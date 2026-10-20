@@ -465,8 +465,11 @@ impl SettingsForm {
         if !problems.is_empty() {
             return Err(problems.join(" "));
         }
+        // Only what the form changed (I3): a hand edit to the file made
+        // while the app ran stays.
+        let changed = self.saved.changed_keys(&self.edited);
         self.edited
-            .save_to(path)
+            .save_keys_to(path, &changed)
             .map_err(|e: ConfigError| e.to_string())?;
         self.saved = self.edited.clone();
         Ok(())
@@ -1547,6 +1550,24 @@ mod tests {
         form.edited.lan_discovery = !form.edited.lan_discovery;
         form.save_to(&path).unwrap();
         assert!(!form.restart_needed());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// I3: Save writes what the form changed, never back what it read.
+    #[test]
+    fn save_keeps_a_hand_edit_made_while_the_app_ran() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-hand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "streaming_port = 4716\n").unwrap();
+        let mut form = SettingsForm::from_config(Config::load_from(&path).unwrap());
+        std::fs::write(&path, "streaming_port = 5000\n").unwrap();
+        form.edited.lan_discovery = !form.edited.lan_discovery;
+        form.save_to(&path).unwrap();
+        let now = Config::load_from(&path).unwrap();
+        assert_eq!(now.streaming_port, 5000, "the hand edit stays");
+        assert_eq!(now.lan_discovery, form.edited.lan_discovery);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

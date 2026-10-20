@@ -73,6 +73,39 @@ pub fn muted(ui: &egui::Ui) -> Color32 {
     pick(ui, MUTED)
 }
 
+/// The text on a chip filled with `fill` (I3): black or white, whichever
+/// reads better on it.
+pub fn on_chip(_ui: &egui::Ui, fill: Color32) -> Color32 {
+    chip_text(fill)
+}
+
+fn chip_text(fill: Color32) -> Color32 {
+    if contrast(Color32::BLACK, fill) >= contrast(Color32::WHITE, fill) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
+
+/// WCAG's relative luminance of `c`.
+fn luminance(c: Color32) -> f64 {
+    let channel = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.039_28 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+}
+
+/// WCAG's contrast ratio between two colours, 1 to 21.
+fn contrast(a: Color32, b: Color32) -> f64 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,23 +114,15 @@ mod tests {
     const LIGHT_PANEL: Color32 = Color32::from_gray(248);
     const DARK_PANEL: Color32 = Color32::from_gray(27);
 
-    /// WCAG's relative luminance of `c`.
-    fn luminance(c: Color32) -> f64 {
-        let channel = |v: u8| {
-            let v = f64::from(v) / 255.0;
-            if v <= 0.039_28 {
-                v / 12.92
-            } else {
-                ((v + 0.055) / 1.055).powf(2.4)
+    /// I3: a status chip's word reads on its fill, in both themes.
+    #[test]
+    fn a_chips_text_reads_on_it() {
+        for token in [GOOD, BAD, WARN, MUTED] {
+            for fill in [token.light, token.dark] {
+                let ratio = contrast(chip_text(fill), fill);
+                assert!(ratio >= 4.5, "{fill:?}: {ratio:.2}");
             }
-        };
-        0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
-    }
-
-    /// WCAG's contrast ratio between two colours, 1 to 21.
-    fn contrast(a: Color32, b: Color32) -> f64 {
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+        }
     }
 
     #[test]

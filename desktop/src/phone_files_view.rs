@@ -99,9 +99,14 @@ impl PhoneFilesView {
     ) {
         match store::request(state_dir, phone, kind, root, &path, now_unix) {
             Ok(_) => {
-                self.waiting = (kind == Kind::List).then(|| (phone.to_string(), now_unix));
+                // A fetch leaves a listing's wait as it is (I3 review: it
+                // dropped its spinner and its "did not answer").
+                if kind == Kind::List {
+                    self.waiting = Some((phone.to_string(), now_unix));
+                }
                 self.notice = match kind {
-                    Kind::List => crate::notice::Notice::done("Asked the phone…"),
+                    // A listing's ask shows as a spinner until it answers (I3).
+                    Kind::List => None,
                     Kind::Fetch => crate::notice::Notice::done(format!(
                         "Asked the phone to send {}; it arrives where received files land.",
                         path.last().map(String::as_str).unwrap_or("it")
@@ -190,7 +195,19 @@ impl PhoneFilesView {
                          and Pocketdesk allowed to run in the background on it?",
                     );
                 }
-                None => {}
+                None => {
+                    // Said while it waits (I3): a folder, Up or Refresh had
+                    // shown nothing for seconds.
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(format!(
+                            "Asking {}…",
+                            crate::model::device_label(devices, &asking)
+                        ));
+                    });
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(250));
+                }
             }
         }
         let kept = self.listings.get(&phone).cloned();

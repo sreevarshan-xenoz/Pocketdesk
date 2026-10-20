@@ -418,6 +418,19 @@ impl Config {
     /// Write this config to `path`, changing only keys whose value differs
     /// from what the file already says. Writes nothing when nothing changed.
     pub fn save_to(&self, path: &Path) -> Result<(), ConfigError> {
+        self.save_filtered(path, None)
+    }
+
+    /// Write only `keys` of this config to `path`, as [`Config::save_to`]
+    /// does, leaving every other key as the file has it now (I3: the desktop
+    /// app writes what its form changed, so a hand edit to the file made
+    /// while it ran is kept).
+    pub fn save_keys_to(&self, path: &Path, keys: &[&str]) -> Result<(), ConfigError> {
+        self.save_filtered(path, Some(keys))
+    }
+
+    fn save_filtered(&self, path: &Path, only: Option<&[&str]>) -> Result<(), ConfigError> {
+        let wanted_key = |key: &str| only.is_none_or(|keys| keys.contains(&key));
         let parse_error = |message: String| ConfigError::Parse {
             path: path.to_path_buf(),
             message,
@@ -444,7 +457,7 @@ impl Config {
         let effective =
             toml::Table::try_from(&effective).map_err(|e| parse_error(e.to_string()))?;
         for (key, value) in &wanted {
-            if effective.get(key) == Some(value) {
+            if !wanted_key(key) || effective.get(key) == Some(value) {
                 continue;
             }
             // Render the one value through toml, then hand it to toml_edit,
@@ -464,7 +477,10 @@ impl Config {
         }
         // A key this config no longer sets (an option cleared to `None`) goes.
         for key in current.keys() {
-            if Self::KNOWN_KEYS.contains(&key.as_str()) && !wanted.contains_key(key) {
+            if Self::KNOWN_KEYS.contains(&key.as_str())
+                && wanted_key(key)
+                && !wanted.contains_key(key)
+            {
                 doc.remove(key);
             }
         }
@@ -598,6 +614,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("config.toml")
+    }
+
+    /// I3: a form saves what it changed, never what it read before a hand
+    /// edit to the file.
+    #[test]
+    fn saving_some_keys_leaves_the_others_as_the_file_has_them() {
+        let path = temp("save-keys");
+        std::fs::write(&path, "control_port = 1716\nstreaming_port = 4716\n").unwrap();
+        // The app read the file, then the owner set the stream port by hand.
+        let read = Config::load_from(&path).unwrap();
+        std::fs::write(&path, "control_port = 1716\nstreaming_port = 5000\n").unwrap();
+        let mut edited = read.clone();
+        edited.control_port = 1800;
+        edited
+            .save_keys_to(&path, &read.changed_keys(&edited))
+            .unwrap();
+        let now = Config::load_from(&path).unwrap();
+        assert_eq!(now.control_port, 1800, "the form's change is written");
+        assert_eq!(now.streaming_port, 5000, "the hand edit stays");
+        // Nothing changed in the form: nothing written.
+        let before = std::fs::read_to_string(&path).unwrap();
+        now.save_keys_to(&path, &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]

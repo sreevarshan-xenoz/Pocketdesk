@@ -18,6 +18,8 @@ pub struct DiagnosticsView {
     failed: bool,
     /// When the debug report was last copied, for "Copied.".
     copied: Option<std::time::Instant>,
+    /// The checks were started once by opening the page (I3).
+    started: bool,
 }
 
 impl DiagnosticsView {
@@ -35,27 +37,30 @@ impl DiagnosticsView {
                 Err(_) => self.failed = true,
             }
         }
-        ui.label(
-            "Checks why a phone might not connect: the server, its ports, the firewall, \
-             the addresses phones can use, and the last session.",
-        );
-        ui.add_space(6.0);
+        // The checks run as the page first opens (I3): it is opened to see
+        // them. Not under tests, where they would start the firewall probe.
+        let open_run =
+            !self.started && self.report.is_none() && self.running.is_none() && !cfg!(test);
+        self.started = true;
         ui.horizontal(|ui| {
             let busy = self.running.is_some();
-            if ui
-                .add_enabled(
-                    !busy,
-                    egui::Button::new(if self.report.is_some() {
-                        "Run again"
-                    } else {
-                        "Run checks"
-                    }),
-                )
-                .clicked()
+            if open_run
+                || ui
+                    .add_enabled(
+                        !busy,
+                        egui::Button::new(if self.report.is_some() {
+                            "Run again"
+                        } else {
+                            "Run checks"
+                        }),
+                    )
+                    .clicked()
             {
                 let dir = state_dir.to_path_buf();
                 let config = config.cloned();
                 self.running = Some(std::thread::spawn(move || run(&dir, config)));
+                // Its spinner now, not at the app's next refresh (I3 review).
+                ui.ctx().request_repaint();
             }
             if self.failed {
                 ui.label(
@@ -78,14 +83,11 @@ impl DiagnosticsView {
             return;
         };
         ui.add_space(8.0);
-        egui::Grid::new("diagnostics")
-            .num_columns(3)
-            .spacing([12.0, 6.0])
-            .show(ui, |ui| {
-                for finding in &report.findings {
-                    finding_row(ui, finding);
-                }
-            });
+        // A block per finding, wrapping at a narrow width (I3).
+        for finding in &report.findings {
+            finding_row(ui, finding);
+            ui.add_space(6.0);
+        }
         ui.add_space(10.0);
         ui.strong("Last session");
         match &report.last_session {
@@ -139,21 +141,36 @@ impl DiagnosticsView {
 }
 
 fn finding_row(ui: &mut egui::Ui, finding: &Finding) {
-    let (color, mark) = match finding.status {
-        Status::Good => (crate::theme::good(ui), "ok"),
-        Status::Warn => (crate::theme::warn(ui), "check"),
-        Status::Bad => (crate::theme::bad(ui), "problem"),
-        Status::Info => (crate::theme::muted(ui), "info"),
-    };
-    ui.label(egui::RichText::new(mark).color(color).strong());
-    ui.strong(finding.check);
-    ui.vertical(|ui| {
-        ui.label(&finding.detail);
-        if let Some(hint) = &finding.hint {
-            ui.label(egui::RichText::new(hint).color(crate::theme::muted(ui)));
-        }
+    let (color, mark) = status_chip(ui, finding.status);
+    ui.horizontal(|ui| {
+        // The status as a filled chip (I3): a word in colour read as text.
+        egui::Frame::new()
+            .fill(color)
+            .corner_radius(6.0)
+            .inner_margin(egui::Margin::symmetric(8, 2))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(mark)
+                        .color(crate::theme::on_chip(ui, color))
+                        .strong(),
+                );
+            });
+        ui.strong(finding.check);
     });
-    ui.end_row();
+    ui.label(&finding.detail);
+    if let Some(hint) = &finding.hint {
+        ui.label(egui::RichText::new(hint).color(crate::theme::muted(ui)));
+    }
+}
+
+/// A status's chip: its colour and word.
+fn status_chip(ui: &egui::Ui, status: Status) -> (egui::Color32, &'static str) {
+    match status {
+        Status::Good => (crate::theme::good(ui), "OK"),
+        Status::Warn => (crate::theme::warn(ui), "Check"),
+        Status::Bad => (crate::theme::bad(ui), "Problem"),
+        Status::Info => (crate::theme::muted(ui), "Info"),
+    }
 }
 
 /// Every check, as the worker thread runs them.

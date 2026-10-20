@@ -362,7 +362,8 @@ impl PocketdeskApp {
                         crate::restart::restart(&dir)
                     });
                 }
-                if ui.button("Cancel").clicked() {
+                // Esc answers Cancel (I3).
+                if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
                     self.confirm_restart = false;
                 }
             });
@@ -904,6 +905,22 @@ impl PocketdeskApp {
                     ui.end_row();
                 }
             });
+        // Not a fact among the others: a warning, with the way to change it (I3).
+        if self.config.as_ref().is_some_and(|c| !c.pairing_required) {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(
+                        "Pairing is not required: any device that reaches this computer can connect without pairing.",
+                    )
+                    .color(crate::theme::warn(ui)),
+                );
+                if ui.button("Open Settings").clicked() {
+                    self.switch_to(Tab::Settings);
+                    self.chosen = Tab::Settings;
+                }
+            });
+        }
         ui.add_space(16.0);
         self.phones_panel(ui);
     }
@@ -1025,7 +1042,29 @@ impl PocketdeskApp {
                 });
                 // Its battery, and its last session unless one runs now
                 // (a session is recorded when it ends).
-                let mut facts = vec![format!("Battery {}", battery_text(device.battery.as_ref(), now))];
+                // The battery as a small bar, in the warning colour when low
+                // (I3); its words beside it.
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Battery").color(crate::theme::muted(ui)));
+                    if let Some(battery) = device.battery.as_ref() {
+                        let low = battery_low(battery);
+                        let mut bar = egui::ProgressBar::new(f32::from(battery.charge) / 100.0)
+                            .desired_width(90.0)
+                            .desired_height(8.0);
+                        if low {
+                            bar = bar.fill(crate::theme::warn(ui));
+                        }
+                        ui.add(bar);
+                    }
+                    let words = battery_text(device.battery.as_ref(), now);
+                    let low = device.battery.as_ref().is_some_and(battery_low);
+                    ui.label(if low {
+                        RichText::new(format!("{words}, low")).color(crate::theme::warn(ui))
+                    } else {
+                        RichText::new(words).color(crate::theme::muted(ui))
+                    });
+                });
+                let mut facts = Vec::new();
                 if let Some(quiet) = model::quiet_text(device.quiet.as_ref(), now) {
                     facts.push(quiet);
                 }
@@ -1288,7 +1327,7 @@ impl PocketdeskApp {
                         if ui.button("Unpair").clicked() {
                             confirmed = Some(device.id.clone());
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
                             revoke = Some(None);
                         }
                     });
@@ -1653,6 +1692,13 @@ impl PocketdeskApp {
             save = form.save_bar(ui);
             ui.add_space(6.0);
         });
+        // Ctrl+S saves too, while there is something to save (I3).
+        save |= ui.input_mut(|i| {
+            i.consume_shortcut(&egui::KeyboardShortcut::new(
+                egui::Modifiers::COMMAND,
+                egui::Key::S,
+            ))
+        });
         if save {
             // D3: the history turned off is emptied at once.
             let history_off = form.turns_history_off();
@@ -1871,12 +1917,14 @@ impl PocketdeskApp {
         let mut send = None;
         // Wrapped: the box and three buttons are wider than a narrow page.
         ui.horizontal_wrapped(|ui| {
-            ui.add(
+            let path_box = ui.add(
                 egui::TextEdit::singleline(&mut self.send_path)
                     .hint_text("Path to a file or folder")
                     .desired_width(360.0),
             );
-            if ui.button("Send").clicked() && !self.send_path.trim().is_empty() {
+            // Enter in the box sends, as the button does (I3).
+            let entered = crate::keys::entered(ui, &path_box);
+            if (ui.button("Send").clicked() || entered) && !self.send_path.trim().is_empty() {
                 send = Some(PathBuf::from(self.send_path.trim()));
             }
             if crate::pick_file::AVAILABLE {
@@ -1900,12 +1948,13 @@ impl PocketdeskApp {
         }
         let mut link = None;
         ui.horizontal_wrapped(|ui| {
-            ui.add(
+            let link_box = ui.add(
                 egui::TextEdit::singleline(&mut self.send_link)
                     .hint_text("A web link (http or https)")
                     .desired_width(360.0),
             );
-            if ui.button("Send link").clicked() && !self.send_link.trim().is_empty() {
+            let entered = crate::keys::entered(ui, &link_box);
+            if (ui.button("Send link").clicked() || entered) && !self.send_link.trim().is_empty() {
                 link = Some(self.send_link.clone());
             }
         });
@@ -1999,32 +2048,70 @@ impl PocketdeskApp {
         }
         ui.strong("Sent");
         let now = now_unix();
-        egui::Grid::new("sent")
-            .num_columns(4)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for file in &self.snapshot.sent {
-                    ui.label(&file.name).on_hover_text(&file.path);
-                    ui.label(model::target_label(&self.snapshot, &file.device_id));
-                    ui.label(crate::words::ago(now, file.sent_unix));
-                    // What a folder send left out goes beside its state.
-                    let note = file
-                        .note
-                        .as_deref()
-                        .map(|n| format!(" · {n}"))
-                        .unwrap_or_default();
-                    match &file.state {
-                        SentState::Offered => ui.label(format!("waiting for the phone{note}")),
-                        SentState::Sent => ui.label(format!("saved on the phone{note}")),
-                        SentState::Failed(reason) => ui.label(
+        let targets = model::send_target_ids(&self.snapshot);
+        let mut again = None;
+        // A block a row, wrapping at a narrow width (I3), as Devices' are.
+        for file in &self.snapshot.sent {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&file.name).strong())
+                    .on_hover_text(&file.path);
+                ui.label(
+                    RichText::new(format!(
+                        "to {} · {}",
+                        model::target_label(&self.snapshot, &file.device_id),
+                        crate::words::ago(now, file.sent_unix)
+                    ))
+                    .color(crate::theme::muted(ui)),
+                );
+                // What a folder send left out goes beside its state.
+                let note = file
+                    .note
+                    .as_deref()
+                    .map(|n| format!(" · {n}"))
+                    .unwrap_or_default();
+                match &file.state {
+                    SentState::Offered => {
+                        ui.label(format!("waiting for the phone{note}"));
+                    }
+                    SentState::Sent => {
+                        ui.label(format!("saved on the phone{note}"));
+                    }
+                    SentState::Failed(reason) => {
+                        ui.label(
                             RichText::new(format!("not sent: {reason}{note}"))
                                 .color(crate::theme::bad(ui)),
-                        ),
-                    };
-                    ui.end_row();
+                        );
+                        // I3: tried again while its phone can take files.
+                        let reachable = targets.contains(&file.device_id);
+                        if ui
+                            .add_enabled(reachable, egui::Button::new("Send again"))
+                            .on_disabled_hover_text("Its phone cannot take files now.")
+                            .clicked()
+                        {
+                            again = Some((file.device_id.clone(), file.path.clone()));
+                        }
+                    }
                 }
             });
+            ui.add_space(4.0);
+        }
+        if let Some((device, path)) = again {
+            self.notice = crate::notice::Notice::outcome(
+                match model::queue_send(
+                    &self.state_dir,
+                    &device,
+                    std::path::Path::new(&path),
+                    now_unix(),
+                ) {
+                    Ok(name) => Ok(format!(
+                        "Queued {name} again for {}.",
+                        model::target_label(&self.snapshot, &device)
+                    )),
+                    Err(e) => Err(e),
+                },
+            );
+            self.refreshed = None;
+        }
         ui.add_space(12.0);
     }
 
@@ -2043,30 +2130,53 @@ impl PocketdeskApp {
         }
         let now = now_unix();
         let mut show = None;
-        egui::Grid::new("received")
-            .num_columns(4)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for row in &self.snapshot.received {
-                    let file = &row.file;
-                    ui.label(&file.name).on_hover_text(&file.path);
-                    ui.label(human_size(file.size));
-                    ui.label(crate::words::ago(now, file.received_unix));
-                    if row.exists {
-                        if ui.button("Show in folder").clicked() {
-                            show = Some(file.path.clone());
-                        }
-                    } else {
-                        ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
+        let mut open = None;
+        // A block a row, wrapping at a narrow width (I3).
+        for row in &self.snapshot.received {
+            let file = &row.file;
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&file.name).strong())
+                    .on_hover_text(&file.path);
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {}",
+                        human_size(file.size),
+                        crate::words::ago(now, file.received_unix)
+                    ))
+                    .color(crate::theme::muted(ui)),
+                );
+                if row.exists {
+                    // I3: what opens in a viewer opens from here.
+                    // Judged by the file opened as well as the name shown
+                    // (I3 review): the two come from different places.
+                    let opened_name = std::path::Path::new(&file.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if crate::reveal::openable(&file.name)
+                        && crate::reveal::openable(&opened_name)
+                        && ui.button("Open").clicked()
+                    {
+                        open = Some(file.path.clone());
                     }
-                    ui.end_row();
+                    if ui.button("Show in folder").clicked() {
+                        show = Some(file.path.clone());
+                    }
+                } else {
+                    ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
                 }
             });
+            ui.add_space(4.0);
+        }
         if let Some(path) = show
             && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
         {
             self.notice = crate::notice::Notice::error(format!("Could not open the folder: {e}"));
+        }
+        if let Some(path) = open
+            && let Err(e) = crate::reveal::open_file(std::path::Path::new(&path))
+        {
+            self.notice = crate::notice::Notice::error(format!("Could not open it: {e}"));
         }
     }
 
@@ -2174,6 +2284,29 @@ impl eframe::App for PocketdeskApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.take_files_to_send(ui.ctx());
+        // Ctrl+Page Down and Up move through the pages as listed (I3).
+        let (next, previous) = ui.input_mut(|i| {
+            (
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::PageDown,
+                )),
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::PageUp,
+                )),
+            )
+        });
+        if next || previous {
+            let tab = crate::nav::step(self.tab, next);
+            self.switch_to(tab);
+            self.chosen = tab;
+        }
+        let waiting = crate::nav::Waiting {
+            sessions: self.snapshot.sessions.len(),
+            transfers: self.snapshot.under_way.len(),
+            unsaved: matches!(&self.settings, Some(Ok(form)) if form.dirty()),
+        };
         egui::Panel::left("nav")
             .resizable(false)
             .exact_size(170.0)
@@ -2191,7 +2324,40 @@ impl eframe::App for PocketdeskApp {
                                 );
                             }
                             for tab in group.pages {
-                                if ui.selectable_label(self.tab == *tab, tab.name()).clicked() {
+                                // What waits there, after its name (I3).
+                                let label = match crate::nav::badge(*tab, waiting) {
+                                    Some(badge) => {
+                                        let mut job = egui::text::LayoutJob::default();
+                                        let font = egui::TextStyle::Button.resolve(ui.style());
+                                        job.append(
+                                            tab.name(),
+                                            0.0,
+                                            // The label's own colour, selected
+                                            // or hovered (I3 review).
+                                            egui::TextFormat::simple(
+                                                font.clone(),
+                                                egui::Color32::PLACEHOLDER,
+                                            ),
+                                        );
+                                        job.append(
+                                            &badge,
+                                            8.0,
+                                            // A count as the name; Settings'
+                                            // unsaved dot as a warning, not "good".
+                                            egui::TextFormat::simple(
+                                                font,
+                                                if *tab == Tab::Settings {
+                                                    crate::theme::warn(ui)
+                                                } else {
+                                                    egui::Color32::PLACEHOLDER
+                                                },
+                                            ),
+                                        );
+                                        egui::WidgetText::from(job)
+                                    }
+                                    None => egui::WidgetText::from(tab.name()),
+                                };
+                                if ui.selectable_label(self.tab == *tab, label).clicked() {
                                     self.switch_to(*tab);
                                     self.chosen = *tab;
                                 }
@@ -2203,8 +2369,23 @@ impl eframe::App for PocketdeskApp {
         if self.tab == Tab::Settings {
             self.settings_save_bar(ui);
         }
+        // The notice has a bar of its own at the foot of the window (I3): at
+        // the top of the page it pushed the page down a line under the
+        // pointer, and back as it went.
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.showing(std::time::Instant::now()))
+        {
+            egui::Panel::bottom("notice").show(ui, |ui| {
+                ui.add_space(4.0);
+                crate::notice::show(ui, &mut self.notice);
+                ui.add_space(4.0);
+            });
+        } else {
+            self.notice = None;
+        }
         egui::CentralPanel::default().show(ui, |ui| {
-            crate::notice::show(ui, &mut self.notice);
             ui.heading(self.tab.name());
             ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
             ui.add_space(6.0);
@@ -2292,6 +2473,14 @@ pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) ->
         (true, false) => media.app.clone(),
         (true, true) => "something".to_string(),
     }
+}
+
+/// Whether a battery is low as the server warns of it (T8b's 15 %, the
+/// server's `phone_battery::LOW_AT`, kept in step by hand: the desktop
+/// cannot take it from the server crate), not charging: its bar on the
+/// Overview is drawn as a warning (I3).
+pub fn battery_low(battery: &pocketdesk_core::local::phone_status::PhoneBattery) -> bool {
+    battery.charge <= 15 && !battery.charging
 }
 
 /// A phone's last battery report for the Devices tab (T8b): its charge,
@@ -2470,6 +2659,21 @@ mod tests {
         );
         // A clock that went back is not "in the future".
         assert_eq!(battery_text(Some(&battery(9, false)), 900), "9 %");
+    }
+
+    /// I3: low as the server warns of it, 15 % or under and not charging.
+    #[test]
+    fn a_battery_is_low_at_the_servers_mark() {
+        use pocketdesk_core::local::phone_status::PhoneBattery;
+        let battery = |charge, charging| PhoneBattery {
+            charge,
+            charging,
+            updated_unix: 0,
+        };
+        assert!(battery_low(&battery(15, false)));
+        assert!(battery_low(&battery(3, false)));
+        assert!(!battery_low(&battery(16, false)));
+        assert!(!battery_low(&battery(9, true)), "charging is not low");
     }
 
     #[test]

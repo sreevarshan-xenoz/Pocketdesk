@@ -12,13 +12,16 @@ use pocketdesk_core::local::{identity, network, pin};
 
 use crate::model::Device;
 
-/// The link for a phone to scan now: reuses a PIN that is still valid (so
-/// the code on screen does not change under the camera), mints one otherwise.
+/// The link for a phone to scan now: reuses a PIN that is still valid and
+/// pairs for `grant_secs` (so the code on screen does not change under the
+/// camera), mints one otherwise. `grant_secs` is a guest's time (I3); None
+/// pairs for good.
 pub fn link_for(
     state_dir: &Path,
     config: &Config,
     now_unix: u64,
     addresses: Vec<String>,
+    grant_secs: Option<u64>,
 ) -> io::Result<PairLink> {
     let addresses = order_addresses(addresses);
     if addresses.is_empty() {
@@ -27,11 +30,11 @@ pub fn link_for(
             "this computer has no network address a phone could reach",
         ));
     }
-    let pin = match pin::read(state_dir, now_unix) {
+    let pin = match pin::read(state_dir, now_unix).filter(|f| f.grant_secs == grant_secs) {
         Some(file) => file.pin,
         None => {
             let pin = pin::mint_value();
-            pin::write(state_dir, &pin, now_unix, None)?;
+            pin::write(state_dir, &pin, now_unix, grant_secs)?;
             pin
         }
     };
@@ -163,7 +166,34 @@ pub struct PairView {
     /// only once it answers, on this thread, so a tab left mid-lookup leaves
     /// no PIN behind.
     lookup: Option<mpsc::Receiver<Vec<String>>>,
+    /// How long the code pairs a phone: None for good, else a guest's
+    /// seconds (I3), as `pocketdesk pair --grant` does.
+    grant_secs: Option<u64>,
+    /// The owner chose another time since the code on screen was made.
+    grant_chosen: bool,
 }
+
+/// The time the next code pairs for: the owner's choice just made, else a
+/// live code on file's own (one `pocketdesk pair --grant` wrote while the
+/// page was open is kept, not replaced; I3 review), else the view's.
+pub fn grant_for(
+    chosen_now: bool,
+    view: Option<u64>,
+    on_file: Option<&pin::FilePin>,
+) -> Option<u64> {
+    match on_file {
+        Some(file) if !chosen_now => file.grant_secs,
+        _ => view,
+    }
+}
+
+/// The choices for how long a code pairs a phone (I3).
+const GRANTS: [(Option<u64>, &str); 4] = [
+    (None, "For good"),
+    (Some(15 * 60), "For 15 minutes"),
+    (Some(60 * 60), "For an hour"),
+    (Some(24 * 60 * 60), "For a day"),
+];
 
 impl PairView {
     /// Forget the current code (the tab was left, or the window hidden or
@@ -171,7 +201,10 @@ impl PairView {
     /// is looking at; a fresh look starts over.
     pub fn reset(&mut self, state_dir: &Path) {
         self.withdraw(state_dir);
+        // The choice of how long it pairs stays for the next code.
+        let grant_secs = self.grant_secs;
         *self = Self::default();
+        self.grant_secs = grant_secs;
     }
 
     /// Whether the app should refresh its snapshot now (asked once).
@@ -285,6 +318,7 @@ impl PairView {
         let (Some(link), Some(texture)) = (&self.link, &self.texture) else {
             return;
         };
+        let mut grant_changed = None;
         ui.horizontal_top(|ui| {
             ui.add(
                 egui::Image::new(texture)
@@ -298,6 +332,26 @@ impl PairView {
                     "In the Pocketdesk app, tap \"Scan pairing code\" and point the camera here.",
                 );
                 ui.add_space(10.0);
+                // A guest's phone pairs for a while (I3); Devices counts it down.
+                let mut chosen = self.grant_secs;
+                ui.horizontal(|ui| {
+                    ui.label("This code pairs the phone");
+                    let shown = GRANTS
+                        .iter()
+                        .find(|(secs, _)| *secs == chosen)
+                        .map_or("For good", |(_, label)| label);
+                    egui::ComboBox::from_id_salt("pair-grant")
+                        .selected_text(shown)
+                        .show_ui(ui, |ui| {
+                            for (secs, label) in GRANTS {
+                                ui.selectable_value(&mut chosen, secs, label);
+                            }
+                        });
+                });
+                if chosen != self.grant_secs {
+                    grant_changed = Some(chosen);
+                }
+                ui.add_space(6.0);
                 ui.label("Or enter this PIN:");
                 let spaced: String = link
                     .pin
@@ -346,6 +400,12 @@ impl PairView {
                 }
             });
         });
+        // Another choice of time: this code goes, and one for it is made.
+        if let Some(chosen) = grant_changed {
+            self.withdraw(state_dir);
+            self.grant_secs = chosen;
+            self.grant_chosen = true;
+        }
     }
 
     /// Mint (or reuse) the PIN and draw the code for `addresses`.
@@ -358,7 +418,13 @@ impl PairView {
         addresses: Vec<String>,
     ) {
         let config = config.cloned().unwrap_or_default();
-        match link_for(state_dir, &config, now_unix, addresses) {
+        self.grant_secs = grant_for(
+            self.grant_chosen,
+            self.grant_secs,
+            pin::read(state_dir, now_unix).as_ref(),
+        );
+        self.grant_chosen = false;
+        match link_for(state_dir, &config, now_unix, addresses, self.grant_secs) {
             Ok(link) => match qr_modules(&link.to_uri()) {
                 Ok(modules) => {
                     self.texture = Some(ui.ctx().load_texture(
@@ -439,7 +505,7 @@ mod tests {
             ..Config::default()
         };
         let addresses = vec!["100.64.0.9".to_string(), "192.168.1.4".to_string()];
-        let link = link_for(&dir, &config, 1_000, addresses).unwrap();
+        let link = link_for(&dir, &config, 1_000, addresses, None).unwrap();
         assert_eq!(link.pin, pin::read(&dir, 1_000).unwrap().pin);
         assert_eq!((link.control_port, link.stream_port), (1800, 4800));
         assert_eq!(
@@ -456,20 +522,67 @@ mod tests {
     fn a_live_pin_is_reused_and_an_expired_one_replaced() {
         let dir = temp_dir("reuse");
         let config = Config::default();
-        let first = link_for(&dir, &config, 1_000, vec!["10.0.0.2".into()]).unwrap();
-        let again = link_for(&dir, &config, 1_100, vec!["10.0.0.2".into()]).unwrap();
+        let first = link_for(&dir, &config, 1_000, vec!["10.0.0.2".into()], None).unwrap();
+        let again = link_for(&dir, &config, 1_100, vec!["10.0.0.2".into()], None).unwrap();
         assert_eq!(
             first.pin, again.pin,
             "the code on screen stays the same while valid"
         );
-        let later = link_for(&dir, &config, 1_000 + 301, vec!["10.0.0.2".into()]).unwrap();
+        let later = link_for(&dir, &config, 1_000 + 301, vec!["10.0.0.2".into()], None).unwrap();
         assert!(pin::read(&dir, 1_301).is_some_and(|p| p.pin == later.pin));
+    }
+
+    /// I3: a guest's code pairs for its time; another choice is another code.
+    #[test]
+    fn a_guest_code_carries_its_time_and_a_new_choice_a_new_code() {
+        let dir = temp_dir("guest");
+        let config = Config::default();
+        let address = || vec!["10.0.0.2".to_string()];
+        let for_good = link_for(&dir, &config, 1_000, address(), None).unwrap();
+        assert_eq!(pin::read(&dir, 1_000).unwrap().grant_secs, None);
+        let guest = link_for(&dir, &config, 1_010, address(), Some(900)).unwrap();
+        assert_ne!(guest.pin, for_good.pin, "a new choice, a new code");
+        assert_eq!(pin::read(&dir, 1_010).unwrap().grant_secs, Some(900));
+        let again = link_for(&dir, &config, 1_020, address(), Some(900)).unwrap();
+        assert_eq!(again.pin, guest.pin, "the same choice keeps the code");
+    }
+
+    /// I3 review: a code the CLI made while the page was open keeps its time.
+    #[test]
+    fn a_code_on_file_keeps_its_time_unless_another_was_just_chosen() {
+        let on_file = pin::FilePin {
+            pin: "123456".to_string(),
+            minted_unix: 0,
+            grant_secs: Some(3600),
+        };
+        assert_eq!(
+            grant_for(false, None, Some(&on_file)),
+            Some(3600),
+            "the CLI's hour is kept"
+        );
+        assert_eq!(
+            grant_for(true, None, Some(&on_file)),
+            None,
+            "the owner's choice wins"
+        );
+        assert_eq!(
+            grant_for(false, Some(900), None),
+            Some(900),
+            "no code on file: the view's"
+        );
     }
 
     #[test]
     fn without_a_certificate_or_endpoint_the_link_still_pairs() {
         let dir = temp_dir("bare");
-        let link = link_for(&dir, &Config::default(), 5, vec!["192.168.0.2".into()]).unwrap();
+        let link = link_for(
+            &dir,
+            &Config::default(),
+            5,
+            vec!["192.168.0.2".into()],
+            None,
+        )
+        .unwrap();
         assert!(link.fingerprint.is_none() && link.endpoint.is_none());
         assert!(link.to_uri().starts_with("pocketdesk://pair?v=1&"));
     }
@@ -477,7 +590,7 @@ mod tests {
     #[test]
     fn no_usable_address_is_an_error_not_an_unscannable_code() {
         let dir = temp_dir("noaddr");
-        assert!(link_for(&dir, &Config::default(), 5, vec!["127.0.0.1".into()]).is_err());
+        assert!(link_for(&dir, &Config::default(), 5, vec!["127.0.0.1".into()], None).is_err());
     }
 
     fn file_pin(pin: &str) -> pin::FilePin {

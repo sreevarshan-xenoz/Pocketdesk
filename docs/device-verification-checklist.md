@@ -2137,6 +2137,20 @@ Built 2026-10-20 on the owner's word; checked on the A71 as it was built (agains
 - [ ] Android 11 or older: the pine theme in both modes, no previews, the state widget's layout by its height.
 - [ ] Spanish and Tamil (the bar labels at 68 dp); font scale 2.0.
 
+## 142. The desktop app, upgrades and UI tweaks (I3)
+
+Built 2026-10-20 on the owner's word; tested through the harness and units, nothing by hand yet.
+- [ ] Messages: half-type a reply to one conversation, open another, then New text: each its own draft; Enter sends, Shift+Enter a new line.
+- [ ] Settings: change a key by hand in `config.toml` with the app open, then change another in the form and Save: the hand edit stays. Ctrl+S saves.
+- [ ] The notice at the foot of the window, the page not moving; a long one readable; Restart's spinner.
+- [ ] The page list: a count on Sessions in a session, on Files while a file moves, a warning dot on Settings while it has changes; readable selected and hovered, light and dark.
+- [ ] Files: Send again on a failed send (and disabled with the phone away); Open on a received picture and PDF, none on a program; the rows wrapping at the minimum width.
+- [ ] Overview: a phone's battery bar, in the warning colour at 15 % or under not charging; with pairing off, the warning and Open Settings.
+- [ ] Diagnostics: the checks running as it opens, the chips in both themes.
+- [ ] Pair: "For 15 minutes" makes a new code; a phone paired with it shows its time left on Devices and goes when it runs out.
+- [ ] Phone files: the spinner while a folder is asked for.
+- [ ] Keys: Esc on Unpair, Restart and Clear; Ctrl+Page Up and Down; Enter in the Files and Notifications boxes.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

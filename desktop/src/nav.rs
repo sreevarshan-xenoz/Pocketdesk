@@ -160,9 +160,75 @@ pub fn page_from_args(args: impl IntoIterator<Item = std::ffi::OsString>) -> Opt
     None
 }
 
+/// What waits on the pages, counted for their badges in the page list (I3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Waiting {
+    /// Phones in a session now.
+    pub sessions: usize,
+    /// Files moving now.
+    pub transfers: usize,
+    /// Settings has changes not saved.
+    pub unsaved: bool,
+}
+
+/// A page's badge after its name: a count, or a dot for unsaved changes;
+/// none when nothing waits there.
+pub fn badge(tab: Tab, waiting: Waiting) -> Option<String> {
+    let count = |n: usize| (n > 0).then(|| n.to_string());
+    match tab {
+        Tab::Sessions => count(waiting.sessions),
+        Tab::Files => count(waiting.transfers),
+        Tab::Settings => waiting.unsaved.then(|| "\u{2022}".to_string()),
+        _ => None,
+    }
+}
+
+/// The page after `tab` in the page list (before it when not `forward`),
+/// round from the last to the first: Ctrl+Page Down and Up (I3).
+pub fn step(tab: Tab, forward: bool) -> Tab {
+    let order: Vec<Tab> = GROUPS
+        .iter()
+        .flat_map(|g| g.pages.iter().copied())
+        .collect();
+    let at = order.iter().position(|t| *t == tab).unwrap_or(0);
+    let n = order.len();
+    order[if forward {
+        (at + 1) % n
+    } else {
+        (at + n - 1) % n
+    }]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keys_step_through_the_pages_as_listed() {
+        assert_eq!(step(Tab::Status, true), Tab::Pair);
+        assert_eq!(step(Tab::Pair, false), Tab::Status);
+        assert_eq!(step(Tab::Sessions, true), Tab::Files, "across a group");
+        assert_eq!(step(Tab::Logs, true), Tab::Status, "round to the first");
+        assert_eq!(step(Tab::Status, false), Tab::Logs, "and back to the last");
+    }
+
+    #[test]
+    fn a_page_says_what_waits_there() {
+        let none = Waiting::default();
+        assert!(
+            Tab::ALL.iter().all(|t| badge(*t, none).is_none()),
+            "nothing waits: no badges"
+        );
+        let some = Waiting {
+            sessions: 2,
+            transfers: 1,
+            unsaved: true,
+        };
+        assert_eq!(badge(Tab::Sessions, some).as_deref(), Some("2"));
+        assert_eq!(badge(Tab::Files, some).as_deref(), Some("1"));
+        assert_eq!(badge(Tab::Settings, some).as_deref(), Some("\u{2022}"));
+        assert_eq!(badge(Tab::Devices, some), None);
+    }
 
     #[test]
     fn the_phone_page_scrolls_as_a_whole_so_its_photos_are_in_reach() {

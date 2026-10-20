@@ -124,7 +124,7 @@ impl ClipboardView {
                             Err(e) => Action::Failed(format!("Not cleared: {e}")),
                         });
                         self.confirm_clear = None;
-                    } else if ui.button("Cancel").clicked() {
+                    } else if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
                         self.confirm_clear = None;
                     }
                 } else if ui.button("Clear history…").clicked() {
