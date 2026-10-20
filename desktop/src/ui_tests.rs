@@ -382,6 +382,48 @@ mod snapshots {
     }
 }
 
+/// J1: the Logs page shows the newest log's lines and how many it shows.
+#[test]
+fn the_logs_page_shows_the_newest_lines() {
+    let fixture = Fixture::new();
+    let logs = fixture.state().join(pocketdesk_core::local::paths::LOG_DIR);
+    std::fs::create_dir_all(&logs).expect("logs");
+    std::fs::write(
+        logs.join("pocketdesk.2026-10-20.log"),
+        "2026-10-20T06:00:00Z  INFO pocketdesk: server starting\n2026-10-20T06:00:01Z  WARN pocketdesk: a refusal\n",
+    )
+    .expect("log");
+    let mut app = fixture.open(Some(Tab::Logs));
+    assert!(
+        app.query_by_label("2026-10-20T06:00:01Z  WARN pocketdesk: a refusal")
+            .is_some()
+    );
+    assert!(app.query_by_label("2 of the last 2 lines").is_some());
+    // The filter narrows them, and the count follows in the same frame.
+    let filter = app.get_by_role(egui::accesskit::Role::TextInput);
+    filter.focus();
+    filter.type_text("refusal");
+    app.run();
+    assert!(app.query_by_label("1 of the last 2 lines").is_some());
+    assert!(
+        app.query_by_label("2026-10-20T06:00:00Z  INFO pocketdesk: server starting")
+            .is_none()
+    );
+}
+
+/// J1 review: a log that exists but is empty yet (just rotated) is not
+/// "no log file", and its folder can still be opened.
+#[test]
+fn an_empty_log_is_a_log() {
+    let fixture = Fixture::new();
+    let logs = fixture.state().join(pocketdesk_core::local::paths::LOG_DIR);
+    std::fs::create_dir_all(&logs).expect("logs");
+    std::fs::write(logs.join("pocketdesk.2026-10-21.log"), "").expect("log");
+    let app = fixture.open(Some(Tab::Logs));
+    assert!(app.query_by_label("Open log folder").is_some());
+    assert!(app.query_by_label("0 of the last 0 lines").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]
