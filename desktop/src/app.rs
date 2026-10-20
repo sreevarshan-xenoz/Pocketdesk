@@ -392,6 +392,17 @@ impl PocketdeskApp {
         }
     }
 
+    /// The Sessions page's recent sessions, read again only when the log
+    /// changed (J3).
+    fn read_recent_sessions(&mut self) {
+        let stamp = model::session_log_stamp(&self.state_dir);
+        if stamp != self.recent_sessions_stamp {
+            self.recent_sessions =
+                model::recent_sessions(&model::session_log_tail(&self.state_dir), 10);
+            self.recent_sessions_stamp = stamp;
+        }
+    }
+
     fn switch_to(&mut self, tab: Tab) {
         // The Overview's link box is for the moment it was opened in.
         if tab != self.tab {
@@ -402,6 +413,11 @@ impl PocketdeskApp {
         }
         if tab == Tab::Activity && self.tab != Tab::Activity {
             self.activity.reopen();
+        }
+        // Read before the page's first frame, not after it (J3 review: the
+        // list popped in a frame late, or showed the last visit's).
+        if tab == Tab::Sessions {
+            self.read_recent_sessions();
         }
         if tab == Tab::Settings {
             // Read again on each visit: it may have changed outside the app.
@@ -439,12 +455,7 @@ impl PocketdeskApp {
             }
         }
         if self.tab == Tab::Sessions {
-            let stamp = model::session_log_stamp(&self.state_dir);
-            if stamp != self.recent_sessions_stamp {
-                self.recent_sessions =
-                    model::recent_sessions(&model::session_log_tail(&self.state_dir), 10);
-                self.recent_sessions_stamp = stamp;
-            }
+            self.read_recent_sessions();
         }
         if self.tab == Tab::Activity {
             self.activity.refresh(&self.state_dir);
