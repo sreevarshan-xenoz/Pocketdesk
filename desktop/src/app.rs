@@ -182,6 +182,9 @@ pub struct PocketdeskApp {
     raised_approvals: Vec<String>,
     /// The phone the Files tab sends to (F7b).
     send_to: Option<String>,
+    /// Files dropped while several phones or computers could take them,
+    /// waiting for the owner to say which (J5).
+    dropped: Vec<PathBuf>,
     /// The Files tab's path field.
     send_path: String,
     /// The link the send box hands to the phone (T8a).
@@ -258,6 +261,7 @@ impl PocketdeskApp {
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
+            dropped: Vec::new(),
             send_path: String::new(),
             send_link: String::new(),
             last_sessions: Default::default(),
@@ -1951,12 +1955,59 @@ impl PocketdeskApp {
 
     fn files_tab(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            self.drop_question(ui);
             self.send_box(ui);
             ui.add_space(12.0);
             self.under_way_list(ui);
             self.sent_list(ui);
             self.received_list(ui);
         });
+    }
+
+    /// Files dropped with several phones or computers to take them: which
+    /// (J5).
+    fn drop_question(&mut self, ui: &mut egui::Ui) {
+        if self.dropped.is_empty() {
+            return;
+        }
+        let targets = match model::drop_to(&self.snapshot) {
+            model::DropTo::Ask(targets) => targets,
+            model::DropTo::Send(id) => vec![id],
+            model::DropTo::Nobody => {
+                let n = self.dropped.len();
+                self.dropped.clear();
+                self.notice = crate::notice::Notice::error(format!(
+                    "Not sent: no phone or computer can take {} now.",
+                    files_count(n)
+                ));
+                return;
+            }
+        };
+        let mut chosen = None;
+        let mut cancel = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong(format!("Send {} to:", files_count(self.dropped.len())));
+            ui.horizontal_wrapped(|ui| {
+                for id in &targets {
+                    if ui.button(model::target_label(&self.snapshot, id)).clicked() {
+                        chosen = Some(id.clone());
+                    }
+                }
+                cancel = ui.button("Cancel").clicked() || crate::keys::escaped(ui);
+            });
+        });
+        ui.add_space(12.0);
+        if let Some(id) = chosen {
+            self.send_to = Some(id);
+            for path in std::mem::take(&mut self.dropped) {
+                self.send_file(&path);
+            }
+        } else if cancel {
+            let n = self.dropped.len();
+            self.dropped.clear();
+            self.notice = crate::notice::Notice::done(format!("Not sent: {}.", files_count(n)));
+        }
     }
 
     /// The phone the send box shows (F7b): the one chosen while it is in a
@@ -2305,8 +2356,18 @@ impl PocketdeskApp {
         });
         if !dropped.is_empty() {
             self.switch_to(Tab::Files);
-            for path in dropped {
-                self.send_file(&path);
+            match model::drop_to(&self.snapshot) {
+                // Several could take them: they wait for the owner (J5).
+                model::DropTo::Ask(_) => self.dropped.extend(dropped),
+                // The only one, or none (send_file says so).
+                to => {
+                    if let model::DropTo::Send(id) = to {
+                        self.send_to = Some(id);
+                    }
+                    for path in dropped {
+                        self.send_file(&path);
+                    }
+                }
             }
         }
         if self.picking.as_ref().is_some_and(|h| h.is_finished()) {
@@ -2657,6 +2718,14 @@ fn chip(ui: &mut egui::Ui, text: &str, fill: egui::Color32) -> egui::Response {
             ui.label(RichText::new(text).color(crate::theme::on_chip(ui, fill)));
         })
         .response
+}
+
+/// "1 file", "3 files".
+fn files_count(n: usize) -> String {
+    match n {
+        1 => "1 file".to_string(),
+        n => format!("{n} files"),
+    }
 }
 
 /// Whether closing the window hides it to the tray: only with a tray, and

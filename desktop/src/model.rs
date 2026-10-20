@@ -607,6 +607,29 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     }
 }
 
+/// Where files dropped on the window go (J5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropTo {
+    /// The one phone or computer that can take them.
+    Send(String),
+    /// Several can: ask which, among these.
+    Ask(Vec<String>),
+    /// None can now.
+    Nobody,
+}
+
+/// Where a drop goes: straight to the only target, a question with
+/// several, and nowhere with none (J5: a drop had gone to the Files page's
+/// last choice without a word).
+pub fn drop_to(snapshot: &Snapshot) -> DropTo {
+    let mut targets = send_target_ids(snapshot);
+    match targets.len() {
+        0 => DropTo::Nobody,
+        1 => DropTo::Send(targets.remove(0)),
+        _ => DropTo::Ask(targets),
+    }
+}
+
 /// Queue the link `url` for the phone `device_id` (T8a), which shows it as
 /// a notification that opens it; what to tell the owner.
 pub fn queue_link(
@@ -1491,6 +1514,41 @@ mod tests {
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
+    }
+
+    /// J5: a drop goes straight to the only target, asks with several.
+    #[test]
+    fn a_drop_asks_only_with_several_targets() {
+        assert_eq!(drop_to(&Snapshot::default()), DropTo::Nobody);
+        let phone = Device {
+            id: "phone-a".to_string(),
+            takes_files: true,
+            ..Default::default()
+        };
+        let away = Device {
+            id: "phone-b".to_string(),
+            takes_files: false,
+            ..Default::default()
+        };
+        let one = Snapshot {
+            devices: vec![phone.clone(), away],
+            ..Snapshot::default()
+        };
+        assert_eq!(drop_to(&one), DropTo::Send("phone-a".to_string()));
+        let computer = Snapshot {
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(drop_to(&computer), DropTo::Send("desk-b".to_string()));
+        let both = Snapshot {
+            devices: vec![phone],
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(
+            drop_to(&both),
+            DropTo::Ask(vec!["phone-a".to_string(), "desk-b".to_string()])
+        );
     }
 
     /// U3: a phone shows by its name, the owner's over its own, and by
