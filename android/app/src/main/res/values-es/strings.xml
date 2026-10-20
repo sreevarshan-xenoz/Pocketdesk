@@ -507,7 +507,7 @@
     <string name="link_from_computer">Un enlace de %1$s</string>
     <string name="channel_links">Enlaces del equipo</string>
     <string name="settings_calls_from_computer">Llamadas desde el equipo</string>
-    <string name="settings_calls_from_computer_summary">Un número que envía el equipo (Llamar en su página de Mensajes) abre el marcador con él; tú pulsas Llamar. En segundo plano espera como notificación</string>
+    <string name="settings_calls_from_computer_summary">Un número que envía el equipo (Llamar en su página de Mensajes) abre el marcador con él; tú pulsas Llamar. Fuera de una sesión espera como notificación, mientras haya un enlace con el equipo por otra función (respuestas, llamadas, portapapeles)</string>
     <string name="channel_dials">Números del equipo</string>
     <string name="dial_from_computer">¿Llamar a %1$s?</string>
     <string name="dial_from_computer_text">Desde %1$s: toca para abrir el marcador</string>

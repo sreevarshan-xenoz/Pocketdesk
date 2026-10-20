@@ -549,8 +549,11 @@ class PhoneNotificationListener : NotificationListenerService() {
                 RustCore.connectToPeer(own.address, own.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, own.address))
             }
         }
-        // L4: numbers the computer asks to dial, offered in a notification.
-        dev.pocketdesk.android.calls.Dials.take(this, own, inFront = false)
+        // L4: numbers the computer asks to dial, offered in a notification,
+        // unless a session takes them.
+        if (!dev.pocketdesk.android.calls.Dials.inSession) {
+            dev.pocketdesk.android.calls.Dials.take(this, own, inFront = false)
+        }
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
         for (answer in answers) {

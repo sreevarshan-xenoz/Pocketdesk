@@ -26,6 +26,11 @@ object Dials {
     private val ids = AtomicInteger(0)
     private val budget = NotificationActionRule.Budget(DialRule.PER_MINUTE)
 
+    /** A session takes the numbers while it runs (L4 review: the listener
+     * raced it, and judged another computer's numbers as not its own). */
+    @Volatile
+    var inSession = false
+
     /**
      * Take the numbers waiting; [own] is the computer the phone works with.
      * [inFront] opens the dialer, else each is offered in a notification.
@@ -45,7 +50,8 @@ object Dials {
                 Log.i("Dials", "a number from the computer was not taken: $decision")
                 continue
             }
-            if (inFront) open(context, number) else offer(context, own!!.address, number)
+            val address = own?.address ?: continue
+            if (inFront) open(context, number) else offer(context, address, number)
         }
     }
 
@@ -81,5 +87,7 @@ object Dials {
                 .setAutoCancel(true)
                 .build()
         runCatching { manager.notify("dial", id, notification) }
+            .onFailure { Log.w("Dials", "a number was not offered: ${it.message}") }
+        if (!manager.areNotificationsEnabled()) Log.w("Dials", "a number was not offered: notifications are off")
     }
 }

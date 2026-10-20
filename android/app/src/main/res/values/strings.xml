@@ -511,7 +511,7 @@
     <string name="link_from_computer">A link from %1$s</string>
     <string name="channel_links">Links from the computer</string>
     <string name="settings_calls_from_computer">Calls from the computer</string>
-    <string name="settings_calls_from_computer_summary">A number the computer sends (Call on its Messages page) opens the dialer with it; you press Call. In the background it waits as a notification</string>
+    <string name="settings_calls_from_computer_summary">A number the computer sends (Call on its Messages page) opens the dialer with it; you press Call. Outside a session it waits as a notification, while a link to the computer is up for another feature (answers, calls, the clipboard)</string>
     <string name="channel_dials">Numbers from the computer</string>
     <string name="dial_from_computer">Call %1$s?</string>
     <string name="dial_from_computer_text">From %1$s: tap to open the dialer</string>
