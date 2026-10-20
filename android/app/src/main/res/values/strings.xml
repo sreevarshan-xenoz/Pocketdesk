@@ -860,4 +860,13 @@
     <string name="wake_tile_waiting">Sent, waiting for it to answer…</string>
     <string name="wake_tile_awake">It is awake</string>
     <string name="wake_tile_no_answer">Sent, but it has not answered</string>
+    <string name="talk_timer">Timer</string>
+    <string name="talk_timer_title">How long is the talk?</string>
+    <string name="talk_timer_running">Talk timer, %1$s; tap to stop</string>
+    <string name="settings_talk_timer_buzz">Talk timer buzzes</string>
+    <string name="settings_talk_timer_buzz_summary">Remote\'s talk timer buzzes once at five minutes left, twice at one minute, three times at the end.</string>
+    <plurals name="talk_timer_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
 </resources>

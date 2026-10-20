@@ -157,6 +157,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             TrackpadSpeed()
             AirMouseSpeed()
+            // H2: the talk timer in Remote.
+            SettingSwitch(
+                stringResource(R.string.settings_talk_timer_buzz),
+                stringResource(R.string.settings_talk_timer_buzz_summary),
+                Prefs.talkTimerBuzz(context),
+                { Prefs.setTalkTimerBuzz(context, it) },
+            )
             PenPressure()
             SettingSwitch(
                 stringResource(R.string.settings_gamepad_controller),

@@ -846,4 +846,13 @@
     <string name="wake_tile_waiting">அனுப்பப்பட்டது, பதிலுக்குக் காத்திருக்கிறது…</string>
     <string name="wake_tile_awake">அது விழித்துவிட்டது</string>
     <string name="wake_tile_no_answer">அனுப்பப்பட்டது, ஆனால் பதில் இல்லை</string>
+    <string name="talk_timer">நேரம்</string>
+    <string name="talk_timer_title">பேச்சு எவ்வளவு நேரம்?</string>
+    <string name="talk_timer_running">பேச்சு நேரம், %1$s; நிறுத்த தட்டவும்</string>
+    <string name="settings_talk_timer_buzz">பேச்சு நேரம் அதிர்கிறது</string>
+    <string name="settings_talk_timer_buzz_summary">ரிமோட்டின் பேச்சு நேரம் ஐந்து நிமிடம் மீதமிருக்கும்போது ஒருமுறை, ஒரு நிமிடத்தில் இருமுறை, முடிவில் மூன்றுமுறை அதிரும்.</string>
+    <plurals name="talk_timer_minutes">
+        <item quantity="one">%d நிமிடம்</item>
+        <item quantity="other">%d நிமிடங்கள்</item>
+    </plurals>
 </resources>

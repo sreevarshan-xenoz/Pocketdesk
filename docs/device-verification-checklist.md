@@ -2072,6 +2072,15 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet. Waki
 - [ ] On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
 - [ ] A computer asleep (not this box): woken, "It is awake" within a minute.
 
+## 139. A talk timer in Remote (H2)
+
+Built 2026-10-20 on the owner's night of features; nothing on a device yet.
+- [ ] Remote on the A71: "Timer", 5 minutes: the count down, a buzz at one minute (twice) and three at the end, then "+0:05" in red; a tap stops it.
+- [ ] The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service).
+- [ ] The link dropped and back mid-talk: the timer still counting; rotated: the same.
+- [ ] Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
+- [ ] Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
