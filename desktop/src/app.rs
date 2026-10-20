@@ -1840,7 +1840,7 @@ impl PocketdeskApp {
         let Some(device) = self.send_target() else {
             ui.label(
                 RichText::new(
-                    "No phone or computer can take a file right now. A phone can in a session, or \
+                    "No phone or computer can take a file right now. A phone can in a screen or sound session, or \
                      with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone; \
                      another of your computers, while its link is up. Files land in the \
                      phone's folder for files from computers (Downloads/Pocketdesk unless chosen).",

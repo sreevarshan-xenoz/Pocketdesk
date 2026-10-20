@@ -75,16 +75,15 @@ pub struct LiveMirror {
 }
 
 impl LiveMirror {
-    /// Whether a file can be offered to `device_id` now: it is in a
-    /// session, or linked where files reach it ([`LinkedPhone::files`]).
+    /// Whether a file can be offered to `device_id` now: it is linked where
+    /// files reach it ([`LinkedPhone::files`]). The server offers files and
+    /// asks for photos over the control link only, so a session alone is no
+    /// road: a screen or sound session's phone is linked as well, a remote
+    /// is not.
     pub fn files_reach(&self, device_id: &str) -> bool {
-        self.sessions
+        self.linked
             .iter()
-            .any(|s| s.device_id.as_deref() == Some(device_id))
-            || self
-                .linked
-                .iter()
-                .any(|p| p.device_id == device_id && p.files)
+            .any(|p| p.device_id == device_id && p.files)
     }
 }
 
@@ -276,8 +275,11 @@ mod tests {
             2,
         ))
         .unwrap();
-        assert!(mirror.files_reach("in-session") && mirror.files_reach("at-home"));
+        assert!(mirror.files_reach("at-home"));
         assert!(!mirror.files_reach("away"));
+        // A session alone is no road: a remote keeps no control link, and
+        // the server offers files and asks for photos over that link only.
+        assert!(!mirror.files_reach("in-session"));
         assert!(!mirror.files_reach("stranger"));
         // A mirror from before T10d has no `linked`.
         let old = parse_mirror(r#"{"updated_unix":1,"sessions":[]}"#).unwrap();
