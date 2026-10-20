@@ -2088,6 +2088,7 @@ Built 2026-10-20 on the owner's night of features; nothing by hand yet. It regis
 - [ ] A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
 - [ ] No phone in reach: a press says "the last press found no phone".
 - [ ] A password manager's copy: not sent (the server's notification says why).
+- [ ] The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
 
 ## Recording results
 
