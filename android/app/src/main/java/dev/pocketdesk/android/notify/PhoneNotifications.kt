@@ -93,6 +93,9 @@ object PhoneNotificationPrefs {
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 }
 
+/** How long after a notification went a link is kept for the computer's clears (L1). */
+private const val CLEAR_LINK_MS = 10 * 60_000L
+
 /**
  * Reads the phone's notifications, once the user grants access, and sends
  * those [NotificationForwardRule] lets through to the most recently used
@@ -140,6 +143,10 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private val answerable = LinkedHashMap<String, Answerable>()
     private val answerBudget = NotificationActionRule.Budget()
+
+    /** When a notification last went to the computer (L1). */
+    @Volatile
+    private var lastSentMs = Long.MIN_VALUE / 2
 
     /** Clears from the computer (L1), thirty a minute. */
     private val clearBudget = NotificationActionRule.Budget(ClearRule.PER_MINUTE)
@@ -330,6 +337,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
         val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
         val sent = PhoneLink.sendNow(this, "kdeconnect.notification", out)
+        if (sent) lastSentMs = SystemClock.elapsedRealtime()
         // Its app's icon reached this computer (K3 review).
         if (sent) iconOf.remove(body)?.let { iconsSent.add(iconKey(it)) }
         return sent
@@ -389,7 +397,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     /** Clear [answer]'s notification here, if [ClearRule] lets it (L1). */
     private fun clear(answer: RustCore.NotificationAnswer, settingOn: Boolean, ownComputer: Boolean) {
-        val shown = runCatching { activeNotifications?.firstOrNull { it.key == answer.key } }.getOrNull()
+        val shown = runCatching { getActiveNotifications(arrayOf(answer.key))?.firstOrNull() }.getOrNull()
         val decision =
             ClearRule.decide(
                 settingOn = settingOn,
@@ -528,9 +536,13 @@ class PhoneNotificationListener : NotificationListenerService() {
         // The permission is often granted while the listener runs (F5 review).
         if (callsOn) android.os.Handler(android.os.Looper.getMainLooper()).post { calls.start() }
         calls.retry()
-        // L1: the computer's clears come on the same link.
+        // L1: the computer's clears come on the same link, taken whenever a
+        // link is up; kept up for them only while notifications went in the
+        // last ten minutes (L1 review: else every phone sharing them would
+        // keep a link all day).
         val clearing = Prefs.letComputerClear(this) && PhoneNotificationPrefs.enabled(this)
-        if ((answering || callsOn || clearing) && own != null && RustCore.controlPeer() == null) {
+        val clearsWanted = clearing && SystemClock.elapsedRealtime() - lastSentMs < CLEAR_LINK_MS
+        if ((answering || callsOn || clearsWanted) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now
@@ -542,7 +554,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         for (answer in answers) {
             // L1: a clear, not an answer.
             if (answer.cancel) {
-                clear(answer, clearing, NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort))
+                val ownComputer =
+                    NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort)
+                // On the worker, where the forward rule lives (L1 review).
+                worker.execute { clear(answer, clearing, ownComputer) }
                 continue
             }
             // F5: an answer to a ringing call's note is the call's, not a notification's.
