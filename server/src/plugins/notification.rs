@@ -421,12 +421,26 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
         serde_json::json!({ "app": app }),
         serde_json::json!({ "title": title, "text": text }),
     );
-    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
+    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted_here(&app) {
         return;
     }
     if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text, None).await {
         tracing::warn!("Failed to show a KDE Connect device's notification: {}", e);
     }
+}
+
+/// Whether `app` is muted on this computer (K2b): its notifications are
+/// logged and kept to answer, never shown. Read at each notification, so a
+/// mute from the desktop app or a toast applies to the next one.
+fn muted_here(app: &str) -> bool {
+    crate::state::state_dir()
+        .map(|dir| {
+            pocketdesk_core::local::muted_apps::is_muted(
+                &pocketdesk_core::local::muted_apps::read(&dir),
+                app,
+            )
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Debug)]
@@ -544,6 +558,10 @@ impl Plugin for NotificationPlugin {
                     && let Err(e) = phone_notes::keep(&dir, note)
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
+                }
+                // Muted here (K2b): kept to answer and logged, not shown.
+                if muted_here(&app) {
+                    return Ok(());
                 }
                 let text = with_late(&text, waited);
                 if let Err(e) =
@@ -1231,6 +1249,21 @@ mod tests {
             self.0.lock().unwrap().push(packet.clone());
             Ok(())
         }
+    }
+
+    /// K2b: an app muted here is muted for the next notification, whatever
+    /// the case of its name.
+    #[test]
+    fn a_muted_app_is_muted_here() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        assert!(!muted_here("Mail (K2b test)"));
+        pocketdesk_core::local::muted_apps::mute(dir, "Mail (K2b test)", 1).unwrap();
+        assert!(muted_here("mail (k2b test)"));
+        pocketdesk_core::local::muted_apps::unmute(dir, "Mail (K2b test)").unwrap();
+        assert!(!muted_here("Mail (K2b test)"));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that
