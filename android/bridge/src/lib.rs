@@ -1150,7 +1150,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
 /// Send a file from a file descriptor the caller gives up (F7), naming it by
 /// `source` so a retry continues it (T6a), and, for a file of a folder send,
 /// where it sits (`folder_id`, `folder`, `path_json` a JSON array of names;
-/// T6b): `{"ok": null}` or `{"err": "..."}`.
+/// T6b), and with its modified time (`last_modified`, ms since 1970, 0 for
+/// none; K1): `{"ok": null}` or `{"err": "..."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFileFd(
     mut env: JNIEnv<'_>,
@@ -1165,6 +1166,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
     folder: JString<'_>,
     path_json: JString<'_>,
     drive: JString<'_>,
+    last_modified: jlong,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let name = jstring_to_string(&mut env, &name);
@@ -1190,7 +1192,11 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendFil
         name,
         size,
         source,
-        api::ShareTags { folder, drive },
+        api::ShareTags {
+            folder,
+            drive,
+            modified: u64::try_from(last_modified).ok().filter(|ms| *ms > 0),
+        },
     ))));
     to_jstring(&mut env, json)
 }

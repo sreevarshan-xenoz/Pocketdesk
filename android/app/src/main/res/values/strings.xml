@@ -46,6 +46,8 @@
     <string name="share_not_saved">No saved computer has that address</string>
     <string name="share_choosing_off">Other apps may not choose a computer: turn it on in Pocketdesk\'s Settings</string>
     <string name="settings_retry_transfers">Retry failed files</string>
+    <string name="settings_keep_file_dates">Keep files\' dates</string>
+    <string name="settings_keep_file_dates_summary">Files sent to the computer keep the date they were last changed, and files from it keep theirs in Downloads/Pocketdesk. A folder picked under \"Files from computers go to\" cannot keep them</string>
     <string name="settings_retry_transfers_summary">A file that stops part way is sent again up to 3 times, continuing where it stopped; with no network it first waits up to 3 minutes for one</string>
     <string name="settings_internet_files">Files over the internet</string>
     <string name="settings_internet_files_summary">Send and receive files with a computer reached from away, on the same link. The computer may turn this off too</string>

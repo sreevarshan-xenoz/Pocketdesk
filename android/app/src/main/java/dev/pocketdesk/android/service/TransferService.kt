@@ -557,9 +557,13 @@ class TransferService : Service() {
                 Result.failure(IllegalStateException("$name is empty"))
             }
             size > 0L -> {
-                val source = SourceId.of(uri.toString(), size, lastModified(uri))
+                val modified = lastModified(uri)
+                val source = SourceId.of(uri.toString(), size, modified)
                 withProgress({ size }, onProgress) {
-                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, part, drive)
+                    RustCore.sendFileFd(
+                        address, port, descriptor.detachFd(), name, size, source, part, drive,
+                        FileDates.toSend(Prefs.keepFileDates(this), modified),
+                    )
                 }
             }
             else -> {
@@ -675,8 +679,12 @@ class TransferService : Service() {
                 // sent as any other, it would land in its Downloads.
                 drive != null -> {
                     val descriptor = android.os.ParcelFileDescriptor.open(copy, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-                    val source = SourceId.of(uri.toString(), size, lastModified(uri))
-                    RustCore.sendFileFd(address, port, descriptor.detachFd(), name, size, source, null, drive)
+                    val modified = lastModified(uri)
+                    val source = SourceId.of(uri.toString(), size, modified)
+                    RustCore.sendFileFd(
+                        address, port, descriptor.detachFd(), name, size, source, null, drive,
+                        FileDates.toSend(Prefs.keepFileDates(this), modified),
+                    )
                 }
                 else -> RustCore.sendFile(address, port, copy.absolutePath)
             }
