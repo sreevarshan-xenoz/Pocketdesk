@@ -463,9 +463,6 @@ fn wait_deadline(wait: std::time::Duration) -> std::time::Instant {
         .unwrap_or_else(|| now + std::time::Duration::from_secs(365 * 24 * 3600))
 }
 
-/// Ask the running server in `state_dir` to hand the link `url` to the
-/// phone `query` names (T8a): a phone in a session, a link that may be
-/// opened. What to print, and the exit code.
 /// Have the phone `query` names dial `number` (L4), through the server.
 pub fn call_in(state_dir: &Path, query: &str, number: &str, running: bool) -> (Value, i32) {
     if !running {
@@ -476,7 +473,7 @@ pub fn call_in(state_dir: &Path, query: &str, number: &str, running: bool) -> (V
     }
     if pocketdesk_core::protocol::dial::clean_number(number).is_none() {
         return (
-            error("not a phone number: digits, * and #, with a + only at the start"),
+            error("not a phone number: digits, with a + only at the start"),
             exit::BAD_ARGUMENTS,
         );
     }
@@ -488,6 +485,13 @@ pub fn call_in(state_dir: &Path, query: &str, number: &str, running: bool) -> (V
         Ok(id) => id,
         Err(reason) => return (error(reason), exit::BAD_ARGUMENTS),
     };
+    // A paired computer has no dialer (L4 review).
+    if store.is_computer(&device_id) {
+        return (
+            error(format!("{device_id} is a computer, not a phone")),
+            exit::BAD_ARGUMENTS,
+        );
+    }
     // The server would drop it: say so now, not "queued".
     if !store.permissions(&device_id).allows(Capability::Dial) {
         return (
@@ -500,7 +504,12 @@ pub fn call_in(state_dir: &Path, query: &str, number: &str, running: bool) -> (V
     let now = pocketdesk_core::local::pin::now_unix();
     match pocketdesk_core::local::dials::request(state_dir, &device_id, number, now) {
         Ok(request) => (
-            versioned(json!({ "queued": true, "phone": device_id, "number": request.number })),
+            versioned(json!({
+                "id": request.id,
+                "device_id": device_id,
+                "number": request.number,
+                "state": "queued",
+            })),
             exit::DONE,
         ),
         Err(e) => (
@@ -537,6 +546,9 @@ pub fn run_call(query: &str, number: &str, as_json: bool) -> i32 {
     code
 }
 
+/// Ask the running server in `state_dir` to hand the link `url` to the
+/// phone `query` names (T8a): a phone in a session, a link that may be
+/// opened. What to print, and the exit code.
 pub fn link_in(state_dir: &Path, query: &str, url: &str, running: bool) -> (Value, i32) {
     if !running {
         return (
@@ -1609,6 +1621,7 @@ mod tests {
         let (out, code) = call_in(&dir, "5f1c9b", "+1 555 010 0100", true);
         assert_eq!(code, exit::DONE, "{out}");
         assert_eq!(out["number"], "+15550100100");
+        assert_eq!(out["state"], "queued");
         let queued =
             pocketdesk_core::local::dials::take_all(&dir, pocketdesk_core::local::pin::now_unix());
         assert_eq!(queued.len(), 1);

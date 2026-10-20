@@ -152,7 +152,7 @@ Hands a web link to a phone in a session; it waits there as a notification that 
 
 ### `pocketdesk call <phone> <number> --json`
 
-Has a phone dial a number (L4): its dialer opens with it, and the owner presses Call there (the phone takes it with "Calls from the computer" on). The number may have spaces, dashes, dots and brackets, which are dropped; what is left is digits, `*` and `#`, a `+` only at the start, 3 to 32 characters. `{"api": 1, "queued": true, "phone": "…", "number": "+15550100100"}`; it goes to the phone if it is connected within a minute. Exit 2 for a number it is not, 1 for a phone with "Call numbers from here" off, 3 when no server runs.
+Has a phone dial a number (L4): its dialer opens with it, and the owner presses Call there (the phone takes it with "Calls from the computer" on). The number may have spaces, dashes, dots and brackets, which are dropped; what is left is digits, a `+` only at the start, 3 to 32 characters (never `*` or `#`, which make codes). `{"api": 1, "id": "…", "device_id": "…", "number": "+15550100100", "state": "queued"}`; it goes to the phone if it is connected within a minute. Exit 2 for a number it is not, or a paired computer; 1 for a phone with "Call numbers from here" off; 3 when no server runs.
 
 ### `pocketdesk ring <phone> --json`
 

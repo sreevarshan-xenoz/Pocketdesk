@@ -211,15 +211,27 @@ impl MessagesView {
                                 )
                                 .clicked()
                         {
-                            self.notice = crate::notice::Notice::outcome(
+                            // Said at once with Dial off (L4 review).
+                            let allowed = pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+                                state_dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+                            )
+                            .map(|store| {
+                                store.permissions(&device).allows(
+                                    pocketdesk_core::protocol::permissions::Capability::Dial,
+                                )
+                            })
+                            .unwrap_or(true);
+                            self.notice = crate::notice::Notice::outcome(if !allowed {
+                                Err("Not asked: Call numbers from here is off for this phone (Devices).".to_string())
+                            } else {
                                 pocketdesk_core::local::dials::request(
                                     state_dir, &device, &address, now_unix,
                                 )
                                 .map(|_| {
                                     "Asked the phone to open its dialer with the number; it does with \u{201c}Calls from the computer\u{201d} on.".to_string()
                                 })
-                                .map_err(|e| format!("Not asked: {e}")),
-                            );
+                                .map_err(|e| format!("Not asked: {e}"))
+                            });
                         }
                     });
                     pane.label(
