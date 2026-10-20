@@ -628,13 +628,11 @@ fn update_permissions(
     })
 }
 
-/// The last `lines` lines of the newest daily server log
-/// (`<state>/logs/pocketdesk.<date>.log`, written by `start --background`).
-pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(state_dir.join(LOG_DIR)) else {
-        return Vec::new();
-    };
-    let newest = entries
+/// The newest daily server log (`<state>/logs/pocketdesk.<date>.log`,
+/// written by `start --background`), if there is one.
+pub fn newest_log(state_dir: &Path) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(state_dir.join(LOG_DIR))
+        .ok()?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
@@ -642,12 +640,39 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.starts_with("pocketdesk.") && n.ends_with(".log"))
         })
-        .max();
-    let Some(raw) = newest.and_then(|p| std::fs::read(p).ok()) else {
+        .max()
+}
+
+/// What the newest log is now: its path, size and modification time. The
+/// Logs page reads it again only when this changes (J1: it had read the
+/// whole file every second).
+pub fn log_stamp(state_dir: &Path) -> Option<(std::path::PathBuf, u64, std::time::SystemTime)> {
+    let path = newest_log(state_dir)?;
+    let meta = std::fs::metadata(&path).ok()?;
+    Some((path, meta.len(), meta.modified().ok()?))
+}
+
+/// How much of a log's end is read: a day's debug log runs to megabytes.
+const LOG_TAIL_BYTES: u64 = 256 * 1024;
+
+/// The last `lines` lines of the newest daily server log, read from at most
+/// its last 256 KiB; a line the read cut in two is left out.
+pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Some(mut file) = newest_log(state_dir).and_then(|p| std::fs::File::open(p).ok()) else {
         return Vec::new();
     };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let start = len.saturating_sub(LOG_TAIL_BYTES);
+    let mut raw = Vec::new();
+    if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut raw).is_err() {
+        return Vec::new();
+    }
     let text = String::from_utf8_lossy(&raw);
-    let all: Vec<&str> = text.lines().collect();
+    let mut all: Vec<&str> = text.lines().collect();
+    if start > 0 && !all.is_empty() {
+        all.remove(0);
+    }
     all[all.len().saturating_sub(lines)..]
         .iter()
         .map(|l| l.to_string())
@@ -1049,6 +1074,47 @@ mod tests {
         assert_eq!(tail.first().map(String::as_str), Some("line 50"));
         assert_eq!(tail.last().map(String::as_str), Some("line 249"));
         assert!(log_tail(&temp_dir("nologs"), 10).is_empty());
+    }
+
+    /// J1: a big log is read from its tail only, its cut first line dropped.
+    #[test]
+    fn a_big_log_is_read_from_its_tail() {
+        let dir = temp_dir("biglog");
+        let logs = dir.join(LOG_DIR);
+        std::fs::create_dir_all(&logs).unwrap();
+        // Some 600 KiB: more than the tail read.
+        let lines: String = (0..20_000)
+            .map(|i| format!("line {i:05} {}\n", "x".repeat(20)))
+            .collect();
+        std::fs::write(logs.join("pocketdesk.2026-10-20.log"), &lines).unwrap();
+        let tail = log_tail(&dir, 400);
+        assert_eq!(tail.len(), 400);
+        assert!(tail.last().unwrap().starts_with("line 19999"));
+        assert!(tail.first().unwrap().starts_with("line 19600"));
+        // A tail too small for every line starts at a whole line.
+        let few = log_tail(&dir, 1_000_000);
+        assert!(
+            few.first().unwrap().starts_with("line "),
+            "no cut line: {:?}",
+            few.first()
+        );
+        assert!(few.len() < 20_000, "only the tail was read");
+    }
+
+    /// J1: the log is read again only when its size or time changed.
+    #[test]
+    fn the_log_stamp_changes_with_the_file() {
+        let dir = temp_dir("logstamp");
+        let logs = dir.join(LOG_DIR);
+        std::fs::create_dir_all(&logs).unwrap();
+        assert_eq!(log_stamp(&dir), None);
+        let file = logs.join("pocketdesk.2026-10-20.log");
+        std::fs::write(&file, "a\n").unwrap();
+        let first = log_stamp(&dir);
+        assert!(first.is_some());
+        assert_eq!(log_stamp(&dir), first, "unchanged");
+        std::fs::write(&file, "a\nb\n").unwrap();
+        assert_ne!(log_stamp(&dir), first, "grown");
     }
 
     #[test]
