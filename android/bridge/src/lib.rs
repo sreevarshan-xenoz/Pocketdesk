@@ -12,6 +12,7 @@ mod clipboard_push;
 mod deck;
 mod download;
 mod link;
+mod link_quiet;
 mod links;
 mod logcat;
 mod media_presses;

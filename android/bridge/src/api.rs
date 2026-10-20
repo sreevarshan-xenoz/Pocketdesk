@@ -2894,7 +2894,35 @@ pub async fn reconnect_streaming(
 pub fn remote_state() -> String {
     let guard = crate::session::REMOTE.lock().unwrap();
     let state = state_name(guard.as_ref(), false);
-    format!("{{\"state\":\"{state}\"{}}}", sound_grants(guard.as_ref()))
+    format!(
+        "{{\"state\":\"{state}\"{},\"quietMs\":{}}}",
+        sound_grants(guard.as_ref()),
+        link_quiet_ms()
+    )
+}
+
+/// How long the session's link has been quiet, in ms (I1b): the time since
+/// the datagrams it received last rose. 0 with no session, or while the
+/// session handle is busy (it is read again in half a second).
+fn link_quiet_ms() -> u128 {
+    static QUIET: std::sync::LazyLock<std::sync::Mutex<crate::link_quiet::Quiet>> =
+        std::sync::LazyLock::new(Default::default);
+    let Ok(handle) = (*STREAMING_HANDLE).try_lock() else {
+        return 0;
+    };
+    let mut quiet = QUIET.lock().unwrap();
+    match handle.as_ref() {
+        Some(h) => quiet
+            .note(
+                h.connection.stats().datagrams_received,
+                std::time::Instant::now(),
+            )
+            .as_millis(),
+        None => {
+            quiet.reset();
+            0
+        }
+    }
 }
 
 /// For a sound session (N5), what the computer said it allows, as JSON
