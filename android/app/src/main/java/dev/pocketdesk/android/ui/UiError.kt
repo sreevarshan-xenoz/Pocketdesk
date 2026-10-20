@@ -16,6 +16,8 @@ fun humanizeError(raw: String): Int {
         "connection refused" in l -> R.string.err_host_unreachable
         "timed out" in l || "timeout" in l -> R.string.err_timeout
         "no cached wan identity" in l -> R.string.err_lan_only
+        // The far side closed during the handshake: nothing there to judge.
+        HANDSHAKE_CLOSED in l -> R.string.err_host_unreachable
         "certificate" in l || "untrusted" in l || "handshake" in l ->
             R.string.err_trust_mismatch
         "session refused" in l -> R.string.err_session_refused
@@ -33,9 +35,17 @@ fun humanizeError(raw: String): Int {
 /** Does this failure call for the "pair again" escape hatch? */
 fun errorSuggestsRepair(raw: String): Boolean {
     val l = raw.lowercase()
+    if (HANDSHAKE_CLOSED in l) return false
     return "certificate" in l || "untrusted" in l || "handshake" in l ||
         "declined" in l || PIN.containsMatchIn(l) || "session refused" in l
 }
+
+/**
+ * A handshake the far side closed (a tunnel with nothing behind it, a server
+ * stopping): nothing answered, never a changed certificate. tokio-rustls's
+ * words for it; a certificate it refuses reads "invalid peer certificate".
+ */
+private const val HANDSHAKE_CLOSED = "handshake eof"
 
 /** "pin" as a word, not inside "ping", "mapping" or "stopping". */
 private val PIN = Regex("""\bpin\b""")

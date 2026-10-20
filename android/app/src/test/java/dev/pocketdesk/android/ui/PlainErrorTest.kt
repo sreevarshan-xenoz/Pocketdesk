@@ -2,6 +2,8 @@ package dev.pocketdesk.android.ui
 
 import dev.pocketdesk.android.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlainErrorTest {
@@ -18,6 +20,20 @@ class PlainErrorTest {
         for ((raw, expected) in cases) {
             assertEquals(raw, Plain.Res(expected), plainError(raw))
         }
+    }
+
+    /**
+     * A handshake the far side closed is nothing answering (a tunnel with
+     * nothing behind it, a server stopping), never a changed certificate:
+     * "pair again" would send the owner the wrong way.
+     */
+    @Test
+    fun aHandshakeClosedOnIsNothingAnsweringNotATrustMismatch() {
+        val raw = "Connection failed: connection to 127.0.0.1:1716 failed: TLS: tls handshake eof"
+        assertEquals(Plain.Res(R.string.err_host_unreachable), plainError(raw))
+        assertFalse(errorSuggestsRepair(raw))
+        assertEquals(Plain.Res(R.string.err_trust_mismatch), plainError("TLS handshake failed: invalid peer certificate"))
+        assertTrue(errorSuggestsRepair("TLS handshake failed: invalid peer certificate"))
     }
 
     /** A session the computer's permissions turned down says which switch (N5). */
