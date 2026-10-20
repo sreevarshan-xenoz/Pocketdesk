@@ -2000,7 +2000,9 @@ impl PocketdeskApp {
                         chosen = Some(id.clone());
                     }
                 }
-                cancel = ui.button("Cancel").clicked() || crate::keys::escaped(ui);
+                // Esc in a text box only leaves the box (J5 review).
+                let typing = ui.memory(|m| m.focused().is_some());
+                cancel = ui.button("Cancel").clicked() || (!typing && crate::keys::escaped(ui));
             });
         });
         ui.add_space(12.0);
