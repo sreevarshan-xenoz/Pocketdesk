@@ -543,8 +543,7 @@ fn the_clipboard_page_searches_its_texts() {
     pair_phone(fixture.state(), PHONE, "Test Phone");
     std::fs::write(
         fixture.config().join("config.toml"),
-        "clipboard_history = 20
-",
+        "clipboard_history = 20\n",
     )
     .expect("config");
     use pocketdesk_core::local::clip_history::{ClipEntry, record};
@@ -577,6 +576,24 @@ fn the_clipboard_page_searches_its_texts() {
     app.run_steps(3);
     assert!(app.query_by_label("the meeting link").is_some());
     assert!(app.query_by_label("12 Main Street").is_some());
+
+    // Esc in the box empties the search and leaves Clear's question open
+    // (J4 review: Clear's Cancel, drawn first, had taken it).
+    app.get_by_label("Clear history…").click();
+    app.run_steps(3);
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("main");
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_none());
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_some(), "emptied");
+    assert!(
+        app.query_by_label("Forget all 2 texts kept here?")
+            .is_some(),
+        "the question stays"
+    );
 }
 
 /// D3: the Clipboard page says the history is off, and with it on lists

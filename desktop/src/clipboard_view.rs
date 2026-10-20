@@ -88,6 +88,9 @@ pub struct ClipboardView {
     confirm_clear: Option<Instant>,
     /// What the Search box holds (J4).
     search: String,
+    /// The box had focus last frame: Esc there is the box's, not Clear's
+    /// Cancel, which is drawn first (J4 review).
+    search_focused: bool,
 }
 
 impl ClipboardView {
@@ -138,7 +141,9 @@ impl ClipboardView {
                             Err(e) => Action::Failed(format!("Not cleared: {e}")),
                         });
                         self.confirm_clear = None;
-                    } else if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
+                    } else if ui.button("Cancel").clicked()
+                        || (!self.search_focused && crate::keys::escaped(ui))
+                    {
                         self.confirm_clear = None;
                     }
                 } else if ui.button("Clear history…").clicked() {
@@ -147,6 +152,7 @@ impl ClipboardView {
             }
         });
         if self.entries.is_empty() {
+            self.search_focused = false;
             ui.label(
                 RichText::new("Nothing yet: copy something on a connected phone, or here with \"Clipboard to phones\" on.")
                     .color(crate::theme::muted(ui)),
@@ -161,7 +167,7 @@ impl ClipboardView {
             }
             return action;
         }
-        crate::search_box::show(ui, &mut self.search);
+        self.search_focused = crate::search_box::show(ui, &mut self.search).has_focus();
         ui.add_space(4.0);
         let shown = shown(&self.entries, &self.search, devices);
         let query = self.search.trim().to_string();
