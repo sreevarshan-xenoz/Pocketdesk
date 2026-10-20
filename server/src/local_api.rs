@@ -1988,6 +1988,27 @@ mod tests {
         );
     }
 
+    /// K2a: `pause` takes 1 to 10080 minutes, until resumed, or resume,
+    /// one of them at most.
+    #[test]
+    fn pause_takes_one_of_minutes_until_resumed_or_resume() {
+        use clap::Parser;
+        let parse = |args: &[&str]| crate::cli::Cli::try_parse_from(args);
+        assert!(
+            parse(&["pocketdesk", "pause"]).is_ok(),
+            "says whether paused"
+        );
+        assert!(parse(&["pocketdesk", "pause", "--for", "1"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "10080"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "0"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--for", "10081"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--until-resumed"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--resume", "--json"]).is_ok());
+        assert!(parse(&["pocketdesk", "pause", "--for", "5", "--resume"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--for", "5", "--until-resumed"]).is_err());
+        assert!(parse(&["pocketdesk", "pause", "--until-resumed", "--resume"]).is_err());
+    }
+
     /// D2: a mute is queued for a linked phone with Mute on, refused at once
     /// otherwise, and a day at most.
     #[test]

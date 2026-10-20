@@ -59,8 +59,7 @@ impl Plugin for SirenPlugin {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true)
         {
-            // Paused (K2a): not sounded.
-            if crate::paused::now() {
+            if !sounds() {
                 tracing::info!("Find-my-device: not ringing, paused");
                 return Ok(());
             }
@@ -68,6 +67,11 @@ impl Plugin for SirenPlugin {
         }
         Ok(())
     }
+}
+
+/// Whether a phone's ring sounds here: not while paused (K2a).
+fn sounds() -> bool {
+    !crate::paused::now()
 }
 
 /// Play a looping sound for `secs`, trying each player and file. Never
@@ -168,6 +172,14 @@ fn alarm_wav() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    /// K2a: a pause keeps a phone's ring silent.
+    #[test]
+    fn a_pause_holds_a_ring() {
+        assert!(super::sounds());
+        let _paused = crate::paused::paused_for_test();
+        assert!(!super::sounds());
+    }
+
     use super::*;
 
     #[test]

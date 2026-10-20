@@ -420,7 +420,7 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     };
     // A muted app's never counts against the limit (K2b review); a pause
     // holds them all alike (K2a).
-    let muted = muted_here(&app) || crate::paused::now();
+    let muted = held_here(&app);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -456,6 +456,12 @@ fn given_name(body: &serde_json::Value, field: &str) -> bool {
     body.get(field)
         .and_then(|v| v.as_str())
         .is_some_and(|app| !app.trim().is_empty())
+}
+
+/// Whether `app`'s notification is held here: its app muted (K2b), or this
+/// computer paused (K2a).
+fn held_here(app: &str) -> bool {
+    muted_here(app) || crate::paused::now()
 }
 
 /// Whether `app` is muted on this computer (K2b): its notifications are
@@ -553,7 +559,7 @@ impl Plugin for NotificationPlugin {
                 // counted against the phone's limit, which is for what shows
                 // (K2b review: a muted app's burst dropped the others).
                 // Paused (K2a): held as a muted app's are.
-                let muted = muted_here(&app) || crate::paused::now();
+                let muted = held_here(&app);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()
@@ -1340,6 +1346,16 @@ mod tests {
         assert!(muted_here("mail (k2b test)"));
         pocketdesk_core::local::muted_apps::unmute(dir, "Mail (K2b test)").unwrap();
         assert!(!muted_here("Mail (K2b test)"));
+    }
+
+    /// K2a: a pause holds every app's notifications, phones' and KDE
+    /// devices' alike (both ask `held_here`).
+    #[test]
+    fn a_pause_holds_every_app_s_notifications() {
+        assert!(!held_here("Chat (K2a test)"));
+        let _paused = crate::paused::paused_for_test();
+        assert!(held_here("Chat (K2a test)"));
+        assert!(held_here("Mail (K2a test)"));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that
