@@ -275,8 +275,9 @@ fn drawn_here(key: &str) -> bool {
     }
 }
 
-/// A row shows for `query` by its name or key, or a setting drawn in it,
-/// or its section's title.
+/// A row shows for `query` when each word is in its name or key, a
+/// setting drawn in it, or its section's title (J2 review: "advanced
+/// capture" had found nothing, a word on each).
 pub fn row_shown(query: &str, key: &str) -> bool {
     let mut texts = vec![name(key), key];
     for (k, n, _) in SETTINGS {
@@ -284,7 +285,8 @@ pub fn row_shown(query: &str, key: &str) -> bool {
             texts.extend([*n, *k]);
         }
     }
-    matches(query, &texts) || section_of(key).is_some_and(|s| matches(query, &[s.title()]))
+    texts.extend(section_of(key).map(Section::title));
+    matches(query, &texts)
 }
 
 /// A section is drawn for `query` by its title, or for a row or an extra
@@ -297,10 +299,10 @@ pub fn section_shown(query: &str, section: Section) -> bool {
         || extras(section).iter().any(|x| matches(query, &[x]))
 }
 
-/// An extra beside a section's rows shows for `query` by its own name or
-/// its section's title.
+/// An extra beside a section's rows shows for `query` when each word is in
+/// its own name or its section's title.
 pub fn extra_shown(query: &str, section: Section, extra: &str) -> bool {
-    matches(query, &[extra]) || matches(query, &[section.title()])
+    matches(query, &[extra, section.title()])
 }
 
 /// Where the search box's words wait while the page draws, for `row`.
@@ -1518,6 +1520,25 @@ mod tests {
         assert!(row_shown("broker", "home_assistant"));
         assert!(row_shown("details", "events"));
         assert!(!row_shown("broker", "events"));
+    }
+
+    /// J2 review: a search's words may fall on a row and on its section's
+    /// title.
+    #[test]
+    fn a_search_reads_a_section_title_with_its_rows() {
+        use super::{EXTRA_BROWSER, Section, extra_shown, row_shown};
+        assert!(row_shown("advanced capture", "capture_backend"));
+        assert!(!row_shown("advanced laser", "laser_pointer"));
+        assert!(extra_shown(
+            "phones browser",
+            Section::Phones,
+            EXTRA_BROWSER
+        ));
+        assert!(!extra_shown(
+            "advanced browser",
+            Section::Phones,
+            EXTRA_BROWSER
+        ));
     }
 
     /// J2 review: a row this system does not draw finds no section.
