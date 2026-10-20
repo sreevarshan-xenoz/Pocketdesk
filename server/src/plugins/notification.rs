@@ -618,11 +618,7 @@ impl Plugin for NotificationPlugin {
                 let Some((app, title, text)) = to_show(&packet.body) else {
                     return Ok(());
                 };
-                // The app's icon, kept for this and later ones (K3).
                 let named = given_name(&packet.body, "app");
-                if named {
-                    keep_icon(sender.device_id(), &app, &packet.body);
-                }
                 // One that waited on the phone says so (C3).
                 let waited = waited_secs(&packet.body);
                 // Muted here (K2b): logged and kept, never shown, and never
@@ -640,6 +636,17 @@ impl Plugin for NotificationPlugin {
                         .admit(sender.device_id(), Instant::now(), limit)
                 {
                     return Ok(());
+                }
+                // The app's icon, kept for this and later ones (K3), once
+                // the phone's limit let the notification in (K3 review).
+                if named && !muted && packet.body.get("appIcon").is_some() {
+                    let (phone, app, body) = (
+                        sender.device_id().to_string(),
+                        app.clone(),
+                        packet.body.clone(),
+                    );
+                    let _ =
+                        tokio::task::spawn_blocking(move || keep_icon(&phone, &app, &body)).await;
                 }
                 // An event whether or not it is shown here (a script may want
                 // the phone's notifications without the toasts), as it would
@@ -676,7 +683,19 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
-                let pictures = pictures_for(sender.device_id(), &app, named, id, &packet.body);
+                let pictures = {
+                    let (phone, app, id, body) = (
+                        sender.device_id().to_string(),
+                        app.clone(),
+                        id.to_string(),
+                        packet.body.clone(),
+                    );
+                    tokio::task::spawn_blocking(move || {
+                        pictures_for(&phone, &app, named, &id, &body)
+                    })
+                    .await
+                    .unwrap_or_default()
+                };
                 if let Err(e) = show_desktop_notification(
                     tag.as_deref(),
                     &app,
