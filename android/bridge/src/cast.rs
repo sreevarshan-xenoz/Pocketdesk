@@ -41,6 +41,8 @@ static AUDIO_TX: Mutex<Option<mpsc::Sender<Vec<u8>>>> = Mutex::new(None);
 
 /// Sound packets waiting: 10, a fifth of a second.
 const AUDIO_QUEUE: usize = 10;
+/// Sound packets sent and not yet delivered: 5, a tenth of a second.
+const AUDIO_IN_FLIGHT: usize = 5;
 
 fn queue_tx() -> Option<mpsc::Sender<Vec<u8>>> {
     QUEUE_TX.lock().unwrap_or_else(|e| e.into_inner()).clone()
@@ -61,7 +63,14 @@ fn spawn_audio_sender(
 ) -> mpsc::Sender<Vec<u8>> {
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(AUDIO_QUEUE);
     tokio::spawn(async move {
+        // At most a tenth of a second sent and not yet delivered (K5 review:
+        // a stalled link had piled the sound up in the transport, to arrive
+        // late); meanwhile the queue fills, and a full queue drops.
+        let mut in_flight = InFlight::new(AUDIO_IN_FLIGHT);
         loop {
+            if !in_flight.admit(&cancel).await {
+                break;
+            }
             let bytes = tokio::select! {
                 _ = cancel.cancelled() => break,
                 bytes = rx.recv() => match bytes {
@@ -69,10 +78,13 @@ fn spawn_audio_sender(
                     None => break,
                 },
             };
-            if let Err(e) = send(&connection, &bytes).await {
-                tracing::debug!("A cast's sound was not sent: {e}");
-                if connection.close_reason().is_some() {
-                    break;
+            match send(&connection, &bytes).await {
+                Ok(delivered) => in_flight.push(delivered),
+                Err(e) => {
+                    tracing::debug!("A cast's sound was not sent: {e}");
+                    if connection.close_reason().is_some() {
+                        break;
+                    }
                 }
             }
         }
