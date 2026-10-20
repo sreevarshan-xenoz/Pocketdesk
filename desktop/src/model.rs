@@ -431,6 +431,9 @@ pub struct RecentSession {
     /// How it connected, or that it was refused or failed, in words.
     pub how: &'static str,
     pub refused: bool,
+    /// How many refusals in a row this line stands for: a phone refused as
+    /// it reconnects is refused every few seconds (J3 review).
+    pub times: u32,
     /// The phone's median latency from capture to arrival, when it
     /// measured it.
     pub e2e_ms: Option<u64>,
@@ -478,6 +481,7 @@ pub fn recent_sessions(lines: &str, n: usize) -> Vec<RecentSession> {
                     _ => "connected",
                 },
                 refused: outcome == "rejected",
+                times: 1,
                 e2e_ms: record
                     .get("e2e_tail")
                     .and_then(|t| t.get("p50_ms"))
@@ -487,8 +491,21 @@ pub fn recent_sessions(lines: &str, n: usize) -> Vec<RecentSession> {
         .collect();
     // The log is in order of ending already; sorted anyway, stably.
     all.sort_by_key(|s| std::cmp::Reverse(s.ended_unix));
-    all.truncate(n);
-    all
+    // Refusals of one device in a row are one line, so a phone retrying
+    // does not push the real sessions out of the list.
+    let mut lines: Vec<RecentSession> = Vec::new();
+    for session in all {
+        match lines.last_mut() {
+            Some(last)
+                if last.refused && session.refused && last.device_id == session.device_id =>
+            {
+                last.times += 1;
+            }
+            _ => lines.push(session),
+        }
+    }
+    lines.truncate(n);
+    lines
 }
 
 /// The session log's size and change time, so it is read again only when
@@ -865,6 +882,7 @@ mod tests {
             duration_secs: 1,
             how: "on this network",
             refused,
+            times: 1,
             e2e_ms: None,
         };
         assert_eq!(
@@ -951,6 +969,28 @@ mod tests {
         assert_eq!(two.len(), 2);
         assert_eq!(two[0].ended_unix, 600);
         assert!(recent_sessions("", 10).is_empty());
+    }
+
+    /// J3 review: a device refused again and again is one line, and the
+    /// sessions before it stay in the list.
+    #[test]
+    fn refusals_in_a_row_are_one_line() {
+        let mut log = String::from(
+            r#"{"unix_secs":100,"outcome":"lan_direct","duration_secs":60,"device_id":"a"}"#,
+        );
+        log.push('\n');
+        for at in 200..206 {
+            log.push_str(&format!(
+                r#"{{"unix_secs":{at},"outcome":"rejected","duration_secs":0,"device_id":"b"}}"#
+            ));
+            log.push('\n');
+        }
+        let two = recent_sessions(&log, 2);
+        assert_eq!(two.len(), 2);
+        assert!(two[0].refused);
+        assert_eq!(two[0].times, 6);
+        assert_eq!(two[0].ended_unix, 205, "the newest refusal's time");
+        assert_eq!(two[1].device_id.as_deref(), Some("a"), "still listed");
     }
 
     #[test]

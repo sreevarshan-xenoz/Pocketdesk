@@ -1625,7 +1625,10 @@ impl PocketdeskApp {
                 if !recent.refused {
                     line.push(format!("for {}", human_duration(recent.duration_secs)));
                 }
-                line.push(recent.how.to_string());
+                line.push(match recent.times {
+                    1 => recent.how.to_string(),
+                    n => format!("{} {n} times", recent.how),
+                });
                 if let Some(ms) = recent.e2e_ms {
                     line.push(format!("{ms} ms latency"));
                 }
