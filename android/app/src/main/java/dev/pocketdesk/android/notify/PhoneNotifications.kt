@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Parcelable
 import android.os.SystemClock
 import android.os.Process
 import android.provider.Settings
@@ -368,8 +369,9 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
-        // K3: the app's icon once, and its picture with the setting on.
-        addPictures(sbn, note.pkg, body, out.full)
+        // K3: the app's icon once, and its picture with the setting on;
+        // whatever an app put in its extras never stops the listener.
+        runCatching { addPictures(sbn, note.pkg, body, out.full) }
         // Only with the notification in full.
         if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
@@ -394,18 +396,19 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         if (!NotificationPictures.sendPicture(Prefs.notificationPictures(this), full)) return
         val extras = sbn.notification.extras
-        // The untyped reads: the typed ones need Android 13, and apps set
-        // either a Bitmap or (Android 12+) an Icon here.
+        // The untyped reads (the typed ones need Android 13), each checked:
+        // an app may put anything under these keys (K3 review).
         @Suppress("DEPRECATION")
         val picture: Drawable? =
-            extras.getParcelable<Bitmap>(Notification.EXTRA_PICTURE)?.toDrawable(resources)
-                ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    extras.getParcelable<Icon>(Notification.EXTRA_PICTURE_ICON)
-                        ?.let { runCatching { it.loadDrawable(this) }.getOrNull() }
-                } else {
-                    null
-                }
-                ?: sbn.notification.getLargeIcon()?.let { runCatching { it.loadDrawable(this) }.getOrNull() }
+            runCatching {
+                (extras.getParcelable<Parcelable>(Notification.EXTRA_PICTURE) as? Bitmap)?.toDrawable(resources)
+                    ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        (extras.getParcelable<Parcelable>(Notification.EXTRA_PICTURE_ICON) as? Icon)?.loadDrawable(this)
+                    } else {
+                        null
+                    }
+                    ?: sbn.notification.getLargeIcon()?.loadDrawable(this)
+            }.getOrNull()
         picture
             ?.let { encoded(it, NotificationPictures.PICTURE_PX, Bitmap.CompressFormat.JPEG) }
             ?.let { body.put("picture", it) }
