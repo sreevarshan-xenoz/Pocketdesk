@@ -69,7 +69,9 @@ fun BatteryEffect(address: String, controlPort: Int) {
                 }
                 if (linked && Prefs.shareBattery(context)) {
                     withContext(Dispatchers.IO) {
-                        switches.tick(readSwitches(context), nowMs) { body ->
+                        // A read that throws is skipped, never the app (L7 review).
+                        val said = runCatching { readSwitches(context) }.getOrNull()
+                        if (said != null) switches.tick(said, nowMs) { body ->
                             RustCore.sendPhonePacket(address, controlPort, SwitchReport.SWITCHES, body)
                         }
                     }
