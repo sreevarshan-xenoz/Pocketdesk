@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-671 open items.
+676 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 384 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 389 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -795,6 +795,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
 - On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
 - A computer asleep (not this box): woken, "It is awake" within a minute.
+
+**139. A talk timer in Remote (H2)**
+
+- Remote on the A71: "Timer", 5 minutes: the count down, a buzz at one minute (twice) and three at the end, then "+0:05" in red; a tap stops it.
+- The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service).
+- The link dropped and back mid-talk: the timer still counting; rotated: the same.
+- Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
+- Landscape and font scale 2.0: all seven lengths reachable; the header not crowded.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
