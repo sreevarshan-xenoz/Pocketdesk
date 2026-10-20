@@ -42,7 +42,7 @@ The phone's switch "Share battery with the computer" becomes "Share the phone's 
 
 ## Privacy
 
-None of the fields names a network, a place or a carrier. They go only to the phone's own computer, on the link the battery already uses. SECURITY.md's list is unchanged: the battery's limit already covers what the phone tells its computer of itself. protocol.md's battery row names the new fields.
+None of the fields names a network, a place or a carrier. They go only to the phone's own computer, on the link the battery already uses. protocol.md's battery row names the new fields, and its accepted limit 2 (a phone with every permission off still reports its battery) now names them too: they ride the same report.
 
 ## Tests
 
@@ -56,3 +56,18 @@ None of the fields names a network, a place or a carrier. They go only to the ph
 - The Overview line matches the phone's Settings: storage, Wi-Fi, and the ringer after a change.
 - Mobile data with the bars, on a phone with a SIM.
 - The switch off sends nothing.
+
+## As built
+
+- **Core:** `core::local::phone_status`: `PhoneState` (flattened into `PhoneBattery`, each field optional and read leniently), `Network`, `Ringer`, `PhoneState::from_body`.
+- **Server:** `phone_battery`'s `take` keeps `report.state`; `devices --json` carries it in `battery`.
+- **Desktop:** `model::phone_state_text` (decimal units, "under 100 MB"), `model::state_is_now` (reached, and reported in the last 10 minutes), a line under the Overview's battery.
+- **Phone:** `status/PhoneStateRule.kt` (JVM-tested), `status/PhoneState.kt` (`StorageStatsManager`, the network behind a VPN, the data SIM's bars), `BatteryRule.shouldSend` and `body`; each tick reads only what decides a send, off the main thread.
+
+## Review
+
+A fresh review (0 Critical, 2 Important, 9 Minor), fixed one commit each:
+
+- **Important:** storage from the data partition in MiB, unlike the phone's Settings (now the volume's advertised size, decimal); a nearly full phone read "0 B free" (now "under 100 MB free").
+- **Minor, fixed:** an unknown word emptied the whole file for its reader; an away phone's state shown as now; reads on the main thread and in full every background tick; a VPN's network named instead of the one it rides; the voice SIM's bars, and an unknown level said as none; `devices --json` untested with the fields; stale names of the switch; the spec's privacy claim.
+

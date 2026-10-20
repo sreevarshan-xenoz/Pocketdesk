@@ -2311,6 +2311,15 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] With no automation app installed: nothing is sent, and Settings says so.
 - [ ] Tasker itself.
 
+## 162. The phone's state on the computer (L9)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars.
+- [ ] The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
+- [ ] Behind Tailscale on the phone: Wi-Fi with its bars, not nothing.
+- [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
+- [ ] The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
