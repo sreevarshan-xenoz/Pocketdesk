@@ -27,6 +27,7 @@ pub mod network;
 pub mod outbox;
 pub mod pair_link;
 pub mod paths;
+pub mod pause;
 pub mod phone_files;
 pub mod phone_media;
 pub mod phone_notes;
