@@ -85,7 +85,7 @@ impl LogsView {
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(LOOK_EVERY);
-        if self.lines.is_empty() {
+        if self.read.is_none() {
             ui.label(
                 "No log file yet. The server writes one when it starts at logon \
                  (`start --background`); started from a terminal it logs there instead.",

@@ -401,6 +401,19 @@ fn the_logs_page_shows_the_newest_lines() {
     assert!(app.query_by_label("2 of the last 2 lines").is_some());
 }
 
+/// J1 review: a log that exists but is empty yet (just rotated) is not
+/// "no log file", and its folder can still be opened.
+#[test]
+fn an_empty_log_is_a_log() {
+    let fixture = Fixture::new();
+    let logs = fixture.state().join(pocketdesk_core::local::paths::LOG_DIR);
+    std::fs::create_dir_all(&logs).expect("logs");
+    std::fs::write(logs.join("pocketdesk.2026-10-21.log"), "").expect("log");
+    let app = fixture.open(Some(Tab::Logs));
+    assert!(app.query_by_label("Open log folder").is_some());
+    assert!(app.query_by_label("0 of the last 0 lines").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]
