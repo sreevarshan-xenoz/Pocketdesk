@@ -2,15 +2,15 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-695 open items.
+699 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 402 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 405 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 22 |
-| A second phone | 8 |
+| A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 89 |
@@ -832,6 +832,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Activity with a few hundred events: Search by a phone's name, a file's name and a link's host; with a kind chip; nothing found, then Clear search.
 - Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question.
 
+**147. Dropped files ask where they go (J5)**
+
+- One phone linked: a dropped file goes to it at once, one notice.
+- A second drop while it asks joins the files; a folder reads as a folder.
+- Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1135,6 +1141,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **145. The Sessions page in blocks, with the recent ones (J3)**
 
 - Two phones: "driving" on one, Give control on the other. A cast with its window closed: Show screen. Music on the phone: Previous, Play/Pause, Next inside its block.
+
+**147. Dropped files ask where they go (J5)**
+
+- Two (a phone and another computer, or two phones): "Send 3 files to:" with a button each; each button sends all three, one notice; Cancel and Esc send nothing.
 
 ## Away from home: another network, or through a router
 

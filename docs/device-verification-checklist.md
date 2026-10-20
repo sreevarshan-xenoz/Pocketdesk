@@ -2183,6 +2183,14 @@ Built 2026-10-20; tested through the harness and units, nothing by hand yet.
 - [ ] Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question.
 - [ ] Ctrl+F on each page, scrolled down; both boxes at the minimum width, light and dark.
 
+## 147. Dropped files ask where they go (J5)
+
+Built 2026-10-20; tested through the harness and units, nothing by hand yet.
+- [ ] One phone linked: a dropped file goes to it at once, one notice.
+- [ ] Two (a phone and another computer, or two phones): "Send 3 files to:" with a button each; each button sends all three, one notice; Cancel and Esc send nothing.
+- [ ] A second drop while it asks joins the files; a folder reads as a folder.
+- [ ] Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
