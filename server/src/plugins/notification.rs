@@ -139,14 +139,21 @@ async fn server_caps(proxy: &zbus::Proxy<'static>) -> crate::toast_answers::Dbus
     .unwrap_or_default()
 }
 
-/// The answerable phone notifications shown over D-Bus (N3), by their
-/// D-Bus id, newest last: a press names only the id.
+/// What a phone notification shown over D-Bus with buttons offers: N3's
+/// answers, and its app for "Not from this app" (K2b).
 #[cfg(target_os = "linux")]
-fn answerable_ids()
--> &'static Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>> {
-    static IDS: std::sync::OnceLock<
-        Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>>,
-    > = std::sync::OnceLock::new();
+#[derive(Clone)]
+struct Pressable {
+    answers: Option<crate::toast_answers::Answerable>,
+    app: String,
+}
+
+/// The phone notifications shown over D-Bus with buttons, by their D-Bus
+/// id, newest last: a press names only the id.
+#[cfg(target_os = "linux")]
+fn answerable_ids() -> &'static Mutex<std::collections::VecDeque<(u32, Pressable)>> {
+    static IDS: std::sync::OnceLock<Mutex<std::collections::VecDeque<(u32, Pressable)>>> =
+        std::sync::OnceLock::new();
     IDS.get_or_init(Default::default)
 }
 
@@ -155,10 +162,10 @@ fn answerable_ids()
 const MAX_ANSWERABLE: usize = 30;
 
 #[cfg(target_os = "linux")]
-fn remember_answerable(id: u32, answers: crate::toast_answers::Answerable) {
+fn remember_answerable(id: u32, pressable: Pressable) {
     let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.retain(|(i, _)| *i != id);
-    ids.push_back((id, answers));
+    ids.push_back((id, pressable));
     while ids.len() > MAX_ANSWERABLE {
         ids.pop_front();
     }
@@ -171,7 +178,7 @@ fn forget_answerable(id: u32) {
 }
 
 #[cfg(target_os = "linux")]
-fn answerable_for(id: u32) -> Option<crate::toast_answers::Answerable> {
+fn answerable_for(id: u32) -> Option<Pressable> {
     let ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.iter().find(|(i, _)| *i == id).map(|(_, a)| a.clone())
 }
@@ -220,15 +227,20 @@ async fn answer_signals() -> Result<()> {
         tokio::select! {
             Some(message) = invoked.next() => {
                 if let Ok((id, key)) = message.body().deserialize::<(u32, String)>()
-                    && let Some(answers) = answerable_for(id)
-                    && let Some(answer) = crate::toast_answers::dbus_action_answer(&key, &answers)
+                    && let Some(pressable) = answerable_for(id)
                 {
-                    crate::toast_answers::send(&answers, answer);
+                    if key == crate::toast_answers::MUTE {
+                        crate::toast_answers::mute(&pressable.app);
+                    } else if let Some(answers) = &pressable.answers
+                        && let Some(answer) = crate::toast_answers::dbus_action_answer(&key, answers)
+                    {
+                        crate::toast_answers::send(answers, answer);
+                    }
                 }
             }
             Some(message) = replied.next() => {
                 if let Ok((id, text)) = message.body().deserialize::<(u32, String)>()
-                    && let Some(answers) = answerable_for(id)
+                    && let Some(answers) = answerable_for(id).and_then(|p| p.answers)
                     && let Some(answer) = crate::toast_answers::dbus_reply_answer(&text, &answers)
                 {
                     crate::toast_answers::send(&answers, answer);
@@ -830,6 +842,7 @@ async fn send_notification_dbus(
     body: &str,
     replaces: u32,
     answers: Option<&crate::toast_answers::Answerable>,
+    mute: bool,
 ) -> Result<u32> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
@@ -838,14 +851,12 @@ async fn send_notification_dbus(
     // N3: an answerable one carries its buttons, and KDE's inline reply
     // when it takes one, as far as the server shows them; it stays longer,
     // to be answered.
-    let caps = if answers.is_some() {
+    let caps = if answers.is_some() || mute {
         server_caps(&proxy).await
     } else {
         Default::default()
     };
-    let actions = answers
-        .map(|a| crate::toast_answers::dbus_actions(a, caps))
-        .unwrap_or_default();
+    let actions = crate::toast_answers::dbus_actions(answers, caps, mute);
     let mut hints = std::collections::HashMap::<String, zbus::zvariant::Value>::new();
     if caps.inline_reply && answers.is_some_and(|a| a.reply) {
         hints.insert(
@@ -853,7 +864,12 @@ async fn send_notification_dbus(
             zbus::zvariant::Value::from("Reply"),
         );
     }
-    let timeout: i32 = if actions.is_empty() { 5000 } else { 20_000 };
+    // One to answer stays longer; "Not from this app" alone does not.
+    let timeout: i32 = if answers.is_some() && !actions.is_empty() {
+        20_000
+    } else {
+        5000
+    };
     proxy
         .call::<_, _, u32>(
             "Notify",
@@ -890,19 +906,26 @@ async fn show_desktop_notification(
     #[cfg(target_os = "linux")]
     {
         let replaces = tag.and_then(shown_id).unwrap_or(0);
-        match send_notification_dbus(&summary, text, replaces, answers.as_ref()).await {
+        match send_notification_dbus(&summary, text, replaces, answers.as_ref(), tag.is_some())
+            .await
+        {
             Ok(id) => {
                 if let Some(tag) = tag {
                     remember_shown(tag, id);
                 }
                 // A plain update of an answerable one is answerable no
-                // more (N3 review).
-                match &answers {
-                    Some(answers) => {
-                        remember_answerable(id, answers.clone());
-                        listen_for_answers();
-                    }
-                    None => forget_answerable(id),
+                // more (N3 review); a phone's can still be muted (K2b).
+                if tag.is_some() {
+                    remember_answerable(
+                        id,
+                        Pressable {
+                            answers: answers.clone(),
+                            app: app.to_string(),
+                        },
+                    );
+                    listen_for_answers();
+                } else {
+                    forget_answerable(id);
                 }
                 tracing::info!("Desktop notification shown: {}", title);
                 return Ok(());
@@ -911,8 +934,12 @@ async fn show_desktop_notification(
         }
     }
 
-    let (toast_summary, toast_text, toast_tag) =
-        (summary, text.to_string(), tag.map(str::to_string));
+    let (toast_summary, toast_text, toast_tag, toast_app) = (
+        summary,
+        text.to_string(),
+        tag.map(str::to_string),
+        app.to_string(),
+    );
     let shown = tokio::task::spawn_blocking(move || {
         #[cfg(windows)]
         {
@@ -922,6 +949,7 @@ async fn show_desktop_notification(
                     &toast_text,
                     tag,
                     answers.as_ref(),
+                    Some(&toast_app),
                 ),
                 None => crate::platform::notify(
                     &toast_summary,
@@ -932,8 +960,8 @@ async fn show_desktop_notification(
         }
         #[cfg(not(windows))]
         {
-            // The D-Bus path above answers; notify-send cannot.
-            let _ = (toast_tag, answers);
+            // The D-Bus path above answers and mutes; notify-send cannot.
+            let _ = (toast_tag, answers, toast_app);
             crate::platform::notify(
                 &toast_summary,
                 &toast_text,

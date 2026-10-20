@@ -21,6 +21,12 @@ const ACTION: &str = "action:";
 /// The D-Bus action of KDE's inline reply.
 pub const DBUS_INLINE_REPLY: &str = "inline-reply";
 
+/// The toast argument and D-Bus action of "Not from this app" (K2b).
+pub const MUTE: &str = "mute";
+
+/// Its label.
+const MUTE_LABEL: &str = "Not from this app";
+
 /// What a shown notification can be answered with: whose it is, its
 /// buttons in the order shown, and whether it takes a reply.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,9 +47,10 @@ impl Answerable {
         }
     }
 
-    /// The buttons a toast has room for beside the reply.
-    fn toast_buttons(&self) -> &[String] {
-        let room = MAX_TOAST_ACTIONS - usize::from(self.reply);
+    /// The buttons a toast has room for beside the reply and, with `mute`,
+    /// "Not from this app".
+    fn toast_buttons(&self, mute: bool) -> &[String] {
+        let room = MAX_TOAST_ACTIONS - usize::from(self.reply) - usize::from(mute);
         &self.actions[..self.actions.len().min(room)]
     }
 }
@@ -58,27 +65,38 @@ fn xml_escape(text: &str) -> String {
 }
 
 /// The toast's XML: a title line and a body line, then, for a notification
-/// that can be answered, a reply box with Send and its buttons.
-pub fn toast_xml(summary: &str, body: &str, answers: Option<&Answerable>) -> String {
+/// that can be answered, a reply box with Send and its buttons, and with
+/// `mute`, "Not from this app" last (K2b).
+pub fn toast_xml(summary: &str, body: &str, answers: Option<&Answerable>, mute: bool) -> String {
     let mut xml = format!(
         "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual>",
         xml_escape(summary),
         xml_escape(body)
     );
-    if let Some(answers) = answers.filter(|a| a.reply || !a.actions.is_empty()) {
+    let answers = answers.filter(|a| a.reply || !a.actions.is_empty());
+    if answers.is_some() || mute {
         xml.push_str("<actions>");
+    }
+    if let Some(answers) = answers {
         if answers.reply {
             xml.push_str(&format!(
                 "<input id=\"{REPLY}\" type=\"text\" placeHolderContent=\"Reply\"/>\
                  <action content=\"Send\" arguments=\"{REPLY}\" hint-inputId=\"{REPLY}\"/>"
             ));
         }
-        for (i, title) in answers.toast_buttons().iter().enumerate() {
+        for (i, title) in answers.toast_buttons(mute).iter().enumerate() {
             xml.push_str(&format!(
                 "<action content=\"{}\" arguments=\"{ACTION}{i}\"/>",
                 xml_escape(title)
             ));
         }
+    }
+    if mute {
+        xml.push_str(&format!(
+            "<action content=\"{MUTE_LABEL}\" arguments=\"{MUTE}\"/>"
+        ));
+    }
+    if answers.is_some() || mute {
         xml.push_str("</actions>");
     }
     xml.push_str("</toast>");
@@ -92,6 +110,7 @@ pub fn toast_answer(
     arguments: &str,
     reply_text: Option<&str>,
     answers: &Answerable,
+    mute: bool,
 ) -> Option<Answer> {
     if arguments == REPLY {
         let text = reply_text?.trim();
@@ -99,7 +118,7 @@ pub fn toast_answer(
     }
     let index: usize = arguments.strip_prefix(ACTION)?.parse().ok()?;
     answers
-        .toast_buttons()
+        .toast_buttons(mute)
         .get(index)
         .map(|title| Answer::Action(title.clone()))
 }
@@ -126,19 +145,44 @@ impl DbusCaps {
 /// buttons where the server shows actions, and KDE's inline reply where it
 /// offers one; a server that offers neither gets none, never a button that
 /// does nothing (N3 review).
-pub fn dbus_actions(answers: &Answerable, caps: DbusCaps) -> Vec<String> {
+pub fn dbus_actions(answers: Option<&Answerable>, caps: DbusCaps, mute: bool) -> Vec<String> {
     let mut actions = Vec::new();
-    if caps.actions {
-        for (i, title) in answers.actions.iter().enumerate() {
-            actions.push(format!("a{i}"));
-            actions.push(title.clone());
+    if let Some(answers) = answers {
+        if caps.actions {
+            for (i, title) in answers.actions.iter().enumerate() {
+                actions.push(format!("a{i}"));
+                actions.push(title.clone());
+            }
+        }
+        if answers.reply && caps.inline_reply {
+            actions.push(DBUS_INLINE_REPLY.to_string());
+            actions.push("Reply".to_string());
         }
     }
-    if answers.reply && caps.inline_reply {
-        actions.push(DBUS_INLINE_REPLY.to_string());
-        actions.push("Reply".to_string());
+    // "Not from this app" where the server shows buttons (K2b).
+    if mute && caps.actions {
+        actions.push(MUTE.to_string());
+        actions.push(MUTE_LABEL.to_string());
     }
     actions
+}
+
+/// Mute `app` on this computer from its notification's button (K2b): its
+/// next notifications are kept and logged, not shown.
+pub fn mute(app: &str) {
+    let muted = crate::state::state_dir()
+        .map_err(std::io::Error::other)
+        .and_then(|dir| {
+            pocketdesk_core::local::muted_apps::mute(
+                &dir,
+                app,
+                pocketdesk_core::local::pin::now_unix(),
+            )
+        });
+    match muted {
+        Ok(()) => tracing::info!("Notifications from {app} muted on this computer"),
+        Err(e) => tracing::warn!("Could not mute {app}: {e}"),
+    }
 }
 
 /// What `ActionInvoked` with `key` answers: a button by its `a<n>` key.
@@ -212,9 +256,9 @@ mod tests {
 
     #[test]
     fn a_plain_notification_has_no_actions() {
-        let xml = toast_xml("Chat: Ann", "hi", None);
+        let xml = toast_xml("Chat: Ann", "hi", None, false);
         assert!(!xml.contains("<actions>"));
-        assert!(!toast_xml("t", "b", Some(&answerable(&[], false))).contains("<actions>"));
+        assert!(!toast_xml("t", "b", Some(&answerable(&[], false)), false).contains("<actions>"));
     }
 
     #[test]
@@ -223,6 +267,7 @@ mod tests {
             "Chat: Ann",
             "hi",
             Some(&answerable(&["Mark read", "Mute"], true)),
+            false,
         );
         assert!(xml.contains("<input id=\"reply\" type=\"text\""));
         assert!(xml.contains("arguments=\"reply\" hint-inputId=\"reply\""));
@@ -236,6 +281,7 @@ mod tests {
             "A & B",
             "<x>",
             Some(&answerable(&["Say \"hi\" & 'go'"], false)),
+            false,
         );
         assert!(xml.contains("<text>A &amp; B</text><text>&lt;x&gt;</text>"));
         assert!(xml.contains("content=\"Say &quot;hi&quot; &amp; &apos;go&apos;\""));
@@ -244,15 +290,15 @@ mod tests {
     #[test]
     fn a_toast_shows_at_most_five_actions() {
         let many = answerable(&["1", "2", "3", "4", "5", "6"], true);
-        let xml = toast_xml("t", "b", Some(&many));
+        let xml = toast_xml("t", "b", Some(&many), false);
         assert_eq!(xml.matches("<action ").count(), 5, "Send and four buttons");
         assert_eq!(
-            toast_answer("action:4", None, &many),
+            toast_answer("action:4", None, &many, false),
             None,
             "the fifth was never shown"
         );
         assert_eq!(
-            toast_answer("action:3", None, &many),
+            toast_answer("action:3", None, &many, false),
             Some(Answer::Action("4".into()))
         );
     }
@@ -261,30 +307,60 @@ mod tests {
     fn a_press_answers_with_the_reply_or_its_button() {
         let a = answerable(&["Mark read"], true);
         assert_eq!(
-            toast_answer("reply", Some("  on my way "), &a),
+            toast_answer("reply", Some("  on my way "), &a, false),
             Some(Answer::Reply("on my way".into()))
         );
         assert_eq!(
-            toast_answer("reply", Some("   "), &a),
+            toast_answer("reply", Some("   "), &a, false),
             None,
             "an empty reply"
         );
-        assert_eq!(toast_answer("reply", None, &a), None);
+        assert_eq!(toast_answer("reply", None, &a, false), None);
         assert_eq!(
-            toast_answer("action:0", None, &a),
+            toast_answer("action:0", None, &a, false),
             Some(Answer::Action("Mark read".into()))
         );
-        assert_eq!(toast_answer("action:1", None, &a), None);
-        assert_eq!(toast_answer("action:x", None, &a), None);
+        assert_eq!(toast_answer("action:1", None, &a, false), None);
+        assert_eq!(toast_answer("action:x", None, &a, false), None);
         assert_eq!(
-            toast_answer("", None, &a),
+            toast_answer("", None, &a, false),
             None,
             "a click on the toast itself"
         );
         assert_eq!(
-            toast_answer("reply", Some("hi"), &answerable(&[], false)),
+            toast_answer("reply", Some("hi"), &answerable(&[], false), false),
             None,
             "a notification that takes no reply"
+        );
+    }
+
+    /// K2b: every phone toast ends with "Not from this app", which takes a
+    /// place among the five, and a press on it is no answer.
+    #[test]
+    fn a_toast_offers_not_from_this_app() {
+        let plain = toast_xml("Chat: Ann", "hi", None, true);
+        assert!(plain.contains(
+            "<actions><action content=\"Not from this app\" arguments=\"mute\"/></actions>"
+        ));
+        let many = answerable(&["1", "2", "3", "4", "5", "6"], true);
+        let xml = toast_xml("t", "b", Some(&many), true);
+        assert_eq!(
+            xml.matches("<action ").count(),
+            5,
+            "Send, three buttons, and the mute"
+        );
+        assert!(xml.ends_with("arguments=\"mute\"/></actions></toast>"));
+        assert_eq!(
+            toast_answer("action:3", None, &many, true),
+            None,
+            "not shown beside the mute"
+        );
+        assert_eq!(toast_answer(MUTE, None, &many, true), None);
+        let gnome = DbusCaps::from_list(&["actions".into()]);
+        assert_eq!(dbus_actions(None, gnome, true), [MUTE, "Not from this app"]);
+        assert!(
+            dbus_actions(None, DbusCaps::default(), true).is_empty(),
+            "no buttons shown"
         );
     }
 
@@ -293,14 +369,17 @@ mod tests {
         let a = answerable(&["Mark read", "Mute"], true);
         let kde = DbusCaps::from_list(&["actions".into(), "inline-reply".into(), "body".into()]);
         assert_eq!(
-            dbus_actions(&a, kde),
+            dbus_actions(Some(&a), kde, false),
             ["a0", "Mark read", "a1", "Mute", "inline-reply", "Reply"]
         );
         // GNOME shows buttons but has no inline reply: no dead Reply button.
         let gnome = DbusCaps::from_list(&["actions".into(), "body".into()]);
-        assert_eq!(dbus_actions(&a, gnome), ["a0", "Mark read", "a1", "Mute"]);
+        assert_eq!(
+            dbus_actions(Some(&a), gnome, false),
+            ["a0", "Mark read", "a1", "Mute"]
+        );
         assert!(
-            dbus_actions(&a, DbusCaps::default()).is_empty(),
+            dbus_actions(Some(&a), DbusCaps::default(), false).is_empty(),
             "no actions at all"
         );
         assert_eq!(
