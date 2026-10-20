@@ -2265,6 +2265,15 @@ Built 2026-10-20; tested through units, a loopback cast and the WAV seam, nothin
 - [ ] "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture.
 - [ ] Linux: the sound through `pw-cat`.
 
+## 156. Cleared on the computer, cleared on the phone (L1)
+
+Built 2026-10-20; tested through units, the harness and the server's mapping, nothing on a device yet.
+- [ ] The throwaway chat app posts a notification; Clear on the Notifications page: `adb shell dumpsys notification --noredact` no longer lists it.
+- [ ] The toast's ✕ on its banner, and inside the Action Center: cleared on the phone (by hand).
+- [ ] An ongoing or unclearable notification, and a ringing call: not cleared.
+- [ ] Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
+- [ ] Linux (GNOME): closing a notification clears it; pressing its button does not.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
