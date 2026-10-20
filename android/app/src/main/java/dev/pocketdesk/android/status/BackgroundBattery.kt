@@ -18,6 +18,9 @@ import dev.pocketdesk.android.notify.PhoneLink
 class BackgroundBattery(private val ctx: Context) {
     private var last: BatteryRule.Report? = null
     private var lastMs = 0L
+    // L7: which features are on, read at most every SWITCHES_EVERY_MS here.
+    private val switches = SwitchSender()
+    private var switchesReadMs = Long.MIN_VALUE / 2
 
     fun tick() {
         if (!Prefs.shareBattery(ctx)) return
@@ -25,10 +28,13 @@ class BackgroundBattery(private val ctx: Context) {
         if (RustCore.controlPeer() != (own.address to own.controlPort)) {
             // A new link is told again at once: the computer may have restarted.
             last = null
+            switches.forget()
+            switchesReadMs = Long.MIN_VALUE / 2
             return
         }
         // A session's own BatteryEffect reports it.
         if (RustCore.isStreamingActive) return
+        tellSwitches(own.address, own.controlPort)
         // Only what decides a send is read each tick (L9 review); storage
         // and bars for a report that goes.
         val light = readBattery(ctx, full = false) ?: return
@@ -43,5 +49,19 @@ class BackgroundBattery(private val ctx: Context) {
         } else {
             Log.d("BackgroundBattery", "Battery not sent: ${sent.exceptionOrNull()?.message}")
         }
+    }
+
+    private fun tellSwitches(address: String, controlPort: Int) {
+        val nowMs = SystemClock.elapsedRealtime()
+        if (nowMs - switchesReadMs < SWITCHES_EVERY_MS) return
+        switchesReadMs = nowMs
+        switches.tick(readSwitches(ctx), nowMs) { body ->
+            RustCore.sendPhonePacketOnLink(address, controlPort, SwitchReport.SWITCHES, body)
+        }
+    }
+
+    private companion object {
+        /** A switch changed in the background reaches the computer within this. */
+        const val SWITCHES_EVERY_MS = 30_000L
     }
 }
