@@ -832,6 +832,7 @@ impl PocketdeskApp {
                     Some(crate::activity_view::Action::OpenSettings) => {
                         self.switch_to(Tab::Settings)
                     }
+                    Some(crate::activity_view::Action::Mute(app)) => self.mute_app(&app),
                     None => {}
                 }
             }
@@ -1782,6 +1783,11 @@ impl PocketdeskApp {
                         self.computers
                             .show(ui, &self.state_dir, self.snapshot.running, now_unix());
                     }
+                    crate::settings_view::Section::Notifications
+                        if extra(crate::settings_view::EXTRA_MUTED) =>
+                    {
+                        self.muted_apps_setting(ui);
+                    }
                     crate::settings_view::Section::KdeConnect
                         if extra(crate::settings_view::EXTRA_KDE) =>
                     {
@@ -2015,6 +2021,53 @@ impl PocketdeskApp {
         } else if cancel {
             let what = dropped_words(&std::mem::take(&mut self.dropped));
             self.notice = crate::notice::Notice::done(format!("Not sent: {what}."));
+        }
+    }
+
+    /// Mute `app`'s phone notifications here (K2b), and say so.
+    fn mute_app(&mut self, app: &str) {
+        self.notice = crate::notice::Notice::outcome(
+            pocketdesk_core::local::muted_apps::mute(&self.state_dir, app, now_unix())
+                .map(|()| {
+                    format!(
+                        "{app}'s notifications from phones are not shown here now. Unmute in Settings."
+                    )
+                })
+                .map_err(|e| format!("Could not mute {app}: {e}")),
+        );
+        self.activity.refresh(&self.state_dir);
+    }
+
+    /// Settings' "Muted apps" (K2b): each with Unmute.
+    fn muted_apps_setting(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(RichText::new(crate::settings_view::EXTRA_MUTED).strong());
+        let muted = pocketdesk_core::local::muted_apps::read(&self.state_dir);
+        if muted.is_empty() {
+            ui.label(
+                RichText::new(
+                    "None. \"Not from this app\" on a phone's notification, or its row on Activity, stops its app's notifications showing here.",
+                )
+                .small()
+                .weak(),
+            );
+            return;
+        }
+        let mut unmute = None;
+        for app in &muted {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(&app.app);
+                if ui.small_button("Unmute").clicked() {
+                    unmute = Some(app.app.clone());
+                }
+            });
+        }
+        if let Some(app) = unmute {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::muted_apps::unmute(&self.state_dir, &app)
+                    .map(|()| format!("{app}'s notifications show here again."))
+                    .map_err(|e| format!("Could not unmute {app}: {e}")),
+            );
         }
     }
 

@@ -231,6 +231,8 @@ pub const EXTRA_SEND_MENU: &str = "Send to phone in the file manager";
 pub const EXTRA_COMPUTERS: &str = "Your other computers";
 /// KDE Connect's devices, beside its rows.
 pub const EXTRA_KDE: &str = "KDE Connect devices";
+/// The phone apps muted here, beside Notifications' rows (K2b).
+pub const EXTRA_MUTED: &str = "Muted apps";
 
 /// What a section draws beside its rows, by name.
 fn extras(section: Section) -> &'static [&'static str] {
@@ -238,6 +240,7 @@ fn extras(section: Section) -> &'static [&'static str] {
         Section::Phones => &[EXTRA_BROWSER, EXTRA_SEND_MENU],
         Section::Computers => &[EXTRA_COMPUTERS],
         Section::KdeConnect => &[EXTRA_KDE],
+        Section::Notifications => &[EXTRA_MUTED],
         _ => &[],
     }
 }
