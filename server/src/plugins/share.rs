@@ -1740,10 +1740,18 @@ pub(crate) fn received_date(body: &serde_json::Value) -> Option<std::time::Syste
 /// Date the file at `path` `at` (K1). A file that will not take it is kept
 /// as it is, and the failure logged.
 fn set_date(path: &Path, at: std::time::SystemTime) {
-    let set = std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .and_then(|file| file.set_modified(at));
+    // Only the right to change its times (K1 review): a file that has gone
+    // read-only, or that another program holds, still takes its date.
+    let mut options = std::fs::OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        options.access_mode(FILE_WRITE_ATTRIBUTES);
+    }
+    #[cfg(not(windows))]
+    options.read(true);
+    let set = options.open(path).and_then(|file| file.set_modified(at));
     if let Err(e) = set {
         tracing::warn!("Could not date {}: {e}", path.display());
     }
@@ -1836,6 +1844,26 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K1 review: a read-only file takes its date too.
+    #[test]
+    fn a_read_only_file_takes_its_date() {
+        let dir = std::env::temp_dir().join(format!("pd-k1-readonly-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"hello").unwrap();
+        let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&file, permissions.clone()).unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        set_date(&file, june);
+        assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), june);
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&file, permissions).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// K1: a placed file takes the date it is given, and keeps its own
     /// without one.
