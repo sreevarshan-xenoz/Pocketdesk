@@ -350,13 +350,12 @@ pub fn quiet_text(
 }
 
 /// What a phone last said of itself beside its battery (L9), for the
-/// Overview: "Wi-Fi, 3 of 4 bars · 12.0 GB free of 125.0 GB · on silent".
+/// Overview: "Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent".
 /// `None` when it said nothing of it (a KDE device, an older phone).
 pub fn phone_state_text(
     state: &pocketdesk_core::local::phone_status::PhoneState,
 ) -> Option<String> {
     use pocketdesk_core::local::phone_status::{Network, Ringer};
-    const MB: u64 = 1024 * 1024;
     let mut parts = Vec::new();
     let bars = state.signal.map(|bars| format!(", {bars} of 4 bars"));
     match state.network {
@@ -369,13 +368,10 @@ pub fn phone_state_text(
     match (state.storage_free_mb, state.storage_total_mb) {
         (Some(free), Some(total)) => parts.push(format!(
             "{} free of {}",
-            crate::words::human_size(free.saturating_mul(MB)),
-            crate::words::human_size(total.saturating_mul(MB))
+            storage_words(free),
+            storage_words(total)
         )),
-        (Some(free), None) => parts.push(format!(
-            "{} free",
-            crate::words::human_size(free.saturating_mul(MB))
-        )),
+        (Some(free), None) => parts.push(format!("{} free", storage_words(free))),
         _ => {}
     }
     match state.ringer {
@@ -394,6 +390,24 @@ pub fn phone_state_text(
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => line,
     })
+}
+
+/// A phone's storage in decimal units, as its own Settings says it (L9
+/// review): "128 GB", "12.3 GB", "800 MB". Free space comes rounded down
+/// to 100 MB, so 0 is "under 100 MB".
+fn storage_words(mb: u64) -> String {
+    if mb == 0 {
+        return "under 100 MB".to_string();
+    }
+    if mb < 1000 {
+        return format!("{mb} MB");
+    }
+    let gb = mb as f64 / 1000.0;
+    if gb >= 100.0 {
+        format!("{gb:.0} GB")
+    } else {
+        format!("{gb:.1} GB")
+    }
 }
 
 /// How long the Overview says a phone said no to a mute.
@@ -886,15 +900,15 @@ mod tests {
         use pocketdesk_core::local::phone_status::{Network, PhoneState, Ringer};
         assert_eq!(super::phone_state_text(&PhoneState::default()), None);
         let full = PhoneState {
-            storage_free_mb: Some(12 * 1024),
-            storage_total_mb: Some(125 * 1024),
+            storage_free_mb: Some(12_300),
+            storage_total_mb: Some(128_000),
             network: Some(Network::Wifi),
             signal: Some(3),
             ringer: Some(Ringer::Silent),
         };
         assert_eq!(
             super::phone_state_text(&full).as_deref(),
-            Some("Wi-Fi, 3 of 4 bars · 12.0 GB free of 125.0 GB · on silent")
+            Some("Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent")
         );
         let mobile = PhoneState {
             network: Some(Network::Mobile),
@@ -913,8 +927,26 @@ mod tests {
         };
         assert_eq!(
             super::phone_state_text(&bare).as_deref(),
-            Some("No network · 500.0 MB free · ringer on")
+            Some("No network · 500 MB free · ringer on")
         );
+        // Nearly full reads as such, not "0 B" (L9 review).
+        let full_up = PhoneState {
+            storage_free_mb: Some(0),
+            storage_total_mb: Some(64_000),
+            network: Some(Network::Mobile),
+            signal: Some(2),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::phone_state_text(&full_up).as_deref(),
+            Some("Mobile data, 2 of 4 bars · under 100 MB free of 64.0 GB")
+        );
+        let wired = PhoneState {
+            network: Some(Network::Ethernet),
+            storage_total_mb: Some(256_000),
+            ..Default::default()
+        };
+        assert_eq!(super::phone_state_text(&wired).as_deref(), Some("Ethernet"));
     }
 
     use super::*;

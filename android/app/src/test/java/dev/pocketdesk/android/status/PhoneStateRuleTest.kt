@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhoneStateRuleTest {
-    private val mb = 1024L * 1024L
+    private val mb = 1_000_000L
 
     @Test
     fun storageIsInWholeMbTheFreeRoundedDown() {

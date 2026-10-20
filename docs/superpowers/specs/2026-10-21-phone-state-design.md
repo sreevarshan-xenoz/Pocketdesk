@@ -18,7 +18,7 @@ KDE Connect shows its connectivity report and Phone Link shows the signal. Pocke
 
 | Field | What |
 |---|---|
-| `storageFreeMb`, `storageTotalMb` | The app's data volume (`StatFs` on the data directory), in whole MB, the free space rounded down to 100 MB |
+| `storageFreeMb`, `storageTotalMb` | The internal storage as the phone's Settings says it (`StorageStatsManager` for the default volume, `StatFs` if it will not answer), in whole decimal MB, the free space rounded down to 100 MB |
 | `network` | `wifi`, `mobile`, `ethernet` or `none`: the default network's transport, never its name, SSID or carrier |
 | `signal` | 0 to 4 bars, Wi-Fi from its RSSI or mobile from the modem's level; left out when not known |
 | `ringer` | `normal`, `vibrate` or `silent` |
@@ -32,7 +32,7 @@ The phone's switch "Share battery with the computer" becomes "Share the phone's 
 **The computer** keeps the new fields beside the battery in `phone_status.json`:
 - `PhoneBattery` gains `storage_free_mb`, `storage_total_mb`, `network`, `signal` and `ringer`. Each is optional and left out when absent, so an older file or a KDE device's report reads as before.
 - `pocketdesk devices --json` shows them in `battery`, as it shows the rest of it.
-- The Overview's phone block shows one more line, "Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent", made of what the phone said (`model::phone_state_text`, tested).
+- The Overview's phone block shows one more line, "Wi-Fi, 3 of 4 bars · 12.3 GB free of 128 GB · on silent", made of what the phone said, in decimal units as the phone's Settings (`model::phone_state_text`, tested). A phone with less than 100 MB free reads "under 100 MB free".
 
 ## Not now
 

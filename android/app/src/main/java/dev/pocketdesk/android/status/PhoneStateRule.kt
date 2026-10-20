@@ -18,7 +18,8 @@ object PhoneStateRule {
     /** Free storage is said to this step, so it does not change with every file. */
     const val STORAGE_STEP_MB = 100L
 
-    private const val MB = 1024L * 1024L
+    /** Decimal, as the phone's own Settings counts storage. */
+    private const val MB = 1_000_000L
 
     /** Each part null when it could not be read. */
     data class State(
@@ -30,7 +31,7 @@ object PhoneStateRule {
         val ringer: String? = null,
     )
 
-    /** Free and total storage in whole MB, the free rounded down to [STORAGE_STEP_MB]; null for a reading that makes no sense. */
+    /** Free and total storage in whole (decimal) MB, the free rounded down to [STORAGE_STEP_MB]; null for a reading that makes no sense. */
     fun storage(freeBytes: Long, totalBytes: Long): Pair<Long, Long>? {
         if (totalBytes <= 0 || freeBytes < 0 || freeBytes > totalBytes) return null
         val free = freeBytes / MB / STORAGE_STEP_MB * STORAGE_STEP_MB
