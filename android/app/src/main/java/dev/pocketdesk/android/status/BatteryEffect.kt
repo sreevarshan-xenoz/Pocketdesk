@@ -75,5 +75,5 @@ internal fun readBattery(context: Context): BatteryRule.Report? {
         scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1),
         plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
         low = low,
-    )
+    )?.copy(state = readPhoneState(context))
 }

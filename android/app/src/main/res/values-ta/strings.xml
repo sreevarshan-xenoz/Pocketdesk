@@ -512,8 +512,8 @@
     <string name="dial_from_computer_text">%1$s இலிருந்து: டயலரைத் திறக்கத் தட்டவும்</string>
     <string name="settings_links_from_computer">கணினியிலிருந்து இணைப்புகள்</string>
     <string name="settings_links_from_computer_summary">கணினி அனுப்பும் இணைப்பு, அதைத் திறக்கும் அறிவிப்பாகக் காட்டப்படும். அணைத்தால்: அத்தகைய இணைப்புகள் கைவிடப்படும்</string>
-    <string name="settings_share_battery">மின்கலத்தைக் கணினியுடன் பகிர்</string>
-    <string name="settings_share_battery_summary">கணினி இந்தத் தொலைபேசியின் மின்கல நிலையைக் காட்டும்; குறைந்தால் எச்சரிக்கலாம்: அமர்வின்போதும், வேறொரு பின்னணி அம்சம் தொலைபேசியை இணைப்பில் வைத்திருக்கும்போது பின்னணியிலும்</string>
+    <string name="settings_share_battery">தொலைபேசியின் நிலையைக் கணினியுடன் பகிர்</string>
+    <string name="settings_share_battery_summary">கணினி இந்தத் தொலைபேசியின் மின்கலம், காலி சேமிப்பிடம், வலையமைப்பு (Wi-Fi அல்லது கைபேசித் தரவு, அதன் கம்பிகள்; அதன் பெயர் ஒருபோதும் இல்லை), அழைப்பொலி நிலை ஆகியவற்றைக் காட்டும்; மின்கலம் குறைந்தால் எச்சரிக்கலாம்: அமர்வின்போதும், வேறொரு பின்னணி அம்சம் தொலைபேசியை இணைப்பில் வைத்திருக்கும்போது பின்னணியிலும்</string>
     <string name="media_now_playing">கணினியில் இப்போது இயங்குவது</string>
     <string name="media_nothing">எதுவும் இயங்கவில்லை</string>
     <string name="media_previous">முந்தையது</string>
