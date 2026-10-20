@@ -2210,6 +2210,14 @@ Built and checked 2026-10-20 on the OPPO against a throwaway server built from t
 - [ ] "Keep files' dates" off on each side: dated as it arrives.
 - [ ] Android 10, and a KDE Connect device's share.
 
+## 150. Not from this app (K2b)
+
+Built 2026-10-20; tested through units and the harness, nothing by hand yet.
+- [ ] A phone notification's toast on Windows: "Not from this app" last among its buttons; pressed, a notification says the app is muted, and the app's next notification shows no toast but is on Activity, "muted here".
+- [ ] An answerable notification from a muted app: still on the Notifications page.
+- [ ] Settings → Notifications and texts → Muted apps: Unmute, and the app's toasts again.
+- [ ] Linux: GNOME and KDE show the action; a server without actions shows none.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-705 open items.
+709 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 410 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 412 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
-| A phone with a SIM | 22 |
+| A phone with a SIM | 23 |
 | A second phone | 9 |
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
-| A Linux desktop (the Azure VM serves for some) | 89 |
+| A Linux desktop (the Azure VM serves for some) | 90 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 63 |
 
@@ -849,6 +849,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so.
 - "Keep files' dates" off on each side: dated as it arrives.
 
+**150. Not from this app (K2b)**
+
+- A phone notification's toast on Windows: "Not from this app" last among its buttons; pressed, a notification says the app is muted, and the app's next notification shows no toast but is on Activity, "muted here".
+- An answerable notification from a muted app: still on the Notifications page.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1118,6 +1123,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **132. The computer's state on the home screen (G1)**
 
 - "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
+
+**150. Not from this app (K2b)**
+
+- Settings → Notifications and texts → Muted apps: Unmute, and the app's toasts again.
 
 ## A second phone
 
@@ -1510,6 +1519,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **143. The Logs page (J1)**
 
 - Copy pastes the lines shown; Open log folder opens the folder at the file (Windows, then Linux).
+
+**150. Not from this app (K2b)**
+
+- Linux: GNOME and KDE show the action; a server without actions shows none.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
