@@ -59,6 +59,8 @@ impl DiagnosticsView {
                 let dir = state_dir.to_path_buf();
                 let config = config.cloned();
                 self.running = Some(std::thread::spawn(move || run(&dir, config)));
+                // Its spinner now, not at the app's next refresh (I3 review).
+                ui.ctx().request_repaint();
             }
             if self.failed {
                 ui.label(
