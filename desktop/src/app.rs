@@ -2006,9 +2006,8 @@ impl PocketdeskApp {
         ui.add_space(12.0);
         if let Some(id) = chosen {
             self.send_to = Some(id);
-            for path in std::mem::take(&mut self.dropped) {
-                self.send_file(&path);
-            }
+            let dropped = std::mem::take(&mut self.dropped);
+            self.send_files(dropped);
         } else if cancel {
             let what = dropped_words(&std::mem::take(&mut self.dropped));
             self.notice = crate::notice::Notice::done(format!("Not sent: {what}."));
@@ -2046,6 +2045,51 @@ impl PocketdeskApp {
                 Err(e) => Err(e),
             },
         );
+        self.refreshed = None;
+    }
+
+    /// Queue several paths for the chosen phone with one notice for them
+    /// all (J5 review: each file's notice replaced the last, an early
+    /// failure hidden behind a later success).
+    fn send_files(&mut self, paths: Vec<PathBuf>) {
+        if paths.len() < 2 {
+            for path in &paths {
+                self.send_file(path);
+            }
+            return;
+        }
+        let device = match model::target_for_send(&self.snapshot, self.send_to.as_deref()) {
+            Ok(device) => device,
+            Err(e) => {
+                self.send_to = None;
+                self.notice = crate::notice::Notice::error(e);
+                return;
+            }
+        };
+        let what = dropped_words(&paths);
+        let to = model::target_label(&self.snapshot, &device);
+        let mut failed = Vec::new();
+        for path in &paths {
+            if let Err(e) = model::queue_send(&self.state_dir, &device, path, now_unix()) {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                failed.push(format!("{name} ({e})"));
+            }
+        }
+        self.notice = if failed.is_empty() {
+            crate::notice::Notice::done(format!(
+                "Queued {what} for {to}: the Sent list says when they have gone."
+            ))
+        } else {
+            crate::notice::Notice::error(format!(
+                "Queued {} of {} for {to}. Not queued: {}.",
+                paths.len() - failed.len(),
+                paths.len(),
+                failed.join(", ")
+            ))
+        };
         self.refreshed = None;
     }
 
@@ -2374,9 +2418,7 @@ impl PocketdeskApp {
                     if let model::DropTo::Send(id) = to {
                         self.send_to = Some(id);
                     }
-                    for path in dropped {
-                        self.send_file(&path);
-                    }
+                    self.send_files(dropped);
                 }
             }
         }
