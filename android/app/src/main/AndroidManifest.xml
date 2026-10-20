@@ -216,6 +216,23 @@
             </intent-filter>
         </service>
 
+        <!-- G7: wake the last computer from Quick Settings. -->
+        <service
+            android:name=".shortcuts.WakeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_pocketdesk"
+            android:label="@string/wake_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- G7: the tile's wake, under a broadcast so closing the shade does not cut it off. -->
+        <receiver
+            android:name=".shortcuts.WakeTileReceiver"
+            android:exported="false" />
+
         <!-- F11: one tap to the last computer from Quick Settings. -->
         <service
             android:name=".shortcuts.ConnectTileService"

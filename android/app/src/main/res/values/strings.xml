@@ -852,4 +852,12 @@
     <string name="media_widget_unreadable">The computer\'s answer did not read</string>
     <string name="media_tile_label">Computer\'s music</string>
     <string name="media_tile_hint">Tap to play or pause</string>
+    <string name="wake_tile_label">Wake computer</string>
+    <string name="wake_tile_not_yet">Connect once while it is awake</string>
+    <string name="wake_tile_off">Wake is off for it</string>
+    <string name="wake_tile_failed">The wake did not go</string>
+    <string name="wake_tile_sending">Sending the wake…</string>
+    <string name="wake_tile_waiting">Sent, waiting for it to answer…</string>
+    <string name="wake_tile_awake">It is awake</string>
+    <string name="wake_tile_no_answer">Sent, but it has not answered</string>
 </resources>
