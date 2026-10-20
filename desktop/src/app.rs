@@ -2332,15 +2332,26 @@ impl eframe::App for PocketdeskApp {
                                         job.append(
                                             tab.name(),
                                             0.0,
+                                            // The label's own colour, selected
+                                            // or hovered (I3 review).
                                             egui::TextFormat::simple(
                                                 font.clone(),
-                                                ui.visuals().text_color(),
+                                                egui::Color32::PLACEHOLDER,
                                             ),
                                         );
                                         job.append(
                                             &badge,
                                             8.0,
-                                            egui::TextFormat::simple(font, crate::theme::good(ui)),
+                                            // A count as the name; Settings'
+                                            // unsaved dot as a warning, not "good".
+                                            egui::TextFormat::simple(
+                                                font,
+                                                if *tab == Tab::Settings {
+                                                    crate::theme::warn(ui)
+                                                } else {
+                                                    egui::Color32::PLACEHOLDER
+                                                },
+                                            ),
                                         );
                                         egui::WidgetText::from(job)
                                     }
