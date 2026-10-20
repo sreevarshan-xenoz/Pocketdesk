@@ -25,6 +25,40 @@ pub struct NotesView {
     notice: Option<crate::notice::Notice>,
     /// The page an empty state's button asked for (E5).
     go_to: Option<crate::app::Tab>,
+    /// Each app's icon as kept for its phone (K3), by phone and app; `None`
+    /// where none is kept yet, looked for again at the next read.
+    icons: HashMap<(String, String), Option<egui::TextureHandle>>,
+}
+
+/// An app's kept icon as a texture, if there is one that reads as a PNG
+/// within an icon's size (K3: held to it before decoding).
+fn icon_texture(
+    ctx: &egui::Context,
+    state_dir: &Path,
+    phone: &str,
+    app: &str,
+) -> Option<egui::TextureHandle> {
+    use pocketdesk_core::local::notification_icons as icons;
+    let path = icons::kept_icon(state_dir, phone, app)?;
+    let bytes = std::fs::read(path).ok()?;
+    if !icons::icon_fits(&bytes) {
+        return None;
+    }
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(icons::MAX_ICON_SIDE);
+    limits.max_image_height = Some(icons::MAX_ICON_SIDE);
+    limits.max_alloc = Some(8 << 20);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(
+        format!("icon-{phone}-{}", app.to_lowercase()),
+        color,
+        egui::TextureOptions::LINEAR,
+    ))
 }
 
 /// The notifications to list, newest first.
@@ -56,6 +90,8 @@ impl NotesView {
             .map(|n| (n.device_id.clone(), n.key.clone()))
             .collect();
         self.drafts.retain(|k, _| live.contains(k));
+        // An icon not kept before may be now.
+        self.icons.retain(|_, icon| icon.is_some());
         self.read_at = Some(Instant::now());
     }
 
@@ -107,8 +143,30 @@ impl NotesView {
         let notes = self.notes.clone();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for note in &notes {
+                let icon = self
+                    .icons
+                    .entry((note.device_id.clone(), note.app.to_lowercase()))
+                    .or_insert_with(|| {
+                        icon_texture(ui.ctx(), state_dir, &note.device_id, &note.app)
+                    })
+                    .clone();
                 ui.group(|ui| {
-                    ui.strong(format!("{}: {}", note.app, note.title));
+                    ui.horizontal(|ui| {
+                        // K3: the app's icon, as the phone sent it.
+                        if let Some(icon) = &icon {
+                            ui.add(
+                                egui::Image::new(icon)
+                                    .fit_to_exact_size(egui::vec2(20.0, 20.0))
+                                    .alt_text(note.app.clone()),
+                            );
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("{}: {}", note.app, note.title)).strong(),
+                            )
+                            .wrap(),
+                        );
+                    });
                     if note.messages.is_empty() {
                         if !note.text.is_empty() {
                             ui.label(&note.text);
