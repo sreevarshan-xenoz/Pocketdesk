@@ -2191,6 +2191,15 @@ Built 2026-10-20; tested through the harness and units, nothing by hand yet.
 - [ ] A second drop while it asks joins the files; a folder reads as a folder.
 - [ ] Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left.
 
+## 148. A sound session notices a computer gone quiet (J6)
+
+Built and checked 2026-10-20 on the OPPO against the throwaway server.
+- [x] A sound session held a minute over the LAN.
+- [x] The server stopped: "the computer stopped answering" in 14 s, then reconnecting.
+- [x] Back by itself 13 s after the server returned, with the phone's screen off.
+- [ ] Nothing playing, the screen off, an hour: never ends on its own.
+- [ ] Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
