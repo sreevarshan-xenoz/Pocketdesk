@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-681 open items.
+680 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 393 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 392 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 51 |
 | A phone with a SIM | 22 |
@@ -742,7 +742,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **128. Take a photo with the phone (F3)**
 
-- "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
 - "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - Spanish and Tamil.
 

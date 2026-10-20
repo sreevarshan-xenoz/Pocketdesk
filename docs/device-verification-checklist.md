@@ -1978,6 +1978,7 @@ Built 2026-10-20 on the owner's night of features; nothing here ran on a device 
 
 Built 2026-10-20 on the owner's night of features; the computer's half read this box live in a test (memory and uptime), nothing on a device yet.
 - [ ] "How it is doing" on the A71 against this box: the CPU moving under load, memory, each fixed drive (no removable or network drive), the battery when there is one, uptime.
+  - Checked 2026-10-20 by script on the A71 against the throwaway server (built from main): memory 25.9 of 29.9 GB, the four fixed disks (C:, D:, E:, G:), the battery 55 % charging and uptime 21 h 42 min, each matching Windows' own; the CPU shown (56 %), its movement under load not watched.
 - [ ] The same against Linux: `df`'s disks once each (btrfs subvolumes, bind mounts), the battery.
 - [ ] "This computer's state" off in desktop Settings: the sheet says so, without a restart.
 - [ ] The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0.
@@ -1985,8 +1986,10 @@ Built 2026-10-20 on the owner's night of features; the computer's half read this
 ## 128. Take a photo with the phone (F3)
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
-- [ ] "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
+- [x] "Take a photo with the phone" on the Phone page: the A71's notification "<computer> asks for a photo" with the app in the background.
+  - Checked 2026-10-20 by script (the request written as the Phone page writes it): "Test Desk asks for a photo" within 2 s of the ask; a first ask sent before the phone linked was dropped by the computer ("the phone is not connected"), as designed.
 - [ ] Its tap: the camera permission prompt the first time, then the camera; the photo in the received files and on the computer's clipboard.
+  - 2026-10-20: the tap opened the camera (Aperture), the camera key took the photo, Confirm sent it; the computer refused both the file and the image with "will not connect back to 127.0.0.1", because `adb reverse` put the phone on loopback. The arrival is owed on the LAN road.
 - [ ] "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - [ ] The camera left with Back: nothing sent; the activity killed while the camera runs (Don't keep activities): the photo still sent.
 - [ ] Spanish and Tamil.
@@ -2012,6 +2015,7 @@ Built 2026-10-20 on the owner's night of features; needs a phone with a SIM.
 
 Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 - [ ] "Show camera" on the A71: the camera permission asked once, then the back camera in the computer's cast window, landscape, live; the notification's Stop ends it and the camera's indicator goes.
+  - Checked 2026-10-20 by script (the permission granted with `pm grant`): camera 0 opened and streamed (CameraService), the computer took a cast session (mode 2, "the phone's screen is shown here"), "Showing the camera on Test Desk" in the shade; its Stop disconnected the camera, the computer shut the pipeline down and the notification went. The cast window itself not looked at (the throwaway server's relay has no viewer).
 - [ ] "Show its screen or camera here" off for the phone: refused, with its reason.
 - [ ] Stop pressed while the camera is still opening: the camera's indicator goes.
 - [ ] Another app taking the camera: "The camera stopped", the cast ended.
@@ -2069,6 +2073,7 @@ Built 2026-10-20 on the owner's night of features; nothing on a device yet.
 Built 2026-10-20 on the owner's night of features; nothing on a device yet. Waking is a magic packet, never a power action on this box; a computer really asleep is owed elsewhere.
 - [ ] Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake".
 - [ ] A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
+  - 2026-10-20 by script: a tap sent the wake ("Sent the wake to 2 of 2 targets", twice). Its words are not seen: Android 16 draws the tile compact, with no subtitle; at its large size by hand.
 - [ ] On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
 - [ ] A computer asleep (not this box): woken, "It is awake" within a minute.
 
