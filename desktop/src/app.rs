@@ -95,7 +95,7 @@ const PERMISSIONS: [(Capability, &str, &str); 19] = [
     (
         Capability::Command,
         "Send commands to its automation apps",
-        "pocketdesk phone-command hands a name and a text to Tasker, Automate or MacroDroid on the phone, with \u{201c}Commands from the computer\u{201d} on there.",
+        "A script here can hand a name and a text to Tasker, Automate or MacroDroid on the phone, with \u{201c}Commands from the computer\u{201d} on there.",
     ),
     (
         Capability::PhoneSound,

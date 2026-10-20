@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
 import android.util.Log
-import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.NotificationActionRule
@@ -17,9 +16,9 @@ import dev.pocketdesk.android.notify.NotificationActionRule
 object Commands {
     private val budget = NotificationActionRule.Budget(CommandRule.PER_MINUTE)
 
-    /** A session takes them while it runs, so the listener does not race it. */
-    @Volatile
-    var inSession = false
+    /** Sessions running, which take the commands (L6 review: a flag was
+     * cleared by the old of two sessions overlapping). */
+    val sessions = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** The known automation apps installed. */
     fun installed(context: Context): Set<String> =
@@ -27,14 +26,17 @@ object Commands {
             runCatching { context.packageManager.getPackageInfo(pkg, 0) }.isSuccess
         }.toSet()
 
-    /** Take the commands waiting; [own] is the computer the phone works with. */
-    fun take(context: Context, own: HostStore.Host?) {
+    /**
+     * Take the commands waiting; [isOwn] says whether a command's computer
+     * (its address and port) is the phone's own.
+     */
+    fun take(context: Context, isOwn: (String, Int) -> Boolean) {
         val commands = RustCore.takeCommands()
         if (commands.isEmpty()) return
         val on = Prefs.commandsFromComputer(context)
         val to = CommandRule.onlyTo(Prefs.commandsOnlyTo(context), installed(context))
         for (command in commands) {
-            val ownComputer = own != null && own.address == command.host && own.controlPort == command.port
+            val ownComputer = isOwn(command.host, command.port)
             var decision = CommandRule.decide(on, ownComputer, withinBudget = true)
             if (decision == CommandRule.Decision.Send && !budget.take(SystemClock.elapsedRealtime())) {
                 decision = CommandRule.Decision.TooMany
@@ -43,14 +45,19 @@ object Commands {
                 Log.i("Commands", "a command from the computer was not sent on: $decision")
                 continue
             }
+            // Never to any app (L6 review): a script's text may be a secret.
+            if (to == null) {
+                Log.i("Commands", "a command from the computer was not sent on: no automation app")
+                continue
+            }
             val intent =
                 Intent(CommandRule.ACTION)
                     .putExtra("name", command.name)
                     .putExtra("text", command.text)
                     .putExtra("computer", command.host)
-            to?.let { intent.setPackage(it) }
+            intent.setPackage(to)
             runCatching { context.applicationContext.sendBroadcast(intent) }
-                .onSuccess { Log.d("Commands", "a command went to ${to ?: "any app"}") }
+                .onSuccess { Log.d("Commands", "a command went to $to") }
                 .onFailure { Log.w("Commands", "a command was not sent on: ${it.message}") }
         }
     }

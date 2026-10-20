@@ -18,7 +18,7 @@
   - from its own computer only, at most 30 a minute;
   - in a session, and outside one while a link to the computer is up for another feature.
 - **"Only to":** an automation app found on the phone (Tasker, Automate, MacroDroid), the first found by default. With one set, the broadcast goes to that package only, so no other app reads it. Android 8+ manifest receivers need an explicit package anyway.
-  - With none set, any app may receive it: Settings says so, as SECURITY.md does.
+  - With no automation app found, the command goes nowhere (a script's text may be a secret), and Settings says so.
 
 ## Left out
 

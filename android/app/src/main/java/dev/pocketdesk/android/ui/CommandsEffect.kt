@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
-import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.automation.Commands
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -16,13 +15,13 @@ import kotlinx.coroutines.withContext
 fun CommandsEffect(address: String) {
     val context = LocalContext.current
     DisposableEffect(address) {
-        Commands.inSession = true
-        onDispose { Commands.inSession = false }
+        Commands.sessions.incrementAndGet()
+        onDispose { Commands.sessions.decrementAndGet() }
     }
     LaunchedEffect(address) {
         while (isActive) {
-            val own = HostStore.hosts(context).firstOrNull { it.address == address }
-            withContext(Dispatchers.IO) { Commands.take(context, own) }
+            // The session's own computer, saved or not (L6 review).
+            withContext(Dispatchers.IO) { Commands.take(context) { host, _ -> host == address } }
             delay(1_000)
         }
     }

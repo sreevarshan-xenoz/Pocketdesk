@@ -555,8 +555,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             dev.pocketdesk.android.calls.Dials.take(this, own, inFront = false)
         }
         // L6: commands for the phone's automation apps, outside a session.
-        if (!dev.pocketdesk.android.automation.Commands.inSession) {
-            dev.pocketdesk.android.automation.Commands.take(this, own)
+        if (dev.pocketdesk.android.automation.Commands.sessions.get() == 0) {
+            dev.pocketdesk.android.automation.Commands.take(this) { host, port ->
+                own != null && own.address == host && own.controlPort == port
+            }
         }
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
