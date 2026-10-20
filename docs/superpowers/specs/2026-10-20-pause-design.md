@@ -14,7 +14,7 @@
   - from the Overview ("Pause…" with the three, or "Resume" while paused);
   - from the CLI (`pocketdesk pause --for <minutes> | --until-resumed | --resume`, with `--json`).
 - **While paused, the computer holds:**
-  - phones' and KDE devices' notifications, calls among them: logged and kept to answer, not shown, never counted against a phone's limit, as a muted app's are (K2b);
+  - phones' and KDE devices' notifications, calls among them: logged and kept to answer, not shown, as a muted app's are (K2b), but still counted against a phone's limit, so a week's pause does not unbound a phone;
   - texts: kept on the Messages page, not shown;
   - links from phones: listed on Activity, not opened;
   - a phone's ring for the computer (the siren): not sounded.
