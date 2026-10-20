@@ -108,6 +108,8 @@ struct Key {
     status: hotkey::Status,
     /// When a taken key was last tried again.
     tried: Option<Instant>,
+    /// The config file's time when last read: it is read again only when it changes.
+    stamp: Option<std::time::SystemTime>,
     #[cfg(windows)]
     registered: bool,
 }
@@ -123,11 +125,23 @@ impl Key {
     }
 
     fn follow(&mut self, state_dir: &Path) {
-        let text = pocketdesk_core::local::config::Config::load()
-            .map(|c| c.clipboard_hotkey.trim().to_string())
-            .unwrap_or_default();
         // A key another app held is tried again now and then (H3 review).
         let retry = self.status.taken && self.tried.is_none_or(|at| at.elapsed() >= RETRY_TAKEN);
+        let stamp = pocketdesk_core::local::config::Config::path()
+            .ok()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok());
+        if self.text.is_some() && stamp == self.stamp && !retry {
+            return;
+        }
+        // A config that does not read (a typo, a save under way) keeps the
+        // key as it is (H3 review); it is read again when it changes.
+        let text = match pocketdesk_core::local::config::Config::load() {
+            Ok(config) => config.clipboard_hotkey.trim().to_string(),
+            Err(_) if self.text.is_some() => return,
+            Err(_) => String::new(),
+        };
+        self.stamp = stamp;
         if self.text.as_deref() == Some(text.as_str()) && !retry {
             return;
         }
