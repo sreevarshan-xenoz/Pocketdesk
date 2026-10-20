@@ -169,6 +169,22 @@ pub struct PairView {
     /// How long the code pairs a phone: None for good, else a guest's
     /// seconds (I3), as `pocketdesk pair --grant` does.
     grant_secs: Option<u64>,
+    /// The owner chose another time since the code on screen was made.
+    grant_chosen: bool,
+}
+
+/// The time the next code pairs for: the owner's choice just made, else a
+/// live code on file's own (one `pocketdesk pair --grant` wrote while the
+/// page was open is kept, not replaced; I3 review), else the view's.
+pub fn grant_for(
+    chosen_now: bool,
+    view: Option<u64>,
+    on_file: Option<&pin::FilePin>,
+) -> Option<u64> {
+    match on_file {
+        Some(file) if !chosen_now => file.grant_secs,
+        _ => view,
+    }
 }
 
 /// The choices for how long a code pairs a phone (I3).
@@ -388,6 +404,7 @@ impl PairView {
         if let Some(chosen) = grant_changed {
             self.withdraw(state_dir);
             self.grant_secs = chosen;
+            self.grant_chosen = true;
         }
     }
 
@@ -401,6 +418,12 @@ impl PairView {
         addresses: Vec<String>,
     ) {
         let config = config.cloned().unwrap_or_default();
+        self.grant_secs = grant_for(
+            self.grant_chosen,
+            self.grant_secs,
+            pin::read(state_dir, now_unix).as_ref(),
+        );
+        self.grant_chosen = false;
         match link_for(state_dir, &config, now_unix, addresses, self.grant_secs) {
             Ok(link) => match qr_modules(&link.to_uri()) {
                 Ok(modules) => {
@@ -522,6 +545,31 @@ mod tests {
         assert_eq!(pin::read(&dir, 1_010).unwrap().grant_secs, Some(900));
         let again = link_for(&dir, &config, 1_020, address(), Some(900)).unwrap();
         assert_eq!(again.pin, guest.pin, "the same choice keeps the code");
+    }
+
+    /// I3 review: a code the CLI made while the page was open keeps its time.
+    #[test]
+    fn a_code_on_file_keeps_its_time_unless_another_was_just_chosen() {
+        let on_file = pin::FilePin {
+            pin: "123456".to_string(),
+            minted_unix: 0,
+            grant_secs: Some(3600),
+        };
+        assert_eq!(
+            grant_for(false, None, Some(&on_file)),
+            Some(3600),
+            "the CLI's hour is kept"
+        );
+        assert_eq!(
+            grant_for(true, None, Some(&on_file)),
+            None,
+            "the owner's choice wins"
+        );
+        assert_eq!(
+            grant_for(false, Some(900), None),
+            Some(900),
+            "no code on file: the view's"
+        );
     }
 
     #[test]
