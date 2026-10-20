@@ -211,6 +211,11 @@ class CastService : Service() {
         }
         if (Build.VERSION.SDK_INT >= CastSoundRule.MIN_SDK) {
             sound = CastSound(taken).takeIf { it.start() }
+            // A cast that ended meanwhile stops it (K5 review).
+            if (finished) {
+                sound?.stop()
+                sound = null
+            }
         }
     }
 
@@ -376,8 +381,9 @@ class CastService : Service() {
         if (finished) return
         finished = true
         castingTo = null
-        // Its sound first: it captures under the projection given back below.
-        sound?.stop()
+        // Its sound first, off the main thread (its stop waits for its
+        // worker): it captures under the projection given back below.
+        val capture = sound
         sound = null
         main.post {
             val shown = display
@@ -391,6 +397,7 @@ class CastService : Service() {
             shown?.release()
             lens?.close()
             Thread {
+                capture?.stop()
                 coding?.release()
                 runCatching { taken?.stop() }
                 runCatching { RustCore.stopCast() }

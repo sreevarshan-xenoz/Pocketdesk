@@ -90,6 +90,13 @@ class CastSound(private val projection: MediaProjection) {
                 var offset = 0
                 while (offset < FRAME_BYTES && running) {
                     val n = record.read(pcm, offset, FRAME_BYTES - offset)
+                    // An error (the audio server restarted, the projection
+                    // ended) ends the capture: it never comes back (K5 review:
+                    // it spun a core).
+                    if (n < 0) {
+                        Log.w(TAG, "capture ended: $n")
+                        running = false
+                    }
                     if (n <= 0) break
                     offset += n
                 }
