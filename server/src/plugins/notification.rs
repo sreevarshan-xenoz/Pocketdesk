@@ -503,14 +503,23 @@ fn pictures_for(
         return Default::default();
     };
     let icon = named.then(|| icons::kept_icon(&dir, phone, app)).flatten();
-    let picture = (!id.is_empty())
-        .then(|| decoded(body, "picture"))
-        .flatten()
-        .and_then(|bytes| {
-            icons::keep_picture(&dir, phone, id, &bytes)
-                .inspect_err(|e| tracing::info!("A phone notification's picture was not kept: {e}"))
-                .ok()
-        });
+    if id.is_empty() {
+        return crate::toast_answers::Pictures {
+            icon,
+            picture: None,
+        };
+    }
+    // An update without a picture (redacted now, or the phone's switch
+    // off) leaves none behind (K3 review).
+    let picture = match decoded(body, "picture") {
+        Some(bytes) => icons::keep_picture(&dir, phone, id, &bytes)
+            .inspect_err(|e| tracing::info!("A phone notification's picture was not kept: {e}"))
+            .ok(),
+        None => None,
+    };
+    if picture.is_none() {
+        icons::forget_picture(&dir, phone, id);
+    }
     crate::toast_answers::Pictures { icon, picture }
 }
 
@@ -598,11 +607,17 @@ impl Plugin for NotificationPlugin {
                     if let Some(tag) = &tag {
                         close_desktop_notification(tag).await;
                     }
-                    // And it can no longer be answered (T10c).
+                    // And it can no longer be answered (T10c), nor is its
+                    // picture kept (K3 review).
                     if !id.is_empty()
                         && let Ok(dir) = crate::state::state_dir()
                     {
                         let _ = phone_notes::forget(&dir, sender.device_id(), id);
+                        pocketdesk_core::local::notification_icons::forget_picture(
+                            &dir,
+                            sender.device_id(),
+                            id,
+                        );
                     }
                     return Ok(());
                 }
@@ -680,6 +695,16 @@ impl Plugin for NotificationPlugin {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
                 if held {
+                    // Not shown, so no picture is kept for it (K3 review).
+                    if !id.is_empty()
+                        && let Ok(dir) = crate::state::state_dir()
+                    {
+                        pocketdesk_core::local::notification_icons::forget_picture(
+                            &dir,
+                            sender.device_id(),
+                            id,
+                        );
+                    }
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
