@@ -607,6 +607,56 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     }
 }
 
+/// Where files dropped on the window go (J5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropTo {
+    /// The one phone or computer that can take them.
+    Send(String),
+    /// Several can: ask which, among these.
+    Ask(Vec<String>),
+    /// None can now.
+    Nobody,
+}
+
+/// Where a drop goes: straight to the only target, a question with
+/// several, and nowhere with none (J5: a drop had gone to the Files page's
+/// last choice without a word).
+pub fn drop_to(snapshot: &Snapshot) -> DropTo {
+    let mut targets = send_target_ids(snapshot);
+    match targets.len() {
+        0 => DropTo::Nobody,
+        1 => DropTo::Send(targets.remove(0)),
+        _ => DropTo::Ask(targets),
+    }
+}
+
+/// "1 file", "3 files", "1 folder", "2 files and 1 folder".
+pub fn files_and_folders(files: usize, folders: usize) -> String {
+    let count = |n: usize, one: &str, many: &str| match n {
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    };
+    match (files, folders) {
+        (files, 0) => count(files, "file", "files"),
+        (0, folders) => count(folders, "folder", "folders"),
+        (files, folders) => format!(
+            "{} and {}",
+            count(files, "file", "files"),
+            count(folders, "folder", "folders")
+        ),
+    }
+}
+
+/// Files dropped while a question waits join it, each path once (J5
+/// review: the same file dropped twice went twice).
+pub fn join_drops(waiting: &mut Vec<std::path::PathBuf>, dropped: Vec<std::path::PathBuf>) {
+    for path in dropped {
+        if !waiting.contains(&path) {
+            waiting.push(path);
+        }
+    }
+}
+
 /// Queue the link `url` for the phone `device_id` (T8a), which shows it as
 /// a notification that opens it; what to tell the owner.
 pub fn queue_link(
@@ -1491,6 +1541,62 @@ mod tests {
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
+    }
+
+    /// J5 review: a dropped folder is called a folder.
+    #[test]
+    fn dropped_files_and_folders_in_words() {
+        assert_eq!(files_and_folders(1, 0), "1 file");
+        assert_eq!(files_and_folders(3, 0), "3 files");
+        assert_eq!(files_and_folders(0, 1), "1 folder");
+        assert_eq!(files_and_folders(2, 1), "2 files and 1 folder");
+    }
+
+    /// J5 review: a second drop joins the files waiting, each path once.
+    #[test]
+    fn dropped_files_join_the_waiting_ones_once() {
+        use std::path::PathBuf;
+        let mut waiting = vec![PathBuf::from("a.txt")];
+        join_drops(
+            &mut waiting,
+            vec![PathBuf::from("b.txt"), PathBuf::from("a.txt")],
+        );
+        assert_eq!(waiting, [PathBuf::from("a.txt"), PathBuf::from("b.txt")]);
+    }
+
+    /// J5: a drop goes straight to the only target, asks with several.
+    #[test]
+    fn a_drop_asks_only_with_several_targets() {
+        assert_eq!(drop_to(&Snapshot::default()), DropTo::Nobody);
+        let phone = Device {
+            id: "phone-a".to_string(),
+            takes_files: true,
+            ..Default::default()
+        };
+        let away = Device {
+            id: "phone-b".to_string(),
+            takes_files: false,
+            ..Default::default()
+        };
+        let one = Snapshot {
+            devices: vec![phone.clone(), away],
+            ..Snapshot::default()
+        };
+        assert_eq!(drop_to(&one), DropTo::Send("phone-a".to_string()));
+        let computer = Snapshot {
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(drop_to(&computer), DropTo::Send("desk-b".to_string()));
+        let both = Snapshot {
+            devices: vec![phone],
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(
+            drop_to(&both),
+            DropTo::Ask(vec!["phone-a".to_string(), "desk-b".to_string()])
+        );
     }
 
     /// U3: a phone shows by its name, the owner's over its own, and by

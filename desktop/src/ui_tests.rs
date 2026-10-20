@@ -647,6 +647,40 @@ fn the_clipboard_page_searches_its_texts() {
     );
 }
 
+/// A file dropped on the window, as the windowing layer hands it over.
+#[derive(Debug)]
+struct TestDrop(PathBuf);
+
+impl egui::DroppedFile for TestDrop {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+/// J5: a file dropped with no phone or computer to take it opens Files and
+/// says so, sending nothing.
+#[test]
+fn a_drop_with_nothing_to_take_it_says_so() {
+    let fixture = Fixture::new();
+    let file = fixture.state().join("dropped.txt");
+    std::fs::write(&file, "hello").expect("a file");
+    let mut app = fixture.open(None);
+    app.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(TestDrop(file)));
+    app.run_steps(3);
+    assert!(app.query_by_label("Send a file").is_some(), "Files opened");
+    assert!(
+        app.query_by_label_contains("No phone or computer is connected")
+            .is_some()
+    );
+    assert!(app.query_by_label_contains("Send 1 file to").is_none());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

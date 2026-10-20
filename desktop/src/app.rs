@@ -182,6 +182,9 @@ pub struct PocketdeskApp {
     raised_approvals: Vec<String>,
     /// The phone the Files tab sends to (F7b).
     send_to: Option<String>,
+    /// Files dropped while several phones or computers could take them,
+    /// waiting for the owner to say which (J5).
+    dropped: Vec<PathBuf>,
     /// The Files tab's path field.
     send_path: String,
     /// The link the send box hands to the phone (T8a).
@@ -258,6 +261,7 @@ impl PocketdeskApp {
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
+            dropped: Vec::new(),
             send_path: String::new(),
             send_link: String::new(),
             last_sessions: Default::default(),
@@ -407,6 +411,14 @@ impl PocketdeskApp {
         // The Overview's link box is for the moment it was opened in.
         if tab != self.tab {
             self.overview_link = None;
+        }
+        // Dropped files waiting for "which?" go when the page does, and say
+        // so, rather than waiting unseen for a click hours later (J5 review).
+        if self.tab == Tab::Files && tab != Tab::Files && !self.dropped.is_empty() {
+            let what = dropped_words(&std::mem::take(&mut self.dropped));
+            self.notice = crate::notice::Notice::done(format!(
+                "Not sent: {what}, since you left the question."
+            ));
         }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
@@ -1951,12 +1963,59 @@ impl PocketdeskApp {
 
     fn files_tab(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
+            self.drop_question(ui);
             self.send_box(ui);
             ui.add_space(12.0);
             self.under_way_list(ui);
             self.sent_list(ui);
             self.received_list(ui);
         });
+    }
+
+    /// Files dropped with several phones or computers to take them: which
+    /// (J5).
+    fn drop_question(&mut self, ui: &mut egui::Ui) {
+        if self.dropped.is_empty() {
+            return;
+        }
+        let targets = match model::drop_to(&self.snapshot) {
+            model::DropTo::Ask(targets) => targets,
+            model::DropTo::Send(id) => vec![id],
+            model::DropTo::Nobody => {
+                let what = dropped_words(&std::mem::take(&mut self.dropped));
+                self.notice = crate::notice::Notice::error(format!(
+                    "Not sent: no phone or computer can take {what} now."
+                ));
+                // Said with no click to bring a frame (J5 review).
+                ui.ctx().request_repaint();
+                return;
+            }
+        };
+        let mut chosen = None;
+        let mut cancel = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong(format!("Send {} to:", dropped_words(&self.dropped)));
+            ui.horizontal_wrapped(|ui| {
+                for id in &targets {
+                    if ui.button(model::target_label(&self.snapshot, id)).clicked() {
+                        chosen = Some(id.clone());
+                    }
+                }
+                // Esc in a text box only leaves the box (J5 review).
+                let typing = ui.memory(|m| m.focused().is_some());
+                cancel = ui.button("Cancel").clicked() || (!typing && crate::keys::escaped(ui));
+            });
+        });
+        ui.add_space(12.0);
+        if let Some(id) = chosen {
+            self.send_to = Some(id);
+            let dropped = std::mem::take(&mut self.dropped);
+            self.send_files(dropped);
+        } else if cancel {
+            let what = dropped_words(&std::mem::take(&mut self.dropped));
+            self.notice = crate::notice::Notice::done(format!("Not sent: {what}."));
+        }
     }
 
     /// The phone the send box shows (F7b): the one chosen while it is in a
@@ -1990,6 +2049,51 @@ impl PocketdeskApp {
                 Err(e) => Err(e),
             },
         );
+        self.refreshed = None;
+    }
+
+    /// Queue several paths for the chosen phone with one notice for them
+    /// all (J5 review: each file's notice replaced the last, an early
+    /// failure hidden behind a later success).
+    fn send_files(&mut self, paths: Vec<PathBuf>) {
+        if paths.len() < 2 {
+            for path in &paths {
+                self.send_file(path);
+            }
+            return;
+        }
+        let device = match model::target_for_send(&self.snapshot, self.send_to.as_deref()) {
+            Ok(device) => device,
+            Err(e) => {
+                self.send_to = None;
+                self.notice = crate::notice::Notice::error(e);
+                return;
+            }
+        };
+        let what = dropped_words(&paths);
+        let to = model::target_label(&self.snapshot, &device);
+        let mut failed = Vec::new();
+        for path in &paths {
+            if let Err(e) = model::queue_send(&self.state_dir, &device, path, now_unix()) {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.display().to_string());
+                failed.push(format!("{name} ({e})"));
+            }
+        }
+        self.notice = if failed.is_empty() {
+            crate::notice::Notice::done(format!(
+                "Queued {what} for {to}: the Sent list says when they have gone."
+            ))
+        } else {
+            crate::notice::Notice::error(format!(
+                "Queued {} of {} for {to}. Not queued: {}.",
+                paths.len() - failed.len(),
+                paths.len(),
+                failed.join(", ")
+            ))
+        };
         self.refreshed = None;
     }
 
@@ -2305,8 +2409,21 @@ impl PocketdeskApp {
         });
         if !dropped.is_empty() {
             self.switch_to(Tab::Files);
-            for path in dropped {
-                self.send_file(&path);
+            // Judged on what can take files now, not up to a second ago: a
+            // phone that just linked must be asked about (J5 review).
+            self.refresh();
+            match model::drop_to(&self.snapshot) {
+                // Several could take them, or a question is open already:
+                // they wait with it, never going around it (J5 review).
+                _ if !self.dropped.is_empty() => model::join_drops(&mut self.dropped, dropped),
+                model::DropTo::Ask(_) => model::join_drops(&mut self.dropped, dropped),
+                // The only one, or none (send_file says so).
+                to => {
+                    if let model::DropTo::Send(id) = to {
+                        self.send_to = Some(id);
+                    }
+                    self.send_files(dropped);
+                }
             }
         }
         if self.picking.as_ref().is_some_and(|h| h.is_finished()) {
@@ -2657,6 +2774,13 @@ fn chip(ui: &mut egui::Ui, text: &str, fill: egui::Color32) -> egui::Response {
             ui.label(RichText::new(text).color(crate::theme::on_chip(ui, fill)));
         })
         .response
+}
+
+/// Dropped paths in words, a folder as a folder (J5 review: "1 file" for
+/// a dropped folder).
+fn dropped_words(paths: &[PathBuf]) -> String {
+    let folders = paths.iter().filter(|p| p.is_dir()).count();
+    model::files_and_folders(paths.len() - folders, folders)
 }
 
 /// Whether closing the window hides it to the tray: only with a tray, and
