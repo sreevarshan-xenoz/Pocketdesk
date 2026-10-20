@@ -93,6 +93,7 @@ fun RemoteInputScreen(
     var attempt by remember { mutableIntStateOf(0) }
     val gyro = remember { hasGyroscope(context) }
     var air by remember { mutableStateOf(Prefs.airMouse(context)) }
+    val talk = rememberTalkTimerState()
     // G4: the laser dot, offered once the computer admitted the remote and said it draws one.
     var laser by remember { mutableStateOf(Prefs.airLaser(context)) }
     val laserOffered = remember(state) { state == State.Ready && RustCore.laserSupported() }
@@ -284,9 +285,13 @@ fun RemoteInputScreen(
                         if (keyboardOpen) keyboard.open() else keyboard.close()
                     }) { Text(stringResource(R.string.remote_keyboard)) }
                 }
-                // H2: a talk timer, for a presenter.
-                if (state == State.Ready) TalkTimerButton()
                 TextButton(onClick = onExit) { Text(stringResource(R.string.remote_exit)) }
+            }
+            // H2: a talk timer, for a presenter, on its own row so the header
+            // keeps its room at large text, and in every state, so a reconnect
+            // never loses it (H2 review).
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
+                TalkTimerButton(talk)
             }
             when (state) {
                 State.Ready -> {
