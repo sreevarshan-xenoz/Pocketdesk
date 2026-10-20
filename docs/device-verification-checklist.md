@@ -2200,6 +2200,16 @@ Built and checked 2026-10-20 on the OPPO against the throwaway server.
 - [ ] Nothing playing, the screen off, an hour: never ends on its own.
 - [ ] Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects.
 
+## 149. Files keep their dates (K1)
+
+Built and checked 2026-10-20 on the OPPO against a throwaway server built from the branch.
+- [x] A file dated June here, sent to the phone: dated June there, by `stat` and in MediaStore.
+- [x] The same file shared from the phone: dated June here.
+- [ ] A file downloaded from the remote file browser, and a folder each way.
+- [ ] A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so.
+- [ ] "Keep files' dates" off on each side: dated as it arrives.
+- [ ] Android 10, and a KDE Connect device's share.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

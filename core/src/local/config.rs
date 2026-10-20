@@ -51,6 +51,10 @@ pub struct Config {
     /// nothing a session there does not (sizes and timing, never content).
     #[serde(default = "default_true")]
     pub internet_files: bool,
+    /// Received files keep the date they were last changed where they came
+    /// from, and sent files carry theirs (K1). On by default.
+    #[serde(default = "default_true")]
+    pub keep_file_dates: bool,
     /// Capture backend selection (R4 B3). `"auto"` (default) detects the
     /// display server and falls back (screencopy → portal on Wayland, X11 on
     /// bare X11). `"screencopy"`, `"portal"` or `"x11"` pins the pipeline —
@@ -301,6 +305,7 @@ impl Default for Config {
             slow_link_frame_rate: true,
             laser_pointer: true,
             internet_files: true,
+            keep_file_dates: true,
             capture_backend: CaptureBackend::Auto,
             mic_relay_device: None,
             lan_discovery: true,
@@ -518,6 +523,7 @@ impl Config {
         "slow_link_frame_rate",
         "laser_pointer",
         "internet_files",
+        "keep_file_dates",
         "capture_backend",
         "mic_relay_device",
         "lan_discovery",
@@ -896,6 +902,7 @@ phone_battery = \"x\"
     #[test]
     fn files_cross_the_internet_road_by_default_and_the_choice_saves() {
         assert!(Config::default().internet_files);
+        assert!(Config::default().keep_file_dates, "K1: on by default");
         let path = temp("internet-files");
         let mut config = Config::load_from(&path).unwrap();
         assert!(config.internet_files, "a file without the key");

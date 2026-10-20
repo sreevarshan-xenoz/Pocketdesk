@@ -89,6 +89,11 @@ video_quality = "balanced"
 # timing, never content. Each phone's Files permission still applies.
 # internet_files = true
 
+# Received files keep the date they were last changed where they came from,
+# and files sent from here carry theirs (`lastModified` on the share and the
+# offer). Read at each transfer.
+# keep_file_dates = true
+
 # A link a phone hands over ("Open on computer"): opened in the default
 # browser, or, false, shown as a notification. Each phone's Links
 # permission (desktop app, Devices) still applies.

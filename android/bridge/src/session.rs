@@ -347,6 +347,13 @@ pub(crate) fn queue_file_offer(body: &serde_json::Value) {
             }
         }
     }
+    // The file's date where it came from (K1), held to now.
+    if let Some(ms) =
+        pocketdesk_core::protocol::file_time::from_body(body, std::time::SystemTime::now())
+            .and_then(pocketdesk_core::protocol::file_time::to_millis)
+    {
+        entry[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
+    }
     // When it came: an offer lasts 10 minutes on the computer, and one
     // older is not started (T10d).
     entry["queuedUnix"] = serde_json::json!(unix_now());

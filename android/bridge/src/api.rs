@@ -1797,6 +1797,8 @@ pub struct FolderPart {
 pub struct ShareTags {
     pub folder: Option<FolderPart>,
     pub drive: Option<String>,
+    /// The file's modified time, ms since 1970 (K1); none to send none.
+    pub modified: Option<u64>,
 }
 
 /// A file's source id (T6a): 32 hex digits naming the file at its source,
@@ -1894,6 +1896,9 @@ async fn send_stream<R: tokio::io::AsyncRead + Unpin>(
     }
     if let Some(drive) = &tags.drive {
         body["drive"] = serde_json::json!(drive);
+    }
+    if let Some(ms) = tags.modified {
+        body[pocketdesk_core::protocol::file_time::FIELD] = serde_json::json!(ms);
     }
     let request = NetworkPacket::new("kdeconnect.share.request")
         .with_body(body)

@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-701 open items.
+705 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 407 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 410 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 22 |
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 9 |
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 89 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 24 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 63 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -843,6 +843,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Nothing playing, the screen off, an hour: never ends on its own.
 - Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects.
 
+**149. Files keep their dates (K1)**
+
+- A file downloaded from the remote file browser, and a folder each way.
+- A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so.
+- "Keep files' dates" off on each side: dated as it arrives.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1590,6 +1596,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **141. The home-screen widgets, a design pass (I2)**
 
 - Android 11 or older: the pine theme in both modes, no previews, the state widget's layout by its height.
+
+**149. Files keep their dates (K1)**
+
+- Android 10, and a KDE Connect device's share.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

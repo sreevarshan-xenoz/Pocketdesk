@@ -202,6 +202,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setRetryTransfers(context, it) },
             )
             SettingSwitch(
+                stringResource(R.string.settings_keep_file_dates),
+                stringResource(R.string.settings_keep_file_dates_summary),
+                Prefs.keepFileDates(context),
+                { Prefs.setKeepFileDates(context, it) },
+            )
+            SettingSwitch(
                 stringResource(R.string.settings_internet_files),
                 stringResource(R.string.settings_internet_files_summary),
                 Prefs.internetFiles(context),

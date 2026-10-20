@@ -645,12 +645,15 @@ async fn deliver(
         &request.device_id,
         Instant::now(),
     );
-    let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
-        "id": request.id,
-        "name": name,
-        "size": size,
-        "source": source_of(&path, size),
-    }));
+    let packet = NetworkPacket::new(OFFER).with_body(with_date(
+        serde_json::json!({
+            "id": request.id,
+            "name": name,
+            "size": size,
+            "source": source_of(&path, size),
+        }),
+        &path,
+    ));
     if target.send_packet(&packet).await.is_err() {
         offers()
             .lock()
@@ -673,6 +676,29 @@ const MAX_FOLDER_FILES: usize = 10_000;
 const MAX_FOLDER_ENTRIES: usize = 100_000;
 /// The most bytes one folder send offers.
 const MAX_FOLDER_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+
+/// The date the file at `path` was last changed, as it goes with the file
+/// (K1); none with Settings "Keep files' dates" off or no date to read.
+fn sent_date(path: &Path, keep: bool) -> Option<u64> {
+    if !keep {
+        return None;
+    }
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    pocketdesk_core::protocol::file_time::to_millis(modified)
+}
+
+/// `body` with the file at `path`'s date in it, when it goes with it (K1).
+pub(crate) fn with_date(body: serde_json::Value, path: &Path) -> serde_json::Value {
+    with_date_when(body, path, crate::events::current_config().keep_file_dates)
+}
+
+/// [`with_date`] with the setting given.
+fn with_date_when(mut body: serde_json::Value, path: &Path, keep: bool) -> serde_json::Value {
+    if let Some(ms) = sent_date(path, keep) {
+        body[pocketdesk_core::protocol::file_time::FIELD] = ms.into();
+    }
+    body
+}
 
 /// One file of a folder to offer.
 #[derive(Debug, Clone)]
@@ -1017,15 +1043,18 @@ async fn offer_folder(
         Instant::now(),
     );
     for (file, id) in found.files.iter().zip(&ids) {
-        let packet = NetworkPacket::new(OFFER).with_body(serde_json::json!({
-            "id": id,
-            "name": file.path.last(),
-            "size": file.size,
-            "source": source_of(&file.full, file.size),
-            "folderId": folder_id,
-            "folder": folder,
-            "path": file.path,
-        }));
+        let packet = NetworkPacket::new(OFFER).with_body(with_date(
+            serde_json::json!({
+                "id": id,
+                "name": file.path.last(),
+                "size": file.size,
+                "source": source_of(&file.full, file.size),
+                "folderId": folder_id,
+                "folder": folder,
+                "path": file.path,
+            }),
+            &file.full,
+        ));
         if target.send_packet(&packet).await.is_err() {
             // The phone left: every file not yet offered ends here.
             for id in &ids {
@@ -1641,6 +1670,37 @@ mod tests {
         outbox::request(dir, "phone-a", path.to_str().unwrap(), now_unix()).unwrap()
     }
 
+    /// K1 review: a single file's offer carries its date, and none with
+    /// "Keep files' dates" off.
+    #[test]
+    fn an_offer_carries_its_files_date_only_with_the_setting_on() {
+        let dir = temp_dir("dated-offer");
+        let file = dir.join("photo.jpg");
+        std::fs::write(&file, b"p").unwrap();
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .and_then(|f| f.set_modified(june))
+            .unwrap();
+        let body = serde_json::json!({ "id": "x", "name": "photo.jpg" });
+        assert_eq!(
+            with_date_when(body.clone(), &file, true)["lastModified"],
+            1_780_000_000_000u64
+        );
+        assert!(
+            with_date_when(body.clone(), &file, false)
+                .get("lastModified")
+                .is_none()
+        );
+        assert!(
+            with_date_when(body, &dir.join("gone"), true)
+                .get("lastModified")
+                .is_none(),
+            "no file, no date"
+        );
+    }
+
     #[tokio::test]
     async fn a_folder_is_offered_file_by_file_with_each_files_place() {
         let dir = temp_dir("deliver-folder");
@@ -1648,6 +1708,13 @@ mod tests {
         std::fs::create_dir_all(root.join("day 2")).unwrap();
         std::fs::write(root.join("map.png"), b"m").unwrap();
         std::fs::write(root.join("day 2").join("a.jpg"), b"aa").unwrap();
+        // K1: a file goes with its own date.
+        let june = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join("day 2").join("a.jpg"))
+            .and_then(|f| f.set_modified(june))
+            .unwrap();
         let store = trusting(&dir, "phone-a", true);
         let tcp = Conn::new("phone-a", true);
         let clients: [Arc<dyn DeviceSender>; 1] = [tcp.clone()];
@@ -1667,6 +1734,11 @@ mod tests {
             serde_json::json!(["day 2", "a.jpg"])
         );
         assert_eq!(pushed[0].body["name"], "a.jpg");
+        // Unless this computer's config turns "Keep files' dates" off,
+        // which a test does not choose.
+        if crate::events::current_config().keep_file_dates {
+            assert_eq!(pushed[0].body["lastModified"], 1_780_000_000_000u64);
+        }
         assert_eq!(pushed[1].body["path"], serde_json::json!(["map.png"]));
         assert_ne!(
             pushed[0].body["id"], pushed[1].body["id"],

@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.service.FileDates
 import dev.pocketdesk.android.service.SourceId
 import dev.pocketdesk.android.service.TransferService
 import kotlinx.coroutines.Dispatchers
@@ -259,7 +260,11 @@ private fun Message(text: String, error: Boolean) {
 
 private fun download(context: Context, address: String, controlPort: Int, entry: RemoteEntry) {
     val source = SourceId.of(entry.path, entry.size, entry.modified)
-    TransferService.receive(context, address, controlPort, false, entry.path, entry.name, entry.size, source)
+    // Its date from the listing goes with it, as an offer's does (K1 review).
+    TransferService.receive(
+        context, address, controlPort, false, entry.path, entry.name, entry.size, source,
+        lastModified = FileDates.fromListing(entry.modified),
+    )
     Toast.makeText(context, context.getString(R.string.files_download_started, entry.name), Toast.LENGTH_SHORT).show()
 }
 
@@ -304,6 +309,7 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                         offer.optLong("size"),
                         offer.optString("source"),
                         folderPartOf(offer),
+                        offer.optLong("lastModified"),
                     )
                 }
             }

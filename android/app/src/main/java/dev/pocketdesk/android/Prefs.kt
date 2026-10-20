@@ -23,6 +23,7 @@ object Prefs {
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_AUTO_RECONNECT = "auto_reconnect"
     private const val KEY_RETRY_TRANSFERS = "retry_transfers"
+    private const val KEY_KEEP_FILE_DATES = "keep_file_dates"
     private const val KEY_DOWNLOAD_TREE = "download_tree"
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
@@ -315,6 +316,15 @@ object Prefs {
 
     fun setRetryTransfers(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_RETRY_TRANSFERS, enabled) }
+        bump()
+    }
+
+    /** Files keep the date they were last changed, both ways (K1). On by default. */
+    fun keepFileDates(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_KEEP_FILE_DATES, true)
+
+    fun setKeepFileDates(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_KEEP_FILE_DATES, enabled) }
         bump()
     }
 

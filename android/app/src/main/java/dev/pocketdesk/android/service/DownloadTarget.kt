@@ -66,6 +66,29 @@ object DownloadTarget {
             }
         }
 
+        /**
+         * Date the published file [ms] (K1); whether it took. A file in
+         * Downloads/Pocketdesk is the app's own, so its time can be set
+         * through its path; a picked folder's document has no way to.
+         */
+        fun date(ms: Long): Boolean = runCatching {
+            legacyFile?.let { return@runCatching it.setLastModified(ms) }
+            val uri = mediaUri ?: return@runCatching false
+            @Suppress("DEPRECATION") // read only, for the app's own file
+            val path = context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)
+                ?.use { if (it.moveToFirst()) it.getString(0) else null }
+            if (path != null && File(path).setLastModified(ms)) {
+                // MediaStore's own date follows the file's at its next look.
+                android.media.MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+                return@runCatching true
+            }
+            // No path the app may touch (Android 10 without legacy storage):
+            // MediaStore's own date at least, which Files apps sort by
+            // (K1 review).
+            val row = ContentValues().apply { put(MediaStore.MediaColumns.DATE_MODIFIED, ms / 1000) }
+            context.contentResolver.update(uri, row, null, null) > 0
+        }.getOrDefault(false)
+
         fun discard() {
             runCatching { descriptor.close() }
             mediaUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }

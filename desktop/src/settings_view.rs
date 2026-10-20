@@ -100,6 +100,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Files over the internet",
         Section::Connection,
     ),
+    ("keep_file_dates", "Keep files' dates", Section::Connection),
     (
         "transfer_keep_hours",
         "Unfinished files",
@@ -341,6 +342,7 @@ pub fn applies_live(key: &str) -> bool {
             | "mqtt_user"
             | "mqtt_password"
             | "internet_files"
+            | "keep_file_dates"
             | "toast_answers"
             | "cast_control"
             | "downloads_folder"
@@ -641,6 +643,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "On the phone's own link, so nothing dials it back. Relays see sizes and timing, never content.",
+                    );
+                });
+                row(ui, "keep_file_dates", |ui| {
+                    ui.checkbox(
+                        &mut e.keep_file_dates,
+                        "files keep the date they were last changed",
+                    );
+                    note(
+                        ui,
+                        "A photo from June stays dated June here, and a file sent to a phone keeps its date there.",
                     );
                 });
                 row(ui, "transfer_keep_hours", |ui| {

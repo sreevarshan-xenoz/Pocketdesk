@@ -99,6 +99,8 @@ pub struct Offer {
     pub name: String,
     pub size: u64,
     pub port: u16,
+    /// Its `lastModified`, set once it is kept (K1).
+    pub modified: Option<std::time::SystemTime>,
 }
 
 /// The file a share request offers, held to the rules.
@@ -129,6 +131,7 @@ pub fn offer_of(packet: &NetworkPacket) -> Result<Offer, String> {
         name: crate::plugins::share::safe_file_name(raw),
         size,
         port,
+        modified: crate::plugins::share::received_date(&packet.body),
     })
 }
 
@@ -330,7 +333,7 @@ async fn receive_into<S: AsyncRead + Unpin>(
         .await
         .map_err(|e| format!("could not write its part: {e}"))?;
     drop(file);
-    crate::plugins::share::place(&part.0, &places.downloads, &offer.name)
+    crate::plugins::share::place(&part.0, &places.downloads, &offer.name, offer.modified)
         .await
         .map_err(|e| e.to_string())
 }
@@ -376,6 +379,32 @@ mod tests {
         packet.payload_size = size;
         packet.payload_transfer_info = port.map(|port| serde_json::json!({ "port": port }));
         packet
+    }
+
+    /// K1: a KDE device's `lastModified` is the kept file's date.
+    #[test]
+    fn a_file_offer_reads_its_date() {
+        let offer = offer_of(&offering(
+            serde_json::json!({ "filename": "a.jpg", "lastModified": 1_780_000_000_000u64 }),
+            Some(5),
+            Some(1739),
+        ))
+        .unwrap();
+        // None only with "Keep files' dates" turned off in this computer's
+        // config, which a test does not choose.
+        if crate::events::current_config().keep_file_dates {
+            assert_eq!(
+                offer.modified,
+                Some(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_780_000_000))
+            );
+        }
+        let undated = offer_of(&offering(
+            serde_json::json!({ "filename": "a.jpg" }),
+            Some(5),
+            Some(1739),
+        ))
+        .unwrap();
+        assert_eq!(undated.modified, None);
     }
 
     #[test]
@@ -424,6 +453,7 @@ mod tests {
             name: "photo.jpg".to_string(),
             size: 200_000,
             port: 1739,
+            modified: None,
         };
         let bytes: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
         let (mut device, mut ours) = tokio::io::duplex(8 * 1024);
@@ -477,6 +507,7 @@ mod tests {
             name: "big.bin".to_string(),
             size,
             port: 1739,
+            modified: None,
         };
         let (mut device, mut ours) = tokio::io::duplex(256 * 1024);
         tokio::spawn(async move {
@@ -514,6 +545,7 @@ mod tests {
             name: "slow.bin".to_string(),
             size: 100,
             port: 1739,
+            modified: None,
         };
         let (mut device, mut ours) = tokio::io::duplex(1024);
         tokio::spawn(async move {
@@ -632,6 +664,7 @@ mod tests {
             name: "note.txt".to_string(),
             size: 5,
             port,
+            modified: None,
         };
         let path = receive(
             &ours,
