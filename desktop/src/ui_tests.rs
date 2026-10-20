@@ -382,6 +382,25 @@ mod snapshots {
     }
 }
 
+/// J1: the Logs page shows the newest log's lines and how many it shows.
+#[test]
+fn the_logs_page_shows_the_newest_lines() {
+    let fixture = Fixture::new();
+    let logs = fixture.state().join(pocketdesk_core::local::paths::LOG_DIR);
+    std::fs::create_dir_all(&logs).expect("logs");
+    std::fs::write(
+        logs.join("pocketdesk.2026-10-20.log"),
+        "2026-10-20T06:00:00Z  INFO pocketdesk: server starting\n2026-10-20T06:00:01Z  WARN pocketdesk: a refusal\n",
+    )
+    .expect("log");
+    let app = fixture.open(Some(Tab::Logs));
+    assert!(
+        app.query_by_label("2026-10-20T06:00:01Z  WARN pocketdesk: a refusal")
+            .is_some()
+    );
+    assert!(app.query_by_label("2 of the last 2 lines").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

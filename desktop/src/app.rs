@@ -153,7 +153,8 @@ pub struct PocketdeskApp {
     chosen: Tab,
     snapshot: Snapshot,
     config: Option<Config>,
-    log: Vec<String>,
+    /// The Logs page: it reads the log itself, when it changed (J1).
+    logs: crate::logs_view::LogsView,
     refreshed: Option<Instant>,
     /// A device the user asked to revoke, awaiting confirmation.
     confirm_revoke: Option<String>,
@@ -236,7 +237,7 @@ impl PocketdeskApp {
             chosen: Tab::Status,
             snapshot: Snapshot::default(),
             config: None,
-            log: Vec::new(),
+            logs: Default::default(),
             refreshed: None,
             confirm_revoke: None,
             renaming: std::collections::HashMap::new(),
@@ -419,9 +420,6 @@ impl PocketdeskApp {
             .filter(|r| !self.answered_tasks.contains(&r.id))
             .collect();
         self.config = Config::load().ok();
-        if self.tab == Tab::Logs {
-            self.log = model::log_tail(&self.state_dir, 400);
-        }
         if self.tab == Tab::Status {
             // Read again only when the log changed, not every second.
             let stamp = model::session_log_stamp(&self.state_dir);
@@ -853,7 +851,7 @@ impl PocketdeskApp {
             Tab::Diagnostics => self
                 .diagnostics
                 .show(ui, &self.state_dir, self.config.as_ref()),
-            Tab::Logs => self.logs_tab(ui),
+            Tab::Logs => self.logs.show(ui, &self.state_dir),
         }
     }
 
@@ -2205,24 +2203,6 @@ impl PocketdeskApp {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
     }
-
-    fn logs_tab(&self, ui: &mut egui::Ui) {
-        if self.log.is_empty() {
-            ui.label(
-                "No log file yet. The server writes one when it starts at logon \
-                 (`start --background`); started from a terminal it logs there instead.",
-            );
-            return;
-        }
-        egui::ScrollArea::both()
-            .stick_to_bottom(true)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for line in &self.log {
-                    ui.monospace(line);
-                }
-            });
-    }
 }
 
 impl eframe::App for PocketdeskApp {
@@ -2405,6 +2385,7 @@ impl eframe::App for PocketdeskApp {
             self.kdeconnect.take_notice(),
             self.computers.take_notice(),
             self.messages.take_notice(),
+            self.logs.take_notice(),
         ];
         if let Some(notice) = said.into_iter().flatten().last() {
             self.notice = Some(notice);
