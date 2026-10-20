@@ -304,6 +304,7 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                         offer.optLong("size"),
                         offer.optString("source"),
                         folderPartOf(offer),
+                        offer.optLong("lastModified"),
                     )
                 }
             }

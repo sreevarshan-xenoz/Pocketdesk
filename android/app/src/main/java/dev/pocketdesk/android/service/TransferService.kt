@@ -67,6 +67,8 @@ class TransferService : Service() {
             val source: String,
             /** Where it sits in a folder the computer sends (T6b), if it does. */
             val folder: RustCore.FolderPart?,
+            /** Its date where it came from, ms since 1970 (K1); 0 for none. */
+            val lastModified: Long = 0L,
         ) : Job
     }
 
@@ -196,6 +198,7 @@ class TransferService : Service() {
                 intent.getLongExtra(EXTRA_SIZE, 0L),
                 intent.getStringExtra(EXTRA_SOURCE) ?: "",
                 folderOf(intent),
+                intent.getLongExtra(EXTRA_LAST_MODIFIED, 0L),
             )
         }
         androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_TREE, Uri::class.java)?.let { return Job.SendFolder(address, port, it) }
@@ -634,6 +637,9 @@ class TransferService : Service() {
             }
             if (saved.isSuccess) {
                 target.publish()
+                // Its date where it came from, where Android lets it be set (K1).
+                FileDates.toKeep(Prefs.keepFileDates(this), job.lastModified, System.currentTimeMillis())
+                    ?.let { if (!target.date(it)) Log.i(TAG, "${job.name} keeps its arrival date here") }
                 Result.success(target.viewUri)
             } else {
                 // Kept for a retry only when the bridge recorded this place.
@@ -835,6 +841,7 @@ class TransferService : Service() {
         private const val EXTRA_NAME = "name"
         private const val EXTRA_SIZE = "size"
         private const val EXTRA_SOURCE = "source"
+        private const val EXTRA_LAST_MODIFIED = "last_modified"
         private const val EXTRA_TREE = "tree"
         private const val EXTRA_FOLDER_ID = "folder_id"
         private const val EXTRA_FOLDER = "folder"
@@ -890,7 +897,8 @@ class TransferService : Service() {
          * Save a file from the desktop at [address] to Downloads: the browsed
          * path [value], or the offer id [value] when [isOffer]. [size] is
          * what the desktop said it holds, and [source] the file's id, so a
-         * retry continues a broken download ("" for none).
+         * retry continues a broken download ("" for none). [lastModified] is
+         * its date where it came from (ms, 0 for none; K1).
          */
         fun receive(
             context: Context,
@@ -902,8 +910,9 @@ class TransferService : Service() {
             size: Long,
             source: String,
             folder: RustCore.FolderPart? = null,
+            lastModified: Long = 0L,
         ) {
-            context.startForegroundService(receiveIntent(context, address, port, isOffer, value, name, size, source, folder))
+            context.startForegroundService(receiveIntent(context, address, port, isOffer, value, name, size, source, folder, lastModified))
         }
 
         /** The intent that starts a download, to start now or from a notification's tap (T10d). */
@@ -917,6 +926,7 @@ class TransferService : Service() {
             size: Long,
             source: String,
             folder: RustCore.FolderPart? = null,
+            lastModified: Long = 0L,
         ): Intent {
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_ADDRESS, address)
@@ -927,6 +937,7 @@ class TransferService : Service() {
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_SIZE, size)
                 .putExtra(EXTRA_SOURCE, source)
+                .putExtra(EXTRA_LAST_MODIFIED, lastModified)
             folder?.let {
                 intent.putExtra(EXTRA_FOLDER_ID, it.folderId)
                     .putExtra(EXTRA_FOLDER, it.folder)

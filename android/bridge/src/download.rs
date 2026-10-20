@@ -1035,6 +1035,23 @@ mod tests {
         assert_eq!(packet.body["reason"], "Not enough space for a.pdf");
     }
 
+    /// K1: an offer's date goes on to the app, and none without one.
+    #[test]
+    fn an_offer_keeps_its_date() {
+        let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();
+        let _ = crate::take_file_offers_json();
+        crate::queue_file_offer(&serde_json::json!({
+            "id": "dated", "name": "a.jpg", "size": 3, "lastModified": 1_780_000_000_000u64,
+        }));
+        crate::queue_file_offer(
+            &serde_json::json!({ "id": "undated", "name": "b.jpg", "size": 3 }),
+        );
+        let taken: Vec<serde_json::Value> =
+            serde_json::from_str(&crate::take_file_offers_json()).unwrap();
+        assert_eq!(taken[0]["lastModified"], 1_780_000_000_000u64);
+        assert!(taken[1].get("lastModified").is_none());
+    }
+
     #[test]
     fn a_folder_offer_keeps_its_place_only_when_every_name_is_safe() {
         let _offers = crate::OFFERS_TEST_LOCK.blocking_lock();

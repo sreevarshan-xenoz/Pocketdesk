@@ -61,6 +61,7 @@ class BackgroundFiles(private val ctx: Context) {
                     offer.optLong("size"),
                     offer.optString("source"),
                     folderPartOf(offer),
+                    offer.optLong("lastModified"),
                 )
             val started = runCatching { ctx.startForegroundService(intent) }
             if (started.isSuccess) continue
