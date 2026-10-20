@@ -188,7 +188,11 @@ pub async fn run_commands() {
         let clients = crate::state::clone_clients().await;
         let mut still = Vec::new();
         for command in waiting.drain(..) {
-            if !crate::plugins::pair::permits(&command.device_id, COMMAND) {
+            // Paired now, not only allowed by default (L6 review, as Ring is).
+            if !crate::plugins::pair::allows(
+                &command.device_id,
+                pocketdesk_core::protocol::permissions::Capability::Command,
+            ) {
                 tracing::info!("A command was not sent: it is off for the phone");
                 continue;
             }
