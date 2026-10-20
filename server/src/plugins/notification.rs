@@ -654,7 +654,11 @@ impl Plugin for NotificationPlugin {
                 }
                 // The app's icon, kept for this and later ones (K3), once
                 // the phone's limit let the notification in (K3 review).
-                if named && !muted && packet.body.get("appIcon").is_some() {
+                if named
+                    && !muted
+                    && packet.body.get("appIcon").is_some()
+                    && crate::events::current_config().notification_pictures
+                {
                     let (phone, app, body) = (
                         sender.device_id().to_string(),
                         app.clone(),
@@ -708,7 +712,10 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
-                let pictures = {
+                // The owner's switch (K3 review): off, nothing is kept.
+                let pictures = if !crate::events::current_config().notification_pictures {
+                    crate::toast_answers::Pictures::default()
+                } else {
                     let (phone, app, id, body) = (
                         sender.device_id().to_string(),
                         app.clone(),

@@ -98,6 +98,10 @@ pub struct Config {
     /// still answers.
     #[serde(default = "default_true")]
     pub toast_answers: bool,
+    /// A phone notification shows its app's icon and, when the phone sends
+    /// one, its picture (K3); off, none is kept or shown. On by default.
+    #[serde(default = "default_true")]
+    pub notification_pictures: bool,
     /// Where received files land (C2): an absolute folder, or empty for
     /// Downloads. A folder that is gone falls back to Downloads.
     #[serde(default)]
@@ -314,6 +318,7 @@ impl Default for Config {
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
             toast_answers: true,
+            notification_pictures: true,
             downloads_folder: String::new(),
             cast_control: true,
             notifications_per_minute: default_notifications_per_minute(),
@@ -532,6 +537,7 @@ impl Config {
         "dht_publish",
         "phone_notifications",
         "toast_answers",
+        "notification_pictures",
         "downloads_folder",
         "cast_control",
         "notifications_per_minute",
