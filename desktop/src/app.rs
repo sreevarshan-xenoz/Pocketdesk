@@ -412,6 +412,16 @@ impl PocketdeskApp {
         if tab != self.tab {
             self.overview_link = None;
         }
+        // Dropped files waiting for "which?" go when the page does, and say
+        // so, rather than waiting unseen for a click hours later (J5 review).
+        if self.tab == Tab::Files && tab != Tab::Files && !self.dropped.is_empty() {
+            let n = self.dropped.len();
+            self.dropped.clear();
+            self.notice = crate::notice::Notice::done(format!(
+                "Not sent: {}, since you left the question.",
+                files_count(n)
+            ));
+        }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
         }
