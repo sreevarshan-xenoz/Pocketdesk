@@ -681,6 +681,66 @@ fn a_drop_with_nothing_to_take_it_says_so() {
     assert!(app.query_by_label_contains("Send 1 file to").is_none());
 }
 
+/// K2b: "Not from this app" on a notification's Activity row mutes it here,
+/// and Settings lists it with Unmute.
+#[test]
+fn an_app_is_muted_from_activity_and_unmuted_in_settings() {
+    use pocketdesk_core::local::events::{Event, EventsDetail, append};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let note = Event::new(
+        "notification",
+        Some(PHONE),
+        now,
+        serde_json::json!({ "app": "Gmail" }),
+        serde_json::json!({}),
+        EventsDetail::Metadata,
+    );
+    append(fixture.state(), &note).expect("logged");
+    let mut app = fixture.open(Some(Tab::Activity));
+    app.run_steps(3);
+    app.get_by_label("Not from this app").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("muted here").is_some());
+    assert!(app.query_by_label("Not from this app").is_none());
+    assert!(pocketdesk_core::local::muted_apps::is_muted(
+        &pocketdesk_core::local::muted_apps::read(fixture.state()),
+        "gmail"
+    ));
+
+    go_to(&app, Tab::Settings);
+    app.run_steps(3);
+    find(&app).focus();
+    find(&app).type_text("muted");
+    app.run_steps(3);
+    assert!(app.query_by_label("Gmail").is_some(), "listed");
+    app.get_by_label("Unmute").click();
+    app.run_steps(3);
+    assert!(pocketdesk_core::local::muted_apps::read(fixture.state()).is_empty());
+}
+
+/// K2b review: Settings says when the muted list cannot be read.
+#[test]
+fn a_broken_muted_list_is_said_in_settings() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture
+            .state()
+            .join(pocketdesk_core::local::paths::MUTED_APPS_FILE),
+        "not json",
+    )
+    .expect("file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("muted");
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("could not be read").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

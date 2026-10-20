@@ -139,14 +139,21 @@ async fn server_caps(proxy: &zbus::Proxy<'static>) -> crate::toast_answers::Dbus
     .unwrap_or_default()
 }
 
-/// The answerable phone notifications shown over D-Bus (N3), by their
-/// D-Bus id, newest last: a press names only the id.
+/// What a phone notification shown over D-Bus with buttons offers: N3's
+/// answers, and its app for "Not from this app" (K2b).
 #[cfg(target_os = "linux")]
-fn answerable_ids()
--> &'static Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>> {
-    static IDS: std::sync::OnceLock<
-        Mutex<std::collections::VecDeque<(u32, crate::toast_answers::Answerable)>>,
-    > = std::sync::OnceLock::new();
+#[derive(Clone)]
+struct Pressable {
+    answers: Option<crate::toast_answers::Answerable>,
+    app: String,
+}
+
+/// The phone notifications shown over D-Bus with buttons, by their D-Bus
+/// id, newest last: a press names only the id.
+#[cfg(target_os = "linux")]
+fn answerable_ids() -> &'static Mutex<std::collections::VecDeque<(u32, Pressable)>> {
+    static IDS: std::sync::OnceLock<Mutex<std::collections::VecDeque<(u32, Pressable)>>> =
+        std::sync::OnceLock::new();
     IDS.get_or_init(Default::default)
 }
 
@@ -155,13 +162,12 @@ fn answerable_ids()
 const MAX_ANSWERABLE: usize = 30;
 
 #[cfg(target_os = "linux")]
-fn remember_answerable(id: u32, answers: crate::toast_answers::Answerable) {
+fn remember_answerable(id: u32, pressable: Pressable) {
     let mut ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.retain(|(i, _)| *i != id);
-    ids.push_back((id, answers));
-    while ids.len() > MAX_ANSWERABLE {
-        ids.pop_front();
-    }
+    ids.push_back((id, pressable));
+    // Each kind its own places (K2b review).
+    crate::toast_answers::keep_within(&mut ids, |(_, p)| p.answers.is_some(), MAX_ANSWERABLE);
 }
 
 #[cfg(target_os = "linux")]
@@ -171,7 +177,7 @@ fn forget_answerable(id: u32) {
 }
 
 #[cfg(target_os = "linux")]
-fn answerable_for(id: u32) -> Option<crate::toast_answers::Answerable> {
+fn answerable_for(id: u32) -> Option<Pressable> {
     let ids = answerable_ids().lock().unwrap_or_else(|e| e.into_inner());
     ids.iter().find(|(i, _)| *i == id).map(|(_, a)| a.clone())
 }
@@ -220,15 +226,20 @@ async fn answer_signals() -> Result<()> {
         tokio::select! {
             Some(message) = invoked.next() => {
                 if let Ok((id, key)) = message.body().deserialize::<(u32, String)>()
-                    && let Some(answers) = answerable_for(id)
-                    && let Some(answer) = crate::toast_answers::dbus_action_answer(&key, &answers)
+                    && let Some(pressable) = answerable_for(id)
                 {
-                    crate::toast_answers::send(&answers, answer);
+                    if key == crate::toast_answers::MUTE {
+                        crate::toast_answers::mute(&pressable.app);
+                    } else if let Some(answers) = &pressable.answers
+                        && let Some(answer) = crate::toast_answers::dbus_action_answer(&key, answers)
+                    {
+                        crate::toast_answers::send(answers, answer);
+                    }
                 }
             }
             Some(message) = replied.next() => {
                 if let Ok((id, text)) = message.body().deserialize::<(u32, String)>()
-                    && let Some(answers) = answerable_for(id)
+                    && let Some(answers) = answerable_for(id).and_then(|p| p.answers)
                     && let Some(answer) = crate::toast_answers::dbus_reply_answer(&text, &answers)
                 {
                     crate::toast_answers::send(&answers, answer);
@@ -407,12 +418,15 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     let Some((app, title, text)) = kde_to_show(body) else {
         return;
     };
+    // A muted app's never counts against the limit (K2b review).
+    let muted = muted_here(&app);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
-    let admitted = flood_guard()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .admit(device_id, Instant::now(), limit);
-    if !admitted {
+    if !muted
+        && !flood_guard()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .admit(device_id, Instant::now(), limit)
+    {
         return;
     }
     crate::events::emit(
@@ -421,12 +435,40 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
         serde_json::json!({ "app": app }),
         serde_json::json!({ "title": title, "text": text }),
     );
-    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
+    if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || muted {
         return;
     }
-    if let Err(e) = show_desktop_notification(tag.as_deref(), &app, &title, &text, None).await {
+    // Muteable only by a name the device gave (K2b review: the fallback
+    // name stands for every nameless one).
+    let named = given_name(body, "appName");
+    if let Err(e) =
+        show_desktop_notification(tag.as_deref(), &app, &title, &text, None, named).await
+    {
         tracing::warn!("Failed to show a KDE Connect device's notification: {}", e);
     }
+}
+
+/// Whether `body` names its app in `field`: a notification without one is
+/// shown under a fallback name, which "Not from this app" must not mute
+/// (K2b review).
+fn given_name(body: &serde_json::Value, field: &str) -> bool {
+    body.get(field)
+        .and_then(|v| v.as_str())
+        .is_some_and(|app| !app.trim().is_empty())
+}
+
+/// Whether `app` is muted on this computer (K2b): its notifications are
+/// logged and kept to answer, never shown. Read at each notification, so a
+/// mute from the desktop app or a toast applies to the next one.
+fn muted_here(app: &str) -> bool {
+    crate::state::state_dir()
+        .map(|dir| {
+            pocketdesk_core::local::muted_apps::is_muted(
+                &pocketdesk_core::local::muted_apps::read(&dir),
+                app,
+            )
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Debug)]
@@ -506,12 +548,17 @@ impl Plugin for NotificationPlugin {
                 };
                 // One that waited on the phone says so (C3).
                 let waited = waited_secs(&packet.body);
+                // Muted here (K2b): logged and kept, never shown, and never
+                // counted against the phone's limit, which is for what shows
+                // (K2b review: a muted app's burst dropped the others).
+                let muted = muted_here(&app);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
-                let admitted = flood_guard()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .admit(sender.device_id(), Instant::now(), limit);
-                if !admitted {
+                if !muted
+                    && !flood_guard()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .admit(sender.device_id(), Instant::now(), limit)
+                {
                     return Ok(());
                 }
                 // An event whether or not it is shown here (a script may want
@@ -545,9 +592,19 @@ impl Plugin for NotificationPlugin {
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
+                if muted {
+                    return Ok(());
+                }
                 let text = with_late(&text, waited);
-                if let Err(e) =
-                    show_desktop_notification(tag.as_deref(), &app, &title, &text, answers).await
+                if let Err(e) = show_desktop_notification(
+                    tag.as_deref(),
+                    &app,
+                    &title,
+                    &text,
+                    answers,
+                    given_name(&packet.body, "app"),
+                )
+                .await
                 {
                     tracing::warn!("Failed to show notification: {}", e);
                 }
@@ -805,14 +862,15 @@ async fn notifications_proxy() -> Result<zbus::Proxy<'static>> {
 
 /// Send a desktop notification via D-Bus (native, no external binary),
 /// replacing the one with id `replaces` (0: none), and return the id the
-/// notification server gave it.
+/// notification server gave it and whether it shows any button.
 #[cfg(target_os = "linux")]
 async fn send_notification_dbus(
     summary: &str,
     body: &str,
     replaces: u32,
     answers: Option<&crate::toast_answers::Answerable>,
-) -> Result<u32> {
+    mute: bool,
+) -> Result<(u32, bool)> {
     let proxy = notifications_proxy().await?;
     // Markup is escaped: the text may be a stranger's (N5a).
     let summary = crate::platform::markup_escaped(summary);
@@ -820,14 +878,12 @@ async fn send_notification_dbus(
     // N3: an answerable one carries its buttons, and KDE's inline reply
     // when it takes one, as far as the server shows them; it stays longer,
     // to be answered.
-    let caps = if answers.is_some() {
+    let caps = if answers.is_some() || mute {
         server_caps(&proxy).await
     } else {
         Default::default()
     };
-    let actions = answers
-        .map(|a| crate::toast_answers::dbus_actions(a, caps))
-        .unwrap_or_default();
+    let actions = crate::toast_answers::dbus_actions(answers, caps, mute);
     let mut hints = std::collections::HashMap::<String, zbus::zvariant::Value>::new();
     if caps.inline_reply && answers.is_some_and(|a| a.reply) {
         hints.insert(
@@ -835,7 +891,13 @@ async fn send_notification_dbus(
             zbus::zvariant::Value::from("Reply"),
         );
     }
-    let timeout: i32 = if actions.is_empty() { 5000 } else { 20_000 };
+    // One to answer stays longer; "Not from this app" alone does not.
+    let timeout: i32 = if answers.is_some() && !actions.is_empty() {
+        20_000
+    } else {
+        5000
+    };
+    let pressable = !actions.is_empty();
     proxy
         .call::<_, _, u32>(
             "Notify",
@@ -851,6 +913,7 @@ async fn send_notification_dbus(
             ),
         )
         .await
+        .map(|id| (id, pressable))
         .map_err(|e| pocketdesk_core::error::PocketdeskError::Other {
             detail: format!("D-Bus call failed: {e}"),
         })
@@ -866,25 +929,40 @@ async fn show_desktop_notification(
     title: &str,
     text: &str,
     answers: Option<crate::toast_answers::Answerable>,
+    muteable: bool,
 ) -> Result<()> {
     let summary = format!("{}: {}", app, title);
 
     #[cfg(target_os = "linux")]
     {
         let replaces = tag.and_then(shown_id).unwrap_or(0);
-        match send_notification_dbus(&summary, text, replaces, answers.as_ref()).await {
-            Ok(id) => {
+        match send_notification_dbus(
+            &summary,
+            text,
+            replaces,
+            answers.as_ref(),
+            tag.is_some() && muteable,
+        )
+        .await
+        {
+            Ok((id, pressable)) => {
                 if let Some(tag) = tag {
                     remember_shown(tag, id);
                 }
                 // A plain update of an answerable one is answerable no
-                // more (N3 review).
-                match &answers {
-                    Some(answers) => {
-                        remember_answerable(id, answers.clone());
-                        listen_for_answers();
-                    }
-                    None => forget_answerable(id),
+                // more (N3 review); a phone's can still be muted (K2b), where
+                // the server shows its button at all (K2b review).
+                if tag.is_some() && pressable {
+                    remember_answerable(
+                        id,
+                        Pressable {
+                            answers: answers.clone(),
+                            app: app.to_string(),
+                        },
+                    );
+                    listen_for_answers();
+                } else {
+                    forget_answerable(id);
                 }
                 tracing::info!("Desktop notification shown: {}", title);
                 return Ok(());
@@ -893,8 +971,12 @@ async fn show_desktop_notification(
         }
     }
 
-    let (toast_summary, toast_text, toast_tag) =
-        (summary, text.to_string(), tag.map(str::to_string));
+    let (toast_summary, toast_text, toast_tag, toast_app) = (
+        summary,
+        text.to_string(),
+        tag.map(str::to_string),
+        app.to_string(),
+    );
     let shown = tokio::task::spawn_blocking(move || {
         #[cfg(windows)]
         {
@@ -904,6 +986,7 @@ async fn show_desktop_notification(
                     &toast_text,
                     tag,
                     answers.as_ref(),
+                    muteable.then_some(toast_app.as_str()),
                 ),
                 None => crate::platform::notify(
                     &toast_summary,
@@ -914,8 +997,8 @@ async fn show_desktop_notification(
         }
         #[cfg(not(windows))]
         {
-            // The D-Bus path above answers; notify-send cannot.
-            let _ = (toast_tag, answers);
+            // The D-Bus path above answers and mutes; notify-send cannot.
+            let _ = (toast_tag, answers, toast_app);
             crate::platform::notify(
                 &toast_summary,
                 &toast_text,
@@ -1231,6 +1314,30 @@ mod tests {
             self.0.lock().unwrap().push(packet.clone());
             Ok(())
         }
+    }
+
+    /// K2b review: only a name the phone gave can be muted.
+    #[test]
+    fn only_a_given_name_is_muteable() {
+        assert!(given_name(&json!({"app": "Gmail"}), "app"));
+        assert!(!given_name(&json!({"app": "  "}), "app"));
+        assert!(!given_name(&json!({"title": "x"}), "app"));
+        assert!(given_name(&json!({"appName": "Chat"}), "appName"));
+    }
+
+    /// K2b: an app muted here is muted for the next notification, whatever
+    /// the case of its name.
+    #[test]
+    fn a_muted_app_is_muted_here() {
+        let dir = pocketdesk_core::local::paths::use_state_dir(
+            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
+        );
+        std::fs::create_dir_all(dir).unwrap();
+        assert!(!muted_here("Mail (K2b test)"));
+        pocketdesk_core::local::muted_apps::mute(dir, "Mail (K2b test)", 1).unwrap();
+        assert!(muted_here("mail (k2b test)"));
+        pocketdesk_core::local::muted_apps::unmute(dir, "Mail (K2b test)").unwrap();
+        assert!(!muted_here("Mail (K2b test)"));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that

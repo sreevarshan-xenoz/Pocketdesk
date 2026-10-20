@@ -22,6 +22,7 @@ pub mod identity;
 pub mod kdeconnect;
 pub mod kdeconnect_devices;
 pub mod links;
+pub mod muted_apps;
 pub mod network;
 pub mod outbox;
 pub mod pair_link;

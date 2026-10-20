@@ -55,6 +55,17 @@ pub enum Action {
     ShowFile(PathBuf),
     /// Open Settings (the log is off).
     OpenSettings,
+    /// Mute this phone app's notifications here (K2b).
+    Mute(String),
+}
+
+/// The app a phone notification's event names, for "Not from this app"
+/// (K2b); none for any other event.
+pub fn notifying_app(event: &Event) -> Option<&str> {
+    (event.event == "notification")
+        .then(|| text(event, "app"))
+        .flatten()
+        .filter(|app| !app.trim().is_empty())
 }
 
 #[derive(Default)]
@@ -67,6 +78,8 @@ pub struct ActivityView {
     /// `received.json`, as last read, for Show in folder.
     received: Vec<pocketdesk_core::local::received::ReceivedFile>,
     filter: Filter,
+    /// The apps muted here (K2b), read with the events.
+    muted: Vec<pocketdesk_core::local::muted_apps::MutedApp>,
     /// What the Search box holds (J4).
     search: String,
 }
@@ -119,6 +132,7 @@ impl ActivityView {
         let extra = self.events.len().saturating_sub(KEEP);
         self.events.drain(..extra);
         self.received = pocketdesk_core::local::received::read(state_dir);
+        self.muted = pocketdesk_core::local::muted_apps::read(state_dir);
     }
 
     /// Opened again: read the history afresh (a tail kept while another tab
@@ -191,6 +205,7 @@ impl ActivityView {
             return action;
         }
         let received = &self.received;
+        let muted = &self.muted;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -205,6 +220,19 @@ impl ActivityView {
                             && ui.small_button("Show in folder").clicked()
                         {
                             action = Some(Action::ShowFile(path));
+                        }
+                        if let Some(app) = notifying_app(event) {
+                            if pocketdesk_core::local::muted_apps::is_muted(muted, app) {
+                                ui.label(RichText::new("muted here").weak());
+                            } else if ui
+                                .small_button("Not from this app")
+                                .on_hover_text(format!(
+                                    "Stop showing {app}'s notifications from phones on this computer"
+                                ))
+                                .clicked()
+                            {
+                                action = Some(Action::Mute(app.to_string()));
+                            }
                         }
                     });
                     ui.separator();
@@ -451,6 +479,21 @@ mod tests {
             "with the chip"
         );
         assert!(shown(&events, Filter::FilesAndLinks, "paired", &devices).is_empty());
+    }
+
+    /// K2b: a notification's event names its app for "Not from this app".
+    #[test]
+    fn a_notification_names_its_app_to_mute() {
+        let note = event("notification", json!({"app": "Gmail"}));
+        assert_eq!(notifying_app(&note), Some("Gmail"));
+        assert_eq!(
+            notifying_app(&event("notification", json!({"app": "  "}))),
+            None
+        );
+        assert_eq!(
+            notifying_app(&event("phone_linked", json!({"app": "Gmail"}))),
+            None
+        );
     }
 
     #[test]

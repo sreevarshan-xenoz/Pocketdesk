@@ -376,16 +376,17 @@ fn register_aumid() -> windows::core::Result<()> {
 /// address one of them for removal (N5c).
 const PHONE_GROUP: &str = "phone";
 
-/// The answerable phone toasts (N3), newest last, by tag: each holds its
-/// `Activated` handler, which lives only as long as the toast object does.
-static ANSWERABLE: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification)>> =
+/// The phone toasts with buttons (N3's answers, K2b's "Not from this app"),
+/// newest last, by tag: each holds its `Activated` handler, which lives only
+/// as long as the toast object does.
+static ANSWERABLE: std::sync::Mutex<std::collections::VecDeque<(String, ToastNotification, bool)>> =
     std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// As many as the notes kept to answer (`phone_notes`).
 const KEEP_ANSWERABLE: usize = 30;
 
 fn answerable()
--> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification)>> {
+-> std::sync::MutexGuard<'static, std::collections::VecDeque<(String, ToastNotification, bool)>> {
     ANSWERABLE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -394,32 +395,49 @@ fn show_toast(
     body: &str,
     tag: Option<&str>,
     answers: Option<&crate::toast_answers::Answerable>,
+    app: Option<&str>,
 ) -> windows::core::Result<()> {
     // The calling thread may never have touched WinRT; an apartment that is
     // already initialized makes this a no-op error worth ignoring.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     register_aumid()?;
     let doc = XmlDocument::new()?;
-    // Only a tagged (phone) toast is answered: its tag keeps it alive.
+    // Only a tagged (phone) toast is answered or muted: its tag keeps it
+    // alive.
     let answers = answers.filter(|_| tag.is_some());
+    let app = app.filter(|_| tag.is_some()).map(str::to_string);
     doc.LoadXml(&HSTRING::from(crate::toast_answers::toast_xml(
-        summary, body, answers,
+        summary,
+        body,
+        answers,
+        app.is_some(),
     )))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
     if let Some(tag) = tag {
         toast.SetTag(&HSTRING::from(tag))?;
         toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
     }
-    if let (Some(answers), Some(_)) = (answers, tag) {
-        let answers = answers.clone();
+    let has_buttons = answers.is_some() || app.is_some();
+    if has_buttons && tag.is_some() {
+        let answers = answers.cloned();
+        let muting = app.clone();
         toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
             move |_, args| {
-                if let Some(answer) = args
+                let Some(args) = args
                     .as_ref()
                     .and_then(|args| args.cast::<ToastActivatedEventArgs>().ok())
-                    .and_then(|args| activation_answer(&args, &answers))
+                else {
+                    return Ok(());
+                };
+                let arguments = args.Arguments().map(|a| a.to_string()).unwrap_or_default();
+                if arguments == crate::toast_answers::MUTE {
+                    if let Some(app) = &muting {
+                        crate::toast_answers::mute(app);
+                    }
+                } else if let Some(answers) = &answers
+                    && let Some(answer) = activation_answer(&args, answers, muting.is_some())
                 {
-                    crate::toast_answers::send(&answers, answer);
+                    crate::toast_answers::send(answers, answer);
                 }
                 Ok(())
             },
@@ -430,12 +448,11 @@ fn show_toast(
     // answered: a plain update of it drops the old one (N3 review).
     if let Some(tag) = tag {
         let mut kept = answerable();
-        kept.retain(|(t, _)| t != tag);
-        if answers.is_some() {
-            kept.push_back((tag.to_string(), toast));
-            while kept.len() > KEEP_ANSWERABLE {
-                kept.pop_front();
-            }
+        kept.retain(|(t, _, _)| t != tag);
+        if has_buttons {
+            kept.push_back((tag.to_string(), toast, answers.is_some()));
+            // Each kind its own places: thirty to answer, thirty to mute.
+            crate::toast_answers::keep_within(&mut kept, |(_, _, a)| *a, KEEP_ANSWERABLE);
         }
     }
     Ok(())
@@ -446,6 +463,7 @@ fn show_toast(
 fn activation_answer(
     args: &ToastActivatedEventArgs,
     answers: &crate::toast_answers::Answerable,
+    mute: bool,
 ) -> Option<pocketdesk_core::local::phone_notes::Answer> {
     let arguments = args.Arguments().ok()?.to_string();
     let reply = args
@@ -459,19 +477,20 @@ fn activation_answer(
         .and_then(|value| value.cast::<IPropertyValue>().ok())
         .and_then(|value| value.GetString().ok())
         .map(|text| text.to_string());
-    crate::toast_answers::toast_answer(&arguments, reply.as_deref(), answers)
+    crate::toast_answers::toast_answer(&arguments, reply.as_deref(), answers, mute)
 }
 
 /// Show a phone's notification as a toast that [`remove_tagged`] can take
 /// back by `tag` (at most 64 characters), with its buttons and reply box
-/// when it can be `answers`ed (N3).
+/// when it can be `answers`ed (N3), and "Not from this app" for `app` (K2b).
 pub(super) fn notify_tagged(
     summary: &str,
     body: &str,
     tag: &str,
     answers: Option<&crate::toast_answers::Answerable>,
+    app: Option<&str>,
 ) -> bool {
-    match show_toast(summary, body, Some(tag), answers) {
+    match show_toast(summary, body, Some(tag), answers, app) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -483,7 +502,7 @@ pub(super) fn notify_tagged(
 /// Take the phone toast tagged `tag` off the screen and out of the Action
 /// Center. A tag that is not there is no error.
 pub(super) fn remove_tagged(tag: &str) {
-    answerable().retain(|(t, _)| t != tag);
+    answerable().retain(|(t, _, _)| t != tag);
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     let removed = ToastNotificationManager::History().and_then(|history| {
         history.RemoveGroupedTagWithId(
@@ -498,7 +517,7 @@ pub(super) fn remove_tagged(tag: &str) {
 }
 
 pub(super) fn notify(summary: &str, body: &str) -> bool {
-    match show_toast(summary, body, None, None) {
+    match show_toast(summary, body, None, None, None) {
         Ok(()) => true,
         Err(e) => {
             tracing::debug!("toast notification failed: {e}");
@@ -703,6 +722,7 @@ mod tests {
             "Pocketdesk test",
             "This toast removes itself",
             tag,
+            None,
             None
         ));
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -779,7 +799,7 @@ mod tests {
 
     #[test]
     fn toast_text_is_escaped_and_loads_as_xml() {
-        let xml = crate::toast_answers::toast_xml("PIN <1234> & go", "a > b", None);
+        let xml = crate::toast_answers::toast_xml("PIN <1234> & go", "a > b", None, false);
         assert!(xml.contains("PIN &lt;1234&gt; &amp; go"));
         let doc = XmlDocument::new().unwrap();
         doc.LoadXml(&HSTRING::from(xml))
@@ -798,7 +818,7 @@ mod tests {
     /// N3: Windows takes the reply box and buttons as a toast.
     #[test]
     fn an_answerable_toast_loads_as_toast_xml() {
-        let xml = crate::toast_answers::toast_xml("Chat: Ann", "hi", Some(&answerable()));
+        let xml = crate::toast_answers::toast_xml("Chat: Ann", "hi", Some(&answerable()), false);
         let doc = XmlDocument::new().unwrap();
         doc.LoadXml(&HSTRING::from(xml.clone()))
             .expect("well-formed");
@@ -816,17 +836,18 @@ mod tests {
             "Pocketdesk test: Chat",
             "Reply or press a button",
             tag,
-            Some(&answerable())
+            Some(&answerable()),
+            None
         ));
         std::thread::sleep(std::time::Duration::from_millis(500));
         assert!(phone_tags_in_history().iter().any(|t| t == tag), "shown");
         assert!(
-            super::answerable().iter().any(|(t, _)| t == tag),
+            super::answerable().iter().any(|(t, _, _)| t == tag),
             "kept to answer"
         );
         remove_tagged(tag);
         assert!(
-            !super::answerable().iter().any(|(t, _)| t == tag),
+            !super::answerable().iter().any(|(t, _, _)| t == tag),
             "dropped with its toast"
         );
     }
