@@ -2,16 +2,16 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-750 open items.
+754 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 444 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 446 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
-| A phone with a SIM | 23 |
+| A phone with a SIM | 24 |
 | A second phone | 9 |
-| Away from home: another network, or through a router | 9 |
+| Away from home: another network, or through a router | 10 |
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 94 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
@@ -913,6 +913,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Recording while the phone turns: the file so far kept, the bar says why it stopped.
 - The cast ends during a recording: the bar names the file and stops counting.
 
+**159. Call a number from the computer (L4)**
+
+- Phone Settings "Calls from the computer" on; in a session, Call on the Messages page (or `pocketdesk call`): the dialer opens with the number (`adb shell dumpsys activity activities`); nothing is called.
+- A number with `*` or `#`: refused on the computer.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1191,6 +1196,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Settings → Notifications and texts → Muted apps: Unmute, and the app's toasts again.
 
+**159. Call a number from the computer (L4)**
+
+- A real call (a SIM): the owner presses Call.
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -1263,6 +1272,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)**
 
 - 2b on a relayed path: A71 → the VM with direct UDP from home dropped, session and control link both up 10 minutes ("WAN · relayed").
+
+**159. Call a number from the computer (L4)**
+
+- With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
 
 ## A second computer
 
