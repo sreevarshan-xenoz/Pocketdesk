@@ -25,9 +25,17 @@ pub struct NotesView {
     notice: Option<crate::notice::Notice>,
     /// The page an empty state's button asked for (E5).
     go_to: Option<crate::app::Tab>,
-    /// Each app's icon as kept for its phone (K3), by phone and app; `None`
-    /// where none is kept yet, looked for again at the next read.
-    icons: HashMap<(String, String), Option<egui::TextureHandle>>,
+    /// Each app's icon as kept for its phone (K3), by phone and app, with
+    /// its file's time; looked for again at the next read when none was
+    /// kept or the file changed (K3 review: an updated icon showed only
+    /// after a restart).
+    icons: HashMap<(String, String), (Option<std::time::SystemTime>, Option<egui::TextureHandle>)>,
+}
+
+/// When `phone`'s icon for `app` was kept, if it is.
+fn icon_stamp(state_dir: &Path, phone: &str, app: &str) -> Option<std::time::SystemTime> {
+    let path = pocketdesk_core::local::notification_icons::icon_path(state_dir, phone, app);
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 /// An app's kept icon as a texture, if there is one that reads as a PNG
@@ -90,8 +98,10 @@ impl NotesView {
             .map(|n| (n.device_id.clone(), n.key.clone()))
             .collect();
         self.drafts.retain(|k, _| live.contains(k));
-        // An icon not kept before may be now.
-        self.icons.retain(|_, icon| icon.is_some());
+        // An icon not kept before may be now, or kept anew.
+        self.icons.retain(|(phone, app), (stamp, icon)| {
+            icon.is_some() && *stamp == icon_stamp(state_dir, phone, app)
+        });
         self.read_at = Some(Instant::now());
     }
 
@@ -147,8 +157,12 @@ impl NotesView {
                     .icons
                     .entry((note.device_id.clone(), note.app.to_lowercase()))
                     .or_insert_with(|| {
-                        icon_texture(ui.ctx(), state_dir, &note.device_id, &note.app)
+                        (
+                            icon_stamp(state_dir, &note.device_id, &note.app),
+                            icon_texture(ui.ctx(), state_dir, &note.device_id, &note.app),
+                        )
                     })
+                    .1
                     .clone();
                 ui.group(|ui| {
                     ui.horizontal(|ui| {
