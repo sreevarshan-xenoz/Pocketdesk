@@ -52,17 +52,49 @@ pub enum Ringer {
 /// when it did not say or said something that does not read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PhoneState {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub storage_free_mb: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub storage_total_mb: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub network: Option<Network>,
     /// 0–4 bars.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub signal: Option<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient"
+    )]
     pub ringer: Option<Ringer>,
+}
+
+/// A field of [PhoneState] read from the file, or none when it does not
+/// read (L9 review): a word a later version added, read by this one, leaves
+/// that field out rather than every phone's battery.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 impl PhoneState {
@@ -304,6 +336,16 @@ mod tests {
         let old = read(&dir);
         assert_eq!(old["old"].charge, 5);
         assert!(old["old"].state.is_empty());
+        // A word from a later version leaves its field out, not the file.
+        std::fs::write(
+            dir.join(PHONE_STATUS_FILE),
+            r#"{"batteries":{"new":{"charge":5,"charging":true,"updated_unix":7,"network":"satellite","signal":300,"ringer":"silent"}}}"#,
+        )
+        .unwrap();
+        let new = read(&dir);
+        assert_eq!(new["new"].state.network, None);
+        assert_eq!(new["new"].state.signal, None);
+        assert_eq!(new["new"].state.ringer, Some(Ringer::Silent));
         std::fs::write(dir.join(PHONE_STATUS_FILE), "not json").unwrap();
         assert!(read(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
