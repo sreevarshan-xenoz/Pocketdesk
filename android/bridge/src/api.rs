@@ -2566,6 +2566,7 @@ async fn install_streaming(
     // this session replaced would be quoted as if it were measured here.
     RTT_HISTORY.lock().unwrap().clear();
     RATE_SNAPSHOTS.lock().unwrap().clear();
+    QUIET.lock().unwrap().reset();
     *STREAM_CLOSED_REASON.lock().unwrap() = None;
 
     let cancel = client.cancel_token();
@@ -2894,7 +2895,38 @@ pub async fn reconnect_streaming(
 pub fn remote_state() -> String {
     let guard = crate::session::REMOTE.lock().unwrap();
     let state = state_name(guard.as_ref(), false);
-    format!("{{\"state\":\"{state}\"{}}}", sound_grants(guard.as_ref()))
+    format!(
+        "{{\"state\":\"{state}\"{},\"quietMs\":{}}}",
+        sound_grants(guard.as_ref()),
+        link_quiet_ms()
+    )
+}
+
+/// The link's quiet, kept between polls (I1b); reset as a session starts
+/// or stops, so a new one never takes the last one's time (I1b review).
+static QUIET: std::sync::LazyLock<std::sync::Mutex<crate::link_quiet::Quiet>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// How long the session's link has been quiet, in ms (I1b): the time since
+/// the datagrams it received last rose. 0 with no session, or while the
+/// session handle is busy (it is read again in half a second).
+fn link_quiet_ms() -> u128 {
+    let Ok(handle) = (*STREAMING_HANDLE).try_lock() else {
+        return 0;
+    };
+    let mut quiet = QUIET.lock().unwrap();
+    match handle.as_ref() {
+        Some(h) => quiet
+            .note(
+                h.connection.stats().datagrams_received,
+                std::time::Instant::now(),
+            )
+            .as_millis(),
+        None => {
+            quiet.reset();
+            0
+        }
+    }
 }
 
 /// For a sound session (N5), what the computer said it allows, as JSON
@@ -3070,6 +3102,7 @@ pub async fn stop_v2() -> Result<(), String> {
 
 /// Stop remote screen streaming.
 pub async fn stop_streaming() -> Result<(), String> {
+    QUIET.lock().unwrap().reset();
     // Reset streaming metrics
     STREAMING_FRAME_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
     STREAMING_BYTE_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);

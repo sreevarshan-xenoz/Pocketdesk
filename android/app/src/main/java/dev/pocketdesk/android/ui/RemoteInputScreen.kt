@@ -142,6 +142,9 @@ fun RemoteInputScreen(
     // itself, with backoff, for ten minutes; an end the computer chose
     // waits for the person (AutoReconnect). The talk timer, the air mouse
     // and the laser live outside each attempt, so they carry on.
+    // The card's words for a computer gone quiet (I1b), read here: not from
+    // the context inside the loop, which misses a change of configuration.
+    val quietReason = stringResource(R.string.remote_quiet)
     var reconnects by remember { mutableIntStateOf(0) }
     var droppedAtMs by remember { mutableLongStateOf(0L) }
     var reconnectInS by remember { mutableStateOf<Int?>(null) }
@@ -182,9 +185,19 @@ fun RemoteInputScreen(
             val waitingSince = SystemClock.elapsedRealtime()
             var readySince = 0L
             while (isActive) {
-                val (remote, closed) =
-                    withContext(Dispatchers.IO) { RemoteSession.parse(RustCore.remoteState()) to RustCore.streamClosedReason }
-                val next = RemoteSession.next(state, remote, closed)
+                val (json, closed) = withContext(Dispatchers.IO) { RustCore.remoteState() to RustCore.streamClosedReason }
+                val remote = RemoteSession.parse(json)
+                var next = RemoteSession.next(state, remote, closed)
+                // A computer gone quiet is a lost link in 12 s (I1b): a remote
+                // has no frames to stall, and the transport takes 45 s.
+                val quiet = next == State.Ready && closed == null && RemoteSession.silent(RemoteSession.quietMs(json))
+                if (quiet) {
+                    next = State.Down
+                    // The bridge still holds the dead connection until the
+                    // transport times it out: closed here, or the reconnect
+                    // would take it for a live session and skip the dial.
+                    withContext(NonCancellable + Dispatchers.IO) { RustCore.stopStreaming() }
+                }
                 if (next == State.Ready && state != State.Ready) readySince = SystemClock.elapsedRealtime()
                 // Healthy for a while: the next drop gets a fresh window.
                 if (readySince != 0L && SystemClock.elapsedRealtime() - readySince > AutoReconnect.HEALTHY_MS) {
@@ -201,7 +214,7 @@ fun RemoteInputScreen(
                 if (state == State.Down || state == State.TooOld) {
                     // The transport's words, said plainly (U2 review), as the
                     // session's error card does.
-                    reason = closed?.let { context.closeReasonText(it) }
+                    reason = if (quiet) quietReason else closed?.let { context.closeReasonText(it) }
                     ended = AutoReconnect.endedBy(closed, wasWaiting)
                     return@attempt
                 }

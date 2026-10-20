@@ -568,6 +568,7 @@
     <string name="remote_too_old">El Pocketdesk de este equipo es demasiado antiguo para el mando: actualízalo, o abre una sesión.</string>
     <string name="remote_down">El mando se detuvo: %1$s</string>
     <string name="remote_no_reason">el equipo no respondió</string>
+    <string name="remote_quiet">el equipo dejó de responder</string>
     <string name="remote_retry">Reintentar</string>
     <string name="remote_key_previous">Anterior</string>
     <string name="remote_key_play_pause">Reproducir o pausar</string>

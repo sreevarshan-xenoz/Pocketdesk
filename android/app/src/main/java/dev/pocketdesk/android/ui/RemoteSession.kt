@@ -29,6 +29,20 @@ object RemoteSession {
     /** The bridge's `{"state": ...}`: none, waiting, ready or tooOld. */
     fun parse(json: String): String = STATE.find(json)?.groupValues?.get(1) ?: "none"
 
+    private val QUIET = Regex("\"quietMs\"\\s*:\\s*(\\d+)")
+
+    /** How long the bridge says the link has been quiet, in ms; 0 from a bridge that does not say. */
+    fun quietMs(json: String): Long = QUIET.find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+
+    /**
+     * Whether a link quiet for [quietMs] is lost (I1b): the computer
+     * acknowledges the remote's link report every 5 s while it lives, so
+     * 12 s is over two missed; the transport alone takes 45 s to say so.
+     */
+    fun silent(quietMs: Long): Boolean = quietMs >= QUIET_LIMIT_MS
+
+    private const val QUIET_LIMIT_MS = 12_000L
+
     /** What a sound session (N5) may do: hear the computer, and be its mic. */
     data class Grants(val audio: Boolean, val mic: Boolean)
 

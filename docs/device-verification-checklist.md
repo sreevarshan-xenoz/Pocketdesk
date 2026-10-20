@@ -1298,6 +1298,7 @@ Owed:
 - [ ] The owner's approval prompt ("Ask before each session") before ready.
 - [ ] Over the internet road, and a phone driving while another has a picture session (driving rules).
 - [ ] I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone.
+  - Checked 2026-10-20 on the OPPO (CPH2359, Android 14) against the throwaway server: the server killed under a remote with a talk timer; first noticed only at 47 s (the transport's idle timeout), then, with I1b, at 14 s, "the computer stopped answering" and its countdown, and the remote ready again by itself 14 s after the server returned, the timer counting through.
 
 ## 74. The phone's battery without a session
 
