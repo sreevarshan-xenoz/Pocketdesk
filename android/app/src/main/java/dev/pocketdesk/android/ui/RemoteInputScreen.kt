@@ -200,7 +200,10 @@ fun RemoteInputScreen(
                 }
                 if (next == State.Ready && state != State.Ready) readySince = SystemClock.elapsedRealtime()
                 // Healthy for a while: the next drop gets a fresh window.
-                if (readySince != 0L && SystemClock.elapsedRealtime() - readySince > AutoReconnect.HEALTHY_MS) {
+                if (readySince != 0L &&
+                    RemoteSession.heard(json) &&
+                    SystemClock.elapsedRealtime() - readySince > AutoReconnect.HEALTHY_MS
+                ) {
                     reconnects = 0
                     droppedAtMs = 0L
                     readySince = 0L

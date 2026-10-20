@@ -66,6 +66,14 @@ class RemoteSessionTest {
         assertFalse("the transport said why", RemoteSession.goneQuiet(RemoteSession.State.Ready, "timed out", quiet))
     }
 
+    /** J6 review: only a session heard from lately counts as healthy. */
+    @Test
+    fun `a session is heard from within one link report`() {
+        assertTrue(RemoteSession.heard("""{"state":"ready","quietMs":4999}"""))
+        assertFalse(RemoteSession.heard("""{"state":"ready","quietMs":5000}"""))
+        assertTrue("an older bridge says nothing", RemoteSession.heard("""{"state":"ready"}"""))
+    }
+
     @Test
     fun `the rows send keys the bridge maps`() {
         // android/bridge/src/api.rs maps these Android key codes to evdev.

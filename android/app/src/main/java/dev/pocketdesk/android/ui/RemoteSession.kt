@@ -51,6 +51,16 @@ object RemoteSession {
     fun goneQuiet(next: State, closed: String?, json: String): Boolean =
         next == State.Ready && closed == null && silent(quietMs(json))
 
+    /**
+     * Whether the computer was heard from lately: within one link report's
+     * 5 s. A session counts as healthy, and its reconnects start over, only
+     * while it is (J6 review: one that went quiet a second after it was
+     * admitted counted its silence as health and never gave up).
+     */
+    fun heard(json: String): Boolean = quietMs(json) < HEARD_MS
+
+    private const val HEARD_MS = 5_000L
+
     /** What a sound session (N5) may do: hear the computer, and be its mic. */
     data class Grants(val audio: Boolean, val mic: Boolean)
 
