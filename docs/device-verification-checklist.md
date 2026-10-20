@@ -2246,6 +2246,15 @@ Built 2026-10-20; tested through units and the harness, nothing on a device yet.
 - [ ] Desktop Settings "Apps' icons and pictures" off: plain toasts.
 - [ ] Linux: GNOME and KDE show the icon; a server with body images shows the picture.
 
+## 154. The phone's music in the computer's media controls (K7)
+
+Built 2026-10-20; the media controls read back on this Windows box by a live test, nothing with a phone yet.
+- [ ] Settings "The phone's music in this computer's media controls" on; a phone in a session plays music: the volume flyout shows its song as Pocketdesk, with its buttons.
+- [ ] Play/Pause, Next and Previous from the flyout reach the phone; the flyout shows the new state at once.
+- [ ] The keyboard's media keys (input on this box: with the owner).
+- [ ] The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves.
+- [ ] The setting off: it leaves at once.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

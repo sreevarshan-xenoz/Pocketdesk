@@ -148,6 +148,11 @@ pub struct Config {
     /// Windows. Empty (the default) is off.
     #[serde(default)]
     pub clipboard_hotkey: String,
+    /// Show a phone's player in this computer's own media controls (K7):
+    /// Windows' volume flyout and media keys, through the tray program.
+    /// Off by default.
+    #[serde(default)]
+    pub phone_media_controls: bool,
     /// Serve the phones' shared folders (T10g) read-only as WebDAV on
     /// loopback, behind a token (D8). Off by default.
     #[serde(default)]
@@ -332,6 +337,7 @@ impl Default for Config {
             computer_clipboard: false,
             clipboard_history: 0,
             clipboard_hotkey: String::new(),
+            phone_media_controls: false,
             phone_drive: false,
             away_lock_minutes: default_away_lock_minutes(),
             kdeconnect_compat: true,
@@ -547,6 +553,7 @@ impl Config {
         "virtual_screens",
         "clipboard_push",
         "clipboard_hotkey",
+        "phone_media_controls",
         "computer_clipboard",
         "clipboard_history",
         "phone_drive",

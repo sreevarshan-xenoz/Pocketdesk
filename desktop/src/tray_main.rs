@@ -23,6 +23,9 @@ fn main() {
         // Another tray program holds the tray.
         return;
     };
+    // K7: before any window, as Windows asks.
+    #[cfg(windows)]
+    pocketdesk_desktop::phone_player::prepare();
     let state_dir = match pocketdesk_core::local::paths::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -48,6 +51,9 @@ fn main() {
     let mut seen = tray_watch::Seen::default();
     // H3: the key that sends the clipboard, as Settings has it now.
     let mut key = Key::default();
+    // K7: a phone's player in this computer's media controls.
+    #[cfg(windows)]
+    let mut player = pocketdesk_desktop::phone_player::Watch::default();
     loop {
         let pressed = wait(&woken, REFRESH);
         if tray.closed() {
@@ -63,6 +69,15 @@ fn main() {
             let now = now_unix();
             let snapshot = model::snapshot(&state_dir, now);
             key.follow(&state_dir);
+            #[cfg(windows)]
+            {
+                let in_session: Vec<&str> = snapshot
+                    .sessions
+                    .iter()
+                    .filter_map(|s| s.device_id.as_deref())
+                    .collect();
+                player.follow(&state_dir, &snapshot.phone_media, &in_session, now);
+            }
             let stamp = model::session_log_stamp(&state_dir);
             if stamp != log.0 {
                 log = (

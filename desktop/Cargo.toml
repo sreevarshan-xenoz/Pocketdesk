@@ -40,6 +40,10 @@ egui_kittest = { version = "=0.36.2", optional = true, features = ["eframe", "sn
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+# The media controls' live test waits on WinRT calls (K7), as the server does.
+windows-future = "0.3"
+
 # The tray. tray-icon's Linux backend needs a GTK main loop the app does not
 # run, so Linux has its own (src/tray_linux.rs): a StatusNotifierItem over
 # D-Bus, no GTK (N6).
