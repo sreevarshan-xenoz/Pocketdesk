@@ -2010,32 +2010,70 @@ impl PocketdeskApp {
         }
         ui.strong("Sent");
         let now = now_unix();
-        egui::Grid::new("sent")
-            .num_columns(4)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for file in &self.snapshot.sent {
-                    ui.label(&file.name).on_hover_text(&file.path);
-                    ui.label(model::target_label(&self.snapshot, &file.device_id));
-                    ui.label(crate::words::ago(now, file.sent_unix));
-                    // What a folder send left out goes beside its state.
-                    let note = file
-                        .note
-                        .as_deref()
-                        .map(|n| format!(" · {n}"))
-                        .unwrap_or_default();
-                    match &file.state {
-                        SentState::Offered => ui.label(format!("waiting for the phone{note}")),
-                        SentState::Sent => ui.label(format!("saved on the phone{note}")),
-                        SentState::Failed(reason) => ui.label(
+        let targets = model::send_target_ids(&self.snapshot);
+        let mut again = None;
+        // A block a row, wrapping at a narrow width (I3), as Devices' are.
+        for file in &self.snapshot.sent {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&file.name).strong())
+                    .on_hover_text(&file.path);
+                ui.label(
+                    RichText::new(format!(
+                        "to {} · {}",
+                        model::target_label(&self.snapshot, &file.device_id),
+                        crate::words::ago(now, file.sent_unix)
+                    ))
+                    .color(crate::theme::muted(ui)),
+                );
+                // What a folder send left out goes beside its state.
+                let note = file
+                    .note
+                    .as_deref()
+                    .map(|n| format!(" · {n}"))
+                    .unwrap_or_default();
+                match &file.state {
+                    SentState::Offered => {
+                        ui.label(format!("waiting for the phone{note}"));
+                    }
+                    SentState::Sent => {
+                        ui.label(format!("saved on the phone{note}"));
+                    }
+                    SentState::Failed(reason) => {
+                        ui.label(
                             RichText::new(format!("not sent: {reason}{note}"))
                                 .color(crate::theme::bad(ui)),
-                        ),
-                    };
-                    ui.end_row();
+                        );
+                        // I3: tried again while its phone can take files.
+                        let reachable = targets.contains(&file.device_id);
+                        if ui
+                            .add_enabled(reachable, egui::Button::new("Send again"))
+                            .on_disabled_hover_text("Its phone cannot take files now.")
+                            .clicked()
+                        {
+                            again = Some((file.device_id.clone(), file.path.clone()));
+                        }
+                    }
                 }
             });
+            ui.add_space(4.0);
+        }
+        if let Some((device, path)) = again {
+            self.notice = crate::notice::Notice::outcome(
+                match model::queue_send(
+                    &self.state_dir,
+                    &device,
+                    std::path::Path::new(&path),
+                    now_unix(),
+                ) {
+                    Ok(name) => Ok(format!(
+                        "Queued {name} again for {}.",
+                        model::target_label(&self.snapshot, &device)
+                    )),
+                    Err(e) => Err(e),
+                },
+            );
+            self.refreshed = None;
+        }
         ui.add_space(12.0);
     }
 
@@ -2054,30 +2092,44 @@ impl PocketdeskApp {
         }
         let now = now_unix();
         let mut show = None;
-        egui::Grid::new("received")
-            .num_columns(4)
-            .striped(true)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                for row in &self.snapshot.received {
-                    let file = &row.file;
-                    ui.label(&file.name).on_hover_text(&file.path);
-                    ui.label(human_size(file.size));
-                    ui.label(crate::words::ago(now, file.received_unix));
-                    if row.exists {
-                        if ui.button("Show in folder").clicked() {
-                            show = Some(file.path.clone());
-                        }
-                    } else {
-                        ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
+        let mut open = None;
+        // A block a row, wrapping at a narrow width (I3).
+        for row in &self.snapshot.received {
+            let file = &row.file;
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(&file.name).strong())
+                    .on_hover_text(&file.path);
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {}",
+                        human_size(file.size),
+                        crate::words::ago(now, file.received_unix)
+                    ))
+                    .color(crate::theme::muted(ui)),
+                );
+                if row.exists {
+                    // I3: what opens in a viewer opens from here.
+                    if crate::reveal::openable(&file.name) && ui.button("Open").clicked() {
+                        open = Some(file.path.clone());
                     }
-                    ui.end_row();
+                    if ui.button("Show in folder").clicked() {
+                        show = Some(file.path.clone());
+                    }
+                } else {
+                    ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
                 }
             });
+            ui.add_space(4.0);
+        }
         if let Some(path) = show
             && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))
         {
             self.notice = crate::notice::Notice::error(format!("Could not open the folder: {e}"));
+        }
+        if let Some(path) = open
+            && let Err(e) = crate::reveal::open_file(std::path::Path::new(&path))
+        {
+            self.notice = crate::notice::Notice::error(format!("Could not open it: {e}"));
         }
     }
 

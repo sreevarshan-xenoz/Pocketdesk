@@ -123,31 +123,6 @@ fn taken_text(taken_ms: u64, now_unix: u64) -> String {
     }
 }
 
-/// Open `path` with the system's viewer for it.
-fn open_file(path: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        // Explorer opens a file with its default program.
-        std::process::Command::new(crate::reveal::windows_dir().join("explorer.exe"))
-            .arg(path)
-            .spawn()
-            .map(drop)
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let mut child = std::process::Command::new("xdg-open").arg(path).spawn()?;
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        Ok(())
-    }
-    #[cfg(not(any(windows, target_os = "linux")))]
-    {
-        let _ = path;
-        Err(std::io::Error::other("not supported on this system"))
-    }
-}
-
 /// The longest side a copied photo keeps: a phone's 50 or 108 MP photo
 /// would hold gigabytes on its way to the clipboard (C7 review).
 const MAX_COPY_SIDE: u32 = 4096;
@@ -391,7 +366,7 @@ impl PhotosView {
                     crate::notice::Notice::done(format!("Saved {name} to {}.", path.display()))
             }
             Then::Open => {
-                self.notice = match open_file(&path) {
+                self.notice = match crate::reveal::open_file(&path) {
                     Ok(()) => crate::notice::Notice::done(format!("Opened {name}.")),
                     Err(e) => crate::notice::Notice::error(format!("Could not open {name}: {e}")),
                 };
