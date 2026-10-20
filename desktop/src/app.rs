@@ -156,6 +156,11 @@ pub struct PocketdeskApp {
     /// The Logs page: it reads the log itself, when it changed (J1).
     logs: crate::logs_view::LogsView,
     refreshed: Option<Instant>,
+    /// The pause as last read, and when (K2a review: once a second).
+    pause_read: Option<(
+        Instant,
+        Result<Option<pocketdesk_core::local::pause::Pause>, String>,
+    )>,
     /// A device the user asked to revoke, awaiting confirmation.
     confirm_revoke: Option<String>,
     /// The Name boxes on the Devices page, by device id (U3).
@@ -248,6 +253,7 @@ impl PocketdeskApp {
             config: None,
             logs: Default::default(),
             refreshed: None,
+            pause_read: None,
             confirm_revoke: None,
             renaming: std::collections::HashMap::new(),
             notice: None,
@@ -991,6 +997,7 @@ impl PocketdeskApp {
     /// 0 (D2), and say how that went.
     /// Pause this computer for `minutes`, or until resumed (K2a).
     fn pause(&mut self, minutes: Option<u32>) {
+        self.pause_read = None;
         self.notice = crate::notice::Notice::outcome(
             pocketdesk_core::local::pause::pause(&self.state_dir, minutes, now_unix())
                 .map(|_| match minutes {
@@ -1005,11 +1012,34 @@ impl PocketdeskApp {
 
     /// End the pause (K2a).
     fn resume(&mut self) {
+        self.pause_read = None;
         self.notice = crate::notice::Notice::outcome(
             pocketdesk_core::local::pause::resume(&self.state_dir)
                 .map(|()| "Resumed.".to_string())
                 .map_err(|e| format!("Could not resume: {e}")),
         );
+    }
+
+    /// The pause in force at `now`, read at most once a second (K2a review:
+    /// not on every frame the mouse moves), and at once after a change.
+    fn pause_now(
+        &mut self,
+        now: u64,
+    ) -> Result<Option<pocketdesk_core::local::pause::Pause>, String> {
+        let stale = self
+            .pause_read
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= Duration::from_secs(1));
+        if stale {
+            let read =
+                pocketdesk_core::local::pause::load(&self.state_dir).map_err(|e| e.to_string());
+            self.pause_read = Some((Instant::now(), read));
+        }
+        match &self.pause_read {
+            Some((_, Ok(pause))) => Ok(pause.filter(|p| p.active(now))),
+            Some((_, Err(e))) => Err(e.clone()),
+            None => Ok(None),
+        }
     }
 
     /// The Overview's pause (K2a): while paused, what is held and Resume;
@@ -1018,8 +1048,17 @@ impl PocketdeskApp {
         let now = now_unix();
         let mut picked = None;
         let mut resume = false;
-        match pocketdesk_core::local::pause::current(&self.state_dir, now) {
-            Some(pause) => {
+        match self.pause_now(now) {
+            Err(e) => {
+                ui.label(
+                    RichText::new(format!(
+                        "{} could not be read ({e}): nothing is held. Remove the file to pause again.",
+                        pocketdesk_core::local::paths::PAUSE_FILE
+                    ))
+                    .color(crate::theme::bad(ui)),
+                );
+            }
+            Ok(Some(pause)) => {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new(crate::tray_menu::pause_text(&pause, now)).strong());
@@ -1029,7 +1068,7 @@ impl PocketdeskApp {
                     resume = ui.button("Resume").clicked();
                 });
             }
-            None => {
+            Ok(None) => {
                 ui.menu_button("Pause…", |ui| {
                     for (label, minutes) in crate::tray_menu::PAUSES {
                         if ui.button(label).clicked() {

@@ -762,6 +762,23 @@ fn the_overview_pauses_and_resumes() {
     assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_none());
 }
 
+/// K2a review: a pause that cannot be read is said so on the Overview,
+/// not shown as "not paused" with a Pause… that fails.
+#[test]
+fn the_overview_says_a_broken_pause() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture
+            .state()
+            .join(pocketdesk_core::local::paths::PAUSE_FILE),
+        "x",
+    )
+    .expect("pause");
+    let app = fixture.open(None);
+    assert!(app.query_by_label_contains("could not be read").is_some());
+    assert!(app.query_by_label("Pause…").is_none());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

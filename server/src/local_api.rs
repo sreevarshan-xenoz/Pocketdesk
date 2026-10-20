@@ -693,7 +693,18 @@ pub fn pause_in(state_dir: &Path, ask: PauseAsk, now_unix: u64) -> (Value, i32) 
             exit::FAILED,
         );
     }
-    let out = match pause::current(state_dir, now_unix) {
+    // A pause that cannot be read is said so, never "not paused" (K2a
+    // review): the server then holds nothing, and the owner should know.
+    let pause = match pause::load(state_dir) {
+        Ok(pause) => pause.filter(|p| p.active(now_unix)),
+        Err(e) => {
+            return (
+                error(format!("could not read the pause: {e}")),
+                exit::FAILED,
+            );
+        }
+    };
+    let out = match pause {
         Some(p) => {
             json!({ "paused": true, "since_unix": p.since_unix, "until_unix": p.until_unix })
         }
@@ -1312,6 +1323,8 @@ mod tests {
         assert_eq!(out["paused"], false);
         std::fs::write(dir.join(pocketdesk_core::local::paths::PAUSE_FILE), "x").unwrap();
         assert_eq!(pause_in(&dir, PauseAsk::Resume, 1_000).1, exit::FAILED);
+        let (out, code) = pause_in(&dir, PauseAsk::Show, 1_000);
+        assert_eq!(code, exit::FAILED, "a broken pause is said so: {out}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
