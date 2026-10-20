@@ -203,8 +203,9 @@ fun SoundScreen(
         } finally {
             DesktopAudio.streamDown(generation)
         }
-        if (state != State.Down) return@LaunchedEffect
-        val retry = ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
+        if (state != State.Down && state != State.TooOld) return@LaunchedEffect
+        // A computer too old for a sound session never takes one: nothing to retry.
+        val retry = state == State.Down && ended?.let { Prefs.autoReconnect(context) && AutoReconnect.retryable(it) } == true
         val now = SystemClock.elapsedRealtime()
         if (retry && droppedAtMs == 0L) droppedAtMs = now
         val wait = if (retry) AutoReconnect.delayMs(reconnects, now - droppedAtMs) else null
