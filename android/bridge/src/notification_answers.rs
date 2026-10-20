@@ -8,7 +8,8 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use pocketdesk_core::protocol::notification_action::{
-    NOTIFICATION_ACTION, NOTIFICATION_REPLY, valid_action, valid_answer_id, valid_key, valid_reply,
+    NOTIFICATION_ACTION, NOTIFICATION_REPLY, NOTIFICATION_REQUEST, cancel_key, valid_action,
+    valid_answer_id, valid_key, valid_reply,
 };
 
 /// Answers waiting for the app, at most; the oldest go first.
@@ -32,6 +33,13 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
                 serde_json::json!({ "host": host, "port": port, "key": key, "message": message })
             }
             _ => return,
+        },
+        // A clear (L1): the notification closed on the computer.
+        NOTIFICATION_REQUEST => match cancel_key(body) {
+            Some(key) => {
+                serde_json::json!({ "host": host, "port": port, "key": key, "cancel": true })
+            }
+            None => return,
         },
         _ => return,
     };
@@ -64,6 +72,30 @@ pub(crate) fn take_json() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// L1: a clear waits with its computer, as an answer does.
+    #[tokio::test]
+    async fn a_clear_waits_with_its_computer() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            NOTIFICATION_REQUEST,
+            &serde_json::json!({ "cancel": "0|com.chat|1|null|10" }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            NOTIFICATION_REQUEST,
+            &serde_json::json!({ "request": true }),
+            "192.0.2.7",
+            1716,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([{ "host": "192.0.2.7", "port": 1716, "key": "0|com.chat|1|null|10", "cancel": true }])
+        );
+    }
+
     use super::*;
 
     #[tokio::test]
