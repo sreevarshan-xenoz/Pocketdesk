@@ -48,8 +48,11 @@ object PhoneStateRule {
         else -> 0
     }
 
-    /** A modem's level (0–4) as bars, or null for one outside it. */
-    fun mobileBars(level: Int): Int? = level.takeIf { it in 0..4 }
+    /**
+     * A modem's level as bars, or null: 0 is Android's "none or unknown"
+     * (L9 review), so it is not said as no bars.
+     */
+    fun mobileBars(level: Int): Int? = level.takeIf { it in 1..4 }
 
     /**
      * Whether a change from [last] to [now] is sent at once: the network's

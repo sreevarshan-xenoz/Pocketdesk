@@ -29,6 +29,7 @@ class PhoneStateRuleTest {
         assertNull(PhoneStateRule.wifiBars(5))
         assertEquals(2, PhoneStateRule.mobileBars(2))
         assertNull(PhoneStateRule.mobileBars(5))
+        assertNull("none or unknown", PhoneStateRule.mobileBars(0))
         assertNull(PhoneStateRule.mobileBars(-1))
     }
 
