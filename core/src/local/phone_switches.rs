@@ -136,6 +136,20 @@ mod tests {
         assert_eq!(from_body(&json!({"switches": []})), None);
     }
 
+    /// The phone's list (`SwitchReport.FEATURES`) is this one, in order.
+    #[test]
+    fn the_phones_list_is_this_one() {
+        let kotlin = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../android/app/src/main/java/dev/pocketdesk/android/status/SwitchReport.kt"
+        ))
+        .expect("SwitchReport.kt");
+        let start = kotlin.find("val FEATURES = listOf(").expect("its FEATURES");
+        let end = start + kotlin[start..].find(')').expect("its end");
+        let names: Vec<&str> = kotlin[start..end].split('"').skip(1).step_by(2).collect();
+        assert_eq!(names, FEATURES);
+    }
+
     #[test]
     fn reports_are_written_and_read_back_and_a_bad_file_is_empty() {
         let dir = std::env::temp_dir().join(format!(
