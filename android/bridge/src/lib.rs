@@ -9,6 +9,7 @@ mod api;
 mod cancel;
 mod cast;
 mod clipboard_push;
+mod commands;
 mod deck;
 mod dials;
 mod download;
@@ -1549,6 +1550,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeDia
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(dials::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The commands the computer sent this phone's automation apps (L6), with
+/// their computer, as a JSON array; taken.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeCommands(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(commands::take_json()));
     to_jstring(&mut env, json)
 }
 
