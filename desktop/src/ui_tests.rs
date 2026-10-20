@@ -815,6 +815,43 @@ fn a_notification_shows_its_app_s_icon() {
     assert!(app.query_by_label("Chat").is_some(), "the icon, named");
 }
 
+/// L1: Clear on the Notifications page asks the phone to clear it.
+#[test]
+fn the_notifications_page_clears_on_the_phone() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    pocketdesk_core::local::phone_notes::keep(
+        fixture.state(),
+        pocketdesk_core::local::phone_notes::PhoneNote {
+            device_id: PHONE.to_string(),
+            key: "0|com.chat|9|null|10".to_string(),
+            app: "Chat".to_string(),
+            title: "Ann".to_string(),
+            text: "hi".to_string(),
+            at_unix: 1,
+            actions: vec!["Mark read".to_string()],
+            reply: false,
+            messages: Vec::new(),
+        },
+    )
+    .expect("note");
+    let mut app = fixture.open(Some(Tab::Notifications));
+    app.get_by_label("Clear").click();
+    app.run_steps(3);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let cleared: Vec<_> = pocketdesk_core::local::note_clears::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|c| (c.device_id, c.key))
+        .collect();
+    assert_eq!(
+        cleared,
+        vec![(PHONE.to_string(), "0|com.chat|9|null|10".to_string())]
+    );
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]
