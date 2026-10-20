@@ -193,6 +193,8 @@ pub async fn run(config: Config) -> Result<()> {
     crate::plugins::deck::warm_up(config.deck_enabled && !config.deck.is_empty());
     // The desktop app's answers to the phones' notifications (T10c).
     tokio::spawn(crate::plugins::notification::run_answers());
+    // L1: notifications closed here, cleared on their phones.
+    tokio::spawn(crate::plugins::notification::run_clears());
     // The clipboard to connected phones as it changes (T10b), and shared
     // with the owner's other computers (2g).
     if crate::clipboard_push::configure(config.clipboard_push, config.computer_clipboard) {
