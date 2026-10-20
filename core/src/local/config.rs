@@ -174,6 +174,10 @@ pub struct Config {
     /// (roadmap T8b).
     #[serde(default = "default_true")]
     pub phone_battery_alerts: bool,
+    /// Tell me when a phone has charged to this many percent (L3): 0 is
+    /// off (the default), else 80, 90 or 100.
+    #[serde(default)]
+    pub charged_alert: u8,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -348,6 +352,7 @@ impl Default for Config {
             away_lock_minutes: default_away_lock_minutes(),
             kdeconnect_compat: true,
             phone_battery_alerts: true,
+            charged_alert: 0,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -567,6 +572,7 @@ impl Config {
         "away_lock_minutes",
         "kdeconnect_compat",
         "phone_battery_alerts",
+        "charged_alert",
         "sms_keep",
         "sms_names",
         "wake_announce",

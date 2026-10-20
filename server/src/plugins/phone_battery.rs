@@ -83,12 +83,43 @@ impl LowBatteryWatch {
     }
 }
 
+/// When a phone has charged to a level (L3): once a charge, armed again
+/// once it is unplugged or 5 % under the level.
+#[derive(Default)]
+struct ChargedWatch {
+    /// Each phone's: whether the next time at the level tells.
+    armed: std::collections::HashMap<String, bool>,
+}
+
+impl ChargedWatch {
+    /// `device`'s `report`; whether it has just charged to `level` (0: off).
+    fn report(&mut self, device: &str, report: &BatteryReport, level: u8) -> bool {
+        let armed = self.armed.entry(device.to_string()).or_insert(true);
+        if level == 0 {
+            return false;
+        }
+        let level = level.min(100);
+        if !report.charging || report.charge.saturating_add(5) <= level {
+            *armed = true;
+            return false;
+        }
+        // At or above: a report can skip a level, as it comes on a change
+        // or every five minutes.
+        if report.charge >= level && *armed {
+            *armed = false;
+            return true;
+        }
+        false
+    }
+}
+
 /// The reports kept in memory, and whether the file is behind them.
 #[derive(Default)]
 struct Reports {
     batteries: BTreeMap<String, PhoneBattery>,
     dirty: bool,
     watch: LowBatteryWatch,
+    charged: ChargedWatch,
     /// Whether the last report taken fell low (warned or not, as the
     /// setting says), for the event log.
     last_low: bool,
@@ -101,6 +132,7 @@ impl Reports {
             self.dirty = true;
         }
         self.watch.phones.remove(device);
+        self.charged.armed.remove(device);
     }
 
     /// Forget every phone not in `paired`: one removed or unpaired leaves
@@ -110,6 +142,7 @@ impl Reports {
             .batteries
             .keys()
             .chain(self.watch.phones.keys())
+            .chain(self.charged.armed.keys())
             .filter(|id| !paired.contains(*id))
             .cloned()
             .collect();
@@ -118,12 +151,14 @@ impl Reports {
         }
     }
 
-    /// Keep `report` from `device`; the warning to show, if any.
+    /// Keep `report` from `device`; the warning to show, if any: low, or
+    /// charged to `charged_at` (L3; 0 off).
     fn take(
         &mut self,
         device: &str,
         report: &BatteryReport,
         alerts: bool,
+        charged_at: u8,
         now_unix: u64,
         now: Instant,
     ) -> Option<String> {
@@ -150,10 +185,15 @@ impl Reports {
         self.dirty = true;
         let warn = self.watch.report(device, report, now);
         self.last_low = warn;
-        (alerts && warn).then(|| {
-            let short: String = device.chars().take(8).collect();
-            format!("Phone {short}: battery low ({} %)", report.charge)
-        })
+        let charged = self.charged.report(device, report, charged_at);
+        let short: String = device.chars().take(8).collect();
+        if alerts && warn {
+            Some(format!("Phone {short}: battery low ({} %)", report.charge))
+        } else if charged {
+            Some(format!("Phone {short}: charged to {} %", report.charge))
+        } else {
+            None
+        }
     }
 }
 
@@ -224,6 +264,7 @@ pub(crate) fn take_from(device: &str, body: &serde_json::Value) {
             device,
             &report,
             ALERTS.load(Ordering::Relaxed),
+            crate::events::current_config().charged_alert,
             pocketdesk_core::local::pin::now_unix(),
             Instant::now(),
         );
@@ -305,6 +346,34 @@ pub async fn run_writer() {
 
 #[cfg(test)]
 mod tests {
+    /// L3: charged to the level once a charge, at or above it, armed again
+    /// unplugged or 5 % under; nothing with it off.
+    #[test]
+    fn charged_tells_once_a_charge() {
+        let mut watch = ChargedWatch::default();
+        let r = |charge: u8, charging: bool| BatteryReport {
+            charge,
+            charging,
+            low: false,
+        };
+        assert!(!watch.report("p", &r(79, true), 80));
+        assert!(watch.report("p", &r(82, true), 80), "a level skipped");
+        assert!(!watch.report("p", &r(85, true), 80), "once");
+        assert!(!watch.report("p", &r(78, true), 80), "still within 5 %");
+        assert!(!watch.report("p", &r(81, true), 80));
+        assert!(
+            !watch.report("p", &r(81, false), 80),
+            "unplugged: armed again"
+        );
+        assert!(watch.report("p", &r(81, true), 80));
+        assert!(
+            !watch.report("p", &r(70, true), 80),
+            "5 % under: armed again"
+        );
+        assert!(watch.report("p", &r(80, true), 80));
+        assert!(!watch.report("q", &r(100, true), 0), "off");
+    }
+
     use super::*;
 
     #[test]
@@ -312,7 +381,7 @@ mod tests {
         let mut reports = Reports::default();
         let now = Instant::now();
         assert_eq!(
-            reports.take("phone-a", &report(54, true), true, 100, now),
+            reports.take("phone-a", &report(54, true), true, 0, 100, now),
             None
         );
         assert_eq!(
@@ -324,14 +393,14 @@ mod tests {
             }
         );
         assert!(reports.dirty);
-        let warning = reports.take("phone-a", &report(12, false), true, 160, now);
+        let warning = reports.take("phone-a", &report(12, false), true, 0, 160, now);
         assert_eq!(
             warning.as_deref(),
             Some("Phone phone-a: battery low (12 %)")
         );
         assert_eq!(reports.batteries["phone-a"].updated_unix, 160);
         assert_eq!(
-            reports.take("phone-b", &report(12, false), false, 160, now),
+            reports.take("phone-b", &report(12, false), false, 0, 160, now),
             None
         );
         assert_eq!(
@@ -400,11 +469,12 @@ mod tests {
                 &format!("phone-{n}"),
                 &report(50, false),
                 true,
+                0,
                 n as u64,
                 now,
             );
         }
-        reports.take("phone-new", &report(50, false), true, 1000, now);
+        reports.take("phone-new", &report(50, false), true, 0, 1000, now);
         assert_eq!(reports.batteries.len(), MAX_PHONES);
         assert!(
             reports.batteries.contains_key("phone-new"),
@@ -417,7 +487,7 @@ mod tests {
         // The new phone is warned about too.
         assert!(
             reports
-                .take("phone-new", &report(5, false), true, 1001, now)
+                .take("phone-new", &report(5, false), true, 0, 1001, now)
                 .is_some()
         );
     }
@@ -428,10 +498,10 @@ mod tests {
         let now = Instant::now();
         assert!(
             reports
-                .take("phone-a", &report(5, false), true, 1, now)
+                .take("phone-a", &report(5, false), true, 0, 1, now)
                 .is_some()
         );
-        reports.take("phone-b", &report(50, false), true, 1, now);
+        reports.take("phone-b", &report(50, false), true, 0, 1, now);
         reports.dirty = false;
         let paired: std::collections::HashSet<String> = ["phone-b".to_string()].into();
         reports.keep_only(&paired);
@@ -444,7 +514,7 @@ mod tests {
         // Paired again, it starts afresh, so a low battery is warned about.
         assert!(
             reports
-                .take("phone-a", &report(5, false), true, 2, now)
+                .take("phone-a", &report(5, false), true, 0, 2, now)
                 .is_some()
         );
     }

@@ -146,6 +146,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("share_state", "This computer's state", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
+        "charged_alert",
+        "Tell me when a phone has charged to",
+        Section::Phones,
+    ),
+    (
         "virtual_screens",
         "Phones may add a screen",
         Section::Phones,
@@ -373,6 +378,7 @@ pub fn applies_live(key: &str) -> bool {
             | "clipboard_hotkey"
             | "phone_media_controls"
             | "phone_drive"
+            | "charged_alert"
             | "away_lock_minutes"
     )
 }
@@ -861,6 +867,23 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.phone_battery_alerts,
                         "a notification when a phone runs low",
+                    );
+                });
+                row(ui, "charged_alert", |ui| {
+                    let label = |level: u8| match level {
+                        0 => "Off".to_string(),
+                        level => format!("{level} %"),
+                    };
+                    egui::ComboBox::from_id_salt("charged_alert")
+                        .selected_text(label(e.charged_alert))
+                        .show_ui(ui, |ui| {
+                            for level in [0, 80, 90, 100] {
+                                ui.selectable_value(&mut e.charged_alert, level, label(level));
+                            }
+                        });
+                    note(
+                        ui,
+                        "One notification each time a phone charging reaches it, again once it is unplugged or 5 % under. A phone that stops itself at 80 % (Android's own charging limit) never reaches 100.",
                     );
                 });
                 row(ui, "virtual_screens", |ui| {
