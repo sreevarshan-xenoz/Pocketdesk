@@ -1234,9 +1234,12 @@ impl PocketdeskApp {
                     });
                 });
                 // What else it said of itself (L9), on its own line.
+                // Only while it is reached and the report is recent (L9
+                // review): an away phone's Wi-Fi and ringer are not now's.
                 if let Some(state) = device
                     .battery
                     .as_ref()
+                    .filter(|b| model::state_is_now(b, row.place, now))
                     .and_then(|b| model::phone_state_text(&b.state))
                 {
                     ui.label(RichText::new(state).color(crate::theme::muted(ui)))

@@ -392,6 +392,20 @@ pub fn phone_state_text(
     })
 }
 
+/// How long a phone's state is shown after its report: it resends every
+/// five minutes while reached, so twice that is a report that stopped.
+pub const STATE_FRESH_SECS: u64 = 600;
+
+/// Whether the Overview shows a phone's state (L9 review): only while the
+/// phone is reached, and its report is recent.
+pub fn state_is_now(
+    battery: &pocketdesk_core::local::phone_status::PhoneBattery,
+    place: Place,
+    now_unix: u64,
+) -> bool {
+    place != Place::Away && now_unix.saturating_sub(battery.updated_unix) <= STATE_FRESH_SECS
+}
+
 /// A phone's storage in decimal units, as its own Settings says it (L9
 /// review): "128 GB", "12.3 GB", "800 MB". Free space comes rounded down
 /// to 100 MB, so 0 is "under 100 MB".
@@ -895,6 +909,26 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_phones_state_is_shown_only_while_it_is_reached_and_recent() {
+        use super::{Place, STATE_FRESH_SECS, state_is_now};
+        let battery = pocketdesk_core::local::phone_status::PhoneBattery {
+            updated_unix: 1000,
+            ..Default::default()
+        };
+        assert!(state_is_now(
+            &battery,
+            Place::Linked,
+            1000 + STATE_FRESH_SECS
+        ));
+        assert!(state_is_now(&battery, Place::Session, 1000));
+        assert!(!state_is_now(&battery, Place::Away, 1000), "away");
+        assert!(
+            !state_is_now(&battery, Place::Linked, 1001 + STATE_FRESH_SECS),
+            "stopped reporting"
+        );
+    }
+
     #[test]
     fn a_phones_state_reads_as_one_line_of_what_it_said() {
         use pocketdesk_core::local::phone_status::{Network, PhoneState, Ringer};
