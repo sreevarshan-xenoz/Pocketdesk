@@ -133,7 +133,11 @@ pub async fn run_dials() {
         let clients = crate::state::clone_clients().await;
         let mut still = Vec::new();
         for call in waiting.drain(..) {
-            if !crate::plugins::pair::permits(&call.device_id, DIAL) {
+            // Paired now, not only allowed by default (L4 review, as Ring is).
+            if !crate::plugins::pair::allows(
+                &call.device_id,
+                pocketdesk_core::protocol::permissions::Capability::Dial,
+            ) {
                 tracing::info!("A call was not sent: Call numbers from here is off for the phone");
                 continue;
             }
