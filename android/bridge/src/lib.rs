@@ -629,6 +629,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastCon
     RUNTIME.block_on(cast::config(width, height))
 }
 
+/// One Opus packet of the phone's sound with its cast (K5): 0 queued, 1
+/// dropped (the link is behind, or a packet out of bounds), 2 no cast.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCastAudio(
+    env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    packet: jni::objects::JByteArray<'_>,
+) -> jint {
+    match env.convert_byte_array(&packet) {
+        Ok(opus) => cast::audio(&opus),
+        Err(_) => cast::FULL,
+    }
+}
+
 /// One access unit of the cast (T10k), `size` bytes at `offset` of a direct
 /// buffer (MediaCodec's output), copied before this returns: 0 queued, 1
 /// dropped as the link is behind (send a keyframe), 2 no cast session.

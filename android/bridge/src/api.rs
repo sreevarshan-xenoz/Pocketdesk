@@ -2957,8 +2957,21 @@ fn sound_grants(flags: Option<&pocketdesk_core::streaming::RemoteFlags>) -> Stri
 /// session is anything else, so a cast never takes a remote or a screen
 /// session the person opened since for its own.
 pub fn cast_state() -> String {
-    let state = state_name(crate::session::REMOTE.lock().unwrap().as_ref(), true);
-    format!("{{\"state\":\"{state}\"}}")
+    let remote = crate::session::REMOTE.lock().unwrap();
+    let state = state_name(remote.as_ref(), true);
+    // K5: whether the computer takes the phone's sound with it.
+    let sound = remote.as_ref().is_some_and(cast_sound_taken);
+    format!("{{\"state\":\"{state}\",\"sound\":{sound}}}")
+}
+
+/// Whether a cast's computer said it plays the phone's sound (K5).
+fn cast_sound_taken(remote: &pocketdesk_core::streaming::RemoteFlags) -> bool {
+    remote.cast
+        && remote
+            .screen_features
+            .load(std::sync::atomic::Ordering::Acquire)
+            & pocketdesk_core::streaming::client::REMOTE_FEATURE_PHONE_SOUND
+            != 0
 }
 
 /// The state of an input-only session's `flags`; with `cast`, only of a cast.
@@ -3030,7 +3043,34 @@ mod laser_tests {
 
 #[cfg(test)]
 mod cast_state_tests {
-    use super::{sound_grants, state_name};
+    use super::{cast_sound_taken, sound_grants, state_name};
+
+    /// K5: a cast takes its sound when its computer said so, and only a cast.
+    #[test]
+    fn a_cast_s_sound_is_taken_when_its_computer_said_so() {
+        use pocketdesk_core::streaming::client::{
+            REMOTE_FEATURE_PHONE_SOUND, REMOTE_FEATURES_SAID,
+        };
+        let flags = |cast: bool, byte: u8| {
+            let flags = RemoteFlags {
+                input_only: true,
+                cast,
+                ..Default::default()
+            };
+            flags
+                .screen_features
+                .store(byte, std::sync::atomic::Ordering::Release);
+            flags
+        };
+        let said = REMOTE_FEATURES_SAID | REMOTE_FEATURE_PHONE_SOUND;
+        assert!(cast_sound_taken(&flags(true, said)));
+        assert!(
+            !cast_sound_taken(&flags(true, REMOTE_FEATURES_SAID)),
+            "not taken"
+        );
+        assert!(!cast_sound_taken(&flags(true, 0)), "a computer before K5");
+        assert!(!cast_sound_taken(&flags(false, said)), "a remote");
+    }
     use pocketdesk_core::streaming::{
         RemoteFlags, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID,
     };
