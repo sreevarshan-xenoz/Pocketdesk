@@ -24,6 +24,19 @@ pub const SEAM: &str = "POCKETDESK_PHONE_AUDIO_FILE";
 /// How long a player that would not open waits before it is tried again.
 const OPEN_RETRY: Duration = Duration::from_secs(5);
 
+/// The most sound kept queued at the output: 80 ms. Sound past it is
+/// dropped a packet at a time (K5 review: a burst after a stall had kept
+/// the output 200 ms behind for the rest of the cast, and a full buffer cut
+/// packets short, which clicked).
+pub const TARGET_FRAMES: u32 = RATE / 1000 * 80;
+
+/// Whether a packet of `frames` plays, with `queued` frames waiting at the
+/// output and `room` free: whole, and only while the queue is under its
+/// target.
+pub fn plays(queued: u32, frames: u32, room: u32) -> bool {
+    queued < TARGET_FRAMES && frames <= room
+}
+
 /// Something that plays decoded, interleaved stereo samples.
 trait Sink {
     fn play(&mut self, samples: &[f32]) -> Result<()>;
@@ -189,14 +202,13 @@ impl Speakers {
 
 #[cfg(windows)]
 impl Sink for Speakers {
-    /// Late sound is dropped where the buffer is full: a gap is better
-    /// than a growing delay.
+    /// Late sound is dropped a whole packet at a time ([`plays`]): a gap
+    /// is better than a growing delay.
     fn play(&mut self, samples: &[f32]) -> Result<()> {
         let channels = usize::from(CHANNELS);
         let padding = unsafe { self.client.GetCurrentPadding() }?;
-        let room = (self.buffer_frames - padding) as usize;
-        let frames = (samples.len() / channels).min(room);
-        if frames == 0 {
+        let frames = samples.len() / channels;
+        if frames == 0 || !plays(padding, frames as u32, self.buffer_frames - padding) {
             return Ok(());
         }
         let target = unsafe { self.render.GetBuffer(frames as u32) }? as *mut f32;
@@ -266,9 +278,11 @@ fn play_blocking(mut rx: Receiver<Vec<u8>>, seam: Option<PathBuf>) {
         if let Some(s) = sink.as_mut()
             && let Err(e) = s.play(&samples)
         {
+            // Opened again at once (K5 review: an output switched or
+            // unplugged had cost five seconds); a failed open then waits.
             warn!("The phone's sound stopped playing ({e:#}); opening the output again");
             sink = None;
-            retry_after = Some(Instant::now() + OPEN_RETRY);
+            retry_after = None;
         }
     }
     if sink.is_some() {
@@ -286,6 +300,15 @@ pub async fn run(rx: Receiver<Vec<u8>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K5 review: a packet plays whole, and only under the target.
+    #[test]
+    fn sound_past_the_target_is_dropped_whole() {
+        assert!(plays(0, 960, 9600));
+        assert!(plays(TARGET_FRAMES - 1, 960, 9600));
+        assert!(!plays(TARGET_FRAMES, 960, 9600), "behind: dropped");
+        assert!(!plays(0, 960, 959), "never cut short");
+    }
 
     /// K5: the seam's header is a 48 kHz stereo 16-bit WAV's.
     #[test]
