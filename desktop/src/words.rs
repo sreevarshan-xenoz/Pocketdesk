@@ -38,9 +38,32 @@ pub fn human_size(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
+/// Every word of `query`, case ignored, is in one of `texts` (J4): the
+/// pages' search boxes. Nothing typed holds everywhere.
+pub fn holds_all(query: &str, texts: &[&str]) -> bool {
+    let texts: Vec<String> = texts.iter().map(|t| t.to_lowercase()).collect();
+    query.split_whitespace().all(|word| {
+        let word = word.to_lowercase();
+        texts.iter().any(|t| t.contains(word.as_str()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ago;
+    use super::{ago, holds_all};
+
+    /// J4: a search's words, each anywhere in any of the texts.
+    #[test]
+    fn a_search_holds_every_word_in_any_text() {
+        assert!(holds_all("", &["anything"]));
+        assert!(holds_all("   ", &[]), "only spaces is nothing typed");
+        assert!(holds_all("PIXEL file", &["From Pixel 8", "a file arrived"]));
+        assert!(!holds_all(
+            "pixel photo",
+            &["From Pixel 8", "a file arrived"]
+        ));
+        assert!(!holds_all("x", &[]));
+    }
 
     #[test]
     fn an_age_reads_the_same_on_every_page() {

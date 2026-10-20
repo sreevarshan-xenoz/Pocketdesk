@@ -535,6 +535,50 @@ fn the_sessions_page_lists_the_recent_sessions() {
     );
 }
 
+/// J4: the Clipboard page's Search narrows the texts, and says when it
+/// finds none, with Clear search.
+#[test]
+fn the_clipboard_page_searches_its_texts() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "clipboard_history = 20
+",
+    )
+    .expect("config");
+    use pocketdesk_core::local::clip_history::{ClipEntry, record};
+    record(
+        fixture.state(),
+        ClipEntry::new("12 Main Street", Some(PHONE), 100),
+        20,
+    )
+    .expect("kept");
+    record(
+        fixture.state(),
+        ClipEntry::new("the meeting link", None, 200),
+        20,
+    )
+    .expect("kept");
+    let mut app = fixture.open(Some(Tab::Clipboard));
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text("test phone");
+    app.run_steps(3);
+    assert!(app.query_by_label("12 Main Street").is_some());
+    assert!(app.query_by_label("the meeting link").is_none());
+
+    app.get_by_role(egui::accesskit::Role::TextInput).focus();
+    app.get_by_role(egui::accesskit::Role::TextInput)
+        .type_text(" nowhere");
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("No kept text holds").is_some());
+    app.get_by_label("Clear search").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("the meeting link").is_some());
+    assert!(app.query_by_label("12 Main Street").is_some());
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

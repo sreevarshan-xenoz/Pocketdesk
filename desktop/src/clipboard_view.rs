@@ -67,6 +67,15 @@ pub fn targets(devices: &[Device]) -> Vec<&Device> {
         .collect()
 }
 
+/// The texts shown, newest first as kept: those holding every word of
+/// `search` in the text or where it came from (J4).
+pub fn shown<'a>(entries: &'a [ClipEntry], search: &str, devices: &[Device]) -> Vec<&'a ClipEntry> {
+    entries
+        .iter()
+        .filter(|e| crate::words::holds_all(search, &[&e.text, &origin(e, devices)]))
+        .collect()
+}
+
 #[derive(Default)]
 pub struct ClipboardView {
     entries: Vec<ClipEntry>,
@@ -74,6 +83,8 @@ pub struct ClipboardView {
     /// Clear's question asked, when: it goes after [`CONFIRM`] unanswered
     /// (D3 review: an armed Clear had stayed armed for good).
     confirm_clear: Option<Instant>,
+    /// What the Search box holds (J4).
+    search: String,
 }
 
 impl ClipboardView {
@@ -147,9 +158,26 @@ impl ClipboardView {
             }
             return action;
         }
+        crate::search_box::show(ui, &mut self.search);
+        ui.add_space(4.0);
+        let shown = shown(&self.entries, &self.search, devices);
+        let query = self.search.trim().to_string();
+        if shown.is_empty() && !query.is_empty() {
+            // J4: a search that finds nothing says so, with the way back.
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(format!("No kept text holds \"{query}\"."))
+                        .color(crate::theme::muted(ui)),
+                );
+                if ui.button("Clear search").clicked() {
+                    self.search.clear();
+                }
+            });
+            return action;
+        }
         let targets = targets(devices);
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for entry in &self.entries {
+            for entry in shown {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let mut head = format!(
@@ -224,6 +252,36 @@ mod tests {
         let shown = preview(&entry(&long));
         assert!(shown.ends_with('…'));
         assert_eq!(shown.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    /// J4: Search finds a text by its words or where it came from.
+    #[test]
+    fn a_search_finds_a_text_or_its_origin() {
+        let devices = [Device {
+            id: "phone-a".to_string(),
+            name: Some("Pixel 8".to_string()),
+            ..Default::default()
+        }];
+        let entries = [
+            ClipEntry::new("12 Main Street", Some("phone-a"), 2),
+            ClipEntry::new("the meeting link", None, 1),
+        ];
+        let texts =
+            |found: Vec<&ClipEntry>| found.iter().map(|e| e.text.clone()).collect::<Vec<_>>();
+        assert_eq!(texts(shown(&entries, "", &devices)).len(), 2);
+        assert_eq!(
+            texts(shown(&entries, "main STREET", &devices)),
+            ["12 Main Street"]
+        );
+        assert_eq!(
+            texts(shown(&entries, "pixel", &devices)),
+            ["12 Main Street"]
+        );
+        assert_eq!(
+            texts(shown(&entries, "this computer link", &devices)),
+            ["the meeting link"]
+        );
+        assert!(shown(&entries, "nowhere", &devices).is_empty());
     }
 
     #[test]
