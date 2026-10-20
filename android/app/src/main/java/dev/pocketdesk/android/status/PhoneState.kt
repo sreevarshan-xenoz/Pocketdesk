@@ -13,11 +13,12 @@ import android.util.Log
 
 /**
  * The phone's state now (L9), as [PhoneStateRule] says it: each part read
- * on its own, and left out when Android will not say.
+ * on its own, and left out when Android will not say. Without [full], only
+ * the network's kind and the ringer, which decide a send.
  */
-internal fun readPhoneState(context: Context): PhoneStateRule.State {
-    val storage = runCatching { storage(context) }.getOrNull()
-    val (network, signal) = runCatching { network(context) }
+internal fun readPhoneState(context: Context, full: Boolean = true): PhoneStateRule.State {
+    val storage = if (full) runCatching { storage(context) }.getOrNull() else null
+    val (network, signal) = runCatching { network(context, full) }
         .onFailure { Log.d("PhoneState", "No network read: ${it.message}") }
         .getOrDefault(null to null)
     val ringer = runCatching {
@@ -53,22 +54,22 @@ private fun storage(context: Context): Pair<Long, Long>? {
     return PhoneStateRule.storage(free, total)
 }
 
-/** The default network's kind and bars: never its name. */
-private fun network(context: Context): Pair<String?, Int?> {
+/** The default network's kind and, with [bars], its bars: never its name. */
+private fun network(context: Context, bars: Boolean): Pair<String?, Int?> {
     val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null to null
     val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
         ?: return PhoneStateRule.NONE to null
     return when {
         caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> {
-            val bars = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val wifiBars = if (bars && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 PhoneStateRule.wifiBars(caps.signalStrength)
             } else {
                 null
             }
-            PhoneStateRule.WIFI to bars
+            PhoneStateRule.WIFI to wifiBars
         }
         caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> {
-            val bars = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val mobileBars = if (bars && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 // Needs no permission; a phone that refuses says no bars.
                 runCatching {
                     context.getSystemService(TelephonyManager::class.java)?.signalStrength?.level
@@ -76,7 +77,7 @@ private fun network(context: Context): Pair<String?, Int?> {
             } else {
                 null
             }
-            PhoneStateRule.MOBILE to bars
+            PhoneStateRule.MOBILE to mobileBars
         }
         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> PhoneStateRule.ETHERNET to null
         // A VPN alone, Bluetooth or USB tethering: none of the three.
