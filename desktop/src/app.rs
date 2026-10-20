@@ -169,6 +169,8 @@ pub struct PocketdeskApp {
     /// Loaded when the Settings tab opens; an unreadable file is shown, not
     /// overwritten.
     settings: Option<Result<SettingsForm, String>>,
+    /// What "Find a setting" holds (J2).
+    settings_query: String,
     /// A start or restart running off the UI thread.
     job: Option<(&'static str, std::thread::JoinHandle<Result<(), String>>)>,
     /// A setting that runs a program (the file manager's menu, the
@@ -246,6 +248,7 @@ impl PocketdeskApp {
             started_unix: now_unix(),
             pair: PairView::default(),
             settings: None,
+            settings_query: String::new(),
             job: None,
             setting_job: None,
             confirm_restart: false,
@@ -1611,6 +1614,35 @@ impl PocketdeskApp {
                 return;
             }
         };
+        // J2: the rows below are held to the words in the box.
+        let search = ui.add(
+            egui::TextEdit::singleline(&mut self.settings_query)
+                .hint_text("Find a setting")
+                .desired_width(260.0),
+        );
+        if ui.input_mut(|i| i.consume_shortcut(&crate::keys::FIND)) {
+            search.request_focus();
+            // The page may be scrolled down past the box (J2 review).
+            search.scroll_to_me(Some(egui::Align::TOP));
+        }
+        // Esc empties a search, and is taken, so it does not also cancel a
+        // question drawn later in the frame (J2 review).
+        if search.lost_focus() && !self.settings_query.is_empty() && crate::keys::escaped(ui) {
+            self.settings_query.clear();
+        }
+        let query = self.settings_query.trim().to_string();
+        if !query.is_empty()
+            && !crate::settings_view::Section::ALL
+                .into_iter()
+                .any(|s| crate::settings_view::section_shown(&query, s))
+        {
+            ui.label(
+                RichText::new(format!("No setting matches \"{query}\"."))
+                    .color(crate::theme::muted(ui)),
+            );
+        }
+        ui.add_space(8.0);
+        crate::settings_view::set_search(ui.ctx(), &query);
         if form.restart_needed() {
             ui.label(
                 RichText::new(format!(
@@ -1641,25 +1673,42 @@ impl PocketdeskApp {
             } else {
                 None
             };
+            // A held section is drawn whole whatever is searched (J2
+            // review: a problem's field, or KDE's Allow, had been hidden).
+            let section_query = if held.is_some() { "" } else { query.as_str() };
+            if !crate::settings_view::section_shown(section_query, section) {
+                continue;
+            }
+            crate::settings_view::set_search(ui.ctx(), section_query);
             let mut header =
                 egui::CollapsingHeader::new(section_heading(ui, section, held.as_deref()))
                     .id_salt(section.title())
                     .default_open(section.opens());
-            if held.is_some() {
+            // A search opens every section it finds something in.
+            if held.is_some() || !query.is_empty() {
                 header = header.open(Some(true));
             }
+            let extra = |name| crate::settings_view::extra_shown(section_query, section, name);
             header.show(ui, |ui| {
                 form.show_section(ui, section);
                 match section {
                     crate::settings_view::Section::Phones => {
-                        self.send_menu_setting(ui);
-                        self.browser_setting(ui);
+                        if extra(crate::settings_view::EXTRA_SEND_MENU) {
+                            self.send_menu_setting(ui);
+                        }
+                        if extra(crate::settings_view::EXTRA_BROWSER) {
+                            self.browser_setting(ui);
+                        }
                     }
-                    crate::settings_view::Section::Computers => {
+                    crate::settings_view::Section::Computers
+                        if extra(crate::settings_view::EXTRA_COMPUTERS) =>
+                    {
                         self.computers
                             .show(ui, &self.state_dir, self.snapshot.running, now_unix());
                     }
-                    crate::settings_view::Section::KdeConnect => {
+                    crate::settings_view::Section::KdeConnect
+                        if extra(crate::settings_view::EXTRA_KDE) =>
+                    {
                         self.kdeconnect.show(
                             ui,
                             &self.state_dir,
@@ -1672,6 +1721,7 @@ impl PocketdeskApp {
                 ui.add_space(8.0);
             });
         }
+        crate::settings_view::set_search(ui.ctx(), "");
         self.settings = Some(Ok(form));
     }
 

@@ -424,6 +424,74 @@ fn an_empty_log_is_a_log() {
     assert!(app.query_by_label("0 of the last 0 lines").is_some());
 }
 
+/// J2: "Find a setting" shows the rows it finds, their sections open, and
+/// says when it finds none.
+#[test]
+fn settings_search_shows_what_it_finds() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    assert!(app.query_by_label("Control port (TCP)").is_some());
+    assert!(
+        app.query_by_label("Outside wake port").is_none(),
+        "Wake starts closed"
+    );
+    find(&app).focus();
+    find(&app).type_text("wake port");
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("Outside wake port").is_some(),
+        "found, its section opened"
+    );
+    assert!(app.query_by_label("Control port (TCP)").is_none());
+    assert!(app.query_by_label("Wake from the phone").is_none());
+
+    find(&app).focus();
+    find(&app).type_text(" zzzz");
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("No setting matches").is_some());
+    assert!(app.query_by_label("Outside wake port").is_none());
+
+    // Esc in the box empties it: every section back.
+    find(&app).focus();
+    app.run();
+    app.key_press(egui::Key::Escape);
+    app.run_steps(3);
+    assert!(app.query_by_label_contains("No setting matches").is_none());
+    assert!(app.query_by_label("Control port (TCP)").is_some());
+}
+
+/// J2 review: a section held open by a problem stays, whole, under a
+/// search that does not find it, so the field the save bar names is there.
+#[test]
+fn settings_search_keeps_a_section_with_a_problem() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "streaming_port = 5000
+wake_port = 5000
+",
+    )
+    .expect("config");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("laser");
+    app.run_steps(3);
+    assert!(app.query_by_label("Laser pointer from phones").is_some());
+    assert!(app.query_by_label("Outside wake port").is_some());
+    assert!(
+        app.query_by_label("Wake from the phone").is_some(),
+        "the held section whole"
+    );
+    assert!(app.query_by_label("Control port (TCP)").is_none());
+}
+
+/// The "Find a setting" box: Settings' first text box.
+fn find<'a>(app: &'a Harness<'static, PocketdeskApp>) -> egui_kittest::Node<'a> {
+    app.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("the search box")
+}
+
 /// D3: the Clipboard page says the history is off, and with it on lists
 /// the texts that crossed, each with Copy and Send to….
 #[test]

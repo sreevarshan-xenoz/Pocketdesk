@@ -18,6 +18,10 @@ pub fn enter_in(ui: &egui::Ui, field: &egui::Response) -> bool {
     field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
 }
 
+/// Ctrl+F: the page's search box (J2).
+pub const FIND: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::F);
+
 /// Esc pressed: an open question's Cancel. Taken, so one press answers one
 /// question.
 pub fn escaped(ui: &egui::Ui) -> bool {
