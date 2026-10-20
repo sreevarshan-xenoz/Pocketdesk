@@ -99,7 +99,7 @@ pub fn command(button: Button, playing: bool) -> Option<&'static str> {
 }
 
 #[cfg(windows)]
-pub use windows_player::{Player, Watch};
+pub use windows_player::{Player, Watch, prepare};
 
 #[cfg(windows)]
 mod windows_player {
@@ -131,6 +131,16 @@ mod windows_player {
     /// toasts, so the flyout says Pocketdesk, not the program's file.
     const AUMID: windows::core::PCWSTR = w!("Pocketdesk.Server");
 
+    /// Ready this thread and process for the media controls, before any
+    /// window (K7 review): WinRT on the tray's thread, and the name the
+    /// flyout shows. Call once, first.
+    pub fn prepare() {
+        // One already set up makes this a harmless error.
+        let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
+        let _ =
+            unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(AUMID) };
+    }
+
     /// The phone shown, and whether it plays, for a press.
     type Target = Arc<Mutex<Option<(String, bool)>>>;
 
@@ -159,12 +169,6 @@ mod windows_player {
         /// Register with the media controls; a press goes to the shown
         /// phone through `state_dir`'s `phone_media_out/`.
         pub fn new(state_dir: PathBuf) -> windows::core::Result<Self> {
-            // The thread may never have touched WinRT; one already set up
-            // makes this a harmless error.
-            let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
-            let _ = unsafe {
-                windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(AUMID)
-            };
             let instance: HINSTANCE = unsafe { GetModuleHandleW(None) }?.into();
             let class = WNDCLASSW {
                 lpfnWndProc: Some(proc),
@@ -271,7 +275,13 @@ mod windows_player {
                 Some((_, media)) => {
                     updater.SetType(MediaPlaybackType::Music)?;
                     let music = updater.MusicProperties()?;
-                    music.SetTitle(&HSTRING::from(media.title.as_str()))?;
+                    // A player that names no song is named by its app.
+                    let title = if media.title.is_empty() {
+                        &media.app
+                    } else {
+                        &media.title
+                    };
+                    music.SetTitle(&HSTRING::from(title.as_str()))?;
                     music.SetArtist(&HSTRING::from(media.artist.as_str()))?;
                     updater.Update()?;
                     self.smtc.SetIsPlayEnabled(media.can_play_pause)?;
@@ -536,6 +546,7 @@ mod tests {
         }
         let dir = std::env::temp_dir().join(format!("pd-k7-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        prepare();
         let mut player = Player::new(dir.clone()).expect("a player");
         let mut phones = BTreeMap::new();
         phones.insert("probe".to_string(), state("K7 probe song", true, 1));

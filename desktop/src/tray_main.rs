@@ -23,6 +23,9 @@ fn main() {
         // Another tray program holds the tray.
         return;
     };
+    // K7: before any window, as Windows asks.
+    #[cfg(windows)]
+    pocketdesk_desktop::phone_player::prepare();
     let state_dir = match pocketdesk_core::local::paths::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
