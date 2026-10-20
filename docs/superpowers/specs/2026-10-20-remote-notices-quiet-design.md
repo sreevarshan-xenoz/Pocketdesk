@@ -20,3 +20,14 @@ A screen session notices a dead computer in 10 s: frames stop, and its stall wat
 
 - **Unit:** `Quiet` (a rising count resets it, a still one ages, a new connection's lower count starts over) and `RemoteSession.silent` at its edge.
 - **On the OPPO (checklist §73):** the throwaway server killed under a remote. The remote's card in about 12 s, back by itself once the server is up, the timer still counting.
+
+## As built
+
+- A remote that finds its link quiet closes the session itself before reconnecting. The bridge held the dead connection until the transport timed it out, so the first build's reconnect took it for a live session ("Session already active … skipping connect") and the remote never came back. Found on the OPPO.
+- Checked there after that fix: the throwaway server killed under a remote with a talk timer. The remote noticed at 14 s and was ready again 14 s after the server returned. The timer counted through: 9:48 at the kill, 9:14 when it was back.
+
+## Review
+
+A fresh review found 0 Critical, 0 Important and 2 Minor issues.
+- **Fixed:** the tracker kept the last session's count and time. A new session whose count matched could be taken as quiet at once. It is now reset as a session connects and as it stops.
+- **Left as is:** the 12 s margin on a lossy or relayed path. Any datagram received (acks, retransmits) resets it, so a lost report does not trip it, and a 12 s outage is meant to.
