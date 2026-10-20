@@ -136,7 +136,7 @@ pub struct Config {
     #[serde(default)]
     pub clipboard_history: u32,
     /// A key that sends this computer's clipboard to a phone from anywhere
-    /// (H3): "ctrl+alt+p" and the like, through the tray program on
+    /// (H3): "win+shift+c" and the like, through the tray program on
     /// Windows. Empty (the default) is off.
     #[serde(default)]
     pub clipboard_hotkey: String,
