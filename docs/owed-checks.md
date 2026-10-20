@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-699 open items.
+701 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 405 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 407 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 53 |
 | A phone with a SIM | 22 |
@@ -837,6 +837,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - One phone linked: a dropped file goes to it at once, one notice.
 - A second drop while it asks joins the files; a folder reads as a folder.
 - Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left.
+
+**148. A sound session notices a computer gone quiet (J6)**
+
+- Nothing playing, the screen off, an hour: never ends on its own.
+- Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
