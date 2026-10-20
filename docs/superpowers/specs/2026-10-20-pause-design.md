@@ -18,11 +18,14 @@
   - texts: kept on the Messages page, not shown;
   - links from phones: listed on Activity, not opened;
   - a phone's ring for the computer (the siren): not sounded.
+  - the other pop-ups a phone causes: a received file's notification (the file is still saved and on the Files page), a phone's low-battery warning (its battery is still on the Overview), and a KDE device's ping.
 - **What it does not hold:**
   - sessions, which the owner chose to open;
   - files;
   - the clipboard;
   - anything the owner does from the computer.
+  - the deck's presses (F1), which the owner makes from the phone: a deck link still opens;
+  - hooks and Home Assistant, which see every event as before: they are the owner's own setup.
 - **It shows that it is paused:**
   - the tray's menu leads with "Paused, 42 min left" (or "until resumed") and Resume;
   - the Overview says what is held and has Resume.
