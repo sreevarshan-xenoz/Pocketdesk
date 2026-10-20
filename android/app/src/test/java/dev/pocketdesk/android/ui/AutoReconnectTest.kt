@@ -71,6 +71,17 @@ class AutoReconnectTest {
         assertTrue(errorSuggestsRepair("wrong PIN"))
     }
 
+    /** I1: one rule for why a sound session or a remote ended. */
+    @Test
+    fun `a session ends by the computer's words, a silent link, or no answer`() {
+        assertEquals("stream closed by the desktop: kicked", AutoReconnect.endedBy("kicked", wasWaiting = false))
+        assertEquals("stream closed by the desktop: kicked", AutoReconnect.endedBy("kicked", wasWaiting = true))
+        assertEquals("stalled", AutoReconnect.endedBy(null, wasWaiting = false))
+        assertNull("the owner never answered: theirs to decide again", AutoReconnect.endedBy(null, wasWaiting = true))
+        assertFalse(AutoReconnect.retryable(AutoReconnect.endedBy("kicked by user", false)!!))
+        assertTrue(AutoReconnect.retryable(AutoReconnect.endedBy(null, false)!!))
+    }
+
     @Test
     fun `retries back off, then stop after ten minutes`() {
         assertEquals(2_000L, AutoReconnect.delayMs(attempt = 0, elapsedMs = 0))

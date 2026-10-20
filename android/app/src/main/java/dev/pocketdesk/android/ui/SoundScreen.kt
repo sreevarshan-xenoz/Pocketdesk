@@ -194,14 +194,7 @@ fun SoundScreen(
                     }
                     if (state == State.Down || state == State.TooOld) {
                         reason = closed?.let { context.closeReasonText(it) }
-                        ended =
-                            when {
-                                closed != null -> "stream closed by the desktop: $closed"
-                                // The owner never answered: theirs to decide again.
-                                wasWaiting -> null
-                                // It went away under us.
-                                else -> "stalled"
-                            }
+                        ended = AutoReconnect.endedBy(closed, wasWaiting)
                         return@attempt
                     }
                     delay(POLL_MS)

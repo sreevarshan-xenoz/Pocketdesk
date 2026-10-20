@@ -36,6 +36,19 @@ object AutoReconnect {
     }
 
     /**
+     * Why a sound session or a remote ended, in the words [retryable] reads:
+     * the computer's close reason [closed] when it gave one, a silent link
+     * otherwise; null when it ended while the owner was still to answer
+     * ([wasWaiting]), which is theirs to decide again (I1).
+     */
+    fun endedBy(closed: String?, wasWaiting: Boolean): String? =
+        when {
+            closed != null -> "stream $DESKTOP_CLOSED $closed"
+            wasWaiting -> null
+            else -> "stalled"
+        }
+
+    /**
      * How long to wait before attempt [attempt] (0-based), [elapsedMs] after
      * the link dropped; null once it is time to stop.
      */
