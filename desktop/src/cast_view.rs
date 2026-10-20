@@ -836,6 +836,25 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
         });
 }
 
+/// A recording ended (its ffmpeg has finished the file): the window says
+/// where it went, if it holds anything, and why it stopped (L5 review: a
+/// recording's state had outlived it, and named files never written).
+fn end_recording(shared: &Mutex<State>, why: Option<&str>) {
+    let mut state = lock(shared);
+    state.record_want = false;
+    let Some((path, _)) = state.recording.take() else {
+        return;
+    };
+    let kept = std::fs::metadata(&path).is_ok_and(|m| m.len() > 0);
+    let note = match (kept, why) {
+        (true, None) => format!("Recorded {}.", path.display()),
+        (true, Some(why)) => format!("Recorded {}; {why}.", path.display()),
+        (false, Some(why)) => format!("Nothing recorded: {why}."),
+        (false, None) => "Nothing recorded: no picture came.".to_string(),
+    };
+    state.saved_note = Some((note, std::time::Instant::now()));
+}
+
 /// Save the picture shown as a PNG in Pictures\\Pocketdesk, and copy it
 /// (L5); the file is written off the window's thread.
 fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
@@ -901,6 +920,9 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         // An error is the relay gone or the window closed: the file says
         // which on the next look.
         let _ = view(&file, shared, ctx);
+        // A recording ends with its cast, however it ended (L5 review).
+        end_recording(shared, Some("the phone's screen stopped"));
+        ctx.request_repaint_of(viewport_id());
         let mut state = lock(shared);
         state.stream = None;
         state.writer = None;
@@ -909,6 +931,7 @@ fn watch(state_dir: &std::path::Path, shared: &Arc<Mutex<State>>, ctx: &egui::Co
         state.size = None;
         state.texture = None;
         state.picture = None;
+        state.shown = None;
     }
 }
 
@@ -950,8 +973,11 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     let mut recorder: Option<Recorder> = None;
     loop {
         let message = Message::read(&mut reader)?;
-        // L5: the owner's Record and Stop, between two messages.
-        let want = lock(shared).record_want;
+        // L5: the owner's Record and Stop, between frames or heartbeats; a
+        // config (a reconnect, the phone turned) starts a new stream first.
+        let want = lock(shared).record_want
+            && matches!(message, Message::Frame { .. } | Message::Heartbeat);
+        let stop = !lock(shared).record_want;
         if want && recorder.is_none() {
             let dir = user_folder("Videos");
             let path = free_name(&dir, &format!("Phone screen {}", stamp(now_unix())), "mkv");
@@ -966,21 +992,17 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
                 Err(e) => {
                     state.record_want = false;
-                    state.saved_note = Some((
-                        format!("Not recording: {e} (it needs ffmpeg)."),
-                        std::time::Instant::now(),
-                    ));
+                    let why = if e.kind() == io::ErrorKind::NotFound {
+                        format!("Not recording: {e} (it needs ffmpeg).")
+                    } else {
+                        format!("Not recording: {e}.")
+                    };
+                    state.saved_note = Some((why, std::time::Instant::now()));
                 }
             }
-        } else if !want && recorder.is_some() {
+        } else if stop && recorder.is_some() {
             recorder = None;
-            let mut state = lock(shared);
-            if let Some((path, _)) = state.recording.take() {
-                state.saved_note = Some((
-                    format!("Recorded {}.", path.display()),
-                    std::time::Instant::now(),
-                ));
-            }
+            end_recording(shared, None);
             ctx.request_repaint_of(viewport_id());
         }
         match message {
@@ -989,17 +1011,7 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 gate = KeyGate::default();
                 // A new size is a new stream: the recording so far is kept.
                 if recorder.take().is_some() {
-                    let mut state = lock(shared);
-                    state.record_want = false;
-                    if let Some((path, _)) = state.recording.take() {
-                        state.saved_note = Some((
-                            format!(
-                                "Recorded {}; it stopped as the phone turned.",
-                                path.display()
-                            ),
-                            std::time::Instant::now(),
-                        ));
-                    }
+                    end_recording(shared, Some("it stopped as the phone's screen changed"));
                 }
                 let started = Decoder::start(width, height, publisher(shared, ctx));
                 let mut state = lock(shared);
@@ -1036,13 +1048,7 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     && let Err(e) = r.feed(keyframe, &data)
                 {
                     recorder = None;
-                    let mut state = lock(shared);
-                    state.record_want = false;
-                    state.recording = None;
-                    state.saved_note = Some((
-                        format!("The recording stopped ({e})."),
-                        std::time::Instant::now(),
-                    ));
+                    end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
