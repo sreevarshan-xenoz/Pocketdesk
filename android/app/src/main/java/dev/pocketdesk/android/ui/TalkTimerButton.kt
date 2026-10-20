@@ -7,6 +7,8 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -99,7 +101,8 @@ fun TalkTimerButton(state: TalkTimerState) {
             onDismissRequest = { choosing = false },
             title = { Text(stringResource(R.string.talk_timer_title)) },
             text = {
-                Column {
+                // Scrolls in landscape and at large text (H2 review).
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     TalkTimer.MINUTES.forEach { minutes ->
                         TextButton(onClick = {
                             Prefs.setTalkTimerMinutes(context, minutes)
