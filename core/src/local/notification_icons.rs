@@ -10,17 +10,24 @@ use sha2::{Digest, Sha256};
 
 use super::paths::NOTIFICATION_ICONS_DIR;
 
-/// The longest side an app's icon may declare.
-pub const MAX_ICON_SIDE: u32 = 1024;
+/// The longest side an app's icon may declare: the phone sends 64.
+pub const MAX_ICON_SIDE: u32 = 256;
+
+/// The most bytes an icon may hold (K3 review: a real one is a few KB).
+pub const MAX_ICON_BYTES: usize = 256 << 10;
 
 /// The longest side a notification's picture may declare.
 pub const MAX_PICTURE_SIDE: u32 = 4096;
 
-/// The most bytes either may hold.
+/// The most bytes a picture may hold.
 pub const MAX_BYTES: usize = 2 << 20;
 
 /// Icons kept at most, the oldest dropped first.
 pub const MAX_ICONS: usize = 200;
+
+/// Icons kept at most for one phone (K3 review: one phone's flood must not
+/// push the others' out).
+pub const MAX_ICONS_PER_PHONE: usize = 50;
 
 /// Pictures kept at most, the oldest dropped first.
 pub const MAX_PICTURES: usize = 30;
@@ -81,10 +88,10 @@ fn fits((width, height): (u32, u32), max: u32) -> bool {
     width > 0 && height > 0 && width <= max && height <= max
 }
 
-/// Whether `bytes` is an icon to keep: a PNG of at most [`MAX_BYTES`],
-/// declaring at most [`MAX_ICON_SIDE`] a side.
+/// Whether `bytes` is an icon to keep: a PNG of at most
+/// [`MAX_ICON_BYTES`], declaring at most [`MAX_ICON_SIDE`] a side.
 pub fn icon_fits(bytes: &[u8]) -> bool {
-    bytes.len() <= MAX_BYTES && png_size(bytes).is_some_and(|size| fits(size, MAX_ICON_SIDE))
+    bytes.len() <= MAX_ICON_BYTES && png_size(bytes).is_some_and(|size| fits(size, MAX_ICON_SIDE))
 }
 
 /// Whether `bytes` is a picture to keep: a JPEG of at most [`MAX_BYTES`],
@@ -94,10 +101,10 @@ pub fn picture_fits(bytes: &[u8]) -> bool {
 }
 
 /// A name for `parts`, the same each time, safe as a file name.
-fn name_for(parts: &[&str]) -> String {
+fn name_for(parts: &[&[u8]]) -> String {
     let mut hash = Sha256::new();
     for part in parts {
-        hash.update(part.as_bytes());
+        hash.update(part);
         hash.update([0]);
     }
     hash.finalize()[..12]
@@ -106,19 +113,23 @@ fn name_for(parts: &[&str]) -> String {
         .collect()
 }
 
-/// Where `phone`'s icon for `app` is kept (the app's name in any case).
+/// Where `phone`'s icon for `app` is kept (the app's name in any case):
+/// named by the phone first, so a phone's icons can be counted.
 pub fn icon_path(state_dir: &Path, phone: &str, app: &str) -> PathBuf {
-    state_dir
-        .join(NOTIFICATION_ICONS_DIR)
-        .join(format!("{}.png", name_for(&[phone, &app.to_lowercase()])))
+    state_dir.join(NOTIFICATION_ICONS_DIR).join(format!(
+        "{}-{}.png",
+        name_for(&[phone.as_bytes()]),
+        name_for(&[phone.as_bytes(), app.to_lowercase().as_bytes()])
+    ))
 }
 
-/// Where the picture of `phone`'s notification known by `tag` is kept.
-pub fn picture_path(state_dir: &Path, phone: &str, tag: &str) -> PathBuf {
-    state_dir
-        .join(NOTIFICATION_ICONS_DIR)
-        .join("pictures")
-        .join(format!("{}.jpg", name_for(&[phone, tag])))
+fn pictures_dir(state_dir: &Path) -> PathBuf {
+    state_dir.join(NOTIFICATION_ICONS_DIR).join("pictures")
+}
+
+/// The start of the names of the pictures of `phone`'s notification `tag`.
+fn picture_prefix(phone: &str, tag: &str) -> String {
+    format!("{}-", name_for(&[phone.as_bytes(), tag.as_bytes()]))
 }
 
 /// `phone`'s icon for `app`, if one was kept.
@@ -128,27 +139,64 @@ pub fn kept_icon(state_dir: &Path, phone: &str, app: &str) -> Option<PathBuf> {
 }
 
 /// Keep `bytes` as `phone`'s icon for `app`, if it fits; at most
-/// [`MAX_ICONS`] are kept. The path kept, or why not.
+/// [`MAX_ICONS_PER_PHONE`] a phone and [`MAX_ICONS`] in all are kept. The
+/// path kept, or why not.
 pub fn keep_icon(state_dir: &Path, phone: &str, app: &str, bytes: &[u8]) -> io::Result<PathBuf> {
     if !icon_fits(bytes) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not an icon"));
     }
     let path = icon_path(state_dir, phone, app);
     write(&path, bytes)?;
-    prune(path.parent().unwrap_or(state_dir), "png", MAX_ICONS);
+    let dir = path.parent().unwrap_or(state_dir);
+    prune(
+        dir,
+        &format!("{}-", name_for(&[phone.as_bytes()])),
+        "png",
+        MAX_ICONS_PER_PHONE,
+    );
+    prune(dir, "", "png", MAX_ICONS);
     Ok(path)
 }
 
-/// Keep `bytes` as the picture of `phone`'s notification `tag`, if it fits;
-/// at most [`MAX_PICTURES`] are kept. The path kept, or why not.
+/// Keep `bytes` as the picture of `phone`'s notification `tag`, if it fits,
+/// in place of the one it had (K3 review: named by its content, so a toast
+/// still showing the old one keeps it until replaced); at most
+/// [`MAX_PICTURES`] are kept. The path kept, or why not.
 pub fn keep_picture(state_dir: &Path, phone: &str, tag: &str, bytes: &[u8]) -> io::Result<PathBuf> {
     if !picture_fits(bytes) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a picture"));
     }
-    let path = picture_path(state_dir, phone, tag);
-    write(&path, bytes)?;
-    prune(path.parent().unwrap_or(state_dir), "jpg", MAX_PICTURES);
+    let prefix = picture_prefix(phone, tag);
+    let path = pictures_dir(state_dir).join(format!("{prefix}{}.jpg", name_for(&[bytes])));
+    if !path.is_file() {
+        write(&path, bytes)?;
+    }
+    remove_named(&pictures_dir(state_dir), &prefix, Some(&path));
+    prune(&pictures_dir(state_dir), "", "jpg", MAX_PICTURES);
     Ok(path)
+}
+
+/// Forget the picture of `phone`'s notification `tag` (K3 review: closed on
+/// the phone, or updated without one, it is not kept).
+pub fn forget_picture(state_dir: &Path, phone: &str, tag: &str) {
+    remove_named(&pictures_dir(state_dir), &picture_prefix(phone, tag), None);
+}
+
+/// Remove the files in `dir` whose names start with `prefix`, but `keep`.
+fn remove_named(dir: &Path, prefix: &str, keep: Option<&Path>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(prefix));
+        if named && Some(path.as_path()) != keep {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -166,16 +214,39 @@ fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     })
 }
 
-/// Drop the oldest files ending in `ext` in `dir` past `keep`.
-fn prune(dir: &Path, ext: &str, keep: usize) {
+/// How old a temp file must be to count as a crash's leftover.
+const LEFTOVER: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Drop the oldest files in `dir` named `prefix…` ending in `ext` past
+/// `keep`, and temp files a crash left (K3 review).
+fn prune(dir: &Path, prefix: &str, ext: &str, keep: usize) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
-        .flatten()
-        .filter(|e| e.path().extension().is_some_and(|x| x == ext))
-        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
-        .collect();
+    let now = std::time::SystemTime::now();
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(modified) = entry.metadata().ok().and_then(|m| m.modified().ok()) else {
+            continue;
+        };
+        if path.extension().is_some_and(|x| x == "tmp") {
+            if now
+                .duration_since(modified)
+                .is_ok_and(|age| age >= LEFTOVER)
+            {
+                let _ = std::fs::remove_file(&path);
+            }
+            continue;
+        }
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(prefix));
+        if named && path.extension().is_some_and(|x| x == ext) {
+            files.push((modified, path));
+        }
+    }
     if files.len() <= keep {
         return;
     }
@@ -249,8 +320,9 @@ mod tests {
         assert!(!icon_fits(&jpeg(64, 64)), "an icon is a PNG");
         assert!(picture_fits(&jpeg(4096, 1)));
         assert!(!picture_fits(&jpeg(4097, 1)));
+        assert!(!icon_fits(&png(257, 10)), "an icon is small");
         let mut big = png(64, 64);
-        big.resize(MAX_BYTES + 1, 0);
+        big.resize(MAX_ICON_BYTES + 1, 0);
         assert!(!icon_fits(&big));
     }
 
@@ -264,17 +336,52 @@ mod tests {
         assert_eq!(kept_icon(&dir, "phone-a", "chat"), Some(path));
         assert_eq!(kept_icon(&dir, "phone-b", "Chat"), None);
         assert!(keep_icon(&dir, "phone-a", "Mail", &png(2000, 2000)).is_err());
-        for i in 0..MAX_ICONS + 5 {
+        for i in 0..MAX_ICONS_PER_PHONE + 5 {
             keep_icon(&dir, "phone-a", &format!("app {i}"), &png(8, 8)).unwrap();
         }
-        let icons = std::fs::read_dir(dir.join(NOTIFICATION_ICONS_DIR))
-            .unwrap()
-            .flatten()
-            .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
-            .count();
-        assert_eq!(icons, MAX_ICONS);
-        let picture = keep_picture(&dir, "phone-a", "tag1", &jpeg(10, 10)).unwrap();
-        assert!(picture.is_file());
+        let icons = || {
+            std::fs::read_dir(dir.join(NOTIFICATION_ICONS_DIR))
+                .unwrap()
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "png"))
+                .count()
+        };
+        assert_eq!(icons(), MAX_ICONS_PER_PHONE, "one phone's flood is its own");
+        for phone in 0..5 {
+            for i in 0..MAX_ICONS_PER_PHONE {
+                keep_icon(
+                    &dir,
+                    &format!("phone {phone}"),
+                    &format!("app {i}"),
+                    &png(8, 8),
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(icons(), MAX_ICONS);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// K3 review: a notification has one picture, named by its content,
+    /// and none once forgotten.
+    #[test]
+    fn a_picture_replaces_its_own_and_is_forgotten() {
+        let dir = dir("pictures");
+        let pictures = || {
+            std::fs::read_dir(dir.join(NOTIFICATION_ICONS_DIR).join("pictures"))
+                .map_or(0, |e| e.count())
+        };
+        let first = keep_picture(&dir, "phone-a", "tag1", &jpeg(10, 10)).unwrap();
+        let again = keep_picture(&dir, "phone-a", "tag1", &jpeg(10, 10)).unwrap();
+        assert_eq!(first, again, "the same picture, the same file");
+        let next = keep_picture(&dir, "phone-a", "tag1", &jpeg(20, 10)).unwrap();
+        assert_ne!(first, next);
+        assert!(!first.exists() && next.is_file(), "one a notification");
+        keep_picture(&dir, "phone-a", "tag2", &jpeg(10, 10)).unwrap();
+        assert_eq!(pictures(), 2);
+        forget_picture(&dir, "phone-a", "tag1");
+        assert!(!next.exists());
+        assert_eq!(pictures(), 1, "another notification's stays");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
