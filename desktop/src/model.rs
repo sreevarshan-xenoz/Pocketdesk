@@ -474,7 +474,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Computer's clipboard in the background",
         permission: Capability::Clipboard,
         permission_name: "Share the clipboard",
-        android: "",
+        android: "notification access",
     },
     Feature {
         key: "files",
@@ -482,7 +482,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Files from the computer in the background",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "its notifications",
+        android: "notification access and its notifications",
     },
     Feature {
         key: "folders",
@@ -490,7 +490,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Folders the computer may open (one shared)",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "",
+        android: "notification access",
     },
     Feature {
         key: "photos",
@@ -498,7 +498,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Recent photos on the computer",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "photo access",
+        android: "notification access and photo access",
     },
     Feature {
         key: "screenshots",
@@ -506,7 +506,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "New screenshots to the computer",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "photo access",
+        android: "notification access and photo access",
     },
     Feature {
         key: "camera",
@@ -514,7 +514,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Photos the computer asks for",
         permission: Capability::Files,
         permission_name: "Send and browse files",
-        android: "the camera",
+        android: "notification access and its notifications",
     },
     Feature {
         key: "links",
@@ -530,7 +530,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Ring from the computer",
         permission: Capability::Ring,
         permission_name: "Ring this phone from here",
-        android: "its notifications",
+        android: "notification access and its notifications",
     },
     Feature {
         key: "media",
@@ -562,7 +562,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Calls from the computer",
         permission: Capability::Dial,
         permission_name: "Call numbers from here",
-        android: "",
+        android: "its notifications",
     },
     Feature {
         key: "commands",
@@ -570,7 +570,7 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Commands from the computer to my automation apps",
         permission: Capability::Command,
         permission_name: "Send commands to its automation apps",
-        android: "",
+        android: "notification access",
     },
 ];
 
