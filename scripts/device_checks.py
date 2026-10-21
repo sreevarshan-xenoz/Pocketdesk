@@ -602,8 +602,9 @@ def n2_media(ctx: Ctx) -> tuple[str, str]:
         "TIMEOUT", "an ended player stayed on the computer")
 def openable(ctx: Ctx, title: str) -> tuple[Optional[str], Optional[dict]]:
     """Post a fixture notification and wait for the computer to keep it as openable."""
-    if (why := forwarding(ctx)):
-        return why, None
+    notes = ctx.phone.prefs("pocketdesk-phone-notifications")
+    if not notes.get("enabled") or FIXTURE not in (notes.get("shared") or []):
+        return f"turn on This phone's notifications for {FIXTURE}", None
     if not ctx.phone.prefs("pocketdesk-ui").get("let_computer_open"):
         return "turn on Let the computer open my notifications", None
     ctx.phone.notify(int(time.time()) % 100000, title, "Open me")
@@ -629,9 +630,11 @@ def n3_open(ctx: Ctx) -> tuple[str, str]:
         return "TIMEOUT", "no word on the open"
     if done["state"]["state"] != "handed":
         return "FAIL", done["state"].get("reason", "not sent")
-    opened = field_text(ctx.phone.dump()) or ""
-    return ("PASS", f"the app opened: {opened!r}") if opened.startswith("opened ") else (
-        "FAIL", f"handed, but the screen shows {opened!r}")
+    # The activity draws a moment after the word comes (N3 review).
+    opened = wait_for(lambda: (t := field_text(ctx.phone.dump()) or "").startswith("opened ") and t, 10, step=2)
+    said = done.get("said", "")
+    return ("PASS", f"{said}: {opened!r}") if opened else (
+        "FAIL", f"{said or 'handed'}, but the screen shows {field_text(ctx.phone.dump())!r}")
 
 
 @check("n3-locked", "§177")
