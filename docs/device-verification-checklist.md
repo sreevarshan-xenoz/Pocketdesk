@@ -2297,6 +2297,7 @@ Built 2026-10-21; tested through units and the harness, nothing on a device yet.
 - [ ] A number with `*` or `#`: refused on the computer.
 - [ ] A real call (a SIM): the owner presses Call.
 - [x] 2026-10-21, on the OPPO with only a background link: `pocketdesk call` offered "Call 5550102?" in the phone's notification, no call made. One of three test numbers sent during a link's reconnect never showed.
+- Seen on the OPPO (ColorOS 14): with the screen off, ColorOS froze the app's background threads even with Android's battery optimization lifted, so numbers and commands waited until the screen woke, then arrived at once. ColorOS's own "Allow background activity" is what the Home card's dontkillmyapp link covers.
 
 ## 160. Screenshot and record the phone's window (L5)
 
@@ -2313,6 +2314,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] With "Only to" set to another installed app: nothing reaches the receiver.
 - [ ] With no automation app installed: nothing is sent, and Settings says so.
 - [ ] Tasker itself.
+- [x] 2026-10-21, on the OPPO with no automation app installed: `pocketdesk phone-command` reached the phone, which sent it nowhere ("no automation app").
 
 ## 162. The phone's state on the computer (L9)
 
