@@ -2345,6 +2345,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The second server shows no answer buttons, and no texts.
 - [ ] The same chat posting, being cleared and posting again: the second is cleared on both.
 - [ ] The computer in use swapped (a session with the second): the picks still mean the same computers.
+- [x] 2026-10-21, on the OPPO with two throwaway servers (the second on other ports, reached as `localhost`): a notification reached both, the copy a second after the own computer's; with the own server stopped, the second still got the next at once; the copied cancel reached the second server. Found there first: copied cancels went as a plain packet, which the bridge refuses for notifications (fixed).
 
 ## Recording results
 
