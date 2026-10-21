@@ -27,7 +27,7 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N5.
   Android shows these on the lock screen, in the shade's media controls and on a watch, and a headset's buttons reach the session while it is the one playing.
 - **The presses** go through T8c's `mediaControl`, on the live link.
 - **When it ends:**
-  - nothing playing for five minutes;
+  - nothing playing for ten seconds, or paused for five minutes;
   - no push for 150 s (the link dropped);
   - the switch off.
 
@@ -54,3 +54,33 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N5.
 - **On the OPPO, by the runner:**
   - a computer media report made through a seam (`POCKETDESK_MEDIA_FILE`, so this box's own players are untouched) reaching the phone's media session (`dumpsys media_session`);
   - a press from the session reaching the seam.
+
+## As built
+
+- **As designed, with the review's fixes.**
+  - Pocketdesk's own entry in the media controls goes by one name, core's `MEDIA_CONTROLS_APP_ID`, which the tray (K7), the toasts and the server's skip all read.
+  - A phone that asks again is told afresh, the cover's bytes included; and the phone asks again when no push came for 75 s or a cover it does not hold is named, at most every 30 s (`ComputerMediaRule.Watch`), since a link that dropped and came back between two looks seems the same.
+  - A cover not there when a track starts is looked for at the next ten looks: a browser sets its artwork a moment after its title.
+  - Nothing playing ends the session after ten seconds, not at once: Windows lists no player for a moment between two tracks.
+  - Play and Pause send the computer's one toggle only when they change what shows.
+- **The run on the OPPO** (2026-10-21): `n5-media` PASS (shown in the media session, not echoed back as the phone's music, Next reached the computer, gone when it stopped), and `n2-media` PASS beside it.
+- **The runner's check** (`n5-media`) sends a media key with `cmd media_session dispatch next`, which reaches whichever session holds the media keys; on a phone where another player holds them it fails and says so.
+
+## Review
+
+A fresh review found 0 Critical, 3 Important and 9 Minor. All were fixed except the runner's cover check (owed by eye, checklist §179).
+
+- **Important:**
+  - a cover missing at a track's start was never read again;
+  - a cover the phone could not decode was asked for, with its bytes, every 30 s;
+  - a draw queued behind a slow press could leave the session and its notification after close.
+- **Minor:**
+  - Pause while paused started the computer's music;
+  - a cover's pixels were not bounded;
+  - a Linux cover read could hang on a FIFO;
+  - the seam was not announced nor held to an absolute path;
+  - a newer push dropped the cover's one-time bytes;
+  - a gap between tracks tore the session down;
+  - the echo guard's name unheld by anything;
+  - SECURITY.md's limit did not say where the cover comes from;
+  - README and the status.

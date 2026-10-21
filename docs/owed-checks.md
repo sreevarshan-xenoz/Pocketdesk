@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-856 open items.
+855 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 518 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 517 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -1042,7 +1042,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **179. The computer's music in the phone's media controls (N5)**
 
-- The runner's `n5-media` on the OPPO.
 - A headset's button and a watch's controls.
 - The link dropped: the session gone within 150 s; back by itself when the link returns.
 - Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
