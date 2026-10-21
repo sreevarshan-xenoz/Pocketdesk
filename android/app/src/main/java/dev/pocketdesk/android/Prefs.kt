@@ -34,6 +34,7 @@ object Prefs {
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
+    private const val KEY_PHONE_MEDIA_BACKGROUND = "phone_media_background"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
@@ -291,6 +292,19 @@ object Prefs {
 
     fun setPhoneMediaOnComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA, enabled) }
+        bump()
+    }
+
+    /**
+     * Whether the listener tells the own computer what this phone plays
+     * without a session, with its cover (N2). Off by default: titles leave
+     * the phone in the background.
+     */
+    fun phoneMediaInBackground(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_PHONE_MEDIA_BACKGROUND, false)
+
+    fun setPhoneMediaInBackground(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA_BACKGROUND, enabled) }
         bump()
     }
 

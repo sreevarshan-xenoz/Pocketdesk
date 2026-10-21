@@ -522,6 +522,8 @@
     <string name="media_next">அடுத்தது</string>
     <string name="settings_phone_media">என் ஊடகம் கணினியில்</string>
     <string name="settings_phone_media_summary">அமர்வின்போது இந்தத் தொலைபேசி இயக்குவதைக் கணினி காட்டும்; இடைநிறுத்தவும் தவிர்க்கவும் முடியும். அறிவிப்பு அணுகல் தேவை</string>
+    <string name="settings_phone_media_background">பின்னணியிலும் என் ஊடகம் கணினியில்</string>
+    <string name="settings_phone_media_background_summary">அமர்வு இல்லாமலும் இந்தத் தொலைபேசி இயக்குவதை அதன் அட்டைப்படத்துடன் கணினி காட்டும்; இடைநிறுத்தவும் தவிர்க்கவும் முடியும். இயங்கும்போது தலைப்புகள் தொலைபேசியை விட்டுச் செல்லும். அறிவிப்பு அணுகல் தேவை</string>
     <string name="texts_names">என் தொடர்புகளிலிருந்து பெயர்கள்</string>
     <string name="texts_names_summary">செய்தி கணினியில் எண்ணுடன், இந்தத் தொலைபேசியின் தொடர்புகளில் உள்ள அனுப்புநரின் பெயருடன் காட்டப்படும்</string>
     <string name="settings_capture_mouse">இணைக்கப்பட்ட சுட்டியைக் கணினியில் பயன்படுத்து</string>

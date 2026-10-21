@@ -195,6 +195,8 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** New screenshots to the computer (T10h), on a 2 s tick of their own: a send takes seconds. */
     private val screenshots by lazy { dev.pocketdesk.android.files.Screenshots(applicationContext) }
     private val screenshotsTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    // N2: the phone's music without a session.
+    private val media by lazy { dev.pocketdesk.android.media.BackgroundMedia(applicationContext) }
 
     override fun onCreate() {
         super.onCreate()
@@ -304,6 +306,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         screenshots.close()
         clipboardTicker.shutdownNow()
         dev.pocketdesk.android.control.TypeRunner.stop(this)
+        media.close()
         clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()
@@ -588,6 +591,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         lastKeeperUptime = uptime
         dev.pocketdesk.android.control.TypeRunner.sync(this)
+        media.sync()
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
@@ -614,7 +618,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted)
         // M4: typing comes on the own computer's link, kept while it may come.
         val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
-        if ((answering || callsOn || clearsWanted || typingOn) && own != null && RustCore.controlPeer() == null) {
+        // N2: the phone's music, while what it reports is current.
+        media.tick()
+        val mediaWanted = media.linkWanted()
+        if ((answering || callsOn || clearsWanted || typingOn || mediaWanted) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now

@@ -311,6 +311,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                     askForListener(it)
                 },
             )
+            // N2: the same without a session, from the listener.
+            SettingSwitch(
+                stringResource(R.string.settings_phone_media_background),
+                stringResource(R.string.settings_phone_media_background_summary),
+                Prefs.phoneMediaInBackground(context),
+                {
+                    Prefs.setPhoneMediaInBackground(context, it)
+                    if (it) Prefs.setPhoneMediaOnComputer(context, true)
+                    askForListener(it)
+                },
+            )
             ScreenshotsSection()
             RecentPhotosSection()
             // M5: a photo's place kept when it is sent.
