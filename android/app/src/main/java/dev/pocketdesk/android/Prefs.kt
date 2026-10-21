@@ -37,6 +37,7 @@ object Prefs {
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
+    private const val KEY_QUIET_IN_HAND = "quiet_in_hand"
     private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
@@ -344,6 +345,15 @@ object Prefs {
 
     fun setAnswerNotifications(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_ANSWER_NOTIFICATIONS, enabled) }
+        bump()
+    }
+
+    /** M6: no toast on the computer for a notification that came while the phone was in use. Off by default. */
+    fun quietInHand(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_QUIET_IN_HAND, false)
+
+    fun setQuietInHand(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_QUIET_IN_HAND, enabled) }
         bump()
     }
 

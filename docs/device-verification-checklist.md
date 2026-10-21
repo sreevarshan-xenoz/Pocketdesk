@@ -2393,6 +2393,14 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] Android 14's "selected photos only": the row says access is needed, and photos go as before.
 - [ ] A share from the Files app (`com.android.providers.media.documents`), and one from Google Photos.
 
+## 170. No toast while the phone is in hand (M6)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] The throwaway chat app's notification with the OPPO unlocked and its screen on, the switch on: no toast on the computer; the Activity page says "not shown: the phone was in use".
+- [ ] The same with the screen off, the phone locked, or the switch off: a toast.
+- [ ] With Pocketdesk's Remote open on the phone: a toast.
+- [ ] A notification that comes as the screen is off and wakes it: a toast.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

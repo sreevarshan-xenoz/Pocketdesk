@@ -506,7 +506,7 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // holds them all alike, still counted, so a phone's burst stays bounded
     // (K2a review).
     let muted = muted_here(&app);
-    let held = held_here(muted);
+    let held = held_here(muted, false);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -616,10 +616,16 @@ fn given_name(body: &serde_json::Value, field: &str) -> bool {
         .is_some_and(|app| !app.trim().is_empty())
 }
 
-/// Whether a notification is held here: its app `muted` (K2b), or this
-/// computer paused (K2a).
-fn held_here(muted: bool) -> bool {
-    muted || crate::paused::now()
+/// Whether the phone says it was in use when the notification came (M6,
+/// `phoneInUse`): then no toast shows it here.
+fn phone_in_use(body: &serde_json::Value) -> bool {
+    body.get("phoneInUse").and_then(|v| v.as_bool()) == Some(true)
+}
+
+/// Whether a notification is held here: its app `muted` (K2b), this
+/// computer paused (K2a), or the phone `in_hand` when it came (M6).
+fn held_here(muted: bool, in_hand: bool) -> bool {
+    muted || in_hand || crate::paused::now()
 }
 
 /// Whether `app` is muted on this computer (K2b): its notifications are
@@ -735,7 +741,10 @@ impl Plugin for NotificationPlugin {
                 // Paused (K2a): held as a muted app's are, but still counted
                 // (K2a review: a week's pause must not unbound a phone).
                 let muted = muted_here(&app);
-                let held = held_here(muted);
+                // M6: one that came while the phone was in hand is held as a
+                // pause holds it: kept, logged, counted, not shown.
+                let in_hand = phone_in_use(&packet.body);
+                let held = held_here(muted, in_hand);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()
@@ -764,11 +773,14 @@ impl Plugin for NotificationPlugin {
                 // the phone's notifications without the toasts), as it would
                 // be shown: one the phone hides stays hidden in the log too.
                 // Late as the toast says it (a minute or more, C3 review).
-                let meta = if late_line(waited).is_some() {
+                let mut meta = if late_line(waited).is_some() {
                     serde_json::json!({ "app": app, "late_secs": waited })
                 } else {
                     serde_json::json!({ "app": app })
                 };
+                if in_hand {
+                    meta["phone_in_use"] = serde_json::json!(true);
+                }
                 crate::events::emit(
                     "notification",
                     Some(sender.device_id()),
@@ -1655,6 +1667,17 @@ mod tests {
         assert!(given_name(&json!({"appName": "Chat"}), "appName"));
     }
 
+    #[test]
+    fn a_notification_from_a_phone_in_hand_is_held() {
+        assert!(phone_in_use(&serde_json::json!({ "phoneInUse": true })));
+        assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": false })));
+        assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": "yes" })));
+        assert!(!phone_in_use(&serde_json::json!({})));
+        // Held as a mute or a pause holds it.
+        assert!(held_here(false, true));
+        assert!(held_here(true, false));
+    }
+
     /// K2b: an app muted here is muted for the next notification, whatever
     /// the case of its name.
     #[test]
@@ -1674,10 +1697,10 @@ mod tests {
     /// devices' alike (both ask `held_here`).
     #[test]
     fn a_pause_holds_every_app_s_notifications() {
-        assert!(!held_here(false));
-        assert!(held_here(true), "a muted app's");
+        assert!(!held_here(false, false));
+        assert!(held_here(true, false), "a muted app's");
         let _paused = crate::paused::paused_for_test();
-        assert!(held_here(false));
+        assert!(held_here(false, false));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that
