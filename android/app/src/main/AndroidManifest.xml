@@ -189,6 +189,11 @@
                 android:value="Maintains the user-initiated remote-desktop QUIC video/input session while the app is backgrounded" />
         </service>
 
+        <!-- N5: the buttons of the computer's music in the media controls. -->
+        <receiver
+            android:name=".media.ComputerMediaReceiver"
+            android:exported="false" />
+
         <!-- M4: Stop on the typing notification. -->
         <receiver
             android:name=".control.TypeStopReceiver"

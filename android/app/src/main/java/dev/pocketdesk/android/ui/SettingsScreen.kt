@@ -322,6 +322,16 @@ fun SettingsScreen(onBack: () -> Unit) {
                     askForListener(it)
                 },
             )
+            // N5: the other way, the computer's music in this phone's controls.
+            SettingSwitch(
+                stringResource(R.string.settings_computer_media_controls),
+                stringResource(R.string.settings_computer_media_controls_summary),
+                Prefs.computerMediaInControls(context),
+                {
+                    Prefs.setComputerMediaInControls(context, it)
+                    askForListener(it)
+                },
+            )
             ScreenshotsSection()
             RecentPhotosSection()
             // M5: a photo's place kept when it is sent.

@@ -931,13 +931,13 @@ object RustCore {
     fun sendLink(address: String, port: Int, url: String): Result<Unit> =
         envelope(nativeSendLink(address, port, url)).map { }
 
-    /** The computer's presses for the phone's player since the last call, oldest first (T8d). */
     /** The computer's music as it last pushed it (N5), taken; null when none came since. */
     fun takeComputerMedia(): org.json.JSONObject? =
         runCatching {
             envelope(nativeTakeComputerMedia()).getOrNull()?.takeIf { it.isNotEmpty() }?.let { org.json.JSONObject(it) }
         }.getOrNull()
 
+    /** The computer's presses for the phone's player since the last call, oldest first (T8d). */
     fun takeMediaPresses(): List<String> =
         parseStringArray(envelope(nativeTakeMediaPresses()).getOrDefault("[]"))
 

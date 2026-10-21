@@ -35,6 +35,7 @@ object Prefs {
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
     private const val KEY_PHONE_MEDIA_BACKGROUND = "phone_media_background"
+    private const val KEY_COMPUTER_MEDIA_CONTROLS = "computer_media_controls"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
@@ -305,6 +306,19 @@ object Prefs {
 
     fun setPhoneMediaInBackground(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PHONE_MEDIA_BACKGROUND, enabled) }
+        bump()
+    }
+
+    /**
+     * Whether the computer's music shows in this phone's media controls
+     * (N5): the listener keeps the link and asks the computer to tell it.
+     * Off by default: titles and covers come to the lock screen.
+     */
+    fun computerMediaInControls(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_COMPUTER_MEDIA_CONTROLS, false)
+
+    fun setComputerMediaInControls(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_COMPUTER_MEDIA_CONTROLS, enabled) }
         bump()
     }
 

@@ -214,6 +214,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     // N2: the phone's music without a session.
     private val media by lazy { dev.pocketdesk.android.media.BackgroundMedia(applicationContext) }
 
+    // N5: the computer's music in this phone's media controls.
+    private val computerMedia by lazy { dev.pocketdesk.android.media.ComputerMedia(applicationContext) }
+
     override fun onCreate() {
         super.onCreate()
         rule = NotificationForwardRule(packageName)
@@ -324,6 +327,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         dev.pocketdesk.android.control.TypeRunner.stop(this)
         liveTicker.shutdownNow()
         media.close()
+        computerMedia.close()
         clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()
@@ -838,7 +842,12 @@ class PhoneNotificationListener : NotificationListenerService() {
         // N2: the phone's music, while what it reports is current.
         media.tick()
         val mediaWanted = media.linkWanted()
-        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || mediaWanted) && own != null && RustCore.controlPeer() == null) {
+        // N5: the computer's music, while its switch is on.
+        computerMedia.tick()
+        val computerMediaWanted = computerMedia.linkWanted()
+        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || mediaWanted || computerMediaWanted) &&
+            own != null && RustCore.controlPeer() == null
+        ) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now

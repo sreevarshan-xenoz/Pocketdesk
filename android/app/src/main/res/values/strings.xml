@@ -533,6 +533,9 @@
     <string name="settings_phone_media_summary">During a session the computer shows what this phone plays, and can pause and skip it. Needs notification access</string>
     <string name="settings_phone_media_background">My media on the computer in the background</string>
     <string name="settings_phone_media_background_summary">Without a session, the computer shows what this phone plays, with its cover, and can pause and skip it. Titles leave the phone while it plays. Needs notification access</string>
+    <string name="settings_computer_media_controls">Computer\'s music in my media controls</string>
+    <string name="settings_computer_media_controls_summary">The computer\'s music shows on this phone\'s lock screen, in its media controls and on a watch, and Play/Pause, Next and Previous there reach the computer. Its titles and covers come to the phone. Needs notification access</string>
+    <string name="channel_computer_media">The computer\'s music</string>
     <string name="texts_names">Names from my contacts</string>
     <string name="texts_names_summary">A text shows on the computer with the sender\'s name from this phone\'s contacts, not only the number</string>
     <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
