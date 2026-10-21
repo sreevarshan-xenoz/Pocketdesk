@@ -277,7 +277,6 @@ pub(crate) fn live_gone(tag: &str) {
 }
 
 /// The person closed the phone notification shown with `tag` here (its
-
 /// toast's ✕, a Linux close): ask its phone to clear it too (L1), with
 /// "Clearing here clears it on the phone" on.
 pub(crate) fn cleared_here(tag: &str) {
