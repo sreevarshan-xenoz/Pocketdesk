@@ -3,8 +3,8 @@
 use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::{IPropertyValue, TypedEventHandler};
 use windows::UI::Notifications::{
-    ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs, ToastNotification,
-    ToastNotificationManager,
+    NotificationData, NotificationUpdateResult, ToastActivatedEventArgs, ToastDismissalReason,
+    ToastDismissedEventArgs, ToastNotification, ToastNotificationManager,
 };
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
@@ -469,6 +469,22 @@ fn show_toast(
     // already initialized makes this a no-op error worth ignoring.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
     register_aumid()?;
+    // N4: a live card's later updates change its toast in place, never
+    // showing it again; one the owner closed stays closed.
+    if let (Some(tag), Some(live)) = (tag, pictures.live.as_ref())
+        && !live.first
+    {
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?;
+        let result = notifier.UpdateWithTagAndGroup(
+            &live_data(live)?,
+            &HSTRING::from(tag),
+            &HSTRING::from(PHONE_GROUP),
+        )?;
+        if result != NotificationUpdateResult::Succeeded {
+            tracing::debug!("A live card's update found no toast: closed here");
+        }
+        return Ok(());
+    }
     let doc = XmlDocument::new()?;
     // Only a tagged (phone) toast is answered or muted: its tag keeps it
     // alive.
@@ -482,6 +498,9 @@ fn show_toast(
         pictures,
     )))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
+    if let Some(live) = &pictures.live {
+        toast.SetData(&live_data(live)?)?;
+    }
     if let Some(tag) = tag {
         toast.SetTag(&HSTRING::from(tag))?;
         toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
@@ -552,6 +571,23 @@ fn show_toast(
         }
     }
     Ok(())
+}
+
+/// A live card's values for its bound bar (N4), each later than the last.
+fn live_data(live: &crate::toast_answers::LiveShow) -> windows::core::Result<NotificationData> {
+    static SEQUENCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let data = NotificationData::new()?;
+    let values = data.Values()?;
+    values.Insert(
+        &HSTRING::from("progressValue"),
+        &HSTRING::from(live.bar_value()),
+    )?;
+    values.Insert(
+        &HSTRING::from("progressStatus"),
+        &HSTRING::from(live.status.as_str()),
+    )?;
+    data.SetSequenceNumber(SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed))?;
+    Ok(data)
 }
 
 /// What a press on an answerable toast answers: its arguments, and the reply
@@ -932,6 +968,49 @@ mod tests {
         ToastNotification::CreateToastNotification(&doc).expect("a toast Windows accepts");
     }
 
+    /// N4: a live card shows once and then changes in place.
+    #[test]
+    #[ignore = "shows a real toast on an interactive Windows desktop"]
+    fn a_live_card_updates_in_place() {
+        let tag = "n4livecard000001";
+        let card = |percent: u8, first: bool| crate::toast_answers::Pictures {
+            live: Some(crate::toast_answers::LiveShow {
+                percent: Some(percent),
+                status: format!("{percent} %"),
+                first,
+            }),
+            ..Default::default()
+        };
+        assert!(notify_tagged(
+            "Files: Downloading",
+            "movie.mp4",
+            tag,
+            None,
+            None,
+            &card(10, true)
+        ));
+        let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+        let notifier =
+            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID)).unwrap();
+        let result = notifier
+            .UpdateWithTagAndGroup(
+                &live_data(card(60, false).live.as_ref().unwrap()).unwrap(),
+                &HSTRING::from(tag),
+                &HSTRING::from(PHONE_GROUP),
+            )
+            .unwrap();
+        assert_eq!(result, NotificationUpdateResult::Succeeded);
+        assert!(notify_tagged(
+            "Files: Downloading",
+            "movie.mp4",
+            tag,
+            None,
+            None,
+            &card(90, false)
+        ));
+        remove_tagged(tag);
+    }
+
     /// K3: Windows takes a toast with its app's logo and a picture.
     #[test]
     fn a_pictured_toast_loads_as_toast_xml() {
@@ -942,6 +1021,7 @@ mod tests {
             picture: Some(std::path::PathBuf::from(
                 r"C:\state\notification_icons\pictures\c d.jpg",
             )),
+            ..Default::default()
         };
         let xml = crate::toast_answers::toast_xml_pictured(
             "Chat: Ann",

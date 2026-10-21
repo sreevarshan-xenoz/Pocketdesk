@@ -83,12 +83,34 @@ pub fn toast_xml(summary: &str, body: &str, answers: Option<&Answerable>, mute: 
     toast_xml_pictured(summary, body, answers, mute, &Pictures::default())
 }
 
-/// The pictures a phone's notification shows with it (K3): its app's icon
-/// and its own picture, as kept files.
+/// What a phone's notification shows besides its words: its app's icon and
+/// its own picture, as kept files (K3), and its ongoing update (N4).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Pictures {
     pub icon: Option<std::path::PathBuf>,
     pub picture: Option<std::path::PathBuf>,
+    pub live: Option<LiveShow>,
+}
+
+/// An ongoing update as a card shows it (N4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveShow {
+    /// How far along, 0 to 100; none for a bar that moves or a timer.
+    pub percent: Option<u8>,
+    /// "42 %", "8 min left".
+    pub status: String,
+    /// Its first update: the card is shown; later ones change it in place.
+    pub first: bool,
+}
+
+impl LiveShow {
+    /// The toast's bar value: "0.42", or "indeterminate".
+    pub fn bar_value(&self) -> String {
+        match self.percent {
+            Some(p) => format!("{:.2}", f64::from(p) / 100.0),
+            None => "indeterminate".to_string(),
+        }
+    }
 }
 
 /// `path` as a `file:` URI: separators forward, and any byte but a path's
@@ -134,6 +156,10 @@ pub fn toast_xml_pictured(
             "<image src=\"{}\"/>",
             xml_escape(&file_uri(picture))
         ));
+    }
+    // N4: a bar bound to data, so later updates change it in place.
+    if pictures.live.is_some() {
+        xml.push_str("<progress value=\"{progressValue}\" status=\"{progressStatus}\"/>");
     }
     xml.push_str("</binding></visual>");
     let answers = answers.filter(|a| a.reply || a.open || !a.actions.is_empty());
@@ -357,6 +383,39 @@ pub fn send(answers: &Answerable, answer: Answer) {
 #[cfg(test)]
 mod tests {
 
+    /// N4: a live card's toast has a bar bound to data.
+    #[test]
+    fn a_live_card_has_a_bound_bar() {
+        let live = LiveShow {
+            percent: Some(42),
+            status: "42 %".to_string(),
+            first: true,
+        };
+        let pictures = Pictures {
+            live: Some(live.clone()),
+            ..Default::default()
+        };
+        let xml = toast_xml_pictured("Files: Downloading", "movie.mp4", None, false, &pictures);
+        assert!(
+            xml.contains(
+                "<progress value=\"{progressValue}\" status=\"{progressStatus}\"/></binding>"
+            ),
+            "{xml}"
+        );
+        assert_eq!(live.bar_value(), "0.42");
+        assert_eq!(
+            LiveShow {
+                percent: None,
+                ..live
+            }
+            .bar_value(),
+            "indeterminate"
+        );
+        assert!(
+            !toast_xml_pictured("a", "b", None, false, &Pictures::default()).contains("progress")
+        );
+    }
+
     /// N3: "Open on the phone" in the toast and over D-Bus, only where the
     /// notification offers it, and room kept for it among the buttons.
     #[test]
@@ -421,6 +480,7 @@ mod tests {
                 r"C:\state\notification_icons\ab.png",
             )),
             picture: Some(std::path::PathBuf::from("/state/my pictures/c&d.jpg")),
+            ..Default::default()
         };
         let xml = toast_xml_pictured("Chat: Ann", "hi", None, false, &pictures);
         assert!(xml.contains(

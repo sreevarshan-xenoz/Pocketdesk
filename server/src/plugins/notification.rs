@@ -29,6 +29,12 @@ pub fn configure(show_phones: bool, per_minute: u32) {
     use std::sync::atomic::Ordering;
     SHOW_PHONES.store(show_phones, Ordering::Relaxed);
     LIMIT.store((per_minute as usize).max(1), Ordering::Relaxed);
+    // N4: no card from an earlier run is going on now.
+    if !cfg!(test)
+        && let Ok(dir) = crate::state::state_dir()
+    {
+        pocketdesk_core::local::phone_live::clear(&dir);
+    }
 }
 
 /// How many notifications each phone had shown in the last minute.
@@ -590,7 +596,7 @@ fn pictures_for(
     if id.is_empty() {
         return crate::toast_answers::Pictures {
             icon,
-            picture: None,
+            ..Default::default()
         };
     }
     // An update without a picture (redacted now, or the phone's switch
@@ -604,7 +610,11 @@ fn pictures_for(
     if picture.is_none() {
         icons::forget_picture(&dir, phone, id);
     }
-    crate::toast_answers::Pictures { icon, picture }
+    crate::toast_answers::Pictures {
+        icon,
+        picture,
+        ..Default::default()
+    }
 }
 
 /// Whether `body` names its app in `field`: a notification without one is
@@ -707,6 +717,14 @@ impl Plugin for NotificationPlugin {
                     // Closed on the phone (N5c): close it here too.
                     if let Some(tag) = &tag {
                         close_desktop_notification(tag).await;
+                        // N4: its card ends with it.
+                        if let Ok(dir) = crate::state::state_dir() {
+                            let (phone, tag) = (sender.device_id().to_string(), tag.clone());
+                            let _ = tokio::task::spawn_blocking(move || {
+                                pocketdesk_core::local::phone_live::remove(&dir, &phone, &tag)
+                            })
+                            .await;
+                        }
                     }
                     // And it can no longer be answered (T10c), nor is its
                     // picture kept (K3 review).
@@ -748,8 +766,28 @@ impl Plugin for NotificationPlugin {
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
                 let held = held_here(muted, in_hand);
+                // N4: an ongoing update is one card, updated in place; only
+                // its first counts against the limit and is an event.
+                let live = pocketdesk_core::protocol::live::Live::from_body(&packet.body);
+                if live.is_some() && !crate::events::current_config().phone_live_updates {
+                    return Ok(());
+                }
+                let first = match (&live, &tag, crate::state::state_dir()) {
+                    (Some(_), Some(tag), Ok(dir)) => {
+                        let (phone, tag) = (sender.device_id().to_string(), tag.clone());
+                        tokio::task::spawn_blocking(move || {
+                            !pocketdesk_core::local::phone_live::read(&dir)
+                                .iter()
+                                .any(|c| c.device_id == phone && c.tag == tag)
+                        })
+                        .await
+                        .unwrap_or(true)
+                    }
+                    _ => true,
+                };
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
+                    && first
                     && !flood_guard()
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
@@ -784,12 +822,17 @@ impl Plugin for NotificationPlugin {
                 if in_hand {
                     meta["phone_in_use"] = serde_json::json!(true);
                 }
-                crate::events::emit(
-                    "notification",
-                    Some(sender.device_id()),
-                    meta,
-                    serde_json::json!({ "title": title, "text": text }),
-                );
+                if live.is_some() {
+                    meta["live"] = serde_json::json!(true);
+                }
+                if first {
+                    crate::events::emit(
+                        "notification",
+                        Some(sender.device_id()),
+                        meta,
+                        serde_json::json!({ "title": title, "text": text }),
+                    );
+                }
                 if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
                     return Ok(());
                 }
@@ -820,8 +863,35 @@ impl Plugin for NotificationPlugin {
                     return Ok(());
                 }
                 let text = with_late(&text, waited);
+                // N4: its card, for the Notifications page.
+                let live_show = match (&live, &tag) {
+                    (Some(live), Some(tag)) => {
+                        let now_ms = unix_now().saturating_mul(1000);
+                        if let Ok(dir) = crate::state::state_dir() {
+                            let card = pocketdesk_core::local::phone_live::LiveCard {
+                                device_id: sender.device_id().to_string(),
+                                tag: tag.clone(),
+                                app: app.clone(),
+                                title: title.clone(),
+                                text: text.clone(),
+                                live: *live,
+                                updated_unix: unix_now(),
+                            };
+                            let _ = tokio::task::spawn_blocking(move || {
+                                pocketdesk_core::local::phone_live::put(&dir, card)
+                            })
+                            .await;
+                        }
+                        Some(crate::toast_answers::LiveShow {
+                            percent: live.percent(),
+                            status: live.status(now_ms),
+                            first,
+                        })
+                    }
+                    _ => None,
+                };
                 // The owner's switch (K3 review): off, nothing is kept.
-                let pictures = if !crate::events::current_config().notification_pictures {
+                let mut pictures = if !crate::events::current_config().notification_pictures {
                     crate::toast_answers::Pictures::default()
                 } else {
                     let (phone, app, id, body) = (
@@ -836,6 +906,7 @@ impl Plugin for NotificationPlugin {
                     .await
                     .unwrap_or_default()
                 };
+                pictures.live = live_show;
                 if let Err(e) = show_desktop_notification(
                     tag.as_deref(),
                     &app,
@@ -1216,8 +1287,24 @@ async fn send_notification_dbus(
             zbus::zvariant::Value::from("Reply"),
         );
     }
-    // One to answer stays longer; "Not from this app" alone does not.
-    let timeout: i32 = if answers.is_some() && !actions.is_empty() {
+    // N4: a live card's bar, where the server draws one, and its words.
+    if let Some(live) = &pictures.live {
+        if let Some(percent) = live.percent {
+            hints.insert(
+                "value".to_string(),
+                zbus::zvariant::Value::from(i32::from(percent)),
+            );
+        }
+        body.push_str(&format!(
+            "\n{}",
+            crate::platform::markup_escaped(&live.status)
+        ));
+    }
+    // One to answer stays longer; "Not from this app" alone does not; a
+    // live card stays until it ends (N4).
+    let timeout: i32 = if pictures.live.is_some() {
+        0
+    } else if answers.is_some() && !actions.is_empty() {
         20_000
     } else {
         5000
