@@ -48,6 +48,6 @@ class AlsoToTest {
     @Test
     fun aCopyLeavesOutWhatOffersAnAnswer() {
         // org.json is Android's, not in JVM tests: the names it drops are held here.
-        assertEquals(listOf("actions", "requestReplyId", "messages"), AlsoTo.ANSWERS)
+        assertEquals(listOf("actions", "requestReplyId", "messages", "canOpen"), AlsoTo.ANSWERS)
     }
 }

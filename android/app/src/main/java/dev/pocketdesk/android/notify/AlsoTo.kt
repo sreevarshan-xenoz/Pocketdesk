@@ -18,7 +18,8 @@ object AlsoTo {
     const val MAX_PICKS = MAX + 1
 
     /** What in a notification would offer an answer the phone would refuse from them (D4's thread among them). */
-    val ANSWERS = listOf("actions", "requestReplyId", "messages")
+    // N3 review: an open too, which a copy's computer cannot send back.
+    val ANSWERS = listOf("actions", "requestReplyId", "messages", "canOpen")
 
     /** A saved computer: its address and the paired desktop id it has, if paired. */
     data class Saved(val address: String, val desktopId: String?)
