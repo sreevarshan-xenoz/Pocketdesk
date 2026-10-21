@@ -554,6 +554,7 @@ mod tests {
             pin: "123456".to_string(),
             minted_unix: 0,
             grant_secs: Some(3600),
+            someone_else: false,
         };
         assert_eq!(
             grant_for(false, None, Some(&on_file)),
@@ -598,6 +599,7 @@ mod tests {
             pin: pin.to_string(),
             minted_unix: 1_000,
             grant_secs: None,
+            someone_else: false,
         }
     }
 

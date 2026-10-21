@@ -4,8 +4,10 @@
 //! accepts a phone that sends the PIN while the file is fresh. Format, one
 //! value per line: the six digits, the unix second it was minted, and an
 //! optional grant length in seconds (R4 D3: pairing with this PIN trusts the
-//! phone only for that long). A file with no timestamp line holds no PIN:
-//! it would never expire.
+//! phone only for that long), and the word `someone-else` when the phone is
+//! not the owner's (M2b: it pairs with files and links only). The lines after
+//! the time are read in any order. A file with no timestamp line holds no
+//! PIN: it would never expire.
 
 use std::io;
 use std::path::Path;
@@ -28,7 +30,12 @@ pub struct FilePin {
     pub minted_unix: u64,
     /// How long pairing with it trusts the phone; `None` is permanent.
     pub grant_secs: Option<u64>,
+    /// M2b: the phone is someone else's, so it pairs with files and links only.
+    pub someone_else: bool,
 }
+
+/// The PIN file's word for a phone that is someone else's (M2b).
+const SOMEONE_ELSE: &str = "someone-else";
 
 /// Exactly six ASCII digits.
 pub fn is_valid(pin: &str) -> bool {
@@ -49,6 +56,17 @@ pub fn write(
     now_unix: u64,
     grant_secs: Option<u64>,
 ) -> io::Result<()> {
+    write_preset(state_dir, pin, now_unix, grant_secs, false)
+}
+
+/// [`write`], saying whether the phone it pairs is someone else's (M2b).
+pub fn write_preset(
+    state_dir: &Path,
+    pin: &str,
+    now_unix: u64,
+    grant_secs: Option<u64>,
+    someone_else: bool,
+) -> io::Result<()> {
     if !is_valid(pin) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -57,9 +75,14 @@ pub fn write(
     }
     std::fs::create_dir_all(state_dir)?;
     let grant_line = grant_secs.map(|s| format!("{s}\n")).unwrap_or_default();
+    let preset_line = if someone_else {
+        format!("{SOMEONE_ELSE}\n")
+    } else {
+        String::new()
+    };
     crate::secure_fs::write_private(
         &state_dir.join(PIN_FILE),
-        format!("{pin}\n{now_unix}\n{grant_line}").as_bytes(),
+        format!("{pin}\n{now_unix}\n{grant_line}{preset_line}").as_bytes(),
     )
 }
 
@@ -75,7 +98,10 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
     // No minting time is no PIN: it would never expire (an old CLI's file,
     // or one planted in the state folder).
     let minted = lines.next().and_then(|s| s.parse::<u64>().ok())?;
-    let grant_secs = lines.next().and_then(|s| s.parse::<u64>().ok());
+    // After the time, in any order: a grant's seconds, and the preset.
+    let rest: Vec<&str> = lines.collect();
+    let grant_secs = rest.iter().find_map(|s| s.parse::<u64>().ok());
+    let someone_else = rest.contains(&SOMEONE_ELSE);
     if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
         return None;
     }
@@ -86,6 +112,7 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
         pin,
         minted_unix: minted,
         grant_secs,
+        someone_else,
     })
 }
 
@@ -208,5 +235,23 @@ mod tests {
         distinct.sort_unstable();
         distinct.dedup();
         assert!(distinct.len() > 240, "only {} distinct", distinct.len());
+    }
+
+    #[test]
+    fn someone_elses_phone_is_said_with_or_without_a_grant() {
+        let dir =
+            std::env::temp_dir().join(format!("pocketdesk-pin-preset-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_preset(&dir, "123456", 1_000, None, true).unwrap();
+        let read_back = read(&dir, 1_010).unwrap();
+        assert!(read_back.someone_else);
+        assert_eq!(read_back.grant_secs, None);
+        write_preset(&dir, "123456", 1_000, Some(900), true).unwrap();
+        let read_back = read(&dir, 1_010).unwrap();
+        assert!(read_back.someone_else);
+        assert_eq!(read_back.grant_secs, Some(900));
+        write(&dir, "123456", 1_000, Some(900)).unwrap();
+        assert!(!read(&dir, 1_010).unwrap().someone_else);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

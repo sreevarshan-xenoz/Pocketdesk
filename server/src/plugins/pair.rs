@@ -84,6 +84,27 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The permissions a pairing sets (M2b), or `None` to leave them: someone
+/// else's phone, and every new guest, gets files and links only; the
+/// owner's own phone keeps what it has (the defaults when new), a computer
+/// its own narrow set (2f), and a guest grant on a phone already paired
+/// changes nothing (that phone stays as it was).
+fn preset_permissions(
+    guest: bool,
+    someone_else: bool,
+    computer: bool,
+    was_trusted: bool,
+) -> Option<DevicePermissions> {
+    let narrow = if computer {
+        false
+    } else if guest {
+        !was_trusted
+    } else {
+        someone_else
+    };
+    narrow.then(DevicePermissions::someone_else)
+}
+
 /// Is `device_id` one of the owner's other computers (2f)?
 pub fn is_computer_device(device_id: &str) -> bool {
     let Ok(path) = state::trust_store_path() else {
@@ -883,9 +904,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // R4 D3: only a CLI PIN can carry a scoped grant; the push flow (a PIN
     // this desktop generated itself) keeps trusting permanently.
     // Matching spends it, in one step.
-    let cli_grant: Option<Option<u64>> = cli_pin()
-        .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix))
-        .map(|cli| cli.grant_secs);
+    let cli = cli_pin().filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
+    let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
+    // M2b: the Pair page said the phone is someone else's.
+    let someone_else = cli.as_ref().is_some_and(|cli| cli.someone_else);
     let matches_cli = cli_grant.is_some();
 
     if matches_pending || matches_cli {
@@ -939,12 +961,17 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         let computer = grant_secs.is_none()
             && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
+            let was_trusted = store.is_trusted(&phone_id);
             match grant_secs {
                 Some(secs) => {
-                    store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
+                    store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))?
                 }
-                None if computer => store.trust_computer(phone_id.clone()),
-                None => store.trust_device(phone_id.clone()),
+                None if computer => store.trust_computer(phone_id.clone())?,
+                None => store.trust_device(phone_id.clone())?,
+            }
+            match preset_permissions(grant_secs.is_some(), someone_else, computer, was_trusted) {
+                Some(permissions) => store.set_permissions(&phone_id, permissions),
+                None => Ok(()),
             }
         });
         match outcome {
@@ -1072,6 +1099,22 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_pairing_sets_narrow_permissions_for_someone_else_and_new_guests() {
+        let narrow = Some(DevicePermissions::someone_else());
+        // The owner's own phone: as it was.
+        assert_eq!(preset_permissions(false, false, false, false), None);
+        assert_eq!(preset_permissions(false, false, false, true), None);
+        // Someone else's: narrow, new or paired again.
+        assert_eq!(preset_permissions(false, true, false, false), narrow);
+        assert_eq!(preset_permissions(false, true, false, true), narrow);
+        // A guest: narrow when new; a phone already paired keeps its own.
+        assert_eq!(preset_permissions(true, false, false, false), narrow);
+        assert_eq!(preset_permissions(true, true, false, true), None);
+        // A computer keeps its own set.
+        assert_eq!(preset_permissions(false, true, true, false), None);
+    }
     use super::*;
 
     /// U3: a paired phone's name, from its identity, is kept cleaned; a

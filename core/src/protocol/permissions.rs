@@ -279,6 +279,20 @@ impl DevicePermissions {
         permissions.ask_first = true;
         permissions
     }
+
+    /// What a phone that is not the owner's may do when it pairs (M2b),
+    /// as the Pair page's "Someone else's" and every guest: files and links,
+    /// nothing else. The owner can change each later.
+    pub fn someone_else() -> Self {
+        let mut permissions = Self::default();
+        for capability in Capability::ALL {
+            permissions.set(
+                capability,
+                matches!(capability, Capability::Files | Capability::Links),
+            );
+        }
+        permissions
+    }
 }
 
 #[cfg(test)]
@@ -436,5 +450,18 @@ mod tests {
         assert_eq!(back, permissions);
         let empty: DevicePermissions = serde_json::from_str("{}").unwrap();
         assert!(empty.is_default());
+    }
+
+    #[test]
+    fn someone_elses_phone_may_send_files_and_links_only() {
+        let permissions = DevicePermissions::someone_else();
+        for capability in Capability::ALL {
+            assert_eq!(
+                permissions.allows(capability),
+                matches!(capability, Capability::Files | Capability::Links),
+                "{capability:?}"
+            );
+        }
+        assert!(!permissions.ask_first);
     }
 }
