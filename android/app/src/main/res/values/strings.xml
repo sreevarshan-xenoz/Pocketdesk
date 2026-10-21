@@ -541,6 +541,7 @@
     <string name="send_clipboard_too_long">The clipboard text is too long to send</string>
     <string name="send_clipboard_sent">Clipboard sent to %1$s</string>
     <string name="send_clipboard_failed">Could not reach %1$s</string>
+    <string name="send_clipboard_unreadable">The copied image could not be read.</string>
     <string name="send_clipboard_private_title">Send a private copy?</string>
     <string name="send_clipboard_private_text">The app you copied from marked this private (a password, say). Send it to %1$s anyway?</string>
     <string name="send_clipboard_private_send">Send</string>

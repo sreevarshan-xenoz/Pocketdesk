@@ -532,6 +532,7 @@
     <string name="send_clipboard_too_long">கிளிப்போர்டு உரை அனுப்ப மிக நீளமானது</string>
     <string name="send_clipboard_sent">கிளிப்போர்டு %1$s க்கு அனுப்பப்பட்டது</string>
     <string name="send_clipboard_failed">%1$s ஐ அடைய முடியவில்லை</string>
+    <string name="send_clipboard_unreadable">நகலெடுத்த படத்தைப் படிக்க முடியவில்லை.</string>
     <string name="send_clipboard_private_title">தனிப்பட்ட நகலை அனுப்பவா?</string>
     <string name="send_clipboard_private_text">நீங்கள் நகலெடுத்த செயலி இதைத் தனிப்பட்டதாகக் குறித்துள்ளது (கடவுச்சொல் போன்றது). இருந்தும் %1$s-க்கு அனுப்பவா?</string>
     <string name="send_clipboard_private_send">அனுப்பு</string>

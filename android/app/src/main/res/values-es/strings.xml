@@ -537,6 +537,7 @@
     <string name="send_clipboard_too_long">El texto del portapapeles es demasiado largo para enviarlo</string>
     <string name="send_clipboard_sent">Portapapeles enviado a %1$s</string>
     <string name="send_clipboard_failed">No se pudo llegar a %1$s</string>
+    <string name="send_clipboard_unreadable">No se pudo leer la imagen copiada.</string>
     <string name="send_clipboard_private_title">¿Enviar una copia privada?</string>
     <string name="send_clipboard_private_text">La app de la que copiaste lo marcó como privado (una contraseña, por ejemplo). ¿Enviarlo a %1$s de todos modos?</string>
     <string name="send_clipboard_private_send">Enviar</string>

@@ -47,9 +47,10 @@ object SendClipboard {
 /**
  * "Send clipboard" (T10b), from the Quick Settings tile: a window that never
  * shows, because Android lets only the app in focus read the clipboard. It
- * reads the text once it has focus, sends it to the phone's computer over
- * the live link, or opens one (over the internet when it must), says how it
- * went, and closes once the send is done.
+ * reads the text once it has focus (or, with none, an image copied here,
+ * M3), sends it to the phone's computer over the live link, or opens one
+ * (over the internet when it must), says how it went, and closes once the
+ * send is done.
  */
 class SendClipboardActivity : Activity() {
     private var done = false
@@ -149,13 +150,25 @@ class SendClipboardActivity : Activity() {
         val name = HostStore.shownName(app, host.address)
         val png = runCatching { ClipboardImages.pngOf(app, uri) }.getOrNull()
         if (png == null) {
-            say(app, app.getString(R.string.send_clipboard_failed, name))
+            say(app, app.getString(R.string.send_clipboard_unreadable))
             return
         }
+        // Noted before the send, as the computer may tell of it before the
+        // send returns; put back if it does not go (M3 review).
+        val before = ClipboardShared.sentImageId
         ClipboardShared.sentImageId = ImageClipRule.idOf(png)
         val sent = ClipboardImages.withStaged(app, png) { file ->
-            RustCore.sendClipboardImage(host.address, host.controlPort, file.absolutePath)
+            val first = RustCore.sendClipboardImage(host.address, host.controlPort, file.absolutePath)
+            if (first.isSuccess || RustCore.controlPeer() != null) {
+                first
+            } else {
+                // No link up: open one, over the internet when it must, as
+                // text does (ClipboardSend), and try once more.
+                RustCore.connectToPeer(host.address, host.controlPort, HostStore.wanIdentity(app, host.address))
+                RustCore.sendClipboardImage(host.address, host.controlPort, file.absolutePath)
+            }
         }
+        if (sent.isFailure) ClipboardShared.sentImageId = before
         say(app, app.getString(if (sent.isSuccess) R.string.send_clipboard_sent else R.string.send_clipboard_failed, name))
     }
 
