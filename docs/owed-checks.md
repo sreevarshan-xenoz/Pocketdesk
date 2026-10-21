@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-831 open items.
+837 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 504 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 509 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
 | A Linux desktop (the Azure VM serves for some) | 96 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 26 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 27 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 74 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -1018,6 +1018,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone's "Send commands to its automation apps" off: refused, in the server's log.
 - A command removed in Settings: its button goes from the broker; another command keeps its id.
 
+**175. Copies sent by themselves (M10 part 2)**
+
+- The copy reaching the computer's clipboard on a throwaway server with the clipboard seam (`POCKETDESK_CLIPBOARD_FILE`).
+- A password manager's copy (marked sensitive): read, not sent.
+- The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
+- The keyboard and selection in the app copied from, after the read (focus moves away and back).
+- An hour with the switch on: the battery.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1850,6 +1858,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **172. The phone's sound without its screen (M7)**
 
 - The microphone not granted on Android 13+: its request shows.
+
+**175. Copies sent by themselves (M10 part 2)**
+
+- Another maker's Android 13+, and Android 12 (the row hidden).
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
