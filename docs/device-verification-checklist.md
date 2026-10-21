@@ -2421,6 +2421,15 @@ Built 2026-10-21; tested through units and a loopback session, nothing on a devi
 - [ ] Started while the screen is shown: refused before Android's consent, saying why.
 - [ ] An hour with the screen off: the battery.
 - [ ] By ear, and a real music app (the owner).
+## 173. tel: links and Call back (M8)
+
+Built 2026-10-21; tested through units, the harness and the registry read back here, nothing on a device yet.
+- [ ] `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so.
+- [ ] Two phones that may dial, neither linked: the Overview asks; a choice dials; Cancel, and two minutes, drop it.
+- [ ] Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window.
+- [ ] Off again: the keys are gone and Windows asks for another app.
+- [ ] Linux: the desktop file and `xdg-open tel:5550100`; removed, `mimeapps.list` no longer names it.
+- [ ] Call back from a ringing call's note, and from one whose call ended (a SIM).
 
 ## Recording results
 
