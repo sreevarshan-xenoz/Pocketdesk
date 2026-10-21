@@ -152,10 +152,144 @@ fn note_of(tag: &str) -> Option<(String, String)> {
         .map(|(_, phone, id)| (phone.clone(), id.clone()))
 }
 
+/// What this run knows of each live card (N4), by its phone-scoped tag:
+/// whether its toast was shown, whether the person closed it, when it was
+/// last heard and when it ended. Kept apart from the store so a card held
+/// at first (a pause, the phone in hand) still shows once it may (N4
+/// review), and counted once whether or not phones' notifications show.
+#[derive(Default)]
+struct LiveCards {
+    cards: HashMap<String, LiveState>,
+}
+
+struct LiveState {
+    shown: bool,
+    closed: bool,
+    heard: Instant,
+    ended: Option<Instant>,
+}
+
+/// How a live update is taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveHeard {
+    /// Dropped: just ended (a late update after its cancel), or too soon
+    /// after the last.
+    Drop,
+    /// Its first this run: counted and logged.
+    First,
+    /// A later one.
+    Again,
+}
+
+/// The least time between two updates of one card taken here, whatever a
+/// phone sends; a finished bar is always taken.
+const LIVE_PACE: Duration = Duration::from_secs(1);
+
+/// How long a card's end is remembered, so an update that crossed it is
+/// not taken for a new card (N4 review).
+const LIVE_ENDED: Duration = Duration::from_secs(10);
+
+impl LiveCards {
+    fn heard(&mut self, tag: &str, now: Instant, finished: bool) -> LiveHeard {
+        self.cards
+            .retain(|_, s| s.ended.is_none_or(|at| now.duration_since(at) < LIVE_ENDED));
+        if self.cards.len() > 200 {
+            // Forged tags cannot grow it without end.
+            let oldest = self
+                .cards
+                .iter()
+                .min_by_key(|(_, s)| s.heard)
+                .map(|(t, _)| t.clone());
+            if let Some(oldest) = oldest {
+                self.cards.remove(&oldest);
+            }
+        }
+        match self.cards.get_mut(tag) {
+            None => {
+                self.cards.insert(
+                    tag.to_string(),
+                    LiveState {
+                        shown: false,
+                        closed: false,
+                        heard: now,
+                        ended: None,
+                    },
+                );
+                LiveHeard::First
+            }
+            Some(state) if state.ended.is_some() => LiveHeard::Drop,
+            Some(state) if !finished && now.duration_since(state.heard) < LIVE_PACE => {
+                LiveHeard::Drop
+            }
+            Some(state) => {
+                state.heard = now;
+                LiveHeard::Again
+            }
+        }
+    }
+
+    /// Whether its toast is to be shown in full (none shown yet) rather
+    /// than updated, or not at all (closed here).
+    fn show(&self, tag: &str) -> Option<bool> {
+        let state = self.cards.get(tag)?;
+        (!state.closed).then_some(!state.shown)
+    }
+
+    fn shown(&mut self, tag: &str) {
+        if let Some(state) = self.cards.get_mut(tag) {
+            state.shown = true;
+        }
+    }
+
+    /// The person closed it here: no toast for it again until it ends.
+    fn closed(&mut self, tag: &str) -> bool {
+        match self.cards.get_mut(tag) {
+            Some(state) if state.ended.is_none() => {
+                state.closed = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn ended(&mut self, tag: &str, now: Instant) {
+        if let Some(state) = self.cards.get_mut(tag) {
+            state.ended = Some(now);
+        }
+    }
+
+    fn is_live(&self, tag: &str) -> bool {
+        self.cards.get(tag).is_some_and(|s| s.ended.is_none())
+    }
+}
+
+fn live_cards() -> &'static Mutex<LiveCards> {
+    static CARDS: std::sync::OnceLock<Mutex<LiveCards>> = std::sync::OnceLock::new();
+    CARDS.get_or_init(Default::default)
+}
+
+/// A live card's toast was not found to update (Windows): closed here.
+pub(crate) fn live_gone(tag: &str) {
+    live_cards()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .closed(tag);
+}
+
 /// The person closed the phone notification shown with `tag` here (its
+
 /// toast's ✕, a Linux close): ask its phone to clear it too (L1), with
 /// "Clearing here clears it on the phone" on.
 pub(crate) fn cleared_here(tag: &str) {
+    // N4: a live card closed here stays closed, and its D-Bus id is let go
+    // so a later update cannot open a new one (N4 review).
+    if live_cards()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .closed(tag)
+    {
+        let _ = take_shown(tag);
+    }
     if !crate::events::current_config().clear_on_phone {
         return;
     }
@@ -717,6 +851,10 @@ impl Plugin for NotificationPlugin {
                     // Closed on the phone (N5c): close it here too.
                     if let Some(tag) = &tag {
                         close_desktop_notification(tag).await;
+                        live_cards()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .ended(tag, Instant::now());
                         // N4: its card ends with it.
                         if let Ok(dir) = crate::state::state_dir() {
                             let (phone, tag) = (sender.device_id().to_string(), tag.clone());
@@ -769,19 +907,46 @@ impl Plugin for NotificationPlugin {
                 // N4: an ongoing update is one card, updated in place; only
                 // its first counts against the limit and is an event.
                 let live = pocketdesk_core::protocol::live::Live::from_body(&packet.body);
-                if live.is_some() && !crate::events::current_config().phone_live_updates {
+                // A card's notification that comes without live now (a
+                // download done, the switch off) is a card no more (N4
+                // review); with the setting off, none is kept.
+                let was_live = tag.as_ref().is_some_and(|t| {
+                    live_cards()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .is_live(t)
+                });
+                let live_off = !crate::events::current_config().phone_live_updates;
+                if let Some(tag) = &tag
+                    && (live_off || live.is_none())
+                    && was_live
+                {
+                    live_cards()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .ended(tag, Instant::now());
+                    if let Ok(dir) = crate::state::state_dir() {
+                        let (phone, tag) = (sender.device_id().to_string(), tag.clone());
+                        let _ = tokio::task::spawn_blocking(move || {
+                            pocketdesk_core::local::phone_live::remove(&dir, &phone, &tag)
+                        })
+                        .await;
+                    }
+                }
+                if live.is_some() && live_off {
                     return Ok(());
                 }
-                let first = match (&live, &tag, crate::state::state_dir()) {
-                    (Some(_), Some(tag), Ok(dir)) => {
-                        let (phone, tag) = (sender.device_id().to_string(), tag.clone());
-                        tokio::task::spawn_blocking(move || {
-                            !pocketdesk_core::local::phone_live::read(&dir)
-                                .iter()
-                                .any(|c| c.device_id == phone && c.tag == tag)
-                        })
-                        .await
-                        .unwrap_or(true)
+                let first = match (&live, &tag) {
+                    (Some(live), Some(tag)) => {
+                        match live_cards()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .heard(tag, Instant::now(), live.percent() == Some(100))
+                        {
+                            LiveHeard::Drop => return Ok(()),
+                            LiveHeard::First => true,
+                            LiveHeard::Again => false,
+                        }
                     }
                     _ => true,
                 };
@@ -863,7 +1028,7 @@ impl Plugin for NotificationPlugin {
                                 app: app.clone(),
                                 title: title.clone(),
                                 text: text.clone(),
-                                live: *live,
+                                live: live.clone(),
                                 updated_unix: unix_now(),
                             };
                             let _ = tokio::task::spawn_blocking(move || {
@@ -871,10 +1036,18 @@ impl Plugin for NotificationPlugin {
                             })
                             .await;
                         }
+                        // Closed here by the person: kept for the page, no toast.
+                        let show = live_cards()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .show(tag);
+                        let Some(full) = show else {
+                            return Ok(());
+                        };
                         Some(crate::toast_answers::LiveShow {
                             percent: live.percent(),
                             status: live.status(now_ms),
-                            first,
+                            first: full,
                         })
                     }
                     _ => None,
@@ -909,8 +1082,9 @@ impl Plugin for NotificationPlugin {
                     .await
                     .unwrap_or_default()
                 };
+                let is_live = live_show.is_some();
                 pictures.live = live_show;
-                if let Err(e) = show_desktop_notification(
+                match show_desktop_notification(
                     tag.as_deref(),
                     &app,
                     &title,
@@ -921,7 +1095,16 @@ impl Plugin for NotificationPlugin {
                 )
                 .await
                 {
-                    tracing::warn!("Failed to show notification: {}", e);
+                    // N4: its toast stands now; later updates change it.
+                    Ok(()) => {
+                        if is_live && let Some(tag) = &tag {
+                            live_cards()
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .shown(tag);
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to show notification: {}", e),
                 }
             }
             // How an answer from here went (E1).
@@ -1304,9 +1487,10 @@ async fn send_notification_dbus(
         ));
     }
     // One to answer stays longer; "Not from this app" alone does not; a
-    // live card stays until it ends (N4).
+    // live card as the server keeps any (N4).
     let timeout: i32 = if pictures.live.is_some() {
-        0
+        // The server's own: never-expiring sits on screen on Plasma (N4 review).
+        -1
     } else if answers.is_some() && !actions.is_empty() {
         20_000
     } else {
@@ -1468,6 +1652,52 @@ async fn close_desktop_notification(tag: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// N4: a card counts once, shows in full until it is shown, stays
+    /// closed once closed, and an update after its end is dropped.
+    #[test]
+    fn a_live_card_counts_once_and_shows_until_shown() {
+        let mut cards = LiveCards::default();
+        let t0 = Instant::now();
+        assert_eq!(cards.heard("t", t0, false), LiveHeard::First);
+        assert_eq!(
+            cards.show("t"),
+            Some(true),
+            "held at first: still to be shown"
+        );
+        assert_eq!(
+            cards.heard("t", t0 + Duration::from_millis(200), false),
+            LiveHeard::Drop,
+            "paced"
+        );
+        assert_eq!(
+            cards.heard("t", t0 + Duration::from_millis(300), true),
+            LiveHeard::Again,
+            "finished is taken"
+        );
+        assert_eq!(cards.show("t"), Some(true), "never shown yet: in full");
+        cards.shown("t");
+        assert_eq!(
+            cards.heard("t", t0 + Duration::from_secs(5), false),
+            LiveHeard::Again
+        );
+        assert_eq!(cards.show("t"), Some(false), "an update in place");
+        assert!(cards.closed("t"));
+        assert_eq!(cards.show("t"), None, "closed here");
+        cards.ended("t", t0 + Duration::from_secs(6));
+        assert!(!cards.is_live("t"));
+        assert_eq!(
+            cards.heard("t", t0 + Duration::from_secs(7), false),
+            LiveHeard::Drop,
+            "after its end"
+        );
+        assert_eq!(
+            cards.heard("t", t0 + Duration::from_secs(20), false),
+            LiveHeard::First,
+            "a new card later"
+        );
+        assert!(!cards.closed("unknown"));
+    }
 
     /// N3: a notification that only offers to be opened is kept, and Open
     /// goes only to one that offers it.

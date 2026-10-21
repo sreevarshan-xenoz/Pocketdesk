@@ -140,6 +140,13 @@ pub fn toast_xml_pictured(
     mute: bool,
     pictures: &Pictures,
 ) -> String {
+    // N4: a live card's words are bound to data too, so an update changes
+    // them with its bar (N4 review: "Driver arrived" stayed "5 min away").
+    let (summary, body) = if pictures.live.is_some() {
+        ("{liveTitle}", "{liveText}")
+    } else {
+        (summary, body)
+    };
     let mut xml = format!(
         "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text>",
         xml_escape(summary),
@@ -396,6 +403,10 @@ mod tests {
             ..Default::default()
         };
         let xml = toast_xml_pictured("Files: Downloading", "movie.mp4", None, false, &pictures);
+        assert!(
+            xml.contains("<text>{liveTitle}</text><text>{liveText}</text>"),
+            "{xml}"
+        );
         assert!(
             xml.contains(
                 "<progress value=\"{progressValue}\" status=\"{progressStatus}\"/></binding>"

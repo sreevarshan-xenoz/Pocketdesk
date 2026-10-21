@@ -476,12 +476,15 @@ fn show_toast(
     {
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?;
         let result = notifier.UpdateWithTagAndGroup(
-            &live_data(live)?,
+            &live_data(live, summary, body)?,
             &HSTRING::from(tag),
             &HSTRING::from(PHONE_GROUP),
         )?;
         if result != NotificationUpdateResult::Succeeded {
+            // Gone from the screen and the Action Center: closed here, so
+            // no later update brings it back.
             tracing::debug!("A live card's update found no toast: closed here");
+            crate::plugins::notification::live_gone(tag);
         }
         return Ok(());
     }
@@ -499,7 +502,7 @@ fn show_toast(
     )))?;
     let toast = ToastNotification::CreateToastNotification(&doc)?;
     if let Some(live) = &pictures.live {
-        toast.SetData(&live_data(live)?)?;
+        toast.SetData(&live_data(live, summary, body)?)?;
     }
     if let Some(tag) = tag {
         toast.SetTag(&HSTRING::from(tag))?;
@@ -574,7 +577,11 @@ fn show_toast(
 }
 
 /// A live card's values for its bound bar (N4), each later than the last.
-fn live_data(live: &crate::toast_answers::LiveShow) -> windows::core::Result<NotificationData> {
+fn live_data(
+    live: &crate::toast_answers::LiveShow,
+    title: &str,
+    text: &str,
+) -> windows::core::Result<NotificationData> {
     static SEQUENCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
     let data = NotificationData::new()?;
     let values = data.Values()?;
@@ -586,6 +593,8 @@ fn live_data(live: &crate::toast_answers::LiveShow) -> windows::core::Result<Not
         &HSTRING::from("progressStatus"),
         &HSTRING::from(live.status.as_str()),
     )?;
+    values.Insert(&HSTRING::from("liveTitle"), &HSTRING::from(title))?;
+    values.Insert(&HSTRING::from("liveText"), &HSTRING::from(text))?;
     data.SetSequenceNumber(SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed))?;
     Ok(data)
 }
@@ -994,7 +1003,12 @@ mod tests {
             ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID)).unwrap();
         let result = notifier
             .UpdateWithTagAndGroup(
-                &live_data(card(60, false).live.as_ref().unwrap()).unwrap(),
+                &live_data(
+                    card(60, false).live.as_ref().unwrap(),
+                    "Files: Downloading",
+                    "movie.mp4, 2 of 3",
+                )
+                .unwrap(),
                 &HSTRING::from(tag),
                 &HSTRING::from(PHONE_GROUP),
             )
