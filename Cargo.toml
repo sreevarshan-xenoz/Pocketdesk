@@ -79,6 +79,8 @@ windows = { version = "0.62", features = [
     "ApplicationModel",
     "Graphics_DirectX_Direct3D11",
     "Media_Control",
+    "Storage",
+    "Storage_Streams",
     "UI_Notifications",
     "UI_Notifications_Management",
     "Data_Xml_Dom",

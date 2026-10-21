@@ -137,6 +137,7 @@ fn action_id(action: &TrayAction) -> String {
         TrayAction::Pause(Some(minutes)) => format!("pause:{minutes}"),
         TrayAction::Pause(None) => "pause:resumed".to_string(),
         TrayAction::Resume => "resume".to_string(),
+        TrayAction::PhoneMedia(id, command) => format!("media:{command}:{id}"),
     }
 }
 
@@ -171,6 +172,8 @@ mod tests {
             TrayAction::Pause(None),
             TrayAction::Resume,
             TrayAction::Ring("q".into()),
+            TrayAction::PhoneMedia("p".into(), "playPause"),
+            TrayAction::PhoneMedia("p".into(), "next"),
         ];
         let ids: std::collections::HashSet<String> = actions.iter().map(action_id).collect();
         assert_eq!(ids.len(), actions.len());

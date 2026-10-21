@@ -258,6 +258,7 @@ mod tests {
             file: Err("x"),
             link: Err("x"),
             clipboard: if reach { Ok(()) } else { Err("x") },
+            playing: None,
         };
         let devices: &'static [Device; 2] = Box::leak(Box::new(devices));
         assert_eq!(

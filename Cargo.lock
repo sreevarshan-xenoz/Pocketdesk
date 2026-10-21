@@ -5658,6 +5658,7 @@ dependencies = [
  "pocketdesk-core",
  "qrcode",
  "serde_json",
+ "sha2 0.10.9",
  "skrifa",
  "tray-icon",
  "windows 0.62.2",
