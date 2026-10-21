@@ -1,5 +1,6 @@
 //! The computer's music as it last pushed it (N5), kept for the app until
-//! taken: only the newest matters, so a new push replaces one not taken.
+//! taken: only the newest matters, so a new push replaces one not taken,
+//! keeping the cover's bytes it carried for the same cover (they come once).
 
 use std::sync::Mutex;
 
@@ -14,7 +15,17 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
     let mut kept = serde_json::Value::Object(fields.clone());
     kept["host"] = serde_json::Value::from(host);
     kept["port"] = serde_json::Value::from(port);
-    *WAITING.lock().unwrap_or_else(|e| e.into_inner()) = Some(kept);
+    let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
+    // A push not taken may hold the cover's only bytes (N5 review).
+    if kept.get("art").is_none()
+        && let Some(old) = waiting.as_ref()
+        && old.get("artId").is_some()
+        && old.get("artId") == kept.get("artId")
+        && let Some(art) = old.get("art")
+    {
+        kept["art"] = art.clone();
+    }
+    *waiting = Some(kept);
 }
 
 /// Drop what waits: its link ended.
@@ -53,5 +64,31 @@ mod tests {
         assert_eq!(take_json(), "", "taken");
         receive(&serde_json::json!("not an object"), "192.0.2.7", 1716);
         assert_eq!(take_json(), "");
+        // N5 review: the cover's bytes, sent once, outlive a newer push
+        // for the same cover, not one for another.
+        receive(
+            &serde_json::json!({"playing": {"title": "One"}, "artId": "aa", "art": "Ynl0ZXM="}),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({"playing": {"title": "One", "isPlaying": false}, "artId": "aa"}),
+            "192.0.2.7",
+            1716,
+        );
+        let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(taken["art"], "Ynl0ZXM=");
+        receive(
+            &serde_json::json!({"playing": {"title": "One"}, "artId": "aa", "art": "Ynl0ZXM="}),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            &serde_json::json!({"playing": {"title": "Two"}, "artId": "bb"}),
+            "192.0.2.7",
+            1716,
+        );
+        let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert!(taken.get("art").is_none());
     }
 }
