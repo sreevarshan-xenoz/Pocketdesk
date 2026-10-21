@@ -79,6 +79,9 @@ pub(crate) struct WindowsMarks {
     pub history: Option<u32>,
     /// The DWORD in `CanUploadToCloudClipboard`, when present.
     pub cloud: Option<u32>,
+    /// One of those two was present but could not be read (another app held
+    /// the clipboard): counted as private, never as not (M3 review).
+    pub unread: bool,
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -87,6 +90,7 @@ impl WindowsMarks {
     pub(crate) fn private(self) -> bool {
         self.exclude_from_monitors
             || self.viewer_ignore
+            || self.unread
             || self.history == Some(0)
             || self.cloud == Some(0)
     }
@@ -520,6 +524,11 @@ mod tests {
             },
             WindowsMarks {
                 cloud: Some(0),
+                ..Default::default()
+            },
+            // A mark there but unread fails closed (M3 review).
+            WindowsMarks {
+                unread: true,
                 ..Default::default()
             },
         ] {
