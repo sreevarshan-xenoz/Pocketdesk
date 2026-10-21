@@ -16,6 +16,8 @@ const REFRESH: Duration = Duration::from_secs(2);
 #[derive(Default)]
 pub struct NotesView {
     notes: Vec<PhoneNote>,
+    /// The phones' ongoing updates (N4), newest first.
+    cards: Vec<pocketdesk_core::local::phone_live::LiveCard>,
     /// Where each answer stands (E1).
     answers: Vec<Outcome>,
     /// Each notification's reply being typed, by phone and key.
@@ -90,6 +92,9 @@ impl NotesView {
             return;
         }
         self.notes = newest_first(phone_notes::read(state_dir));
+        let mut cards = pocketdesk_core::local::phone_live::read(state_dir);
+        cards.reverse();
+        self.cards = cards;
         self.answers = answers::read(state_dir);
         // Drafts for notifications that went are dropped.
         let live: Vec<(String, String)> = self
@@ -179,6 +184,35 @@ impl NotesView {
     ) {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
+        // N4: what is going on now, above what can be answered.
+        let going = going_on(&self.cards, devices);
+        if !going.is_empty() {
+            ui.label(RichText::new("Going on now").strong());
+            for card in going {
+                ui.group(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(format!("{}: {}", card.app, card.title)).strong());
+                    if !card.text.is_empty() {
+                        ui.label(&card.text);
+                    }
+                    let now_ms = now_unix.saturating_mul(1000);
+                    let status = card.live.status(now_ms);
+                    match card.live.percent() {
+                        Some(percent) => {
+                            ui.add(
+                                egui::ProgressBar::new(f32::from(percent) / 100.0)
+                                    .desired_width(260.0)
+                                    .text(status),
+                            );
+                        }
+                        None => {
+                            ui.label(RichText::new(status).color(crate::theme::muted(ui)));
+                        }
+                    }
+                });
+            }
+            ui.add_space(8.0);
+        }
         if self.notes.is_empty() {
             ui.label(
                 RichText::new(
@@ -381,6 +415,22 @@ pub enum Tone {
 /// says so: a phone from before E1 never answers.
 pub const NO_WORD_SECS: u64 = 60;
 
+/// The ongoing updates to show (N4): those of a phone linked or in a
+/// session now, since one gone away cannot say they ended.
+pub fn going_on<'a>(
+    cards: &'a [pocketdesk_core::local::phone_live::LiveCard],
+    devices: &[crate::model::Device],
+) -> Vec<&'a pocketdesk_core::local::phone_live::LiveCard> {
+    cards
+        .iter()
+        .filter(|c| {
+            devices
+                .iter()
+                .any(|d| d.id == c.device_id && (d.linked || d.connected))
+        })
+        .collect()
+}
+
 /// Where an answer stands, as the page says it (E1).
 pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
     match &outcome.state {
@@ -438,6 +488,39 @@ pub fn thread_lines(
 
 #[cfg(test)]
 mod tests {
+
+    /// N4: only a reached phone's cards show.
+    #[test]
+    fn only_a_reached_phone_s_updates_show() {
+        use pocketdesk_core::local::phone_live::LiveCard;
+        use pocketdesk_core::protocol::live::Live;
+        let card = |device: &str| LiveCard {
+            device_id: device.into(),
+            tag: "t".into(),
+            app: "Files".into(),
+            title: "Downloading".into(),
+            text: String::new(),
+            live: Live {
+                progress: 1,
+                max: 2,
+                indeterminate: false,
+                chronometer: None,
+                countdown: false,
+            },
+            updated_unix: 1,
+        };
+        let device = |id: &str, linked: bool| crate::model::Device {
+            id: id.into(),
+            linked,
+            ..Default::default()
+        };
+        let cards = [card("near"), card("away"), card("unknown")];
+        let shown: Vec<&str> = going_on(&cards, &[device("near", true), device("away", false)])
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        assert_eq!(shown, ["near"]);
+    }
     use super::*;
 
     /// E1: each state in words, and a silent phone said after a minute.
