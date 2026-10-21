@@ -16,4 +16,10 @@ class CastSoundRuleTest {
         assertFalse("Android 9", CastSoundRule.capture(true, true, true, false, 28))
         assertTrue("Android 10", CastSoundRule.capture(true, true, true, false, 29))
     }
+
+    @Test
+    fun `the phone's sound alone is offered from Android 10`() {
+        assertTrue(CastSoundRule.offeredAlone(29))
+        assertFalse(CastSoundRule.offeredAlone(28))
+    }
 }

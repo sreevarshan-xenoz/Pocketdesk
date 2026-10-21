@@ -18,6 +18,9 @@ object CastSoundRule {
         sdk: Int,
     ): Boolean = enabled && recordGranted && computerTakes && !camera && sdk >= MIN_SDK
 
+    /** M7: whether the phone's sound alone is offered at all. */
+    fun offeredAlone(sdk: Int): Boolean = sdk >= MIN_SDK
+
     /** Whether a cast's state (`castState`'s JSON) says the computer plays its sound. */
     fun computerTakes(castState: String): Boolean =
         runCatching { org.json.JSONObject(castState).optBoolean("sound", false) }.getOrDefault(false)

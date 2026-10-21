@@ -930,4 +930,12 @@
     <string name="settings_typing_summary_off">\"Escribir en el teléfono\" en el equipo escribe en el campo de delante, sin mostrar la pantalla. Nunca en un campo de contraseña ni con el teléfono bloqueado. Usa el servicio de accesibilidad \"Pocketdesk control\"</string>
     <string name="settings_typing_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que escribe el equipo</string>
     <string name="settings_typing_summary_on">Activado: \"Escribir en el teléfono\" en el equipo propio de este teléfono escribe en el campo de delante, con una notificación mientras lo hace</string>
+    <string name="card_phone_sound">Reproducir allí el sonido de este teléfono</string>
+    <string name="phone_sound_consent">Android lo llama compartir pantalla; solo se envía el sonido</string>
+    <string name="phone_sound_needs_mic">Android pide el permiso del micrófono para que Pocketdesk capture lo que reproducen las apps</string>
+    <string name="phone_sound_playing">El sonido de este teléfono se reproduce en %1$s</string>
+    <string name="phone_sound_failed">No se pudo reproducir el sonido de este teléfono en %1$s: %2$s</string>
+    <string name="phone_sound_no_capture">Android no dejó que Pocketdesk lo capturara</string>
+    <string name="phone_sound_not_allowed">no reproduce el sonido de este teléfono (Dispositivos, \"Reproducir su sonido aquí\")</string>
+    <string name="phone_sound_not_played">su Pocketdesk no puede reproducir sonido</string>
 </resources>

@@ -577,7 +577,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
 }
 
 /// Show this phone's screen on the computer (T10k): a cast session to
-/// `address:port` on the LAN. Its config and frames go through
+/// `address:port` on the LAN; with `sound_alone`, its sound and nothing
+/// else (M7). Its config and frames go through
 /// `nativeCastConfig` / `nativeCastFrame`; its state is `nativeCastState`'s.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectCast(
@@ -585,6 +586,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     _class: JClass<'_>,
     address: JString<'_>,
     port: jint,
+    sound_alone: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope_unit(RUNTIME.block_on(api::connect_streaming(
@@ -592,7 +594,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         port as u16,
         None,
         0,
-        pocketdesk_core::streaming::SessionMode::Cast,
+        cast_mode(sound_alone),
     )));
     to_jstring(&mut env, json)
 }
@@ -605,6 +607,7 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
     _class: JClass<'_>,
     address: JString<'_>,
     identity_json: JString<'_>,
+    sound_alone: jboolean,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let identity = jstring_to_string(&mut env, &identity_json);
@@ -613,9 +616,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnect
         identity,
         None,
         0,
-        pocketdesk_core::streaming::SessionMode::Cast,
+        cast_mode(sound_alone),
     )));
     to_jstring(&mut env, json)
+}
+
+/// A cast's mode: its screen, or its sound alone (M7).
+fn cast_mode(sound_alone: jboolean) -> pocketdesk_core::streaming::SessionMode {
+    if sound_alone != 0 {
+        pocketdesk_core::streaming::SessionMode::PhoneSound
+    } else {
+        pocketdesk_core::streaming::SessionMode::Cast
+    }
 }
 
 /// The cast's encoder (re)started at `width`×`height` (T10k): 0 queued, 1

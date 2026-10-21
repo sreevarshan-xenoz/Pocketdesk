@@ -186,15 +186,49 @@ class MainActivity : ComponentActivity() {
     /** The computer a cast waits for Android's consent to (T10k). */
     private var castTo: HostStore.Host? = null
 
+    /** M7: that cast is the phone's sound alone. */
+    private var castSoundAlone = false
+
     private val castConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val host = castTo ?: return@registerForActivityResult
             castTo = null
             val data = result.data
             if (result.resultCode == RESULT_OK && data != null) {
-                dev.pocketdesk.android.cast.CastService.start(this, host.address, host.port, result.resultCode, data)
+                dev.pocketdesk.android.cast.CastService.start(
+                    this,
+                    host.address,
+                    host.port,
+                    result.resultCode,
+                    data,
+                    soundAlone = castSoundAlone,
+                )
             }
         }
+
+    /** M7: the computer the phone's sound waits for the microphone permission to go to. */
+    private var phoneSoundTo: HostStore.Host? = null
+
+    private val phoneSoundPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val host = phoneSoundTo ?: return@registerForActivityResult
+            phoneSoundTo = null
+            if (granted) {
+                askPhoneSoundConsent(host)
+            } else {
+                android.widget.Toast.makeText(this, R.string.phone_sound_needs_mic, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+
+    /** M7: Android's consent for the phone's sound alone, said first to be sound only. */
+    private fun askPhoneSoundConsent(host: HostStore.Host) {
+        android.widget.Toast.makeText(this, R.string.phone_sound_consent, android.widget.Toast.LENGTH_LONG).show()
+        castTo = host
+        castSoundAlone = true
+        castConsent.launch(
+            getSystemService(android.media.projection.MediaProjectionManager::class.java).createScreenCaptureIntent(),
+        )
+    }
 
     private val requestLocalNetworkPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -431,6 +465,7 @@ class MainActivity : ComponentActivity() {
                                             HostStore.save(this@MainActivity, host)
                                             maybeRequestNotificationPermission()
                                             castTo = host
+                                            castSoundAlone = false
                                             castConsent.launch(
                                                 getSystemService(android.media.projection.MediaProjectionManager::class.java)
                                                     .createScreenCaptureIntent(),
@@ -444,6 +479,16 @@ class MainActivity : ComponentActivity() {
                                             } else {
                                                 cameraTo = host
                                                 cameraPermission.launch(android.Manifest.permission.CAMERA)
+                                            }
+                                        },
+                                        onPhoneSound = { host ->
+                                            HostStore.save(this@MainActivity, host)
+                                            maybeRequestNotificationPermission()
+                                            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                                askPhoneSoundConsent(host)
+                                            } else {
+                                                phoneSoundTo = host
+                                                phoneSoundPermission.launch(android.Manifest.permission.RECORD_AUDIO)
                                             }
                                         },
                                         onConnectFound = { host ->

@@ -83,8 +83,8 @@ object RustCore {
     private external fun nativeConnectSound(address: String, port: Int): String
     private external fun nativeConnectSoundWan(address: String, identityJson: String): String
     private external fun nativeRemoteState(): String
-    private external fun nativeConnectCast(address: String, port: Int): String
-    private external fun nativeConnectCastWan(address: String, identityJson: String): String
+    private external fun nativeConnectCast(address: String, port: Int, soundAlone: Boolean): String
+    private external fun nativeConnectCastWan(address: String, identityJson: String, soundAlone: Boolean): String
     private external fun nativeCastConfig(width: Int, height: Int): Int
     private external fun nativeCastFrame(
         buffer: java.nio.ByteBuffer,
@@ -558,12 +558,16 @@ object RustCore {
     /** The remote (or sound) session's state as the bridge reports it: `{"state": none | waiting | ready | tooOld}`. */
     fun remoteState(): String = nativeRemoteState()
 
-    /** Show this phone's screen on the computer at [address] (T10k): a cast session on the LAN. */
-    fun connectCast(address: String, port: Int): Result<Unit> = envelope(nativeConnectCast(address, port)).map { }
+    /**
+     * Show this phone's screen on the computer at [address] (T10k): a cast
+     * session on the LAN; with [soundAlone], its sound and nothing else (M7).
+     */
+    fun connectCast(address: String, port: Int, soundAlone: Boolean = false): Result<Unit> =
+        envelope(nativeConnectCast(address, port, soundAlone)).map { }
 
     /** [connectCast] over the iroh WAN path, with the desktop's cached endpoint identity. */
-    fun connectCastWan(address: String, identityJson: String): Result<Unit> =
-        envelope(nativeConnectCastWan(address, identityJson)).map { }
+    fun connectCastWan(address: String, identityJson: String, soundAlone: Boolean = false): Result<Unit> =
+        envelope(nativeConnectCastWan(address, identityJson, soundAlone)).map { }
 
     /**
      * The cast's encoder (re)started at [width]×[height]; waits up to 2 s for
