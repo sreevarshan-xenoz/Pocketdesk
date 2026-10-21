@@ -25,6 +25,13 @@ object ComputerMediaRule {
     /** A paused player shows this long, then the session ends. */
     const val PAUSED_MS = 5 * 60_000L
 
+    /**
+     * Nothing playing this long ends the session: Windows lists no player
+     * for a moment between two tracks, and the session is not torn down
+     * and made again for that (N5 review).
+     */
+    const val NOTHING_MS = 10_000L
+
     /** The commands a press sends, as T8c's `mediaControl` takes them. */
     const val PLAY_PAUSE = "playPause"
     const val NEXT = "next"
@@ -50,10 +57,17 @@ object ComputerMediaRule {
         private var playing: Playing? = null
         private var heardMs = 0L
         private var pausedSinceMs: Long? = null
+        private var nothingSinceMs: Long? = null
 
         /** A push said [now] (null: nothing plays) at [nowMs]. */
         fun heard(now: Playing?, nowMs: Long) {
             heardMs = nowMs
+            if (now == null) {
+                // What showed stays a moment, in case the next track comes.
+                if (playing != null && nothingSinceMs == null) nothingSinceMs = nowMs
+                return
+            }
+            nothingSinceMs = null
             pausedSinceMs = when {
                 now == null || now.isPlaying -> null
                 // Still paused: since it first was.
@@ -67,6 +81,7 @@ object ComputerMediaRule {
         fun current(nowMs: Long): Playing? {
             val now = playing ?: return null
             if (nowMs - heardMs >= SILENT_MS) return null
+            nothingSinceMs?.let { if (nowMs - it >= NOTHING_MS) return null }
             val since = pausedSinceMs
             if (!now.isPlaying && since != null && nowMs - since >= PAUSED_MS) return null
             return now
@@ -76,6 +91,7 @@ object ComputerMediaRule {
         fun clear() {
             playing = null
             pausedSinceMs = null
+            nothingSinceMs = null
         }
     }
 

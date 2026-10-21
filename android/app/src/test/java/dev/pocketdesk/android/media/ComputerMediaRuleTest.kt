@@ -28,11 +28,18 @@ class ComputerMediaRuleTest {
     }
 
     @Test
-    fun nothingPlayingEndsAtOnce() {
+    fun nothingPlayingEndsAfterAMoment() {
         val shown = ComputerMediaRule.Shown()
         shown.heard(song(), 0)
         shown.heard(null, 2_000)
-        assertNull(shown.current(2_000))
+        shown.heard(null, 4_000)
+        assertEquals("a gap between tracks", "One", shown.current(2_000 + ComputerMediaRule.NOTHING_MS - 1)?.title)
+        assertNull(shown.current(2_000 + ComputerMediaRule.NOTHING_MS))
+        // The next track within the moment shows at once.
+        shown.heard(null, 20_000)
+        shown.heard(song("Two"), 21_000)
+        assertEquals("Two", shown.current(21_000)?.title)
+        assertEquals("Two", shown.current(35_000)?.title)
     }
 
     @Test
