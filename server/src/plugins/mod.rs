@@ -5,6 +5,7 @@ pub mod deck;
 pub mod exec;
 pub mod file_browse;
 pub mod input;
+pub mod link_role;
 pub mod links;
 pub mod monitors;
 pub mod notification;
@@ -68,6 +69,7 @@ pub fn register_all() -> PluginSet {
     let mut registry = PluginRegistry::new();
     registry.register(battery::BatteryPlugin::new());
     registry.register(phone_battery::PhoneBatteryPlugin);
+    registry.register(link_role::LinkRolePlugin);
     registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);

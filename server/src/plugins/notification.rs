@@ -1031,7 +1031,7 @@ pub async fn run_answers() {
             continue;
         }
         let notes = phone_notes::read(&dir);
-        let clients = crate::state::clone_clients().await;
+        let clients = crate::state::clone_answer_targets().await;
         let mut still = Vec::new();
         for request in waiting.drain(..) {
             let Some(packet) = answer_packet(&notes, &request) else {
@@ -1092,7 +1092,7 @@ pub async fn run_clears() {
         if waiting.is_empty() {
             continue;
         }
-        let clients = crate::state::clone_clients().await;
+        let clients = crate::state::clone_answer_targets().await;
         let mut still = Vec::new();
         // The owner's switch holds for every clear, the page's too, and one
         // queued before it was turned off (L1 review).
