@@ -138,6 +138,22 @@ fn pair_opens_from_the_left() {
     assert!(app.query_by_label(Tab::Pair.purpose()).is_some());
 }
 
+/// M2b: the Pair page asks whose phone it is, beside its code.
+#[test]
+fn pair_asks_whose_phone_it_is() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    go_to(&app, Tab::Pair);
+    for _ in 0..50 {
+        app.run_steps(2);
+        if app.query_by_label("Whose phone is it?").is_some() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("the Pair page never asked whose phone it is");
+}
+
 /// With no phone paired, Devices says how to pair one, and its button goes
 /// there.
 #[test]
