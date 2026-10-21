@@ -46,6 +46,6 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N1. This is part 1; part 2 grows th
 
 ## Tests
 
-- **The runner's pure parts** (parsing the mirror, the event log and `uiautomator`'s dump; the refusal of the owner's folder) are tested with `python -m unittest scripts/test_device_checks.py`, in CI's Python step if there is one.
+- **The runner's pure parts** (parsing the mirror, the event log and `uiautomator`'s dump; the refusal of the owner's folder) are tested with `python -m unittest scripts/test_device_checks.py`, in CI's Rust job beside the owed checks' index.
 - **The fixture:** `assembleDebug` and `lintDebug` build it.
 - **On the OPPO:** the runner's own first run is the check, and its output goes in the as-built section.

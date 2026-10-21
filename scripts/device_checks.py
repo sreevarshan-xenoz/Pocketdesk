@@ -36,8 +36,8 @@ from typing import Callable, Optional
 APP = "dev.pocketdesk.android"
 FIXTURE = "dev.pocketdesk.fixture"
 DUMP = "/data/local/tmp/device_checks.xml"
-# How long Pocketdesk's control service takes to come back after a screen read.
-SETTLE = 4.0
+# A moment more once the control service says it is back.
+SETTLE = 0.5
 
 
 # ---- pure parts (tested in scripts/test_device_checks.py) ----
@@ -87,20 +87,45 @@ def prefs(xml: str) -> dict[str, object]:
 
 
 def owner_state_dirs() -> list[pathlib.Path]:
-    """Where the owner's own server keeps its state, never to be used here."""
-    dirs = []
-    if os.environ.get("LOCALAPPDATA"):
-        dirs.append(pathlib.Path(os.environ["LOCALAPPDATA"]) / "pocketdesk")
-    if os.environ.get("XDG_STATE_HOME"):
-        dirs.append(pathlib.Path(os.environ["XDG_STATE_HOME"]) / "pocketdesk")
-    dirs.append(pathlib.Path.home() / ".local" / "state" / "pocketdesk")
+    """Where the owner's own server keeps its state and config, never to be
+    used here: the new and the legacy (`linux-link`) names, and a state
+    folder the environment names."""
+    bases = []
+    for var in ("LOCALAPPDATA", "APPDATA", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
+        if os.environ.get(var):
+            bases.append(pathlib.Path(os.environ[var]))
+    bases += [pathlib.Path.home() / ".local" / "state", pathlib.Path.home() / ".config"]
+    dirs = [b / name for b in bases for name in ("pocketdesk", "linux-link")]
+    for var in ("POCKETDESK_STATE_DIR", "POCKETDESK_CONFIG_DIR"):
+        if os.environ.get(var):
+            dirs.append(pathlib.Path(os.environ[var]))
     return dirs
 
 
+def owner_control_port() -> int:
+    """The control port the owner's own server listens on (1716 unless its
+    config says otherwise)."""
+    for folder in owner_state_dirs():
+        config = folder / "config.toml"
+        if config.exists():
+            return control_port(config.read_text(encoding="utf-8", errors="replace"))
+    return 1716
+
+
 def is_owner_root(root: pathlib.Path, owners: list[pathlib.Path]) -> bool:
-    """Whether `root`'s state folder is the owner's own."""
-    state = (root / "state").resolve()
-    return any(state == o.resolve() or root.resolve() == o.resolve() for o in owners)
+    """Whether `root`, or its state or config folder, is the owner's own."""
+    mine = {(root / sub).resolve() for sub in ("", "state", "config")}
+    return any(o.resolve() in mine for o in owners)
+
+
+def fresh_linked(mirror: str, now_unix: float, within: float = 10) -> list[str]:
+    """The linked phones of a mirror written in the last `within` seconds: a
+    stale one (a server since stopped) links no one (N1 review)."""
+    try:
+        updated = json.loads(mirror).get("updated_unix", 0)
+    except ValueError:
+        return []
+    return linked_ids(mirror) if now_unix - updated <= within else []
 
 
 def status_running(out: str) -> bool:
@@ -164,8 +189,11 @@ def wait_for(probe: Callable[[], object], timeout: float, step: float = 0.5) -> 
 class Phone:
     def wake(self) -> None:
         adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
-        adb("shell", "wm", "dismiss-keyguard")
-        adb("shell", "input", "swipe", "540", "2100", "540", "500", "250")
+        if self.locked():
+            adb("shell", "wm", "dismiss-keyguard")
+            # Only on the lock screen: a swipe elsewhere lands on the app in front.
+            if self.locked():
+                adb("shell", "input", "swipe", "540", "2100", "540", "500", "250")
         wait_for(lambda: not self.locked(), 5)
 
     def sleep(self) -> None:
@@ -180,7 +208,13 @@ class Phone:
         return int(out) if out.isdigit() else 0
 
     def prefs(self, name: str) -> dict[str, object]:
-        return prefs(adb("shell", f"run-as {APP} cat shared_prefs/{name}.xml"))
+        out = adb("shell", f"run-as {APP} cat shared_prefs/{name}.xml")
+        if "run-as:" in out and "not debuggable" in out:
+            raise RuntimeError("Pocketdesk is not a debug build: its settings cannot be read")
+        return prefs(out)
+
+    def may_notify(self, package: str) -> bool:
+        return "POST_NOTIFICATIONS: granted=true" in adb("shell", "dumpsys", "package", package)
 
     def accessibility_on(self) -> bool:
         return f"{APP}/{APP}.control.ControlService" in adb("shell", "settings", "get", "secure", "enabled_accessibility_services")
@@ -189,14 +223,14 @@ class Phone:
         """The screen's views. `uiautomator` suppresses other Accessibility
         services while it reads, so Pocketdesk's control service is away for
         a moment after: see [service_back]."""
+        adb("logcat", "-c")
         adb("shell", "uiautomator", "dump", DUMP)
         return adb("shell", "cat", DUMP)
 
     def service_back(self, timeout: float = 15) -> bool:
-        """Pocketdesk's control service bound again after a dump."""
-        back = wait_for(lambda: "label=Pocketdesk control" in adb("shell", "dumpsys", "accessibility"), timeout)
-        # Bound is not yet connected: on the OPPO the service came back about
-        # 3 s after a read (its "control service connected" in logcat).
+        """Pocketdesk's control service connected again after the last dump:
+        its own "control service connected" in logcat (about 3 s on the OPPO)."""
+        back = wait_for(lambda: "control service connected" in self.logcat("ControlService"), timeout)
         time.sleep(SETTLE)
         return bool(back)
 
@@ -225,7 +259,7 @@ class Phone:
 class Server:
     root: pathlib.Path
     exe: pathlib.Path
-    started: bool = False
+    child: Optional[subprocess.Popen] = None
 
     def env(self) -> dict:
         return {
@@ -240,37 +274,66 @@ class Server:
         return status_running(out)
 
     def input_off(self) -> None:
-        """No phone gives this computer input during the checks."""
+        """No phone gives this computer input during the checks: written
+        before the server starts, in one move."""
         path = self.root / "state" / "trusted_devices.json"
         store = json.loads(path.read_text(encoding="utf-8"))
         for device in store.get("trusted_device_ids", []):
             store.setdefault("permissions", {}).setdefault(device, {})["input"] = False
-        path.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
 
-    def start(self) -> None:
+    def log(self) -> str:
+        path = self.root / "device_checks.log"
+        return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+    def start(self) -> Optional[str]:
+        """Start it, with every phone's input off; why not, when it cannot.
+        One that already runs is refused (N1 review: its input was not
+        turned off, and it was never stopped)."""
         if self.running():
-            return
+            return "a server already runs for this folder: stop it first (pocketdesk stop with its folders)"
         self.input_off()
         (self.root / "state" / "live_sessions.json").unlink(missing_ok=True)
-        log = open(self.root / "device_checks.log", "w", encoding="utf-8")
         full = dict(os.environ)
         full.update(self.env())
-        subprocess.Popen([str(self.exe), "start"], stdout=log, stderr=subprocess.STDOUT, env=full)
-        self.started = bool(wait_for(self.running, 30, 1))
+        with open(self.root / "device_checks.log", "w", encoding="utf-8") as log:
+            self.child = subprocess.Popen([str(self.exe), "start"], stdout=log, stderr=subprocess.STDOUT, env=full)
+        # Started once it listens: its pid file comes before the bind.
+        if not wait_for(lambda: "Control listener ready" in self.log() or self.child.poll() is not None, 60, 1):
+            return "it did not start listening within 60 s"
+        if self.child.poll() is not None:
+            return "it stopped at once (see device_checks.log)"
+        return None
 
     def stop(self) -> None:
-        if self.started:
-            run([str(self.exe), "stop"], env=self.env())
+        if self.child is None:
+            return
+        run([str(self.exe), "stop"], env=self.env())
+        try:
+            self.child.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self.child.kill()
 
     def linked(self) -> list[str]:
         path = self.root / "state" / "live_sessions.json"
-        return linked_ids(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not path.exists():
+            return []
+        return fresh_linked(path.read_text(encoding="utf-8"), time.time())
 
-    def events(self, after: int, kind: str) -> list[dict]:
+    def event_count(self) -> int:
+        path = self.root / "state" / "events.jsonl"
+        return len(path.read_text(encoding="utf-8").splitlines()) if path.exists() else 0
+
+    def events_since(self, count: int, kind: str, device: str, app: str) -> list[dict]:
+        """The events of `kind` after the log's first `count` lines, from
+        `device`'s `app` (N1 review: by the second, any app's matched)."""
         path = self.root / "state" / "events.jsonl"
         if not path.exists():
             return []
-        return events_after(path.read_text(encoding="utf-8").splitlines(), after, kind)
+        lines = path.read_text(encoding="utf-8").splitlines()[count:]
+        return [e for e in events_after(lines, 0, kind) if e.get("device_id") == device and e.get("app") == app]
 
     def clipboard(self) -> str:
         path = self.root / "clip.txt"
@@ -323,12 +386,16 @@ def m4_typing(ctx: Ctx) -> tuple[str, str]:
     ctx.phone.wake()
     if not ctx.phone.field(""):
         return "TIMEOUT", "the fixture's field never came up"
+    return typed(ctx, 1, [{"text": "Héllo தமிழ்"}, {"key": "backspace"}, {"text": "!"}], "Héllo தமிழ!")
+
+
+def typed(ctx: Ctx, seq: int, events: list[dict], want: str) -> tuple[str, str]:
+    """Type `events` once the control service is back, and read the field."""
     if not ctx.phone.service_back():
         return "TIMEOUT", "Pocketdesk control did not come back after the screen was read"
-    ctx.server.type_batch(ctx.device, 1, [{"text": "Héllo தமிழ்"}, {"key": "backspace"}, {"text": "!"}])
-    want = "Héllo தமிழ!"
+    ctx.server.type_batch(ctx.device, seq, events)
     # Read once the batch has had time: each read takes the service away.
-    time.sleep(4)
+    time.sleep(3)
     got = wait_for(lambda: field_text(ctx.phone.dump()) == want, 15, step=3)
     return ("PASS", f"read back {want!r}") if got else ("TIMEOUT", f"field holds {field_text(ctx.phone.dump())!r}")
 
@@ -347,33 +414,49 @@ def m4_locked(ctx: Ctx) -> tuple[str, str]:
     time.sleep(6)
     ctx.phone.wake()
     got = field_text(ctx.phone.dump())
-    return ("PASS", "nothing typed while locked") if got == "keep" else ("FAIL", f"field holds {got!r}")
+    if got != "keep":
+        return "FAIL", f"field holds {got!r}"
+    # The control: typing reaches it once unlocked, so the batch was refused,
+    # not lost on the way (N1 review).
+    status, detail = typed(ctx, 3, [{"text": " ok"}], "keep ok")
+    return ("PASS", "nothing typed while locked; typed once unlocked") if status == "PASS" else (status, "control: " + detail)
+
+
+def copies_ready(ctx: Ctx) -> Optional[str]:
+    if ctx.phone.sdk() < 33:
+        return "Android 13 or later"
+    if (why := needs(ctx, "copies_by_themselves")):
+        return why
+    return None
+
+
+def copied(ctx: Ctx, sensitive: bool = False) -> tuple[str, bool]:
+    """Copy a fresh token once the control service is back; whether it reached the computer."""
+    ctx.phone.wake()
+    ctx.phone.service_back(timeout=5)
+    token = ("secret-" if sensitive else "copy-") + secrets.token_hex(4)
+    ctx.phone.copy(token, sensitive)
+    return token, bool(wait_for(lambda: ctx.server.clipboard() == token, 8 if sensitive else 20))
 
 
 @check("m10-copy", "§175")
 def m10_copy(ctx: Ctx) -> tuple[str, str]:
-    if ctx.phone.sdk() < 33:
-        return "SKIP", "Android 13 or later"
-    if (why := needs(ctx, "copies_by_themselves")):
+    if (why := copies_ready(ctx)):
         return "SKIP", why
-    ctx.phone.wake()
-    token = "copy-" + secrets.token_hex(4)
-    ctx.phone.copy(token)
-    got = wait_for(lambda: ctx.server.clipboard() == token, 20)
-    return ("PASS", f"{token} reached the computer") if got else ("TIMEOUT", f"clipboard holds {ctx.server.clipboard()!r}")
+    token, arrived = copied(ctx)
+    return ("PASS", f"{token} reached the computer") if arrived else ("TIMEOUT", f"clipboard holds {ctx.server.clipboard()!r}")
 
 
 @check("m10-sensitive", "§175")
 def m10_sensitive(ctx: Ctx) -> tuple[str, str]:
-    if ctx.phone.sdk() < 33:
-        return "SKIP", "Android 13 or later"
-    if (why := needs(ctx, "copies_by_themselves")):
+    if (why := copies_ready(ctx)):
         return "SKIP", why
-    ctx.phone.wake()
-    token = "secret-" + secrets.token_hex(4)
-    ctx.phone.copy(token, sensitive=True)
-    time.sleep(8)
-    return ("FAIL", "a sensitive copy reached the computer") if ctx.server.clipboard() == token else ("PASS", "not sent")
+    _, arrived = copied(ctx, sensitive=True)
+    if arrived:
+        return "FAIL", "a sensitive copy reached the computer"
+    # The control: a plain copy right after does arrive (N1 review).
+    token, control = copied(ctx)
+    return ("PASS", "not sent; a plain copy after it was") if control else ("TIMEOUT", "control: the plain copy did not arrive either")
 
 
 def forwarding(ctx: Ctx) -> Optional[str]:
@@ -382,7 +465,17 @@ def forwarding(ctx: Ctx) -> Optional[str]:
         return f"turn on This phone's notifications for {FIXTURE}"
     if not ctx.phone.prefs("pocketdesk-ui").get("quiet_in_hand"):
         return "turn on Quiet on the computer while I use the phone"
+    if not ctx.phone.may_notify(FIXTURE):
+        return "allow the fixture's notifications (open its field once and press Allow)"
     return None
+
+
+def fixture_note(ctx: Ctx, nid: int, text: str, timeout: float) -> Optional[dict]:
+    """Post a fixture notification; its event on the computer, if it came."""
+    count = ctx.server.event_count()
+    ctx.phone.notify(nid, "Ann", text)
+    got = wait_for(lambda: ctx.server.events_since(count, "notification", ctx.device, "Pocketdesk fixture"), timeout)
+    return got[-1] if got else None
 
 
 @check("m6-in-hand", "§170")
@@ -390,12 +483,10 @@ def m6_in_hand(ctx: Ctx) -> tuple[str, str]:
     if (why := forwarding(ctx)):
         return "SKIP", why
     ctx.phone.wake()
-    since = int(time.time())
-    ctx.phone.notify(601, "Ann", "In hand " + secrets.token_hex(2))
-    got = wait_for(lambda: ctx.server.events(since, "notification"), 25)
-    if not got:
+    event = fixture_note(ctx, 601, "In hand " + secrets.token_hex(2), 25)
+    if not event:
         return "TIMEOUT", "no notification reached the computer"
-    return ("PASS", "held: phone_in_use") if got[-1].get("phone_in_use") else ("FAIL", "shown while in hand")
+    return ("PASS", "held: phone_in_use") if event.get("phone_in_use") else ("FAIL", "shown while in hand")
 
 
 @check("m6-locked", "§170")
@@ -403,13 +494,11 @@ def m6_locked(ctx: Ctx) -> tuple[str, str]:
     if (why := forwarding(ctx)):
         return "SKIP", why
     ctx.phone.sleep()
-    since = int(time.time())
-    ctx.phone.notify(602, "Ann", "Locked " + secrets.token_hex(2))
-    got = wait_for(lambda: ctx.server.events(since, "notification"), 30)
+    event = fixture_note(ctx, 602, "Locked " + secrets.token_hex(2), 30)
     ctx.phone.wake()
-    if not got:
+    if not event:
         return "TIMEOUT", "no notification reached the computer"
-    return ("FAIL", "held while locked") if got[-1].get("phone_in_use") else ("PASS", "shown")
+    return ("FAIL", "held while locked") if event.get("phone_in_use") else ("PASS", "shown")
 
 
 @check("m8-tel", "§173")
@@ -418,8 +507,16 @@ def m8_tel(ctx: Ctx) -> tuple[str, str]:
     code, out = run([str(ctx.server.exe), "tel", "tel:+1-555-0100"], env=ctx.server.env())
     if code != 0 or "Calling +15550100" not in out:
         return "FAIL", out.strip().splitlines()[-1] if out.strip() else f"exit {code}"
-    got = wait_for(lambda: "number from the computer" in ctx.phone.logcat("Dials") or "Dial" in ctx.phone.logcat("Dials"), 30)
-    return ("PASS", "chose the linked phone; the dial reached it") if got else ("TIMEOUT", "the dial did not reach the phone")
+    # What the phone made of it, as its own log says (N1 review: a refusal
+    # had passed as "reached").
+    seen = wait_for(lambda: re.search(r"a number from the computer (was not taken: \S+|was \w+)", ctx.phone.logcat("Dials")), 30)
+    if not seen:
+        return "TIMEOUT", "the dial did not reach the phone"
+    outcome = seen.group(1)
+    on = ctx.phone.prefs("pocketdesk-ui").get("calls_from_computer")
+    if on and "not taken" in outcome:
+        return "FAIL", f"chose the linked phone, which {outcome} with Calls from the computer on"
+    return "PASS", f"chose the linked phone, whose answer was: {outcome}"
 
 
 # ---- main ----
@@ -430,6 +527,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--server-root", type=pathlib.Path, help="a throwaway server's folder, holding state/ and config/")
     parser.add_argument("--server-exe", type=pathlib.Path, help="the pocketdesk program to run it with")
     parser.add_argument("--phone-port", type=int, default=1716, help="the control port the phone has saved for 127.0.0.1")
+    parser.add_argument("--serial", help="the phone's adb serial, when more than one is attached")
+    parser.add_argument("--phone-id", help="the phone's Pocketdesk id, when more than one is linked")
     parser.add_argument("--only", nargs="*", help="the checks to run")
     parser.add_argument("--list", action="store_true", help="name the checks")
     args = parser.parse_args(argv)
@@ -445,23 +544,41 @@ def main(argv: Optional[list[str]] = None) -> int:
     if is_owner_root(args.server_root, owner_state_dirs()):
         print("Refused: that is the owner's own state folder; give a throwaway server's.", file=sys.stderr)
         return 2
+    if not (args.server_root / "state" / "trusted_devices.json").exists():
+        print(f"Refused: {args.server_root} holds no paired server (state/trusted_devices.json).", file=sys.stderr)
+        return 2
+    if args.serial:
+        os.environ["ANDROID_SERIAL"] = args.serial
     server = Server(args.server_root, args.server_exe)
     phone = Phone()
-    port = control_port((args.server_root / "config" / "config.toml").read_text(encoding="utf-8")
-                        if (args.server_root / "config" / "config.toml").exists() else "")
-    adb("reverse", f"tcp:{args.phone_port}", f"tcp:{port}")
-    server.start()
+    config = args.server_root / "config" / "config.toml"
+    port = control_port(config.read_text(encoding="utf-8") if config.exists() else "")
+    # Never at the owner's own server (N1 review: a copied config pointed the
+    # phone there).
+    if port == owner_control_port():
+        print(f"Refused: the throwaway's control port {port} is the owner's; give it another in its config.toml.", file=sys.stderr)
+        return 2
+    had = adb("reverse", "--list")
+    if f"tcp:{args.phone_port} " in had:
+        print(f"Refused: adb already reverses tcp:{args.phone_port}; remove it first.", file=sys.stderr)
+        return 2
     failed = False
     try:
-        if not server.running():
-            print("TIMEOUT  the throwaway server did not start")
+        why = server.start()
+        if why:
+            print(f"TIMEOUT  the throwaway server: {why}")
             return 1
+        adb("reverse", f"tcp:{args.phone_port}", f"tcp:{port}")
         phone.wake()
         linked = wait_for(server.linked, 90, 2)
         if not linked:
             print("TIMEOUT  the phone never linked to the throwaway server")
             return 1
-        ctx = Ctx(server, phone, linked[0])
+        device = args.phone_id or linked[0]
+        if device not in linked:
+            print(f"TIMEOUT  {device} is not linked")
+            return 1
+        ctx = Ctx(server, phone, device)
         for cid, (section, fn) in CHECKS.items():
             if args.only and cid not in args.only:
                 continue

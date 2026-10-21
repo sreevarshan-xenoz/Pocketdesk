@@ -47,7 +47,13 @@ class PureParts(unittest.TestCase):
     def test_the_owner_s_own_state_folder_is_refused(self):
         owners = [pathlib.Path("C:/Users/x/AppData/Local/pocketdesk")]
         self.assertTrue(dc.is_owner_root(pathlib.Path("C:/Users/x/AppData/Local/pocketdesk"), owners))
+        self.assertTrue(dc.is_owner_root(pathlib.Path("C:/Users/x/AppData/Local"), [pathlib.Path("C:/Users/x/AppData/Local/state")]))
         self.assertFalse(dc.is_owner_root(pathlib.Path("C:/tmp/srv"), owners))
+
+    def test_a_stale_mirror_links_no_one(self):
+        mirror = '{"updated_unix": 100, "linked": [{"device_id": "aaa"}]}'
+        self.assertEqual(dc.fresh_linked(mirror, 105), ["aaa"])
+        self.assertEqual(dc.fresh_linked(mirror, 200), [])
 
     def test_the_server_s_status_past_its_log_lines(self):
         out = 'INFO conn{id=1}: x\n{"api": 1, "server": {"running": true}}\n'
