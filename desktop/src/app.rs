@@ -620,6 +620,10 @@ impl PocketdeskApp {
                     self.pause(minutes);
                     false
                 }
+                TrayAction::PhoneMedia(id, command) => {
+                    self.press_phone_media(&id, command);
+                    false
+                }
                 TrayAction::Resume => {
                     self.resume();
                     false
@@ -1085,6 +1089,26 @@ impl PocketdeskApp {
         self.phones_panel(ui);
     }
 
+    /// Send a press to `id`'s player, saying it was asked (the Sessions
+    /// page, the Overview and the window's tray, N2).
+    fn press_phone_media(&mut self, id: &str, command: &str) {
+        self.notice = crate::notice::Notice::outcome(
+            match model::press_phone_media(&self.state_dir, id, command, now_unix()) {
+                // Asked, not done: the phone acts while it reports its
+                // music, with its media setting on.
+                Ok(()) => Ok(format!(
+                    "Asked the phone to {}.",
+                    match command {
+                        "next" => "skip ahead",
+                        "previous" => "go back",
+                        _ => "play or pause",
+                    }
+                )),
+                Err(e) => Err(e),
+            },
+        );
+    }
+
     /// Ask the phone `id` to ring (N1), and say how that went.
     fn ring(&mut self, id: &str) {
         let who = self.label(id);
@@ -1266,6 +1290,7 @@ impl PocketdeskApp {
         let mut send_clip = None;
         let mut take_photo = None;
         let mut type_to = None;
+        let mut media_press = None;
         let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
@@ -1344,6 +1369,29 @@ impl PocketdeskApp {
                     });
                 }
                 ui.label(RichText::new(facts.join(" · ")).color(crate::theme::muted(ui)));
+                // N2: what it plays, in a session or linked with its
+                // background reporter on, with the player's buttons.
+                if let Some(playing) = row.playing {
+                    let media = &playing.media;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(if media.is_playing { "Playing:" } else { "Paused:" });
+                        ui.label(RichText::new(model::media_line(media)).strong());
+                        let buttons = [
+                            ("Previous", "previous", media.can_previous),
+                            (
+                                if media.is_playing { "Pause" } else { "Play" },
+                                "playPause",
+                                media.can_play_pause,
+                            ),
+                            ("Next", "next", media.can_next),
+                        ];
+                        for (label, command, enabled) in buttons {
+                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                media_press = Some((device.id.clone(), command));
+                            }
+                        }
+                    });
+                }
                 // A refused mute on its own line, as a warning (E5): in the
                 // facts it read as one more fact.
                 if model::mute_refused(device.quiet.as_ref(), now) {
@@ -1467,6 +1515,9 @@ impl PocketdeskApp {
         drop(rows);
         if let Some(id) = ring {
             self.ring(&id);
+        }
+        if let Some((id, command)) = media_press {
+            self.press_phone_media(&id, command);
         }
         if let Some((id, minutes)) = mute {
             self.quiet(&id, minutes);
@@ -1840,7 +1891,7 @@ impl PocketdeskApp {
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Playing:");
-                        ui.label(RichText::new(media_line(media)).strong());
+                        ui.label(RichText::new(model::media_line(media)).strong());
                     });
                     ui.horizontal(|ui| {
                         let buttons = [
@@ -1863,21 +1914,7 @@ impl PocketdeskApp {
             ui.add_space(4.0);
         }
         if let Some((id, command)) = pressed {
-            self.notice = crate::notice::Notice::outcome(
-                match model::press_phone_media(&self.state_dir, &id, command, now_unix()) {
-                    // Asked, not done: the phone acts while Pocketdesk is
-                    // in front there, with its media setting on.
-                    Ok(()) => Ok(format!(
-                        "Asked the phone to {}.",
-                        match command {
-                            "next" => "skip ahead",
-                            "previous" => "go back",
-                            _ => "play or pause",
-                        }
-                    )),
-                    Err(e) => Err(e),
-                },
-            );
+            self.press_phone_media(&id, command);
         }
         if show_cast && let Some(cast) = &self.cast {
             cast.reopen();
@@ -3158,22 +3195,6 @@ fn phone_row(ui: &mut egui::Ui, devices: &[model::Device], id: &str) {
     });
 }
 
-/// What a phone plays, for the Sessions tab (T8d): "Song · Artist (App)",
-/// with what is missing left out.
-pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) -> String {
-    let what = [media.title.as_str(), media.artist.as_str()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" · ");
-    match (what.is_empty(), media.app.is_empty()) {
-        (false, false) => format!("{what} ({})", media.app),
-        (false, true) => what,
-        (true, false) => media.app.clone(),
-        (true, true) => "something".to_string(),
-    }
-}
-
 /// Whether a battery is low as the server warns of it (T8b's 15 %, the
 /// server's `phone_battery::LOW_AT`, kept in step by hand: the desktop
 /// cannot take it from the server crate), not charging: its bar on the
@@ -3351,26 +3372,27 @@ mod tests {
             can_play_pause: true,
             can_next: true,
             can_previous: true,
+            ..Default::default()
         };
-        assert_eq!(media_line(&song), "Song · Artist (Spotify)");
+        assert_eq!(model::media_line(&song), "Song · Artist (Spotify)");
         let video = PhoneMedia {
             artist: String::new(),
             ..song.clone()
         };
-        assert_eq!(media_line(&video), "Song (Spotify)");
+        assert_eq!(model::media_line(&video), "Song (Spotify)");
         let untitled = PhoneMedia {
             title: String::new(),
             artist: String::new(),
             ..song.clone()
         };
-        assert_eq!(media_line(&untitled), "Spotify");
+        assert_eq!(model::media_line(&untitled), "Spotify");
         let bare = PhoneMedia {
             title: String::new(),
             artist: String::new(),
             app: String::new(),
             ..song
         };
-        assert_eq!(media_line(&bare), "something");
+        assert_eq!(model::media_line(&bare), "something");
     }
 
     #[test]

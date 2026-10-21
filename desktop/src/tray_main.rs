@@ -76,7 +76,14 @@ fn main() {
                     .iter()
                     .filter_map(|s| s.device_id.as_deref())
                     .collect();
-                player.follow(&state_dir, &snapshot.phone_media, &in_session, now);
+                // N2: a linked phone's background report shows too.
+                let linked: Vec<&str> = snapshot
+                    .devices
+                    .iter()
+                    .filter(|d| d.linked)
+                    .map(|d| d.id.as_str())
+                    .collect();
+                player.follow(&state_dir, &snapshot.phone_media, &in_session, &linked, now);
             }
             let stamp = model::session_log_stamp(&state_dir);
             if stamp != log.0 {
@@ -270,6 +277,9 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
             pocketdesk_core::local::pause::pause(state_dir, *minutes, now).map(|_| ())
         }
         TrayAction::Resume => pocketdesk_core::local::pause::resume(state_dir),
+        TrayAction::PhoneMedia(id, command) => {
+            model::press_phone_media(state_dir, id, command, now).map_err(std::io::Error::other)
+        }
         TrayAction::Quit => {
             // The window goes too, when it runs (E2).
             let _ = pocketdesk_core::local::app_open::request(

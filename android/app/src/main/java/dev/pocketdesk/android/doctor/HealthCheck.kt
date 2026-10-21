@@ -56,7 +56,9 @@ object HealthCheck {
             Prefs.typingFromComputer(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
-            PhoneFolders.all(ctx).isNotEmpty()
+            PhoneFolders.all(ctx).isNotEmpty() ||
+            // N2: the phone's music without a session.
+            (Prefs.phoneMediaInBackground(ctx) && Prefs.phoneMediaOnComputer(ctx))
 
     /**
      * Whether a feature that needs notification access, but not the listener

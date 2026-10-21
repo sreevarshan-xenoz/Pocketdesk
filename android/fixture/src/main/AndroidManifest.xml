@@ -7,6 +7,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <application
         android:allowBackup="false"
@@ -36,6 +38,13 @@
                 <action android:name="dev.pocketdesk.fixture.CANCEL" />
             </intent-filter>
         </receiver>
+
+        <!-- A silent player with a cover, for the media checks (N2). -->
+        <service
+            android:name=".PlayerService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback"
+            android:permission="android.permission.DUMP" />
 
         <!-- A notification's answers, written to logcat. -->
         <receiver

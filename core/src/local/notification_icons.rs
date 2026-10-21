@@ -199,7 +199,7 @@ fn remove_named(dir: &Path, prefix: &str, keep: Option<&Path>) {
     }
 }
 
-fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let dir = path.parent().unwrap_or(Path::new("."));
     crate::secure_fs::create_private_dir(dir)?;
@@ -219,7 +219,7 @@ const LEFTOVER: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Drop the oldest files in `dir` named `prefix…` ending in `ext` past
 /// `keep`, and temp files a crash left (K3 review).
-fn prune(dir: &Path, prefix: &str, ext: &str, keep: usize) {
+pub(crate) fn prune(dir: &Path, prefix: &str, ext: &str, keep: usize) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };

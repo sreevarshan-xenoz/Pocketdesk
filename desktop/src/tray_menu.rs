@@ -25,7 +25,12 @@ pub enum TrayAction {
     Pause(Option<u32>),
     /// K2a: end the pause.
     Resume,
+    /// N2: a press for the phone's player (`playPause` or `next`).
+    PhoneMedia(String, &'static str),
 }
+
+/// The longest song line the tray shows, in characters.
+const SONG_CHARS: usize = 48;
 
 /// The pauses offered (K2a): an hour, 8 hours, until resumed.
 pub const PAUSES: [(&str, Option<u32>); 3] = [
@@ -159,31 +164,67 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
         // here, and nothing over the owner's own Do Not Disturb.
         let muted = model::muted_from_here(device.quiet.as_ref(), now_unix);
         let owners = !muted && model::quiet_by_owner(device.quiet.as_ref());
+        // N2: what it plays first, with Play/Pause and Next.
+        let mut items = Vec::new();
+        if let Some(playing) = row.playing {
+            let media = &playing.media;
+            let line = model::media_line(media);
+            let line = if line.chars().count() > SONG_CHARS {
+                format!("{}…", line.chars().take(SONG_CHARS - 1).collect::<String>())
+            } else {
+                line
+            };
+            items.push(item(
+                &format!(
+                    "{} {line}",
+                    if media.is_playing {
+                        "Playing:"
+                    } else {
+                        "Paused:"
+                    }
+                ),
+                None,
+            ));
+            items.push(item(
+                if media.is_playing { "Pause" } else { "Play" },
+                media
+                    .can_play_pause
+                    .then(|| TrayAction::PhoneMedia(id(), "playPause")),
+            ));
+            items.push(item(
+                "Next",
+                media.can_next.then(|| TrayAction::PhoneMedia(id(), "next")),
+            ));
+            items.push(Entry::Separator);
+        }
         entries.push(Entry::Phone {
             label,
-            items: vec![
-                item("Ring", row.ring.is_ok().then(|| TrayAction::Ring(id()))),
-                item(
-                    if muted { "Unmute" } else { "Mute for an hour" },
-                    (row.mute.is_ok() && !owners)
-                        .then(|| TrayAction::Mute(id(), if muted { 0 } else { 60 })),
-                ),
-                item(
-                    "Send the clipboard",
-                    row.clipboard
-                        .is_ok()
-                        .then(|| TrayAction::SendClipboard(id())),
-                ),
-                item(
-                    "Send file…",
-                    row.file.is_ok().then(|| TrayAction::SendFile(id())),
-                ),
-                // F3's ask reaches a phone files reach (G2).
-                item(
-                    "Take a photo",
-                    row.file.is_ok().then(|| TrayAction::TakePhoto(id())),
-                ),
-            ],
+            items: items
+                .into_iter()
+                .chain([
+                    item("Ring", row.ring.is_ok().then(|| TrayAction::Ring(id()))),
+                    item(
+                        if muted { "Unmute" } else { "Mute for an hour" },
+                        (row.mute.is_ok() && !owners)
+                            .then(|| TrayAction::Mute(id(), if muted { 0 } else { 60 })),
+                    ),
+                    item(
+                        "Send the clipboard",
+                        row.clipboard
+                            .is_ok()
+                            .then(|| TrayAction::SendClipboard(id())),
+                    ),
+                    item(
+                        "Send file…",
+                        row.file.is_ok().then(|| TrayAction::SendFile(id())),
+                    ),
+                    // F3's ask reaches a phone files reach (G2).
+                    item(
+                        "Take a photo",
+                        row.file.is_ok().then(|| TrayAction::TakePhoto(id())),
+                    ),
+                ])
+                .collect(),
         });
     }
     entries.push(Entry::Separator);
@@ -214,6 +255,71 @@ pub fn with_key(mut entries: Vec<Entry>, phone: &str, key: &str) -> Vec<Entry> {
 
 #[cfg(test)]
 mod tests {
+    /// N2: a phone's music leads its items, with Play/Pause and Next as
+    /// its player offers them.
+    #[test]
+    fn a_phone_s_music_leads_its_items() {
+        use super::*;
+        let mut device = crate::model::Device {
+            id: "p".to_string(),
+            linked: true,
+            ..Default::default()
+        };
+        device.name = Some("Phone".to_string());
+        let mut snapshot = crate::model::Snapshot {
+            now_unix: 100,
+            ..Default::default()
+        };
+        snapshot.devices = vec![device];
+        snapshot.phone_media.insert(
+            "p".to_string(),
+            pocketdesk_core::local::phone_media::PhoneMediaState {
+                media: pocketdesk_core::protocol::phone_media::PhoneMedia {
+                    title: "A song whose name runs on and on and on past the tray".to_string(),
+                    is_playing: true,
+                    can_play_pause: true,
+                    background: true,
+                    ..Default::default()
+                },
+                updated_unix: 100,
+                art: None,
+            },
+        );
+        let rows = crate::model::phone_rows(&snapshot, &Default::default());
+        let entries = menu(&rows, &snapshot.devices, 100);
+        let Entry::Phone { items, .. } = &entries[3] else {
+            panic!("the phone: {entries:?}");
+        };
+        let Entry::Item {
+            label,
+            action: None,
+        } = &items[0]
+        else {
+            panic!("the song first: {items:?}");
+        };
+        assert!(label.starts_with("Playing: A song"), "{label}");
+        assert!(
+            label.chars().count() <= "Playing: ".len() + SONG_CHARS,
+            "{label}"
+        );
+        assert_eq!(
+            items[1],
+            Entry::Item {
+                label: "Pause".to_string(),
+                action: Some(TrayAction::PhoneMedia("p".to_string(), "playPause")),
+            }
+        );
+        assert_eq!(
+            items[2],
+            Entry::Item {
+                label: "Next".to_string(),
+                action: None,
+            },
+            "its player offers no Next"
+        );
+        assert_eq!(items[3], Entry::Separator);
+    }
+
     /// K2a: the menu offers Pause, and while paused says so with Resume.
     #[test]
     fn the_menu_offers_a_pause_and_resume() {

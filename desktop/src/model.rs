@@ -46,6 +46,8 @@ pub struct Device {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Snapshot {
     pub running: bool,
+    /// When it was read (unix seconds), for what ages (N2's music).
+    pub now_unix: u64,
     pub devices: Vec<Device>,
     pub sessions: Vec<sessions::MirrorSession>,
     /// Every phone drives, as the running server says (N7).
@@ -146,6 +148,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     sent.reverse();
     Snapshot {
         running,
+        now_unix,
         devices,
         sessions,
         shared_control,
@@ -268,6 +271,24 @@ pub struct PhoneRow<'a> {
     pub link: Result<(), &'static str>,
     /// A text to its clipboard (D3's Send to…, D5's tray).
     pub clipboard: Result<(), &'static str>,
+    /// What it plays, when that may show (N2: in a session, or linked
+    /// with the phone's background reporter on).
+    pub playing: Option<&'a pocketdesk_core::local::phone_media::PhoneMediaState>,
+}
+
+/// What a phone plays in a line: "Song · Artist (App)", the parts it has.
+pub fn media_line(media: &pocketdesk_core::protocol::phone_media::PhoneMedia) -> String {
+    let what = [media.title.as_str(), media.artist.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    match (what.is_empty(), media.app.is_empty()) {
+        (false, false) => format!("{what} ({})", media.app),
+        (false, true) => what,
+        (true, false) => media.app.clone(),
+        (true, true) => "something".to_string(),
+    }
 }
 
 /// Whether a text can go to `device`'s clipboard now: one rule for the
@@ -337,6 +358,14 @@ pub fn phone_rows<'a>(
                     Ok(())
                 },
                 clipboard: clipboard_reach(device),
+                playing: snapshot.phone_media.get(&device.id).filter(|state| {
+                    crate::phone_player::may_show(
+                        state,
+                        device.connected,
+                        device.linked,
+                        snapshot.now_unix,
+                    )
+                }),
             }
         })
         .collect()
@@ -538,6 +567,13 @@ pub const FEATURES: &[Feature] = &[
         key: "media",
         what: "Its music here",
         phone_switch: "My media on the computer",
+        permission_name: "Show and control its media here",
+        android: "notification access",
+    },
+    Feature {
+        key: "media_background",
+        what: "Its music here without a session",
+        phone_switch: "My media on the computer in the background",
         permission_name: "Show and control its media here",
         android: "notification access",
     },
@@ -1558,6 +1594,62 @@ mod tests {
         );
         assert_eq!(rows[2].last_session, Some(50));
         assert_eq!(rows[0].last_session, None);
+    }
+
+    /// What a phone plays, from its background reporter or not (N2).
+    fn playing(background: bool, at: u64) -> pocketdesk_core::local::phone_media::PhoneMediaState {
+        pocketdesk_core::local::phone_media::PhoneMediaState {
+            media: pocketdesk_core::protocol::phone_media::PhoneMedia {
+                title: "Song".to_string(),
+                app: "Music".to_string(),
+                is_playing: true,
+                can_play_pause: true,
+                can_next: true,
+                background,
+                ..Default::default()
+            },
+            updated_unix: at,
+            art: None,
+        }
+    }
+
+    /// N2: a linked phone's music shows with its background reporter on,
+    /// a phone in a session's as before, and none away or stale.
+    #[test]
+    fn a_phone_s_music_shows_in_a_session_or_linked_from_the_background() {
+        let mut snapshot = Snapshot {
+            now_unix: 1_000,
+            ..Default::default()
+        };
+        let mut session = phone("session");
+        session.connected = true;
+        session.linked = true;
+        let mut linked = phone("linked");
+        linked.linked = true;
+        let mut in_app = phone("in-app");
+        in_app.linked = true;
+        let away = phone("away");
+        let mut stale = phone("stale");
+        stale.linked = true;
+        snapshot.devices = vec![session, linked, in_app, away, stale];
+        snapshot
+            .phone_media
+            .insert("session".to_string(), playing(false, 990));
+        snapshot
+            .phone_media
+            .insert("linked".to_string(), playing(true, 990));
+        snapshot
+            .phone_media
+            .insert("in-app".to_string(), playing(false, 990));
+        snapshot
+            .phone_media
+            .insert("away".to_string(), playing(true, 990));
+        snapshot
+            .phone_media
+            .insert("stale".to_string(), playing(true, 10));
+        let rows = phone_rows(&snapshot, &Default::default());
+        let shown: Vec<bool> = rows.iter().map(|r| r.playing.is_some()).collect();
+        assert_eq!(shown, [true, true, false, false, false]);
     }
 
     #[test]

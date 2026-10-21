@@ -18,6 +18,53 @@ class MediaRuleTest {
         canPrevious = true,
     )
 
+    /** N2: what plays is said again each minute, and a pause for five minutes, then left. */
+    @Test
+    fun theBackgroundReporterSaysAgainWhatIsCurrent() {
+        val playing = media("Spotify", playing = true)
+        val paused = playing.copy(isPlaying = false)
+        assertTrue("first", MediaRule.backgroundDue(MediaRule.Sent(), playing, 0, null))
+        assertFalse(
+            "a new link does not hear a pause past five minutes",
+            MediaRule.backgroundDue(MediaRule.Sent(), paused, MediaRule.PAUSED_MS, 0),
+        )
+        assertTrue(MediaRule.backgroundDue(MediaRule.Sent(), paused, 1_000, 0))
+        assertFalse("nothing, never sent", MediaRule.backgroundDue(MediaRule.Sent(), null, 0, null))
+        val sent = MediaRule.Sent(any = true, last = playing, atMs = 1_000)
+        assertFalse(MediaRule.backgroundDue(sent, playing, 1_000 + 59_999, null))
+        assertTrue(MediaRule.backgroundDue(sent, playing, 1_000 + MediaRule.RESEND_MS, null))
+        assertTrue("a pause is a change", MediaRule.backgroundDue(sent, paused, 2_000, 2_000))
+        val sentPaused = MediaRule.Sent(any = true, last = paused, atMs = 2_000)
+        assertTrue(MediaRule.backgroundDue(sentPaused, paused, 2_000 + MediaRule.RESEND_MS, 2_000))
+        assertFalse(
+            "paused too long",
+            MediaRule.backgroundDue(sentPaused, paused, 2_000 + MediaRule.PAUSED_MS, 2_000),
+        )
+        assertTrue("stopped: {} once", MediaRule.backgroundDue(sent, null, 3_000, null))
+        val sentNothing = MediaRule.Sent(any = true, last = null, atMs = 3_000)
+        assertFalse(MediaRule.backgroundDue(sentNothing, null, 3_000 + MediaRule.RESEND_MS, null))
+        assertTrue("a cover that came late is a change", MediaRule.backgroundDue(sent, playing.copy(artId = "0123456789abcdef"), 1_001, null))
+    }
+
+    @Test
+    fun aPlayerIsCurrentWhilePlayingOrPausedFiveMinutes() {
+        val playing = media("Spotify", playing = true)
+        val paused = playing.copy(isPlaying = false)
+        assertTrue(MediaRule.current(playing, 0, null))
+        assertTrue(MediaRule.current(paused, MediaRule.PAUSED_MS - 1, 0))
+        assertFalse(MediaRule.current(paused, MediaRule.PAUSED_MS, 0))
+        assertFalse(MediaRule.current(paused, 0, null))
+        assertFalse(MediaRule.current(null, 0, 0))
+    }
+
+    @Test
+    fun aCoverGoesOncePerLink() {
+        assertTrue(MediaRule.sendArt("0123456789abcdef", null))
+        assertFalse(MediaRule.sendArt("0123456789abcdef", "0123456789abcdef"))
+        assertTrue("held another", MediaRule.sendArt("0123456789abcdef", "fedcba9876543210"))
+        assertFalse(MediaRule.sendArt(null, null))
+    }
+
     @Test
     fun thePlayingSessionIsReportedElseTheMostRecent() {
         val paused = media("Podcasts", playing = false)

@@ -18,6 +18,8 @@ object MediaRule {
         val canPlayPause: Boolean,
         val canNext: Boolean,
         val canPrevious: Boolean,
+        /** Its cover's id (N2), 16 hex digits of the JPEG's SHA-256; null for none. */
+        val artId: String? = null,
     )
 
     /**
@@ -44,6 +46,40 @@ object MediaRule {
 
     /** What was sent, as far as a computer [linked] (or not) still knows it. */
     fun forLink(sent: Sent, linked: Boolean): Sent = if (linked) sent else Sent()
+
+    /**
+     * How long a paused player is said again by the background reporter
+     * (N2): the computer's media controls keep a paused phone this long (K7).
+     */
+    const val PAUSED_MS = 5 * 60_000L
+
+    /** Whether [now] is current at [nowMs]: playing, or paused since [pausedSinceMs] for under [PAUSED_MS]. */
+    fun current(now: Media?, nowMs: Long, pausedSinceMs: Long?): Boolean = when {
+        now == null -> false
+        now.isPlaying -> true
+        else -> pausedSinceMs != null && nowMs - pausedSinceMs < PAUSED_MS
+    }
+
+    /**
+     * Whether the background reporter (N2) sends [now] at [nowMs] after
+     * [sent]: what is [current] to a link that has heard nothing (N2
+     * review: not yesterday's paused song to each new link), a change,
+     * `{}` once when playing stops, or what is current again every
+     * [RESEND_MS]; a player paused past [PAUSED_MS] is left to age out on
+     * the computer.
+     */
+    fun backgroundDue(sent: Sent, now: Media?, nowMs: Long, pausedSinceMs: Long?): Boolean = when {
+        !sent.any -> current(now, nowMs, pausedSinceMs)
+        now != sent.last -> true
+        else -> current(now, nowMs, pausedSinceMs) && nowMs - sent.atMs >= RESEND_MS
+    }
+
+    /**
+     * Whether the cover [artId] goes with a report: the computer holds one
+     * cover a phone, the last sent ([held]), so a cover it no longer holds
+     * goes again (N2 review: a track played again after another).
+     */
+    fun sendArt(artId: String?, held: String?): Boolean = artId != null && artId != held
 
     /** Whether a press for [command] is acted on. */
     fun accepts(command: String, settingOn: Boolean): Boolean = settingOn && command in COMMANDS
