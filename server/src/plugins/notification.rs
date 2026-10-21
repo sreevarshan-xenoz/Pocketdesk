@@ -269,6 +269,7 @@ fn live_cards() -> &'static Mutex<LiveCards> {
 }
 
 /// A live card's toast was not found to update (Windows): closed here.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn live_gone(tag: &str) {
     live_cards()
         .lock()
