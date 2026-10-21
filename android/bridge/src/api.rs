@@ -789,7 +789,8 @@ pub async fn connect_to_peer(
                                 }
                                 // The computer's answers to this phone's
                                 // notifications (T10c), kept for the app.
-                                if trimmed.contains("kdeconnect.notification.")
+                                if (trimmed.contains("kdeconnect.notification.")
+                                    || trimmed.contains("notification_open"))
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                 {
                                     crate::notification_answers::receive(

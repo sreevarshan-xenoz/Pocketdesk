@@ -95,7 +95,8 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
         while let Ok(Some(line)) = lines.next_line().await {
             let trimmed = line.trim();
             // The computer's answers and clears (T10c, L1), kept with it.
-            if trimmed.contains("kdeconnect.notification.")
+            if (trimmed.contains("kdeconnect.notification.")
+                || trimmed.contains("notification_open"))
                 && let Ok(packet) = NetworkPacket::from_wire(trimmed)
             {
                 crate::notification_answers::receive(

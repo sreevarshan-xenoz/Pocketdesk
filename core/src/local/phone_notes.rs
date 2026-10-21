@@ -39,6 +39,9 @@ pub struct PhoneNote {
     /// Whether it takes a typed reply.
     #[serde(default)]
     pub reply: bool,
+    /// Whether the phone lets the computer open it there (N3).
+    #[serde(default)]
+    pub open: bool,
     /// A chat's recent messages, oldest first (D4), when the phone sent them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<crate::protocol::conversation::Message>,
@@ -78,15 +81,22 @@ fn write(state_dir: &Path, notes: Vec<PhoneNote>) -> io::Result<()> {
     std::fs::rename(&tmp, &path)
 }
 
-/// Keep `note`, replacing the phone's earlier one of the same key; the
-/// oldest go past [`MAX_KEPT`].
+/// Keep `note`, replacing the phone's earlier one of the same key; past
+/// [`MAX_KEPT`] the oldest go, one that only opens on the phone before one
+/// that takes an answer (N3 review: thirty news notifications had pushed a
+/// chat's reply out).
 pub fn keep(state_dir: &Path, note: PhoneNote) -> io::Result<()> {
     let _one = writing();
     let mut notes = read(state_dir);
     notes.retain(|n| !(n.device_id == note.device_id && n.key == note.key));
     notes.push(note);
-    let excess = notes.len().saturating_sub(MAX_KEPT);
-    notes.drain(..excess);
+    while notes.len() > MAX_KEPT {
+        let oldest = notes
+            .iter()
+            .position(|n| n.open && n.actions.is_empty() && !n.reply)
+            .unwrap_or(0);
+        notes.remove(oldest);
+    }
     write(state_dir, notes)
 }
 
@@ -138,12 +148,14 @@ pub fn clear(state_dir: &Path) -> io::Result<()> {
     }
 }
 
-/// What the computer answers: a button, or a typed reply.
+/// What the computer answers: a button, a typed reply, or opening the
+/// notification on the phone (N3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     Action(String),
     Reply(String),
+    Open,
 }
 
 impl Answer {
@@ -151,6 +163,7 @@ impl Answer {
         match self {
             Answer::Action(title) => valid_action(title),
             Answer::Reply(message) => valid_reply(message),
+            Answer::Open => true,
         }
     }
 }
@@ -252,6 +265,31 @@ fn request_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+
+    /// N3 review: open-only notes go first, so one that takes a reply stays.
+    #[test]
+    fn open_only_notes_go_before_answerable_ones() {
+        let dir = std::env::temp_dir().join(format!("pd-notes-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut chat = note("phone", "chat", 1);
+        chat.reply = true;
+        keep(&dir, chat).unwrap();
+        for n in 0..MAX_KEPT + 5 {
+            let mut news = note("phone", &format!("news-{n}"), 2 + n as u64);
+            news.actions.clear();
+            news.reply = false;
+            news.open = true;
+            keep(&dir, news).unwrap();
+        }
+        let kept = read(&dir);
+        assert_eq!(kept.len(), MAX_KEPT);
+        assert!(kept.iter().any(|n| n.key == "chat"), "the chat stays");
+        assert!(
+            !kept.iter().any(|n| n.key == "news-0"),
+            "the oldest news went"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -271,6 +309,7 @@ mod tests {
             at_unix: at,
             actions: vec!["Mark as read".into()],
             reply: true,
+            open: false,
             messages: vec![],
         }
     }

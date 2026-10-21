@@ -106,20 +106,25 @@ impl NotesView {
     }
 
     fn answer(&mut self, state_dir: &Path, note: &PhoneNote, answer: Answer, now_unix: u64) {
-        let what = match &answer {
-            Answer::Action(title) => format!("\"{title}\""),
-            Answer::Reply(_) => "your reply".to_string(),
+        let asked = match &answer {
+            Answer::Action(title) => {
+                format!("Asked the phone to send \"{title}\" to {}.", note.app)
+            }
+            Answer::Reply(_) => format!("Asked the phone to send your reply to {}.", note.app),
+            // N3: it opens on the phone's screen, unlocked.
+            Answer::Open => format!("Asked the phone to open it in {}.", note.app),
         };
+        let opening = answer == Answer::Open;
         match phone_notes::request(state_dir, &note.device_id, &note.key, answer, now_unix) {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
-                self.notice = crate::notice::Notice::done(format!(
-                    "Asked the phone to send {what} to {}.",
-                    note.app
-                ));
-                self.drafts
-                    .remove(&(note.device_id.clone(), note.key.clone()));
+                self.notice = crate::notice::Notice::done(asked);
+                // An open leaves a reply being typed as it is (N3 review).
+                if !opening {
+                    self.drafts
+                        .remove(&(note.device_id.clone(), note.key.clone()));
+                }
             }
             Err(e) => self.notice = crate::notice::Notice::error(e.to_string()),
         }
@@ -270,6 +275,15 @@ impl NotesView {
                                 );
                             }
                         }
+                        // N3: where the phone lets the computer open it.
+                        if note.open
+                            && ui
+                                .button("Open on the phone")
+                                .on_hover_text("It opens on the phone's screen, as a tap on it would; the phone must be unlocked")
+                                .clicked()
+                        {
+                            self.answer(state_dir, note, Answer::Open, now_unix);
+                        }
                         // L1: cleared here, cleared on the phone; an ended
                         // call is gone there, so only here (M8 review).
                         if ended_call(note) {
@@ -380,7 +394,11 @@ pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
             Tone::Unsure,
         ),
         State::Sent => ("Your answer: sent to the phone…".to_string(), Tone::Waiting),
-        State::Handed => ("Your answer: handed to the app".to_string(), Tone::Done),
+        // N3: an open says whether it opened or waits as an offer there.
+        State::Handed => match outcome.said.as_deref() {
+            Some(said) => (format!("Your answer: {said}"), Tone::Done),
+            None => ("Your answer: handed to the app".to_string(), Tone::Done),
+        },
         State::NotSent { reason } => (format!("Your answer was not sent: {reason}"), Tone::Failed),
     }
 }
@@ -431,6 +449,7 @@ mod tests {
             key: "k".into(),
             state,
             at_unix: 1_000,
+            said: None,
         };
         assert_eq!(answer_line(&at(State::Waiting), 1_000).1, Tone::Waiting);
         assert_eq!(
@@ -448,6 +467,14 @@ mod tests {
             "a warning, not waiting (E5)"
         );
         assert_eq!(answer_line(&at(State::Handed), 1_000).1, Tone::Done);
+        let opened = Outcome {
+            said: Some("opened on the phone".to_string()),
+            ..at(State::Handed)
+        };
+        assert_eq!(
+            answer_line(&opened, 1_000).0,
+            "Your answer: opened on the phone"
+        );
         let refused = answer_line(
             &at(State::NotSent {
                 reason: "the app refused it".into(),
@@ -474,6 +501,7 @@ mod tests {
             at_unix: 0,
             actions: vec![],
             reply: true,
+            open: false,
             messages: vec![],
         };
         let listed = newest_first(vec![note("old"), note("new")]);
@@ -552,6 +580,7 @@ mod tests {
             at_unix: 0,
             actions: vec!["Silence".into()],
             reply: false,
+            open: false,
             messages: Vec::new(),
         };
         assert_eq!(

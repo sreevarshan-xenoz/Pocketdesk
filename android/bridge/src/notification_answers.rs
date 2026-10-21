@@ -8,8 +8,8 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use pocketdesk_core::protocol::notification_action::{
-    NOTIFICATION_ACTION, NOTIFICATION_REPLY, NOTIFICATION_REQUEST, cancel_key, valid_action,
-    valid_answer_id, valid_key, valid_reply,
+    NOTIFICATION_ACTION, NOTIFICATION_OPEN, NOTIFICATION_REPLY, NOTIFICATION_REQUEST, cancel_key,
+    valid_action, valid_answer_id, valid_key, valid_reply,
 };
 
 /// Answers waiting for the app, at most; the oldest go first.
@@ -31,6 +31,13 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
         NOTIFICATION_REPLY => match (text("requestReplyId"), text("message")) {
             (Some(key), Some(message)) if valid_key(key) && valid_reply(message) => {
                 serde_json::json!({ "host": host, "port": port, "key": key, "message": message })
+            }
+            _ => return,
+        },
+        // An open (N3): show the notification's app on the phone.
+        NOTIFICATION_OPEN => match text("key") {
+            Some(key) if valid_key(key) => {
+                serde_json::json!({ "host": host, "port": port, "key": key, "open": true })
             }
             _ => return,
         },
@@ -85,6 +92,31 @@ pub(crate) fn take_json() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// N3: an open waits with its computer and its answer's id.
+    #[tokio::test]
+    async fn an_open_waits_with_its_computer() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        let id = "6c1f2a0e-0000-4000-8000-000000000001";
+        receive(
+            NOTIFICATION_OPEN,
+            &serde_json::json!({ "key": "0|com.chat|1|null|10", "answerId": id }),
+            "192.0.2.7",
+            1716,
+        );
+        receive(
+            NOTIFICATION_OPEN,
+            &serde_json::json!({ "key": "" }),
+            "192.0.2.7",
+            1716,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(
+            waiting,
+            serde_json::json!([{ "host": "192.0.2.7", "port": 1716, "key": "0|com.chat|1|null|10", "open": true, "answerId": id }])
+        );
+    }
+
     /// L1: a clear waits with its computer, as an answer does.
     #[tokio::test]
     async fn a_clear_waits_with_its_computer() {

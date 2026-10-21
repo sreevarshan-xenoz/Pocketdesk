@@ -536,7 +536,10 @@ fn show_toast(
         let mut kept = answerable();
         kept.retain(|(t, _, _)| t != tag);
         if has_buttons {
-            kept.push_back((tag.to_string(), toast, answers.is_some()));
+            // One that only opens on the phone (N3) is not "to answer": it
+            // would take a reply's place (N3 review).
+            let to_answer = answers.is_some_and(|a| a.reply || !a.actions.is_empty());
+            kept.push_back((tag.to_string(), toast, to_answer));
             // Each kind its own places: thirty to answer, thirty to mute.
             crate::toast_answers::keep_within(&mut kept, |(_, _, a)| *a, KEEP_ANSWERABLE);
         } else {
@@ -915,6 +918,7 @@ mod tests {
             key: "0|chat|1|null|10001".into(),
             actions: vec!["Mark \"read\" & <go>".into(), "Mute".into()],
             reply: true,
+            open: false,
         }
     }
 

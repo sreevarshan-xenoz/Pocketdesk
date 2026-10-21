@@ -38,6 +38,10 @@ pub struct Outcome {
     pub state: State,
     /// When it last changed.
     pub at_unix: u64,
+    /// What the phone said of one handed over (N3: "opened on the phone",
+    /// "offered on the phone: …"); none from a phone before N3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -110,6 +114,9 @@ pub fn phone_said(
     else {
         return Ok(false);
     };
+    if answered.ok {
+        answer.said = answered.reason.clone();
+    }
     answer.state = if answered.ok {
         State::Handed
     } else {
@@ -160,6 +167,7 @@ mod tests {
             key: "k".to_string(),
             state,
             at_unix: 100,
+            said: None,
         }
     }
 

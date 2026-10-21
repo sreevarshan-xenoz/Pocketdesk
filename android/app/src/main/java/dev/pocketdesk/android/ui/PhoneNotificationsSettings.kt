@@ -79,6 +79,16 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // N3: the computer may open a notification here, as a tap on it would.
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_open),
+        stringResource(R.string.phone_notifications_open_summary),
+        version.let { Prefs.letComputerOpen(context) },
+        {
+            Prefs.setLetComputerOpen(context, it)
+            version++
+        },
+    )
     // T10c: the computer may press buttons and reply, as this phone's owner.
     SettingSwitch(
         stringResource(R.string.phone_notifications_answer),

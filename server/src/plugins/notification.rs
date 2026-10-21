@@ -680,6 +680,8 @@ impl Plugin for NotificationPlugin {
             pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION,
             // A clear (L1).
             pocketdesk_core::protocol::notification_action::NOTIFICATION_REQUEST,
+            // An open on the phone (N3).
+            pocketdesk_core::protocol::notification_action::NOTIFICATION_OPEN,
         ]
     }
 
@@ -898,8 +900,9 @@ fn unix_now() -> u64 {
 }
 
 /// The note to keep for a phone notification `body` that can be answered:
-/// one that offers buttons, or a reply for itself (`requestReplyId` is its
-/// own id). The fields are those shown, held to the same limits.
+/// one that offers buttons, a reply for itself (`requestReplyId` is its
+/// own id), or to be opened on the phone (N3). The fields are those shown,
+/// held to the same limits.
 pub(crate) fn answerable(
     device_id: &str,
     body: &serde_json::Value,
@@ -911,7 +914,11 @@ pub(crate) fn answerable(
     }
     let actions = notification_action::offered_actions(body);
     let reply = body.get("requestReplyId").and_then(|v| v.as_str()) == Some(key);
-    if actions.is_empty() && !reply {
+    let open = body
+        .get(notification_action::CAN_OPEN)
+        .and_then(|v| v.as_bool())
+        == Some(true);
+    if actions.is_empty() && !reply && !open {
         return None;
     }
     let (app, title, text) = to_show(body)?;
@@ -925,6 +932,7 @@ pub(crate) fn answerable(
         at_unix: now_unix.saturating_sub(waited_secs(body)),
         actions,
         reply,
+        open,
         // A chat's recent messages (D4), held to their limits.
         messages: pocketdesk_core::protocol::conversation::messages(body),
     })
@@ -944,6 +952,7 @@ pub(crate) fn answer_packet(notes: &[PhoneNote], request: &AnswerRequest) -> Opt
         Answer::Reply(message) if note.reply => {
             notification_action::reply_packet(&note.key, message)
         }
+        Answer::Open if note.open => notification_action::open_packet(&note.key),
         _ => None,
     }?;
     Some(notification_action::with_answer_id(packet, &request.id))
@@ -964,6 +973,7 @@ async fn note_answer(request: &AnswerRequest, state: answers::State) {
         key: request.key.clone(),
         state,
         at_unix: unix_now(),
+        said: None,
     };
     let kept = tokio::task::spawn_blocking(move || answers::record(&dir, outcome)).await;
     if let Ok(Err(e)) = kept {
@@ -1368,6 +1378,38 @@ async fn close_desktop_notification(tag: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// N3: a notification that only offers to be opened is kept, and Open
+    /// goes only to one that offers it.
+    #[test]
+    fn an_open_goes_only_where_offered() {
+        use pocketdesk_core::local::phone_notes::{Answer, AnswerRequest};
+        let body = serde_json::json!({
+            "id": "0|com.chat|1|null|10", "app": "Chat", "title": "Ann",
+            "text": "Hi", "canOpen": true,
+        });
+        let note = answerable("phone", &body, 100).expect("kept for its open");
+        assert!(note.open && note.actions.is_empty() && !note.reply);
+        let plain = serde_json::json!({"id": "0|com.chat|2|null|10", "app": "Chat", "title": "Ann", "text": "Hi"});
+        assert!(answerable("phone", &plain, 100).is_none());
+        let request = |key: &str| AnswerRequest {
+            id: "6c1f2a0e-0000-4000-8000-000000000001".to_string(),
+            device_id: "phone".to_string(),
+            key: key.to_string(),
+            answer: Answer::Open,
+            created_unix: 100,
+        };
+        let packet = answer_packet(std::slice::from_ref(&note), &request(&note.key)).expect("sent");
+        assert_eq!(packet.packet_type, notification_action::NOTIFICATION_OPEN);
+        assert_eq!(packet.body["key"], note.key.as_str());
+        assert!(packet.body.get("answerId").is_some());
+        let mut closed = note.clone();
+        closed.open = false;
+        assert!(
+            answer_packet(&[closed], &request(&note.key)).is_none(),
+            "not offered"
+        );
+    }
     use super::*;
     use serde_json::json;
 
@@ -1421,6 +1463,7 @@ mod tests {
             at_unix: 1,
             actions: vec!["Mark as read".into()],
             reply: false,
+            open: false,
             messages: vec![],
         }];
         let ask = |device: &str, key: &str, answer: Answer| AnswerRequest {
@@ -1718,6 +1761,7 @@ mod tests {
             key: "k".to_string(),
             state: answers::State::Sent,
             at_unix: 1,
+            said: None,
         };
         let theirs = "e1e1e1e1-0000-4000-8000-00000000a001";
         let mine = "e1e1e1e1-0000-4000-8000-00000000a002";

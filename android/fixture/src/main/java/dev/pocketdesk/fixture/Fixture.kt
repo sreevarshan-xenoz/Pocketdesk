@@ -100,10 +100,20 @@ class NotifyReceiver : BroadcastReceiver() {
         )
         val title = intent.getStringExtra("title") ?: "Fixture"
         val text = intent.getStringExtra("text") ?: "A notification"
+        // A tap opens the field with "opened <id>" in it (N3's check).
+        val tap = PendingIntent.getActivity(
+            context,
+            id,
+            Intent(context, FieldActivity::class.java)
+                .putExtra("text", "opened $id")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val builder = Notification.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(tap)
         when (intent.getStringExtra("style")) {
             "chat" -> {
                 val me = Person.Builder().setName("Me").build()
