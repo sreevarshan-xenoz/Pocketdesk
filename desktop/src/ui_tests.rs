@@ -937,6 +937,8 @@ fn the_overview_asks_which_phone_calls_a_link() {
     app.get_by_role_and_label(egui::accesskit::Role::Button, "Test Phone")
         .click();
     app.run_steps(3);
+    // Read after the click: the request carries the clock's second then.
+    let now = now + 2;
     let dialled: Vec<_> = pocketdesk_core::local::dials::take_all(fixture.state(), now)
         .into_iter()
         .map(|d| (d.device_id, d.number))
