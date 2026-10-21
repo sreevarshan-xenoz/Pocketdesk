@@ -2443,7 +2443,7 @@ Built 2026-10-21; tested through units, nothing against a broker or a device yet
 
 Built 2026-10-21; checked on the OPPO by adb: a copy noticed, the reading window started from the background, the clipboard read, two copies 6 s apart both read. Owed:
 - [x] The copy reaching the computer's clipboard on a throwaway server with the clipboard seam (`POCKETDESK_CLIPBOARD_FILE`). 2026-10-21, on the OPPO by adb: `endtoend42` copied by keys in the Google app's search field reached the throwaway's clipboard seam by itself ("A copy sent by itself").
-- [ ] A password manager's copy (marked sensitive): read, not sent.
+- [x] A password manager's copy (marked sensitive): read, not sent. 2026-10-21, on the OPPO by `scripts/device_checks.py` (`m10-sensitive`): the fixture's copy marked `IS_SENSITIVE` did not reach the throwaway's clipboard seam, and a plain copy right after it did. A real password manager is still owed.
 - [ ] The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
 - [ ] The keyboard and selection in the app copied from, after the read (focus moves away and back).
 - [ ] An hour with the switch on: the battery.

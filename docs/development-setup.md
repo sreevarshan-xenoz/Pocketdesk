@@ -160,6 +160,42 @@ Notes:
 - `./gradlew connectedDebugAndroidTest` uninstalls the app when it ends, which wipes
   the phone's pairings. Add `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`.
 
+### 5b. Device checks by script (N1)
+
+`scripts/device_checks.py` runs the owed checks that need no hands (its `--list`
+names them) against a phone on adb and a throwaway server it starts and stops.
+Use a phone you test with, never one you use: the runner wakes it, locks it,
+types into it and posts notifications on it.
+
+1. Make a throwaway server's folder, `<root>/state` and `<root>/config`, with
+   `<root>/config/config.toml` holding a control port that is not your own
+   server's (the runner refuses the same port):
+
+   ```toml
+   control_port = 1726
+   streaming_port = 4726
+   ```
+
+2. Pair the phone with it once by hand: start it with
+   `POCKETDESK_STATE_DIR=<root>/state POCKETDESK_CONFIG_DIR=<root>/config pocketdesk start`,
+   `adb reverse tcp:1716 tcp:1726`, add `127.0.0.1` on the phone and pair. Then stop
+   it (`pocketdesk stop` with the same folders) and remove the reverse.
+3. Install the fixture app, `cd android && ./gradlew :fixture:installDebug`, open its
+   field once (`adb shell am start -n dev.pocketdesk.fixture/.FieldActivity`) and
+   allow its notifications.
+4. On the phone, turn on what the checks use: Typing from the computer's keyboard,
+   Copies by themselves, This phone's notifications for "Pocketdesk fixture" and
+   Quiet on the computer while I use the phone. A check whose switch is off is
+   SKIPped with what to turn on.
+5. Run `python scripts/device_checks.py --server-root <root> --server-exe <pocketdesk>`
+   (`--only ID…` for some, `--serial` with more than one phone). On Git Bash, give
+   Windows paths (`C:/…`): with `MSYS_NO_PATHCONV=1`, `/c/…` reaches Python as is.
+
+Each check prints `PASS`, `FAIL`, `SKIP` or `TIMEOUT` with what it saw; the exit code
+is 0 with no FAIL or TIMEOUT. The APK must carry a bridge built from the same tree
+(step 1 above): an old `.so` fails the typing and dial checks with "No
+implementation found" in logcat.
+
 The bridge now exposes the full client session/streaming/input API (ported from
 the Flutter-era `android/rust/src/api.rs`) via 34 `native*` JNI functions under
 `dev.pocketdesk.android.bridge.RustCore`, with a typed Kotlin facade in
