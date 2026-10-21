@@ -42,4 +42,12 @@ class ClipboardPushRuleTest {
             SendClipboard.check("hunter2", hasComputer = false, private = true),
         )
     }
+
+    @Test
+    fun `an image is fetched with the switch on, unmetered, and not the one just sent`() {
+        assertTrue(ClipboardPushRule.mayFetchImage(on = true, unmetered = true, id = "a", sentImageId = "b"))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = false, unmetered = true, id = "a", sentImageId = null))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = true, unmetered = false, id = "a", sentImageId = null))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = true, unmetered = true, id = "a", sentImageId = "a"))
+    }
 }

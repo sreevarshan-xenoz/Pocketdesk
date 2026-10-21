@@ -251,6 +251,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                     askForListener(it)
                 },
             )
+            // M3: an image copied on the computer too, on Wi-Fi.
+            SettingSwitch(
+                stringResource(R.string.settings_clipboard_images_background),
+                stringResource(R.string.settings_clipboard_images_background_summary),
+                Prefs.clipboardImagesInBackground(context),
+                { Prefs.setClipboardImagesInBackground(context, it) },
+                enabled = Prefs.clipboardInBackground(context),
+                indent = true,
+            )
             SettingSwitch(
                 stringResource(R.string.settings_files_background),
                 stringResource(R.string.settings_files_background_summary),

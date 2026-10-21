@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.clip
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -9,6 +10,8 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.ui.ClipHistory
+import dev.pocketdesk.android.ui.ClipboardImages
+import dev.pocketdesk.android.ui.ImageClipRule
 import dev.pocketdesk.android.ui.writeLocalClipboard
 
 /**
@@ -40,6 +43,13 @@ object ClipboardPushRule {
 
     /** Text is taken only from the computer the phone sends to. */
     fun fromOwnComputer(host: String, own: String?): Boolean = own != null && host == own
+
+    /**
+     * Fetch the computer's image [id] (M3)? With the switch on, on an
+     * unmetered network, and not the image this phone just sent there.
+     */
+    fun mayFetchImage(on: Boolean, unmetered: Boolean, id: String, sentImageId: String?): Boolean =
+        on && unmetered && id != sentImageId
 }
 
 /**
@@ -52,6 +62,9 @@ object ClipboardPushRule {
 class BackgroundClipboard(private val ctx: Context) {
     private var lastConnectMs = 0L
     private val main = Handler(Looper.getMainLooper())
+
+    /** The images that crossed here, and a failed fetch's wait (M3, as N4's session). */
+    private val images = ImageClipRule()
 
     fun tick() {
         if (!Prefs.clipboardInBackground(ctx) || ClipboardShared.sessionSyncs.get() > 0) {
@@ -68,12 +81,46 @@ class BackgroundClipboard(private val ctx: Context) {
         }
         val pushed = RustCore.takeClipboardPush() ?: return
         if (!ClipboardPushRule.fromOwnComputer(pushed.host, own.address)) return
-        if (!ClipboardPushRule.shouldApply(pushed.content, ClipboardShared.lastExchanged)) return
-        ClipboardShared.lastExchanged = pushed.content
-        main.post {
-            writeLocalClipboard(ctx, pushed.content)
-            ClipHistory.add(ctx, pushed.content)
+        pushed.image?.let {
+            fetchImage(pushed.host, pushed.port, it)
+            return
         }
+        val content = pushed.content ?: return
+        if (!ClipboardPushRule.shouldApply(content, ClipboardShared.lastExchanged)) return
+        ClipboardShared.lastExchanged = content
+        images.textMoved()
+        main.post {
+            writeLocalClipboard(ctx, content)
+            ClipHistory.add(ctx, content)
+        }
+    }
+
+    /** Fetch the computer's copied image onto the phone's clipboard (M3), as N4's session does. */
+    private fun fetchImage(host: String, port: Int, image: RustCore.PushedImage) {
+        val unmetered = ctx.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == false
+        if (!ClipboardPushRule.mayFetchImage(
+                Prefs.clipboardImagesInBackground(ctx),
+                unmetered,
+                image.id,
+                ClipboardShared.sentImageId,
+            )
+        ) {
+            return
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (!images.shouldFetch(image.id, image.size, now)) return
+        val part = ClipboardImages.partFile(ctx, image.id)
+        RustCore.fetchClipboardImage(host, port, image.id, part.path)
+            .mapCatching { ClipboardImages.keepReceived(ctx, part, image.id) }
+            .onSuccess { file ->
+                images.moved(image.id)
+                ClipboardShared.lastExchanged = null
+                main.post { runCatching { ClipboardImages.writeLocal(ctx, file) } }
+            }
+            .onFailure {
+                part.delete()
+                images.fetchFailed(image.id, now)
+            }
     }
 
     private companion object {

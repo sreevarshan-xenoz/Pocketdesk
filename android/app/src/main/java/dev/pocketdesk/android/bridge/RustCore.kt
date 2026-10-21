@@ -925,11 +925,17 @@ object RustCore {
     fun takeMediaPresses(): List<String> =
         parseStringArray(envelope(nativeTakeMediaPresses()).getOrDefault("[]"))
 
-    /** The computer's clipboard text as it last arrived (T10b), taken; null when nothing came. */
+    /**
+     * The computer's clipboard as it last arrived (T10b), taken: its text,
+     * or an image to fetch (M3); null when nothing came.
+     */
     fun takeClipboardPush(): ClipboardPushed? =
         envelope(nativeTakeClipboardPush()).getOrNull()?.takeIf { it.isNotBlank() }?.let { json ->
             runCatching {
-                JSONObject(json).let { ClipboardPushed(it.getString("host"), it.getInt("port"), it.getString("content")) }
+                val o = JSONObject(json)
+                val image = o.optJSONObject("image")?.let { PushedImage(it.getString("id"), it.getLong("size")) }
+                val content = if (o.has("content")) o.getString("content") else null
+                if (content == null && image == null) null else ClipboardPushed(o.getString("host"), o.getInt("port"), content, image)
             }.getOrNull()
         }
 
@@ -974,7 +980,10 @@ object RustCore {
     )
 
     /** One `kdeconnect.clipboard` text from the computer at [host]:[port]. */
-    data class ClipboardPushed(val host: String, val port: Int, val content: String)
+    data class ClipboardPushed(val host: String, val port: Int, val content: String?, val image: PushedImage? = null)
+
+    /** An image the computer's clipboard holds (M3), to fetch by its id. */
+    data class PushedImage(val id: String, val size: Long)
 
     /** The links the computer handed over since the last call, oldest first (T8a). */
     fun takeLinks(): List<String> = parseStringArray(envelope(nativeTakeLinks()).getOrDefault("[]"))
