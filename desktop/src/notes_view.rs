@@ -106,18 +106,19 @@ impl NotesView {
     }
 
     fn answer(&mut self, state_dir: &Path, note: &PhoneNote, answer: Answer, now_unix: u64) {
-        let what = match &answer {
-            Answer::Action(title) => format!("\"{title}\""),
-            Answer::Reply(_) => "your reply".to_string(),
+        let asked = match &answer {
+            Answer::Action(title) => {
+                format!("Asked the phone to send \"{title}\" to {}.", note.app)
+            }
+            Answer::Reply(_) => format!("Asked the phone to send your reply to {}.", note.app),
+            // N3: it opens on the phone's screen, unlocked.
+            Answer::Open => format!("Asked the phone to open it in {}.", note.app),
         };
         match phone_notes::request(state_dir, &note.device_id, &note.key, answer, now_unix) {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
-                self.notice = crate::notice::Notice::done(format!(
-                    "Asked the phone to send {what} to {}.",
-                    note.app
-                ));
+                self.notice = crate::notice::Notice::done(asked);
                 self.drafts
                     .remove(&(note.device_id.clone(), note.key.clone()));
             }
@@ -269,6 +270,15 @@ impl NotesView {
                                     now_unix,
                                 );
                             }
+                        }
+                        // N3: where the phone lets the computer open it.
+                        if note.open
+                            && ui
+                                .button("Open on the phone")
+                                .on_hover_text("It opens on the phone's screen, as a tap on it would; the phone must be unlocked")
+                                .clicked()
+                        {
+                            self.answer(state_dir, note, Answer::Open, now_unix);
                         }
                         // L1: cleared here, cleared on the phone; an ended
                         // call is gone there, so only here (M8 review).

@@ -918,6 +918,54 @@ fn the_notifications_page_clears_on_the_phone() {
     );
 }
 
+/// N3: Open on the phone asks the phone to open it, and shows only where
+/// the phone offers it.
+#[test]
+fn the_notifications_page_opens_on_the_phone() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let note = |key: &str, open: bool| pocketdesk_core::local::phone_notes::PhoneNote {
+        device_id: PHONE.to_string(),
+        key: key.to_string(),
+        app: "Chat".to_string(),
+        title: format!("Ann {key}"),
+        text: "hi".to_string(),
+        at_unix: 1,
+        actions: vec!["Mark read".to_string()],
+        reply: false,
+        open,
+        messages: Vec::new(),
+    };
+    pocketdesk_core::local::phone_notes::keep(fixture.state(), note("0|com.chat|8|null|10", true))
+        .expect("note");
+    pocketdesk_core::local::phone_notes::keep(fixture.state(), note("0|com.chat|7|null|10", false))
+        .expect("note");
+    let mut app = fixture.open(Some(Tab::Notifications));
+    assert_eq!(
+        app.query_all_by_label("Open on the phone").count(),
+        1,
+        "only where offered"
+    );
+    app.get_by_label("Open on the phone").click();
+    app.run_steps(3);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs()
+        + 2;
+    let asked: Vec<_> = pocketdesk_core::local::phone_notes::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|a| (a.key, a.answer))
+        .collect();
+    assert_eq!(
+        asked,
+        vec![(
+            "0|com.chat|8|null|10".to_string(),
+            pocketdesk_core::local::phone_notes::Answer::Open
+        )]
+    );
+}
+
 /// M8: a tel: link with several phones is asked on the Overview, and the
 /// phone chosen dials it.
 #[test]
