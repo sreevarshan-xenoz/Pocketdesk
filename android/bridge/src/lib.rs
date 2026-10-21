@@ -27,6 +27,7 @@ mod quiet_requests;
 mod rates;
 mod session;
 mod tasks;
+mod typing;
 
 pub(crate) use session::*;
 
@@ -1396,6 +1397,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSystemS
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope(RUNTIME.block_on(deck::system_state(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// What the computer types here (M4): the oldest batch as
+/// `{"ok": "{\"host\", \"port\", \"events\"}"}`, waiting up to `wait_ms`
+/// for one; `{"ok": ""}` when none came.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTypeTake(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    wait_ms: jint,
+) -> jstring {
+    let wait = std::time::Duration::from_millis(wait_ms.clamp(0, 5_000) as u64);
+    let json = envelope(Ok(typing::take_json(wait)));
     to_jstring(&mut env, json)
 }
 
