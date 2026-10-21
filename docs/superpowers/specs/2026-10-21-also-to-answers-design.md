@@ -21,7 +21,9 @@ The bridge keeps them apart from the control link (`extra_links.rs`). On an extr
 
 **Answers and clears from them.** The phone takes them as it takes the own computer's (`fromMine`): under the same switches, rules and budgets. It tells that computer how each answer went, on its link.
 
-**No computer change.** An extra link is an ordinary control link from a paired phone.
+**The computer marks such a link.** As it opens, the phone names it as for copies (`kdeconnect.pocketdesk.link_role {role: "copies"}`). The server then keeps it out of its pushes and out of the phones it shows as linked, and sends only answers and clears to the phone's notifications on it (`clone_answer_targets`). Without this, the second computer would count the phone as linked, and its file offers, rings and links would go into a link that drops them.
+
+**Calls too.** A ringing call's note is copied whole on a link, so that computer can silence or decline it, as the own computer can.
 
 ## Not now
 
@@ -32,7 +34,7 @@ The bridge keeps them apart from the control link (`extra_links.rs`). On an extr
 ## Privacy and cost
 
 - **Privacy:** what a picked computer gets is what the own computer gets. SECURITY.md limit 39 now says that a linked computer may also answer and clear the notifications.
-- **Cost:** a link per picked computer stays up while answering or clearing is on, so the phone keeps more links. They cost what the own computer's link costs, which N7 measured.
+- **Cost:** a link per picked computer stays up while answering is on, or for ten minutes after a notification while clearing is on (as the own link, L1), so the phone keeps more links. They cost what the own computer's link costs, which N7 measured. The links are kept on a thread of their own, so a computer out of reach never holds up the own computer's answers.
 
 ## Tests
 
@@ -44,3 +46,26 @@ The bridge keeps them apart from the control link (`extra_links.rs`). On an extr
 - Two throwaway servers, both paired, the second picked, answering on: the second's toast offers the buttons, and pressing one runs it on the phone.
 - A toast closed on the second computer is cleared on the phone.
 - The second server stopped: its link is tried again a minute later, and copies fall back to one-offs.
+
+## As built
+
+- **Bridge:** `extra_links.rs` (connect with the role, send with a deadline that drops a link cut mid-line, `keep_only`, `live_json`); `notification_answers::forget_from`, so the main link's end keeps the other computers' answers.
+- **Server:** `plugins::link_role`, `state::{mark_copy_link, clone_answer_targets}`; `run_answers` and `run_clears` send to the answer targets.
+- **Phone:** `PhoneLink.keepOthers` on a thread of its own (close first, then dial, a minute between tries), `copy`/`copyCancel` on a link or as a one-off, `AlsoTo.targets` with one computer at two addresses counted once and never the own one again; `PhoneNotifications.fromMine`, and `tell` on the link the answer came by.
+
+## Review
+
+A fresh review (0 Critical, 5 Important, 8 Minor), fixed:
+
+- **Important:**
+  - one computer saved at two addresses got a link to itself, which took its pushes;
+  - clearing alone kept links up all day;
+  - dials on the answers tick could hold up the own computer's answers and calls;
+  - the second computer counted the phone as linked and lost its sends;
+  - the words and SECURITY.md still said the others could not answer.
+- **Minor, fixed:** a send cut mid-line, the main link's end dropping the others' answers, dialing before closing, closing under the lock, the targets read every tick.
+- **Left:**
+  - a clear is limited to notifications sent, not to that computer's copies;
+  - the answer and clear budgets are shared by all the phone's computers;
+  - a copy on a link has no delivery ack (C3's dead-link case), bounded by TCP keepalive.
+
