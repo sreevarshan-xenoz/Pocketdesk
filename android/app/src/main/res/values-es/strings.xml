@@ -742,7 +742,7 @@
     <string name="texts_show_summary_17">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste. Android retiene tres horas un SMS con un código</string>
     <string name="settings_capture_mouse_summary_17">Durante una sesión, un ratón o un panel táctil conectado a este teléfono (USB o Bluetooth) mueve el cursor del ordenador y hace clic allí</string>
     <string name="control_service_label">Control de Pocketdesk</string>
-    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Con “Escribir con el teclado del equipo” activado, también puede escribir en ese campo sin mostrar la pantalla, nunca en un campo de contraseña. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
+    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Con “Escribir con el teclado del equipo” activado, también puede escribir en ese campo sin mostrar la pantalla, nunca en un campo de contraseña. Con “Enviar lo que copio por sí solo” activado, solo observa la vista previa del portapapeles del sistema para saber cuándo copias. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
     <string name="settings_cast_sound">El sonido del teléfono con su pantalla</string>
     <string name="settings_cast_sound_summary">\"Mostrar pantalla\" también envía lo que suenan las apps del teléfono, para oírlo en el ordenador (con su \"Reproducir su sonido aquí\" activado). Android pide el permiso del micrófono para capturar el sonido de otras apps; las llamadas y las apps que lo prohíben no suenan</string>
     <string name="settings_cast_sound_needs_mic">Necesita el permiso del micrófono: Android lo pide para capturar el sonido de otras apps</string>
@@ -942,4 +942,8 @@
     <string name="phone_sound_stopped">El sonido de este teléfono ya no se reproduce allí</string>
     <string name="phone_sound_too_old">Pocketdesk en %1$s es demasiado antiguo para reproducir el sonido de este teléfono. Actualízalo.</string>
     <string name="phone_sound_busy">Este teléfono ya muestra su pantalla o reproduce su sonido en un ordenador: detenlo primero</string>
+    <string name="settings_copies">Enviar lo que copio por sí solo</string>
+    <string name="settings_copies_summary_off">Lo que copias en este teléfono va al portapapeles de su equipo por sí solo, no solo desde el mosaico del portapapeles. Nunca una copia que una app marca como sensible (una contraseña). Usa el servicio de accesibilidad “Pocketdesk control” y necesita que el teléfono muestre la vista previa del portapapeles al copiar</string>
+    <string name="settings_copies_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para mantener la conexión con el equipo</string>
+    <string name="settings_copies_summary_on">Activado: lo que copias va al equipo propio de este teléfono por sí solo, nunca una copia sensible. Android avisa “Pocketdesk pegó desde tu portapapeles” cada vez</string>
 </resources>

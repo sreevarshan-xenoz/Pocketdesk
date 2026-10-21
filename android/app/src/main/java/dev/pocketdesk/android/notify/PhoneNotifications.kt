@@ -588,6 +588,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         lastKeeperUptime = uptime
         dev.pocketdesk.android.control.TypeRunner.sync(this)
+        // M10: SystemUI's windows watched only while the switch is on.
+        dev.pocketdesk.android.control.ControlService.instance?.syncCopyWatch(Prefs.copiesByThemselves(this))
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)

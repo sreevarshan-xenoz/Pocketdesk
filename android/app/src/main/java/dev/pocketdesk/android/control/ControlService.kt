@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.control
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.graphics.Path
@@ -21,7 +22,8 @@ import android.view.accessibility.AccessibilityNodeInfo
  * Pocketdesk's control from the computer (C8): performs the gestures,
  * global actions and typing the computer sends while the phone casts its
  * screen and the owner allows it. It reads only the focused field (for
- * text) and listens for no events. Everything runs on the main thread, as
+ * text), and listens for no events but SystemUI's windows while "Send my
+ * copies by themselves" is on (M10). Everything runs on the main thread, as
  * the gesture callbacks do.
  */
 class ControlService : AccessibilityService() {
@@ -42,6 +44,34 @@ class ControlService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         Log.i(TAG, "control service connected")
+        syncCopyWatch(dev.pocketdesk.android.Prefs.copiesByThemselves(this))
+    }
+
+    /** M10: SystemUI's windows are watched, for its clipboard overlay. */
+    private var watchingCopies = false
+    private var lastCopyReadMs = 0L
+
+    /**
+     * Listen for SystemUI's window changes only while "Send my copies by
+     * themselves" is [on] (M10); otherwise for nothing, as C8 does.
+     */
+    fun syncCopyWatch(on: Boolean) = main.post {
+        if (on == watchingCopies) return@post
+        val info = serviceInfo ?: return@post
+        if (on) {
+            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            info.packageNames = arrayOf(dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI)
+            info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        } else {
+            info.eventTypes = 0
+            info.packageNames = null
+            info.flags = info.flags and
+                (AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS).inv()
+        }
+        serviceInfo = info
+        watchingCopies = on
+        Log.i(TAG, "watching copies: $on")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -66,9 +96,56 @@ class ControlService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!watchingCopies || event == null) return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        if (event.packageName != dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI) return
+        val titles = runCatching { windows.map { it.title?.toString() } }.getOrDefault(emptyList())
+        // The overlay's own views name it, where its window has no title.
+        val ids = runCatching { viewIds(event.source, 40) }.getOrDefault(emptyList())
+        val now = SystemClock.elapsedRealtime()
+        val read = dev.pocketdesk.android.clip.CopyWatchRule.read(
+            on = dev.pocketdesk.android.Prefs.copiesByThemselves(this),
+            hasComputer = dev.pocketdesk.android.notify.PhoneLink.target(this) != null,
+            locked = getSystemService(KeyguardManager::class.java).isDeviceLocked,
+            titles = titles + ids,
+            nowMs = now,
+            lastReadMs = lastCopyReadMs,
+        )
+        if (!read) {
+            Log.d(
+                TAG,
+                "copy not read: on=${dev.pocketdesk.android.Prefs.copiesByThemselves(this)} " +
+                    "computer=${dev.pocketdesk.android.notify.PhoneLink.target(this) != null} " +
+                    "overlay=${dev.pocketdesk.android.clip.CopyWatchRule.isOverlay(titles + ids)}",
+            )
+            return
+        }
+        lastCopyReadMs = now
+        runCatching {
+            startActivity(
+                android.content.Intent(this, dev.pocketdesk.android.clip.CopyReadActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION),
+            )
+        }.onFailure { Log.w(TAG, "A copy could not be read", it) }
+    }
 
     override fun onInterrupt() {}
+
+    /** The view ids under [node], breadth first, at most [max] (M10). */
+    private fun viewIds(node: AccessibilityNodeInfo?, max: Int): List<String> {
+        val ids = mutableListOf<String>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        node?.let { queue.add(it) }
+        var seen = 0
+        while (queue.isNotEmpty() && seen < max) {
+            val n = queue.removeFirst()
+            seen++
+            n.viewIdResourceName?.let { ids.add(it) }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return ids
+    }
 
     /** The screen's size as it is drawn now, rotation included. */
     private fun screen(): Pair<Int, Int> {

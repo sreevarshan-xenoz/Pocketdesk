@@ -425,6 +425,17 @@ object Prefs {
         bump()
     }
 
+    /**
+     * M10: copies made on the phone go to its computer by themselves (off
+     * by default). Needs C8's Accessibility service, never C8's switch.
+     */
+    fun copiesByThemselves(ctx: Context): Boolean = prefs(ctx).getBoolean("copies_by_themselves", false)
+
+    fun setCopiesByThemselves(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("copies_by_themselves", enabled) }
+        bump()
+    }
+
     /** C2: the folder files from computers go to (a tree uri), or null for Downloads/Pocketdesk. */
     fun downloadTree(ctx: Context): String? =
         prefs(ctx).getString(KEY_DOWNLOAD_TREE, null)?.takeIf { it.isNotEmpty() }
