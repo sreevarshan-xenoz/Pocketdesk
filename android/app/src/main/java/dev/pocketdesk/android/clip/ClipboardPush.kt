@@ -2,6 +2,7 @@ package dev.pocketdesk.android.clip
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -45,11 +46,20 @@ object ClipboardPushRule {
     fun fromOwnComputer(host: String, own: String?): Boolean = own != null && host == own
 
     /**
-     * Fetch the computer's image [id] (M3)? With the switch on, on an
-     * unmetered network, and not the image this phone just sent there.
+     * Fetch the computer's image [id] (M3)? With the switch on, on Wi-Fi or
+     * Ethernet, and not the image this phone just sent there.
      */
-    fun mayFetchImage(on: Boolean, unmetered: Boolean, id: String, sentImageId: String?): Boolean =
-        on && unmetered && id != sentImageId
+    fun mayFetchImage(on: Boolean, onWifi: Boolean, id: String, sentImageId: String?): Boolean =
+        on && onWifi && id != sentImageId
+
+    /**
+     * Whether the network is Wi-Fi or Ethernet, never mobile data (M3 review:
+     * an unmetered 5G plan is still mobile data). A VPN over Wi-Fi often
+     * reads as metered, so one counts as unmetered; its own capabilities
+     * carry the network under it.
+     */
+    fun onWifi(wifi: Boolean, ethernet: Boolean, notMetered: Boolean, vpn: Boolean): Boolean =
+        (wifi || ethernet) && (notMetered || vpn)
 }
 
 /**
@@ -57,20 +67,33 @@ object ClipboardPushRule {
  * the notification listener's 5 s tick, it keeps the control link to the
  * phone's computer up (over the internet when it must) and puts the text
  * the computer pushed on the phone's clipboard. Android lets a background
- * app write the clipboard, not read it.
+ * app write the clipboard, not read it. An image the computer tells of
+ * (M3) is fetched on a thread of its own, and kept waiting until it is, so
+ * a failure or a push on mobile data is tried again (M3 review).
  */
 class BackgroundClipboard(private val ctx: Context) {
     private var lastConnectMs = 0L
     private val main = Handler(Looper.getMainLooper())
 
-    /** The images that crossed here, and a failed fetch's wait (M3, as N4's session). */
+    /** The images that crossed here, and a failed fetch's wait (M3, as N4's session); guarded by itself. */
     private val images = ImageClipRule()
+
+    /** The computer's image waiting to be fetched, until it is or another push replaces it. */
+    private data class Pending(val host: String, val port: Int, val image: RustCore.PushedImage)
+
+    @Volatile
+    private var pending: Pending? = null
+
+    /** One fetch at a time, off the listener's tick: a large image must not hold files and battery up. */
+    private val fetcher = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val fetching = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun tick() {
         if (!Prefs.clipboardInBackground(ctx) || ClipboardShared.sessionSyncs.get() > 0) {
             // Not this applier's to apply: dropped, so it is not applied
             // later, when it is old.
             RustCore.takeClipboardPush()
+            pending = null
             return
         }
         val own = PhoneLink.target(ctx) ?: return
@@ -79,47 +102,94 @@ class BackgroundClipboard(private val ctx: Context) {
             lastConnectMs = now
             RustCore.connectToPeer(own.address, own.controlPort, HostStore.wanIdentity(ctx, own.address))
         }
-        val pushed = RustCore.takeClipboardPush() ?: return
-        if (!ClipboardPushRule.fromOwnComputer(pushed.host, own.address)) return
-        pushed.image?.let {
-            fetchImage(pushed.host, pushed.port, it)
-            return
+        RustCore.takeClipboardPush()?.takeIf { ClipboardPushRule.fromOwnComputer(it.host, own.address) }?.let { pushed ->
+            val image = pushed.image
+            if (image != null) {
+                pending = Pending(pushed.host, pushed.port, image)
+            } else {
+                pending = null
+                pushed.content?.let { apply(it) }
+            }
         }
-        val content = pushed.content ?: return
+        pending?.let { maybeFetch(it) }
+    }
+
+    /** Stop the fetcher with the listener. */
+    fun close() {
+        fetcher.shutdownNow()
+    }
+
+    private fun apply(content: String) {
+        // Any text from the computer: its image is gone there, so the same
+        // image copied again is fetched again (M3 review).
+        synchronized(images) { images.textMoved() }
         if (!ClipboardPushRule.shouldApply(content, ClipboardShared.lastExchanged)) return
         ClipboardShared.lastExchanged = content
-        images.textMoved()
         main.post {
             writeLocalClipboard(ctx, content)
             ClipHistory.add(ctx, content)
         }
     }
 
-    /** Fetch the computer's copied image onto the phone's clipboard (M3), as N4's session does. */
-    private fun fetchImage(host: String, port: Int, image: RustCore.PushedImage) {
-        val unmetered = ctx.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == false
-        if (!ClipboardPushRule.mayFetchImage(
-                Prefs.clipboardImagesInBackground(ctx),
-                unmetered,
-                image.id,
-                ClipboardShared.sentImageId,
-            )
-        ) {
+    private fun wifi(): Boolean {
+        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return ClipboardPushRule.onWifi(
+            wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+            ethernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+            notMetered = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+            vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+        )
+    }
+
+    /** Fetch [wait]'s image now, if it may be and none is under way. */
+    private fun maybeFetch(wait: Pending) {
+        val on = Prefs.clipboardImagesInBackground(ctx)
+        if (!on || wait.image.id == ClipboardShared.sentImageId) {
+            pending = null
             return
         }
+        if (!ClipboardPushRule.mayFetchImage(on, wifi(), wait.image.id, ClipboardShared.sentImageId)) return
         val now = SystemClock.elapsedRealtime()
-        if (!images.shouldFetch(image.id, image.size, now)) return
-        val part = ClipboardImages.partFile(ctx, image.id)
-        RustCore.fetchClipboardImage(host, port, image.id, part.path)
-            .mapCatching { ClipboardImages.keepReceived(ctx, part, image.id) }
+        val (nowOk, ever) = synchronized(images) {
+            images.shouldFetch(wait.image.id, wait.image.size, now) to
+                images.shouldFetch(wait.image.id, wait.image.size, now + ImageClipRule.RETRY_MS)
+        }
+        if (!ever) {
+            // Fetched already, or over the limit: nothing to wait for.
+            pending = null
+            return
+        }
+        if (!nowOk || !fetching.compareAndSet(false, true)) return
+        runCatching {
+            fetcher.execute {
+                try {
+                    fetch(wait)
+                } finally {
+                    fetching.set(false)
+                }
+            }
+        }.onFailure { fetching.set(false) }
+    }
+
+    /** Fetch the computer's copied image onto the phone's clipboard (M3), as N4's session does. */
+    private fun fetch(wait: Pending) {
+        // A session started meanwhile fetches it itself.
+        if (ClipboardShared.sessionSyncs.get() > 0) return
+        val id = wait.image.id
+        val now = SystemClock.elapsedRealtime()
+        val part = ClipboardImages.partFile(ctx, id)
+        RustCore.fetchClipboardImage(wait.host, wait.port, id, part.path)
+            .mapCatching { ClipboardImages.keepReceived(ctx, part, id) }
             .onSuccess { file ->
-                images.moved(image.id)
+                synchronized(images) { images.moved(id) }
+                if (pending?.image?.id == id) pending = null
                 ClipboardShared.lastExchanged = null
                 main.post { runCatching { ClipboardImages.writeLocal(ctx, file) } }
             }
             .onFailure {
                 part.delete()
-                images.fetchFailed(image.id, now)
+                synchronized(images) { images.fetchFailed(id, now) }
             }
     }
 
