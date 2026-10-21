@@ -739,6 +739,11 @@ def n5_media(ctx: Ctx) -> tuple[str, str]:
         ctx.server.plays(title)
         if not wait_for(lambda: ctx.phone.shows_media(title), 30, step=2):
             return "TIMEOUT", "the computer's song never showed in the phone's media session"
+        # Never sent back as the phone's own music (N2's reporter is on here).
+        time.sleep(4)
+        echo = ctx.server.media(ctx.device)
+        if echo and echo["media"].get("title") == title:
+            return "FAIL", "the computer's song came back as the phone's music"
         # A media key goes to the session playing: the computer's, here.
         before = len(ctx.server.computer_presses())
         adb("shell", "cmd", "media_session", "dispatch", "next")
