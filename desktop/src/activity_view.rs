@@ -325,6 +325,10 @@ pub fn describe(event: &Event) -> String {
             if let Some(title) = text(event, "title") {
                 line.push_str(&format!(": {title}"));
             }
+            // M6: why no toast showed it (M6 review).
+            if event.fields.get("phone_in_use").and_then(Value::as_bool) == Some(true) {
+                line.push_str(" (not shown: the phone was in use)");
+            }
             line
         }
         "text_received" => match text(event, "from") {
@@ -551,6 +555,13 @@ mod tests {
         assert_eq!(
             describe(&event("notification", json!({"app": "Signal"}))),
             "Notification from Signal"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Signal", "phone_in_use": true})
+            )),
+            "Notification from Signal (not shown: the phone was in use)"
         );
         assert_eq!(describe(&event("text_received", json!({}))), "A text");
         assert_eq!(
