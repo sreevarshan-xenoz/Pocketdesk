@@ -160,6 +160,7 @@ class PhoneNotificationListener : NotificationListenerService() {
      */
     private val keeperTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private var lastKeeperUptime: Long? = null
+    private var keeperTicks = 0
 
     /**
      * The computer browsing this phone's shared folders (T10g), on a 2 s tick
@@ -564,7 +565,9 @@ class PhoneNotificationListener : NotificationListenerService() {
             Prefs.setLastFreeze(this, System.currentTimeMillis(), dev.pocketdesk.android.service.LinkKeeperService.isRunning())
         }
         lastKeeperUptime = uptime
-        dev.pocketdesk.android.service.LinkKeeperService.sync(this)
+        // Its inputs (the features, shared folders' grants, the saved
+        // computers) cost a read each: every 10 s is soon enough (M1 review).
+        if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
     }
 
     private fun runAnswers() {

@@ -52,6 +52,10 @@ class LinkKeeperService : Service() {
         @Volatile
         private var refusedAt = 0L
 
+        /** Whether a refusal was logged as a warning; the next ones only at debug. */
+        @Volatile
+        private var warned = false
+
         /** The notification's words as last posted. */
         @Volatile
         private var postedText: String? = null
@@ -122,7 +126,9 @@ class LinkKeeperService : Service() {
                     // from the app, a boot or an update takes over.
                     val refused = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                         e is ForegroundServiceStartNotAllowedException
-                    Log.w(TAG, if (refused) "Android refused to start it from the background" else "Could not start it: $e")
+                    val line = if (refused) "Android refused to start it from the background" else "Could not start it: $e"
+                    if (warned) Log.d(TAG, line) else Log.w(TAG, line)
+                    warned = true
                     refusedAt = now
                 }
             } else {
