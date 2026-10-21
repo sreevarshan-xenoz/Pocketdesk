@@ -924,9 +924,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         let grant_secs = cli_grant.flatten();
-        // A guest grant binds the key that paired before anything is
-        // trusted, and never claims an id another phone has proved.
-        if grant_secs.is_some()
+        // A guest grant, and someone else's phone (M2 review), binds the key
+        // that paired before anything is trusted, and never claims an id
+        // another phone has proved: only the owner's own code may.
+        if (grant_secs.is_some() || someone_else)
             && let Ok(dir) = state::state_dir()
             && !guest_may_pair_in(
                 &dir,
@@ -936,7 +937,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             )
         {
             tracing::warn!(
-                "Guest pairing refused: {phone_id} is the id of a phone with another key"
+                "Pairing refused: {phone_id} is the id of a phone with another key, and only the owner's own code may take it"
             );
             respond_pair(sender, false, "").await;
             return;
@@ -945,7 +946,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // B), replacing any older one (perhaps a reinstalled phone's), before
         // anything is trusted: a pairing that cannot bind fails, rather than
         // trusting an id with stale keys or none.
-        if grant_secs.is_none() {
+        if grant_secs.is_none() && !someone_else {
             let bound = state::state_dir()
                 .map_err(|e| std::io::Error::other(e.to_string()))
                 .and_then(|dir| owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref()));
