@@ -2449,6 +2449,17 @@ Built 2026-10-21; checked on the OPPO by adb: a copy noticed, the reading window
 - [ ] An hour with the switch on: the battery.
 - [ ] Another maker's Android 13+, and Android 12 (the row hidden).
 
+## 176. The phone's music without a session, with its cover (N2)
+
+Built 2026-10-21; checked on the OPPO against a throwaway server, with the fixture app's silent player and no session (also as `scripts/device_checks.py`'s `n2-media`): the report with `background: true` and a 256 px cover kept; Pause from the computer pausing the player; a player paused more than five minutes not sent after the app was reinstalled; A, then B, then A again with A's cover back; the server restarted while it played, the phone dialing again and the cover resent; the switch off clearing it on the computer. Owed:
+- [ ] A real player (Spotify, YouTube Music) with the screen off, an hour: its cover, presses, and the battery by N7's script.
+- [ ] Windows' media controls with the tray program running: the phone's song and cover in the volume flyout, the media keys (with the owner).
+- [ ] The Overview's music line and buttons, and the tray's menu, by hand.
+- [ ] Next and Previous from the computer.
+- [ ] Media turned off and on for the phone on the Devices page mid-track: the cover comes back at the next track.
+- [ ] Two sessions in one app (a browser's two tabs): the cover of the one reported.
+- [ ] Another maker's Android, and Android 10.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

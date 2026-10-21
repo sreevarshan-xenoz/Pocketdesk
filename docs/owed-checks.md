@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-831 open items.
+838 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 503 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 506 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -14,8 +14,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
 | A Linux desktop (the Azure VM serves for some) | 96 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 27 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 74 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 28 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 77 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1020,6 +1020,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The keyboard and selection in the app copied from, after the read (focus moves away and back).
 - An hour with the switch on: the battery.
 
+**176. The phone's music without a session, with its cover (N2)**
+
+- Next and Previous from the computer.
+- Media turned off and on for the phone on the Devices page mid-track: the cover comes back at the next track.
+- Two sessions in one app (a browser's two tabs): the cover of the one reported.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1857,6 +1863,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Another maker's Android 13+, and Android 12 (the row hidden).
 
+**176. The phone's music without a session, with its cover (N2)**
+
+- Another maker's Android, and Android 10.
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -2091,3 +2101,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **174. Home Assistant buttons for phone commands (M9)**
 
 - Home Assistant itself, and Tasker (the owner).
+
+**176. The phone's music without a session, with its cover (N2)**
+
+- A real player (Spotify, YouTube Music) with the screen off, an hour: its cover, presses, and the battery by N7's script.
+- Windows' media controls with the tray program running: the phone's song and cover in the volume flyout, the media keys (with the owner).
+- The Overview's music line and buttons, and the tray's menu, by hand.
