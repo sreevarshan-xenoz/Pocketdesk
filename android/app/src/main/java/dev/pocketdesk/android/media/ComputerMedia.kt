@@ -73,6 +73,10 @@ class ComputerMedia(private val app: Context) {
     private var cover: Pair<String, Bitmap>? = null
     private var showingFor: String? = null
 
+    /** Closed with the listener: nothing is drawn after (N5 review). */
+    @Volatile
+    private var closed = false
+
     // The main thread's.
     private var session: MediaSession? = null
     private var drawn: Pair<ComputerMediaRule.Playing, Bitmap?>? = null
@@ -93,6 +97,7 @@ class ComputerMedia(private val app: Context) {
     }
 
     fun close() {
+        closed = true
         if (instance === this) instance = null
         runCatching {
             worker.execute {
@@ -102,6 +107,8 @@ class ComputerMedia(private val app: Context) {
                 if (own != null && link != null && watch.due(link, wanted = false) == false) {
                     send(own, false)
                 }
+                // Last in the queue: after any draw a tick before it posted.
+                main.post { end() }
             }
         }
         worker.shutdown()
@@ -118,6 +125,7 @@ class ComputerMedia(private val app: Context) {
 
     /** One tick's work (worker). */
     private fun step() {
+        if (closed) return
         val nowMs = SystemClock.elapsedRealtime()
         val own = PhoneLink.target(app)
         val wanted = wanted() && own != null
@@ -203,7 +211,7 @@ class ComputerMedia(private val app: Context) {
 
     /** Show [now] with [art], or end what shows (main thread). */
     private fun draw(now: ComputerMediaRule.Playing?, art: Bitmap?, computer: String) {
-        if (now == null) {
+        if (now == null || closed) {
             end()
             return
         }
