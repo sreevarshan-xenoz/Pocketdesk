@@ -299,10 +299,11 @@ pub(crate) async fn run() {
         // changed, without opening the clipboard.
         #[cfg(windows)]
         {
-            // A stand-in clipboard (tests) has no sequence: read each tick.
-            let now = crate::plugins::clipboard::stand_in()
-                .is_none()
-                .then(crate::platform::clipboard_windows::sequence);
+            // A stand-in clipboard (tests), text or image, has no sequence:
+            // read each tick.
+            let now = (crate::plugins::clipboard::stand_in().is_none()
+                && crate::plugins::clipboard::image_stand_in().is_none())
+            .then(crate::platform::clipboard_windows::sequence);
             if now.is_some() && sequence == now {
                 continue;
             }
@@ -323,6 +324,7 @@ pub(crate) async fn run() {
         #[cfg(not(windows))]
         {
             let may_watch = crate::plugins::clipboard::stand_in().is_none()
+                && crate::plugins::clipboard::image_stand_in().is_none()
                 && watch_again_at.is_none_or(|at| tokio::time::Instant::now() >= at);
             if change_watch.is_none() && may_watch {
                 match ChangeWatch::start() {

@@ -312,9 +312,17 @@ pub(crate) fn image_stand_in() -> Option<std::path::PathBuf> {
         .filter(|path| path.is_absolute())
 }
 
-/// What the image stand-in holds: a PNG within N4's limit, kept for a
-/// phone's fetch, or nothing.
+/// What the stand-ins hold: the text stand-in's text first, as a real
+/// clipboard's text wins (M3 review), else the image stand-in's PNG within
+/// N4's limit, kept for a phone's fetch, or nothing.
 fn stand_in_clip(path: &std::path::Path) -> Clip {
+    if let Some(text) = stand_in()
+        .and_then(|text| std::fs::read_to_string(text).ok())
+        .filter(|text| !text.is_empty())
+    {
+        forget_image();
+        return Clip::Text(text);
+    }
     match std::fs::read(path) {
         Ok(png)
             if png.len() as u64 <= MAX_CLIPBOARD_IMAGE
@@ -358,6 +366,9 @@ pub(crate) fn is_pairing_link(text: &str) -> bool {
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
     let text = match stand_in() {
         Some(path) => std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+        // The image stand-in alone: the stand-ins are the clipboard, and
+        // there is no text (M3 review).
+        None if image_stand_in().is_some() => None,
         None => read_system_text().await?,
     };
     Ok(text.filter(|t| !is_pairing_link(t)))
@@ -365,6 +376,11 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 
 /// Set the clipboard's text.
 pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
+    // Text replaces an image, as on a real clipboard (M3 review).
+    if let Some(image) = image_stand_in() {
+        let _ = std::fs::remove_file(image);
+        forget_image();
+    }
     if let Some(path) = stand_in() {
         // Clipboard text: owner-only, as the real one is.
         return pocketdesk_core::secure_fs::write_private(&path, content.as_bytes())
