@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-801 open items.
+805 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 480 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 484 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 27 |
@@ -978,6 +978,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The same photo fetched through recent photos (C7), and in a folder send: the tags kept.
 - Android 14's "selected photos only": the row says access is needed, and photos go as before.
 - A share from the Files app (`com.android.providers.media.documents`), and one from Google Photos.
+
+**170. No toast while the phone is in hand (M6)**
+
+- The throwaway chat app's notification with the OPPO unlocked and its screen on, the switch on: no toast on the computer; the Activity page says "not shown: the phone was in use".
+- The same with the screen off, the phone locked, or the switch off: a toast.
+- With Pocketdesk's Remote open on the phone: a toast.
+- A notification that comes as the screen is off and wakes it: a toast.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
