@@ -365,6 +365,33 @@ class Server:
         tmp.write_text(json.dumps({"id": pid, "device_id": device, "command": command,
                                    "created_unix": int(time.time())}), encoding="utf-8")
         os.replace(tmp, folder / f"{pid}.json")
+    def note(self, device: str, title: str) -> Optional[dict]:
+        """The phone notification the server keeps to answer, by its title."""
+        path = self.root / "state" / "phone_notifications.json"
+        try:
+            notes = json.loads(path.read_text(encoding="utf-8")).get("notes", [])
+        except (OSError, ValueError):
+            return None
+        return next((n for n in notes if n.get("device_id") == device and n.get("title") == title), None)
+
+    def open_note(self, device: str, key: str) -> str:
+        """Ask the phone to open `key`, as the Notifications page does; the request's id."""
+        folder = self.root / "state" / "notification_out"
+        folder.mkdir(exist_ok=True)
+        rid = str(uuid.uuid4())
+        tmp = folder / f"{rid}.json.tmp"
+        tmp.write_text(json.dumps({"id": rid, "device_id": device, "key": key, "answer": "open",
+                                   "created_unix": int(time.time())}), encoding="utf-8")
+        os.replace(tmp, folder / f"{rid}.json")
+        return rid
+
+    def answer_state(self, rid: str) -> Optional[dict]:
+        path = self.root / "state" / "notification_answers.json"
+        try:
+            answers = json.loads(path.read_text(encoding="utf-8")).get("answers", [])
+        except (OSError, ValueError):
+            return None
+        return next((a for a in answers if a.get("id") == rid), None)
 
     def type_batch(self, device: str, seq: int, events: list[dict]) -> None:
         """As the desktop's typing window writes it (core::local::typing)."""
@@ -573,6 +600,58 @@ def n2_media(ctx: Ctx) -> tuple[str, str]:
     gone = wait_for(lambda: ctx.server.media(ctx.device) is None, 20)
     return ("PASS", "shown with its cover, paused from here, gone when it ended") if gone else (
         "TIMEOUT", "an ended player stayed on the computer")
+def openable(ctx: Ctx, title: str) -> tuple[Optional[str], Optional[dict]]:
+    """Post a fixture notification and wait for the computer to keep it as openable."""
+    if (why := forwarding(ctx)):
+        return why, None
+    if not ctx.phone.prefs("pocketdesk-ui").get("let_computer_open"):
+        return "turn on Let the computer open my notifications", None
+    ctx.phone.notify(int(time.time()) % 100000, title, "Open me")
+    note = wait_for(lambda: (n := ctx.server.note(ctx.device, title)) and n.get("open") and n, 25)
+    return None, note
+
+
+@check("n3-open", "§177")
+def n3_open(ctx: Ctx) -> tuple[str, str]:
+    ctx.phone.wake()
+    title = "N3 open " + secrets.token_hex(2)
+    why, note = openable(ctx, title)
+    if why:
+        return "SKIP", why
+    if not note:
+        return "TIMEOUT", "the computer never kept it as openable"
+    if not ctx.phone.accessibility_on():
+        return "SKIP", "turn on Pocketdesk control in Android's Accessibility settings"
+    adb("shell", "input", "keyevent", "KEYCODE_HOME")
+    rid = ctx.server.open_note(ctx.device, note["key"])
+    done = wait_for(lambda: (a := ctx.server.answer_state(rid)) and a["state"]["state"] in ("handed", "not_sent") and a, 30)
+    if not done:
+        return "TIMEOUT", "no word on the open"
+    if done["state"]["state"] != "handed":
+        return "FAIL", done["state"].get("reason", "not sent")
+    opened = field_text(ctx.phone.dump()) or ""
+    return ("PASS", f"the app opened: {opened!r}") if opened.startswith("opened ") else (
+        "FAIL", f"handed, but the screen shows {opened!r}")
+
+
+@check("n3-locked", "§177")
+def n3_locked(ctx: Ctx) -> tuple[str, str]:
+    ctx.phone.wake()
+    title = "N3 locked " + secrets.token_hex(2)
+    why, note = openable(ctx, title)
+    if why:
+        return "SKIP", why
+    if not note:
+        return "TIMEOUT", "the computer never kept it as openable"
+    ctx.phone.sleep()
+    rid = ctx.server.open_note(ctx.device, note["key"])
+    done = wait_for(lambda: (a := ctx.server.answer_state(rid)) and a["state"]["state"] in ("handed", "not_sent") and a, 30)
+    ctx.phone.wake()
+    if not done:
+        return "TIMEOUT", "no word on the open"
+    reason = done["state"].get("reason", "")
+    return ("PASS", f"refused: {reason}") if done["state"]["state"] == "not_sent" and "locked" in reason else (
+        "FAIL", f"{done['state']['state']} {reason}")
 
 
 # ---- main ----
