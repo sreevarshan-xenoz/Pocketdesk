@@ -16,6 +16,7 @@ pub mod phone_photos;
 pub mod quiet;
 pub mod relpath;
 pub mod transfer;
+pub mod typing;
 pub mod v2;
 
 #[cfg(test)]

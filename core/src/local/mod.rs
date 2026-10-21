@@ -50,4 +50,5 @@ pub mod sessions;
 pub mod sms;
 pub mod tasks;
 pub mod transfers;
+pub mod typing;
 pub mod wake;
