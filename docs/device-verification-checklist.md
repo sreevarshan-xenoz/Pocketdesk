@@ -2319,6 +2319,8 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] Behind Tailscale on the phone: Wi-Fi with its bars, not nothing.
 - [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
 - [ ] The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+- [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: the computer kept 90.3 GB free of 128 GB, Wi-Fi with 4 bars and the ringer on silent, as the phone's own settings said.
+- Found there: in the background the battery broadcast stayed stale on ColorOS (72 % kept while the phone was at 79 %); the level is now read from BatteryManager (`BatteryRule.fresh`), and the background report then followed the phone's real level.
 
 ## Recording results
 
