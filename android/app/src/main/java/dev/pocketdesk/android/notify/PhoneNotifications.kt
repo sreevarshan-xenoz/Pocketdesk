@@ -316,7 +316,12 @@ class PhoneNotificationListener : NotificationListenerService() {
             matchesInterruptionFilter(sbn),
         )
         if (heldBack) return
-        worker.execute { handle(sbn, rankingVisibility) }
+        // M6: in hand now, as it comes, not when the worker gets to it (M6
+        // review: by then the notification may have woken the screen).
+        val inHand = Prefs.quietInHand(this) && inUse().let { (interactive, locked) ->
+            InHandRule.marks(true, interactive, locked, InHandRule.remoteInFront)
+        }
+        worker.execute { handle(sbn, rankingVisibility, inHand) }
     }
 
     /** D2: the phone's Do Not Disturb changed; the computer is told on the ring's thread. */
@@ -371,7 +376,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         return sent
     }
 
-    private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>) {
+    private fun handle(sbn: StatusBarNotification, rankingVisibility: Pair<Int, Int>, inHand: Boolean = false) {
         if (!PhoneNotificationPrefs.enabled(this)) return
         val note = runCatching { toNote(sbn, rankingVisibility) }.getOrNull() ?: return
         if (note.pkg != packageName && !note.ongoing && !note.otherProfile) {
@@ -413,15 +418,15 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
         // K3: the app's icon once, and its picture with the setting on;
         // whatever an app put in its extras never stops the listener.
-        runCatching { addPictures(sbn, note.pkg, body, out.full) }
+        // M6: one the computer holds shows no picture there, so none goes
+        // (M6 review); its icon still does, which the computer keeps.
+        runCatching { addPictures(sbn, note.pkg, body, out.full && !inHand) }
         // Only with the notification in full.
         if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
         // M6: came while the phone was in use: the computer keeps it without
-        // a pop-up. Decided now, so one that waits keeps the moment it came.
-        if (InHandRule.marks(Prefs.quietInHand(this), inUse().first, inUse().second)) {
-            body.put(InHandRule.FIELD, true)
-        }
+        // a pop-up. Decided as it came, so one that waits keeps that moment.
+        if (inHand) body.put(InHandRule.FIELD, true)
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         // L8: the other computers picked get a copy now, whatever the own one is doing.

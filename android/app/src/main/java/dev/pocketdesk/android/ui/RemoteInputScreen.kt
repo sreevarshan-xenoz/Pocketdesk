@@ -252,6 +252,24 @@ fun RemoteInputScreen(
         attempt++
     }
 
+    // M6 review: while Remote is in front, the phone is on and unlocked but
+    // its owner looks at the computer, whose toasts still show.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> dev.pocketdesk.android.notify.InHandRule.remoteInFront = true
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> dev.pocketdesk.android.notify.InHandRule.remoteInFront = false
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            dev.pocketdesk.android.notify.InHandRule.remoteInFront = false
+        }
+    }
+
     // Keep-screen-on, and the session and its service ended with the screen.
     DisposableEffect(Unit) {
         val window = context.findActivity()?.window
