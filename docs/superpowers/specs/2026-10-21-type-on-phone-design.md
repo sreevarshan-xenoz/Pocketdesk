@@ -16,17 +16,19 @@ Writing a long message on the phone is easier with the computer's keyboard. C8 l
     - its buttons Back, Home and Recents, as the phone's own.
   - **When it may:** only while the phone is linked, and only with the phone's "Show its screen or camera here" permission (which gates C8's control) and Settings "Control phones from their screen window" (C8's).
   - **Esc** closes it.
-- **The road:** the window gathers what is typed and sends it about every 100 ms, as one batch per request in `typing_out/`. The server's watcher wakes on it and sends `kdeconnect.pocketdesk.type {events: [...]}` to that phone on its control link. Each event is one of:
+- **The road:** the window gathers what is typed and sends it about every 100 ms, as one file a flush in `typing_out/`, named by its time and count so the server takes them in the order typed. The server's watcher wakes on it and sends `kdeconnect.pocketdesk.type {events: [...]}` to that phone on its control link. Each event is one of:
   - `{"text": "..."}`;
   - `{"key": "backspace" | "enter"}`;
   - `{"global": "back" | "home" | "recents"}`.
 
   At most 64 events and 1024 bytes of text a batch, as C8's.
-- **On the phone:** with "Let the computer control this phone" on and its Accessibility service on (C8), the notification listener runs a typing thread. It waits on the bridge's queue, with no poll, and does each batch through C8's service:
+- **On the phone:** with "Typing from the computer's keyboard" on (off by default; its own switch, not C8's) and C8's Accessibility service on, the notification listener keeps one typing thread in the process. It waits on the bridge's queue, with no poll, and does each batch through C8's service:
   - **Only from its own computer.**
   - **Never into a password field:** the computer sees nothing of the phone's screen, unlike during a cast. Text for one is dropped, and the notification says so.
   - **Never while the phone is locked:** nothing is typed then. Back and Home are as C8's.
-  - **At C8's rate:** 200 events a second.
+  - **At C8's rate:** 200 events a second, waiting rather than dropping.
+  - **Only while its notification can be shown:** nothing is typed with the app's notifications off.
+  - **Fresh:** a batch more than 10 s old is not typed.
 - **The notification:** while the computer types, an ongoing notification says "The computer is typing here", with Stop. It goes after 30 s without typing. Stop refuses typing for 10 minutes.
 
 ## Not now (part 2)
@@ -59,3 +61,36 @@ SECURITY.md limit 42.
 - A password field: nothing typed.
 - The phone locked: nothing typed.
 - Stop: refused for 10 minutes.
+
+## As built
+
+- **Core:** `protocol/typing.rs` (`TYPE`, `TypeEvent`, `fits`, `events_of`); `local/typing.rs` (`request`, one file a flush named `<ms>-<seq>.json`; `take_all`, in name order, dropping a flush over 10 s old and sweeping stale temp files).
+- **Server:** `plugins/typing.rs` (`packet_for`, `run`, waking on `typing_out/` through the inbox), gated on Settings "Control phones from their screen window" and the phone's Cast permission.
+- **Desktop:** `type_view.rs`, a deferred viewport: `type_reach`, judged each frame by the main window; `events_from` (text, an input method's text, Backspace, Enter, a paste cut to 1024 bytes; Esc closes); `batches`. The Overview's "Type on the phone".
+- **Bridge:** `typing.rs`, a queue of at most 32 batches with a condition variable, each batch stamped as it came; `nativeTypeTake`.
+- **Phone:**
+  - `Prefs.typingFromComputer` and `ui/ControlSettings.kt`'s `TypingSetting`;
+  - `control/TypeRule.kt`;
+  - `control/TypeRunner.kt`, one per process, kept in step on the listener's keeper tick;
+  - `ControlService`'s `typeBlind`, `backspaceBlind`, `enterBlind` and `globalBlind`, all on its typing thread;
+  - the health check and the listener's link keeping count the switch;
+  - strings in English, Spanish and Tamil.
+
+## Review
+
+A fresh review found 1 Critical, 10 Important and several Minor. Each fix is its own commit by layer.
+
+- **Critical:** typing rode C8's "Let the computer control this phone", so allowing a cast's window to drive the phone also let the computer type with no screen shown. It has its own switch now, off by default.
+- **Important:**
+  - the Overview's button asked for the Links reach, not the link;
+  - turning C8's service or the listener's access off was not counted by the health check, nor was a link kept for typing;
+  - the window judged its phone once, when opened;
+  - a flush's batches were a file each, taken in any order;
+  - a batch waited on the phone however long, and a full queue dropped its oldest, leaving a hole mid-text;
+  - Back, Home and Recents went on the main thread and could overtake text;
+  - an input method's text (Chinese, Japanese, Korean) never came;
+  - the window was an immediate viewport, drawn only with the main window;
+  - with the app's notifications off, or its notice swiped away, the phone was typed on unseen;
+  - a listener created again ran a second typing thread, and a stopped one typed the batch it waited for.
+- **Minor, fixed:** events past the rate dropped; the folder made private every 100 ms; a refusal logged per batch; Tab moving focus to a button; a phone's pending typing dropped on opening another; the password refusal's words; a misplaced doc comment.
+- **Left:** typing that lands with no field focused goes nowhere, silently, as C8's does.

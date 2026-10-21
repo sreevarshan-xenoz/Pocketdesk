@@ -2400,6 +2400,17 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The same with the screen off, the phone locked, or the switch off: a toast.
 - [ ] With Pocketdesk's Remote open on the phone: a toast.
 - [ ] A notification that comes as the screen is off and wakes it: a toast.
+## 171. Type on the phone from the computer's keyboard (M4)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] The OPPO with "Typing from the computer's keyboard" and the Accessibility service on, a scratch field in a throwaway app focused: text, a Backspace right after typing, Enter, and Tamil arrive, read back by `uiautomator dump`; the notification shows with Stop.
+- [ ] Back, Home and Recents from the window, in turn with text typed before them.
+- [ ] A password field: nothing typed, and the notification says so.
+- [ ] The phone locked: nothing typed.
+- [ ] Stop: nothing typed for 10 minutes.
+- [ ] The switch off, or the app's notifications off: nothing typed.
+- [ ] Japanese through Windows' input method: the committed text arrives.
+- [ ] The phone unlinked while the window is open: the window says why and sends nothing.
 
 ## Recording results
 
