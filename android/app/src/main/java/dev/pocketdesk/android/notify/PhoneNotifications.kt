@@ -324,6 +324,13 @@ class PhoneNotificationListener : NotificationListenerService() {
         ringTicker.execute { runCatching { quiet.filterChanged() } }
     }
 
+    /** Whether the screen is on, and whether the phone is locked (M6). */
+    private fun inUse(): Pair<Boolean, Boolean> {
+        val interactive = getSystemService(android.os.PowerManager::class.java)?.isInteractive == true
+        val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked != false
+        return interactive to locked
+    }
+
     /** Whether Android lets [sbn] through its Do Not Disturb; true when unknown. */
     private fun matchesInterruptionFilter(sbn: StatusBarNotification): Boolean {
         val ranking = Ranking()
@@ -410,6 +417,11 @@ class PhoneNotificationListener : NotificationListenerService() {
         // Only with the notification in full.
         if (out.full) thread?.let { body.put("messages", it) }
         if (out.id in closedKeys) return
+        // M6: came while the phone was in use: the computer keeps it without
+        // a pop-up. Decided now, so one that waits keeps the moment it came.
+        if (InHandRule.marks(Prefs.quietInHand(this), inUse().first, inUse().second)) {
+            body.put(InHandRule.FIELD, true)
+        }
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         // L8: the other computers picked get a copy now, whatever the own one is doing.

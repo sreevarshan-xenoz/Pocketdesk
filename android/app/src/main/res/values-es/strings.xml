@@ -551,6 +551,8 @@
     <string name="phone_notifications_clear_summary">Una notificación cerrada en el equipo (su ✕, Borrar, o al cerrarla en Linux) se borra también aquí. Las llamadas nunca</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
     <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su página Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="phone_notifications_in_hand">Silencio en el ordenador mientras uso el teléfono</string>
+    <string name="phone_notifications_in_hand_summary">Una notificación que llega con este teléfono desbloqueado y la pantalla encendida no aparece en el ordenador. Se guarda allí para leerla y responder.</string>
     <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>
     <string name="phone_notifications_wait_summary">Las notificaciones esperan en este teléfono, solo en memoria, y se envían cuando el equipo responde, marcadas como tardías con lo que esperaron. Esperan 20 como máximo</string>
     <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>

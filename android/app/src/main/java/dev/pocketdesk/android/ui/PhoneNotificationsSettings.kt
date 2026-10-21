@@ -89,6 +89,17 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // M6: no pop-up on the computer while this phone is in use.
+    val inHand = version.let { Prefs.quietInHand(context) }
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_in_hand),
+        stringResource(R.string.phone_notifications_in_hand_summary),
+        inHand,
+        {
+            Prefs.setQuietInHand(context, it)
+            version++
+        },
+    )
     // K3: a notification's picture with it, off by default.
     val pictures = version.let { Prefs.notificationPictures(context) }
     SettingSwitch(
