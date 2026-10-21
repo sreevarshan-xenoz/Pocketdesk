@@ -7,8 +7,11 @@ import android.os.Looper
 import android.widget.Toast
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.ui.ClipHistory
+import dev.pocketdesk.android.ui.ClipboardImages
+import dev.pocketdesk.android.ui.ImageClipRule
 import dev.pocketdesk.android.ui.localClipboardText
 
 /** What "Send clipboard" does with what it read (T10b). */
@@ -65,6 +68,24 @@ class SendClipboardActivity : Activity() {
         val app = applicationContext
         val text = localClipboardText(this)
         val host = PhoneLink.target(app)
+        // M3: an image copied here, with no text, goes as N4's image does;
+        // never one this app put there (it came from the computer).
+        val image = if (text.isNullOrBlank()) {
+            ClipboardImages.localImageUri(this)?.takeUnless { ClipboardImages.isOurs(this, it) }
+        } else {
+            null
+        }
+        if (image != null && host != null) {
+            if (SendClipboard.clipIsPrivate(this)) {
+                askPrivate(app, host) { sendImage(app, host, image) }
+            } else {
+                Thread {
+                    sendImage(app, host, image)
+                    runOnUiThread { finish() }
+                }.start()
+            }
+            return
+        }
         when (SendClipboard.check(text, host != null, SendClipboard.clipIsPrivate(this))) {
             SendClipboard.Check.NoComputer -> say(app, getString(R.string.send_clipboard_no_computer))
             SendClipboard.Check.Empty -> say(app, getString(R.string.send_clipboard_empty))
@@ -77,15 +98,15 @@ class SendClipboardActivity : Activity() {
                 return
             }
             SendClipboard.Check.AskPrivate -> {
-                askPrivate(app, host!!, text!!)
+                askPrivate(app, host!!) { send(app, host, text!!, private = true) }
                 return
             }
         }
         finish()
     }
 
-    /** A private copy: sent only when the person says so (N2). */
-    private fun askPrivate(app: Context, host: HostStore.Host, text: String) {
+    /** A private copy: sent ([sendIt], off the main thread) only when the person says so (N2). */
+    private fun askPrivate(app: Context, host: HostStore.Host, sendIt: () -> Unit) {
         // The window takes touches for the question, and lets them through again after.
         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
         // The device's own dialog, light or dark as the phone is (N2 review).
@@ -100,7 +121,7 @@ class SendClipboardActivity : Activity() {
             .setPositiveButton(R.string.send_clipboard_private_send) { _, _ ->
                 window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
                 Thread {
-                    send(app, host, text, private = true)
+                    sendIt()
                     runOnUiThread { finish() }
                 }.start()
             }
@@ -117,6 +138,25 @@ class SendClipboardActivity : Activity() {
         } else {
             say(app, app.getString(R.string.send_clipboard_failed, HostStore.shownName(app, host.address)))
         }
+    }
+
+    /**
+     * Send the image at [uri] to [host]'s clipboard (M3), as N4's session
+     * does: a PNG, downsampled as it is, known to both ends by its id, so the
+     * computer's push of it is never fetched back here.
+     */
+    private fun sendImage(app: Context, host: HostStore.Host, uri: android.net.Uri) {
+        val name = HostStore.shownName(app, host.address)
+        val png = runCatching { ClipboardImages.pngOf(app, uri) }.getOrNull()
+        if (png == null) {
+            say(app, app.getString(R.string.send_clipboard_failed, name))
+            return
+        }
+        ClipboardShared.sentImageId = ImageClipRule.idOf(png)
+        val sent = ClipboardImages.withStaged(app, png) { file ->
+            RustCore.sendClipboardImage(host.address, host.controlPort, file.absolutePath)
+        }
+        say(app, app.getString(if (sent.isSuccess) R.string.send_clipboard_sent else R.string.send_clipboard_failed, name))
     }
 
     private fun say(app: Context, message: String) {
