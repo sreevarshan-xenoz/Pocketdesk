@@ -154,6 +154,15 @@ class PhoneNotificationListener : NotificationListenerService() {
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     /**
+     * M1: keeps the link's foreground service in step and notices a freeze,
+     * on a tick of its own that does nothing slow, so a gap between its runs
+     * is the process stopped, never a dial that took long.
+     */
+    private val keeperTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private var lastKeeperUptime: Long? = null
+    private var keeperTicks = 0
+
+    /**
      * The computer browsing this phone's shared folders (T10g), on a 2 s tick
      * of its own: a slow folder or a connect must not hold up answers.
      */
@@ -210,6 +219,12 @@ class PhoneNotificationListener : NotificationListenerService() {
                 runCatching { runAnswers() }.onFailure { Log.w("PhoneNotifications", "answers failed", it) }
             },
             2,
+            2,
+            TimeUnit.SECONDS,
+        )
+        keeperTicker.scheduleWithFixedDelay(
+            { runCatching { keepLinked() }.onFailure { Log.w("PhoneNotifications", "keeper tick failed", it) } },
+            0,
             2,
             TimeUnit.SECONDS,
         )
@@ -276,6 +291,9 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         calls.stop()
         answerTicker.shutdownNow()
+        keeperTicker.shutdownNow()
+        // Access taken away ends the listener: stop the link's service with it (M1).
+        runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(this) }
         phoneFilesTicker.shutdownNow()
         recentPhotosTicker.shutdownNow()
         ringTicker.shutdownNow()
@@ -539,6 +557,19 @@ class PhoneNotificationListener : NotificationListenerService() {
             PhoneLink.linkedOther(host, port)
 
     /** Run the computer's answers that pass [NotificationActionRule.decide]. */
+    /** M1: note a freeze since the last tick, then start or stop the link's service. */
+    private fun keepLinked() {
+        val uptime = SystemClock.uptimeMillis()
+        if (dev.pocketdesk.android.doctor.FreezeWatch.frozen(lastKeeperUptime, uptime)) {
+            Log.i("PhoneNotifications", "Paused for ${(uptime - (lastKeeperUptime ?: uptime)) / 1000} s while the phone ran")
+            Prefs.setLastFreeze(this, System.currentTimeMillis(), dev.pocketdesk.android.service.LinkKeeperService.isRunning())
+        }
+        lastKeeperUptime = uptime
+        // Its inputs (the features, shared folders' grants, the saved
+        // computers) cost a read each: every 10 s is soon enough (M1 review).
+        if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
+    }
+
     private fun runAnswers() {
         val own = PhoneLink.target(this)
         // Answers come on the control link: keep one while answering is on.

@@ -775,6 +775,15 @@
     <string name="health_settings">Open Settings</string>
     <string name="settings_health">Tell me when something stops working</string>
     <string name="settings_health_summary">On Home, and in a notification after an update</string>
+    <string name="channel_linked">Staying linked</string>
+    <string name="channel_linked_desc">Keeps Pocketdesk linked to your computer with the screen off, so Android does not pause it.</string>
+    <string name="linked_to">Keeps the link to %1$s with the screen off</string>
+    <string name="linked_to_computer">Keeps the link to your computer with the screen off</string>
+    <string name="health_turn_on">Turn on</string>
+    <string name="health_paused_stay_linked_off">Android paused Pocketdesk with the screen off, so the computer\'s messages waited. Turn on \"Stay linked with the screen off\".</string>
+    <string name="health_paused_anyway">Android paused Pocketdesk with the screen off, even with \"Stay linked with the screen off\" on. This phone\'s own setting must let it run in the background.</string>
+    <string name="settings_stay_linked">Stay linked with the screen off</string>
+    <string name="settings_stay_linked_summary">Keeps a quiet notification so Android does not pause Pocketdesk. Some phones (OPPO, Xiaomi, Samsung) pause apps without one.</string>
     <plurals name="health_count">
         <item quantity="one">%1$d thing to fix in Pocketdesk</item>
         <item quantity="other">%1$d things to fix in Pocketdesk</item>

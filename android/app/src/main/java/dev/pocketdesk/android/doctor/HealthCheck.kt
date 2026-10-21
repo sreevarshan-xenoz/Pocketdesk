@@ -9,6 +9,7 @@ import android.os.Build
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.net.toUri
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.control.ControlRunner
 import dev.pocketdesk.android.files.PhoneFolders
@@ -111,6 +112,9 @@ object HealthCheck {
             controlService = !control || ControlRunner.serviceEnabled(ctx),
             advancedProtection = control && advancedProtection(ctx),
             downloadFolderLost = runCatching { DownloadTarget.treeLost(ctx) }.getOrDefault(false),
+            frozenRecently = FreezeWatch.recent(Prefs.lastFreezeMs(ctx), System.currentTimeMillis()),
+            frozenWhileLinked = Prefs.lastFreezeLinked(ctx),
+            stayLinked = Prefs.stayLinked(ctx),
         )
     }
 
@@ -143,7 +147,12 @@ object HealthCheck {
         HealthProblem.APP_NOTIFICATIONS ->
             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
         HealthProblem.CONTROL_SERVICE -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-        HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER, HealthProblem.SCREENSHOTS_STOPPED -> null
+        HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER, HealthProblem.SCREENSHOTS_STOPPED,
+        HealthProblem.PAUSED_STAY_LINKED_OFF -> null
+        // M1: the maker's own settings hold it; its guide says where, else the app's page.
+        HealthProblem.PAUSED_ANYWAY -> BackgroundRunning.makerGuide(Build.MANUFACTURER)
+            ?.let { Intent(Intent.ACTION_VIEW, it.toUri()) }
+            ?: BackgroundRunning.appPage(ctx)
     }?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /** Open [problem]'s fix; the app's page where that one is missing. */

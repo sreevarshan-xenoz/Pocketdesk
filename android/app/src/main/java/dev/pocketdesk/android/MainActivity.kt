@@ -138,6 +138,9 @@ class MainActivity : ComponentActivity() {
         // Android 17 puts an alarm volume back only while the app shows: a
         // ring that left it raised is put back here (N4 review).
         dev.pocketdesk.android.ring.PhoneRinger.restoreAfterDeath(this)
+        // M1: the app in front may start what Android refused from the background.
+        val app = applicationContext
+        Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
     }
 
     override fun onStop() {
@@ -278,6 +281,21 @@ class MainActivity : ComponentActivity() {
                     // Home-family route (home list / add form / settings),
                     // kept as a name so it survives process save/restore.
                     var route by rememberSaveable { mutableStateOf(Route.HOME) }
+
+                    // M1 review: a switch turned off or the last computer removed
+                    // in the app stops the link's service, without a listener
+                    // tick (the listener may be unbound); at once on a setting,
+                    // else every 10 s while the app is open.
+                    val prefsVersion = Prefs.observedVersion()
+                    LaunchedEffect(prefsVersion) {
+                        val app = applicationContext
+                        while (true) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) }
+                            }
+                            kotlinx.coroutines.delay(10_000)
+                        }
+                    }
 
                     LaunchedEffect(Unit) {
                         if (sessionKey == null &&

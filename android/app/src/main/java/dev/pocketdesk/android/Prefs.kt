@@ -41,6 +41,9 @@ object Prefs {
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
     private const val KEY_BACKGROUND_REMINDER = "background_reminder"
     private const val KEY_HEALTH_ALERTS = "health_alerts"
+    private const val KEY_STAY_LINKED = "stay_linked"
+    private const val KEY_LAST_FREEZE = "last_freeze_ms"
+    private const val KEY_LAST_FREEZE_LINKED = "last_freeze_linked"
     private const val KEY_HEALTH_DISMISSED = "health_dismissed"
     private const val KEY_HEALTH_SEEN = "health_seen"
     private const val KEY_LAST_FINGERPRINT = "last_fingerprint"
@@ -120,6 +123,40 @@ object Prefs {
 
     fun setBackgroundReminder(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_BACKGROUND_REMINDER, enabled) }
+        bump()
+    }
+
+    /** M1: a quiet foreground service keeps the background link through the screen off. On by default. */
+    fun stayLinked(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_STAY_LINKED, true)
+
+    fun setStayLinked(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit {
+            putBoolean(KEY_STAY_LINKED, enabled)
+            // A freeze seen with it off is the switch's story, not news once it is on.
+            if (enabled) {
+                remove(KEY_LAST_FREEZE)
+                remove(KEY_LAST_FREEZE_LINKED)
+            }
+        }
+        bump()
+    }
+
+    /** M1: when the listener last saw the app frozen (wall clock), or null. */
+    fun lastFreezeMs(ctx: Context): Long? =
+        prefs(ctx).getLong(KEY_LAST_FREEZE, 0L).takeIf { it > 0L }
+
+    /** M1: whether the link's service was running when that freeze was seen. */
+    fun lastFreezeLinked(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_LAST_FREEZE_LINKED, false)
+
+    /** M1: record a freeze seen now, and whether the link's service ran through it. */
+    fun setLastFreeze(ctx: Context, ms: Long, linked: Boolean) {
+        prefs(ctx).edit {
+            putLong(KEY_LAST_FREEZE, ms)
+            putBoolean(KEY_LAST_FREEZE_LINKED, linked)
+        }
+        // Home shows it as it comes (M1 review).
         bump()
     }
 

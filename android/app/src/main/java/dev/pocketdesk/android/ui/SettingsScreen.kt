@@ -402,6 +402,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                 Prefs.healthAlerts(context),
                 { Prefs.setHealthAlerts(context, it) },
             )
+            // M1: a quiet foreground service keeps the background link with the screen off.
+            SettingSwitch(
+                stringResource(R.string.settings_stay_linked),
+                stringResource(R.string.settings_stay_linked_summary),
+                Prefs.stayLinked(context),
+                {
+                    Prefs.setStayLinked(context, it)
+                    val app = context.applicationContext
+                    Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
+                },
+            )
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                 SettingLink(stringResource(R.string.language), null) {
                     runCatching {

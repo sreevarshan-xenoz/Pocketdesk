@@ -38,6 +38,12 @@ enum class HealthProblem {
 
     /** The chosen folder for files from computers, whose grant is gone. */
     DOWNLOAD_FOLDER,
+
+    /** Android or the phone's maker paused Pocketdesk with the screen off, and "Stay linked" is off (M1). */
+    PAUSED_STAY_LINKED_OFF,
+
+    /** The same with "Stay linked" on: the maker's own settings hold it (M1). */
+    PAUSED_ANYWAY,
 }
 
 /** What the check reads, kept apart from Android so it is tested. */
@@ -67,6 +73,12 @@ data class HealthSnapshot(
     val controlService: Boolean,
     val advancedProtection: Boolean,
     val downloadFolderLost: Boolean,
+    /** A freeze was seen in the last day (M1's [FreezeWatch]). */
+    val frozenRecently: Boolean = false,
+    /** Whether the link's service was running when that freeze was seen. */
+    val frozenWhileLinked: Boolean = false,
+    /** Whether "Stay linked with the screen off" is on. */
+    val stayLinked: Boolean = true,
 )
 
 object Health {
@@ -86,6 +98,15 @@ object Health {
             add(if (s.advancedProtection) HealthProblem.CONTROL_BLOCKED else HealthProblem.CONTROL_SERVICE)
         }
         if (s.downloadFolderLost) add(HealthProblem.DOWNLOAD_FOLDER)
+        // A freeze with the switch on but the service refused is not shown:
+        // the app, being opened to see it, starts the service (M1 review).
+        if (s.listenerFeatures && s.frozenRecently) {
+            if (!s.stayLinked) {
+                add(HealthProblem.PAUSED_STAY_LINKED_OFF)
+            } else if (s.frozenWhileLinked) {
+                add(HealthProblem.PAUSED_ANYWAY)
+            }
+        }
     }
 
     /** A set of problems as one word, the same in any order: what "Not now" remembers. */
@@ -106,8 +127,11 @@ object Health {
      */
     fun notifyAfterUpdate(problems: List<HealthProblem>, seen: String?, dismissed: String?): Boolean {
         val known = names(seen) + names(dismissed)
-        return problems.any { it.name !in known }
+        // A pause with the screen off is no update's doing (M1 review).
+        return problems.any { it.name !in known && it !in PAUSED }
     }
+
+    private val PAUSED = setOf(HealthProblem.PAUSED_STAY_LINKED_OFF, HealthProblem.PAUSED_ANYWAY)
 
     private fun names(key: String?): Set<String> = key?.split(',')?.filter { it.isNotEmpty() }?.toSet().orEmpty()
 

@@ -12,6 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- M1: stay linked with the screen off; Android 14 asks CHANGE_NETWORK_STATE (a normal permission) of this type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <!-- T10k: this phone's screen on the computer, only while the owner casts it. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- F6: the back camera shown on the computer, as a cast. -->
@@ -144,6 +147,12 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity-alias>
+
+        <!-- M1: keeps the link to the paired computer through the screen off. -->
+        <service
+            android:name=".service.LinkKeeperService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <service
             android:name=".service.TransferService"

@@ -185,4 +185,42 @@ class HealthTest {
             Health.problems(nothingOn.copy(screenshotsStopped = true, advancedProtection = false)),
         )
     }
+
+    @Test
+    fun `a freeze with the screen off, with Stay linked off or on`() {
+        assertEquals(
+            listOf(HealthProblem.PAUSED_STAY_LINKED_OFF),
+            Health.problems(healthy.copy(frozenRecently = true, stayLinked = false)),
+        )
+        assertEquals(
+            listOf(HealthProblem.PAUSED_ANYWAY),
+            Health.problems(healthy.copy(frozenRecently = true, frozenWhileLinked = true, stayLinked = true)),
+        )
+        assertEquals(emptyList<HealthProblem>(), Health.problems(healthy.copy(frozenRecently = false, stayLinked = false)))
+    }
+
+    @Test
+    fun `a freeze while the service was refused is not blamed on the phone's maker`() {
+        assertEquals(
+            emptyList<HealthProblem>(),
+            Health.problems(healthy.copy(frozenRecently = true, frozenWhileLinked = false, stayLinked = true)),
+        )
+    }
+
+    @Test
+    fun `a freeze matters only while a listener feature is on`() {
+        assertEquals(
+            emptyList<HealthProblem>(),
+            Health.problems(nothingOn.copy(frozenRecently = true, stayLinked = false)),
+        )
+    }
+
+    @Test
+    fun `a pause with the screen off is not an update's news`() {
+        assertFalse(Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_ANYWAY), seen = null, dismissed = null))
+        assertFalse(Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_STAY_LINKED_OFF), seen = null, dismissed = null))
+        assertTrue(
+            Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_ANYWAY, HealthProblem.PHOTOS), seen = null, dismissed = null),
+        )
+    }
 }
