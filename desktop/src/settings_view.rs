@@ -3,6 +3,9 @@
 use std::path::Path;
 
 use eframe::egui::{self, RichText};
+use pocketdesk_core::local::commands::{
+    MAX_PHONE_COMMANDS as PHONE_COMMANDS_MAX, PhoneCommandSpec,
+};
 use pocketdesk_core::local::config::{
     Config, ConfigError, DhtPublish, InputControlMode, relay_url_problem,
 };
@@ -211,6 +214,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("tasks", "Tasks", Section::Automation),
     ("deck_enabled", "Deck", Section::Automation),
     ("deck", "Deck buttons", Section::Automation),
+    ("phone_command", "Phone commands", Section::Automation),
     ("home_assistant", "Home Assistant", Section::Automation),
     (
         "mqtt_broker",
@@ -368,6 +372,7 @@ pub fn applies_live(key: &str) -> bool {
             | "tasks"
             | "deck"
             | "deck_enabled"
+            | "phone_command"
             | "share_state"
             | "home_assistant"
             | "mqtt_broker"
@@ -427,6 +432,9 @@ pub struct SettingsForm {
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
     /// A folder being picked for received files (C2).
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// The paired phones, id and name, for the phone commands' pickers
+    /// (M9); the window sets it each frame.
+    pub phones: Vec<(String, String)>,
 }
 
 impl SettingsForm {
@@ -451,6 +459,7 @@ impl SettingsForm {
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
             picking_downloads: None,
+            phones: Vec::new(),
         }
     }
 
@@ -552,6 +561,11 @@ impl SettingsForm {
             deck_problems(&self.edited.deck)
                 .into_iter()
                 .map(|problem| ("deck", problem)),
+        );
+        problems.extend(
+            command_problems(&self.edited.phone_command)
+                .into_iter()
+                .map(|problem| ("phone_command", problem)),
         );
         if self.edited.home_assistant
             && let Err(why) = ha::parse_broker(&self.edited.mqtt_broker)
@@ -1237,6 +1251,65 @@ impl SettingsForm {
                         .weak(),
                     );
                 });
+                row(ui, "phone_command", |ui| {
+                    let mut remove = None;
+                    let phones = self.phones.clone();
+                    for (i, command) in e.phone_command.iter_mut().enumerate() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut command.label)
+                                    .desired_width(110.0)
+                                    .hint_text("label"),
+                            );
+                            let shown = phones
+                                .iter()
+                                .find(|(id, _)| *id == command.phone)
+                                .map(|(_, name)| name.clone())
+                                .unwrap_or_else(|| {
+                                    if command.phone.is_empty() {
+                                        "Choose a phone".to_string()
+                                    } else {
+                                        "A phone no longer paired".to_string()
+                                    }
+                                });
+                            egui::ComboBox::from_id_salt(("phone-command-phone", i))
+                                .selected_text(shown)
+                                .show_ui(ui, |ui| {
+                                    for (id, name) in &phones {
+                                        ui.selectable_value(&mut command.phone, id.clone(), name);
+                                    }
+                                });
+                            ui.add(
+                                egui::TextEdit::singleline(&mut command.name)
+                                    .desired_width(110.0)
+                                    .hint_text("command name"),
+                            );
+                            ui.add(
+                                egui::TextEdit::singleline(&mut command.text)
+                                    .desired_width(160.0)
+                                    .hint_text("text (optional)"),
+                            );
+                            if ui.small_button("Remove").clicked() {
+                                remove = Some(i);
+                            }
+                        });
+                    }
+                    if let Some(i) = remove {
+                        e.phone_command.remove(i);
+                    }
+                    if e.phone_command.len() < PHONE_COMMANDS_MAX
+                        && ui.button("Add command").clicked()
+                    {
+                        e.phone_command.push(PhoneCommandSpec::default());
+                    }
+                    ui.label(
+                        RichText::new(
+                            "Each is a button in Home Assistant (with \"Home Assistant\" on) that sends the phone the command for its automation apps, as pocketdesk phone-command does: the phone needs \"Send commands to its automation apps\" here (Devices) and \"Commands from the computer to my automation apps\" on there. Home Assistant sees the labels, and anyone who can press its buttons can start these.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                });
                 row(ui, "home_assistant", |ui| {
                     ui.checkbox(
                         &mut e.home_assistant,
@@ -1510,6 +1583,25 @@ fn media_words(media: &str) -> &'static str {
         "previous" => "Previous",
         _ => "Play/Pause",
     }
+}
+
+/// What is wrong with the phone commands, in words for the user (M9).
+fn command_problems(commands: &[PhoneCommandSpec]) -> Vec<String> {
+    let mut problems = Vec::new();
+    if commands.len() > PHONE_COMMANDS_MAX {
+        problems.push(format!("Phone commands: at most {PHONE_COMMANDS_MAX}."));
+    }
+    for (i, command) in commands.iter().enumerate() {
+        if let Some(why) = command.problem() {
+            let which = if command.label.trim().is_empty() {
+                format!("command {}", i + 1)
+            } else {
+                format!("\"{}\"", command.label.trim())
+            };
+            problems.push(format!("Phone commands: {which}: {why}."));
+        }
+    }
+    problems
 }
 
 /// What is wrong with the deck's buttons, in words for the user.
@@ -2056,5 +2148,29 @@ mod tests {
             form.edited.mic_relay_device.as_deref(),
             Some("CABLE-A Input")
         );
+    }
+
+    /// M9: a phone command's problems name it.
+    #[test]
+    fn phone_command_problems_name_the_command() {
+        let good = PhoneCommandSpec {
+            label: "Lights".into(),
+            phone: "phone".into(),
+            name: "lights".into(),
+            text: String::new(),
+        };
+        assert!(super::command_problems(std::slice::from_ref(&good)).is_empty());
+        let unnamed = PhoneCommandSpec {
+            name: String::new(),
+            ..good.clone()
+        };
+        let no_phone = PhoneCommandSpec {
+            phone: String::new(),
+            label: String::new(),
+            ..good
+        };
+        let problems = super::command_problems(&[unnamed, no_phone]);
+        assert!(problems[0].contains("\"Lights\"") && problems[0].contains("name"));
+        assert!(problems[1].contains("command 2"));
     }
 }

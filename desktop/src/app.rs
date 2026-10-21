@@ -2001,6 +2001,19 @@ impl PocketdeskApp {
         // As the running server read it, not the box as edited (3c
         // review: requests to a server with it off lapsed unread).
         let compat_on = form.running().kdeconnect_compat;
+        // M9: the phones a command may go to.
+        form.phones = self
+            .snapshot
+            .devices
+            .iter()
+            .filter(|d| !d.computer)
+            .map(|d| {
+                (
+                    d.id.clone(),
+                    model::device_label(&self.snapshot.devices, &d.id),
+                )
+            })
+            .collect();
         let kde_waiting = self.kdeconnect.waiting(&self.state_dir, now_unix());
         for section in crate::settings_view::Section::ALL {
             // A section with a problem, or a pairing request waiting, stays
