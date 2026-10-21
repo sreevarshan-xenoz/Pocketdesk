@@ -121,6 +121,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     ("clipboard_push", "Clipboard to phones", Section::Phones),
+    (
+        "clipboard_images",
+        "Images to phones' clipboards",
+        Section::Phones,
+    ),
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
         "clipboard_hotkey",
@@ -375,6 +380,7 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
+            | "clipboard_images"
             | "clipboard_hotkey"
             | "phone_media_controls"
             | "phone_drive"
@@ -768,6 +774,19 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.clipboard_push,
                         "send what I copy to connected phones (those with \"Share the clipboard\" on in Devices)",
+                    );
+                });
+                row(ui, "clipboard_images", |ui| {
+                    ui.add_enabled(
+                        e.clipboard_push,
+                        egui::Checkbox::new(
+                            &mut e.clipboard_images,
+                            "send an image I copy too, for the phone to fetch",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "Only to phones the clipboard goes to, and only with \"Computer's copied images in the background\" on there, which fetches it on Wi-Fi. Never a copy marked private.",
                     );
                 });
                 row(ui, "clipboard_history", |ui| {
