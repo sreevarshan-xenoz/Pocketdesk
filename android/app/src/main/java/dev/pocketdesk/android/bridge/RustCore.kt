@@ -100,6 +100,7 @@ object RustCore {
     private external fun nativeListTasks(address: String, port: Int): String
     private external fun nativeListDeck(address: String, port: Int): String
     private external fun nativeSystemState(address: String, port: Int): String
+    private external fun nativeAllowed(address: String, port: Int): String
     private external fun nativePressDeck(address: String, port: Int, index: Int, label: String): String
     private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
     private external fun nativeTaskResult(id: String): String
@@ -602,6 +603,9 @@ object RustCore {
 
     /** The computer's state (F2): CPU, memory, disks, battery and uptime, or `{"off": true}`. */
     fun systemState(address: String, port: Int): Result<String> = envelope(nativeSystemState(address, port))
+
+    /** M2a: what the computer allows this phone, `{"allowed": {<feature>: {"permission", "setting"}}}`. */
+    fun allowed(address: String, port: Int): Result<String> = envelope(nativeAllowed(address, port))
 
     /** The computer's deck (F1): `{"buttons": [{"index", "label", "kind"}]}`. */
     fun listDeck(address: String, port: Int): Result<String> = envelope(nativeListDeck(address, port))
