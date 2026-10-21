@@ -269,6 +269,48 @@ class ControlService : AccessibilityService() {
         }
     }
 
+    /**
+     * The field to type in from the computer's keyboard alone (M4), where
+     * the computer sees nothing of the screen: never a password field, which
+     * [refused] is told of instead.
+     */
+    private fun blindField(refused: () -> Unit): AccessibilityNodeInfo? {
+        val node = field() ?: return null
+        if (node.isPassword) {
+            refused()
+            return null
+        }
+        return node
+    }
+
+    /** M4: [typed] as [type], never into a password field. */
+    fun typeBlind(typed: String, refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.type(textOf(node), start, end, typed))
+    }
+
+    /** M4: [backspace], never in a password field. */
+    fun backspaceBlind(refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.backspace(textOf(node), start, end))
+    }
+
+    /** M4: [enter], never in a password field. */
+    fun enterBlind(refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
+        if (Build.VERSION.SDK_INT >= 30 &&
+            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        ) {
+            return@post
+        }
+        if (node.isMultiLine) {
+            val (start, end) = selectionOf(node)
+            setText(node, ControlPlan.type(textOf(node), start, end, "\n"))
+        }
+    }
+
     companion object {
         private const val TAG = "ControlService"
         private const val SCROLL_MS = 120L

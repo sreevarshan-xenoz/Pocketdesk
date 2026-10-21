@@ -129,6 +129,9 @@ class PhoneNotificationListener : NotificationListenerService() {
      * not hold up text replies.
      */
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
+
+    /** M4: what the computer types here, on a thread of its own. */
+    private val typing by lazy { dev.pocketdesk.android.control.TypeRunner(applicationContext) }
     private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     /** The battery without a session (research item 11), on the clipboard's ticker, over the link those keep. */
@@ -265,6 +268,8 @@ class PhoneNotificationListener : NotificationListenerService() {
             5,
             TimeUnit.SECONDS,
         )
+        // M4: waits for what the computer types; checks control's switch per batch.
+        typing.start()
     }
 
     // D1: whether the listener runs, for the health check in this process.
@@ -300,6 +305,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         screenshotsTicker.shutdownNow()
         screenshots.close()
         clipboardTicker.shutdownNow()
+        typing.stop()
         clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()

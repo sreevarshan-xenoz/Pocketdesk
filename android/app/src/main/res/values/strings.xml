@@ -936,4 +936,10 @@
     <string name="widget_preview_deck_type" translatable="false">Sign-off</string>
     <string name="widget_preview_deck_open" translatable="false">Calendar</string>
     <string name="widget_preview_deck_build" translatable="false">Build</string>
+    <string name="typing_channel">Typing from the computer</string>
+    <string name="typing_now">%1$s is typing here</string>
+    <string name="typing_now_text">What is typed on the computer goes to the field in front</string>
+    <string name="typing_password">Not typed: the field in front is a password\'s</string>
+    <string name="typing_stop">Stop</string>
+    <string name="typing_stopped">No typing from the computer for 10 minutes</string>
 </resources>
