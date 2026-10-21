@@ -89,16 +89,28 @@ class LinkKeeperService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Android may refuse it here too (a start it allowed, then judged
+            // again, or the type's prerequisites on 14+): stop rather than
+            // crash the process, and let the next start try again (M1 review).
+            Log.w(TAG, "Could not go to the foreground: $e")
+            refusedAt = android.os.SystemClock.elapsedRealtime()
+            stopSelf()
+            return START_NOT_STICKY
         }
         running = true
         refusedAt = 0L
         // A freeze seen before it ran is not news any more (M1).
         Prefs.setLastFreezeMs(this, null)
-        return START_STICKY
+        // Not sticky: a restart in a new process is not a start Android
+        // excuses, and the listener's tick and the app start it again.
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
