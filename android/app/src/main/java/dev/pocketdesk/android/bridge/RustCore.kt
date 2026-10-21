@@ -41,6 +41,9 @@ object RustCore {
     private external fun nativeSendNotificationAcked(address: String, port: Int, body: String): String
     private external fun nativeSendPhonePacket(address: String, port: Int, packetType: String, body: String): String
     private external fun nativeSendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): String
+    private external fun nativeConnectExtra(address: String, port: Int): String
+    private external fun nativeSendOnExtra(address: String, port: Int, packetType: String, body: String): String
+    private external fun nativeKeepExtra(keep: String): String
     private external fun nativeTakeSmsRequests(): String
     private external fun nativeControlPeer(): String
     private external fun nativePeerName(address: String): String
@@ -369,6 +372,25 @@ object RustCore {
 
     /** Send the phone's texts or a reply's result to the desktop (N5b). */
     /** [sendPhonePacket] only over the control link already up to that computer: never a connection of its own. */
+    /** Open a link to another computer the owner picked (L8 part 2), on the home road. */
+    fun connectExtra(address: String, port: Int): Result<Unit> =
+        runCatching { envelope(nativeConnectExtra(address, port)).map { } }.getOrElse { Result.failure(it) }
+
+    /** Send a notification, its cancel or how an answer went on the link to another computer (L8 part 2). */
+    fun sendOnExtra(address: String, port: Int, packetType: String, body: String): Result<Unit> =
+        runCatching { envelope(nativeSendOnExtra(address, port, packetType, body)).map { } }.getOrElse { Result.failure(it) }
+
+    /** Close the links to other computers not in [keep], and say which are up. */
+    fun keepExtra(keep: List<Pair<String, Int>>): Set<Pair<String, Int>> =
+        runCatching {
+            val body = org.json.JSONArray(keep.map { org.json.JSONObject().put("host", it.first).put("port", it.second) })
+            val array = org.json.JSONArray(envelope(nativeKeepExtra(body.toString())).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val link = array.getJSONObject(i)
+                link.getString("host") to link.getInt("port")
+            }.toSet()
+        }.getOrDefault(emptySet())
+
     fun sendPhonePacketOnLink(address: String, port: Int, packetType: String, body: String): Result<Unit> =
         envelope(nativeSendPhonePacketOnLink(address, port, packetType, body)).map { }
 
