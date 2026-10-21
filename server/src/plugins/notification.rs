@@ -825,7 +825,9 @@ impl Plugin for NotificationPlugin {
                 if live.is_some() {
                     meta["live"] = serde_json::json!(true);
                 }
-                if first {
+                // A muted app's card is not kept, so its updates are not
+                // told apart from its first: none is logged.
+                if first && !(muted && live.is_some()) {
                     crate::events::emit(
                         "notification",
                         Some(sender.device_id()),
@@ -849,25 +851,12 @@ impl Plugin for NotificationPlugin {
                 {
                     tracing::warn!("A phone notification was not kept to answer: {e}");
                 }
-                if held {
-                    // Not shown, so no picture is kept for it (K3 review).
-                    if !id.is_empty()
-                        && let Ok(dir) = crate::state::state_dir()
-                    {
-                        pocketdesk_core::local::notification_icons::forget_picture(
-                            &dir,
-                            sender.device_id(),
-                            id,
-                        );
-                    }
-                    return Ok(());
-                }
-                let text = with_late(&text, waited);
-                // N4: its card, for the Notifications page.
+                // N4: its card, for the Notifications page, kept while held too (a
+                // pause, the phone in hand), so it counts once; not a muted app's.
                 let live_show = match (&live, &tag) {
                     (Some(live), Some(tag)) => {
                         let now_ms = unix_now().saturating_mul(1000);
-                        if let Ok(dir) = crate::state::state_dir() {
+                        if !muted && let Ok(dir) = crate::state::state_dir() {
                             let card = pocketdesk_core::local::phone_live::LiveCard {
                                 device_id: sender.device_id().to_string(),
                                 tag: tag.clone(),
@@ -890,6 +879,20 @@ impl Plugin for NotificationPlugin {
                     }
                     _ => None,
                 };
+                if held {
+                    // Not shown, so no picture is kept for it (K3 review).
+                    if !id.is_empty()
+                        && let Ok(dir) = crate::state::state_dir()
+                    {
+                        pocketdesk_core::local::notification_icons::forget_picture(
+                            &dir,
+                            sender.device_id(),
+                            id,
+                        );
+                    }
+                    return Ok(());
+                }
+                let text = with_late(&text, waited);
                 // The owner's switch (K3 review): off, nothing is kept.
                 let mut pictures = if !crate::events::current_config().notification_pictures {
                     crate::toast_answers::Pictures::default()
