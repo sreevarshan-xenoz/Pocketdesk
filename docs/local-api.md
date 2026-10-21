@@ -180,9 +180,9 @@ The clipboard's history (D3), with Settings "Clipboard history" above 0: the tex
 
 Ends live sessions: a device id, an id prefix, a peer address, or `all`. `{"api": 1, "kick_requested": "all"}`. Exit 3 when no server runs.
 
-### `pocketdesk pair [PIN] [--grant 15m] --json`
+### `pocketdesk pair [PIN] [--grant 15m] [--someone-else] --json`
 
-Makes a pairing PIN, valid for one phone: `{"api": 1, "pin": "123456", "valid_secs": 300, "grant_secs": null}`. The PIN is a secret for 5 minutes; do not log it.
+Makes a pairing PIN, valid for one phone: `{"api": 1, "pin": "123456", "valid_secs": 300, "grant_secs": null, "someone_else": false}`. The PIN is a secret for 5 minutes; do not log it. With `--grant` (a guest's phone, for that long) or `--someone-else` (for good), the phone pairs with files and links only, and its sessions ask first; `someone_else` is then true.
 
 ### `pocketdesk unpair [DEVICE-ID] --json`
 

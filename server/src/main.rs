@@ -218,7 +218,12 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             let identity = kde::host_identity();
             service::connect_peer(peer, port, &identity).await
         }
-        cli::Commands::Pair { pin, grant, json } => service::pair(pin, grant, json).await,
+        cli::Commands::Pair {
+            pin,
+            grant,
+            someone_else,
+            json,
+        } => service::pair(pin, grant, someone_else, json).await,
         cli::Commands::Unpair { device_id, json } => service::unpair(device_id, json).await,
         cli::Commands::Kick { device, json } => {
             std::process::exit(local_api::run_kick(&device, json))

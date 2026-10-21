@@ -323,10 +323,15 @@ pub enum Commands {
     Pair {
         /// Optional 6-digit PIN
         pin: Option<String>,
-        /// Time-box the trust this PIN grants (e.g. 45s, 15m, 2h, 7d).
-        /// Omit for permanent trust. R4 D3 one-off support sessions.
+        /// Time-box the trust this PIN grants (e.g. 45s, 15m, 2h, 7d), for a
+        /// guest's phone: it may send files and links only, and its sessions
+        /// ask you first. Omit for permanent trust.
         #[arg(long, value_parser = parse_grant_secs)]
         grant: Option<u64>,
+        /// The phone is someone else's: it pairs for good, may send files and
+        /// links only, and its sessions ask you first (as a guest's)
+        #[arg(long)]
+        someone_else: bool,
         /// Print the local API's JSON (see docs/local-api.md)
         #[arg(long)]
         json: bool,
