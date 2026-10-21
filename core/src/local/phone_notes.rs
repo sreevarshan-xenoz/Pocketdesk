@@ -81,15 +81,22 @@ fn write(state_dir: &Path, notes: Vec<PhoneNote>) -> io::Result<()> {
     std::fs::rename(&tmp, &path)
 }
 
-/// Keep `note`, replacing the phone's earlier one of the same key; the
-/// oldest go past [`MAX_KEPT`].
+/// Keep `note`, replacing the phone's earlier one of the same key; past
+/// [`MAX_KEPT`] the oldest go, one that only opens on the phone before one
+/// that takes an answer (N3 review: thirty news notifications had pushed a
+/// chat's reply out).
 pub fn keep(state_dir: &Path, note: PhoneNote) -> io::Result<()> {
     let _one = writing();
     let mut notes = read(state_dir);
     notes.retain(|n| !(n.device_id == note.device_id && n.key == note.key));
     notes.push(note);
-    let excess = notes.len().saturating_sub(MAX_KEPT);
-    notes.drain(..excess);
+    while notes.len() > MAX_KEPT {
+        let oldest = notes
+            .iter()
+            .position(|n| n.open && n.actions.is_empty() && !n.reply)
+            .unwrap_or(0);
+        notes.remove(oldest);
+    }
     write(state_dir, notes)
 }
 
@@ -258,6 +265,31 @@ fn request_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+
+    /// N3 review: open-only notes go first, so one that takes a reply stays.
+    #[test]
+    fn open_only_notes_go_before_answerable_ones() {
+        let dir = std::env::temp_dir().join(format!("pd-notes-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut chat = note("phone", "chat", 1);
+        chat.reply = true;
+        keep(&dir, chat).unwrap();
+        for n in 0..MAX_KEPT + 5 {
+            let mut news = note("phone", &format!("news-{n}"), 2 + n as u64);
+            news.actions.clear();
+            news.reply = false;
+            news.open = true;
+            keep(&dir, news).unwrap();
+        }
+        let kept = read(&dir);
+        assert_eq!(kept.len(), MAX_KEPT);
+        assert!(kept.iter().any(|n| n.key == "chat"), "the chat stays");
+        assert!(
+            !kept.iter().any(|n| n.key == "news-0"),
+            "the oldest news went"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
