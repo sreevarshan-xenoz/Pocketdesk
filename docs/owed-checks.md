@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-832 open items.
+831 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 504 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 503 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -1016,7 +1016,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **175. Copies sent by themselves (M10 part 2)**
 
-- A password manager's copy (marked sensitive): read, not sent.
 - The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
 - The keyboard and selection in the app copied from, after the read (focus moves away and back).
 - An hour with the switch on: the battery.

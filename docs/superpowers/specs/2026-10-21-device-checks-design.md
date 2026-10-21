@@ -49,3 +49,51 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N1. This is part 1; part 2 grows th
 - **The runner's pure parts** (parsing the mirror, the event log and `uiautomator`'s dump; the refusal of the owner's folder) are tested with `python -m unittest scripts/test_device_checks.py`, in CI's Rust job beside the owed checks' index.
 - **The fixture:** `assembleDebug` and `lintDebug` build it.
 - **On the OPPO:** the runner's own first run is the check, and its output goes in the as-built section.
+
+## As built
+
+- **The fixture** is as above. Its exported activities and receiver take only callers holding `DUMP`, which adb's shell has and no app can.
+- **The runner** keeps to the throwaway server:
+  - it refuses a root with no paired server, the owner's state or config folder (new and legacy names), the owner's control port, a server already running for the root, and an `adb reverse` already in place;
+  - it turns the phones' input off in one move before the server starts, counts the server as started once it logs "Control listener ready", and stops the process it started in a `finally`;
+  - a mirror older than 10 s links no one.
+- **Each refusal is proved by a control.** `m4-locked` types once the phone is unlocked and needs that to arrive; `m10-sensitive` needs a plain copy after it to arrive.
+- **Notifications** are matched by the fixture's app and the phone's id, after the event log's line count.
+- **The tel check** reports the phone's own answer from its log: Pocketdesk's `Dials` now logs "opened" or "offered" as well as a refusal, never the number.
+- **The control service** is waited for after each screen read by its own "control service connected" in logcat.
+- **The run on the OPPO** (2026-10-21, ColorOS 14, after the fixes), 7 of 7:
+
+  ```
+  PASS     m4-typing        §171   read back 'Héllo தமிழ!'
+  PASS     m4-locked        §171   nothing typed while locked; typed once unlocked
+  PASS     m10-copy         §175   copy-… reached the computer
+  PASS     m10-sensitive    §175   not sent; a plain copy after it was
+  PASS     m6-in-hand       §170   held: phone_in_use
+  PASS     m6-locked        §170   shown
+  PASS     m8-tel           §173   chose the linked phone, whose answer was: was not taken: Off
+  ```
+
+  Calls from the computer was off, so the dial was refused, and the check says so.
+- **Found on the way:** an APK built with a stale bridge library failed the typing and dial checks ("No implementation found" in logcat). `docs/development-setup.md` §5b now says so.
+
+## Review
+
+A fresh review found 0 Critical, 6 Important and 9 Minor. All were fixed:
+
+- **Important:**
+  - a server already running was reused with its input on, and never stopped;
+  - a copied config could point the phone at the owner's server;
+  - the server's process outlived a failed start;
+  - the tel check passed on a refusal;
+  - the locked and sensitive checks could pass on a dead link;
+  - any app's notification matched.
+- **Minor:**
+  - the fixture's exported parts open to any app;
+  - its notification permission unchecked;
+  - `run-as` failures unseen;
+  - the owner's legacy and config folders;
+  - a swipe on an unlocked phone;
+  - one phone and one id assumed (`--serial`, `--phone-id`);
+  - an existing `adb reverse` replaced;
+  - a fixed sleep for the control service;
+  - no word on making a server root.
