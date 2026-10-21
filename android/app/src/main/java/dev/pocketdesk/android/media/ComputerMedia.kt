@@ -33,6 +33,9 @@ private const val WATCH = "kdeconnect.pocketdesk.computer_media_watch"
 /** The largest cover taken, in bytes, as the computer sends at most. */
 private const val MAX_COVER_BYTES = 256 * 1024
 
+/** The longest side a cover is drawn at. */
+private const val MAX_COVER_PX = 1024
+
 /**
  * The computer's music in the phone's media controls (N5): with "Computer's
  * music in my media controls" on, the notification listener asks its own
@@ -71,6 +74,9 @@ class ComputerMedia(private val app: Context) {
     private val watch = ComputerMediaRule.Watch()
     private var heardMs: Long? = null
     private var cover: Pair<String, Bitmap>? = null
+
+    /** A cover whose bytes would not decode: not asked for again (N5 review). */
+    private var badCover: String? = null
     private var showingFor: String? = null
 
     /** Closed with the listener: nothing is drawn after (N5 review). */
@@ -142,7 +148,7 @@ class ComputerMedia(private val app: Context) {
         }
         val current = shown.current(nowMs)
         val link = own?.let { live(it) }
-        val coverMissing = current?.artId != null && cover?.first != current.artId
+        val coverMissing = current?.artId != null && cover?.first != current.artId && badCover != current.artId
         watch.due(link, wanted, nowMs, heardMs, coverMissing)?.let { on ->
             if (own != null && link != null && send(own, on)) watch.sent(link, on, nowMs)
         }
@@ -157,7 +163,8 @@ class ComputerMedia(private val app: Context) {
         val playing = push.optJSONObject("playing")
         val artId = ComputerMediaRule.artId(push.optString("artId").takeIf { it.isNotEmpty() })
         if (artId != null && cover?.first != artId && push.has("art")) {
-            decodeCover(push.optString("art"))?.let { cover = artId to it }
+            val decoded = decodeCover(push.optString("art"))
+            if (decoded != null) cover = artId to decoded else badCover = artId
         }
         shown.heard(
             playing?.let {
@@ -176,12 +183,21 @@ class ComputerMedia(private val app: Context) {
         )
     }
 
-    /** A cover's base64, as a picture when it is one of at most [MAX_COVER_BYTES]. */
+    /**
+     * A cover's base64, as a picture when it is one of at most
+     * [MAX_COVER_BYTES], drawn at most [MAX_COVER_PX] a side whatever size
+     * it declares (N5 review).
+     */
     private fun decodeCover(base64: String): Bitmap? = runCatching {
         if (base64.length > MAX_COVER_BYTES / 3 * 4 + 4) return null
         val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
         if (bytes.size > MAX_COVER_BYTES) return null
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > MAX_COVER_PX) sample *= 2
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }.getOrNull()
 
     /** Send a press to the own computer (worker). */
