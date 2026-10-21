@@ -104,24 +104,33 @@ fn someone_else_for(
 }
 
 /// The permissions a pairing sets (M2b), or `None` to leave them: someone
-/// else's phone, and every new guest, gets files and links only; the
+/// else's phone, and every new guest, sends files and links only; the
 /// owner's own phone keeps what it has (the defaults when new), a computer
 /// its own narrow set (2f), and a guest grant on a phone already paired
-/// changes nothing (that phone stays as it was).
+/// changes nothing (that phone stays as it was). A paired phone (`current`)
+/// paired again as someone else's keeps only what both allow, so nothing
+/// the owner turned off comes back on (M2 review).
 fn preset_permissions(
     guest: bool,
     someone_else: bool,
     computer: bool,
-    was_trusted: bool,
+    current: Option<&DevicePermissions>,
 ) -> Option<DevicePermissions> {
     let narrow = if computer {
         false
     } else if guest {
-        !was_trusted
+        current.is_none()
     } else {
         someone_else
     };
-    narrow.then(DevicePermissions::someone_else)
+    if !narrow {
+        return None;
+    }
+    let preset = DevicePermissions::someone_else();
+    Some(match current {
+        Some(current) => current.narrowed_to(&preset),
+        None => preset,
+    })
 }
 
 /// Is `device_id` one of the owner's other computers (2f)?
@@ -985,16 +994,23 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             let was_trusted = store.is_trusted(&phone_id);
+            // The permissions before the trust (M2 review): a write that fails
+            // between them leaves an untrusted id's entry, which the store
+            // drops as it loads, never a phone trusted with the defaults.
+            if let Some(permissions) = preset_permissions(
+                grant_secs.is_some(),
+                someone_else,
+                computer,
+                was_trusted.then(|| store.permissions(&phone_id)).as_ref(),
+            ) {
+                store.set_permissions(&phone_id, permissions)?;
+            }
             match grant_secs {
                 Some(secs) => {
-                    store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))?
+                    store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
-                None if computer => store.trust_computer(phone_id.clone())?,
-                None => store.trust_device(phone_id.clone())?,
-            }
-            match preset_permissions(grant_secs.is_some(), someone_else, computer, was_trusted) {
-                Some(permissions) => store.set_permissions(&phone_id, permissions),
-                None => Ok(()),
+                None if computer => store.trust_computer(phone_id.clone()),
+                None => store.trust_device(phone_id.clone()),
             }
         });
         match outcome {
@@ -1143,18 +1159,30 @@ mod tests {
 
     #[test]
     fn a_pairing_sets_narrow_permissions_for_someone_else_and_new_guests() {
+        use pocketdesk_core::protocol::permissions::Capability;
         let narrow = Some(DevicePermissions::someone_else());
+        let mine = DevicePermissions::default();
         // The owner's own phone: as it was.
-        assert_eq!(preset_permissions(false, false, false, false), None);
-        assert_eq!(preset_permissions(false, false, false, true), None);
-        // Someone else's: narrow, new or paired again.
-        assert_eq!(preset_permissions(false, true, false, false), narrow);
-        assert_eq!(preset_permissions(false, true, false, true), narrow);
+        assert_eq!(preset_permissions(false, false, false, None), None);
+        assert_eq!(preset_permissions(false, false, false, Some(&mine)), None);
+        // Someone else's: narrow when new.
+        assert_eq!(preset_permissions(false, true, false, None), narrow);
+        // Paired again as someone else's: narrowed, never widened.
+        let mut no_links = DevicePermissions::default();
+        no_links.set(Capability::Links, false);
+        let again = preset_permissions(false, true, false, Some(&no_links)).unwrap();
+        assert!(again.allows(Capability::Files));
+        assert!(
+            !again.allows(Capability::Links),
+            "the owner's off stays off"
+        );
+        assert!(!again.allows(Capability::Input));
+        assert!(again.ask_first);
         // A guest: narrow when new; a phone already paired keeps its own.
-        assert_eq!(preset_permissions(true, false, false, false), narrow);
-        assert_eq!(preset_permissions(true, true, false, true), None);
+        assert_eq!(preset_permissions(true, false, false, None), narrow);
+        assert_eq!(preset_permissions(true, true, false, Some(&mine)), None);
         // A computer keeps its own set.
-        assert_eq!(preset_permissions(false, true, true, false), None);
+        assert_eq!(preset_permissions(false, true, true, None), None);
     }
     use super::*;
 
