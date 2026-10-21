@@ -380,6 +380,12 @@ async fn set_system_clipboard(content: &str) -> Result<()> {
 async fn read_clipboard() -> Result<Clip> {
     use crate::platform::clipboard_windows as win;
     tokio::task::spawn_blocking(|| -> Result<Clip> {
+        // A copy a password manager marked private goes to no phone that
+        // asks either, text or image (M3), as the watcher's (T10b).
+        if win::privacy_marks().private() {
+            forget_image();
+            return Ok(Clip::Empty);
+        }
         if win::has_text() {
             forget_image();
             let text = win::get_text()?;
@@ -496,6 +502,12 @@ async fn read_clipboard() -> Result<Clip> {
         return Ok(Clip::Empty);
     };
     let types = String::from_utf8_lossy(&types);
+    // A copy a password manager marked private goes to no phone that asks
+    // either, text or image (M3), as the watcher's (T10b).
+    if crate::clipboard_push::private_types(&types) {
+        forget_image();
+        return Ok(Clip::Empty);
+    }
     let has = |prefix: &str| types.lines().any(|t| t.trim().starts_with(prefix));
     if has("text/plain") || has("UTF8_STRING") || has("TEXT") || has("STRING") {
         forget_image();
