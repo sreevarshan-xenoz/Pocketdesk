@@ -2384,6 +2384,14 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll.
 - [ ] The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
 - [ ] GNOME (no `wl-paste --watch`): an image on the clipboard is read at most every 30 s.
+## 169. Photos keep where they were taken (M5)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] Photo access revoked first, then the switch turned on: Android asks for photo access, and the switch stays on.
+- [ ] A JPEG with GPS tags pushed to `DCIM/Camera` by adb, shared from the gallery to a throwaway server with the switch on: the tags arrive (an EXIF reader); with it off, they are gone.
+- [ ] The same photo fetched through recent photos (C7), and in a folder send: the tags kept.
+- [ ] Android 14's "selected photos only": the row says access is needed, and photos go as before.
+- [ ] A share from the Files app (`com.android.providers.media.documents`), and one from Google Photos.
 
 ## Recording results
 
