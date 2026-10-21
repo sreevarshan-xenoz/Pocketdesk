@@ -86,13 +86,15 @@ impl Reports {
 
 /// The cover to show with `device`'s report (N2): the bytes sent with it
 /// (`art`, base64) kept as its `artId`, else the one kept by that id, else
-/// none, the phone's others forgotten. A cover that is not one is logged
-/// and not shown.
+/// none, the phone's others forgotten when it `had` one (N2 review: so a
+/// phone that never sends covers costs no look at the folder). A cover
+/// that is not one is logged and not shown.
 fn cover(
     state_dir: &std::path::Path,
     device: &str,
     report: &MediaReport,
     art: Option<&str>,
+    had: bool,
 ) -> Option<String> {
     use base64::Engine;
     use pocketdesk_core::local::phone_media::{art_name, forget_art, has_art, keep_art};
@@ -101,7 +103,9 @@ fn cover(
         MediaReport::Nothing => None,
     };
     let Some(id) = id else {
-        forget_art(state_dir, device);
+        if had {
+            forget_art(state_dir, device);
+        }
         return None;
     };
     if let Some(text) = art {
@@ -117,7 +121,9 @@ fn cover(
     if has_art(state_dir, device, id) {
         Some(art_name(device, id))
     } else {
-        forget_art(state_dir, device);
+        if had {
+            forget_art(state_dir, device);
+        }
         None
     }
 }
@@ -154,13 +160,22 @@ impl Plugin for PhoneMediaPlugin {
             tracing::debug!("A media report from {} was not read", sender.device_id());
             return Ok(());
         };
-        // At most a stat and, once a track, one cover's write.
+        // A stat for a cover's id, a cover's write when its bytes come, and
+        // a look at the folder only when the phone's last report had one:
+        // small owner-only files, on the handler as the icons' are (K3).
+        let had = REPORTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .phones
+            .get(sender.device_id())
+            .is_some_and(|s| s.art.is_some());
         let art = crate::state::state_dir().ok().and_then(|dir| {
             cover(
                 &dir,
                 sender.device_id(),
                 &report,
                 packet.body.get("art").and_then(|v| v.as_str()),
+                had,
             )
         });
         REPORTS.lock().unwrap_or_else(|e| e.into_inner()).take(
@@ -337,27 +352,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let (bytes, id) = jpeg(b"cover");
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let first = cover(&dir, "phone", &with_cover("One", &id), Some(&b64));
+        let first = cover(&dir, "phone", &with_cover("One", &id), Some(&b64), true);
         assert!(first.is_some(), "the bytes kept");
+        assert_eq!(cover(&dir, "phone", &song("Plain"), None, false), None);
+        assert!(
+            pocketdesk_core::local::phone_media::has_art(&dir, "phone", &id),
+            "no cover before: the folder is not looked at"
+        );
         assert_eq!(
-            cover(&dir, "phone", &with_cover("One", &id), None),
+            cover(&dir, "phone", &with_cover("One", &id), None, true),
             first,
             "said again by id"
         );
         assert_eq!(
-            cover(&dir, "phone", &with_cover("Two", "0123456789abcdef"), None),
+            cover(
+                &dir,
+                "phone",
+                &with_cover("Two", "0123456789abcdef"),
+                None,
+                true
+            ),
             None,
             "another id with no bytes shows none"
         );
         assert_eq!(
-            cover(&dir, "phone", &with_cover("One", &id), None),
+            cover(&dir, "phone", &with_cover("One", &id), None, true),
             None,
             "and the old one went"
         );
-        let again = cover(&dir, "phone", &with_cover("One", &id), Some(&b64));
+        let again = cover(&dir, "phone", &with_cover("One", &id), Some(&b64), true);
         assert!(again.is_some());
         assert_eq!(
-            cover(&dir, "phone", &song("Three"), None),
+            cover(&dir, "phone", &song("Three"), None, true),
             None,
             "a track with none"
         );
@@ -365,7 +391,13 @@ mod tests {
             &dir, "phone", &id
         ));
         assert_eq!(
-            cover(&dir, "phone", &with_cover("Bad", &id), Some("not base64!")),
+            cover(
+                &dir,
+                "phone",
+                &with_cover("Bad", &id),
+                Some("not base64!"),
+                true
+            ),
             None,
             "bad bytes and nothing kept"
         );
