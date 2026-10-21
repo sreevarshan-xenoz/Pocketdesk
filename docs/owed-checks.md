@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-837 open items.
+832 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 509 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 504 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -981,17 +981,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **170. No toast while the phone is in hand (M6)**
 
-- The throwaway chat app's notification with the OPPO unlocked and its screen on, the switch on: no toast on the computer; the Activity page says "not shown: the phone was in use".
-- The same with the screen off, the phone locked, or the switch off: a toast.
 - With Pocketdesk's Remote open on the phone: a toast.
 - A notification that comes as the screen is off and wakes it: a toast.
 
 **171. Type on the phone from the computer's keyboard (M4)**
 
-- The OPPO with "Typing from the computer's keyboard" and the Accessibility service on, a scratch field in a throwaway app focused: text, a Backspace right after typing, Enter, and Tamil arrive, read back by `uiautomator dump`; the notification shows with Stop.
 - Back, Home and Recents from the window, in turn with text typed before them.
 - A password field: nothing typed, and the notification says so.
-- The phone locked: nothing typed.
 - Stop: nothing typed for 10 minutes.
 - The switch off, or the app's notifications off: nothing typed.
 - Japanese through Windows' input method: the committed text arrives.
@@ -1007,7 +1003,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **173. tel: links and Call back (M8)**
 
-- `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so.
+- `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so. 2026-10-21, against a throwaway server with two paired phones, only the OPPO linked: it was chosen ("Calling +15550100: Press Call on OPPO Reno8 5G.") and the dial reached it, which declined with its "Calls from the computer" off (L4's rule). The dialer opening is owed with that switch on.
 - Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window.
 - Off again: the keys are gone and Windows asks for another app.
 
@@ -1020,7 +1016,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **175. Copies sent by themselves (M10 part 2)**
 
-- The copy reaching the computer's clipboard on a throwaway server with the clipboard seam (`POCKETDESK_CLIPBOARD_FILE`).
 - A password manager's copy (marked sensitive): read, not sent.
 - The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
 - The keyboard and selection in the app copied from, after the read (focus moves away and back).
