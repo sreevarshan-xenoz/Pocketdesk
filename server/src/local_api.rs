@@ -1586,8 +1586,10 @@ mod tests {
                     can_play_pause: true,
                     can_next: true,
                     can_previous: true,
+                    ..Default::default()
                 },
                 updated_unix: 99,
+                art: None,
             },
         );
         pocketdesk_core::local::phone_media::write(&dir, &media).unwrap();

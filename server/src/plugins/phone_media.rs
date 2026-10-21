@@ -5,7 +5,9 @@
 //! desktop app's presses (`<state>/phone_media_out/`) go to their phone as
 //! `kdeconnect.pocketdesk.phone_media_control {command}`. The Media
 //! permission gates both: the dispatch gate the reports, [`run_watcher`]
-//! the presses.
+//! the presses. A report's cover (N2) comes once as `art` (base64) beside
+//! its `artId`, and is kept in `<state>/phone_media_art/` while the phone
+//! shows it ([`cover`]).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -30,8 +32,9 @@ struct Reports {
 }
 
 impl Reports {
-    /// Keep `report` from `device` (a paired phone), at `now_unix`.
-    fn take(&mut self, device: &str, report: MediaReport, now_unix: u64) {
+    /// Keep `report` from `device` (a paired phone), at `now_unix`, with
+    /// the cover kept for it (`art`).
+    fn take(&mut self, device: &str, report: MediaReport, now_unix: u64, art: Option<String>) {
         match report {
             MediaReport::Nothing => {
                 if self.phones.remove(device).is_some() {
@@ -55,6 +58,7 @@ impl Reports {
                     PhoneMediaState {
                         media,
                         updated_unix: now_unix,
+                        art,
                     },
                 );
                 self.dirty = true;
@@ -62,13 +66,59 @@ impl Reports {
         }
     }
 
-    /// Forget every phone not in `shown`.
-    fn keep_only(&mut self, shown: &std::collections::HashSet<String>) {
-        let before = self.phones.len();
-        self.phones.retain(|id, _| shown.contains(id));
-        if self.phones.len() != before {
+    /// Forget every phone not in `shown`; the phones forgotten.
+    fn keep_only(&mut self, shown: &std::collections::HashSet<String>) -> Vec<String> {
+        let gone: Vec<String> = self
+            .phones
+            .keys()
+            .filter(|id| !shown.contains(*id))
+            .cloned()
+            .collect();
+        for id in &gone {
+            self.phones.remove(id);
+        }
+        if !gone.is_empty() {
             self.dirty = true;
         }
+        gone
+    }
+}
+
+/// The cover to show with `device`'s report (N2): the bytes sent with it
+/// (`art`, base64) kept as its `artId`, else the one kept by that id, else
+/// none, the phone's others forgotten. A cover that is not one is logged
+/// and not shown.
+fn cover(
+    state_dir: &std::path::Path,
+    device: &str,
+    report: &MediaReport,
+    art: Option<&str>,
+) -> Option<String> {
+    use base64::Engine;
+    use pocketdesk_core::local::phone_media::{art_name, forget_art, has_art, keep_art};
+    let id = match report {
+        MediaReport::Playing(media) => media.art_id.as_deref(),
+        MediaReport::Nothing => None,
+    };
+    let Some(id) = id else {
+        forget_art(state_dir, device);
+        return None;
+    };
+    if let Some(text) = art {
+        let kept = base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            .and_then(|bytes| keep_art(state_dir, device, id, &bytes));
+        match kept {
+            Ok(name) => return Some(name),
+            Err(e) => tracing::debug!("A cover from {device} was not kept: {e}"),
+        }
+    }
+    if has_art(state_dir, device, id) {
+        Some(art_name(device, id))
+    } else {
+        forget_art(state_dir, device);
+        None
     }
 }
 
@@ -104,10 +154,20 @@ impl Plugin for PhoneMediaPlugin {
             tracing::debug!("A media report from {} was not read", sender.device_id());
             return Ok(());
         };
+        // At most a stat and, once a track, one cover's write.
+        let art = crate::state::state_dir().ok().and_then(|dir| {
+            cover(
+                &dir,
+                sender.device_id(),
+                &report,
+                packet.body.get("art").and_then(|v| v.as_str()),
+            )
+        });
         REPORTS.lock().unwrap_or_else(|e| e.into_inner()).take(
             sender.device_id(),
             report,
             pocketdesk_core::local::pin::now_unix(),
+            art,
         );
         // Written out now, not at the inbox's next sweep (R6c).
         crate::inbox::nudge(pocketdesk_core::local::paths::PHONE_MEDIA_DIR);
@@ -125,6 +185,8 @@ pub async fn run_watcher() {
         return;
     };
     REPORTS.lock().unwrap_or_else(|e| e.into_inner()).dirty = true;
+    // Nor are an earlier run's covers.
+    let _ = std::fs::remove_dir_all(dir.join(pocketdesk_core::local::paths::PHONE_MEDIA_ART_DIR));
     let mut last_write = tokio::time::Instant::now() - WRITE_EVERY;
     loop {
         // Wait for a press, or, with a report waiting, for the throttle to
@@ -169,17 +231,21 @@ pub async fn run_watcher() {
         let shown = TrustStore::read(dir.join(TRUST_FILE))
             .ok()
             .map(|store| showable(&connected, &store));
-        let phones = {
+        let (phones, gone) = {
             let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(shown) = &shown {
-                reports.keep_only(shown);
-            }
+            let gone = shown
+                .as_ref()
+                .map(|shown| reports.keep_only(shown))
+                .unwrap_or_default();
             if !reports.dirty {
                 continue;
             }
             reports.dirty = false;
-            reports.phones.clone()
+            (reports.phones.clone(), gone)
         };
+        for device in gone {
+            pocketdesk_core::local::phone_media::forget_art(&dir, &device);
+        }
         if let Err(e) = pocketdesk_core::local::phone_media::write(&dir, &phones) {
             tracing::warn!("Could not keep the phones' media: {e}");
         }
@@ -237,21 +303,87 @@ mod tests {
             can_play_pause: true,
             can_next: true,
             can_previous: true,
+            ..Default::default()
         })
+    }
+
+    fn with_cover(title: &str, id: &str) -> MediaReport {
+        let MediaReport::Playing(mut media) = song(title) else {
+            unreachable!()
+        };
+        media.art_id = Some(id.to_string());
+        MediaReport::Playing(media)
+    }
+
+    /// A JPEG's start declaring 64 x 64, then `tail`, and its id.
+    fn jpeg(tail: &[u8]) -> (Vec<u8>, String) {
+        use sha2::{Digest, Sha256};
+        let mut bytes = vec![
+            0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0, 64, 0, 64, 3, 1, 0x22, 0, 2, 0x11, 1, 3,
+            0x11, 1, 0xFF, 0xD9,
+        ];
+        bytes.extend_from_slice(tail);
+        let id = Sha256::digest(&bytes)[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        (bytes, id)
+    }
+
+    #[test]
+    fn a_cover_is_kept_once_and_shown_by_its_id_until_the_track_has_none() {
+        use base64::Engine;
+        let dir = std::env::temp_dir().join(format!("pd-media-cover-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (bytes, id) = jpeg(b"cover");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let first = cover(&dir, "phone", &with_cover("One", &id), Some(&b64));
+        assert!(first.is_some(), "the bytes kept");
+        assert_eq!(
+            cover(&dir, "phone", &with_cover("One", &id), None),
+            first,
+            "said again by id"
+        );
+        assert_eq!(
+            cover(&dir, "phone", &with_cover("Two", "0123456789abcdef"), None),
+            None,
+            "another id with no bytes shows none"
+        );
+        assert_eq!(
+            cover(&dir, "phone", &with_cover("One", &id), None),
+            None,
+            "and the old one went"
+        );
+        let again = cover(&dir, "phone", &with_cover("One", &id), Some(&b64));
+        assert!(again.is_some());
+        assert_eq!(
+            cover(&dir, "phone", &song("Three"), None),
+            None,
+            "a track with none"
+        );
+        assert!(!pocketdesk_core::local::phone_media::has_art(
+            &dir, "phone", &id
+        ));
+        assert_eq!(
+            cover(&dir, "phone", &with_cover("Bad", &id), Some("not base64!")),
+            None,
+            "bad bytes and nothing kept"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_report_is_kept_and_nothing_playing_forgets_it() {
         let mut reports = Reports::default();
-        reports.take("phone-a", song("One"), 100);
+        reports.take("phone-a", song("One"), 100, None);
         assert_eq!(reports.phones["phone-a"].media.title, "One");
         assert_eq!(reports.phones["phone-a"].updated_unix, 100);
         reports.dirty = false;
-        reports.take("phone-a", MediaReport::Nothing, 101);
+        reports.take("phone-a", MediaReport::Nothing, 101, None);
         assert!(reports.phones.is_empty());
         assert!(reports.dirty);
         reports.dirty = false;
-        reports.take("phone-a", MediaReport::Nothing, 102);
+        reports.take("phone-a", MediaReport::Nothing, 102, None);
         assert!(!reports.dirty, "nothing to forget, nothing to write");
     }
 
@@ -259,9 +391,9 @@ mod tests {
     fn so_many_phones_are_kept_and_one_no_longer_paired_is_forgotten() {
         let mut reports = Reports::default();
         for n in 0..MAX_PHONES {
-            reports.take(&format!("phone-{n}"), song("x"), n as u64);
+            reports.take(&format!("phone-{n}"), song("x"), n as u64, None);
         }
-        reports.take("phone-new", song("x"), 1000);
+        reports.take("phone-new", song("x"), 1000, None);
         assert_eq!(reports.phones.len(), MAX_PHONES);
         assert!(reports.phones.contains_key("phone-new"));
         assert!(!reports.phones.contains_key("phone-0"), "the oldest went");
