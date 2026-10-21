@@ -25,7 +25,10 @@ use windows as platform;
 /// picture's path) and presses are written beside it (`<file>.presses`, a
 /// line each), so a device check never touches this computer's players.
 fn seam() -> Option<std::path::PathBuf> {
-    std::env::var_os("POCKETDESK_MEDIA_FILE").map(std::path::PathBuf::from)
+    // Absolute only, as the other seams (N5 review).
+    std::env::var_os("POCKETDESK_MEDIA_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
 }
 
 fn seam_value(file: &std::path::Path) -> Option<Value> {
