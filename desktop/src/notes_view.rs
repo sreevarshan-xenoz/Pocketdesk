@@ -114,13 +114,17 @@ impl NotesView {
             // N3: it opens on the phone's screen, unlocked.
             Answer::Open => format!("Asked the phone to open it in {}.", note.app),
         };
+        let opening = answer == Answer::Open;
         match phone_notes::request(state_dir, &note.device_id, &note.key, answer, now_unix) {
             Ok(_) => {
                 // Queued: the server sends it within a minute, once the
                 // phone is connected.
                 self.notice = crate::notice::Notice::done(asked);
-                self.drafts
-                    .remove(&(note.device_id.clone(), note.key.clone()));
+                // An open leaves a reply being typed as it is (N3 review).
+                if !opening {
+                    self.drafts
+                        .remove(&(note.device_id.clone(), note.key.clone()));
+                }
             }
             Err(e) => self.notice = crate::notice::Notice::error(e.to_string()),
         }
@@ -390,7 +394,11 @@ pub fn answer_line(outcome: &Outcome, now_unix: u64) -> (String, Tone) {
             Tone::Unsure,
         ),
         State::Sent => ("Your answer: sent to the phone…".to_string(), Tone::Waiting),
-        State::Handed => ("Your answer: handed to the app".to_string(), Tone::Done),
+        // N3: an open says whether it opened or waits as an offer there.
+        State::Handed => match outcome.said.as_deref() {
+            Some(said) => (format!("Your answer: {said}"), Tone::Done),
+            None => ("Your answer: handed to the app".to_string(), Tone::Done),
+        },
         State::NotSent { reason } => (format!("Your answer was not sent: {reason}"), Tone::Failed),
     }
 }
@@ -441,6 +449,7 @@ mod tests {
             key: "k".into(),
             state,
             at_unix: 1_000,
+            said: None,
         };
         assert_eq!(answer_line(&at(State::Waiting), 1_000).1, Tone::Waiting);
         assert_eq!(
@@ -458,6 +467,14 @@ mod tests {
             "a warning, not waiting (E5)"
         );
         assert_eq!(answer_line(&at(State::Handed), 1_000).1, Tone::Done);
+        let opened = Outcome {
+            said: Some("opened on the phone".to_string()),
+            ..at(State::Handed)
+        };
+        assert_eq!(
+            answer_line(&opened, 1_000).0,
+            "Your answer: opened on the phone"
+        );
         let refused = answer_line(
             &at(State::NotSent {
                 reason: "the app refused it".into(),

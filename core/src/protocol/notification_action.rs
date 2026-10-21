@@ -149,7 +149,9 @@ impl Answered {
         Some(Self {
             answer_id: answer_id.to_string(),
             ok,
-            reason: if ok { None } else { reason },
+            // Kept with ok too (N3 review): "opened" or "offered" tells an
+            // open from an answer handed to an app.
+            reason,
         })
     }
 }
@@ -198,7 +200,11 @@ mod tests {
         let ok =
             Answered::from_body(&serde_json::json!({"answerId": id, "ok": true, "reason": "x"}))
                 .unwrap();
-        assert_eq!((ok.ok, ok.reason), (true, None), "no reason with ok");
+        assert_eq!(
+            (ok.ok, ok.reason.as_deref()),
+            (true, Some("x")),
+            "what an ok says is kept (N3)"
+        );
         let long = "a".repeat(MAX_REASON_CHARS + 50);
         let refused = Answered::from_body(&serde_json::json!({
             "answerId": id, "ok": false, "reason": format!("the app\nrefused it {long}")

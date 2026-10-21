@@ -973,6 +973,7 @@ async fn note_answer(request: &AnswerRequest, state: answers::State) {
         key: request.key.clone(),
         state,
         at_unix: unix_now(),
+        said: None,
     };
     let kept = tokio::task::spawn_blocking(move || answers::record(&dir, outcome)).await;
     if let Ok(Err(e)) = kept {
@@ -1760,6 +1761,7 @@ mod tests {
             key: "k".to_string(),
             state: answers::State::Sent,
             at_unix: 1,
+            said: None,
         };
         let theirs = "e1e1e1e1-0000-4000-8000-00000000a001";
         let mine = "e1e1e1e1-0000-4000-8000-00000000a002";
