@@ -127,6 +127,8 @@ pub async fn run(config: Config) -> Result<()> {
     // Home Assistant over MQTT (ecosystem 1e), while config.toml turns it on.
     tokio::spawn(crate::home_assistant::run());
     tokio::spawn(crate::plugins::phone_media::run_watcher());
+    // N5: the computer's music for phones that watch it.
+    tokio::spawn(crate::plugins::computer_media::run_watcher());
     // The desktop app's requests to browse the phones' storage (T10g).
     tokio::spawn(crate::plugins::phone_files::run_watcher());
     tokio::spawn(crate::drive::live::run());
