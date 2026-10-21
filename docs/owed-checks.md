@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-838 open items.
+843 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 506 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 510 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 96 |
+| A Linux desktop (the Azure VM serves for some) | 97 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 28 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 77 |
 
@@ -1026,6 +1026,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Media turned off and on for the phone on the Devices page mid-track: the cover comes back at the next track.
 - Two sessions in one app (a browser's two tabs): the cover of the one reported.
 
+**177. Open on the phone (N3)**
+
+- Without Pocketdesk control: "Tap to open" on the phone, its tap opening the app, gone after ten minutes or when the notification goes.
+- The switch off on the phone: "opening is off on the phone".
+- A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits).
+- Android 15 and 16 (`ALLOW_ALWAYS`).
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1764,6 +1771,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **173. tel: links and Call back (M8)**
 
 - Linux: the desktop file and `xdg-open tel:5550100`; removed, `mimeapps.list` no longer names it.
+
+**177. Open on the phone (N3)**
+
+- The button by hand on the Notifications page, in a Windows toast, and as a Linux D-Bus action.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

@@ -56,3 +56,35 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N3.
   - with the service, the fixture's field shows;
   - locked, refused;
   - with the switch off, refused.
+
+## As built
+
+- **As designed, with the review's fixes.**
+  - The phone keeps the keys it sent offering an open (`openable`) and opens only those.
+  - A screen that is off counts as locked.
+  - `canOpen` is not part of what makes a notification be sent again, so a notification already sent offers it from its next change.
+  - "Tap to open" goes after ten minutes, or with its notification.
+- **Room on the toast:** a notification with a reply, Open and "Not from this app" leaves room for two of the app's own buttons in a Windows toast (at most five actions).
+- **What an outcome says:** a success says "opened on the phone" or "offered on the phone: tap it there" (`notification_answered`'s reason, now kept with ok; `answers::Outcome.said`), which the Notifications page shows.
+- **What the phone cannot see:** a tap action sent from the background on a phone whose maker blocks background starts may report "opened" without the app showing.
+- **The run on the OPPO** (2026-10-21): `n3-open` PASS (the field showed "opened <id>" with the app in the background) and `n3-locked` PASS ("the phone is locked").
+
+## Review
+
+A fresh review found 0 Critical, 5 Important and 8 Minor. All were fixed except the runner's switch-off case, which is owed by hand: the runner never changes the phone's settings.
+
+- **Important:**
+  - an open reached any notification by its key, not only ones offered;
+  - `docs/packets.md` was stale;
+  - no link was kept for opens;
+  - an offer read as "handed to the app";
+  - open-only notifications pushed answerable ones out of the store and the toasts.
+- **Minor:**
+  - other computers' copies offered an open they could not send;
+  - the switch re-sent every notification;
+  - an open on an asleep, not yet locked phone;
+  - "Tap to open" never withdrawn;
+  - the reply draft dropped;
+  - a doc comment moved;
+  - the runner needing M6's switch and racing the draw;
+  - the toast's room, said here.

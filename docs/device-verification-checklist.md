@@ -2460,6 +2460,15 @@ Built 2026-10-21; checked on the OPPO against a throwaway server, with the fixtu
 - [ ] Two sessions in one app (a browser's two tabs): the cover of the one reported.
 - [ ] Another maker's Android, and Android 10.
 
+## 177. Open on the phone (N3)
+
+Built 2026-10-21; checked on the OPPO against a throwaway server, by `scripts/device_checks.py` (`n3-open`, `n3-locked`): a fixture notification opened from the computer showing its field on the phone's screen, with Pocketdesk control on and the app in the background; refused while locked ("the phone is locked"). Owed:
+- [ ] Without Pocketdesk control: "Tap to open" on the phone, its tap opening the app, gone after ten minutes or when the notification goes.
+- [ ] The button by hand on the Notifications page, in a Windows toast, and as a Linux D-Bus action.
+- [ ] The switch off on the phone: "opening is off on the phone".
+- [ ] A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits).
+- [ ] Android 15 and 16 (`ALLOW_ALWAYS`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
