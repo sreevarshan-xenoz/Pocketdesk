@@ -561,7 +561,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         val uptime = SystemClock.uptimeMillis()
         if (dev.pocketdesk.android.doctor.FreezeWatch.frozen(lastKeeperUptime, uptime)) {
             Log.i("PhoneNotifications", "Paused for ${(uptime - (lastKeeperUptime ?: uptime)) / 1000} s while the phone ran")
-            Prefs.setLastFreezeMs(this, System.currentTimeMillis())
+            Prefs.setLastFreeze(this, System.currentTimeMillis(), dev.pocketdesk.android.service.LinkKeeperService.isRunning())
         }
         lastKeeperUptime = uptime
         dev.pocketdesk.android.service.LinkKeeperService.sync(this)

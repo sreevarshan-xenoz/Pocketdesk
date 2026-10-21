@@ -113,6 +113,7 @@ object HealthCheck {
             advancedProtection = control && advancedProtection(ctx),
             downloadFolderLost = runCatching { DownloadTarget.treeLost(ctx) }.getOrDefault(false),
             frozenRecently = FreezeWatch.recent(Prefs.lastFreezeMs(ctx), System.currentTimeMillis()),
+            frozenWhileLinked = Prefs.lastFreezeLinked(ctx),
             stayLinked = Prefs.stayLinked(ctx),
         )
     }

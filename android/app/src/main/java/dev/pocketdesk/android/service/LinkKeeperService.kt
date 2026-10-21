@@ -45,6 +45,9 @@ class LinkKeeperService : Service() {
         @Volatile
         private var running = false
 
+        /** Whether the service is in the foreground now. */
+        fun isRunning(): Boolean = running
+
         /** When Android last refused a start ([android.os.SystemClock.elapsedRealtime]). */
         @Volatile
         private var refusedAt = 0L
@@ -106,8 +109,6 @@ class LinkKeeperService : Service() {
         }
         running = true
         refusedAt = 0L
-        // A freeze seen before it ran is not news any more (M1).
-        Prefs.setLastFreezeMs(this, null)
         // Not sticky: a restart in a new process is not a start Android
         // excuses, and the listener's tick and the app start it again.
         return START_NOT_STICKY

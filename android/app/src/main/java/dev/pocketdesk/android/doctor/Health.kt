@@ -75,6 +75,8 @@ data class HealthSnapshot(
     val downloadFolderLost: Boolean,
     /** A freeze was seen in the last day (M1's [FreezeWatch]). */
     val frozenRecently: Boolean = false,
+    /** Whether the link's service was running when that freeze was seen. */
+    val frozenWhileLinked: Boolean = false,
     /** Whether "Stay linked with the screen off" is on. */
     val stayLinked: Boolean = true,
 )
@@ -96,8 +98,14 @@ object Health {
             add(if (s.advancedProtection) HealthProblem.CONTROL_BLOCKED else HealthProblem.CONTROL_SERVICE)
         }
         if (s.downloadFolderLost) add(HealthProblem.DOWNLOAD_FOLDER)
+        // A freeze with the switch on but the service refused is not shown:
+        // the app, being opened to see it, starts the service (M1 review).
         if (s.listenerFeatures && s.frozenRecently) {
-            add(if (s.stayLinked) HealthProblem.PAUSED_ANYWAY else HealthProblem.PAUSED_STAY_LINKED_OFF)
+            if (!s.stayLinked) {
+                add(HealthProblem.PAUSED_STAY_LINKED_OFF)
+            } else if (s.frozenWhileLinked) {
+                add(HealthProblem.PAUSED_ANYWAY)
+            }
         }
     }
 

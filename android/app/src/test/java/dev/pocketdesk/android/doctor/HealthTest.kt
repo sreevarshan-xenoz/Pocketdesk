@@ -194,9 +194,17 @@ class HealthTest {
         )
         assertEquals(
             listOf(HealthProblem.PAUSED_ANYWAY),
-            Health.problems(healthy.copy(frozenRecently = true, stayLinked = true)),
+            Health.problems(healthy.copy(frozenRecently = true, frozenWhileLinked = true, stayLinked = true)),
         )
         assertEquals(emptyList<HealthProblem>(), Health.problems(healthy.copy(frozenRecently = false, stayLinked = false)))
+    }
+
+    @Test
+    fun `a freeze while the service was refused is not blamed on the phone's maker`() {
+        assertEquals(
+            emptyList<HealthProblem>(),
+            Health.problems(healthy.copy(frozenRecently = true, frozenWhileLinked = false, stayLinked = true)),
+        )
     }
 
     @Test
