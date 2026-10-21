@@ -613,7 +613,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         // answer, or clear within ten minutes of a notification (as the own
         // link, L1 review: else a link to each all day).
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted)
-        if ((answering || callsOn || clearsWanted) && own != null && RustCore.controlPeer() == null) {
+        // M4: typing comes on the own computer's link, kept while it may come.
+        val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
+        if ((answering || callsOn || clearsWanted || typingOn) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now

@@ -742,7 +742,7 @@
     <string name="texts_show_summary_17">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste. Android retiene tres horas un SMS con un código</string>
     <string name="settings_capture_mouse_summary_17">Durante una sesión, un ratón o un panel táctil conectado a este teléfono (USB o Bluetooth) mueve el cursor del ordenador y hace clic allí</string>
     <string name="control_service_label">Control de Pocketdesk</string>
-    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
+    <string name="control_service_description">Mientras este teléfono muestra su pantalla en tu ordenador con Pocketdesk, y lo permites en los Ajustes de Pocketdesk, ese ordenador puede tocar, deslizar, desplazar, escribir en el campo en el que estás y pulsar Atrás, Inicio y Recientes. Con “Escribir con el teclado del equipo” activado, también puede escribir en ese campo sin mostrar la pantalla, nunca en un campo de contraseña. Android permite al servicio leer lo que hay en la pantalla; Pocketdesk solo lee el campo en el que escribe y no envía nada de lo que lee.</string>
     <string name="settings_cast_sound">El sonido del teléfono con su pantalla</string>
     <string name="settings_cast_sound_summary">\"Mostrar pantalla\" también envía lo que suenan las apps del teléfono, para oírlo en el ordenador (con su \"Reproducir su sonido aquí\" activado). Android pide el permiso del micrófono para capturar el sonido de otras apps; las llamadas y las apps que lo prohíben no suenan</string>
     <string name="settings_cast_sound_needs_mic">Necesita el permiso del micrófono: Android lo pide para capturar el sonido de otras apps</string>
@@ -926,4 +926,8 @@
     <string name="typing_password">No se escribió: el campo de delante es de una contraseña</string>
     <string name="typing_stop">Detener</string>
     <string name="typing_stopped">Sin escritura desde el equipo durante 10 minutos</string>
+    <string name="settings_typing_from_computer">Escribir con el teclado del equipo</string>
+    <string name="settings_typing_summary_off">\"Escribir en el teléfono\" en el equipo escribe en el campo de delante, sin mostrar la pantalla. Nunca en un campo de contraseña ni con el teléfono bloqueado. Usa el servicio de accesibilidad \"Pocketdesk control\"</string>
+    <string name="settings_typing_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que escribe el equipo</string>
+    <string name="settings_typing_summary_on">Activado: \"Escribir en el teléfono\" en el equipo propio de este teléfono escribe en el campo de delante, con una notificación mientras lo hace</string>
 </resources>

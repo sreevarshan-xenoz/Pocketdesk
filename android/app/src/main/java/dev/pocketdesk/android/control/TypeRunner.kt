@@ -76,7 +76,7 @@ class TypeRunner(private val ctx: Context) {
     private fun perform(batch: RustCore.TypedBatch) {
         val own = PhoneLink.target(ctx)
         val decision = TypeRule.decide(
-            on = Prefs.controlFromComputer(ctx),
+            on = Prefs.typingFromComputer(ctx),
             service = ControlService.instance != null,
             own = own != null && own.address == batch.host && own.controlPort == batch.port,
             stoppedUntilMs = TypingPrefs.stoppedUntil(ctx),

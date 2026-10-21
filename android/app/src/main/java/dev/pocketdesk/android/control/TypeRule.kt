@@ -14,8 +14,9 @@ object TypeRule {
     enum class Decision { TYPE, OFF, SERVICE_OFF, NOT_OWN_COMPUTER, STOPPED }
 
     /**
-     * Type it? With "Let the computer control this phone" [on], its
-     * Accessibility [service] running, from the phone's [own] computer, and
+     * Type it? With "Typing from the computer's keyboard" [on] (its own
+     * switch, M4 review: C8's lets a cast's window drive the phone, which is
+     * not this), C8's Accessibility [service] running, from the phone's [own] computer, and
      * not within Stop's ten minutes.
      */
     fun decide(on: Boolean, service: Boolean, own: Boolean, stoppedUntilMs: Long, nowMs: Long): Decision = when {
