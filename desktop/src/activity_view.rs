@@ -285,6 +285,8 @@ pub fn describe(event: &Event) -> String {
                 Some("cast") => "Showing its screen or camera here",
                 Some("remote") => "Using this computer as a remote",
                 Some("sound") => "Being this computer's speaker and mic",
+                // M7: not watching anything (M7 review: it read as viewing).
+                Some("phone_sound") => "Playing its sound here",
                 _ => "Viewing this computer",
             };
             if text(event, "transport") == Some("wan") {
@@ -426,6 +428,15 @@ fn file_path(
 mod tests {
     use super::*;
     use pocketdesk_core::local::events::EventsDetail;
+
+    /// M7 review: the phone's sound alone is not read as viewing.
+    #[test]
+    fn the_phone_s_sound_alone_reads_as_playing() {
+        assert_eq!(
+            describe(&event("session_started", json!({"mode": "phone_sound"}))),
+            "Playing its sound here"
+        );
+    }
 
     /// H1: a deck press reads as one, under Tasks, deck and hooks.
     #[test]

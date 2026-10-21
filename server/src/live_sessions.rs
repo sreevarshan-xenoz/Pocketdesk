@@ -160,6 +160,9 @@ async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
 fn session_summary(streamed: &pocketdesk_core::streaming::sessions::Streamed) -> &'static str {
     if streamed.cast {
         "Pocketdesk: a phone is showing its screen here"
+    } else if streamed.phone_sound {
+        // The phone's sound alone (M7).
+        "Pocketdesk: a phone is playing its sound here"
     } else if streamed.video {
         "Pocketdesk: a device is streaming this desktop"
     } else if streamed.input {
@@ -681,6 +684,31 @@ mod tests {
             narrowed_sessions(&[cast], |_| DevicePermissions::default()),
             vec![7],
             "off by default"
+        );
+    }
+
+    /// M7: the phone's sound alone, told as such, and ended when its
+    /// permission goes.
+    #[test]
+    fn the_phone_s_sound_alone_is_told_and_ends_with_its_permission() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let alone = Streamed {
+            phone_sound: true,
+            ..Streamed::default()
+        };
+        assert_eq!(
+            session_summary(&alone),
+            "Pocketdesk: a phone is playing its sound here"
+        );
+        let mut session = session(Some("phone"), true);
+        session.streamed = alone;
+        let mut on = DevicePermissions::default();
+        on.set(Capability::PhoneSound, true);
+        assert!(narrowed_sessions(std::slice::from_ref(&session), |_| on.clone()).is_empty());
+        assert_eq!(
+            narrowed_sessions(&[session], |_| DevicePermissions::default()),
+            vec![7]
         );
     }
 
