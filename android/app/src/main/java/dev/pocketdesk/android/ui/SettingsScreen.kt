@@ -108,6 +108,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             ControlSetting()
             TypingSetting()
+            CopiesSetting()
             CastSoundSetting()
 
             SettingsHeader(stringResource(R.string.settings_session))

@@ -208,6 +208,15 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- M10: reads a copy just made, once in focus, and closes. -->
+        <activity
+            android:name=".clip.CopyReadActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".clip.SendClipboardActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"

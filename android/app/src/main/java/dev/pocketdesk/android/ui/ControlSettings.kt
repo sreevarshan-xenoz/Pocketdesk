@@ -102,3 +102,45 @@ fun TypingSetting() {
         AllowNotificationAccess()
     }
 }
+
+/**
+ * M10: copies made on the phone sent by themselves. Its own switch, needing
+ * C8's Accessibility service, which then watches for Android's clipboard
+ * preview; Android 13 and later only, where the preview is shown.
+ */
+@Composable
+fun CopiesSetting() {
+    val context = LocalContext.current
+    if (!dev.pocketdesk.android.clip.CopyWatchRule.supported(android.os.Build.VERSION.SDK_INT)) return
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.copiesByThemselves(context)) }
+    val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
+    val openAccessibility = {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+    SettingSwitch(
+        title = stringResource(R.string.settings_copies),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_copies_summary_off
+                !serviceOn -> R.string.settings_control_summary_needs_service
+                else -> R.string.settings_copies_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && !serviceOn,
+        onChange = { want ->
+            on = want
+            Prefs.setCopiesByThemselves(context, want)
+            dev.pocketdesk.android.control.ControlService.instance?.syncCopyWatch(want)
+            if (want && !ControlRunner.serviceEnabled(context)) openAccessibility()
+        },
+    )
+    if (on && !serviceOn) {
+        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+    }
+}

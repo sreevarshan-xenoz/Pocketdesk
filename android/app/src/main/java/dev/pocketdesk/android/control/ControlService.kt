@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.control
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.graphics.Path
@@ -21,7 +22,8 @@ import android.view.accessibility.AccessibilityNodeInfo
  * Pocketdesk's control from the computer (C8): performs the gestures,
  * global actions and typing the computer sends while the phone casts its
  * screen and the owner allows it. It reads only the focused field (for
- * text) and listens for no events. Everything runs on the main thread, as
+ * text), and listens for no events but SystemUI's windows while "Send my
+ * copies by themselves" is on (M10). Everything runs on the main thread, as
  * the gesture callbacks do.
  */
 class ControlService : AccessibilityService() {
@@ -42,6 +44,39 @@ class ControlService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         Log.i(TAG, "control service connected")
+        syncCopyWatch(dev.pocketdesk.android.Prefs.copiesByThemselves(this))
+    }
+
+    /** M10: SystemUI's windows are watched, for its clipboard overlay. */
+    private var watchingCopies = false
+    private var lastCopyReadMs = 0L
+
+    /**
+     * Listen for SystemUI's window changes only while "Send my copies by
+     * themselves" is [on] (M10); otherwise for nothing, as C8 does.
+     */
+    fun syncCopyWatch(wanted: Boolean) = main.post {
+        // Only where SystemUI shows the overlay (M10 review: below 13 it
+        // watched every SystemUI window for nothing).
+        val on = wanted && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT)
+        if (on == watchingCopies) return@post
+        val info = serviceInfo ?: return@post
+        if (on) {
+            // A copy made while the preview is still up changes its
+            // contents, not its window (M10 review).
+            info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            info.packageNames = arrayOf(dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI)
+            info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        } else {
+            info.eventTypes = 0
+            info.packageNames = null
+            info.flags = info.flags and
+                (AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS).inv()
+        }
+        serviceInfo = info
+        watchingCopies = on
+        Log.i(TAG, "watching copies: $on")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -66,7 +101,84 @@ class ControlService : AccessibilityService() {
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!watchingCopies || event == null) return
+        val stateChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        if (!stateChanged && event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return
+        if (event.packageName != dev.pocketdesk.android.clip.CopyWatchRule.SYSTEM_UI) return
+        // A read already waits for the debounce: it reads this copy too.
+        if (copyReadPending) return
+        // The cheap checks first (M10 review): the switch and the lock.
+        if (!dev.pocketdesk.android.Prefs.copiesByThemselves(this)) return
+        if (getSystemService(KeyguardManager::class.java).isDeviceLocked) return
+        if (!isClipboardOverlay(event)) return
+        // A change inside the preview is a new copy only if what it shows
+        // changed; its own redraws are not (kept as a hash, never the text).
+        val shown = runCatching { previewHash(event.source?.window?.root ?: event.source) }.getOrDefault(0)
+        if (!stateChanged && shown == lastPreviewHash) return
+        lastPreviewHash = shown
+        if (dev.pocketdesk.android.notify.PhoneLink.target(this) == null) return
+        val wait = dev.pocketdesk.android.clip.CopyWatchRule.delay(SystemClock.elapsedRealtime(), lastCopyReadMs)
+        copyReadPending = true
+        main.postDelayed(::readCopy, wait)
+    }
+
+    /** A read is waiting for the debounce (M10). */
+    private var copyReadPending = false
+
+    /** What the clipboard preview showed when last looked at, as a hash (M10). */
+    private var lastPreviewHash = 0
+
+    /** A hash of the texts in the preview's window, at most 60 views (M10). */
+    private fun previewHash(root: AccessibilityNodeInfo?): Int {
+        var hash = 17
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        root?.let { queue.add(it) }
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 60) {
+            val node = queue.removeFirst()
+            seen++
+            hash = 31 * hash + (node.text?.toString()?.hashCode() ?: 0)
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+        return hash
+    }
+
+    /** Start the window that reads the copy, if the switch is still on. */
+    private fun readCopy() {
+        copyReadPending = false
+        if (!watchingCopies || getSystemService(KeyguardManager::class.java).isDeviceLocked) return
+        lastCopyReadMs = SystemClock.elapsedRealtime()
+        runCatching {
+            startActivity(
+                android.content.Intent(this, dev.pocketdesk.android.clip.CopyReadActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION),
+            )
+        }.onFailure { Log.w(TAG, "A copy could not be read", it) }
+    }
+
+    /**
+     * Whether [event]'s own window is the clipboard overlay (M10): its title,
+     * or SystemUI's clipboard views under the event's source, looked at
+     * breadth first from its window's root and no further than the first
+     * match or 40 views. Only view ids are read here.
+     */
+    private fun isClipboardOverlay(event: AccessibilityEvent): Boolean {
+        val rule = dev.pocketdesk.android.clip.CopyWatchRule
+        val title = runCatching { windows.firstOrNull { it.id == event.windowId }?.title?.toString() }.getOrNull()
+        if (rule.isOverlayName(title)) return true
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        // From its window's root: a content change's source is a view inside.
+        (runCatching { event.source?.window?.root }.getOrNull() ?: event.source)?.let { queue.add(it) }
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 40) {
+            val node = queue.removeFirst()
+            seen++
+            if (rule.isOverlayName(node.viewIdResourceName)) return true
+            for (i in 0 until node.childCount) node.getChild(i)?.let { queue.add(it) }
+        }
+        return false
+    }
 
     override fun onInterrupt() {}
 

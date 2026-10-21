@@ -2439,6 +2439,15 @@ Built 2026-10-21; tested through units, nothing against a broker or a device yet
 - [ ] The phone's "Send commands to its automation apps" off: refused, in the server's log.
 - [ ] A command removed in Settings: its button goes from the broker; another command keeps its id.
 - [ ] Home Assistant itself, and Tasker (the owner).
+## 175. Copies sent by themselves (M10 part 2)
+
+Built 2026-10-21; checked on the OPPO by adb: a copy noticed, the reading window started from the background, the clipboard read, two copies 6 s apart both read. Owed:
+- [ ] The copy reaching the computer's clipboard on a throwaway server with the clipboard seam (`POCKETDESK_CLIPBOARD_FILE`).
+- [ ] A password manager's copy (marked sensitive): read, not sent.
+- [ ] The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
+- [ ] The keyboard and selection in the app copied from, after the read (focus moves away and back).
+- [ ] An hour with the switch on: the battery.
+- [ ] Another maker's Android 13+, and Android 12 (the row hidden).
 
 ## Recording results
 
