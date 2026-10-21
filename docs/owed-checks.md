@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-849 open items.
+856 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 514 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 518 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 98 |
+| A Linux desktop (the Azure VM serves for some) | 99 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 28 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 78 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 80 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1040,6 +1040,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone in hand at the first update: the toast comes once it is put down.
 - The battery with a long download.
 
+**179. The computer's music in the phone's media controls (N5)**
+
+- The runner's `n5-media` on the OPPO.
+- A headset's button and a watch's controls.
+- The link dropped: the session gone within 150 s; back by itself when the link returns.
+- Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1787,6 +1794,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A Linux desktop (the `value` hint, the bar, a close).
 
+**179. The computer's music in the phone's media controls (N5)**
+
+- A Linux computer (`playerctl`, `mpris:artUrl`).
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -2133,3 +2144,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **178. The phone's ongoing updates on the computer (N4)**
 
 - A real download or upload (Chrome, Drive), a timer (Clock) and a delivery or ride app, by eye on the toast: no pop-up after the first, the words changing.
+
+**179. The computer's music in the phone's media controls (N5)**
+
+- The lock screen and the shade's media controls by eye: title, artist, cover, and Previous, Play/Pause, Next as the computer's player offers them.
+- A real player on this computer (Spotify, a browser), with the owner: a press from the phone plays, pauses and skips it; never Pocketdesk's own entry (the phone's music) sent back.
