@@ -14,11 +14,13 @@ import dev.pocketdesk.android.files.PhotoPlacePrefs
 
 /**
  * Settings "Photos keep where they were taken" (M5): off by default; on, it
- * asks for the media location permission. The row says when that was taken
- * away since.
+ * asks for photo access and the media location together. The row says when
+ * they were taken away since. Not shown before Android 10.
  */
 @Composable
 fun PhotoPlaceSection() {
+    // Android 9 and older take nothing out (M5 review): nothing to turn on.
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
     val context = LocalContext.current
     var version by remember { mutableIntStateOf(0) }
     // Read again on return: the permission may have changed in Android's settings.
@@ -26,15 +28,17 @@ fun PhotoPlaceSection() {
     val on = (version + resumes).let { PhotoPlacePrefs.on(context) }
     val granted = (version + resumes).let { PhotoPlacePrefs.granted(context) }
 
+    // Both at once (M5 review): Android grants the media location only with
+    // photo access, and says nothing when asked for it alone.
     val ask =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            PhotoPlacePrefs.setOn(context, ok)
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            PhotoPlacePrefs.setOn(context, PhotoPlacePrefs.granted(context))
             version++
         }
 
     fun setOn(value: Boolean) {
         if (value && !granted) {
-            ask.launch(PhotoPlacePrefs.PERMISSION)
+            ask.launch(PhotoPlacePrefs.permissions)
         } else {
             PhotoPlacePrefs.setOn(context, value)
             version++

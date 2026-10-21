@@ -552,9 +552,10 @@ class TransferService : Service() {
     ): Result<Unit> = try {
         ensureLink(address, port)
         // M5: a photo's place kept, when the person allowed it.
-        val descriptor = dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) {
+        val opened = dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) {
             contentResolver.openFileDescriptor(it, "r")
         }
+        val descriptor = opened.value
             ?: return Result.failure(IllegalStateException("cannot open $name"))
         val size = descriptor.statSize
         when {
@@ -564,7 +565,9 @@ class TransferService : Service() {
             }
             size > 0L -> {
                 val modified = lastModified(uri)
-                val source = SourceId.of(uri.toString(), size, modified)
+                // The original and the place-less copy differ in their bytes:
+                // never resumed one from the other (M5 review).
+                val source = SourceId.of(sourceKey(uri, opened.original), size, modified)
                 withProgress({ size }, onProgress) {
                     RustCore.sendFileFd(
                         address, port, descriptor.detachFd(), name, size, source, part, drive,
@@ -669,6 +672,10 @@ class TransferService : Service() {
         return Result.failure(TransferRetry.Refusal(reason))
     }
 
+    /** What a file's resume is keyed on: its original apart from its place-less copy (M5). */
+    private fun sourceKey(uri: Uri, original: Boolean): String =
+        if (original) "$uri#original" else uri.toString()
+
     private fun sendCopy(address: String, port: Int, uri: Uri, name: String, drive: String?): Result<Unit> {
         val dir = File(cacheDir, "share").apply { mkdirs() }
         // The bridge names the file after its path: copy straight to a name
@@ -677,7 +684,8 @@ class TransferService : Service() {
             .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "shared.bin"
         val copy = File(dir, safe)
         return try {
-            dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) { contentResolver.openInputStream(it) }.use { input ->
+            val opened = dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) { contentResolver.openInputStream(it) }
+            opened.value.use { input ->
                 requireNotNull(input) { "content stream unavailable" }
                 copy.outputStream().use { output -> input.copyTo(output) }
             }
@@ -690,7 +698,7 @@ class TransferService : Service() {
                 else -> {
                     val descriptor = android.os.ParcelFileDescriptor.open(copy, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
                     val modified = lastModified(uri)
-                    val source = SourceId.of(uri.toString(), size, modified)
+                    val source = SourceId.of(sourceKey(uri, opened.original), size, modified)
                     RustCore.sendFileFd(
                         address, port, descriptor.detachFd(), name, size, source, null, drive,
                         FileDates.toSend(Prefs.keepFileDates(this), modified),
