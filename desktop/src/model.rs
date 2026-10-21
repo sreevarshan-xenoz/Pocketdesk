@@ -36,6 +36,8 @@ pub struct Device {
     pub battery: Option<pocketdesk_core::local::phone_status::PhoneBattery>,
     /// Its Do Not Disturb as it last said (D2), if it ever did.
     pub quiet: Option<pocketdesk_core::local::phone_quiet::PhoneQuiet>,
+    /// Which of its features it has on, as it last said (L7).
+    pub switches: Option<pocketdesk_core::local::phone_switches::PhoneSwitches>,
     /// Another of the owner's computers, paired as one (2f).
     pub computer: bool,
 }
@@ -91,6 +93,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
     let sessions = mirror.clone().map(|m| m.sessions).unwrap_or_default();
     let batteries = pocketdesk_core::local::phone_status::read(state_dir);
     let quiet = pocketdesk_core::local::phone_quiet::read(state_dir);
+    let mut switches = pocketdesk_core::local::phone_switches::read(state_dir);
     let devices = match TrustStore::load_or_create(state_dir.join(TRUST_FILE)) {
         Ok(store) => store
             .trusted_devices()
@@ -118,6 +121,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                         None
                     },
                     computer: store.is_computer(&id),
+                    switches: switches.remove(&id),
                     id,
                 }
             })
@@ -422,6 +426,238 @@ fn storage_words(mb: u64) -> String {
     } else {
         format!("{gb:.1} GB")
     }
+}
+
+/// A feature both sides must have on (L7): its name in the phone's report,
+/// what it is, the phone's switch for it, this computer's permission for
+/// it, and what Android must let the app do.
+pub struct Feature {
+    pub key: &'static str,
+    pub what: &'static str,
+    pub phone_switch: &'static str,
+    pub permission: Capability,
+    /// The permission's label on the Devices page (a test there holds it).
+    pub permission_name: &'static str,
+    pub android: &'static str,
+}
+
+/// The features the Devices page lines up, in the phone's order
+/// (`phone_switches::FEATURES`; a test holds the two together).
+pub const FEATURES: &[Feature] = &[
+    Feature {
+        key: "notifications",
+        what: "Its notifications here",
+        phone_switch: "This phone's notifications on my computer",
+        permission: Capability::Notifications,
+        permission_name: "Show its notifications here",
+        android: "notification access",
+    },
+    Feature {
+        key: "answers",
+        what: "Answering them from here",
+        phone_switch: "Let the computer answer notifications",
+        permission: Capability::Notifications,
+        permission_name: "Show its notifications here",
+        android: "notification access",
+    },
+    Feature {
+        key: "texts",
+        what: "Its texts here",
+        phone_switch: "Show texts on my computer",
+        permission: Capability::Texts,
+        permission_name: "Show its texts and send replies",
+        android: "the SMS permission",
+    },
+    Feature {
+        key: "clipboard",
+        what: "The clipboard without a session",
+        phone_switch: "Computer's clipboard in the background",
+        permission: Capability::Clipboard,
+        permission_name: "Share the clipboard",
+        android: "notification access",
+    },
+    Feature {
+        key: "files",
+        what: "Files from here without a session",
+        phone_switch: "Files from the computer in the background",
+        permission: Capability::Files,
+        permission_name: "Send and browse files",
+        android: "notification access and its notifications",
+    },
+    Feature {
+        key: "folders",
+        what: "Its folders here",
+        phone_switch: "Folders the computer may open",
+        permission: Capability::Files,
+        permission_name: "Send and browse files",
+        android: "notification access",
+    },
+    Feature {
+        key: "photos",
+        what: "Its recent photos here",
+        phone_switch: "Recent photos on the computer",
+        permission: Capability::Files,
+        permission_name: "Send and browse files",
+        android: "notification access and photo access",
+    },
+    Feature {
+        key: "screenshots",
+        what: "Its new screenshots here",
+        phone_switch: "Send new screenshots",
+        permission: Capability::Files,
+        permission_name: "Send and browse files",
+        android: "notification access and photo access",
+    },
+    Feature {
+        key: "camera",
+        what: "Photos asked from here",
+        phone_switch: "Photos the computer asks for",
+        permission: Capability::Files,
+        permission_name: "Send and browse files",
+        android: "notification access and its notifications",
+    },
+    Feature {
+        key: "links",
+        what: "Links from here",
+        phone_switch: "Links from the computer",
+        permission: Capability::Links,
+        permission_name: "Open its links here",
+        android: "its notifications",
+    },
+    Feature {
+        key: "ring",
+        what: "Ringing it from here",
+        phone_switch: "Ring from the computer",
+        permission: Capability::Ring,
+        permission_name: "Ring this phone from here",
+        android: "notification access and its notifications",
+    },
+    Feature {
+        key: "media",
+        what: "Its music here",
+        phone_switch: "My media on the computer",
+        permission: Capability::Media,
+        permission_name: "Show and control its media here",
+        android: "notification access",
+    },
+    Feature {
+        key: "mute",
+        what: "Muting it from here",
+        phone_switch: "Let the computer mute this phone",
+        permission: Capability::Mute,
+        permission_name: "Mute this phone from here",
+        android: "notification access",
+    },
+    Feature {
+        key: "control",
+        what: "Controlling it from its screen here",
+        phone_switch: "Let the computer control this phone",
+        permission: Capability::Cast,
+        permission_name: "Show its screen or camera here",
+        android: "the Pocketdesk control Accessibility service",
+    },
+    Feature {
+        key: "dial",
+        what: "Calling numbers from here",
+        phone_switch: "Calls from the computer",
+        permission: Capability::Dial,
+        permission_name: "Call numbers from here",
+        android: "its notifications",
+    },
+    Feature {
+        key: "commands",
+        what: "Commands to its automation apps",
+        phone_switch: "Commands from the computer to my automation apps",
+        permission: Capability::Command,
+        permission_name: "Send commands to its automation apps",
+        android: "notification access",
+    },
+];
+
+/// One feature as both sides stand (L7): this computer's permission (and
+/// its Settings, L7 review), the phone's switch and Android's grant as the
+/// phone said them (`None`: not said, or Android needs nothing), and what
+/// to change when the phone wants it and something holds it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchRow {
+    pub what: &'static str,
+    pub here: bool,
+    pub phone: Option<bool>,
+    pub android: Option<bool>,
+    pub advice: Option<String>,
+}
+
+/// The features this computer's Settings turn off for every phone (L7
+/// review), each with the setting's label: they hold the feature back
+/// whatever the phone's permission says.
+pub fn settings_off(
+    config: &pocketdesk_core::local::config::Config,
+) -> Vec<(&'static str, &'static str)> {
+    let mut off = Vec::new();
+    if !config.phone_notifications {
+        off.push(("notifications", "Phone notifications"));
+        off.push(("answers", "Phone notifications"));
+    }
+    if !config.clipboard_push {
+        off.push(("clipboard", "Clipboard to phones"));
+    }
+    if !config.cast_control {
+        off.push(("control", "Control phones from their screen window"));
+    }
+    off
+}
+
+/// The Devices page's rows for a phone: every feature, with advice for
+/// each side that holds back one the phone has on, this computer's first.
+/// One the phone has off is the owner's choice, not a fault (L7 review),
+/// so it gets none.
+pub fn switch_rows(
+    permissions: &DevicePermissions,
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+    settings_off: &[(&'static str, &'static str)],
+) -> Vec<SwitchRow> {
+    FEATURES
+        .iter()
+        .map(|f| {
+            let setting = settings_off
+                .iter()
+                .find(|(key, _)| *key == f.key)
+                .map(|(_, label)| *label);
+            let allowed = permissions.allows(f.permission);
+            let here = allowed && setting.is_none();
+            let said = switches.and_then(|s| s.switches.get(f.key));
+            let phone = said.map(|s| s.on);
+            let android = said.and_then(|s| s.android);
+            let mut fixes = Vec::new();
+            if phone != Some(false) {
+                if !allowed {
+                    fixes.push(format!(
+                        "turn on \"{}\" in this phone's permissions above",
+                        f.permission_name
+                    ));
+                }
+                if let Some(label) = setting {
+                    fixes.push(format!("turn on \"{label}\" in Settings"));
+                }
+                if android == Some(false) && !f.android.is_empty() {
+                    fixes.push(format!("give Pocketdesk {} on the phone", f.android));
+                }
+            }
+            let advice = (!fixes.is_empty()).then(|| {
+                let mut words = fixes.join(", and ");
+                words[..1].make_ascii_uppercase();
+                words.push('.');
+                words
+            });
+            SwitchRow {
+                what: f.what,
+                here,
+                phone,
+                android,
+                advice,
+            }
+        })
+        .collect()
 }
 
 /// How long the Overview says a phone said no to a mute.
@@ -909,6 +1145,99 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_pages_features_are_the_phones() {
+        let ours: Vec<&str> = super::FEATURES.iter().map(|f| f.key).collect();
+        assert_eq!(ours, pocketdesk_core::local::phone_switches::FEATURES);
+    }
+
+    #[test]
+    fn each_feature_names_the_side_that_holds_it_back() {
+        use pocketdesk_core::local::phone_switches::{PhoneSwitches, from_body};
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        let mut permissions = DevicePermissions::default();
+        permissions.set(Capability::Links, false);
+        let said = PhoneSwitches {
+            switches: from_body(&serde_json::json!({"switches": {
+                "notifications": {"on": true, "android": false},
+                "links": {"on": false},
+                "clipboard": {"on": true},
+            }}))
+            .unwrap(),
+            updated_unix: 1,
+        };
+        let rows = super::switch_rows(&permissions, Some(&said), &[]);
+        let row = |what: &str| rows.iter().find(|r| r.what == what).unwrap().clone();
+        assert_eq!(
+            row("Its notifications here").advice.as_deref(),
+            Some("Give Pocketdesk notification access on the phone.")
+        );
+        assert_eq!(
+            row("Links from here").advice,
+            None,
+            "off on the phone is the owner's choice, not a fault"
+        );
+        let clipboard = row("The clipboard without a session");
+        assert_eq!(clipboard.advice, None, "both on, Android not said");
+        assert_eq!(
+            (clipboard.here, clipboard.phone, clipboard.android),
+            (true, Some(true), None)
+        );
+        // A feature the phone did not mention: nothing said of its side.
+        assert_eq!(row("Its texts here").phone, None);
+        assert_eq!(row("Its texts here").advice, None);
+        // No report yet: only this computer's side.
+        let none = super::switch_rows(&permissions, None, &[]);
+        assert!(none.iter().all(|r| r.phone.is_none()));
+        assert_eq!(
+            none.iter()
+                .find(|r| r.what == "Links from here")
+                .unwrap()
+                .advice
+                .as_deref(),
+            Some("Turn on \"Open its links here\" in this phone's permissions above.")
+        );
+        // A computer-wide setting holds it back too (L7 review).
+        let config = pocketdesk_core::local::config::Config {
+            phone_notifications: false,
+            ..Default::default()
+        };
+        let off = super::settings_off(&config);
+        let rows = super::switch_rows(&DevicePermissions::default(), Some(&said), &off);
+        let notifications = rows
+            .iter()
+            .find(|r| r.what == "Its notifications here")
+            .unwrap();
+        assert!(!notifications.here);
+        assert_eq!(
+            notifications.advice.as_deref(),
+            Some(
+                "Turn on \"Phone notifications\" in Settings, and give Pocketdesk notification access on the phone."
+            )
+        );
+        // A phone as it comes: every feature off but links, no fault shown.
+        let default_phone = PhoneSwitches {
+            switches: pocketdesk_core::local::phone_switches::FEATURES
+                .iter()
+                .map(|k| {
+                    (
+                        k.to_string(),
+                        pocketdesk_core::local::phone_switches::Switch {
+                            on: *k == "links",
+                            android: Some(true),
+                        },
+                    )
+                })
+                .collect(),
+            updated_unix: 1,
+        };
+        assert!(
+            super::switch_rows(&DevicePermissions::default(), Some(&default_phone), &[])
+                .iter()
+                .all(|r| r.advice.is_none())
+        );
+    }
+
     #[test]
     fn a_phones_state_is_shown_only_while_it_is_reached_and_recent() {
         use super::{Place, STATE_FRESH_SECS, state_is_now};

@@ -347,6 +347,8 @@ pub async fn run_writer() {
             let mut reports = REPORTS.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(paired) = &paired {
                 reports.keep_only(paired);
+                // L7: the switches' reports go with the batteries'.
+                crate::plugins::phone_switches::prune(&dir, paired);
             }
             if !reports.dirty {
                 continue;

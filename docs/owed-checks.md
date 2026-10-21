@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-763 open items.
+767 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 452 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 455 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 25 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 7 |
 | A Linux desktop (the Azure VM serves for some) | 94 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 69 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 70 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -929,6 +929,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
 - Behind Tailscale on the phone: Wi-Fi with its bars, not nothing.
 - The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+
+**163. Features on both sides (L7)**
+
+- A switch turned off on the phone shows on the computer's Devices page within 15 s in a session, and within 30 s with only a background link.
+- Settings "Phone notifications" off on the computer: the notifications rows name it.
+- A phone unpaired: its report gone from `phone_switches.json` within seconds.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1936,3 +1942,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A throwaway receiver in Tasker's package logs `dev.pocketdesk.android.event.COMMAND` with NAME, TEXT and ADDRESS after `pocketdesk phone-command`.
 - Tasker itself.
+
+**163. Features on both sides (L7)**
+
+- Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.

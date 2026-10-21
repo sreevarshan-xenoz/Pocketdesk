@@ -156,6 +156,37 @@ fn devices_with_none_paired_say_how_to_pair() {
     );
 }
 
+/// L7: a phone's report shows each feature's sides, with what holds one
+/// back; the table is closed until opened.
+#[test]
+fn devices_show_each_features_sides_and_what_holds_it_back() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let mut phones = std::collections::BTreeMap::new();
+    phones.insert(
+        PHONE.to_string(),
+        pocketdesk_core::local::phone_switches::PhoneSwitches {
+            switches: pocketdesk_core::local::phone_switches::from_body(&serde_json::json!({
+                "switches": {"notifications": {"on": true, "android": false}}
+            }))
+            .expect("a report"),
+            updated_unix: pocketdesk_core::local::pin::now_unix(),
+        },
+    );
+    pocketdesk_core::local::phone_switches::write(fixture.state(), &phones).expect("written");
+    let mut app = fixture.open(Some(Tab::Devices));
+    let advice = "Give Pocketdesk notification access on the phone.";
+    assert!(app.query_by_label(advice).is_none(), "closed until opened");
+    app.get_by_label("Features on both sides for Test Phone")
+        .click();
+    app.run_steps(3);
+    assert!(app.query_by_label(advice).is_some());
+    assert!(
+        app.query_by_label("This computer allows: yes · The phone sends: on · Android allows: no")
+            .is_some()
+    );
+}
+
 /// Unpair… asks by name; Cancel keeps the phone, and Unpair removes it
 /// from the trust store.
 #[test]

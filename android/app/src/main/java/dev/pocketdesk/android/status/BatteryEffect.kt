@@ -40,6 +40,8 @@ fun BatteryEffect(address: String, controlPort: Int) {
     LaunchedEffect(address, controlPort, lifecycleOwner) {
         var last: BatteryRule.Report? = null
         var lastMs = 0L
+        // L7: which features are on, told with the battery's ticks.
+        val switches = SwitchSender()
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
                 val linked = withContext(Dispatchers.IO) {
@@ -64,6 +66,17 @@ fun BatteryEffect(address: String, controlPort: Int) {
                     } else {
                         Log.d("BatteryEffect", "Battery not sent: ${sent.exceptionOrNull()?.message}")
                     }
+                }
+                if (linked && Prefs.shareBattery(context)) {
+                    withContext(Dispatchers.IO) {
+                        // A read that throws is skipped, never the app (L7 review).
+                        val said = runCatching { readSwitches(context) }.getOrNull()
+                        if (said != null) switches.tick(said, nowMs) { body ->
+                            RustCore.sendPhonePacket(address, controlPort, SwitchReport.SWITCHES, body)
+                        }
+                    }
+                } else {
+                    switches.forget()
                 }
                 delay(CHECK_MS)
             }

@@ -1141,9 +1141,9 @@ pub fn take_sms_requests() -> String {
 
 /// The packets the app may send through [`send_phone_packet`]: its texts
 /// and the results of the replies it sent (N5b), its battery (T8b), and
-/// what it plays (T8d), its folders' listings (T10g) and its recent photos
-/// (C7).
-const PHONE_PACKETS: [&str; 8] = [
+/// what it plays (T8d), its folders' listings (T10g), its recent photos
+/// (C7) and which of its features are on (L7).
+const PHONE_PACKETS: [&str; 9] = [
     // E1: how an answer from the computer went.
     pocketdesk_core::protocol::notification_action::NOTIFICATION_ANSWERED,
     // D2: the phone's Do Not Disturb, told to its computer.
@@ -1154,6 +1154,8 @@ const PHONE_PACKETS: [&str; 8] = [
     pocketdesk_core::protocol::phone_media::PHONE_MEDIA,
     pocketdesk_core::protocol::phone_files::LISTING,
     pocketdesk_core::protocol::phone_photos::PHOTOS,
+    // L7: which of its features are on, beside the battery.
+    "kdeconnect.pocketdesk.switches",
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
@@ -4952,6 +4954,14 @@ mod sms_tests {
             "[1]".into(),
         ));
         assert!(media.unwrap_err().contains("not an object"));
+        // Which of its features are on (L7), as the battery is.
+        let switches = runtime.block_on(super::send_phone_packet(
+            "127.0.0.1".into(),
+            9,
+            "kdeconnect.pocketdesk.switches".into(),
+            "[1]".into(),
+        ));
+        assert!(switches.unwrap_err().contains("not an object"));
     }
 }
 

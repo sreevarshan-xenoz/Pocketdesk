@@ -14,6 +14,7 @@ pub mod phone_battery;
 pub mod phone_files;
 pub mod phone_media;
 pub mod phone_photos;
+pub mod phone_switches;
 pub mod power;
 pub mod privacy;
 pub mod share;
@@ -67,6 +68,7 @@ pub fn register_all() -> PluginSet {
     let mut registry = PluginRegistry::new();
     registry.register(battery::BatteryPlugin::new());
     registry.register(phone_battery::PhoneBatteryPlugin);
+    registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
