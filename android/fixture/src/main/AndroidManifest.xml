@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- N1: what scripts/device_checks.py drives on the phone. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Pocketdesk fixture">
+
+        <!-- A text field that fills the screen, focused. -->
+        <activity
+            android:name=".FieldActivity"
+            android:exported="true"
+            android:windowSoftInputMode="stateVisible" />
+
+        <!-- Puts the text it is given on the clipboard, then closes. -->
+        <activity
+            android:name=".CopyActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Posts a notification on an adb broadcast. -->
+        <receiver
+            android:name=".NotifyReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.pocketdesk.fixture.NOTIFY" />
+                <action android:name="dev.pocketdesk.fixture.CANCEL" />
+            </intent-filter>
+        </receiver>
+
+        <!-- A notification's answers, written to logcat. -->
+        <receiver
+            android:name=".AnswerReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
