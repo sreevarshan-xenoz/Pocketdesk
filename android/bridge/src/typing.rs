@@ -4,17 +4,23 @@
 
 use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::protocol::typing::{TypeEvent, events_of};
 
-/// The most batches kept: a thread that stopped taking keeps no backlog.
+/// The most batches kept: past it, the typing thread is not taking, so
+/// all are dropped (M4 review: dropping the oldest left a hole mid-text).
 const MAX_WAITING: usize = 32;
+
+/// How long a batch waits to be typed: later, its keys would land in
+/// whatever field is in front by then (M4 review).
+const STALE: Duration = Duration::from_secs(10);
 
 struct Batch {
     host: String,
     port: u16,
     events: Vec<TypeEvent>,
+    at: Instant,
 }
 
 static WAITING: Mutex<VecDeque<Batch>> = Mutex::new(VecDeque::new());
@@ -25,15 +31,20 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
     let Some(events) = events_of(body) else {
         return;
     };
-    let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
-    waiting.push_back(Batch {
+    keep(Batch {
         host: host.to_string(),
         port,
         events,
+        at: Instant::now(),
     });
-    while waiting.len() > MAX_WAITING {
-        waiting.pop_front();
+}
+
+fn keep(batch: Batch) {
+    let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
+    if waiting.len() >= MAX_WAITING {
+        waiting.clear();
     }
+    waiting.push_back(batch);
     ARRIVED.notify_all();
 }
 
@@ -49,6 +60,9 @@ pub(crate) fn take_json(timeout: Duration) -> String {
     let (mut waiting, _) = ARRIVED
         .wait_timeout_while(waiting, timeout, |w| w.is_empty())
         .unwrap_or_else(|e| e.into_inner());
+    while waiting.front().is_some_and(|b| b.at.elapsed() > STALE) {
+        waiting.pop_front();
+    }
     waiting
         .pop_front()
         .map(|b| {
@@ -91,6 +105,38 @@ mod tests {
         let second: serde_json::Value = serde_json::from_str(&take_json(Duration::ZERO)).unwrap();
         assert_eq!(second["events"][0]["key"], "enter");
         assert_eq!(take_json(Duration::from_millis(10)), "", "nothing waits");
+    }
+
+    #[tokio::test]
+    async fn a_stale_batch_is_dropped_and_a_backlog_is_cleared() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        let batch = |text: &str, at| Batch {
+            host: "192.0.2.7".into(),
+            port: 1716,
+            events: vec![TypeEvent::Text(text.into())],
+            at,
+        };
+        let Some(old) = Instant::now().checked_sub(STALE * 2) else {
+            return;
+        };
+        keep(batch("old", old));
+        keep(batch("new", Instant::now()));
+        let taken: serde_json::Value = serde_json::from_str(&take_json(Duration::ZERO)).unwrap();
+        assert_eq!(
+            taken["events"][0]["text"], "new",
+            "the stale one is dropped"
+        );
+        for i in 0..MAX_WAITING {
+            keep(batch(&i.to_string(), Instant::now()));
+        }
+        keep(batch("after", Instant::now()));
+        let taken: serde_json::Value = serde_json::from_str(&take_json(Duration::ZERO)).unwrap();
+        assert_eq!(
+            taken["events"][0]["text"], "after",
+            "a full backlog is cleared"
+        );
+        assert_eq!(take_json(Duration::ZERO), "");
     }
 
     #[tokio::test]
