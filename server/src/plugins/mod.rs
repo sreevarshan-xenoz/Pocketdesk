@@ -1,3 +1,4 @@
+pub mod allowed;
 pub mod audio_control;
 pub mod battery;
 pub mod clipboard;
@@ -70,6 +71,7 @@ pub fn register_all() -> PluginSet {
     registry.register(battery::BatteryPlugin::new());
     registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(link_role::LinkRolePlugin);
+    registry.register(allowed::AllowedPlugin);
     registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);

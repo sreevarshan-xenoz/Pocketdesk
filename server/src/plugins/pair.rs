@@ -1668,6 +1668,8 @@ forged log line"
             "kdeconnect.pocketdesk.system",
             // A link's role (L8 part 2): it only narrows what the link is for.
             "kdeconnect.pocketdesk.link_role",
+            // M2a: a phone asks what it is allowed; it is told only about itself.
+            "kdeconnect.pocketdesk.allowed",
             // Which of its features a phone has on (L7): status about the
             // phone itself, as its battery is, booleans only.
             "kdeconnect.pocketdesk.switches",
