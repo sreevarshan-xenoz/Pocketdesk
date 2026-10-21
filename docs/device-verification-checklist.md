@@ -2431,6 +2431,15 @@ Built 2026-10-21; tested through units, the harness and the registry read back h
 - [ ] Linux: the desktop file and `xdg-open tel:5550100`; removed, `mimeapps.list` no longer names it.
 - [ ] Call back from a ringing call's note, and from one whose call ended (a SIM).
 
+## 174. Home Assistant buttons for phone commands (M9)
+
+Built 2026-10-21; tested through units, nothing against a broker or a device yet.
+- [ ] A local broker as in 1e: the buttons announced under the phone's device; a press published with `mosquitto_pub` reaches the OPPO's throwaway receiver in logcat.
+- [ ] A retained or empty message on the command topic: nothing sent.
+- [ ] The phone's "Send commands to its automation apps" off: refused, in the server's log.
+- [ ] A command removed in Settings: its button goes from the broker; another command keeps its id.
+- [ ] Home Assistant itself, and Tasker (the owner).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
