@@ -2375,6 +2375,16 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] A phone paired as mine, paired again as someone else's: what was off stays off.
 - [ ] `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
+## 168. Image copies without a session (M3)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app.
+- [ ] Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then.
+- [ ] A screenshot copied on Windows (Win+Shift+S) with a phone linked: it goes once, even while the Snipping Tool holds the clipboard.
+- [ ] A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll.
+- [ ] The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
+- [ ] GNOME (no `wl-paste --watch`): an image on the clipboard is read at most every 30 s.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

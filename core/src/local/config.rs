@@ -139,6 +139,11 @@ pub struct Config {
     /// Clipboard permission, as it changes (T10b).
     #[serde(default = "default_true")]
     pub clipboard_push: bool,
+    /// With `clipboard_push`, tell those phones of an image copied here too,
+    /// for them to fetch (M3). Off by default: a screenshot copied all day
+    /// would go to every phone.
+    #[serde(default)]
+    pub clipboard_images: bool,
     /// Share what is copied with the owner's other paired computers, both
     /// ways (2g). Off by default: the content crosses machines.
     #[serde(default)]
@@ -344,6 +349,7 @@ impl Default for Config {
             share_state: true,
             virtual_screens: true,
             clipboard_push: true,
+            clipboard_images: false,
             computer_clipboard: false,
             clipboard_history: 0,
             clipboard_hotkey: String::new(),
@@ -564,6 +570,7 @@ impl Config {
         "share_state",
         "virtual_screens",
         "clipboard_push",
+        "clipboard_images",
         "clipboard_hotkey",
         "phone_media_controls",
         "computer_clipboard",

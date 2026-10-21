@@ -302,6 +302,55 @@ pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
         .filter(|path| path.is_absolute())
 }
 
+/// A PNG that stands in for the clipboard's image
+/// (`POCKETDESK_CLIPBOARD_IMAGE_FILE`, an absolute path; M3): read for the
+/// phones, and written with an image from one. For tests, beside
+/// [`stand_in`]; the server warns at start when it is set.
+pub(crate) fn image_stand_in() -> Option<std::path::PathBuf> {
+    std::env::var_os("POCKETDESK_CLIPBOARD_IMAGE_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+/// What the stand-ins hold: the text stand-in's text first, as a real
+/// clipboard's text wins (M3 review), else the image stand-in's PNG within
+/// N4's limit, kept for a phone's fetch, or nothing.
+fn stand_in_clip(path: &std::path::Path) -> Clip {
+    if let Some(text) = stand_in()
+        .and_then(|text| std::fs::read_to_string(text).ok())
+        .filter(|text| !text.is_empty())
+    {
+        forget_image();
+        return Clip::Text(text);
+    }
+    match std::fs::read(path) {
+        Ok(png)
+            if png.len() as u64 <= MAX_CLIPBOARD_IMAGE
+                && crate::platform::clip_image::is_png(&png) =>
+        {
+            let image = Arc::new(Image::new(png));
+            remember(None, Some(image.clone()));
+            Clip::Image(image)
+        }
+        _ => {
+            forget_image();
+            Clip::Empty
+        }
+    }
+}
+
+/// The clipboard's image for the watcher to push (M3): its id and size,
+/// kept for the phone's fetch until the clipboard changes; nothing when the
+/// clipboard holds text, nothing usable, or a copy marked private.
+/// An error says the clipboard could not be read now (another app held it),
+/// for the watcher to look again.
+pub(crate) async fn image_for_push() -> Result<Option<(String, u64)>> {
+    Ok(match read_clipboard().await? {
+        Clip::Image(image) => Some((image.id.clone(), image.png.len() as u64)),
+        _ => None,
+    })
+}
+
 /// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
 /// Pair tab copies for another computer (2f): it holds the PIN, so it goes
 /// to no phone or computer from the clipboard.
@@ -317,6 +366,9 @@ pub(crate) fn is_pairing_link(text: &str) -> bool {
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
     let text = match stand_in() {
         Some(path) => std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+        // The image stand-in alone: the stand-ins are the clipboard, and
+        // there is no text (M3 review).
+        None if image_stand_in().is_some() => None,
         None => read_system_text().await?,
     };
     Ok(text.filter(|t| !is_pairing_link(t)))
@@ -324,6 +376,11 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
 
 /// Set the clipboard's text.
 pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
+    // Text replaces an image, as on a real clipboard (M3 review).
+    if let Some(image) = image_stand_in() {
+        let _ = std::fs::remove_file(image);
+        forget_image();
+    }
     if let Some(path) = stand_in() {
         // Clipboard text: owner-only, as the real one is.
         return pocketdesk_core::secure_fs::write_private(&path, content.as_bytes())
@@ -379,7 +436,16 @@ async fn set_system_clipboard(content: &str) -> Result<()> {
 #[cfg(windows)]
 async fn read_clipboard() -> Result<Clip> {
     use crate::platform::clipboard_windows as win;
+    if let Some(path) = image_stand_in() {
+        return Ok(stand_in_clip(&path));
+    }
     tokio::task::spawn_blocking(|| -> Result<Clip> {
+        // A copy a password manager marked private goes to no phone that
+        // asks either, text or image (M3), as the watcher's (T10b).
+        if win::privacy_marks().private() {
+            forget_image();
+            return Ok(Clip::Empty);
+        }
         if win::has_text() {
             forget_image();
             let text = win::get_text()?;
@@ -407,10 +473,10 @@ async fn read_clipboard() -> Result<Clip> {
                 None
             }
             Ok(None) => None,
-            Err(e) => {
-                tracing::debug!("The clipboard image is not read: {e}");
-                None
-            }
+            // Not remembered (M3 review): another app held the clipboard
+            // (Windows' Snipping Tool and clipboard history do, right after
+            // a screenshot), so the next look reads it again.
+            Err(e) => return Err(e.into()),
         };
         remember(Some(sequence), image.clone());
         Ok(image.map_or(Clip::Empty, Clip::Image))
@@ -424,6 +490,9 @@ async fn read_clipboard() -> Result<Clip> {
 #[cfg(windows)]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     use crate::platform::clipboard_windows as win;
+    if let Some(path) = image_stand_in() {
+        return set_stand_in_image(&path, image);
+    }
     let image = image.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let sequence = win::set_image_png(&image.png)?;
@@ -432,6 +501,14 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     })
     .await
     .map_err(other)?
+}
+
+/// Write `image` to the image stand-in (M3), owner-only as the clipboard is.
+fn set_stand_in_image(path: &std::path::Path, image: &Arc<Image>) -> Result<()> {
+    pocketdesk_core::secure_fs::write_private(path, &image.png)
+        .map_err(|e| share::io_error("clipboard image", e))?;
+    remember(None, Some(image.clone()));
+    Ok(())
 }
 
 /// Set system clipboard using `wl-copy`.
@@ -491,11 +568,20 @@ async fn wl_paste(args: &[&str]) -> Result<Vec<u8>> {
 /// What the clipboard holds: text when it offers any, else a PNG.
 #[cfg(not(windows))]
 async fn read_clipboard() -> Result<Clip> {
+    if let Some(path) = image_stand_in() {
+        return Ok(stand_in_clip(&path));
+    }
     let Ok(types) = wl_paste(&["--list-types"]).await else {
         // An empty clipboard makes wl-paste fail.
         return Ok(Clip::Empty);
     };
     let types = String::from_utf8_lossy(&types);
+    // A copy a password manager marked private goes to no phone that asks
+    // either, text or image (M3), as the watcher's (T10b).
+    if crate::clipboard_push::private_types(&types) {
+        forget_image();
+        return Ok(Clip::Empty);
+    }
     let has = |prefix: &str| types.lines().any(|t| t.trim().starts_with(prefix));
     if has("text/plain") || has("UTF8_STRING") || has("TEXT") || has("STRING") {
         forget_image();
@@ -517,6 +603,9 @@ async fn read_clipboard() -> Result<Clip> {
 /// Put `image` on the clipboard with `wl-copy --type image/png`.
 #[cfg(not(windows))]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
+    if let Some(path) = image_stand_in() {
+        return set_stand_in_image(&path, image);
+    }
     wl_copy(Some("image/png"), &image.png).await?;
     remember(None, Some(image.clone()));
     Ok(())
@@ -578,5 +667,30 @@ mod tests {
             image_for_fetch(Some(&unusable), &image.id).is_err(),
             "the clipboard moved on to something that is not an image"
         );
+    }
+
+    /// M3: the image stand-in is read as the clipboard's image and kept for
+    /// a fetch; anything else in it is no image.
+    #[test]
+    fn the_image_stand_in_is_the_clipboards_image() {
+        let dir = std::env::temp_dir().join(format!("pd-clip-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clip.png");
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(b"rest of a picture");
+        std::fs::write(&path, &png).unwrap();
+        let Clip::Image(image) = stand_in_clip(&path) else {
+            panic!("a PNG is the clipboard's image");
+        };
+        assert_eq!(image.id, Image::new(png.clone()).id);
+        let kept = cache().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            image_for_fetch(kept.as_ref(), &image.id).is_ok(),
+            "kept for a fetch"
+        );
+        drop(kept);
+        std::fs::write(&path, b"not a picture").unwrap();
+        assert_eq!(stand_in_clip(&path), Clip::Empty);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

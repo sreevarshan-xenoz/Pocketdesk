@@ -35,6 +35,7 @@ object Prefs {
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
+    private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
     private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
@@ -301,6 +302,19 @@ object Prefs {
 
     fun setClipboardInBackground(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CLIPBOARD_BACKGROUND, enabled) }
+        bump()
+    }
+
+    /**
+     * M3: with the computer's clipboard in the background, an image copied
+     * there is fetched onto this phone's clipboard too, on Wi-Fi. Off by
+     * default.
+     */
+    fun clipboardImagesInBackground(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_CLIPBOARD_IMAGES_BACKGROUND, false)
+
+    fun setClipboardImagesInBackground(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_CLIPBOARD_IMAGES_BACKGROUND, enabled) }
         bump()
     }
 

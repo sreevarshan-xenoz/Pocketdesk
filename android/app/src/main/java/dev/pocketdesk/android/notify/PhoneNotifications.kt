@@ -300,6 +300,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         screenshotsTicker.shutdownNow()
         screenshots.close()
         clipboardTicker.shutdownNow()
+        clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()
     }

@@ -182,11 +182,15 @@ pub(crate) fn privacy_marks() -> crate::clipboard_push::WindowsMarks {
         viewer_ignore: present(viewer),
         ..Default::default()
     };
-    if (present(history) || present(cloud))
-        && let Ok(_open) = Open::new(None)
-    {
-        marks.history = present(history).then(|| dword(history)).flatten();
-        marks.cloud = present(cloud).then(|| dword(cloud)).flatten();
+    if present(history) || present(cloud) {
+        match Open::new(None) {
+            Ok(_open) => {
+                marks.history = present(history).then(|| dword(history)).flatten();
+                marks.cloud = present(cloud).then(|| dword(cloud)).flatten();
+            }
+            // A mark there but unread fails closed (M3 review).
+            Err(_) => marks.unread = true,
+        }
     }
     marks
 }

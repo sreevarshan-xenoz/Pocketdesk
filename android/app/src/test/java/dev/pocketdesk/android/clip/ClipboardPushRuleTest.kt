@@ -42,4 +42,21 @@ class ClipboardPushRuleTest {
             SendClipboard.check("hunter2", hasComputer = false, private = true),
         )
     }
+
+    @Test
+    fun `an image is fetched with the switch on, on Wi-Fi, and not the one just sent`() {
+        assertTrue(ClipboardPushRule.mayFetchImage(on = true, onWifi = true, id = "a", sentImageId = "b"))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = false, onWifi = true, id = "a", sentImageId = null))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = true, onWifi = false, id = "a", sentImageId = null))
+        assertFalse(ClipboardPushRule.mayFetchImage(on = true, onWifi = true, id = "a", sentImageId = "a"))
+    }
+
+    @Test
+    fun `Wi-Fi or Ethernet, never mobile data, a VPN over Wi-Fi counted`() {
+        assertTrue(ClipboardPushRule.onWifi(wifi = true, ethernet = false, notMetered = true, vpn = false))
+        assertTrue(ClipboardPushRule.onWifi(wifi = false, ethernet = true, notMetered = true, vpn = false))
+        assertTrue(ClipboardPushRule.onWifi(wifi = true, ethernet = false, notMetered = false, vpn = true))
+        assertFalse("an unmetered 5G plan", ClipboardPushRule.onWifi(wifi = false, ethernet = false, notMetered = true, vpn = false))
+        assertFalse("a metered hotspot", ClipboardPushRule.onWifi(wifi = true, ethernet = false, notMetered = false, vpn = false))
+    }
 }
