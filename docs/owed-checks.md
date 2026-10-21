@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-826 open items.
+831 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 500 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 504 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 9 |
 | A Linux desktop (the Azure VM serves for some) | 96 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 26 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 73 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 74 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1010,6 +1010,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so.
 - Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window.
 - Off again: the keys are gone and Windows asks for another app.
+
+**174. Home Assistant buttons for phone commands (M9)**
+
+- A local broker as in 1e: the buttons announced under the phone's device; a press published with `mosquitto_pub` reaches the OPPO's throwaway receiver in logcat.
+- A retained or empty message on the command topic: nothing sent.
+- The phone's "Send commands to its automation apps" off: refused, in the server's log.
+- A command removed in Settings: its button goes from the broker; another command keeps its id.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2074,3 +2081,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **172. The phone's sound without its screen (M7)**
 
 - By ear, and a real music app (the owner).
+
+**174. Home Assistant buttons for phone commands (M9)**
+
+- Home Assistant itself, and Tasker (the owner).
