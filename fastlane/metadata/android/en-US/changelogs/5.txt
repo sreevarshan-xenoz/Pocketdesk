@@ -1,0 +1,4 @@
+* The phone's notifications answered from the computer's toast, with icons, pictures, quiet hours and calls.
+* The phone's screen or camera in a window you can control, record and drop files on.
+* The computer's music, state and deck on the phone, home-screen widgets and Quick Settings tiles.
+* Transfers you can watch and cancel, clipboard history, a pen, a gamepad, an air mouse and a talk timer.
