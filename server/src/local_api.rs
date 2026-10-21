@@ -210,6 +210,7 @@ pub fn status(state_dir: &Path, now_unix: u64, running: bool) -> Value {
                 "control_only": s.control_only,
                 "cast": s.cast,
                 "sound_only": s.sound_only,
+                "phone_sound_only": s.phone_sound_only,
             })
         })
         .collect();

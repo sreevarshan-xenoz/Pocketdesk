@@ -36,11 +36,12 @@ Whether the server runs, the phones in a session now, and how phones reach this 
  "pocketdesk_version": "0.4.0",
  "sessions": [{"session_id": 7, "device_id": "0d7c3a52-…", "peer": "192.0.2.7:51234",
                "transport": "lan", "started_unix": 1792050000, "driving": true,
-               "control_only": false, "cast": false, "sound_only": false}],
+               "control_only": false, "cast": false, "sound_only": false,
+               "phone_sound_only": false}],
  "endpoint": {"…": "what the server announces for the internet path, or null"}}
 ```
 
-`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5).
+`sessions` is empty and `endpoint` null when no server runs. `pocketdesk_version` is this program's: a server started before an upgrade may still be an older one. `transport` is `lan` or `wan`. `driving` says which phone has the keyboard and pointer when several are connected. `control_only` is a phone used as a remote: input only, no screen sent. `cast` is a phone showing its own screen here. `sound_only` is a phone used as this computer's speaker and mic: sound both ways, no screen or input (N5). `phone_sound_only` is a phone playing its own sound here, with no screen (M7).
 
 ### `pocketdesk devices --json`
 
@@ -99,7 +100,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 
 | `event` | Fields | With "Details in events" also |
 |---|---|---|
-| `session_started` | `session_id`, `transport` (`lan`/`wan`), `mode` (`screen`, `remote`, `cast`) | — |
+| `session_started` | `session_id`, `transport` (`lan`/`wan`), `mode` (`screen`, `remote`, `cast`, `sound`, `phone_sound`) | — |
 | `session_ended` | `session_id` | — |
 | `phone_linked`, `phone_unlinked` | — (any connection the phone holds to this computer, a brief one for a single send included) | — |
 | `phone_battery` | `charge`, `charging` | — |

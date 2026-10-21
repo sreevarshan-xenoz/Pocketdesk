@@ -75,6 +75,9 @@ struct ClientClaim {
     cast: bool,
     /// Sound both ways and nothing else (N5).
     sound: bool,
+    /// The phone's sound alone, played here (M7): no input, no picture
+    /// either way, and no window.
+    phone_sound: bool,
 }
 
 /// Tells the relay a cast ended, however its session ends (T10k).
@@ -476,6 +479,10 @@ impl StreamingServer {
         let cast = claim.cast;
         // The phone as this computer's speaker and mic (N5).
         let sound = claim.sound;
+        // The phone's sound alone (M7): a cast's sound with no screen.
+        let phone_sound_only = claim.phone_sound;
+        // The phone sends its stream: a cast's screen, or its sound.
+        let casting = cast || phone_sound_only;
         // No capture, encode, video or arbiter for any of those.
         let no_picture = input_only || sound;
 
@@ -525,13 +532,34 @@ impl StreamingServer {
         // Without input, the session is view-only whatever the phone asks:
         // the phone's own view-only switch can tighten this, never lift it.
         // A sound session gives no input at all (N5).
-        let force_view_only = !permissions.allows(Capability::Input) || sound;
+        let force_view_only = !permissions.allows(Capability::Input) || sound || phone_sound_only;
         let laser = self.laser;
         let allow_mic = permissions.allows(Capability::Mic) && !input_only;
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
         // A cast's sound plays here with its own permission (K5).
         let allow_phone_sound =
-            cast && permissions.allows(Capability::PhoneSound) && self.phone_sound_tx.is_some();
+            casting && permissions.allows(Capability::PhoneSound) && self.phone_sound_tx.is_some();
+        // The phone's sound alone needs its own permission, and a player.
+        if phone_sound_only && !allow_phone_sound {
+            let reason: &[u8] = if !permissions.allows(Capability::PhoneSound) {
+                b"phone sound not allowed"
+            } else {
+                b"phone sound not played here"
+            };
+            warn!(
+                device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                reason = %String::from_utf8_lossy(reason),
+                "Phone sound session refused"
+            );
+            if let Some(guard) = &_telemetry_guard {
+                guard.record(SessionOutcome::Rejected);
+            }
+            connection.close(0u32, reason);
+            return Err(anyhow::anyhow!(
+                "phone sound session refused: {}",
+                String::from_utf8_lossy(reason)
+            ));
+        }
         // A cast needs its own permission, and somewhere to show it.
         let cast_tx = if cast {
             let refusal: Option<&[u8]> = if !permissions.allows(Capability::Cast) {
@@ -562,7 +590,7 @@ impl StreamingServer {
         };
         // A remote that may not give input has nothing to do; a cast gives
         // none.
-        if input_only && !cast && force_view_only {
+        if input_only && !casting && force_view_only {
             warn!(
                 device_id = device_id.as_deref().unwrap_or("<none announced>"),
                 "Input-only session refused: the device may not give input"
@@ -652,6 +680,8 @@ impl StreamingServer {
             }
             if sound {
                 info!("Sound session: no capture or encode, sound both ways");
+            } else if phone_sound_only {
+                info!("Phone sound session: its sound plays here, no window");
             } else {
                 info!("Input-only session: no capture, encode or sound");
             }
@@ -1408,7 +1438,7 @@ impl StreamingServer {
         let monitor_cast_control_on = cast_control_on;
         let mut cast_chain = super::cast::CastChain::default();
         // A cast's frames are far larger than input packets.
-        let client_stream_max = if cast {
+        let client_stream_max = if casting {
             super::cast::MAX_CAST_STREAM
         } else {
             64 * 1024
@@ -1471,7 +1501,7 @@ impl StreamingServer {
                                         debug!(size = data.len(), "Received client data");
 
                                         // The phone's screen (T10k), to the relay.
-                                        if cast && data[0] == super::cast::CAST_PREFIX {
+                                        if casting && data[0] == super::cast::CAST_PREFIX {
                                             let Some(payload) = super::cast::parse(&data) else {
                                                 debug!("Ignored a malformed cast stream");
                                                 continue;
@@ -1920,7 +1950,8 @@ async fn read_client_config(
 ) -> ClientClaim {
     use super::client::{
         CODEC_CAPS_MARKER, DEVICE_ID_MARKER, IROH_KEY_MARKER, MONITOR_CONFIG_MARKER,
-        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER, SESSION_MODE_SOUND,
+        SESSION_MODE_CAST, SESSION_MODE_INPUT_ONLY, SESSION_MODE_MARKER, SESSION_MODE_PHONE_SOUND,
+        SESSION_MODE_SOUND,
     };
 
     let mut claim = ClientClaim::default();
@@ -2000,9 +2031,13 @@ async fn read_client_config(
             if !read_with_timeout(&mut *stream, &mut mode).await {
                 break;
             }
-            claim.input_only = matches!(mode[0], SESSION_MODE_INPUT_ONLY | SESSION_MODE_CAST);
+            claim.input_only = matches!(
+                mode[0],
+                SESSION_MODE_INPUT_ONLY | SESSION_MODE_CAST | SESSION_MODE_PHONE_SOUND
+            );
             claim.cast = mode[0] == SESSION_MODE_CAST;
             claim.sound = mode[0] == SESSION_MODE_SOUND;
+            claim.phone_sound = mode[0] == SESSION_MODE_PHONE_SOUND;
             info!(mode = mode[0], "Client session mode");
         } else {
             debug!("Unknown config marker: {:02X?}", &marker);
