@@ -583,8 +583,8 @@
     <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask</string>
     <string name="photo_place">Photos keep where they were taken</string>
     <string name="photo_place_off_summary">Off: Android takes the place out of a photo Pocketdesk sends.</string>
-    <string name="photo_place_on_summary">A photo sent from this phone keeps its location, when the photo is on this phone. Only to your computers.</string>
-    <string name="photo_place_needs_permission">Needs the media location permission, taken away since. Photos go without their place.</string>
+    <string name="photo_place_on_summary">A photo sent from this phone keeps its location, when the photo is on this phone. Asks for access to photos.</string>
+    <string name="photo_place_needs_permission">Needs access to all photos, taken away since. Photos go without their place.</string>
     <string name="recent_photos_needs_photos">Pocketdesk needs access to photos for this: turn it on again to allow it</string>
     <string name="recent_photos_needs_access">Needs notification access: allow it below</string>
     <string name="screenshots_needs_access">Needs notification access: allow it below</string>
