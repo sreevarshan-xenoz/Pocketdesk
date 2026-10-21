@@ -396,6 +396,10 @@ pub fn uninstall() -> Result<()> {
     if crate::browser_host::remove().is_ok() {
         println!("Removed the browser extension's host");
     }
+    // M8: tel: links, if they were taken.
+    if crate::tel_handler::run_tel_handler(true).is_err() {
+        println!("Phone numbers' links were not removed");
+    }
     let subkey = HSTRING::from(r"Software\Classes\AppUserModelId\Pocketdesk.Server");
     let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &subkey) };
     Ok(())

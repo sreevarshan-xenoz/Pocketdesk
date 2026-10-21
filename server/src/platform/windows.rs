@@ -9,7 +9,7 @@ use windows::UI::Notifications::{
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-    RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW,
+    RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteTreeW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, OpenProcess, PROCESS_NAME_WIN32,
@@ -315,7 +315,56 @@ pub(super) fn detach_console() {
 
 /// Set the default value of `HKCU\<subkey>` to `value`, making the key.
 pub(crate) fn set_user_default_value(subkey: &str, value: &str) -> windows::core::Result<()> {
+    set_user_value_named(subkey, None, value)
+}
+
+/// Set the string `name` of `HKCU\<subkey>` to `value`, making the key (M8).
+pub(crate) fn set_user_value(subkey: &str, name: &str, value: &str) -> windows::core::Result<()> {
+    set_user_value_named(subkey, Some(name), value)
+}
+
+/// The string `name` of `HKCU\<subkey>` (its default value for `None`), if
+/// it is there (M8).
+#[cfg(test)]
+pub(crate) fn user_value(subkey: &str, name: Option<&str>) -> Option<String> {
     let subkey = HSTRING::from(subkey);
+    let name = name.map(HSTRING::from);
+    let name_ptr = name.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr()));
+    let mut buffer = vec![0u16; 1024];
+    let mut size = (buffer.len() * 2) as u32;
+    let read = unsafe {
+        windows::Win32::System::Registry::RegGetValueW(
+            HKEY_CURRENT_USER,
+            &subkey,
+            name_ptr,
+            windows::Win32::System::Registry::RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if read.is_err() {
+        return None;
+    }
+    let len = (size as usize / 2).saturating_sub(1).min(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..len]))
+}
+
+/// Remove the value `name` of `HKCU\<subkey>`, if it is there (M8).
+pub(crate) fn delete_user_value(subkey: &str, name: &str) {
+    let subkey = HSTRING::from(subkey);
+    let name = HSTRING::from(name);
+    let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, &subkey, &name) };
+}
+
+fn set_user_value_named(
+    subkey: &str,
+    name: Option<&str>,
+    value: &str,
+) -> windows::core::Result<()> {
+    let subkey = HSTRING::from(subkey);
+    let name = name.map(HSTRING::from);
+    let name_ptr = name.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr()));
     let mut key = HKEY::default();
     unsafe {
         RegCreateKeyExW(
@@ -334,7 +383,7 @@ pub(crate) fn set_user_default_value(subkey: &str, value: &str) -> windows::core
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect();
-        let set = RegSetValueExW(key, PCWSTR::null(), None, REG_SZ, Some(&data));
+        let set = RegSetValueExW(key, name_ptr, None, REG_SZ, Some(&data));
         let _ = RegCloseKey(key);
         set.ok()
     }

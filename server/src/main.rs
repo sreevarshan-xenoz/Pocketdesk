@@ -179,6 +179,8 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             std::process::exit(local_api::run_send_to_phone(&paths))
         }
         cli::Commands::SendMenu { remove } => local_api::run_send_menu(remove),
+        cli::Commands::Tel { uri } => std::process::exit(tel_handler::run_tel(&uri)),
+        cli::Commands::TelHandler { remove } => tel_handler::run_tel_handler(remove),
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Events { since_start, json } => local_api::watch(since_start, json),
