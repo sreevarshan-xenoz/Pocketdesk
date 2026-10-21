@@ -13,11 +13,14 @@ use serde_json::json;
 
 use crate::state;
 
-/// The answer for `device_id` from this trust store and config: nothing for
-/// a device not paired, or no store to read.
+/// The answer for `device_id` from this trust store and config: its own
+/// permissions when it is paired, or when this computer does not require
+/// pairing (a device it does not know then runs with the defaults, M2
+/// review); nothing for no store to read, or an unpaired device where
+/// pairing is required (which the packet gate holds back before this).
 pub fn answer(store: Option<&TrustStore>, device_id: &str, config: &Config) -> serde_json::Value {
     match store {
-        Some(store) if store.is_trusted(device_id) => {
+        Some(store) if store.is_trusted(device_id) || !config.pairing_required => {
             phone_switches::allowed_body(&store.permissions(device_id), config)
         }
         _ => json!({ "allowed": {} }),
@@ -98,6 +101,15 @@ mod tests {
             json!({"allowed": {}})
         );
         assert_eq!(answer(None, "phone-a", &config), json!({"allowed": {}}));
+        let open = Config {
+            pairing_required: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            answer(Some(&store), "stranger", &open)["allowed"]["files"],
+            json!({"permission": true, "setting": true}),
+            "without pairing a stranger runs with the defaults"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
