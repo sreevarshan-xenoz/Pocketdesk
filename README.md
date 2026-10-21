@@ -16,8 +16,8 @@ Its live screen under your fingers, its sound, and the clipboard, files, notific
 </p>
 
 <p align="center">
-  <a href="assets/brand/pocketdesk-launch.mp4"><img src="assets/brand/pocketdesk-launch.jpg" alt="Watch the 21-second launch video" width="720"></a><br>
-  <sub>▶ <a href="assets/brand/pocketdesk-launch.mp4">Watch Pocketdesk in 21 seconds</a></sub>
+  <a href="assets/brand/pocketdesk-launch.mp4"><img src="assets/brand/pocketdesk-launch.gif" alt="Pocketdesk in 32 seconds: drive the computer from the phone, the phone's notifications, calls and screen on the computer, files and the clipboard both ways, the computer's state, deck and music on the phone, from anywhere" width="800"></a><br>
+  <sub>▶ <a href="assets/brand/pocketdesk-launch.mp4">Watch it with sound (32 seconds)</a></sub>
 </p>
 
 ## What is Pocketdesk?

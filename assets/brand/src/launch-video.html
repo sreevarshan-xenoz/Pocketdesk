@@ -65,6 +65,31 @@
   .bar-bg { height:14px; border-radius:7px; background:rgba(255,255,255,.12); overflow:hidden; }
   .bar-fg { height:100%; border-radius:7px; }
 
+  /* Phone on the computer */
+  .toastn { position:absolute; width:440px; border-radius:16px; background:rgba(22,28,58,.97);
+     border:1px solid rgba(140,170,255,.28); box-shadow:0 18px 50px rgba(0,0,0,.5); padding:16px 18px; }
+  .toastn .app { font-size:16px; color:#8FD8FF; font-weight:600; }
+  .toastn .ttl { font-size:21px; font-weight:700; margin-top:4px; }
+  .toastn .txt { font-size:18px; color:#c9d3ee; margin-top:2px; }
+  .field { margin-top:12px; height:40px; border-radius:10px; background:rgba(255,255,255,.07);
+     border:1px solid rgba(255,255,255,.14); font-size:18px; color:#eef2ff; padding:0 12px; display:flex; align-items:center; }
+  .btn { display:inline-block; margin-top:10px; margin-right:8px; padding:8px 18px; border-radius:10px; font-size:17px; font-weight:600;
+     background:rgba(255,255,255,.08); color:#d6ddf5; }
+  .btn.lit { background:#2F7BFF; color:#fff; }
+  .appicon { position:absolute; width:58px; height:58px; border-radius:16px; }
+  /* Computer in the hand */
+  .widget { position:absolute; left:22px; right:22px; border-radius:24px; background:rgba(14,20,48,.82);
+     border:1px solid rgba(140,170,255,.22); padding:16px 18px; }
+  .wtitle { font-size:16px; font-weight:600; color:#8FD8FF; }
+  .wrow { display:flex; align-items:center; gap:10px; font-size:16px; color:#c9d3ee; margin-top:9px; }
+  .wrow span { width:70px; }
+  .deckb { display:inline-flex; align-items:center; justify-content:center; width:31%; height:54px; margin:5px 1%;
+     border-radius:14px; background:rgba(255,255,255,.08); font-size:16px; font-weight:600; color:#dfe6ff; }
+  .deckb.lit { background:linear-gradient(90deg,#2F7BFF,#6D5BFF); color:#fff; }
+  .mbtn { display:inline-flex; width:50px; height:50px; border-radius:50%; align-items:center; justify-content:center;
+     background:rgba(255,255,255,.1); font-size:20px; margin-right:12px; color:#eef2ff; }
+  .mbtn.lit { background:#2F7BFF; }
+
   /* Scene 5 */
   .pathlabel { position:absolute; font-size:30px; font-weight:600; white-space:nowrap; transform:translate(-50%,-50%); }
   .badge { position:absolute; padding:16px 30px; border-radius:999px; font-size:28px; font-weight:600;
@@ -117,7 +142,7 @@
   <div id="s2" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
     <div id="word" class="abs">Pocket<span class="grad">desk</span></div>
     <div id="tag" class="abs">YOUR DESKTOP. ANYWHERE.</div>
-    <div id="platforms" class="abs">Windows &amp; Linux &nbsp;→&nbsp; Android</div>
+    <div id="platforms" class="abs">Android &nbsp;⇄&nbsp; Windows &amp; Linux</div>
   </div>
 
   <!-- Scene 3 -->
@@ -155,6 +180,41 @@
     </div>
   </div>
 
+  <!-- New: the phone on the computer -->
+  <div id="sA" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div class="headline" style="top:70px">Your phone, on your <span class="grad">computer</span></div>
+    <div id="mA" class="monitor" style="left:290px;top:205px;width:1340px;height:640px;">
+      <div class="screen" style="inset:16px;border-radius:14px;"><div class="wall"></div>
+        <div class="taskbar"><div class="tb"></div><div class="tb" style="background:#2F7BFF"></div><div class="tb"></div><div class="tb"></div></div>
+        <div id="pwin" class="win" style="left:70px;top:40px;width:270px;height:500px;background:#0b1022;">
+          <div class="wbar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i>&nbsp; Phone</div>
+          <div style="position:absolute;inset:30px 0 0 0;background:linear-gradient(160deg,#243a8f 0%,#3b2a8f 60%,#151c4a 100%);">
+            <div style="position:absolute;left:18px;top:12px;font-size:15px;color:#dfe6ff;font-weight:600;">9:41</div>
+            <div class="appicon" style="left:24px;top:60px;background:#5AD1FF"></div><div class="appicon" style="left:104px;top:60px;background:#FEBC2E"></div><div class="appicon" style="left:184px;top:60px;background:#28C840"></div>
+            <div class="appicon" style="left:24px;top:140px;background:#FF5F57"></div><div class="appicon" style="left:104px;top:140px;background:#7B6CFF"></div><div class="appicon" style="left:184px;top:140px;background:#ffffff55"></div>
+            <div class="appicon" style="left:24px;top:220px;background:#2F7BFF"></div><div class="appicon" style="left:104px;top:220px;background:#ff8a65"></div><div class="appicon" style="left:184px;top:220px;background:#9b5cff"></div>
+          </div>
+        </div>
+        <div id="tmsg" class="toastn" style="right:28px;">
+          <div class="app">Phone · Messages</div>
+          <div class="ttl">Ann</div>
+          <div class="txt">Running late, start without me</div>
+          <div class="field" id="replyf"></div>
+          <span class="btn" id="replyb">Reply</span><span class="btn">Mark as read</span>
+          <div id="sent" style="font-size:16px;color:#5BE38A;font-weight:600;margin-top:8px;">✓ Answered on the phone</div>
+        </div>
+        <div id="tcall" class="toastn" style="right:28px;">
+          <div class="app">Phone · Call</div>
+          <div class="ttl">Call from Ann</div>
+          <span class="btn">Silence</span><span class="btn">Decline</span>
+        </div>
+      </div>
+    </div>
+    <div id="chipsA" class="abs" style="left:0;right:0;top:885px;display:flex;justify-content:center;gap:22px;">
+      <span class="chip" id="a-note">Notifications</span><span class="chip" id="a-ans">Answers</span><span class="chip" id="a-scr">Its screen</span><span class="chip" id="a-call">Calls</span>
+    </div>
+  </div>
+
   <!-- Scene 4 -->
   <div id="s4" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
     <div class="headline" style="top:70px">Everything moves <span class="grad">both ways</span></div>
@@ -188,6 +248,43 @@
     </div>
   </div>
 
+  <!-- New: the computer in the hand -->
+  <div id="sB" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
+    <div class="headline" style="top:70px">Your computer, in your <span class="grad">hand</span></div>
+    <div id="pB" class="phone" style="left:740px;top:190px;width:440px;height:820px;">
+      <div class="screen"><div class="wall"></div>
+        <div class="widget" style="top:36px;">
+          <div class="wtitle">How it is doing</div>
+          <div class="wrow"><span>CPU</span><div class="bar-bg" style="flex:1"><div class="bar-fg" id="wcpu" style="background:#5AD1FF"></div></div></div>
+          <div class="wrow"><span>Memory</span><div class="bar-bg" style="flex:1"><div class="bar-fg" id="wmem" style="background:#7B6CFF"></div></div></div>
+          <div class="wrow"><span>Disk</span><div class="bar-bg" style="flex:1"><div class="bar-fg" id="wdisk" style="background:#28C840"></div></div></div>
+        </div>
+        <div class="widget" style="top:212px;">
+          <div class="wtitle">Deck</div>
+          <div style="margin-top:6px;">
+            <span class="deckb">Mute mic</span><span class="deckb" id="dk-next">Next slide</span><span class="deckb">Build</span>
+            <span class="deckb">Docs</span><span class="deckb">Sign-off</span><span class="deckb">Lights</span>
+          </div>
+          <div id="dk-said" style="font-size:15px;color:#5BE38A;margin-top:4px;">✓ Next slide</div>
+        </div>
+        <div class="widget" style="top:438px;">
+          <div class="wtitle">Playing on the computer</div>
+          <div style="font-size:19px;font-weight:700;margin-top:6px;">Focus mix</div>
+          <div style="margin-top:12px;"><span class="mbtn">⏮</span><span class="mbtn" id="mplay">⏸</span><span class="mbtn">⏭</span></div>
+        </div>
+        <div id="ripB" class="ripple"></div>
+      </div>
+    </div>
+    <div id="chipsB" class="abs" style="left:0;right:0;top:1022px;display:flex;justify-content:center;gap:22px;transform:translateY(-120px);">
+    </div>
+    <div id="sideB" class="abs" style="left:1260px;top:380px;width:420px;">
+      <div class="chip" id="b-wid" style="margin:10px 0;">Home-screen widgets</div><br>
+      <div class="chip" id="b-deck" style="margin:10px 0;">A deck of your buttons</div><br>
+      <div class="chip" id="b-rem" style="margin:10px 0;">Remote and air mouse</div><br>
+      <div class="chip" id="b-pen" style="margin:10px 0;">Pen and gamepad</div>
+    </div>
+  </div>
+
   <!-- Scene 5 -->
   <div id="s5" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
     <div class="headline" style="top:70px">From <span class="grad">anywhere</span></div>
@@ -211,7 +308,7 @@
   <div id="s6" class="abs" style="left:0;top:0;width:1920px;height:1080px;">
     <div id="word6" class="abs" style="font-size:132px;font-weight:800;letter-spacing:-3px;white-space:nowrap;left:50%;top:600px;transform:translateX(-50%);">Pocket<span class="grad">desk</span></div>
     <div id="tag6" class="abs" style="font-size:28px;font-weight:500;letter-spacing:14px;color:#c9d3ee;white-space:nowrap;left:50%;top:770px;transform:translateX(-50%);">YOUR DESKTOP. ANYWHERE.</div>
-    <div id="url6" class="abs" style="font-size:30px;font-weight:600;color:#dfe6ff;white-space:nowrap;left:50%;top:860px;transform:translateX(-50%);">Open source &nbsp;·&nbsp; <span style="color:#8FD8FF">github.com/sreevarshan-xenoz/Pocketdesk</span></div>
+    <div id="url6" class="abs" style="font-size:30px;font-weight:600;color:#dfe6ff;white-space:nowrap;left:50%;top:860px;transform:translateX(-50%);">Open source &nbsp;·&nbsp; Android, Windows, Linux &nbsp;·&nbsp; <span style="color:#8FD8FF">github.com/sreevarshan-xenoz/Pocketdesk</span></div>
   </div>
 </div>
 
@@ -230,7 +327,7 @@ function show(el, op, extra='') { el.style.opacity = op; el.style.display = op <
 const S = [0, 3.0, 6.2, 10.6, 15.0, 18.2, 21.0];
 const TERM = 'C:\\work> cargo run';
 
-function render(t) {
+function oldRender(t) {
   // ----- background glow drifts gently
   $('glow').style.transform = `translate(${Math.sin(t*.45)*60}px, ${Math.cos(t*.35)*30}px)`;
 
@@ -403,7 +500,89 @@ function render(t) {
     $('url6').style.opacity = eo(seg(t, 18.9, 19.25));
   }
 }
+// The film: the first cut's scenes, with two new ones between them.
+// [0, 10.6) first cut as it was; [10.6, 16.2) the phone on the computer;
+// [16.2, 20.6) first cut's "both ways"; [20.6, 25.4) the computer in the
+// hand; [25.4, 31.6) first cut's "from anywhere" and outro.
+const DUR = 31.6;
+function render(t) {
+  let old = t;
+  if (t >= 10.6 && t < 16.2) old = 10.6;          // nothing of the first cut shows
+  else if (t >= 16.2 && t < 20.6) old = t - 5.6;
+  else if (t >= 20.6 && t < 25.4) old = 10.6;
+  else if (t >= 25.4) old = t - 10.4;
+  oldRender(old);
+  $('glow').style.transform = `translate(${Math.sin(t*.45)*60}px, ${Math.cos(t*.35)*30}px)`;
+  sceneA(t - 10.6);
+  sceneB(t - 20.6);
+}
+
+function sceneA(u) {
+  const a = env(u, 0, 5.6);
+  show($('sA'), a, `scale(${lerp(0.97, 1, eo(seg(u, 0, .5)))})`);
+  if (a <= 0) return;
+  $('mA').style.transform = `translateY(${lerp(30, 0, eo(seg(u, 0, .6)))}px)`;
+  // The message's toast slides in, a reply is typed and answered on the phone.
+  const ti = eo(seg(u, .4, .8));
+  const tmsg = $('tmsg');
+  tmsg.style.bottom = lerp(40, 70, ti) + 'px'; tmsg.style.opacity = Math.min(ti, 1 - seg(u, 3.3, 3.6));
+  const reply = 'No problem!';
+  const typed = Math.floor(clamp((u - 1.0) / 0.08, 0, reply.length));
+  $('replyf').textContent = reply.slice(0, typed) + (u > 1.0 && u < 2.0 && Math.floor(u * 3) % 2 === 0 ? '▏' : '');
+  $('replyb').className = 'btn' + (u > 2.0 && u < 2.3 ? ' lit' : '');
+  $('sent').style.opacity = eo(seg(u, 2.2, 2.45));
+  // Its screen, in a window of its own.
+  const pw = eo(seg(u, 2.6, 3.2));
+  const pwin = $('pwin');
+  pwin.style.opacity = pw; pwin.style.transform = `translateY(${lerp(30, 0, pw)}px) scale(${lerp(.92, 1, pw)})`;
+  // A call comes in.
+  const ci = eo(seg(u, 3.6, 4.0));
+  const tcall = $('tcall');
+  tcall.style.bottom = lerp(40, 70, ci) + 'px'; tcall.style.opacity = ci;
+  tcall.style.transform = `translateX(${Math.sin(u * 40) * 3 * (u > 3.9 && u < 4.6 ? 1 : 0)}px)`;
+  const on = u < 1.0 ? 'a-note' : u < 2.6 ? 'a-ans' : u < 3.6 ? 'a-scr' : 'a-call';
+  for (const id of ['a-note','a-ans','a-scr','a-call']) $(id).className = 'chip' + (id === on ? ' on' : '');
+  $('chipsA').style.opacity = eo(seg(u, .3, .7));
+}
+
+function sceneB(u) {
+  const b = env(u, 0, 4.8);
+  show($('sB'), b, `scale(${lerp(0.97, 1, eo(seg(u, 0, .5)))})`);
+  if (b <= 0) return;
+  $('pB').style.transform = `translateY(${lerp(40, 0, eo(seg(u, 0, .6)))}px)`;
+  // The computer's state, read now and again.
+  const w = eo(seg(u, .4, 1.2));
+  const wob = Math.sin(u * 2.2) * 4;
+  $('wcpu').style.width = (w * (34 + wob)) + '%';
+  $('wmem').style.width = (w * 58) + '%';
+  $('wdisk').style.width = (w * 71) + '%';
+  // A deck button pressed.
+  const tap = seg(u, 1.6, 2.0);
+  const rip = $('ripB'); const rr = lerp(10, 60, eo(tap));
+  const tapx = 210, tapy = 300;
+  const mtap = seg(u, 2.7, 3.1);
+  const mrr = lerp(10, 50, eo(mtap));
+  if (u < 2.5) {
+    rip.style.left = (tapx - rr) + 'px'; rip.style.top = (tapy - rr) + 'px'; rip.style.width = rip.style.height = (2*rr) + 'px';
+    rip.style.opacity = tap > 0 && tap < 1 ? 1 - tap : 0;
+  } else {
+    rip.style.left = (133 - mrr) + 'px'; rip.style.top = (548 - mrr) + 'px'; rip.style.width = rip.style.height = (2*mrr) + 'px';
+    rip.style.opacity = mtap > 0 && mtap < 1 ? 1 - mtap : 0;
+  }
+  $('dk-next').className = 'deckb' + (u > 1.6 && u < 2.1 ? ' lit' : '');
+  $('dk-said').style.opacity = eo(seg(u, 1.9, 2.2));
+  $('mplay').textContent = u > 2.8 ? '▶' : '⏸';
+  $('mplay').className = 'mbtn' + (u > 2.7 && u < 3.0 ? ' lit' : '');
+  // What else the phone does for the computer.
+  const ids = ['b-wid','b-deck','b-rem','b-pen'];
+  ids.forEach((id, i) => {
+    const e = eo(seg(u, .5 + i * .45, .85 + i * .45));
+    $(id).style.opacity = e; $(id).style.transform = `translateX(${lerp(30, 0, e)}px)`;
+    $(id).className = 'chip' + ((u < 2.1 && i === 1) || (u >= 2.1 && u < 3.2 && i === 0) ? ' on' : '');
+  });
+}
 window.render = render;
+window.DUR = DUR;
 render(0);
 </script>
 </body></html>

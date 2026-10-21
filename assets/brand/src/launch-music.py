@@ -7,7 +7,7 @@ import numpy as np
 import wave
 
 SR = 44100
-DUR = 21.0
+DUR = 31.6
 N = int(SR * DUR)
 BPM = 112
 BEAT = 60 / BPM
@@ -133,45 +133,50 @@ for b in range(bars):
     start = b * BAR
     c = b % 4
     # The outro lands back on F.
-    if start >= 18.2 - 0.01 and start < 19.5:
+    if start >= 28.6 - 0.01 and start < 29.9:
         c = 0
     for note in CHORDS[c]:
         add(music, start, pad_voice(note, BAR + 0.8), 0.22, pan=rng.uniform(-.4, .4))
     if start + BAR > GROOVE:
         for beat in (0, 2):
             at = start + beat * BEAT
-            if GROOVE <= at < 20.2:
+            if GROOVE <= at < 30.8:
                 n = int(BEAT * 1.8 * SR); tt = np.arange(n) / SR
                 bass = np.sin(2 * np.pi * hz(ROOTS[c]) * tt) + 0.25 * np.sin(2 * np.pi * 2 * hz(ROOTS[c]) * tt)
                 add(music, at, bass * np.exp(-tt * 2.2) * np.minimum(1, tt * 200), 0.28)
     for step in range(8):
         at = start + step * BEAT / 2
-        if at < 0.25 or at > 20.3:
+        if at < 0.25 or at > 30.9:
             continue
         note = ARP[c][[0, 1, 2, 3, 2, 1, 2, 3][step]]
         quiet = 0.45 if at < GROOVE else 1.0
         add(music, at, pluck(note), 0.075 * quiet, pan=(-.35 if step % 2 else .35))
     for beat in range(4):
         at = start + beat * BEAT
-        if GROOVE <= at < 20.2:
+        if GROOVE <= at < 30.8:
             add(music, at, kick(), 0.42)
         off = at + BEAT / 2
-        if 6.2 <= off < 20.2:
+        if 6.2 <= off < 30.8:
             add(music, off, shaker(), 0.05, pan=.25)
 
 # Effects, in key, on the same reverb bus.
 add(fx, 1.92, thud(), 0.55)
 for note, dt in ((77, 0.0), (81, 0.06), (84, 0.12)):   # F5 A5 C6: the window lands
     add(fx, 1.95 + dt, bell(note), 0.11, pan=.1)
-for at in (6.15, 10.55, 14.95, 18.1):
+for at in (6.15, 10.55, 16.15, 20.55, 25.35, 28.5):
     add(fx, at - 0.35, whoosh(0.7), 0.05)
 add(fx, 3.35, whoosh(0.6), 0.04)
-for at, note in ((6.95, 84), (9.5, 81), (11.75, 84), (12.6, 88), (12.95, 89), (15.5, 84), (15.85, 89), (16.2, 93)):
+for at, note in ((6.95, 84), (9.5, 81),
+                 (11.0, 84), (12.0, 81), (13.2, 88), (14.2, 81), (14.45, 81),   # the phone on the computer
+                 (17.35, 84), (18.2, 88), (18.55, 89),                          # both ways
+                 (22.2, 84), (23.3, 88),                                        # the computer in the hand
+                 (25.9, 84), (26.25, 89), (26.6, 93)):                          # from anywhere
     add(fx, at, pluck(note, 0.35, bright=.6), 0.07, pan=rng.uniform(-.3, .3))
-add(fx, 13.55, pluck(62, 0.5, bright=.3), 0.09)     # the break: a low D
-add(fx, 14.55, bell(89, 1.2), 0.09)                  # saved: F6
+add(fx, 12.8, bell(89, 1.0), 0.07)                   # answered on the phone
+add(fx, 19.15, pluck(62, 0.5, bright=.3), 0.09)     # the break: a low D
+add(fx, 20.15, bell(89, 1.2), 0.09)                  # saved: F6
 for note in (65, 69, 72, 77):                          # the outro swell
-    add(fx, 18.2, pad_voice(note + 12, 2.6), 0.07)
+    add(fx, 28.6, pad_voice(note + 12, 2.6), 0.07)
 
 dry = music + fx
 
