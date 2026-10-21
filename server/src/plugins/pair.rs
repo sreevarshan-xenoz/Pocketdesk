@@ -84,6 +84,55 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a pairing is someone else's phone (M2b): its code said so, or
+/// a PIN this computer showed for the phone's own ask ("Show PIN on
+/// desktop") while the Pair page's live code says someone else's or a
+/// guest's (M2 review: the owner's choice holds whichever way the phone
+/// pairs).
+fn someone_else_for(
+    matched: Option<&local_pin::FilePin>,
+    matches_pending: bool,
+    live: Option<&local_pin::FilePin>,
+) -> bool {
+    match matched {
+        Some(file) => file.someone_else,
+        None => {
+            matches_pending
+                && live.is_some_and(|file| file.someone_else || file.grant_secs.is_some())
+        }
+    }
+}
+
+/// The permissions a pairing sets (M2b), or `None` to leave them: someone
+/// else's phone, and every new guest, sends files and links only; the
+/// owner's own phone keeps what it has (the defaults when new), a computer
+/// its own narrow set (2f), and a guest grant on a phone already paired
+/// changes nothing (that phone stays as it was). A paired phone (`current`)
+/// paired again as someone else's keeps only what both allow, so nothing
+/// the owner turned off comes back on (M2 review).
+fn preset_permissions(
+    guest: bool,
+    someone_else: bool,
+    computer: bool,
+    current: Option<&DevicePermissions>,
+) -> Option<DevicePermissions> {
+    let narrow = if computer {
+        false
+    } else if guest {
+        current.is_none()
+    } else {
+        someone_else
+    };
+    if !narrow {
+        return None;
+    }
+    let preset = DevicePermissions::someone_else();
+    Some(match current {
+        Some(current) => current.narrowed_to(&preset),
+        None => preset,
+    })
+}
+
 /// Is `device_id` one of the owner's other computers (2f)?
 pub fn is_computer_device(device_id: &str) -> bool {
     let Ok(path) = state::trust_store_path() else {
@@ -883,9 +932,13 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // R4 D3: only a CLI PIN can carry a scoped grant; the push flow (a PIN
     // this desktop generated itself) keeps trusting permanently.
     // Matching spends it, in one step.
-    let cli_grant: Option<Option<u64>> = cli_pin()
-        .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix))
-        .map(|cli| cli.grant_secs);
+    let live = cli_pin();
+    let cli = live
+        .clone()
+        .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
+    let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
+    // M2b: the Pair page said the phone is someone else's.
+    let someone_else = someone_else_for(cli.as_ref(), matches_pending, live.as_ref());
     let matches_cli = cli_grant.is_some();
 
     if matches_pending || matches_cli {
@@ -902,9 +955,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         let grant_secs = cli_grant.flatten();
-        // A guest grant binds the key that paired before anything is
-        // trusted, and never claims an id another phone has proved.
-        if grant_secs.is_some()
+        // A guest grant, and someone else's phone (M2 review), binds the key
+        // that paired before anything is trusted, and never claims an id
+        // another phone has proved: only the owner's own code may.
+        if (grant_secs.is_some() || someone_else)
             && let Ok(dir) = state::state_dir()
             && !guest_may_pair_in(
                 &dir,
@@ -914,7 +968,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             )
         {
             tracing::warn!(
-                "Guest pairing refused: {phone_id} is the id of a phone with another key"
+                "Pairing refused: {phone_id} is the id of a phone with another key, and only the owner's own code may take it"
             );
             respond_pair(sender, false, "").await;
             return;
@@ -923,7 +977,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // B), replacing any older one (perhaps a reinstalled phone's), before
         // anything is trusted: a pairing that cannot bind fails, rather than
         // trusting an id with stale keys or none.
-        if grant_secs.is_none() {
+        if grant_secs.is_none() && !someone_else {
             let bound = state::state_dir()
                 .map_err(|e| std::io::Error::other(e.to_string()))
                 .and_then(|dir| owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref()));
@@ -939,6 +993,18 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         let computer = grant_secs.is_none()
             && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
+            let was_trusted = store.is_trusted(&phone_id);
+            // The permissions before the trust (M2 review): a write that fails
+            // between them leaves an untrusted id's entry, which the store
+            // drops as it loads, never a phone trusted with the defaults.
+            if let Some(permissions) = preset_permissions(
+                grant_secs.is_some(),
+                someone_else,
+                computer,
+                was_trusted.then(|| store.permissions(&phone_id)).as_ref(),
+            ) {
+                store.set_permissions(&phone_id, permissions)?;
+            }
             match grant_secs {
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
@@ -1072,6 +1138,52 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_pin_shown_for_the_phone_follows_the_pair_pages_choice() {
+        let file = |someone_else, grant_secs| local_pin::FilePin {
+            pin: "123456".to_string(),
+            minted_unix: 0,
+            grant_secs,
+            someone_else,
+        };
+        // The code itself says it.
+        assert!(someone_else_for(Some(&file(true, None)), false, None));
+        assert!(!someone_else_for(Some(&file(false, None)), false, None));
+        // A PIN shown for the phone, while the page's code is someone else's or a guest's.
+        assert!(someone_else_for(None, true, Some(&file(true, None))));
+        assert!(someone_else_for(None, true, Some(&file(false, Some(900)))));
+        assert!(!someone_else_for(None, true, Some(&file(false, None))));
+        assert!(!someone_else_for(None, true, None));
+    }
+
+    #[test]
+    fn a_pairing_sets_narrow_permissions_for_someone_else_and_new_guests() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let narrow = Some(DevicePermissions::someone_else());
+        let mine = DevicePermissions::default();
+        // The owner's own phone: as it was.
+        assert_eq!(preset_permissions(false, false, false, None), None);
+        assert_eq!(preset_permissions(false, false, false, Some(&mine)), None);
+        // Someone else's: narrow when new.
+        assert_eq!(preset_permissions(false, true, false, None), narrow);
+        // Paired again as someone else's: narrowed, never widened.
+        let mut no_links = DevicePermissions::default();
+        no_links.set(Capability::Links, false);
+        let again = preset_permissions(false, true, false, Some(&no_links)).unwrap();
+        assert!(again.allows(Capability::Files));
+        assert!(
+            !again.allows(Capability::Links),
+            "the owner's off stays off"
+        );
+        assert!(!again.allows(Capability::Input));
+        assert!(again.ask_first);
+        // A guest: narrow when new; a phone already paired keeps its own.
+        assert_eq!(preset_permissions(true, false, false, None), narrow);
+        assert_eq!(preset_permissions(true, true, false, Some(&mine)), None);
+        // A computer keeps its own set.
+        assert_eq!(preset_permissions(false, true, true, None), None);
+    }
     use super::*;
 
     /// U3: a paired phone's name, from its identity, is kept cleaned; a
@@ -1668,6 +1780,8 @@ forged log line"
             "kdeconnect.pocketdesk.system",
             // A link's role (L8 part 2): it only narrows what the link is for.
             "kdeconnect.pocketdesk.link_role",
+            // M2a: a phone asks what it is allowed; it is told only about itself.
+            "kdeconnect.pocketdesk.allowed",
             // Which of its features a phone has on (L7): status about the
             // phone itself, as its battery is, booleans only.
             "kdeconnect.pocketdesk.switches",

@@ -107,6 +107,7 @@ fun HomeScreen(
     var historyFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var deckFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     LaunchedEffect(hosts) {
         // The names the computers gave themselves on this run's connections.
@@ -390,6 +391,7 @@ fun HomeScreen(
                         onHistory = { historyFor = host },
                         onDeck = { deckFor = host },
                         onState = { stateFor = host },
+                        onAllowed = { allowedFor = host },
                     )
                 }
                 item {
@@ -534,6 +536,16 @@ fun HomeScreen(
             controlPort = host.controlPort,
             computer = HostStore.shownName(context, host.address),
             onDismiss = { stateFor = null },
+        )
+    }
+
+    // M2a: what the computer allows this phone.
+    allowedFor?.let { host ->
+        AllowedSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            onDismiss = { allowedFor = null },
         )
     }
 
@@ -706,6 +718,7 @@ private fun HostCard(
     onHistory: () -> Unit,
     onDeck: () -> Unit,
     onState: () -> Unit,
+    onAllowed: () -> Unit,
 ) {
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
@@ -748,6 +761,8 @@ private fun HostCard(
                         val upkeep = listOf(
                             R.string.wake_settings to onWakeSettings,
                             R.string.doctor_title to onCheck,
+                            // M2a: both sides of each feature.
+                            R.string.card_allowed to onAllowed,
                             R.string.card_rename to onRename,
                         )
                         uses.forEach { (label, action) ->

@@ -10,7 +10,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.battery.request` | yes |  | none (any paired phone) | battery |
 | `kdeconnect.clipboard` | yes | yes | Clipboard | clipboard |
 | `kdeconnect.clipboard.connect` | yes |  | Clipboard | clipboard |
-| `kdeconnect.filebrowse.request` | yes |  | Files | filebrowse |
+| `kdeconnect.filebrowse.request` | yes |  | Browse | filebrowse |
 | `kdeconnect.filebrowse.response` |  | yes |  | filebrowse |
 | `kdeconnect.findmydevice` | yes | yes | none (any paired phone) | siren, server |
 | `kdeconnect.identity` | yes |  | none (any phone: pairing) | pair |
@@ -22,6 +22,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.notification.reply` |  | yes |  | notification |
 | `kdeconnect.notification.request` | yes | yes | none (any paired phone) | notification |
 | `kdeconnect.pair` | yes | yes | none (any phone: pairing) | pair |
+| `kdeconnect.pocketdesk.allowed` | yes | yes | none (any paired phone) | allowed |
 | `kdeconnect.pocketdesk.audio` | yes | yes | Audio | audio_control |
 | `kdeconnect.pocketdesk.clipboard_image` | yes |  | Clipboard | clipboard |
 | `kdeconnect.pocketdesk.clipboard_image_fetch` | yes |  | Clipboard | clipboard |
@@ -37,7 +38,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.file_fetch_refused` |  | yes |  | clipboard, share |
 | `kdeconnect.pocketdesk.file_offer` |  | yes |  | share |
 | `kdeconnect.pocketdesk.file_offer_declined` | yes |  | Files | share |
-| `kdeconnect.pocketdesk.folder_fetch` | yes |  | Files | share |
+| `kdeconnect.pocketdesk.folder_fetch` | yes |  | Browse | share |
 | `kdeconnect.pocketdesk.folder_fetch_reply` |  | yes |  | share |
 | `kdeconnect.pocketdesk.hyprland.event` |  | yes |  | server |
 | `kdeconnect.pocketdesk.hyprland.state` |  | yes |  | server |

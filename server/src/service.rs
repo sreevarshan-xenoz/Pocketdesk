@@ -1625,7 +1625,14 @@ pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn pair(pin: Option<String>, grant: Option<u64>, json: bool) -> Result<()> {
+pub async fn pair(
+    pin: Option<String>,
+    grant: Option<u64>,
+    someone_else: bool,
+    json: bool,
+) -> Result<()> {
+    // A guest's phone is someone else's too (M2b): the server narrows it either way.
+    let someone_else = someone_else || grant.is_some();
     let pin_value = match pin {
         Some(value) => {
             if !local_pin::is_valid(&value) {
@@ -1639,7 +1646,7 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>, json: bool) -> Result
     // R4 D3: an optional grant (secs) caps how long pairing with this PIN
     // trusts the phone — the PIN file itself still lives 5 minutes.
     let dir = state::state_dir()?;
-    local_pin::write(&dir, &pin_value, local_pin::now_unix(), grant)
+    local_pin::write_preset(&dir, &pin_value, local_pin::now_unix(), grant, someone_else)
         .with_context(|| format!("failed to write the PIN file in {}", dir.display()))?;
     let path = state::pair_pin_path()?;
 
@@ -1648,6 +1655,7 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>, json: bool) -> Result
             "pin": pin_value,
             "valid_secs": local_pin::PIN_TTL.as_secs(),
             "grant_secs": grant,
+            "someone_else": someone_else,
         })));
         return Ok(());
     }
@@ -1662,6 +1670,11 @@ pub async fn pair(pin: Option<String>, grant: Option<u64>, json: bool) -> Result
             "Stored at {} (valid 5 minutes, for one phone)",
             path.display()
         ),
+    }
+    if someone_else {
+        println!(
+            "The phone may send files and links only, and its sessions ask you first; change it on the desktop app's Devices page."
+        );
     }
     Ok(())
 }

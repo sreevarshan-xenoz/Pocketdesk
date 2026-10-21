@@ -210,7 +210,7 @@ impl PhotosView {
                 self.waiting = None;
                 self.notice = crate::notice::Notice::error(
                     "The phone did not answer. Turn on \"Recent photos on the computer\" in \
-                     Pocketdesk's Settings on the phone, and \"Send and browse files\" for it in Devices.",
+                     Pocketdesk's Settings on the phone, and \"Send files\" for it in Devices.",
                 );
             }
         }
@@ -233,7 +233,7 @@ impl PhotosView {
             let take = ui
                 .add_enabled(reaches, egui::Button::new("Take a photo with the phone"))
                 .on_hover_text("The phone shows a notification that opens its camera; the photo comes here as a received file.")
-                .on_disabled_hover_text("The phone is not linked now with \"Send and browse files\": open Pocketdesk on the phone, with \"Photos the computer asks for\" on in its Settings.");
+                .on_disabled_hover_text("The phone is not linked now with \"Send files\": open Pocketdesk on the phone, with \"Photos the computer asks for\" on in its Settings.");
             if take.clicked() && self.ask(state_dir, phone, Ask::Take, now_unix)
             {
                 self.notice = crate::notice::Notice::done(

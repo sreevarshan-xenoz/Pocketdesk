@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 19] = [
+const PERMISSIONS: [(Capability, &str, &str); 20] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -104,8 +104,13 @@ const PERMISSIONS: [(Capability, &str, &str); 19] = [
     ),
     (
         Capability::Files,
-        "Send and browse files",
-        "Send files to this computer and list its folders.",
+        "Send files",
+        "Send files to this computer, and share the phone's own folders and photos here.",
+    ),
+    (
+        Capability::Browse,
+        "Browse this computer's files",
+        "List this computer's folders from the phone and download from them.",
     ),
     (
         Capability::Audio,
@@ -3091,7 +3096,7 @@ mod tests {
         for feature in crate::model::FEATURES {
             let label = super::PERMISSIONS
                 .iter()
-                .find(|(c, _, _)| *c == feature.permission)
+                .find(|(c, _, _)| *c == feature.permission())
                 .map(|(_, label, _)| *label);
             assert_eq!(label, Some(feature.permission_name), "{}", feature.key);
         }

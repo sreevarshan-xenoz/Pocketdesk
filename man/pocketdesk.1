@@ -126,11 +126,14 @@ both are mutually exclusive.
 .B connect \fIPEER\fR [\-\-port \fIPORT\fR]
 Connect to a peer and perform a basic control\-channel handshake
 .TP
-.B pair [\fIPIN\fR] [\-\-grant \fIDURATION\fR] [\-\-json]
+.B pair [\fIPIN\fR] [\-\-grant \fIDURATION\fR] [\-\-someone\-else] [\-\-json]
 Set or generate a temporary 6\-digit pairing PIN;
 .B \-\-grant
 (s/m/h/d, e.g. 15m, 1h30m) puts a time limit on the trust the PIN grants, for
-one\-off support sessions
+one\-off support sessions; the phone may send files and links only, and its
+sessions ask first;
+.B \-\-someone\-else
+pairs it so for good
 .TP
 .B unpair [\fIDEVICE\-ID\fR] [\-\-json]
 Remove a paired device from the trust store (all devices if omitted)

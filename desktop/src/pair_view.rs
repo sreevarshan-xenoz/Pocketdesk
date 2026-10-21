@@ -12,16 +12,52 @@ use pocketdesk_core::local::{identity, network, pin};
 
 use crate::model::Device;
 
+/// Whose phone the next code pairs (M2b): the owner's, someone else's
+/// (files and links only), or a guest's for a while (I3), which is someone
+/// else's too.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Whose {
+    /// A guest's seconds; None pairs for good.
+    pub grant_secs: Option<u64>,
+    pub someone_else: bool,
+}
+
+impl Whose {
+    pub const MINE: Self = Self {
+        grant_secs: None,
+        someone_else: false,
+    };
+    pub const SOMEONE_ELSE: Self = Self {
+        grant_secs: None,
+        someone_else: true,
+    };
+
+    pub const fn guest(secs: u64) -> Self {
+        Self {
+            grant_secs: Some(secs),
+            someone_else: true,
+        }
+    }
+
+    fn of(file: &pin::FilePin) -> Self {
+        Self {
+            grant_secs: file.grant_secs,
+            // A guest's code from an older `pair --grant` says nothing, and
+            // pairs as someone else's all the same (M2 review).
+            someone_else: file.someone_else || file.grant_secs.is_some(),
+        }
+    }
+}
+
 /// The link for a phone to scan now: reuses a PIN that is still valid and
-/// pairs for `grant_secs` (so the code on screen does not change under the
-/// camera), mints one otherwise. `grant_secs` is a guest's time (I3); None
-/// pairs for good.
+/// pairs as `whose` says (so the code on screen does not change under the
+/// camera), mints one otherwise.
 pub fn link_for(
     state_dir: &Path,
     config: &Config,
     now_unix: u64,
     addresses: Vec<String>,
-    grant_secs: Option<u64>,
+    whose: Whose,
 ) -> io::Result<PairLink> {
     let addresses = order_addresses(addresses);
     if addresses.is_empty() {
@@ -30,11 +66,17 @@ pub fn link_for(
             "this computer has no network address a phone could reach",
         ));
     }
-    let pin = match pin::read(state_dir, now_unix).filter(|f| f.grant_secs == grant_secs) {
+    let pin = match pin::read(state_dir, now_unix).filter(|f| Whose::of(f) == whose) {
         Some(file) => file.pin,
         None => {
             let pin = pin::mint_value();
-            pin::write(state_dir, &pin, now_unix, grant_secs)?;
+            pin::write_preset(
+                state_dir,
+                &pin,
+                now_unix,
+                whose.grant_secs,
+                whose.someone_else,
+            )?;
             pin
         }
     };
@@ -166,33 +208,30 @@ pub struct PairView {
     /// only once it answers, on this thread, so a tab left mid-lookup leaves
     /// no PIN behind.
     lookup: Option<mpsc::Receiver<Vec<String>>>,
-    /// How long the code pairs a phone: None for good, else a guest's
-    /// seconds (I3), as `pocketdesk pair --grant` does.
-    grant_secs: Option<u64>,
-    /// The owner chose another time since the code on screen was made.
-    grant_chosen: bool,
+    /// Whose phone the code pairs (M2b), and for how long (I3), as
+    /// `pocketdesk pair --grant` does.
+    whose: Whose,
+    /// The owner chose again since the code on screen was made.
+    whose_chosen: bool,
 }
 
-/// The time the next code pairs for: the owner's choice just made, else a
+/// Whose phone the next code pairs: the owner's choice just made, else a
 /// live code on file's own (one `pocketdesk pair --grant` wrote while the
 /// page was open is kept, not replaced; I3 review), else the view's.
-pub fn grant_for(
-    chosen_now: bool,
-    view: Option<u64>,
-    on_file: Option<&pin::FilePin>,
-) -> Option<u64> {
+pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) -> Whose {
     match on_file {
-        Some(file) if !chosen_now => file.grant_secs,
+        Some(file) if !chosen_now => Whose::of(file),
         _ => view,
     }
 }
 
-/// The choices for how long a code pairs a phone (I3).
-const GRANTS: [(Option<u64>, &str); 4] = [
-    (None, "For good"),
-    (Some(15 * 60), "For 15 minutes"),
-    (Some(60 * 60), "For an hour"),
-    (Some(24 * 60 * 60), "For a day"),
+/// The choices of whose phone a code pairs (M2b), a guest's for a while (I3).
+const WHOSE: [(Whose, &str); 5] = [
+    (Whose::MINE, "Mine"),
+    (Whose::SOMEONE_ELSE, "Someone else's"),
+    (Whose::guest(15 * 60), "A guest's, for 15 minutes"),
+    (Whose::guest(60 * 60), "A guest's, for an hour"),
+    (Whose::guest(24 * 60 * 60), "A guest's, for a day"),
 ];
 
 impl PairView {
@@ -201,10 +240,10 @@ impl PairView {
     /// is looking at; a fresh look starts over.
     pub fn reset(&mut self, state_dir: &Path) {
         self.withdraw(state_dir);
-        // The choice of how long it pairs stays for the next code.
-        let grant_secs = self.grant_secs;
+        // The choice of whose phone it pairs stays for the next code.
+        let whose = self.whose;
         *self = Self::default();
-        self.grant_secs = grant_secs;
+        self.whose = whose;
     }
 
     /// Whether the app should refresh its snapshot now (asked once).
@@ -332,23 +371,32 @@ impl PairView {
                     "In the Pocketdesk app, tap \"Scan pairing code\" and point the camera here.",
                 );
                 ui.add_space(10.0);
-                // A guest's phone pairs for a while (I3); Devices counts it down.
-                let mut chosen = self.grant_secs;
+                // M2b: someone else's phone, or a guest's for a while (I3,
+                // Devices counts it down), pairs with files and links only.
+                let mut chosen = self.whose;
                 ui.horizontal(|ui| {
-                    ui.label("This code pairs the phone");
-                    let shown = GRANTS
+                    ui.label("Whose phone is it?");
+                    let shown = WHOSE
                         .iter()
-                        .find(|(secs, _)| *secs == chosen)
-                        .map_or("For good", |(_, label)| label);
+                        .find(|(whose, _)| *whose == chosen)
+                        .map_or("Mine", |(_, label)| label);
                     egui::ComboBox::from_id_salt("pair-grant")
                         .selected_text(shown)
                         .show_ui(ui, |ui| {
-                            for (secs, label) in GRANTS {
-                                ui.selectable_value(&mut chosen, secs, label);
+                            for (whose, label) in WHOSE {
+                                ui.selectable_value(&mut chosen, whose, label);
                             }
                         });
                 });
-                if chosen != self.grant_secs {
+                if chosen.someone_else {
+                    ui.label(
+                        RichText::new(
+                            "It may send files and links only. Change what it may do on Devices.",
+                        )
+                        .small(),
+                    );
+                }
+                if chosen != self.whose {
                     grant_changed = Some(chosen);
                 }
                 ui.add_space(6.0);
@@ -403,8 +451,8 @@ impl PairView {
         // Another choice of time: this code goes, and one for it is made.
         if let Some(chosen) = grant_changed {
             self.withdraw(state_dir);
-            self.grant_secs = chosen;
-            self.grant_chosen = true;
+            self.whose = chosen;
+            self.whose_chosen = true;
         }
     }
 
@@ -418,13 +466,13 @@ impl PairView {
         addresses: Vec<String>,
     ) {
         let config = config.cloned().unwrap_or_default();
-        self.grant_secs = grant_for(
-            self.grant_chosen,
-            self.grant_secs,
+        self.whose = whose_for(
+            self.whose_chosen,
+            self.whose,
             pin::read(state_dir, now_unix).as_ref(),
         );
-        self.grant_chosen = false;
-        match link_for(state_dir, &config, now_unix, addresses, self.grant_secs) {
+        self.whose_chosen = false;
+        match link_for(state_dir, &config, now_unix, addresses, self.whose) {
             Ok(link) => match qr_modules(&link.to_uri()) {
                 Ok(modules) => {
                     self.texture = Some(ui.ctx().load_texture(
@@ -505,7 +553,7 @@ mod tests {
             ..Config::default()
         };
         let addresses = vec!["100.64.0.9".to_string(), "192.168.1.4".to_string()];
-        let link = link_for(&dir, &config, 1_000, addresses, None).unwrap();
+        let link = link_for(&dir, &config, 1_000, addresses, Whose::MINE).unwrap();
         assert_eq!(link.pin, pin::read(&dir, 1_000).unwrap().pin);
         assert_eq!((link.control_port, link.stream_port), (1800, 4800));
         assert_eq!(
@@ -522,13 +570,20 @@ mod tests {
     fn a_live_pin_is_reused_and_an_expired_one_replaced() {
         let dir = temp_dir("reuse");
         let config = Config::default();
-        let first = link_for(&dir, &config, 1_000, vec!["10.0.0.2".into()], None).unwrap();
-        let again = link_for(&dir, &config, 1_100, vec!["10.0.0.2".into()], None).unwrap();
+        let first = link_for(&dir, &config, 1_000, vec!["10.0.0.2".into()], Whose::MINE).unwrap();
+        let again = link_for(&dir, &config, 1_100, vec!["10.0.0.2".into()], Whose::MINE).unwrap();
         assert_eq!(
             first.pin, again.pin,
             "the code on screen stays the same while valid"
         );
-        let later = link_for(&dir, &config, 1_000 + 301, vec!["10.0.0.2".into()], None).unwrap();
+        let later = link_for(
+            &dir,
+            &config,
+            1_000 + 301,
+            vec!["10.0.0.2".into()],
+            Whose::MINE,
+        )
+        .unwrap();
         assert!(pin::read(&dir, 1_301).is_some_and(|p| p.pin == later.pin));
     }
 
@@ -538,13 +593,34 @@ mod tests {
         let dir = temp_dir("guest");
         let config = Config::default();
         let address = || vec!["10.0.0.2".to_string()];
-        let for_good = link_for(&dir, &config, 1_000, address(), None).unwrap();
+        let for_good = link_for(&dir, &config, 1_000, address(), Whose::MINE).unwrap();
         assert_eq!(pin::read(&dir, 1_000).unwrap().grant_secs, None);
-        let guest = link_for(&dir, &config, 1_010, address(), Some(900)).unwrap();
+        let guest = link_for(&dir, &config, 1_010, address(), Whose::guest(900)).unwrap();
         assert_ne!(guest.pin, for_good.pin, "a new choice, a new code");
         assert_eq!(pin::read(&dir, 1_010).unwrap().grant_secs, Some(900));
-        let again = link_for(&dir, &config, 1_020, address(), Some(900)).unwrap();
+        let again = link_for(&dir, &config, 1_020, address(), Whose::guest(900)).unwrap();
         assert_eq!(again.pin, guest.pin, "the same choice keeps the code");
+    }
+
+    /// M2b: someone else's phone is said in the code's PIN file, and a
+    /// change of whose phone it is makes another code.
+    #[test]
+    fn someone_elses_code_says_so_and_a_change_makes_another() {
+        let dir = temp_dir("whose");
+        let config = Config::default();
+        let address = || vec!["10.0.0.2".to_string()];
+        let mine = link_for(&dir, &config, 1_000, address(), Whose::MINE).unwrap();
+        assert!(!pin::read(&dir, 1_000).unwrap().someone_else);
+        let theirs = link_for(&dir, &config, 1_010, address(), Whose::SOMEONE_ELSE).unwrap();
+        assert_ne!(theirs.pin, mine.pin);
+        let file = pin::read(&dir, 1_010).unwrap();
+        assert!(file.someone_else);
+        assert_eq!(file.grant_secs, None);
+        let guest = link_for(&dir, &config, 1_020, address(), Whose::guest(900)).unwrap();
+        assert_ne!(guest.pin, theirs.pin);
+        let file = pin::read(&dir, 1_020).unwrap();
+        assert!(file.someone_else);
+        assert_eq!(file.grant_secs, Some(900));
     }
 
     /// I3 review: a code the CLI made while the page was open keeps its time.
@@ -554,20 +630,21 @@ mod tests {
             pin: "123456".to_string(),
             minted_unix: 0,
             grant_secs: Some(3600),
+            someone_else: false,
         };
         assert_eq!(
-            grant_for(false, None, Some(&on_file)),
-            Some(3600),
-            "the CLI's hour is kept"
+            whose_for(false, Whose::MINE, Some(&on_file)),
+            Whose::guest(3600),
+            "the CLI's hour is kept, as a guest's"
         );
         assert_eq!(
-            grant_for(true, None, Some(&on_file)),
-            None,
+            whose_for(true, Whose::MINE, Some(&on_file)),
+            Whose::MINE,
             "the owner's choice wins"
         );
         assert_eq!(
-            grant_for(false, Some(900), None),
-            Some(900),
+            whose_for(false, Whose::guest(900), None),
+            Whose::guest(900),
             "no code on file: the view's"
         );
     }
@@ -580,7 +657,7 @@ mod tests {
             &Config::default(),
             5,
             vec!["192.168.0.2".into()],
-            None,
+            Whose::MINE,
         )
         .unwrap();
         assert!(link.fingerprint.is_none() && link.endpoint.is_none());
@@ -590,7 +667,16 @@ mod tests {
     #[test]
     fn no_usable_address_is_an_error_not_an_unscannable_code() {
         let dir = temp_dir("noaddr");
-        assert!(link_for(&dir, &Config::default(), 5, vec!["127.0.0.1".into()], None).is_err());
+        assert!(
+            link_for(
+                &dir,
+                &Config::default(),
+                5,
+                vec!["127.0.0.1".into()],
+                Whose::MINE
+            )
+            .is_err()
+        );
     }
 
     fn file_pin(pin: &str) -> pin::FilePin {
@@ -598,6 +684,7 @@ mod tests {
             pin: pin.to_string(),
             minted_unix: 1_000,
             grant_secs: None,
+            someone_else: false,
         }
     }
 

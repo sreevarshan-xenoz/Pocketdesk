@@ -28,6 +28,16 @@ pub async fn system_state(address: String, port: u16) -> Result<String, String> 
         .map(|body| body.to_string())
 }
 
+/// What the computer allows this phone (M2a): `{"allowed": {<feature>:
+/// {"permission", "setting"}}}`.
+pub async fn allowed(address: String, port: u16) -> Result<String, String> {
+    const ALLOWED: &str = "kdeconnect.pocketdesk.allowed";
+    let request = NetworkPacket::new(ALLOWED).with_body(serde_json::json!({}));
+    crate::api::query_peer(&address, port, &request, ALLOWED, Duration::from_secs(6))
+        .await
+        .map(|body| body.to_string())
+}
+
 /// One press in flight at a time: the computer's answers name no press,
 /// and the shared connection hands a waiter the first of its type, so two
 /// at once could each take the other's (F1 review).

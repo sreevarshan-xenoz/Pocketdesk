@@ -1399,6 +1399,19 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSystemS
     to_jstring(&mut env, json)
 }
 
+/// What the computer allows this phone (M2a): `{"ok": "{\"allowed\": {...}}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeAllowed(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(deck::allowed(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
 /// The computer's deck (F1): `{"ok": "{\"buttons\": [...]}"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeListDeck(

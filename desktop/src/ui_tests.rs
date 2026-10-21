@@ -138,6 +138,38 @@ fn pair_opens_from_the_left() {
     assert!(app.query_by_label(Tab::Pair.purpose()).is_some());
 }
 
+/// M2b: the Pair page asks whose phone it is, beside its code, and
+/// "Someone else's" makes a code that says so in the PIN file.
+#[test]
+fn pair_asks_whose_phone_it_is_and_someone_elses_code_says_so() {
+    use pocketdesk_core::local::pin;
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    go_to(&app, Tab::Pair);
+    let asked = (0..50).any(|_| {
+        app.run_steps(2);
+        let found = app.query_by_label("Whose phone is it?").is_some();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        found
+    });
+    assert!(asked, "the Pair page never asked whose phone it is");
+    app.get_by_role(egui::accesskit::Role::ComboBox).click();
+    app.run_steps(2);
+    app.get_by_label("Someone else's").click();
+    let said = (0..50).any(|_| {
+        app.run_steps(2);
+        let file = pin::read(&folders().state, pin::now_unix());
+        let said = file.is_some_and(|f| f.someone_else && f.grant_secs.is_none());
+        if !said {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        said
+    });
+    assert!(said, "someone else's code was never written");
+}
+
 /// With no phone paired, Devices says how to pair one, and its button goes
 /// there.
 #[test]
