@@ -42,7 +42,9 @@ impl Whose {
     fn of(file: &pin::FilePin) -> Self {
         Self {
             grant_secs: file.grant_secs,
-            someone_else: file.someone_else,
+            // A guest's code from an older `pair --grant` says nothing, and
+            // pairs as someone else's all the same (M2 review).
+            someone_else: file.someone_else || file.grant_secs.is_some(),
         }
     }
 }
@@ -632,11 +634,8 @@ mod tests {
         };
         assert_eq!(
             whose_for(false, Whose::MINE, Some(&on_file)),
-            Whose {
-                grant_secs: Some(3600),
-                someone_else: false
-            },
-            "the CLI's hour is kept"
+            Whose::guest(3600),
+            "the CLI's hour is kept, as a guest's"
         );
         assert_eq!(
             whose_for(true, Whose::MINE, Some(&on_file)),
