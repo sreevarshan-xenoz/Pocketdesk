@@ -24,6 +24,12 @@ import dev.pocketdesk.android.R
 class HealthReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
+        // M1: every boot and update may start the link's service, which the
+        // listener, in the background, may not; before the health check's own
+        // conditions, so an ordinary reboot does it too (M1 review).
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) }
+        }
         when (intent.action) {
             Intent.ACTION_MY_PACKAGE_REPLACED -> noteBuild(app)
             Intent.ACTION_BOOT_COMPLETED -> if (!systemUpdated(app)) return
@@ -77,9 +83,6 @@ class HealthReceiver : BroadcastReceiver() {
          */
         fun check(ctx: Context) {
             if (dev.pocketdesk.android.HostStore.hosts(ctx).isEmpty()) return
-            // M1: a boot or an update may start the link's service, which the
-            // listener, in the background, may not.
-            runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(ctx) }
             // After a boot the listener may bind late (D1 review): wait for it,
             // up to [LISTENER_WAIT_MS], rather than judge it from one sample.
             if (HealthCheck.rebindIfStopped(ctx) || !ListenerState.connected) {
