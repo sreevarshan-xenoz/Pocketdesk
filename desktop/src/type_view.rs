@@ -5,6 +5,7 @@
 //! its buttons Back, Home and Recents; Esc closes it.
 
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -54,6 +55,10 @@ pub fn events_from(events: &[egui::Event]) -> Typed {
             egui::Event::Text(text) if !text.is_empty() => {
                 typed.events.push(TypeEvent::Text(text.clone()));
             }
+            // The system's input method's text (M4 review).
+            egui::Event::Ime(egui::ImeEvent::Commit(text)) if !text.is_empty() => {
+                typed.events.push(TypeEvent::Text(text.clone()));
+            }
             egui::Event::Paste(text) if !text.is_empty() => {
                 typed.events.push(TypeEvent::Text(cut(text).to_string()));
             }
@@ -99,106 +104,180 @@ pub fn batches(events: Vec<TypeEvent>) -> Vec<Vec<TypeEvent>> {
     out
 }
 
-/// The typing window's state between frames.
+/// The typing window's state, shared with its viewport, which draws on its
+/// own (as the cast window's does, M4 review: an immediate viewport drew
+/// only with the main window and stopped while it was minimized).
 #[derive(Default)]
-pub struct TypeView {
+struct State {
     /// The phone typed to, and its name; `None` while closed.
     phone: Option<(String, String)>,
+    /// Why typing cannot reach it now, as the main window last judged.
+    blocked: Option<&'static str>,
     pending: Vec<TypeEvent>,
     since: Option<Instant>,
     seq: u64,
     error: Option<String>,
 }
 
+/// The typing window.
+#[derive(Default)]
+pub struct TypeView {
+    shared: Arc<Mutex<State>>,
+}
+
+fn lock(shared: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
+    shared
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn viewport_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("pocketdesk-type")
+}
+
 impl TypeView {
-    /// Open the window for `device_id`, called `name`.
-    pub fn open(&mut self, device_id: &str, name: &str) {
-        self.phone = Some((device_id.to_string(), name.to_string()));
-        self.pending.clear();
-        self.since = None;
-        self.error = None;
+    /// Open the window for `device_id`, called `name`. What was typed to
+    /// the phone before goes first (M4 review: it was dropped).
+    pub fn open(&mut self, state_dir: &Path, device_id: &str, name: &str) {
+        let mut state = lock(&self.shared);
+        flush(&mut state, state_dir);
+        state.phone = Some((device_id.to_string(), name.to_string()));
+        state.error = None;
     }
 
-    /// Draw the window while it is open, and send what was typed.
-    pub fn show(&mut self, ctx: &egui::Context, state_dir: Option<&Path>) {
-        let Some((device_id, name)) = self.phone.clone() else {
-            return;
-        };
-        let id = egui::ViewportId::from_hash_of("pocketdesk-type");
-        let builder = egui::ViewportBuilder::default()
-            .with_title(format!("Typing to {name}"))
-            .with_inner_size([440.0, 170.0]);
-        let mut close = false;
-        ctx.show_viewport_immediate(id, builder, |ctx, _class| {
-            let (events, asked_close) = ctx.input(|i| (i.events.clone(), i.viewport().close_requested()));
-            let typed = events_from(&events);
-            close |= asked_close || typed.close;
-            if !typed.events.is_empty() {
-                self.since.get_or_insert_with(Instant::now);
-                self.pending.extend(typed.events);
+    /// The phone the window types to, while it is open.
+    pub fn phone(&self) -> Option<String> {
+        lock(&self.shared).phone.as_ref().map(|(id, _)| id.clone())
+    }
+
+    /// Keep the window open while it is, with `reach` judged afresh each
+    /// frame for its phone (M4 review: a phone that went away, or a
+    /// permission turned off, still took typing).
+    pub fn show(&mut self, ctx: &egui::Context, state_dir: &Path, reach: Result<(), &'static str>) {
+        let title = {
+            let mut state = lock(&self.shared);
+            let Some((_, name)) = state.phone.clone() else {
+                return;
+            };
+            let blocked = reach.err();
+            if state.blocked != blocked {
+                state.blocked = blocked;
+                ctx.request_repaint_of(viewport_id());
             }
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.label(format!(
-                    "What you type here goes to the field in front on {name}. Esc closes this window."
-                ));
-                ui.horizontal(|ui| {
-                    for (label, event) in [
-                        ("Back", TypeEvent::Back),
-                        ("Home", TypeEvent::Home),
-                        ("Recents", TypeEvent::Recents),
-                    ] {
-                        if ui.button(label).clicked() {
-                            self.since.get_or_insert_with(Instant::now);
-                            self.pending.push(event);
-                        }
-                    }
-                });
-                if let Some(error) = &self.error {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
+            format!("Typing to {name}")
+        };
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size([440.0, 170.0]);
+        let shared = self.shared.clone();
+        let state_dir = state_dir.to_path_buf();
+        ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
+            frame(&shared, ui, &state_dir);
+        });
+    }
+}
+
+/// One frame of the typing window.
+fn frame(shared: &Mutex<State>, ui: &mut egui::Ui, state_dir: &Path) {
+    let ctx = ui.ctx().clone();
+    // Tab would move focus to a button, which Enter or Space then presses.
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+    let (events, asked_close) = ctx.input(|i| (i.events.clone(), i.viewport().close_requested()));
+    let typed = events_from(&events);
+    let mut state = lock(shared);
+    let Some((_, name)) = state.phone.clone() else {
+        return;
+    };
+    let close = asked_close || typed.close;
+    let push = |state: &mut State, events: Vec<TypeEvent>| {
+        if events.is_empty() {
+            return;
+        }
+        match state.blocked {
+            Some(why) => state.error = Some(format!("Not sent: {why}")),
+            None => {
+                state.since.get_or_insert_with(Instant::now);
+                state.pending.extend(events);
+            }
+        }
+    };
+    push(&mut state, typed.events);
+    egui::CentralPanel::default().show(ui, |ui| {
+        ui.label(format!(
+            "What you type here goes to the field in front on {name}. Esc closes this window."
+        ));
+        ui.horizontal(|ui| {
+            for (label, event) in [
+                ("Back", TypeEvent::Back),
+                ("Home", TypeEvent::Home),
+                ("Recents", TypeEvent::Recents),
+            ] {
+                if ui.button(label).clicked() {
+                    push(&mut state, vec![event]);
                 }
-                ui.label(
-                    egui::RichText::new(
-                        "Not into a password field, nor while the phone is locked. The phone shows that it is being typed on.",
-                    )
-                    .small()
-                    .weak(),
-                );
-            });
-            if self.since.is_some() {
-                ctx.request_repaint_after(FLUSH);
             }
         });
-        if self.since.is_some_and(|since| since.elapsed() >= FLUSH)
-            || (close && !self.pending.is_empty())
-        {
-            self.flush(state_dir, &device_id);
+        if let Some(why) = state.blocked {
+            ui.colored_label(ui.visuals().warn_fg_color, why);
+        } else if let Some(error) = &state.error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        if close {
-            self.phone = None;
+        ui.label(
+            egui::RichText::new(
+                "Needs \"Typing from the computer's keyboard\" on in Pocketdesk's Settings on the phone, with its Accessibility service and notification access. Never into a password field, nor while the phone is locked; the phone shows that it is being typed on.",
+            )
+            .small()
+            .weak(),
+        );
+        // Ask for the system's input method here (M4 review: Chinese,
+        // Japanese and Korean typing never came without it).
+        if state.blocked.is_none() {
+            let rect = ui.max_rect();
+            let cursor = egui::Rect::from_min_size(rect.left_top(), egui::vec2(1.0, 16.0));
+            ui.ctx().output_mut(|o| {
+                o.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Normal,
+                    rect,
+                    cursor_rect: cursor,
+                    should_interrupt_composition: false,
+                });
+            });
         }
+    });
+    if state.since.is_some_and(|since| since.elapsed() >= FLUSH) || close {
+        flush(&mut state, state_dir);
     }
+    if state.since.is_some() {
+        ctx.request_repaint_after(FLUSH);
+    }
+    if close {
+        state.phone = None;
+        state.blocked = None;
+    }
+}
 
-    fn flush(&mut self, state_dir: Option<&Path>, device_id: &str) {
-        self.since = None;
-        let events = std::mem::take(&mut self.pending);
-        let Some(dir) = state_dir else {
-            self.error = Some("This computer's state folder is not known.".to_string());
-            return;
-        };
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let batches = batches(events);
-        if batches.is_empty() {
-            return;
-        }
-        // One file a flush (M4 review), so its batches stay in order.
-        self.seq += 1;
-        match pocketdesk_core::local::typing::request(dir, device_id, self.seq, &batches, now_ms) {
-            Ok(()) => self.error = None,
-            Err(e) => self.error = Some(format!("Not sent: {e}")),
-        }
+/// Send what is pending, as one flush.
+fn flush(state: &mut State, state_dir: &Path) {
+    state.since = None;
+    let events = std::mem::take(&mut state.pending);
+    let Some((device_id, _)) = state.phone.clone() else {
+        return;
+    };
+    let batches = batches(events);
+    if batches.is_empty() {
+        return;
+    }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    // One file a flush (M4 review), so its batches stay in order.
+    state.seq += 1;
+    match pocketdesk_core::local::typing::request(
+        state_dir, &device_id, state.seq, &batches, now_ms,
+    ) {
+        Ok(()) => state.error = None,
+        Err(e) => state.error = Some(format!("Not sent: {e}")),
     }
 }
 
@@ -218,6 +297,7 @@ mod tests {
         let long = "é".repeat(MAX_TEXT);
         let typed = events_from(&[
             egui::Event::Text("hi".into()),
+            egui::Event::Ime(egui::ImeEvent::Commit("日本".into())),
             key(egui::Key::Backspace),
             key(egui::Key::Enter),
             egui::Event::Paste(long),
@@ -226,16 +306,21 @@ mod tests {
         ]);
         assert!(typed.close);
         assert_eq!(typed.events[0], TypeEvent::Text("hi".into()));
-        assert_eq!(typed.events[1], TypeEvent::Backspace);
-        assert_eq!(typed.events[2], TypeEvent::Enter);
-        let TypeEvent::Text(pasted) = &typed.events[3] else {
+        assert_eq!(
+            typed.events[1],
+            TypeEvent::Text("日本".into()),
+            "an input method's text"
+        );
+        assert_eq!(typed.events[2], TypeEvent::Backspace);
+        assert_eq!(typed.events[3], TypeEvent::Enter);
+        let TypeEvent::Text(pasted) = &typed.events[4] else {
             panic!("a paste is text");
         };
         assert!(
             pasted.len() <= MAX_TEXT && pasted.chars().all(|c| c == 'é'),
             "cut at a character"
         );
-        assert_eq!(typed.events.len(), 4, "other keys are not sent");
+        assert_eq!(typed.events.len(), 5, "other keys are not sent");
     }
 
     #[test]

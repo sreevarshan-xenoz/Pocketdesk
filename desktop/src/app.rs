@@ -1423,13 +1423,15 @@ impl PocketdeskApp {
                         take_photo = Some(device.id.clone());
                     }
                     // M4: this computer's keyboard typing on the phone.
+                    // Linked, not a link's reach (M4 review: that one asks
+                        // for Links, which typing does not need).
                     let type_reach = crate::type_view::type_reach(
-                        row.link.is_ok(),
+                        device.linked,
                         control_on,
                         device.permissions.allows(Capability::Cast),
                     );
                     let type_why = type_reach.err().unwrap_or(
-                        "A window that types what you type at the phone's field, with \"Let the computer control this phone\" on there.",
+                        "A window that types what you type at the phone's field. On the phone it needs \"Typing from the computer's keyboard\" on in Pocketdesk's Settings, its Accessibility service and notification access.",
                     );
                     if ui
                         .add_enabled(type_reach.is_ok(), egui::Button::new("Type on the phone"))
@@ -1478,7 +1480,7 @@ impl PocketdeskApp {
             self.take_photo(&id);
         }
         if let Some((id, name)) = type_to {
-            self.type_view.open(&id, &name);
+            self.type_view.open(&self.state_dir, &id, &name);
         }
     }
 
@@ -2811,7 +2813,20 @@ impl eframe::App for PocketdeskApp {
                 model::send_target_ids(&self.snapshot),
             );
         // M4: the typing window, while open.
-        self.type_view.show(ctx, Some(self.state_dir.as_path()));
+        if let Some(id) = self.type_view.phone() {
+            let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
+            let reach = self.snapshot.devices.iter().find(|d| d.id == id).map_or(
+                Err("The phone is no longer paired."),
+                |d| {
+                    crate::type_view::type_reach(
+                        d.linked,
+                        control_on,
+                        d.permissions.allows(Capability::Cast),
+                    )
+                },
+            );
+            self.type_view.show(ctx, &self.state_dir, reach);
+        }
         ctx.request_repaint_after(REFRESH);
     }
 
