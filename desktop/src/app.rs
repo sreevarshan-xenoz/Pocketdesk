@@ -321,6 +321,8 @@ pub struct PocketdeskApp {
     browser_registered: Option<Option<Vec<String>>>,
     /// The window showing a phone's screen (T10k), started on the first pass.
     cast: Option<crate::cast_view::CastView>,
+    /// M4: the typing window, while it types on a phone.
+    type_view: crate::type_view::TypeView,
     /// The Activity tab (ecosystem 1b).
     activity: crate::activity_view::ActivityView,
     /// Task starts waiting for the owner's answer (ecosystem 1c).
@@ -379,6 +381,7 @@ impl PocketdeskApp {
             send_menu_installed: None,
             browser_registered: None,
             cast: None,
+            type_view: Default::default(),
             activity: Default::default(),
             task_requests: Vec::new(),
             raised_tasks: Vec::new(),
@@ -1251,6 +1254,8 @@ impl PocketdeskApp {
         let mut open_link = None;
         let mut send_clip = None;
         let mut take_photo = None;
+        let mut type_to = None;
+        let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
@@ -1417,6 +1422,28 @@ impl PocketdeskApp {
                     {
                         take_photo = Some(device.id.clone());
                     }
+                    // M4: this computer's keyboard typing on the phone.
+                    // Linked, not a link's reach (M4 review: that one asks
+                        // for Links, which typing does not need).
+                    let type_reach = crate::type_view::type_reach(
+                        device.linked,
+                        control_on,
+                        device.permissions.allows(Capability::Cast),
+                    );
+                    let type_why = type_reach.err().unwrap_or(
+                        "A window that types what you type at the phone's field. On the phone it needs \"Typing from the computer's keyboard\" on in Pocketdesk's Settings, its Accessibility service and notification access.",
+                    );
+                    if ui
+                        .add_enabled(type_reach.is_ok(), egui::Button::new("Type on the phone"))
+                        .on_hover_text(type_why)
+                        .on_disabled_hover_text(type_why)
+                        .clicked()
+                    {
+                        type_to = Some((
+                            device.id.clone(),
+                            model::device_label(&self.snapshot.devices, &device.id),
+                        ));
+                    }
                 });
             });
         }
@@ -1451,6 +1478,9 @@ impl PocketdeskApp {
         }
         if let Some(id) = take_photo {
             self.take_photo(&id);
+        }
+        if let Some((id, name)) = type_to {
+            self.type_view.open(&self.state_dir, &id, &name);
         }
     }
 
@@ -2782,6 +2812,21 @@ impl eframe::App for PocketdeskApp {
                 self.config.as_ref().is_none_or(|c| c.cast_control),
                 model::send_target_ids(&self.snapshot),
             );
+        // M4: the typing window, while open.
+        if let Some(id) = self.type_view.phone() {
+            let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
+            let reach = self.snapshot.devices.iter().find(|d| d.id == id).map_or(
+                Err("The phone is no longer paired."),
+                |d| {
+                    crate::type_view::type_reach(
+                        d.linked,
+                        control_on,
+                        d.permissions.allows(Capability::Cast),
+                    )
+                },
+            );
+            self.type_view.show(ctx, &self.state_dir, reach);
+        }
         ctx.request_repaint_after(REFRESH);
     }
 

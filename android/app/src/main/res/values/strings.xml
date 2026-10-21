@@ -746,7 +746,7 @@
     <string name="texts_show_summary_17">Texts this phone receives appear in Messages on the computer you used last. Android holds a text with a code for three hours first</string>
     <string name="settings_capture_mouse_summary_17">During a session, a mouse or touchpad connected to this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="control_service_label">Pocketdesk control</string>
-    <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
+    <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. With “Typing from the computer’s keyboard” on, it can also type into that field with no screen shown, never a password field. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
     <string name="settings_cast_sound">The phone\'s sound with its screen</string>
     <string name="settings_cast_sound_summary">\"Show screen\" also sends what the phone\'s apps play, to play on the computer (its \"Play its sound here\" on). Android asks for the microphone permission to capture other apps\' sound; calls and apps that forbid it stay silent</string>
     <string name="settings_cast_sound_needs_mic">Needs the microphone permission: Android asks for it to capture other apps\' sound</string>
@@ -936,4 +936,14 @@
     <string name="widget_preview_deck_type" translatable="false">Sign-off</string>
     <string name="widget_preview_deck_open" translatable="false">Calendar</string>
     <string name="widget_preview_deck_build" translatable="false">Build</string>
+    <string name="typing_channel">Typing from the computer</string>
+    <string name="typing_now">%1$s is typing here</string>
+    <string name="typing_now_text">What is typed on the computer goes to the field in front</string>
+    <string name="typing_password">Not typed: the field in front is a password field</string>
+    <string name="typing_stop">Stop</string>
+    <string name="typing_stopped">No typing from the computer for 10 minutes</string>
+    <string name="settings_typing_from_computer">Typing from the computer\'s keyboard</string>
+    <string name="settings_typing_summary_off">\"Type on the phone\" on the computer types into the field in front here, with no screen shown. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
+    <string name="settings_typing_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer types</string>
+    <string name="settings_typing_summary_on">On: \"Type on the phone\" on this phone\'s own computer types into the field in front here, with a notification while it does</string>
 </resources>

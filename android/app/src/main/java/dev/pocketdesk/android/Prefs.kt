@@ -413,6 +413,18 @@ object Prefs {
         bump()
     }
 
+    /**
+     * M4: what is typed on the phone's own computer's keyboard is typed here
+     * (off by default). Needs C8's Accessibility service, never C8's switch:
+     * typing needs no cast.
+     */
+    fun typingFromComputer(ctx: Context): Boolean = prefs(ctx).getBoolean("typing_from_computer", false)
+
+    fun setTypingFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("typing_from_computer", enabled) }
+        bump()
+    }
+
     /** C2: the folder files from computers go to (a tree uri), or null for Downloads/Pocketdesk. */
     fun downloadTree(ctx: Context): String? =
         prefs(ctx).getString(KEY_DOWNLOAD_TREE, null)?.takeIf { it.isNotEmpty() }

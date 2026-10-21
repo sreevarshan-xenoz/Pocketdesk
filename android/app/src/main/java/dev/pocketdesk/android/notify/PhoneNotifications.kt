@@ -265,6 +265,9 @@ class PhoneNotificationListener : NotificationListenerService() {
             5,
             TimeUnit.SECONDS,
         )
+        // M4: waits for what the computer types, while its switch and the
+        // Accessibility service are on (kept in step on the keeper's tick).
+        dev.pocketdesk.android.control.TypeRunner.sync(this)
     }
 
     // D1: whether the listener runs, for the health check in this process.
@@ -300,6 +303,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         screenshotsTicker.shutdownNow()
         screenshots.close()
         clipboardTicker.shutdownNow()
+        dev.pocketdesk.android.control.TypeRunner.stop(this)
         clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()
@@ -583,6 +587,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             Prefs.setLastFreeze(this, System.currentTimeMillis(), dev.pocketdesk.android.service.LinkKeeperService.isRunning())
         }
         lastKeeperUptime = uptime
+        dev.pocketdesk.android.control.TypeRunner.sync(this)
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)
@@ -607,7 +612,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         // answer, or clear within ten minutes of a notification (as the own
         // link, L1 review: else a link to each all day).
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted)
-        if ((answering || callsOn || clearsWanted) && own != null && RustCore.controlPeer() == null) {
+        // M4: typing comes on the own computer's link, kept while it may come.
+        val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
+        if ((answering || callsOn || clearsWanted || typingOn) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
                 answerConnectMs = now

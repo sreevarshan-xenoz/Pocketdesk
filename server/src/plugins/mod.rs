@@ -23,6 +23,7 @@ pub mod share;
 pub mod siren;
 pub mod sms;
 pub mod tasks;
+pub mod typing;
 pub mod wake_relay;
 pub mod windows;
 
@@ -72,6 +73,7 @@ pub fn register_all() -> PluginSet {
     registry.register(phone_battery::PhoneBatteryPlugin);
     registry.register(link_role::LinkRolePlugin);
     registry.register(allowed::AllowedPlugin);
+    registry.register(typing::TypingPlugin);
     registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);

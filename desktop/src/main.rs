@@ -28,6 +28,7 @@ mod search_box;
 mod settings_view;
 mod single_instance;
 mod theme;
+mod type_view;
 #[cfg(test)]
 mod ui_tests;
 

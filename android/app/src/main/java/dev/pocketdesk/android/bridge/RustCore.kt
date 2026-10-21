@@ -174,6 +174,7 @@ object RustCore {
     private external fun nativeTakeLinks(): String
     private external fun nativeTakeCommands(): String
     private external fun nativeTakeDials(): String
+    private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeClipboardPush(): String
     private external fun nativeTakeNotificationAnswers(): String
@@ -990,6 +991,21 @@ object RustCore {
 
     /** A number the computer at [host]:[port] asked this phone to dial (L4). */
     data class Dial(val host: String, val port: Int, val number: String)
+
+    /**
+     * What the computer types here (M4): the oldest batch, waiting up to
+     * [waitMs] for one; null when none came.
+     */
+    fun typeTake(waitMs: Int): TypedBatch? =
+        envelope(nativeTypeTake(waitMs)).getOrNull()?.takeIf { it.isNotBlank() }?.let { json ->
+            runCatching {
+                val o = JSONObject(json)
+                TypedBatch(o.getString("host"), o.getInt("port"), o.getJSONArray("events").toString())
+            }.getOrNull()
+        }
+
+    /** A batch the computer typed: its computer, and its events as a JSON array. */
+    data class TypedBatch(val host: String, val port: Int, val events: String)
 
     /** The numbers waiting (L4), taken. */
     fun takeDials(): List<Dial> =

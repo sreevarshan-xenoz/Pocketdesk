@@ -728,6 +728,14 @@ pub async fn connect_to_peer(
                                 {
                                     crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
                                 }
+                                // What the computer types here (M4), kept
+                                // in order with its computer.
+                                if trimmed.contains("pocketdesk.type")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == pocketdesk_core::protocol::typing::TYPE
+                                {
+                                    crate::typing::receive(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // A command for this phone's automation
                                 // apps (L6), kept with its computer.
                                 if trimmed.contains("pocketdesk.command")
@@ -873,6 +881,7 @@ pub async fn connect_to_peer(
                         crate::links::forget();
                         crate::commands::forget();
                         crate::dials::forget();
+                        crate::typing::forget();
                         crate::media_presses::forget();
                         crate::clipboard_push::forget();
                         // L8 part 2: the other computers' answers still wait.

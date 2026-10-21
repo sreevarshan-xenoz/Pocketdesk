@@ -186,17 +186,26 @@ class ControlService : AccessibilityService() {
     }
 
     /** Back, Home, Recents or the notification shade. */
-    fun global(action: String) = main.post {
+    fun global(action: String) = main.post { pressGlobal(action) }
+
+    /**
+     * M4: [global] in turn with what the computer types, on the thread that
+     * types (M4 review: on the main thread a Home could overtake the text
+     * typed before it).
+     */
+    fun globalBlind(action: String) = text.post { pressGlobal(action) }
+
+    private fun pressGlobal(action: String) {
         val code = when (action) {
             "back" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
             "recents" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-            else -> return@post
+            else -> return
         }
         // Locked, only Back and Home: the shade and Recents could reach
         // what the lock keeps.
-        if (locked() && code != GLOBAL_ACTION_BACK && code != GLOBAL_ACTION_HOME) return@post
+        if (locked() && code != GLOBAL_ACTION_BACK && code != GLOBAL_ACTION_HOME) return
         performGlobalAction(code)
     }
 
@@ -258,6 +267,48 @@ class ControlService : AccessibilityService() {
     /** The field's action (send, search, next), on Android 11+; else a new line where one is allowed. */
     fun enter() = text.post {
         val node = field() ?: return@post
+        if (Build.VERSION.SDK_INT >= 30 &&
+            node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        ) {
+            return@post
+        }
+        if (node.isMultiLine) {
+            val (start, end) = selectionOf(node)
+            setText(node, ControlPlan.type(textOf(node), start, end, "\n"))
+        }
+    }
+
+    /**
+     * The field to type in from the computer's keyboard alone (M4), where
+     * the computer sees nothing of the screen: never a password field, which
+     * [refused] is told of instead.
+     */
+    private fun blindField(refused: () -> Unit): AccessibilityNodeInfo? {
+        val node = field() ?: return null
+        if (node.isPassword) {
+            refused()
+            return null
+        }
+        return node
+    }
+
+    /** M4: [typed] as [type], never into a password field. */
+    fun typeBlind(typed: String, refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.type(textOf(node), start, end, typed))
+    }
+
+    /** M4: [backspace], never in a password field. */
+    fun backspaceBlind(refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
+        val (start, end) = selectionOf(node)
+        setText(node, ControlPlan.backspace(textOf(node), start, end))
+    }
+
+    /** M4: [enter], never in a password field. */
+    fun enterBlind(refused: () -> Unit) = text.post {
+        val node = blindField(refused) ?: return@post
         if (Build.VERSION.SDK_INT >= 30 &&
             node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
         ) {
