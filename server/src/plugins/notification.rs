@@ -506,7 +506,7 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // holds them all alike, still counted, so a phone's burst stays bounded
     // (K2a review).
     let muted = muted_here(&app);
-    let held = held_here(muted);
+    let held = held_here(muted, false);
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -622,10 +622,10 @@ fn phone_in_use(body: &serde_json::Value) -> bool {
     body.get("phoneInUse").and_then(|v| v.as_bool()) == Some(true)
 }
 
-/// Whether a notification is held here: its app `muted` (K2b), or this
-/// computer paused (K2a).
-fn held_here(muted: bool) -> bool {
-    muted || crate::paused::now()
+/// Whether a notification is held here: its app `muted` (K2b), this
+/// computer paused (K2a), or the phone `in_hand` when it came (M6).
+fn held_here(muted: bool, in_hand: bool) -> bool {
+    muted || in_hand || crate::paused::now()
 }
 
 /// Whether `app` is muted on this computer (K2b): its notifications are
@@ -744,7 +744,7 @@ impl Plugin for NotificationPlugin {
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
-                let held = held_here(muted) || in_hand;
+                let held = held_here(muted, in_hand);
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()
@@ -1667,16 +1667,19 @@ mod tests {
         assert!(given_name(&json!({"appName": "Chat"}), "appName"));
     }
 
-    /// K2b: an app muted here is muted for the next notification, whatever
-    /// the case of its name.
     #[test]
     fn a_notification_from_a_phone_in_hand_is_held() {
         assert!(phone_in_use(&serde_json::json!({ "phoneInUse": true })));
         assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": false })));
         assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": "yes" })));
         assert!(!phone_in_use(&serde_json::json!({})));
+        // Held as a mute or a pause holds it.
+        assert!(held_here(false, true));
+        assert!(held_here(true, false));
     }
 
+    /// K2b: an app muted here is muted for the next notification, whatever
+    /// the case of its name.
     #[test]
     fn a_muted_app_is_muted_here() {
         let dir = pocketdesk_core::local::paths::use_state_dir(
@@ -1694,10 +1697,10 @@ mod tests {
     /// devices' alike (both ask `held_here`).
     #[test]
     fn a_pause_holds_every_app_s_notifications() {
-        assert!(!held_here(false));
-        assert!(held_here(true), "a muted app's");
+        assert!(!held_here(false, false));
+        assert!(held_here(true, false), "a muted app's");
         let _paused = crate::paused::paused_for_test();
-        assert!(held_here(false));
+        assert!(held_here(false, false));
     }
 
     /// E1 review: a phone's word is kept only for an answer sent to that
