@@ -2001,12 +2001,13 @@ impl PocketdeskApp {
         // As the running server read it, not the box as edited (3c
         // review: requests to a server with it off lapsed unread).
         let compat_on = form.running().kdeconnect_compat;
-        // M9: the phones a command may go to.
+        // M9: the phones a command may go to, paired for good (M9 review: a
+        // guest's commands are never offered).
         form.phones = self
             .snapshot
             .devices
             .iter()
-            .filter(|d| !d.computer)
+            .filter(|d| !d.computer && d.grant_remaining.is_none())
             .map(|d| {
                 (
                     d.id.clone(),
