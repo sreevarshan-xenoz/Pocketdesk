@@ -25,6 +25,11 @@ pub const AGAIN_EVERY: Duration = Duration::from_secs(60);
 static WATCHERS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
 static WOKEN: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
 
+/// The phones that asked since the last look: each is told afresh, the
+/// cover's bytes included, since one that asks again may hold nothing (an
+/// app restarted while the computer still saw its link).
+static ASKED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
 #[derive(Debug, Default)]
 pub struct ComputerMediaPlugin;
 
@@ -52,6 +57,10 @@ impl Plugin for ComputerMediaPlugin {
         let mut watchers = WATCHERS.lock().unwrap_or_else(|e| e.into_inner());
         if on {
             watchers.insert(sender.device_id().to_string());
+            ASKED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(sender.device_id().to_string());
         } else {
             watchers.remove(sender.device_id());
         }
@@ -103,9 +112,10 @@ impl Pushes {
         Some(with_art)
     }
 
-    /// Forget every phone not in `watching`.
-    fn keep_only(&mut self, watching: &HashSet<String>) {
-        self.told.retain(|id, _| watching.contains(id));
+    /// Forget every phone not in `watching`, and what `asked` were told.
+    fn keep_only(&mut self, watching: &HashSet<String>, asked: &HashSet<String>) {
+        self.told
+            .retain(|id, _| watching.contains(id) && !asked.contains(id));
     }
 }
 
@@ -156,7 +166,8 @@ pub async fn run_watcher() {
                 .cloned()
                 .collect()
         };
-        pushes.keep_only(&watching);
+        let asked = std::mem::take(&mut *ASKED.lock().unwrap_or_else(|e| e.into_inner()));
+        pushes.keep_only(&watching, &asked);
         if watching.is_empty() {
             continue;
         }
@@ -258,7 +269,15 @@ mod tests {
             Some(false),
             "nothing plays"
         );
-        pushes.keep_only(&HashSet::new());
+        // One that asks again is told afresh, its cover's bytes included.
+        let asked = HashSet::from(["p".to_string()]);
+        pushes.keep_only(&HashSet::from(["p".to_string()]), &asked);
+        assert_eq!(
+            pushes.due("p", &paused, Some("bb"), t0 + AGAIN_EVERY),
+            Some(true),
+            "asked again"
+        );
+        pushes.keep_only(&HashSet::new(), &HashSet::new());
         assert!(pushes.told.is_empty());
     }
 }
