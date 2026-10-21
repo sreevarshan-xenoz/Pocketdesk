@@ -26,20 +26,18 @@ pub fn clean_number(number: &str) -> Option<String> {
 }
 
 /// The number a `tel:` or `callto:` link names (M8), cleaned as
-/// [`clean_number`]: the scheme in any case (and `//` after `callto:`),
+/// [`clean_number`]: the scheme in any case (and `//` after it, as web
+/// pages often write `tel://`),
 /// percent-escapes decoded. `None` for another scheme, a link with
 /// parameters (`;ext=`, `;phone-context=`) or a query, a bad escape, or
 /// what [`clean_number`] refuses.
 pub fn tel_number(uri: &str) -> Option<String> {
     let uri = uri.trim();
     let (scheme, rest) = uri.split_once(':')?;
-    let rest = if scheme.eq_ignore_ascii_case("tel") {
-        rest
-    } else if scheme.eq_ignore_ascii_case("callto") {
-        rest.strip_prefix("//").unwrap_or(rest)
-    } else {
+    if !scheme.eq_ignore_ascii_case("tel") && !scheme.eq_ignore_ascii_case("callto") {
         return None;
-    };
+    }
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
     if rest.contains([';', '?', '#']) {
         return None;
     }
@@ -113,6 +111,7 @@ mod tests {
             Some("+15550100")
         );
         assert_eq!(tel_number("callto:5550100").as_deref(), Some("5550100"));
+        assert_eq!(tel_number("tel://5550100").as_deref(), Some("5550100"));
         assert_eq!(tel_number(" tel:112 ").as_deref(), Some("112"));
         assert_eq!(tel_number("tel:5550100;ext=12"), None, "parameters");
         assert_eq!(tel_number("tel:5550100;phone-context=example.com"), None);

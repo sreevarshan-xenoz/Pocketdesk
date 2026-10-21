@@ -39,6 +39,15 @@ use pocketdesk_desktop::{icon, model, tray, tray_instance, tray_menu, words};
 const TITLE: &str = "Pocketdesk";
 
 fn main() -> eframe::Result {
+    // M8: a tel: link from Windows, handed to the server program with no
+    // console (this program has none to flash).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).is_some_and(|a| a == "--tel") {
+        if let (Some(uri), Some(exe)) = (args.get(2), restart::server_exe_beside_app()) {
+            let _ = restart::quiet(exe).arg("tel").arg(uri).spawn();
+        }
+        return Ok(());
+    }
     let Some(instance) = single_instance::acquire(TITLE) else {
         // Another copy is running; it has been brought to the front, and
         // a page asked for goes to it (E2).

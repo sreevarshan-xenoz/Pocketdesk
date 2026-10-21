@@ -141,33 +141,44 @@ pub fn run_tel(uri: &str) -> i32 {
     } else {
         eprintln!("{summary}: {body}");
     }
-    if ask {
-        open_app();
+    let (summary, body) = if ask && !open_app() {
+        (
+            "Not called".to_string(),
+            "Pocketdesk's window could not be opened to ask which phone.".to_string(),
+        )
     } else {
+        (summary, body)
+    };
+    if !ask || summary == "Not called" {
         crate::platform::notify(&summary, &body, std::time::Duration::from_secs(5));
     }
     code
 }
 
 /// Start the desktop app on the Overview, where the question is: a window
-/// running already is raised by the new one, which then exits.
-fn open_app() {
+/// running already is raised by the new one, which then exits. Whether it
+/// started.
+fn open_app() -> bool {
     let Ok(exe) = std::env::current_exe() else {
-        return;
+        return false;
     };
     let app = exe.with_file_name(if cfg!(windows) {
         "pocketdesk-app.exe"
     } else {
         "pocketdesk-app"
     });
-    if let Err(e) = std::process::Command::new(&app)
+    match std::process::Command::new(&app)
         .args(["--page", "overview"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
     {
-        eprintln!("Pocketdesk could not be opened to ask which phone ({e})");
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("Pocketdesk could not be opened to ask which phone ({e})");
+            false
+        }
     }
 }
 
@@ -186,9 +197,12 @@ pub const DESKTOP_FILE: &str = "pocketdesk-tel.desktop";
 pub fn run_tel_handler(remove: bool) -> anyhow::Result<()> {
     let config = pocketdesk_core::local::paths::config_dir()?;
     if remove {
+        let was = config.join(MARKER).exists();
         unregister()?;
         let _ = std::fs::remove_file(config.join(MARKER));
-        println!("Phone numbers no longer open on the phone");
+        if was {
+            println!("Phone numbers no longer open on the phone");
+        }
     } else {
         let exe = std::env::current_exe()?;
         register(&exe)?;
@@ -205,13 +219,27 @@ pub fn run_tel_handler(remove: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What Windows runs for a link: the window's program, which has no console
+/// and hands the link to the server program with none either (M8 review:
+/// the server program flashed a console at each link); the server program
+/// itself when the window's is not beside it.
+#[cfg(windows)]
+pub fn windows_command(exe: &Path) -> String {
+    let app = exe.with_file_name("pocketdesk-app.exe");
+    if app.is_file() {
+        format!("\"{}\" --tel \"%1\"", app.display())
+    } else {
+        format!("\"{}\" tel \"%1\"", exe.display())
+    }
+}
+
 #[cfg(windows)]
 fn register(exe: &Path) -> anyhow::Result<()> {
     use crate::platform::{set_user_default_value, set_user_value};
-    let command = format!("\"{}\" tel \"%1\"", exe.display());
+    let command = windows_command(exe);
+    // No "URL Protocol": the ProgID is not a scheme of its own (M8 review).
     let class = format!(r"Software\Classes\{PROG_ID}");
     set_user_default_value(&class, "Phone number (Pocketdesk)")?;
-    set_user_value(&class, "URL Protocol", "")?;
     set_user_default_value(&format!(r"{class}\shell\open\command"), &command)?;
     let caps = r"Software\Pocketdesk\Capabilities";
     set_user_value(caps, "ApplicationName", "Pocketdesk")?;
@@ -233,6 +261,8 @@ fn unregister() -> anyhow::Result<()> {
     delete_user_key(&format!(r"Software\Classes\{PROG_ID}"));
     delete_user_key(r"Software\Pocketdesk\Capabilities");
     delete_user_value(r"Software\RegisteredApplications", "Pocketdesk");
+    // Its parent, only once empty (M8 review: an empty key was left).
+    crate::platform::delete_user_key_if_empty(r"Software\Pocketdesk");
     Ok(())
 }
 
@@ -262,16 +292,62 @@ fn register(exe: &Path) -> anyhow::Result<()> {
             ])
             .status();
         if !made.is_ok_and(|s| s.success()) {
+            // Nothing half made is left (M8 review).
+            let _ = unregister();
             anyhow::bail!("xdg-mime could not make it the default for {scheme}: links");
         }
     }
     Ok(())
 }
 
+/// The user's `mimeapps.list`.
+#[cfg(not(windows))]
+fn mimeapps() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .map(|config| config.join("mimeapps.list"))
+}
+
 #[cfg(not(windows))]
 fn unregister() -> anyhow::Result<()> {
     let _ = std::fs::remove_file(applications_dir()?.join(DESKTOP_FILE));
+    // The defaults xdg-mime set name a file gone now: dropped, so the
+    // system finds its other handlers again (M8 review).
+    if let Some(list) = mimeapps()
+        && let Ok(raw) = std::fs::read_to_string(&list)
+    {
+        let kept = without_desktop_file(&raw);
+        if kept != raw {
+            std::fs::write(&list, kept)?;
+        }
+    }
     Ok(())
+}
+
+/// `mimeapps.list` without [`DESKTOP_FILE`] in its `tel` and `callto`
+/// handlers; a line left naming nothing goes.
+pub fn without_desktop_file(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for line in raw.lines() {
+        let scheme_line = SCHEMES
+            .iter()
+            .any(|s| line.starts_with(&format!("x-scheme-handler/{s}=")));
+        if scheme_line && let Some((key, apps)) = line.split_once('=') {
+            let rest: Vec<&str> = apps
+                .split(';')
+                .filter(|a| !a.is_empty() && *a != DESKTOP_FILE)
+                .collect();
+            if !rest.is_empty() {
+                out.push_str(&format!("{key}={};\n", rest.join(";")));
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 #[cfg(test)]
@@ -353,6 +429,38 @@ mod tests {
         assert_eq!(
             user_value(r"Software\RegisteredApplications", Some("Pocketdesk")),
             None
+        );
+    }
+
+    /// M8 review: the phone that may not dial is never chosen.
+    #[test]
+    fn only_a_phone_that_may_dial_is_called() {
+        let dir = std::env::temp_dir().join(format!("pd-tel-pick-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("phone-a").unwrap();
+        store.trust_device("phone-b").unwrap();
+        let mut off = store.permissions("phone-a");
+        off.set(Capability::Dial, false);
+        store.set_permissions("phone-a", off).unwrap();
+        let (_, _, code, ask) = tel_in(&dir, "tel:5550100", 1_000, true);
+        assert_eq!(code, exit::DONE);
+        assert!(!ask, "one phone may dial: no question");
+        // The request is stamped with the clock's time.
+        let dialled =
+            pocketdesk_core::local::dials::take_all(&dir, pocketdesk_core::local::pin::now_unix());
+        assert_eq!(dialled.len(), 1);
+        assert_eq!(dialled[0].device_id, "phone-b");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mimeapps_loses_only_this_handler() {
+        let raw = "[Default Applications]\nx-scheme-handler/tel=pocketdesk-tel.desktop;\nx-scheme-handler/callto=other.desktop;pocketdesk-tel.desktop;\ntext/html=firefox.desktop\n";
+        assert_eq!(
+            without_desktop_file(raw),
+            "[Default Applications]\nx-scheme-handler/callto=other.desktop;\ntext/html=firefox.desktop\n"
         );
     }
 

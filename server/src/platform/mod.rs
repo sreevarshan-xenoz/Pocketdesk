@@ -22,8 +22,8 @@ pub(crate) use windows::system32;
 pub(crate) use windows::user_value;
 #[cfg(windows)]
 pub(crate) use windows::{
-    delete_user_key, delete_user_value, install_exception_report, set_user_default_value,
-    set_user_value,
+    delete_user_key, delete_user_key_if_empty, delete_user_value, install_exception_report,
+    set_user_default_value, set_user_value,
 };
 
 /// One-time process setup, before anything enumerates monitors, windows or

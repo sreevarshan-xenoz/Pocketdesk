@@ -350,6 +350,13 @@ pub(crate) fn user_value(subkey: &str, name: Option<&str>) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..len]))
 }
 
+/// Remove `HKCU\<subkey>` only if it has no keys under it (M8): Windows
+/// refuses to delete one that has.
+pub(crate) fn delete_user_key_if_empty(subkey: &str) {
+    let subkey = HSTRING::from(subkey);
+    let _ = unsafe { windows::Win32::System::Registry::RegDeleteKeyW(HKEY_CURRENT_USER, &subkey) };
+}
+
 /// Remove the value `name` of `HKCU\<subkey>`, if it is there (M8).
 pub(crate) fn delete_user_value(subkey: &str, name: &str) {
     let subkey = HSTRING::from(subkey);

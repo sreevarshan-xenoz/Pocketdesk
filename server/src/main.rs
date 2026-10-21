@@ -44,6 +44,16 @@ async fn main() -> Result<()> {
         std::process::exit(browser_host::run());
     }
 
+    // A tel: link (M8) needs no config: a config.toml that does not parse
+    // must not leave a browser's link doing nothing without a word.
+    match &cli.command {
+        Some(cli::Commands::Tel { uri }) => std::process::exit(tel_handler::run_tel(uri)),
+        Some(cli::Commands::TelHandler { remove }) => {
+            return tel_handler::run_tel_handler(*remove);
+        }
+        _ => {}
+    }
+
     // Load configuration first. A config.toml that does not parse fails a
     // `--json` command as JSON too.
     let config = match config::Config::load() {
@@ -179,8 +189,9 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             std::process::exit(local_api::run_send_to_phone(&paths))
         }
         cli::Commands::SendMenu { remove } => local_api::run_send_menu(remove),
-        cli::Commands::Tel { uri } => std::process::exit(tel_handler::run_tel(&uri)),
-        cli::Commands::TelHandler { remove } => tel_handler::run_tel_handler(remove),
+        cli::Commands::Tel { .. } | cli::Commands::TelHandler { .. } => {
+            unreachable!("handled before the config is read")
+        }
         cli::Commands::Sent { count, json } => local_api::print_files(true, count, json),
         cli::Commands::Received { count, json } => local_api::print_files(false, count, json),
         cli::Commands::Events { since_start, json } => local_api::watch(since_start, json),
