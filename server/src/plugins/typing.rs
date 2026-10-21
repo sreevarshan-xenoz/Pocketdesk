@@ -39,15 +39,20 @@ pub async fn run() {
         }
         let control_on = crate::events::current_config().cast_control;
         let clients = crate::state::clone_clients().await;
+        // Said once a flush, not once a batch (M4 review: ten a second
+        // while typing with it off).
+        let mut said = false;
         for batch in batches {
             let allowed = crate::plugins::pair::allows(
                 &batch.device_id,
                 pocketdesk_core::protocol::permissions::Capability::Cast,
             );
             let Some(packet) = packet_for(&batch, control_on, allowed) else {
-                tracing::info!(
-                    "Typing not sent: control from this computer or the phone's permission is off"
-                );
+                if !std::mem::replace(&mut said, true) {
+                    tracing::debug!(
+                        "Typing not sent: control from this computer or the phone's permission is off"
+                    );
+                }
                 continue;
             };
             let Some(phone) = clients.iter().find(|c| c.device_id() == batch.device_id) else {

@@ -189,16 +189,16 @@ impl TypeView {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        for batch in batches(events) {
-            self.seq += 1;
-            if let Err(e) =
-                pocketdesk_core::local::typing::request(dir, device_id, self.seq, &batch, now_ms)
-            {
-                self.error = Some(format!("Not sent: {e}"));
-                return;
-            }
+        let batches = batches(events);
+        if batches.is_empty() {
+            return;
         }
-        self.error = None;
+        // One file a flush (M4 review), so its batches stay in order.
+        self.seq += 1;
+        match pocketdesk_core::local::typing::request(dir, device_id, self.seq, &batches, now_ms) {
+            Ok(()) => self.error = None,
+            Err(e) => self.error = Some(format!("Not sent: {e}")),
+        }
     }
 }
 
