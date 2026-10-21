@@ -263,6 +263,8 @@ pub(crate) async fn run() {
     let mut watch_again_at: Option<tokio::time::Instant> = None;
     #[cfg(not(windows))]
     let mut said = false;
+    #[cfg(not(windows))]
+    let mut image_read_at: Option<tokio::time::Instant> = None;
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -300,14 +302,17 @@ pub(crate) async fn run() {
             if now.is_some() && sequence == now {
                 continue;
             }
-            // Noted only once the clipboard was read: a read that failed
-            // (another app held it) is tried again next tick.
+            // Noted only once the clipboard was read, its image too (M3
+            // review): a read that failed (another app held it) is tried
+            // again next tick.
             match crate::plugins::clipboard::read_text().await {
-                Ok(text) => {
-                    sequence = now;
-                    let image = image_now(text.is_none()).await;
-                    push_change(&mut watch, text, image, clients, linked).await;
-                }
+                Ok(text) => match image_now(text.is_none(), &clients).await {
+                    Ok(image) => {
+                        sequence = now;
+                        push_change(&mut watch, text, image, clients, linked).await;
+                    }
+                    Err(e) => tracing::debug!("The clipboard's image was not read: {e}"),
+                },
                 Err(e) => tracing::debug!("The clipboard was not read: {e}"),
             }
         }
@@ -344,17 +349,45 @@ pub(crate) async fn run() {
                 }
             }
             let text = crate::plugins::clipboard::read_text().await.ok().flatten();
-            let image = image_now(text.is_none()).await;
+            // Without `--watch` (GNOME), an image is read at most every
+            // IMAGE_FALLBACK, not every tick (M3 review): it is a whole PNG
+            // and its hash. Until then nothing is decided, so the watch
+            // keeps what it saw.
+            if text.is_none() && change_watch.is_none() {
+                let due = image_read_at
+                    .is_none_or(|at: tokio::time::Instant| at.elapsed() >= IMAGE_FALLBACK);
+                if !due {
+                    continue;
+                }
+                image_read_at = Some(tokio::time::Instant::now());
+            }
+            let Ok(image) = image_now(text.is_none(), &clients).await else {
+                continue;
+            };
             push_change(&mut watch, text, image, clients, linked).await;
         }
     }
 }
 
-/// The clipboard's image to tell phones of (M3), when it holds no text and
-/// "Images to phones' clipboards" is on, read live from the config.
-async fn image_now(no_text: bool) -> Option<(String, u64)> {
-    if !no_text || !crate::events::current_config().clipboard_images {
-        return None;
+/// How often an image is read where no `wl-paste --watch` says the
+/// clipboard changed (M3 review).
+#[cfg(not(windows))]
+const IMAGE_FALLBACK: Duration = Duration::from_secs(30);
+
+/// The clipboard's image to tell phones of (M3), when it holds no text,
+/// "Images to phones' clipboards" is on (read live from the config) and a
+/// phone among `clients` may have it: never read and encoded for no one
+/// (M3 review). An error says the clipboard could not be read now.
+async fn image_now(
+    no_text: bool,
+    clients: &[Arc<dyn DeviceSender>],
+) -> pocketdesk_core::error::Result<Option<(String, u64)>> {
+    if !no_text
+        || !crate::events::current_config().clipboard_images
+        || !TO_PHONES.load(Ordering::Relaxed)
+        || !clients.iter().any(|c| may_push_image(c.device_id()))
+    {
+        return Ok(None);
     }
     crate::plugins::clipboard::image_for_push().await
 }

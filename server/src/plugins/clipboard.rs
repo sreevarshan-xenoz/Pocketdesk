@@ -334,11 +334,13 @@ fn stand_in_clip(path: &std::path::Path) -> Clip {
 /// The clipboard's image for the watcher to push (M3): its id and size,
 /// kept for the phone's fetch until the clipboard changes; nothing when the
 /// clipboard holds text, nothing usable, or a copy marked private.
-pub(crate) async fn image_for_push() -> Option<(String, u64)> {
-    match read_clipboard().await {
-        Ok(Clip::Image(image)) => Some((image.id.clone(), image.png.len() as u64)),
+/// An error says the clipboard could not be read now (another app held it),
+/// for the watcher to look again.
+pub(crate) async fn image_for_push() -> Result<Option<(String, u64)>> {
+    Ok(match read_clipboard().await? {
+        Clip::Image(image) => Some((image.id.clone(), image.png.len() as u64)),
         _ => None,
-    }
+    })
 }
 
 /// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
@@ -455,10 +457,10 @@ async fn read_clipboard() -> Result<Clip> {
                 None
             }
             Ok(None) => None,
-            Err(e) => {
-                tracing::debug!("The clipboard image is not read: {e}");
-                None
-            }
+            // Not remembered (M3 review): another app held the clipboard
+            // (Windows' Snipping Tool and clipboard history do, right after
+            // a screenshot), so the next look reads it again.
+            Err(e) => return Err(e.into()),
         };
         remember(Some(sequence), image.clone());
         Ok(image.map_or(Clip::Empty, Clip::Image))
