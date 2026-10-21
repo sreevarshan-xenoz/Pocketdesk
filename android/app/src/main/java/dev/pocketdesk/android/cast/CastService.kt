@@ -264,8 +264,15 @@ class CastService : Service() {
                 fail(failed(getString(R.string.cast_no_answer)))
                 return
             }
+            // M7: the sound alone ended by itself (the capture or the
+            // link failed): nothing is left to do (M7 review: it stayed up
+            // silent until Stop).
+            if (soundAlone && showing && sound?.alive != true) {
+                return fail(failed(getString(R.string.phone_sound_no_capture)))
+            }
             when (state) {
-                State.TooOld -> return fail(getString(R.string.cast_too_old, shown))
+                State.TooOld ->
+                    return fail(getString(if (soundAlone) R.string.phone_sound_too_old else R.string.cast_too_old, shown))
                 State.Down -> {
                     if (replaced) return finish()
                     if (!showing || closed != null && closed != "session ended") {
@@ -468,7 +475,7 @@ class CastService : Service() {
             )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(getString(R.string.cast_channel))
+            .setContentTitle(getString(if (soundAlone) R.string.phone_sound_title else R.string.cast_channel))
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
@@ -484,7 +491,7 @@ class CastService : Service() {
     private fun failedNotification(text: String): Notification =
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(getString(R.string.cast_stopped))
+            .setContentTitle(getString(if (soundAlone) R.string.phone_sound_stopped else R.string.cast_stopped))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setAutoCancel(true)

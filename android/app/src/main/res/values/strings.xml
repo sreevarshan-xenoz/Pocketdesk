@@ -954,4 +954,8 @@
     <string name="phone_sound_no_capture">Android did not let Pocketdesk capture it</string>
     <string name="phone_sound_not_allowed">it does not play this phone\'s sound (Devices, \"Play its sound here\")</string>
     <string name="phone_sound_not_played">its Pocketdesk cannot play sound</string>
+    <string name="phone_sound_title">This phone\'s sound on a computer</string>
+    <string name="phone_sound_stopped">This phone\'s sound no longer plays there</string>
+    <string name="phone_sound_too_old">Pocketdesk on %1$s is too old to play this phone\'s sound. Update it.</string>
+    <string name="phone_sound_busy">This phone already shows its screen or plays its sound on a computer: stop that first</string>
 </resources>

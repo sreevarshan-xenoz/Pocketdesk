@@ -214,6 +214,9 @@ class MainActivity : ComponentActivity() {
             val host = phoneSoundTo ?: return@registerForActivityResult
             phoneSoundTo = null
             if (granted) {
+                // Asked only now (M7 review): a second request while the
+                // microphone's was up cancelled it.
+                maybeRequestNotificationPermission()
                 askPhoneSoundConsent(host)
             } else {
                 android.widget.Toast.makeText(this, R.string.phone_sound_needs_mic, android.widget.Toast.LENGTH_LONG).show()
@@ -222,6 +225,11 @@ class MainActivity : ComponentActivity() {
 
     /** M7: Android's consent for the phone's sound alone, said first to be sound only. */
     private fun askPhoneSoundConsent(host: HostStore.Host) {
+        // One cast at a time: a second would be dropped after the consent (M7 review).
+        if (dev.pocketdesk.android.cast.CastService.castingTo != null) {
+            android.widget.Toast.makeText(this, R.string.phone_sound_busy, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         android.widget.Toast.makeText(this, R.string.phone_sound_consent, android.widget.Toast.LENGTH_LONG).show()
         castTo = host
         castSoundAlone = true
@@ -483,8 +491,8 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onPhoneSound = { host ->
                                             HostStore.save(this@MainActivity, host)
-                                            maybeRequestNotificationPermission()
                                             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                                maybeRequestNotificationPermission()
                                                 askPhoneSoundConsent(host)
                                             } else {
                                                 phoneSoundTo = host

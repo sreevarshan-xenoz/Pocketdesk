@@ -931,4 +931,8 @@
     <string name="phone_sound_no_capture">Android அதைப் பிடிக்க Pocketdesk-ஐ அனுமதிக்கவில்லை</string>
     <string name="phone_sound_not_allowed">அது இந்தத் தொலைபேசியின் ஒலியை இயக்குவதில்லை (சாதனங்கள், \"அதன் ஒலியை இங்கே இயக்கு\")</string>
     <string name="phone_sound_not_played">அதன் Pocketdesk ஒலியை இயக்க முடியாது</string>
+    <string name="phone_sound_title">கணினியில் இந்தத் தொலைபேசியின் ஒலி</string>
+    <string name="phone_sound_stopped">இந்தத் தொலைபேசியின் ஒலி இனி அங்கே இயங்கவில்லை</string>
+    <string name="phone_sound_too_old">%1$s இல் உள்ள Pocketdesk இந்தத் தொலைபேசியின் ஒலியை இயக்க மிகப் பழையது. அதைப் புதுப்பிக்கவும்.</string>
+    <string name="phone_sound_busy">இந்தத் தொலைபேசி ஏற்கனவே ஒரு கணினியில் தன் திரையைக் காட்டுகிறது அல்லது ஒலியை இயக்குகிறது: முதலில் அதை நிறுத்தவும்</string>
 </resources>

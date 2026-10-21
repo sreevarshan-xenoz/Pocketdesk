@@ -938,4 +938,8 @@
     <string name="phone_sound_no_capture">Android no dejó que Pocketdesk lo capturara</string>
     <string name="phone_sound_not_allowed">no reproduce el sonido de este teléfono (Dispositivos, \"Reproducir su sonido aquí\")</string>
     <string name="phone_sound_not_played">su Pocketdesk no puede reproducir sonido</string>
+    <string name="phone_sound_title">El sonido de este teléfono en un ordenador</string>
+    <string name="phone_sound_stopped">El sonido de este teléfono ya no se reproduce allí</string>
+    <string name="phone_sound_too_old">Pocketdesk en %1$s es demasiado antiguo para reproducir el sonido de este teléfono. Actualízalo.</string>
+    <string name="phone_sound_busy">Este teléfono ya muestra su pantalla o reproduce su sonido en un ordenador: detenlo primero</string>
 </resources>
