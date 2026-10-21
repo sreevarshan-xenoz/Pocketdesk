@@ -1089,7 +1089,6 @@ impl PocketdeskApp {
         self.phones_panel(ui);
     }
 
-    /// Ask the phone `id` to ring (N1), and say how that went.
     /// Send a press to `id`'s player, saying it was asked (the Sessions
     /// page, the Overview and the window's tray, N2).
     fn press_phone_media(&mut self, id: &str, command: &str) {
@@ -1110,6 +1109,7 @@ impl PocketdeskApp {
         );
     }
 
+    /// Ask the phone `id` to ring (N1), and say how that went.
     fn ring(&mut self, id: &str) {
         let who = self.label(id);
         self.notice =
