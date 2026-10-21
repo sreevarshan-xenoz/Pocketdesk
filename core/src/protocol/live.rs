@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub const MAX_WHOLE: u64 = 1 << 40;
 
 /// What an ongoing notification shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Live {
     /// How far along, out of [`Live::max`]; 0 with no bar.
@@ -24,7 +24,14 @@ pub struct Live {
     /// Whether the timer counts down to its base.
     #[serde(default)]
     pub countdown: bool,
+    /// What the phone says of its timer, in its own clock and words
+    /// ("Ends at 14:32"); at most [`MAX_WORDS`] characters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<String>,
 }
+
+/// The longest timer words kept.
+pub const MAX_WORDS: usize = 60;
 
 impl Live {
     /// The `live` of a notification's body, held to its bounds: `None`
@@ -48,6 +55,18 @@ impl Live {
                 .get("countdown")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            words: live
+                .get("words")
+                .and_then(|v| v.as_str())
+                .map(|w| {
+                    w.chars()
+                        .filter(|c| !c.is_control() && !super::kdeconnect::is_invisible_format(*c))
+                        .take(MAX_WORDS)
+                        .collect::<String>()
+                        .trim()
+                        .to_string()
+                })
+                .filter(|w| !w.is_empty()),
         };
         (live.max > 0 || live.indeterminate || live.chronometer.is_some()).then_some(live)
     }
@@ -58,16 +77,24 @@ impl Live {
             .then(|| (self.progress.saturating_mul(100) / self.max).min(100) as u8)
     }
 
-    /// What the card says of it at `now_ms`: "42 %", "8 min left",
-    /// "Started 5 min ago", or "Under way".
+    /// What the card says of it at `now_ms`: "42 %", the phone's own words
+    /// for a timer ("Ends at 14:32", N4 review: words worked out here froze
+    /// as the timer ran), else "8 min left", "Started 5 min ago", "Ended",
+    /// or "Under way".
     pub fn status(&self, now_ms: u64) -> String {
         if let Some(percent) = self.percent() {
             return format!("{percent} %");
         }
+        if let Some(words) = &self.words {
+            return words.clone();
+        }
         if let Some(base) = self.chronometer {
             let minutes = |ms: u64| ms / 60_000;
             return if self.countdown {
-                match minutes(base.saturating_sub(now_ms)) {
+                if now_ms >= base {
+                    return "Ended".to_string();
+                }
+                match minutes(base - now_ms) {
                     0 => "Under a minute left".to_string(),
                     m => format!("{m} min left"),
                 }
@@ -114,6 +141,7 @@ mod tests {
             indeterminate: false,
             chronometer: None,
             countdown: false,
+            words: None,
         };
         assert_eq!(bar(1, 4).status(now), "25 %");
         let timer = |base: u64, countdown: bool| Live {
@@ -122,6 +150,7 @@ mod tests {
             indeterminate: false,
             chronometer: Some(base),
             countdown,
+            words: None,
         };
         assert_eq!(
             timer(now - 5 * 60_000, false).status(now),
@@ -130,6 +159,19 @@ mod tests {
         assert_eq!(timer(now, false).status(now), "Started just now");
         assert_eq!(timer(now + 8 * 60_000 + 5, true).status(now), "8 min left");
         assert_eq!(timer(now + 30_000, true).status(now), "Under a minute left");
+        assert_eq!(timer(now - 1, true).status(now), "Ended");
+        let worded = Live {
+            words: Some("Ends at 14:32".to_string()),
+            ..timer(now + 30_000, true)
+        };
+        assert_eq!(worded.status(now), "Ends at 14:32");
+        let read = Live::from_body(&json!({"live": {"chronometer": 5, "words": "Ends\nat 14:32"}}))
+            .unwrap();
+        assert_eq!(
+            read.words.as_deref(),
+            Some("Endsat 14:32"),
+            "control characters go"
+        );
         let moving = Live {
             indeterminate: true,
             ..bar(0, 0)

@@ -13,6 +13,17 @@ use crate::protocol::live::Live;
 /// The most cards kept, over all phones.
 pub const MAX_CARDS: usize = 20;
 
+/// A bar not heard of this long is taken for gone (N4 review: a lost
+/// cancel left it for good); a timer may run longer unchanged.
+pub const STALE_SECS: u64 = 30 * 60;
+
+impl LiveCard {
+    /// Whether it is still to be shown at `now_unix`.
+    pub fn current(&self, now_unix: u64) -> bool {
+        self.live.chronometer.is_some() || now_unix.saturating_sub(self.updated_unix) < STALE_SECS
+    }
+}
+
 /// One ongoing update as last heard.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveCard {
@@ -60,6 +71,8 @@ pub fn put(state_dir: &Path, card: LiveCard) -> io::Result<bool> {
     let before = cards.len();
     cards.retain(|c| !(c.device_id == card.device_id && c.tag == card.tag));
     let new = cards.len() == before;
+    let now = card.updated_unix;
+    cards.retain(|c| c.current(now));
     cards.push(card);
     let excess = cards.len().saturating_sub(MAX_CARDS);
     cards.drain(..excess);
@@ -115,6 +128,7 @@ mod tests {
                 indeterminate: false,
                 chronometer: None,
                 countdown: false,
+                words: None,
             },
             updated_unix: 1,
         }

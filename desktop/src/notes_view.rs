@@ -18,6 +18,8 @@ pub struct NotesView {
     notes: Vec<PhoneNote>,
     /// The phones' ongoing updates (N4), newest first.
     cards: Vec<pocketdesk_core::local::phone_live::LiveCard>,
+    /// Settings' "Ongoing updates from phones" is off: none shown.
+    pub live_off: bool,
     /// Where each answer stands (E1).
     answers: Vec<Outcome>,
     /// Each notification's reply being typed, by phone and key.
@@ -185,7 +187,11 @@ impl NotesView {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(REFRESH);
         // N4: what is going on now, above what can be answered.
-        let going = going_on(&self.cards, devices);
+        let going = if self.live_off {
+            Vec::new()
+        } else {
+            going_on(&self.cards, devices, now_unix)
+        };
         if !going.is_empty() {
             ui.label(RichText::new("Going on now").strong());
             for card in going {
@@ -416,17 +422,20 @@ pub enum Tone {
 pub const NO_WORD_SECS: u64 = 60;
 
 /// The ongoing updates to show (N4): those of a phone linked or in a
-/// session now, since one gone away cannot say they ended.
+/// session now, since one gone away cannot say they ended, and not a bar
+/// gone quiet for half an hour (N4 review: a lost cancel).
 pub fn going_on<'a>(
     cards: &'a [pocketdesk_core::local::phone_live::LiveCard],
     devices: &[crate::model::Device],
+    now_unix: u64,
 ) -> Vec<&'a pocketdesk_core::local::phone_live::LiveCard> {
     cards
         .iter()
         .filter(|c| {
-            devices
-                .iter()
-                .any(|d| d.id == c.device_id && (d.linked || d.connected))
+            c.current(now_unix)
+                && devices
+                    .iter()
+                    .any(|d| d.id == c.device_id && (d.linked || d.connected))
         })
         .collect()
 }
@@ -506,6 +515,7 @@ mod tests {
                 indeterminate: false,
                 chronometer: None,
                 countdown: false,
+                words: None,
             },
             updated_unix: 1,
         };
@@ -515,11 +525,17 @@ mod tests {
             ..Default::default()
         };
         let cards = [card("near"), card("away"), card("unknown")];
-        let shown: Vec<&str> = going_on(&cards, &[device("near", true), device("away", false)])
+        let shown: Vec<&str> = going_on(&cards, &[device("near", true), device("away", false)], 1)
             .iter()
             .map(|c| c.device_id.as_str())
             .collect();
         assert_eq!(shown, ["near"]);
+        let stale = going_on(
+            &cards,
+            &[device("near", true)],
+            1 + pocketdesk_core::local::phone_live::STALE_SECS,
+        );
+        assert!(stale.is_empty(), "a bar gone quiet");
     }
     use super::*;
 

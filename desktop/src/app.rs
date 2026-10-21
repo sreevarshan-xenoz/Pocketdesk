@@ -974,6 +974,8 @@ impl PocketdeskApp {
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
             }
             Tab::Notifications => {
+                // N4: no cards with the setting off (N4 review).
+                self.notes.live_off = self.config.as_ref().is_some_and(|c| !c.phone_live_updates);
                 self.notes
                     .show(ui, &self.state_dir, &self.snapshot.devices, now_unix())
             }
