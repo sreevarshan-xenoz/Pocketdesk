@@ -915,6 +915,7 @@ mod tests {
             key: "0|chat|1|null|10001".into(),
             actions: vec!["Mark \"read\" & <go>".into(), "Mute".into()],
             reply: true,
+            open: false,
         }
     }
 

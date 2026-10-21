@@ -27,14 +27,22 @@ pub const MUTE: &str = "mute";
 /// Its label.
 const MUTE_LABEL: &str = "Not from this app";
 
+/// The toast argument and D-Bus action of "Open on the phone" (N3).
+pub const OPEN: &str = "open";
+
+/// Its label.
+const OPEN_LABEL: &str = "Open on the phone";
+
 /// What a shown notification can be answered with: whose it is, its
-/// buttons in the order shown, and whether it takes a reply.
+/// buttons in the order shown, whether it takes a reply, and whether it
+/// opens on the phone (N3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Answerable {
     pub device_id: String,
     pub key: String,
     pub actions: Vec<String>,
     pub reply: bool,
+    pub open: bool,
 }
 
 impl Answerable {
@@ -44,13 +52,17 @@ impl Answerable {
             key: note.key.clone(),
             actions: note.actions.clone(),
             reply: note.reply,
+            open: note.open,
         }
     }
 
-    /// The buttons a toast has room for beside the reply and, with `mute`,
-    /// "Not from this app".
+    /// The buttons a toast has room for beside the reply, "Open on the
+    /// phone" and, with `mute`, "Not from this app".
     fn toast_buttons(&self, mute: bool) -> &[String] {
-        let room = MAX_TOAST_ACTIONS - usize::from(self.reply) - usize::from(mute);
+        let room = MAX_TOAST_ACTIONS
+            - usize::from(self.reply)
+            - usize::from(self.open)
+            - usize::from(mute);
         &self.actions[..self.actions.len().min(room)]
     }
 }
@@ -124,7 +136,7 @@ pub fn toast_xml_pictured(
         ));
     }
     xml.push_str("</binding></visual>");
-    let answers = answers.filter(|a| a.reply || !a.actions.is_empty());
+    let answers = answers.filter(|a| a.reply || a.open || !a.actions.is_empty());
     if answers.is_some() || mute {
         xml.push_str("<actions>");
     }
@@ -139,6 +151,11 @@ pub fn toast_xml_pictured(
             xml.push_str(&format!(
                 "<action content=\"{}\" arguments=\"{ACTION}{i}\"/>",
                 xml_escape(title)
+            ));
+        }
+        if answers.open {
+            xml.push_str(&format!(
+                "<action content=\"{OPEN_LABEL}\" arguments=\"{OPEN}\"/>"
             ));
         }
     }
@@ -166,6 +183,9 @@ pub fn toast_answer(
     if arguments == REPLY {
         let text = reply_text?.trim();
         return (answers.reply && !text.is_empty()).then(|| Answer::Reply(text.to_string()));
+    }
+    if arguments == OPEN {
+        return answers.open.then_some(Answer::Open);
     }
     let index: usize = arguments.strip_prefix(ACTION)?.parse().ok()?;
     answers
@@ -212,6 +232,11 @@ pub fn dbus_actions(answers: Option<&Answerable>, caps: DbusCaps, mute: bool) ->
         if answers.reply && caps.inline_reply {
             actions.push(DBUS_INLINE_REPLY.to_string());
             actions.push("Reply".to_string());
+        }
+        // N3: where the server shows buttons.
+        if answers.open && caps.actions {
+            actions.push(OPEN.to_string());
+            actions.push(OPEN_LABEL.to_string());
         }
     }
     // "Not from this app" where the server shows buttons (K2b).
@@ -269,8 +294,12 @@ pub fn mute(app: &str) {
     crate::platform::notify(&title, &body, std::time::Duration::from_secs(8));
 }
 
-/// What `ActionInvoked` with `key` answers: a button by its `a<n>` key.
+/// What `ActionInvoked` with `key` answers: a button by its `a<n>` key,
+/// or "Open on the phone" (N3).
 pub fn dbus_action_answer(key: &str, answers: &Answerable) -> Option<Answer> {
+    if key == OPEN {
+        return answers.open.then_some(Answer::Open);
+    }
     let index: usize = key.strip_prefix('a')?.parse().ok()?;
     answers
         .actions
@@ -290,7 +319,7 @@ pub fn send(answers: &Answerable, answer: Answer) {
     // A reply's length, for saying why one was refused.
     let answer_kind = match &answer {
         Answer::Reply(text) => Some(text.chars().count()),
-        Answer::Action(_) => None,
+        Answer::Action(_) | Answer::Open => None,
     };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -327,6 +356,50 @@ pub fn send(answers: &Answerable, answer: Answer) {
 
 #[cfg(test)]
 mod tests {
+
+    /// N3: "Open on the phone" in the toast and over D-Bus, only where the
+    /// notification offers it, and room kept for it among the buttons.
+    #[test]
+    fn open_on_the_phone_is_a_button_where_offered() {
+        let answers = Answerable {
+            device_id: "phone".to_string(),
+            key: "k".to_string(),
+            actions: vec![],
+            reply: false,
+            open: true,
+        };
+        let xml = toast_xml_pictured("Ann", "Hi", Some(&answers), false, &Pictures::default());
+        assert!(xml.contains("arguments=\"open\""), "{xml}");
+        assert_eq!(
+            toast_answer(OPEN, None, &answers, false),
+            Some(Answer::Open)
+        );
+        let caps = DbusCaps {
+            actions: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            dbus_actions(Some(&answers), caps, false),
+            vec![OPEN.to_string(), OPEN_LABEL.to_string()]
+        );
+        assert_eq!(dbus_action_answer(OPEN, &answers), Some(Answer::Open));
+        let closed = Answerable {
+            open: false,
+            ..answers.clone()
+        };
+        assert!(
+            !toast_xml_pictured("Ann", "Hi", Some(&closed), false, &Pictures::default())
+                .contains("open")
+        );
+        assert_eq!(toast_answer(OPEN, None, &closed, false), None);
+        assert_eq!(dbus_action_answer(OPEN, &closed), None);
+        let full = Answerable {
+            actions: (0..5).map(|i| format!("b{i}")).collect(),
+            reply: true,
+            ..answers
+        };
+        assert_eq!(full.toast_buttons(true).len(), MAX_TOAST_ACTIONS - 3);
+    }
     use super::*;
 
     fn answerable(actions: &[&str], reply: bool) -> Answerable {
@@ -335,6 +408,7 @@ mod tests {
             key: "0|chat|1|null|10001".into(),
             actions: actions.iter().map(|a| a.to_string()).collect(),
             reply,
+            open: false,
         }
     }
 
