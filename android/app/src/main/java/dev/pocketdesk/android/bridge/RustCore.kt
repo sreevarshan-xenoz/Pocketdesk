@@ -57,6 +57,7 @@ object RustCore {
     private external fun nativePollIncomingPackets(): String
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
+    private external fun nativeTakesLive(address: String): Boolean
     private external fun nativeStreamClosedReason(): String
     private external fun nativeGetStreamingRtt(): Int
     private external fun nativeGetStreamingStats(): String
@@ -444,6 +445,9 @@ object RustCore {
 
     val isStreamingActive: Boolean
         get() = nativeIsStreamingActive()
+
+    /** Whether the computer at [address] shows ongoing updates as one card (N4); false when unknown. */
+    fun takesLive(address: String): Boolean = runCatching { nativeTakesLive(address) }.getOrDefault(false)
 
     /** Why the desktop closed the stream (e.g. "session refused"); null while open. */
     val streamClosedReason: String?

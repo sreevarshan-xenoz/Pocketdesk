@@ -355,6 +355,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSession
     to_jstring(&mut env, json)
 }
 
+/// Whether the computer at `address` shows a phone's ongoing updates as
+/// one card (N4), as it said when last heard.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakesLive(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jboolean {
+    let address = jstring_to_string(&mut env, &address);
+    crate::peer_names::takes_live(&address) as jboolean
+}
+
 /// Whether a streaming session is currently active.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIsStreamingActive(
