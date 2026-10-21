@@ -32,14 +32,28 @@ internal object MediaSessions {
         }
     }
 
-    fun describe(context: Context, controller: MediaController): MediaRule.Media? {
-        val state = controller.playbackState ?: return null
-        val metadata = controller.metadata
-        val actions = state.actions
-        val app = runCatching {
+    /** Apps' names by package, looked up once (a report asks for each session's). */
+    private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun label(context: Context, packageName: String): String =
+        labels[packageName] ?: runCatching {
             val pm = context.packageManager
-            pm.getApplicationLabel(pm.getApplicationInfo(controller.packageName, 0)).toString()
-        }.getOrDefault(controller.packageName)
+            pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+        }.getOrDefault(packageName).also { if (labels.size < 64) labels[packageName] = it }
+
+    /**
+     * [controller]'s session as reported, from [metadata] (by default asked
+     * of the player, a call that carries its cover's bitmap: the listener
+     * passes what its callbacks were told).
+     */
+    fun describe(
+        context: Context,
+        controller: MediaController,
+        metadata: MediaMetadata? = controller.metadata,
+    ): MediaRule.Media? {
+        val state = controller.playbackState ?: return null
+        val actions = state.actions
+        val app = label(context, controller.packageName)
         fun can(action: Long) = actions and action != 0L
         return MediaRule.Media(
             title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).orEmpty(),
@@ -121,12 +135,15 @@ object MediaArt {
         @Synchronized
         fun of(packageName: String, metadata: MediaMetadata?): Cover? {
             val bitmap = metadata?.let(::bitmap)
+            // By what the track is, not the bitmap's object: each ask of the
+            // player brings a new one (N2 review: the cache never hit).
             val key = listOf(
                 packageName,
                 metadata?.getString(MediaMetadata.METADATA_KEY_TITLE),
                 metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST),
                 metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM),
-                bitmap?.let { "${System.identityHashCode(it)}:${it.generationId}:${it.width}x${it.height}" },
+                metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.toString(),
+                bitmap?.let { "${it.width}x${it.height}" },
             ).joinToString("|")
             if (key != this.key) {
                 this.key = key

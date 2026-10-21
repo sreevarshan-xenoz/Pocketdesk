@@ -62,18 +62,24 @@ object MediaRule {
 
     /**
      * Whether the background reporter (N2) sends [now] at [nowMs] after
-     * [sent]: a change, `{}` once when playing stops, or what is
-     * [current] again every [RESEND_MS]; a player paused past [PAUSED_MS]
-     * is left to age out on the computer.
+     * [sent]: what is [current] to a link that has heard nothing (N2
+     * review: not yesterday's paused song to each new link), a change,
+     * `{}` once when playing stops, or what is current again every
+     * [RESEND_MS]; a player paused past [PAUSED_MS] is left to age out on
+     * the computer.
      */
     fun backgroundDue(sent: Sent, now: Media?, nowMs: Long, pausedSinceMs: Long?): Boolean = when {
-        !sent.any -> now != null
+        !sent.any -> current(now, nowMs, pausedSinceMs)
         now != sent.last -> true
         else -> current(now, nowMs, pausedSinceMs) && nowMs - sent.atMs >= RESEND_MS
     }
 
-    /** Whether the cover [artId] goes with a report: one the link has not had ([sentArt]). */
-    fun sendArt(artId: String?, sentArt: Set<String>): Boolean = artId != null && artId !in sentArt
+    /**
+     * Whether the cover [artId] goes with a report: the computer holds one
+     * cover a phone, the last sent ([held]), so a cover it no longer holds
+     * goes again (N2 review: a track played again after another).
+     */
+    fun sendArt(artId: String?, held: String?): Boolean = artId != null && artId != held
 
     /** Whether a press for [command] is acted on. */
     fun accepts(command: String, settingOn: Boolean): Boolean = settingOn && command in COMMANDS

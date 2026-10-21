@@ -24,6 +24,11 @@ class MediaRuleTest {
         val playing = media("Spotify", playing = true)
         val paused = playing.copy(isPlaying = false)
         assertTrue("first", MediaRule.backgroundDue(MediaRule.Sent(), playing, 0, null))
+        assertFalse(
+            "a new link does not hear a pause past five minutes",
+            MediaRule.backgroundDue(MediaRule.Sent(), paused, MediaRule.PAUSED_MS, 0),
+        )
+        assertTrue(MediaRule.backgroundDue(MediaRule.Sent(), paused, 1_000, 0))
         assertFalse("nothing, never sent", MediaRule.backgroundDue(MediaRule.Sent(), null, 0, null))
         val sent = MediaRule.Sent(any = true, last = playing, atMs = 1_000)
         assertFalse(MediaRule.backgroundDue(sent, playing, 1_000 + 59_999, null))
@@ -54,9 +59,10 @@ class MediaRuleTest {
 
     @Test
     fun aCoverGoesOncePerLink() {
-        assertTrue(MediaRule.sendArt("0123456789abcdef", emptySet()))
-        assertFalse(MediaRule.sendArt("0123456789abcdef", setOf("0123456789abcdef")))
-        assertFalse(MediaRule.sendArt(null, emptySet()))
+        assertTrue(MediaRule.sendArt("0123456789abcdef", null))
+        assertFalse(MediaRule.sendArt("0123456789abcdef", "0123456789abcdef"))
+        assertTrue("held another", MediaRule.sendArt("0123456789abcdef", "fedcba9876543210"))
+        assertFalse(MediaRule.sendArt(null, null))
     }
 
     @Test

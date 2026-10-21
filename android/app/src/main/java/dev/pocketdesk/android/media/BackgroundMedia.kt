@@ -17,6 +17,7 @@ import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.notify.PhoneNotificationListener
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 import dev.pocketdesk.android.ui.ControlLink
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -32,8 +33,8 @@ private const val SETTLE_MS = 500L
  * watches the media sessions (Android's callbacks, no polling) and reports
  * what plays on the own computer's live link only, never dialing for it.
  * It says it again each minute while it plays, or for five minutes after a
- * pause, and sends a cover once per link. The listener's 2 s ticks keep the
- * switch in step ([sync]) and take presses ([tick]).
+ * pause, with the cover when the computer does not hold it. The listener's
+ * 2 s ticks keep the switch in step ([sync]) and take presses ([tick]).
  */
 class BackgroundMedia(private val app: Context) {
     companion object {
@@ -55,15 +56,22 @@ class BackgroundMedia(private val app: Context) {
     private var listener: MediaSessionManager.OnActiveSessionsChangedListener? = null
     private val watched = HashMap<MediaSession.Token, Pair<MediaController, MediaController.Callback>>()
 
+    /** What each player last said of its state, so a repeat is let go (main thread). */
+    private val lastState = HashMap<MediaSession.Token, Pair<Int, Long>>()
+
+    /**
+     * Each session's metadata as its callbacks told it: asking the player
+     * again carries its cover's bitmap each time (N2 review).
+     */
+    private val metadata = ConcurrentHashMap<MediaSession.Token, MediaMetadata>()
+
     // The worker's.
     private var pending: ScheduledFuture<*>? = null
     private val covers = MediaArt.Cache()
-    private var sent = MediaRule.Sent()
-    private val sentArt = mutableSetOf<String>()
-    private var linkedTo: Pair<String, Int>? = null
-    private var pausedSinceMs: Long? = null
+    private val report = BackgroundReport()
+    private var cover: MediaArt.Cover? = null
 
-    /** Whether a report is current, so the listener keeps a link for it. */
+    /** Whether a report is current, so the listener keeps a link for it (any thread). */
     @Volatile
     private var current = false
 
@@ -78,12 +86,12 @@ class BackgroundMedia(private val app: Context) {
         main.post { if (wanted) register() else unregister() }
     }
 
-    /** Whether the own computer's link is wanted for this: while a report is current. */
+    /** Whether the own computer's link is wanted for this: while what plays is current. */
     fun linkWanted(): Boolean = active && current
 
     /**
-     * The listener's answers tick: presses, and a report only when one is
-     * due again or the link changed; the players' callbacks report changes.
+     * The listener's answers tick: presses, a pause aging out, and a report
+     * when the link changed or one is due again; changes come by callbacks.
      */
     fun tick() {
         if (!active || worker.isShutdown) return
@@ -91,10 +99,8 @@ class BackgroundMedia(private val app: Context) {
             runCatching {
                 takePresses()
                 val nowMs = SystemClock.elapsedRealtime()
-                // A pause past five minutes is current no longer: no link kept for it.
-                if (!MediaRule.current(sent.last, nowMs, pausedSinceMs)) current = false
-                val due = current && nowMs - sent.atMs >= MediaRule.RESEND_MS
-                if (due || RustCore.controlPeer() != linkedTo) report()
+                current = report.current(nowMs)
+                send(nowMs)
             }.onFailure { Log.w(TAG, "tick failed", it) }
         }
     }
@@ -109,17 +115,28 @@ class BackgroundMedia(private val app: Context) {
     private fun register() {
         if (listener != null || !wanted()) return
         val manager = app.getSystemService(MediaSessionManager::class.java) ?: return
-        val onChange = MediaSessionManager.OnActiveSessionsChangedListener { controllers -> watch(controllers.orEmpty()) }
+        lateinit var onChange: MediaSessionManager.OnActiveSessionsChangedListener
+        onChange = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
+            // One queued before an unregister is let go (N2 review).
+            if (listener === onChange) watch(controllers.orEmpty())
+        }
         try {
             manager.addOnActiveSessionsChangedListener(onChange, component, main)
-            watch(manager.getActiveSessions(component))
         } catch (e: SecurityException) {
             Log.i(TAG, "No notification access: not watching the phone's music")
             return
         }
         listener = onChange
+        val controllers = try {
+            manager.getActiveSessions(component)
+        } catch (e: SecurityException) {
+            // Not left registered for the next try to add another (N2 review).
+            runCatching { manager.removeOnActiveSessionsChangedListener(onChange) }
+            listener = null
+            return
+        }
         active = true
-        changed()
+        watch(controllers)
     }
 
     private fun unregister() {
@@ -129,19 +146,19 @@ class BackgroundMedia(private val app: Context) {
         watch(emptyList())
         if (!active) return
         active = false
+        current = false
         if (worker.isShutdown) return
         // The computer forgets the song it shows; the app's reporter, if
         // open, says it again in full.
         worker.execute {
             runCatching {
                 val own = PhoneLink.target(app)
-                if (sent.any && sent.last != null && own != null && linked(own.address, own.controlPort)) {
+                if (report.sent.last != null && own != null && linked(own.address, own.controlPort)) {
                     RustCore.sendPhonePacketOnLink(own.address, own.controlPort, PHONE_MEDIA, "{}")
                 }
             }
-            sent = MediaRule.Sent()
-            sentArt.clear()
-            current = false
+            report.forget()
+            cover = null
         }
     }
 
@@ -150,30 +167,48 @@ class BackgroundMedia(private val app: Context) {
         val tokens = controllers.map { it.sessionToken }.toSet()
         watched.keys.filter { it !in tokens }.forEach { token ->
             watched.remove(token)?.let { (controller, callback) -> controller.unregisterCallback(callback) }
+            lastState.remove(token)
+            metadata.remove(token)
         }
         for (controller in controllers) {
-            if (controller.sessionToken in watched) continue
+            val token = controller.sessionToken
+            if (token in watched) continue
+            controller.metadata?.let { metadata[token] = it }
             val callback = object : MediaController.Callback() {
-                override fun onPlaybackStateChanged(state: PlaybackState?) = changed()
-                override fun onMetadataChanged(metadata: MediaMetadata?) = changed()
+                override fun onPlaybackStateChanged(state: PlaybackState?) {
+                    // Players that set their state each second for its
+                    // position are let go: only the state and what can be
+                    // pressed are reported (N2 review).
+                    val now = (state?.state ?: -1) to (state?.actions ?: 0L)
+                    if (lastState.put(token, now) != now) changed()
+                }
+
+                override fun onMetadataChanged(data: MediaMetadata?) {
+                    if (data == null) metadata.remove(token) else metadata[token] = data
+                    changed()
+                }
+
                 override fun onSessionDestroyed() = changed()
             }
             controller.registerCallback(callback, main)
-            watched[controller.sessionToken] = controller to callback
+            watched[token] = controller to callback
+            lastState[token] = (controller.playbackState?.state ?: -1) to (controller.playbackState?.actions ?: 0L)
         }
         if (active) changed()
     }
 
     /** Report once things settle: a burst of changes is one report. */
     private fun changed() {
-        if (worker.isShutdown) return
-        worker.execute {
-            pending?.cancel(false)
-            pending = worker.schedule(
-                { runCatching { report() }.onFailure { Log.w(TAG, "report failed", it) } },
-                SETTLE_MS,
-                TimeUnit.MILLISECONDS,
-            )
+        if (!active || worker.isShutdown) return
+        runCatching {
+            worker.execute {
+                pending?.cancel(false)
+                pending = worker.schedule(
+                    { runCatching { look() }.onFailure { Log.w(TAG, "report failed", it) } },
+                    SETTLE_MS,
+                    TimeUnit.MILLISECONDS,
+                )
+            }
         }
     }
 
@@ -184,45 +219,46 @@ class BackgroundMedia(private val app: Context) {
     private fun takePresses() {
         val presses = RustCore.takeMediaPresses()
         if (presses.isEmpty()) return
-        val target = sent.last?.packageName ?: return
+        val target = report.sent.last?.packageName ?: return
         val controller = MediaSessions.controllers(app).firstOrNull { it.packageName == target } ?: return
+        val on = wanted()
         for (command in presses) {
-            if (MediaRule.accepts(command, wanted())) MediaSessions.press(controller, command)
+            if (MediaRule.accepts(command, on)) MediaSessions.press(controller, command)
         }
         // The player's callbacks report its new state.
     }
 
-    /** Send what plays when [MediaRule.backgroundDue] says so (worker). */
-    private fun report() {
+    /** What plays now, its cover and since when it is paused, then a report if due (worker). */
+    private fun look() {
         if (!active) return
-        val own = PhoneLink.target(app) ?: return
-        val peer = RustCore.controlPeer()
-        val linked = linked(own.address, own.controlPort)
-        // A link to another computer, or a new one, knows nothing of what was sent.
-        if (peer != linkedTo || !linked) {
-            linkedTo = peer
-            sent = MediaRule.Sent()
-            sentArt.clear()
+        val sessions = MediaSessions.controllers(app).mapNotNull { controller ->
+            val data = metadata[controller.sessionToken]
+            MediaSessions.describe(app, controller, data)?.let { Triple(controller, data, it) }
         }
-        val controllers = MediaSessions.controllers(app)
-        val picked = MediaRule.pick(controllers.mapNotNull { MediaSessions.describe(app, it) })
-        val cover = picked?.let { media ->
-            covers.of(media.packageName, controllers.firstOrNull { it.packageName == media.packageName }?.metadata)
-        }
-        val now = picked?.copy(artId = cover?.id)
+        val picked = MediaRule.pick(sessions.map { it.third })
+        // The cover of the session picked, not another of its app's (N2 review).
+        val chosen = sessions.firstOrNull { it.third === picked }
+        cover = chosen?.let { (controller, data, _) -> covers.of(controller.packageName, data) }
         val nowMs = SystemClock.elapsedRealtime()
-        pausedSinceMs = when {
-            now == null || now.isPlaying -> null
-            else -> pausedSinceMs ?: nowMs
-        }
-        current = MediaRule.current(now, nowMs, pausedSinceMs)
-        if (!linked || !MediaRule.backgroundDue(sent, now, nowMs, pausedSinceMs)) return
-        val withArt = cover?.takeIf { MediaRule.sendArt(it.id, sentArt) }
-        val body = MediaSessions.body(now, background = true, cover = withArt)
+        // Since when it is paused by the player's own clock, so a song paused
+        // yesterday is not current after a restart (N2 review).
+        val since = chosen?.first?.playbackState?.lastPositionUpdateTime?.takeIf { it in 1..nowMs } ?: nowMs
+        report.see(picked?.copy(artId = cover?.id), since)
+        current = report.current(nowMs)
+        send(nowMs)
+    }
+
+    /** Send what plays when the link is up and a report is due (worker). */
+    private fun send(nowMs: Long) {
+        val own = PhoneLink.target(app) ?: return
+        val linked = linked(own.address, own.controlPort)
+        report.link(RustCore.controlPeer(), linked)
+        if (!linked || !report.due(nowMs)) return
+        val withArt = cover?.takeIf { report.withArt() && it.id == report.seen?.artId }
+        val body = MediaSessions.body(report.seen, background = true, cover = withArt)
         val result = RustCore.sendPhonePacketOnLink(own.address, own.controlPort, PHONE_MEDIA, body.toString())
         if (result.isSuccess) {
-            sent = MediaRule.Sent(any = true, last = now, atMs = nowMs)
-            withArt?.let { sentArt += it.id }
+            report.sent(nowMs)
         } else {
             Log.d(TAG, "Not sent: ${result.exceptionOrNull()?.message}")
         }

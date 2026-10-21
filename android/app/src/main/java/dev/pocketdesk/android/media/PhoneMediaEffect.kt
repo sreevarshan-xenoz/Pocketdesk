@@ -34,14 +34,15 @@ fun PhoneMediaEffect(address: String, controlPort: Int) {
     LaunchedEffect(address, controlPort, lifecycleOwner) {
         var sent = MediaRule.Sent()
         val covers = MediaArt.Cache()
-        val sentArt = mutableSetOf<String>()
+        // The cover the computer holds: the last one sent (N2 review).
+        var heldArt: String? = null
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
                 withContext(Dispatchers.IO) {
                     if (BackgroundMedia.active) {
                         // Heard again in full when it takes over once more.
                         sent = MediaRule.Sent()
-                        sentArt.clear()
+                        heldArt = null
                         return@withContext
                     }
                     val on = Prefs.phoneMediaOnComputer(context) &&
@@ -50,7 +51,7 @@ fun PhoneMediaEffect(address: String, controlPort: Int) {
                     // A computer reached again (a restart, a dropped link)
                     // knows nothing of what was sent: it hears it again.
                     sent = MediaRule.forLink(sent, linked)
-                    if (!linked) sentArt.clear()
+                    if (!linked) heldArt = null
                     val presses = RustCore.takeMediaPresses()
                     var controllers = if (on) MediaSessions.controllers(context) else emptyList()
                     // Presses act on the session reported, the one the computer shows.
@@ -66,24 +67,23 @@ fun PhoneMediaEffect(address: String, controlPort: Int) {
                         }
                         // With the setting off, `{}` once, so the computer
                         // forgets the song it shows.
-                        val picked = if (on) {
-                            MediaRule.pick(controllers.mapNotNull { MediaSessions.describe(context, it) })
+                        val sessions = if (on) {
+                            controllers.mapNotNull { c -> c.metadata.let { m -> MediaSessions.describe(context, c, m)?.let { Triple(c, m, it) } } }
                         } else {
-                            null
+                            emptyList()
                         }
-                        // N2: its cover, encoded once a track.
-                        val cover = picked?.let { media ->
-                            covers.of(media.packageName, controllers.firstOrNull { it.packageName == media.packageName }?.metadata)
-                        }
+                        val picked = MediaRule.pick(sessions.map { it.third })
+                        // N2: its cover, of the session picked, encoded once a track.
+                        val cover = sessions.firstOrNull { it.third === picked }?.let { (c, m, _) -> covers.of(c.packageName, m) }
                         val now = picked?.copy(artId = cover?.id)
                         val nowMs = android.os.SystemClock.elapsedRealtime()
                         if (MediaRule.shouldSend(sent, now, nowMs)) {
-                            val withArt = cover?.takeIf { MediaRule.sendArt(it.id, sentArt) }
+                            val withArt = cover?.takeIf { now?.artId != null && MediaRule.sendArt(it.id, heldArt) }
                             val body = MediaSessions.body(now, background = false, cover = withArt)
                             val result = RustCore.sendPhonePacket(address, controlPort, PHONE_MEDIA, body.toString())
                             if (result.isSuccess) {
                                 sent = MediaRule.Sent(any = true, last = now, atMs = nowMs)
-                                withArt?.let { sentArt += it.id }
+                                heldArt = now?.artId
                             } else {
                                 Log.d(TAG, "Not sent: ${result.exceptionOrNull()?.message}")
                             }
