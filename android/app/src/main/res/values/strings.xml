@@ -939,7 +939,7 @@
     <string name="typing_channel">Typing from the computer</string>
     <string name="typing_now">%1$s is typing here</string>
     <string name="typing_now_text">What is typed on the computer goes to the field in front</string>
-    <string name="typing_password">Not typed: the field in front is a password\'s</string>
+    <string name="typing_password">Not typed: the field in front is a password field</string>
     <string name="typing_stop">Stop</string>
     <string name="typing_stopped">No typing from the computer for 10 minutes</string>
     <string name="settings_typing_from_computer">Typing from the computer\'s keyboard</string>

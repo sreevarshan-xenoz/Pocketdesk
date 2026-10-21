@@ -916,7 +916,7 @@
     <string name="typing_channel">கணினியிலிருந்து தட்டச்சு</string>
     <string name="typing_now">%1$s இங்கே தட்டச்சு செய்கிறது</string>
     <string name="typing_now_text">கணினியில் தட்டச்சு செய்வது முன்னால் உள்ள புலத்துக்குச் செல்லும்</string>
-    <string name="typing_password">தட்டச்சு செய்யப்படவில்லை: முன்னால் உள்ள புலம் கடவுச்சொல்லுடையது</string>
+    <string name="typing_password">தட்டச்சு செய்யப்படவில்லை: முன்னால் உள்ள புலம் ஒரு கடவுச்சொல் புலம்</string>
     <string name="typing_stop">நிறுத்து</string>
     <string name="typing_stopped">10 நிமிடங்களுக்குக் கணினியிலிருந்து தட்டச்சு இல்லை</string>
     <string name="settings_typing_from_computer">கணினியின் விசைப்பலகையிலிருந்து தட்டச்சு</string>

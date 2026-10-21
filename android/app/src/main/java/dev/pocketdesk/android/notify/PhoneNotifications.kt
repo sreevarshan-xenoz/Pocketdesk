@@ -129,9 +129,6 @@ class PhoneNotificationListener : NotificationListenerService() {
      * not hold up text replies.
      */
     private val clipboard by lazy { dev.pocketdesk.android.clip.BackgroundClipboard(applicationContext) }
-
-    /** M4: what the computer types here, on a thread of its own. */
-    private val typing by lazy { dev.pocketdesk.android.control.TypeRunner(applicationContext) }
     private val clipboardTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     /** The battery without a session (research item 11), on the clipboard's ticker, over the link those keep. */
@@ -268,8 +265,9 @@ class PhoneNotificationListener : NotificationListenerService() {
             5,
             TimeUnit.SECONDS,
         )
-        // M4: waits for what the computer types; checks control's switch per batch.
-        typing.start()
+        // M4: waits for what the computer types, while its switch and the
+        // Accessibility service are on (kept in step on the keeper's tick).
+        dev.pocketdesk.android.control.TypeRunner.sync(this)
     }
 
     // D1: whether the listener runs, for the health check in this process.
@@ -305,7 +303,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         screenshotsTicker.shutdownNow()
         screenshots.close()
         clipboardTicker.shutdownNow()
-        typing.stop()
+        dev.pocketdesk.android.control.TypeRunner.stop(this)
         clipboard.close()
         replyTicker.shutdownNow()
         super.onDestroy()
@@ -589,6 +587,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             Prefs.setLastFreeze(this, System.currentTimeMillis(), dev.pocketdesk.android.service.LinkKeeperService.isRunning())
         }
         lastKeeperUptime = uptime
+        dev.pocketdesk.android.control.TypeRunner.sync(this)
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
         if (keeperTicks++ % 5 == 0) dev.pocketdesk.android.service.LinkKeeperService.sync(this)

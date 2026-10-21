@@ -186,17 +186,26 @@ class ControlService : AccessibilityService() {
     }
 
     /** Back, Home, Recents or the notification shade. */
-    fun global(action: String) = main.post {
+    fun global(action: String) = main.post { pressGlobal(action) }
+
+    /**
+     * M4: [global] in turn with what the computer types, on the thread that
+     * types (M4 review: on the main thread a Home could overtake the text
+     * typed before it).
+     */
+    fun globalBlind(action: String) = text.post { pressGlobal(action) }
+
+    private fun pressGlobal(action: String) {
         val code = when (action) {
             "back" -> GLOBAL_ACTION_BACK
             "home" -> GLOBAL_ACTION_HOME
             "recents" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-            else -> return@post
+            else -> return
         }
         // Locked, only Back and Home: the shade and Recents could reach
         // what the lock keeps.
-        if (locked() && code != GLOBAL_ACTION_BACK && code != GLOBAL_ACTION_HOME) return@post
+        if (locked() && code != GLOBAL_ACTION_BACK && code != GLOBAL_ACTION_HOME) return
         performGlobalAction(code)
     }
 

@@ -992,7 +992,6 @@ object RustCore {
     /** A number the computer at [host]:[port] asked this phone to dial (L4). */
     data class Dial(val host: String, val port: Int, val number: String)
 
-    /** The numbers waiting (L4), taken. */
     /**
      * What the computer types here (M4): the oldest batch, waiting up to
      * [waitMs] for one; null when none came.
@@ -1008,6 +1007,7 @@ object RustCore {
     /** A batch the computer typed: its computer, and its events as a JSON array. */
     data class TypedBatch(val host: String, val port: Int, val events: String)
 
+    /** The numbers waiting (L4), taken. */
     fun takeDials(): List<Dial> =
         runCatching {
             val array = org.json.JSONArray(envelope(nativeTakeDials()).getOrDefault("[]"))
