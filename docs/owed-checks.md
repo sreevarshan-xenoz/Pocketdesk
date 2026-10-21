@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-783 open items.
+790 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 466 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 473 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 26 |
@@ -955,6 +955,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
 - A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
 - Renaming the computer changes the notification's words.
+
+**167. Both sides' switches, part 2 (M2)**
+
+- The OPPO paired to a throwaway server: "What this computer allows" matches the server's Devices page, with one permission and one Setting turned off.
+- The sheet for a computer that is not the phone's own: every row "with its own computer only", the notifications too unless picked under "Other computers of mine".
+- A computer from before M2: the sheet says it cannot tell.
+- Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused.
+- Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions.
+- A phone paired as mine, paired again as someone else's: what was off stays off.
+- `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 

@@ -2364,6 +2364,16 @@ Built 2026-10-21. Checked on the OPPO by adb: the service started from the backg
 - [ ] On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
 - [ ] A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
 - [ ] Renaming the computer changes the notification's words.
+## 167. Both sides' switches, part 2 (M2)
+
+Built 2026-10-21; tested through units and the desktop harness, nothing on a device yet.
+- [ ] The OPPO paired to a throwaway server: "What this computer allows" matches the server's Devices page, with one permission and one Setting turned off.
+- [ ] The sheet for a computer that is not the phone's own: every row "with its own computer only", the notifications too unless picked under "Other computers of mine".
+- [ ] A computer from before M2: the sheet says it cannot tell.
+- [ ] Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused.
+- [ ] Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions.
+- [ ] A phone paired as mine, paired again as someone else's: what was off stays off.
+- [ ] `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
 ## Recording results
 
