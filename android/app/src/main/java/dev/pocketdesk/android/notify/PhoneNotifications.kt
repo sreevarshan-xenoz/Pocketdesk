@@ -319,6 +319,8 @@ class PhoneNotificationListener : NotificationListenerService() {
             // Closed on the phone: closed on the computer too (N5c), but only
             // one the computer was shown. What of it still waits is dropped.
             rule.removed(sbn.key)
+            // L8: a copy's cancel, whatever the own computer saw of it.
+            PhoneLink.copyCancel(this, sbn.key)
             if (outbox.closed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
                 PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", sbn.key).put("isCancel", true))
             }
@@ -391,6 +393,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (out.id in closedKeys) return
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
+        // L8: the other computers picked get a copy now, whatever the own one is doing.
+        PhoneLink.copy(this, body)
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }

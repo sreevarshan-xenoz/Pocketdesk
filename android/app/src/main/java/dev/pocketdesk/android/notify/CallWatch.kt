@@ -85,6 +85,8 @@ class CallWatch(private val ctx: Context) {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", false)
                 .put("actions", JSONArray(note.actions))
+            // L8: the other computers picked see it ring, without Silence or Decline.
+            PhoneLink.copy(ctx, body)
             if (!PhoneLink.sendNow(ctx, "kdeconnect.notification", body)) Log.w(TAG, "a ringing call was not told to the computer")
         }
     }
@@ -94,7 +96,10 @@ class CallWatch(private val ctx: Context) {
         val shown = ringing ?: return
         ringing = null
         cancelling = shown
-        PhoneLink.worker.execute { sendCancel() }
+        PhoneLink.worker.execute {
+            PhoneLink.copyCancel(ctx, shown)
+            sendCancel()
+        }
     }
 
     /**
