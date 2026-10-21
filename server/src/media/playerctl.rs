@@ -48,6 +48,35 @@ pub fn now_playing() -> Result<Option<NowPlaying>, String> {
     Ok(parse_playerctl(&String::from_utf8_lossy(&output.stdout)))
 }
 
+/// The track's cover, where the player names a local file (`mpris:artUrl`).
+pub fn cover() -> Option<Vec<u8>> {
+    let output = playerctl(&["metadata", "mpris:artUrl"]).ok()?;
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = url.strip_prefix("file://")?;
+    // Its percent-escapes, as a file URI has them.
+    let mut bytes = Vec::with_capacity(path.len());
+    let raw = path.as_bytes();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%'
+            && let Some(hex) = path.get(i + 1..i + 3)
+            && let Ok(b) = u8::from_str_radix(hex, 16)
+        {
+            bytes.push(b);
+            i += 3;
+        } else {
+            bytes.push(raw[i]);
+            i += 1;
+        }
+    }
+    let path = String::from_utf8(bytes).ok()?;
+    let meta = std::fs::metadata(&path).ok()?;
+    if meta.len() > super::MAX_COVER as u64 {
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
 /// Ask the current player to play or pause, or skip.
 pub fn command(command: Command) -> Result<(), String> {
     let verb = match command {
