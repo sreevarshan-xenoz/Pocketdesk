@@ -39,6 +39,9 @@ pub struct PhoneNote {
     /// Whether it takes a typed reply.
     #[serde(default)]
     pub reply: bool,
+    /// Whether the phone lets the computer open it there (N3).
+    #[serde(default)]
+    pub open: bool,
     /// A chat's recent messages, oldest first (D4), when the phone sent them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub messages: Vec<crate::protocol::conversation::Message>,
@@ -138,12 +141,14 @@ pub fn clear(state_dir: &Path) -> io::Result<()> {
     }
 }
 
-/// What the computer answers: a button, or a typed reply.
+/// What the computer answers: a button, a typed reply, or opening the
+/// notification on the phone (N3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Answer {
     Action(String),
     Reply(String),
+    Open,
 }
 
 impl Answer {
@@ -151,6 +156,7 @@ impl Answer {
         match self {
             Answer::Action(title) => valid_action(title),
             Answer::Reply(message) => valid_reply(message),
+            Answer::Open => true,
         }
     }
 }
@@ -271,6 +277,7 @@ mod tests {
             at_unix: at,
             actions: vec!["Mark as read".into()],
             reply: true,
+            open: false,
             messages: vec![],
         }
     }

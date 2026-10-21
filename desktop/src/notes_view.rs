@@ -474,6 +474,7 @@ mod tests {
             at_unix: 0,
             actions: vec![],
             reply: true,
+            open: false,
             messages: vec![],
         };
         let listed = newest_first(vec![note("old"), note("new")]);
@@ -552,6 +553,7 @@ mod tests {
             at_unix: 0,
             actions: vec!["Silence".into()],
             reply: false,
+            open: false,
             messages: Vec::new(),
         };
         assert_eq!(

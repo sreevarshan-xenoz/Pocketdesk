@@ -860,6 +860,7 @@ fn a_notification_shows_its_app_s_icon() {
             at_unix: 1,
             actions: vec!["Mark read".to_string()],
             reply: true,
+            open: false,
             messages: Vec::new(),
         },
     )
@@ -895,6 +896,7 @@ fn the_notifications_page_clears_on_the_phone() {
             at_unix: 1,
             actions: vec!["Mark read".to_string()],
             reply: false,
+            open: false,
             messages: Vec::new(),
         },
     )
@@ -968,6 +970,7 @@ fn the_notifications_page_calls_back() {
             at_unix: 1,
             actions: vec!["Silence".to_string()],
             reply: false,
+            open: false,
             messages: Vec::new(),
         },
     )

@@ -20,6 +20,13 @@ pub const NOTIFICATION_ACTION: &str = "kdeconnect.notification.action";
 /// (L1; KDE Connect's own request).
 pub const NOTIFICATION_REQUEST: &str = "kdeconnect.notification.request";
 
+/// Computer → phone: open the notification `key` on the phone, as a tap
+/// on it would (N3). Pocketdesk's own, so KDE's packets are untouched.
+pub const NOTIFICATION_OPEN: &str = "kdeconnect.pocketdesk.notification_open";
+
+/// What a notification offers when the phone lets the computer open it.
+pub const CAN_OPEN: &str = "canOpen";
+
 /// A clear's body: the phone's id for the notification.
 pub fn cancel_body(key: &str) -> serde_json::Value {
     serde_json::json!({ "cancel": key })
@@ -147,6 +154,12 @@ impl Answered {
     }
 }
 
+/// The open packet (N3), or `None` when the key is out of bounds.
+pub fn open_packet(key: &str) -> Option<NetworkPacket> {
+    valid_key(key)
+        .then(|| NetworkPacket::new(NOTIFICATION_OPEN).with_body(serde_json::json!({ "key": key })))
+}
+
 /// The button packet, or `None` when a field is out of bounds.
 pub fn action_packet(key: &str, action: &str) -> Option<NetworkPacket> {
     (valid_key(key) && valid_action(action)).then(|| {
@@ -168,6 +181,16 @@ mod tests {
     }
 
     use super::*;
+
+    /// N3: an open names its notification within its bounds.
+    #[test]
+    fn an_open_names_its_notification() {
+        let packet = open_packet("0|com.chat|1|null|10").expect("a packet");
+        assert_eq!(packet.packet_type, NOTIFICATION_OPEN);
+        assert_eq!(packet.body["key"], "0|com.chat|1|null|10");
+        assert!(open_packet("").is_none());
+        assert!(open_packet("a\nb").is_none());
+    }
 
     #[test]
     fn an_outcome_is_held_to_its_bounds() {
