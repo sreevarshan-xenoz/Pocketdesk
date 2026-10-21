@@ -33,6 +33,7 @@ pub mod pair_link;
 pub mod paths;
 pub mod pause;
 pub mod phone_files;
+pub mod phone_live;
 pub mod phone_media;
 pub mod phone_notes;
 pub mod phone_photos;

@@ -107,6 +107,11 @@ pub struct Config {
     /// one, its picture (K3); off, none is kept or shown. On by default.
     #[serde(default = "default_true")]
     pub notification_pictures: bool,
+    /// A phone's ongoing updates (progress, timers) show as one card that
+    /// updates in place (N4). On by default; the phone sends them only
+    /// with its own switch on.
+    #[serde(default = "default_true")]
+    pub phone_live_updates: bool,
     /// Where received files land (C2): an absolute folder, or empty for
     /// Downloads. A folder that is gone falls back to Downloads.
     #[serde(default)]
@@ -342,6 +347,7 @@ impl Default for Config {
             phone_notifications: true,
             toast_answers: true,
             clear_on_phone: true,
+            phone_live_updates: true,
             notification_pictures: true,
             downloads_folder: String::new(),
             cast_control: true,
@@ -566,6 +572,7 @@ impl Config {
         "phone_notifications",
         "toast_answers",
         "clear_on_phone",
+        "phone_live_updates",
         "notification_pictures",
         "downloads_folder",
         "cast_control",

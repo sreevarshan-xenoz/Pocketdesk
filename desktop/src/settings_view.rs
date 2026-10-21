@@ -195,6 +195,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Notifications,
     ),
     (
+        "phone_live_updates",
+        "Ongoing updates from phones",
+        Section::Notifications,
+    ),
+    (
         "notification_pictures",
         "Apps' icons and pictures",
         Section::Notifications,
@@ -382,6 +387,7 @@ pub fn applies_live(key: &str) -> bool {
             | "keep_file_dates"
             | "toast_answers"
             | "clear_on_phone"
+            | "phone_live_updates"
             | "notification_pictures"
             | "cast_control"
             | "downloads_folder"
@@ -1018,6 +1024,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "Its ✕ (closing its banner too, so a notification closed to read later goes from the phone and the Action Center alike), Clear on the Notifications page, or closing it on Linux; the phone takes it with its own \"Let the computer clear my notifications\" on. The Action Center's Clear all is not seen: Windows tells only packaged apps.",
+                    );
+                });
+                // N4: a phone's progress and timers, one card each.
+                row(ui, "phone_live_updates", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_live_updates,
+                        "a phone's ongoing updates show as one card that updates in place",
+                    );
+                    note(
+                        ui,
+                        "A download's progress, a timer, a delivery on its way: the toast changes without popping up again, and Going on now on the Notifications page lists them. A phone sends them with \"Ongoing updates on the computer\" on in its Settings, for the apps whose notifications it shares.",
                     );
                 });
                 row(ui, "sms_notify", |ui| {

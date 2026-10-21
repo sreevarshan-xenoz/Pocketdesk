@@ -80,6 +80,8 @@ pub const PAUSE_FILE: &str = "pause.json";
 pub const NOTIFICATION_ICONS_DIR: &str = "notification_icons";
 /// Each phone's last media report (T8d), written by the server.
 pub const PHONE_MEDIA_FILE: &str = "phone_media.json";
+/// The phones' ongoing updates shown here (N4), owner-only.
+pub const PHONE_LIVE_FILE: &str = "phone_live.json";
 /// The phones' covers for what they play (N2), owner-only.
 pub const PHONE_MEDIA_ART_DIR: &str = "phone_media_art";
 /// Each phone's last listing of its shared folders (T10g).
