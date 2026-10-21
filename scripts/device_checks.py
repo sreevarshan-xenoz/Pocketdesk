@@ -256,9 +256,13 @@ class Phone:
     def stop_playing(self) -> None:
         am("start-foreground-service", "-n", f"{FIXTURE}/.PlayerService", "-a", "dev.pocketdesk.fixture.STOP")
 
-    def notify(self, nid: int, title: str, text: str, style: str = "plain") -> None:
+    def notify(self, nid: int, title: str, text: str, style: str = "plain", progress: int = 0) -> None:
         am("broadcast", "-n", f"{FIXTURE}/.NotifyReceiver", "-a", "dev.pocketdesk.fixture.NOTIFY",
-           "--ei", "id", str(nid), "--es", "title", title, "--es", "text", text, "--es", "style", style)
+           "--ei", "id", str(nid), "--es", "title", title, "--es", "text", text, "--es", "style", style,
+           "--ei", "progress", str(progress))
+
+    def cancel(self, nid: int) -> None:
+        am("broadcast", "-n", f"{FIXTURE}/.NotifyReceiver", "-a", "dev.pocketdesk.fixture.CANCEL", "--ei", "id", str(nid))
 
     def logcat(self, tag: str) -> str:
         return adb("logcat", "-d", "-s", f"{tag}:*")
@@ -384,6 +388,15 @@ class Server:
                                    "created_unix": int(time.time())}), encoding="utf-8")
         os.replace(tmp, folder / f"{rid}.json")
         return rid
+
+    def card(self, device: str, title: str) -> Optional[dict]:
+        """A phone's live card the server keeps (N4), by its title."""
+        path = self.root / "state" / "phone_live.json"
+        try:
+            cards = json.loads(path.read_text(encoding="utf-8")).get("cards", [])
+        except (OSError, ValueError):
+            return None
+        return next((c for c in cards if c.get("device_id") == device and c.get("title") == title), None)
 
     def answer_state(self, rid: str) -> Optional[dict]:
         path = self.root / "state" / "notification_answers.json"
@@ -655,6 +668,32 @@ def n3_locked(ctx: Ctx) -> tuple[str, str]:
     reason = done["state"].get("reason", "")
     return ("PASS", f"refused: {reason}") if done["state"]["state"] == "not_sent" and "locked" in reason else (
         "FAIL", f"{done['state']['state']} {reason}")
+
+
+@check("n4-live", "§178")
+def n4_live(ctx: Ctx) -> tuple[str, str]:
+    notes = ctx.phone.prefs("pocketdesk-phone-notifications")
+    if not notes.get("enabled") or FIXTURE not in (notes.get("shared") or []):
+        return "SKIP", f"turn on This phone's notifications for {FIXTURE}"
+    if not ctx.phone.prefs("pocketdesk-ui").get("live_updates"):
+        return "SKIP", "turn on Ongoing updates on the computer"
+    ctx.phone.wake()
+    nid = int(time.time()) % 100000
+    title = "N4 live " + secrets.token_hex(2)
+    progress = lambda: (c := ctx.server.card(ctx.device, title)) and c["live"]["progress"]
+    try:
+        for step in (10, 50, 52, 100):
+            ctx.phone.notify(nid, title, "file.bin", style="progress", progress=step)
+            time.sleep(1)
+        # 52 is within a step of 50 and 100 is never held back: the last
+        # state arrives within the gap.
+        if not wait_for(lambda: progress() == 100, 20):
+            return "TIMEOUT", f"the card stopped at {progress()!r}"
+    finally:
+        ctx.phone.cancel(nid)
+    gone = wait_for(lambda: ctx.server.card(ctx.device, title) is None, 20)
+    return ("PASS", "the card reached 100 % and went with its end") if gone else (
+        "TIMEOUT", "the card stayed after its end")
 
 
 # ---- main ----
