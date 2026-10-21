@@ -133,34 +133,6 @@ fun PhoneNotificationsSection() {
             )
         }
     }
-    // L8: other computers of mine get a copy, to see but not to answer.
-    val own = version.let { dev.pocketdesk.android.notify.PhoneLink.target(context)?.address }
-    val others = version.let {
-        dev.pocketdesk.android.HostStore.hosts(context).filter {
-            it.address != own && dev.pocketdesk.android.HostStore.pairedDesktopId(context, it.address) != null
-        }
-    }
-    if (others.isNotEmpty()) {
-        val picked = version.let { dev.pocketdesk.android.notify.AlsoToPrefs.picked(context) }
-        SettingRow(
-            stringResource(R.string.phone_notifications_also),
-            stringResource(R.string.phone_notifications_also_summary, dev.pocketdesk.android.notify.AlsoTo.MAX),
-        )
-        others.forEach { host ->
-            SettingSwitch(
-                stringResource(
-                    R.string.phone_notifications_also_to,
-                    dev.pocketdesk.android.HostStore.shownName(context, host.address),
-                ),
-                null,
-                host.address in picked,
-                {
-                    dev.pocketdesk.android.notify.AlsoToPrefs.set(context, host.address, it)
-                    version++
-                },
-            )
-        }
-    }
     if (seen.isEmpty()) {
         Text(
             stringResource(R.string.phone_notifications_apps_empty),
@@ -180,5 +152,39 @@ fun PhoneNotificationsSection() {
             },
             indent = true,
         )
+    }
+    // L8: other computers of mine get a copy, to see but not to answer;
+    // after the app list, so its switches keep their heading (L8 review).
+    // Every paired computer is listed, the own one too: its pick counts
+    // when another is the one in use (L8 review).
+    val own = version.let { dev.pocketdesk.android.notify.PhoneLink.target(context)?.address }
+    val computers = version.let {
+        dev.pocketdesk.android.HostStore.hosts(context).mapNotNull { host ->
+            dev.pocketdesk.android.HostStore.pairedDesktopId(context, host.address)?.let { host to it }
+        }.distinctBy { it.second }
+    }
+    if (computers.size > 1) {
+        val picked = version.let { dev.pocketdesk.android.notify.AlsoToPrefs.picked(context) }
+        val more = dev.pocketdesk.android.notify.AlsoTo.mayPickMore(picked.size)
+        SettingRow(
+            stringResource(R.string.phone_notifications_also),
+            stringResource(R.string.phone_notifications_also_summary),
+        )
+        computers.forEach { (host, desktopId) ->
+            val on = desktopId in picked
+            SettingSwitch(
+                stringResource(
+                    R.string.phone_notifications_also_to,
+                    dev.pocketdesk.android.HostStore.shownName(context, host.address),
+                ),
+                if (host.address == own) stringResource(R.string.phone_notifications_also_own) else null,
+                on,
+                {
+                    dev.pocketdesk.android.notify.AlsoToPrefs.set(context, desktopId, it)
+                    version++
+                },
+                enabled = on || more,
+            )
+        }
     }
 }
