@@ -30,6 +30,7 @@ import shlex
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -247,6 +248,14 @@ class Phone:
     def copy(self, text: str, sensitive: bool = False) -> None:
         am("start", "-n", f"{FIXTURE}/.CopyActivity", "--es", "text", text, "--ez", "sensitive", "true" if sensitive else "false")
 
+    def play(self, title: str, playing: bool = True) -> None:
+        """The fixture's silent player, with a cover (N2)."""
+        am("start-foreground-service", "-n", f"{FIXTURE}/.PlayerService",
+           "--es", "title", title, "--ez", "playing", "true" if playing else "false")
+
+    def stop_playing(self) -> None:
+        am("start-foreground-service", "-n", f"{FIXTURE}/.PlayerService", "-a", "dev.pocketdesk.fixture.STOP")
+
     def notify(self, nid: int, title: str, text: str, style: str = "plain") -> None:
         am("broadcast", "-n", f"{FIXTURE}/.NotifyReceiver", "-a", "dev.pocketdesk.fixture.NOTIFY",
            "--ei", "id", str(nid), "--es", "title", title, "--es", "text", text, "--es", "style", style)
@@ -338,6 +347,24 @@ class Server:
     def clipboard(self) -> str:
         path = self.root / "clip.txt"
         return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def media(self, device: str) -> Optional[dict]:
+        """`device`'s player as the server keeps it (N2), with its cover's file."""
+        path = self.root / "state" / "phone_media.json"
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))["phones"].get(device)
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def press_media(self, device: str, command: str) -> None:
+        """As the desktop app queues a press (core::local::phone_media::press)."""
+        folder = self.root / "state" / "phone_media_out"
+        folder.mkdir(exist_ok=True)
+        pid = str(uuid.uuid4())
+        tmp = folder / f"{pid}.json.tmp"
+        tmp.write_text(json.dumps({"id": pid, "device_id": device, "command": command,
+                                   "created_unix": int(time.time())}), encoding="utf-8")
+        os.replace(tmp, folder / f"{pid}.json")
 
     def type_batch(self, device: str, seq: int, events: list[dict]) -> None:
         """As the desktop's typing window writes it (core::local::typing)."""
@@ -517,6 +544,35 @@ def m8_tel(ctx: Ctx) -> tuple[str, str]:
     if on and "not taken" in outcome:
         return "FAIL", f"chose the linked phone, which {outcome} with Calls from the computer on"
     return "PASS", f"chose the linked phone, whose answer was: {outcome}"
+
+
+@check("n2-media", "§176")
+def n2_media(ctx: Ctx) -> tuple[str, str]:
+    ui = ctx.phone.prefs("pocketdesk-ui")
+    if not (ui.get("phone_media_on_computer") and ui.get("phone_media_background")):
+        return "SKIP", "turn on My media on the computer in the background in the phone's Settings"
+    title = "N2 check " + secrets.token_hex(3)
+    try:
+        ctx.phone.play(title)
+        # No session: the listener's report, with its cover.
+        got = wait_for(lambda: (m := ctx.server.media(ctx.device)) and m["media"].get("title") == title and m, 20)
+        if not got:
+            return "TIMEOUT", "the song did not reach the computer"
+        media = got["media"]
+        if not media.get("background") or not got.get("art"):
+            return "FAIL", f"background {media.get('background')}, cover {got.get('art')}"
+        cover = ctx.server.root / "state" / "phone_media_art" / got["art"]
+        if not cover.is_file() or cover.read_bytes()[:2] != bytes([0xFF, 0xD8]):
+            return "FAIL", "no cover kept"
+        ctx.server.press_media(ctx.device, "playPause")
+        paused = wait_for(lambda: (m := ctx.server.media(ctx.device)) and not m["media"]["isPlaying"], 20)
+        if not paused:
+            return "TIMEOUT", "Pause from the computer did not reach the player"
+    finally:
+        ctx.phone.stop_playing()
+    gone = wait_for(lambda: ctx.server.media(ctx.device) is None, 20)
+    return ("PASS", "shown with its cover, paused from here, gone when it ended") if gone else (
+        "TIMEOUT", "an ended player stayed on the computer")
 
 
 # ---- main ----
