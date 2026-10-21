@@ -55,9 +55,22 @@ pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, p
     }
 }
 
-/// Drop what waits: it came from a computer the phone left.
+/// Drop all that waits (the tests' reset; a link's end uses [`forget_from`]).
+#[cfg(test)]
 pub(crate) fn forget() {
     WAITING.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+/// Forget the answers from `host:port` only, when its link ends: those from
+/// the phone's other computers (L8 part 2) still wait for the app.
+pub(crate) fn forget_from(host: &str, port: u16) {
+    WAITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|a| {
+            a.get("host").and_then(|v| v.as_str()) != Some(host)
+                || a.get("port").and_then(|v| v.as_u64()) != Some(u64::from(port))
+        });
 }
 
 /// The answers waiting, oldest first, as a JSON array; taken.

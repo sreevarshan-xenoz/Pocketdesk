@@ -18,6 +18,9 @@ use crate::session::ControlWriter;
 /// The most other computers kept linked (L8: three besides the own one).
 pub(crate) const MAX_LINKS: usize = 3;
 
+/// The packet that names the link's role to the computer (L8 part 2).
+const LINK_ROLE: &str = "kdeconnect.pocketdesk.link_role";
+
 /// What is sent on such a link: a notification or its cancel, and how an
 /// answer from that computer went (E1).
 const SENT: [&str; 2] = [
@@ -61,15 +64,31 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
     let stream: pocketdesk_core::protocol::connection::ControlDuplex = Box::new(stream);
     let (reader, writer) = tokio::io::split(stream);
     let writer: Writer = Arc::new(Mutex::new(writer));
-    {
+    // Say what the link is for, so the computer neither pushes to it nor
+    // shows the phone as linked by it (L8 part 2 review).
+    let role = NetworkPacket::new(LINK_ROLE).with_body(serde_json::json!({ "role": "copies" }));
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        TcpDeviceSender::from_arc(writer.clone(), address.clone()).send_packet(&role),
+    )
+    .await
+    .map_err(|_| "the computer did not take the link's role in time".to_string())?
+    .map_err(|e| format!("Failed to send the link's role: {e}"))?;
+    let raced = {
         let mut links = LINKS.lock().await;
         // Another caller linked it meanwhile: keep theirs.
-        if links.contains_key(&(address.clone(), port)) {
-            use tokio::io::AsyncWriteExt;
-            let _ = writer.lock().await.shutdown().await;
-            return Ok(());
+        if links.contains_key(&(address.clone(), port)) || links.len() >= MAX_LINKS {
+            true
+        } else {
+            links.insert((address.clone(), port), writer.clone());
+            false
         }
-        links.insert((address.clone(), port), writer.clone());
+    };
+    if raced {
+        // Closed outside the lock (L8 part 2 review).
+        use tokio::io::AsyncWriteExt;
+        let _ = writer.lock().await.shutdown().await;
+        return Ok(());
     }
     tokio::spawn(async move {
         let mut lines = tokio::io::BufReader::new(reader).lines();
@@ -122,11 +141,26 @@ pub(crate) async fn send(
         .cloned()
         .ok_or_else(|| "no link to that computer".to_string())?;
     let packet = NetworkPacket::new(packet_type).with_body(body);
-    let sender = TcpDeviceSender::from_arc(writer, address.to_string());
-    tokio::time::timeout(Duration::from_secs(5), sender.send_packet(&packet))
-        .await
-        .map_err(|_| "the computer did not take it in time".to_string())?
-        .map_err(|e| format!("Failed to send: {e}"))
+    let sender = TcpDeviceSender::from_arc(writer.clone(), address.to_string());
+    match tokio::time::timeout(Duration::from_secs(5), sender.send_packet(&packet)).await {
+        Ok(sent) => sent.map_err(|e| format!("Failed to send: {e}")),
+        Err(_) => {
+            // A write cut off mid-line would garble the next one: the link
+            // goes (L8 part 2 review), and the next tick links again.
+            {
+                let mut links = LINKS.lock().await;
+                if links
+                    .get(&(address.to_string(), port))
+                    .is_some_and(|live| Arc::ptr_eq(live, &writer))
+                {
+                    links.remove(&(address.to_string(), port));
+                }
+            }
+            use tokio::io::AsyncWriteExt;
+            let _ = writer.lock().await.shutdown().await;
+            Err("the computer did not take it in time".to_string())
+        }
+    }
 }
 
 /// Close the links not to one of `keep` (`[(host, port)]`): a computer no

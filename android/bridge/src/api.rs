@@ -875,7 +875,8 @@ pub async fn connect_to_peer(
                         crate::dials::forget();
                         crate::media_presses::forget();
                         crate::clipboard_push::forget();
-                        crate::notification_answers::forget();
+                        // L8 part 2: the other computers' answers still wait.
+                        crate::notification_answers::forget_from(&from_peer.0, from_peer.1);
                         crate::phone_file_requests::forget();
                         crate::photo_requests::forget();
                         crate::quiet_requests::forget();
