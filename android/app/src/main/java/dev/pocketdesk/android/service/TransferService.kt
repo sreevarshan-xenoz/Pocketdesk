@@ -551,7 +551,10 @@ class TransferService : Service() {
         onProgress: (Int) -> Unit,
     ): Result<Unit> = try {
         ensureLink(address, port)
-        val descriptor = contentResolver.openFileDescriptor(uri, "r")
+        // M5: a photo's place kept, when the person allowed it.
+        val descriptor = dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) {
+            contentResolver.openFileDescriptor(it, "r")
+        }
             ?: return Result.failure(IllegalStateException("cannot open $name"))
         val size = descriptor.statSize
         when {
@@ -674,7 +677,7 @@ class TransferService : Service() {
             .takeUnless { it.isBlank() || it == "." || it == ".." } ?: "shared.bin"
         val copy = File(dir, safe)
         return try {
-            contentResolver.openInputStream(uri).use { input ->
+            dev.pocketdesk.android.files.PhotoPlacePrefs.open(this, uri) { contentResolver.openInputStream(it) }.use { input ->
                 requireNotNull(input) { "content stream unavailable" }
                 copy.outputStream().use { output -> input.copyTo(output) }
             }
