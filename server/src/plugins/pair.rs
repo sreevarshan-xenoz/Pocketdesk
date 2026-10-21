@@ -84,6 +84,25 @@ pub fn is_paired_device(device_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a pairing is someone else's phone (M2b): its code said so, or
+/// a PIN this computer showed for the phone's own ask ("Show PIN on
+/// desktop") while the Pair page's live code says someone else's or a
+/// guest's (M2 review: the owner's choice holds whichever way the phone
+/// pairs).
+fn someone_else_for(
+    matched: Option<&local_pin::FilePin>,
+    matches_pending: bool,
+    live: Option<&local_pin::FilePin>,
+) -> bool {
+    match matched {
+        Some(file) => file.someone_else,
+        None => {
+            matches_pending
+                && live.is_some_and(|file| file.someone_else || file.grant_secs.is_some())
+        }
+    }
+}
+
 /// The permissions a pairing sets (M2b), or `None` to leave them: someone
 /// else's phone, and every new guest, gets files and links only; the
 /// owner's own phone keeps what it has (the defaults when new), a computer
@@ -904,10 +923,13 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // R4 D3: only a CLI PIN can carry a scoped grant; the push flow (a PIN
     // this desktop generated itself) keeps trusting permanently.
     // Matching spends it, in one step.
-    let cli = cli_pin().filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
+    let live = cli_pin();
+    let cli = live
+        .clone()
+        .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
     let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
     // M2b: the Pair page said the phone is someone else's.
-    let someone_else = cli.as_ref().is_some_and(|cli| cli.someone_else);
+    let someone_else = someone_else_for(cli.as_ref(), matches_pending, live.as_ref());
     let matches_cli = cli_grant.is_some();
 
     if matches_pending || matches_cli {
@@ -1100,6 +1122,24 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_pin_shown_for_the_phone_follows_the_pair_pages_choice() {
+        let file = |someone_else, grant_secs| local_pin::FilePin {
+            pin: "123456".to_string(),
+            minted_unix: 0,
+            grant_secs,
+            someone_else,
+        };
+        // The code itself says it.
+        assert!(someone_else_for(Some(&file(true, None)), false, None));
+        assert!(!someone_else_for(Some(&file(false, None)), false, None));
+        // A PIN shown for the phone, while the page's code is someone else's or a guest's.
+        assert!(someone_else_for(None, true, Some(&file(true, None))));
+        assert!(someone_else_for(None, true, Some(&file(false, Some(900)))));
+        assert!(!someone_else_for(None, true, Some(&file(false, None))));
+        assert!(!someone_else_for(None, true, None));
+    }
 
     #[test]
     fn a_pairing_sets_narrow_permissions_for_someone_else_and_new_guests() {
