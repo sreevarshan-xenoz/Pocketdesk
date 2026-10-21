@@ -2273,6 +2273,7 @@ Built 2026-10-20; tested through units, the harness and the server's mapping, no
 - [ ] An ongoing or unclearable notification, and a ringing call: not cleared.
 - [ ] Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
 - [ ] Linux (GNOME): closing a notification clears it; pressing its button does not.
+- [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: a shell notification sent to the computer, then cleared there through `notification_clears/` as the Notifications page writes it, was gone from the phone within 8 s.
 
 ## 157. Drop files and paste into the phone's window (L2)
 
@@ -2286,6 +2287,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] Desktop Settings "Tell me when a phone has charged to" 80 %; with Share battery on, `adb shell dumpsys battery set ac 1`, `set level 79`, then `set level 80`: one notification, "charged to 80 %"; `set level 81`: none.
 - [ ] `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
 - [ ] `adb shell dumpsys battery reset` after.
+- [x] 2026-10-21, on the OPPO in a session: with `charged_alert = 80`, a charge seen at 70 % then 85 % raised "charged to 85 %" once (the level faked with `dumpsys battery set`). In the background the report stayed stale until the BatteryManager fix (see §162).
 
 ## 159. Call a number from the computer (L4)
 
@@ -2294,6 +2296,7 @@ Built 2026-10-21; tested through units and the harness, nothing on a device yet.
 - [ ] With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
 - [ ] A number with `*` or `#`: refused on the computer.
 - [ ] A real call (a SIM): the owner presses Call.
+- [x] 2026-10-21, on the OPPO with only a background link: `pocketdesk call` offered "Call 5550102?" in the phone's notification, no call made. One of three test numbers sent during a link's reconnect never showed.
 
 ## 160. Screenshot and record the phone's window (L5)
 
