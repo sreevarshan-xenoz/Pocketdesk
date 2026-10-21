@@ -70,11 +70,20 @@ pub fn cover() -> Option<Vec<u8>> {
         }
     }
     let path = String::from_utf8(bytes).ok()?;
+    // A player names the file: only a plain file is read, and never past
+    // the limit (N5 review: a FIFO or a device would hang the watcher).
     let meta = std::fs::metadata(&path).ok()?;
-    if meta.len() > super::MAX_COVER as u64 {
+    if !meta.is_file() || meta.len() > super::MAX_COVER as u64 {
         return None;
     }
-    std::fs::read(path).ok()
+    let mut bytes = Vec::new();
+    use std::io::Read;
+    std::fs::File::open(path)
+        .ok()?
+        .take(super::MAX_COVER as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= super::MAX_COVER).then_some(bytes)
 }
 
 /// Ask the current player to play or pause, or skip.
