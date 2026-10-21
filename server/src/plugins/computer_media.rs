@@ -136,11 +136,30 @@ fn track(playing: &Value) -> String {
     )
 }
 
+/// How many looks a track's cover is tried for: a browser sets its
+/// artwork a moment after its title (N5 review).
+const COVER_TRIES: u8 = 10;
+
+/// The cover of the track last read: its id and bytes once read, and how
+/// many looks tried.
+struct Cover {
+    track: String,
+    art: Option<(String, String)>,
+    tries: u8,
+}
+
+/// Whether `track`'s cover is to be read at this look, given what was.
+fn cover_due(cover: Option<&Cover>, track: &str) -> bool {
+    match cover {
+        Some(c) if c.track == track => c.art.is_none() && c.tries < COVER_TRIES,
+        _ => true,
+    }
+}
+
 /// Daemon task: push what plays to the phones that watch it.
 pub async fn run_watcher() {
     let mut pushes = Pushes::default();
-    // The cover of the track last read: (its track, its id and bytes).
-    let mut cover: Option<(String, Option<(String, String)>)> = None;
+    let mut cover: Option<Cover> = None;
     loop {
         let idle = WATCHERS
             .lock()
@@ -179,9 +198,10 @@ pub async fn run_watcher() {
         let answer = crate::media::answer(playing);
         let playing = answer.get("playing").cloned().unwrap_or(Value::Null);
         let this_track = (!playing.is_null()).then(|| track(&playing));
-        if cover.as_ref().map(|(t, _)| Some(t)) != Some(this_track.as_ref()) {
-            let read = match &this_track {
-                Some(_) => tokio::task::spawn_blocking(crate::media::cover)
+        match &this_track {
+            None => cover = None,
+            Some(t) if cover_due(cover.as_ref(), t) => {
+                let read = tokio::task::spawn_blocking(crate::media::cover)
                     .await
                     .ok()
                     .flatten()
@@ -191,12 +211,20 @@ pub async fn run_watcher() {
                             art_id(&bytes),
                             base64::engine::general_purpose::STANDARD.encode(bytes),
                         )
-                    }),
-                None => None,
-            };
-            cover = this_track.clone().map(|t| (t, read));
+                    });
+                let tries = match &cover {
+                    Some(c) if c.track == *t => c.tries + 1,
+                    _ => 1,
+                };
+                cover = Some(Cover {
+                    track: t.clone(),
+                    art: read,
+                    tries,
+                });
+            }
+            Some(_) => {}
         }
-        let art = cover.as_ref().and_then(|(_, a)| a.as_ref());
+        let art = cover.as_ref().and_then(|c| c.art.as_ref());
         let now = Instant::now();
         for client in clients.iter().filter(|c| watching.contains(c.device_id())) {
             let Some(with_art) = pushes.due(
@@ -231,6 +259,24 @@ pub async fn run_watcher() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// N5 review: a cover not there yet is looked for again, a while.
+    #[test]
+    fn a_missing_cover_is_tried_again_a_while() {
+        assert!(cover_due(None, "a"));
+        let mut c = Cover {
+            track: "a".into(),
+            art: None,
+            tries: 1,
+        };
+        assert!(cover_due(Some(&c), "a"), "not there yet");
+        c.tries = COVER_TRIES;
+        assert!(!cover_due(Some(&c), "a"), "given up on");
+        assert!(cover_due(Some(&c), "b"), "a new track");
+        c.tries = 1;
+        c.art = Some(("id".into(), "bytes".into()));
+        assert!(!cover_due(Some(&c), "a"), "read");
+    }
 
     /// N5: a phone is told a change at once, the same again each minute,
     /// and a cover's bytes once.
