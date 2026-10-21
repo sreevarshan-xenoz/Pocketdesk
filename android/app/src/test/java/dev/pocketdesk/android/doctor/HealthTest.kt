@@ -185,4 +185,25 @@ class HealthTest {
             Health.problems(nothingOn.copy(screenshotsStopped = true, advancedProtection = false)),
         )
     }
+
+    @Test
+    fun `a freeze with the screen off, with Stay linked off or on`() {
+        assertEquals(
+            listOf(HealthProblem.PAUSED_STAY_LINKED_OFF),
+            Health.problems(healthy.copy(frozenRecently = true, stayLinked = false)),
+        )
+        assertEquals(
+            listOf(HealthProblem.PAUSED_ANYWAY),
+            Health.problems(healthy.copy(frozenRecently = true, stayLinked = true)),
+        )
+        assertEquals(emptyList<HealthProblem>(), Health.problems(healthy.copy(frozenRecently = false, stayLinked = false)))
+    }
+
+    @Test
+    fun `a freeze matters only while a listener feature is on`() {
+        assertEquals(
+            emptyList<HealthProblem>(),
+            Health.problems(nothingOn.copy(frozenRecently = true, stayLinked = false)),
+        )
+    }
 }

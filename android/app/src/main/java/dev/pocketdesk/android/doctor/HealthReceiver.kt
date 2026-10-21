@@ -77,6 +77,9 @@ class HealthReceiver : BroadcastReceiver() {
          */
         fun check(ctx: Context) {
             if (dev.pocketdesk.android.HostStore.hosts(ctx).isEmpty()) return
+            // M1: a boot or an update may start the link's service, which the
+            // listener, in the background, may not.
+            runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(ctx) }
             // After a boot the listener may bind late (D1 review): wait for it,
             // up to [LISTENER_WAIT_MS], rather than judge it from one sample.
             if (HealthCheck.rebindIfStopped(ctx) || !ListenerState.connected) {

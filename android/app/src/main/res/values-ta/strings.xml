@@ -766,6 +766,15 @@
     <string name="health_settings">அமைப்புகளைத் திற</string>
     <string name="settings_health">ஏதாவது வேலை செய்வது நின்றால் சொல்</string>
     <string name="settings_health_summary">முகப்பில், மற்றும் புதுப்பிப்புக்குப் பிறகு ஒரு அறிவிப்பில்</string>
+    <string name="channel_linked">இணைப்பில் இருக்கிறது</string>
+    <string name="channel_linked_desc">திரை அணைந்திருக்கும்போதும் Pocketdesk-ஐ உங்கள் கணினியுடன் இணைப்பில் வைக்கிறது, அதனால் Android அதை இடைநிறுத்தாது.</string>
+    <string name="linked_to">%1$s உடன் இணைப்பில்</string>
+    <string name="linked_to_computer">உங்கள் கணினியுடன் இணைப்பில்</string>
+    <string name="health_turn_on">இயக்கு</string>
+    <string name="health_paused_stay_linked_off">திரை அணைந்திருந்தபோது Android Pocketdesk-ஐ இடைநிறுத்தியது, எனவே கணினியின் செய்திகள் காத்திருந்தன. «திரை அணைந்திருக்கும்போதும் இணைப்பில் இரு» என்பதை இயக்கவும்.</string>
+    <string name="health_paused_anyway">இணைப்பில் இருந்தபோதும், திரை அணைந்திருந்தபோது Android Pocketdesk-ஐ இடைநிறுத்தியது. பின்னணியில் இயங்க இந்தத் தொலைபேசியின் சொந்த அமைப்பு அனுமதிக்க வேண்டும்.</string>
+    <string name="settings_stay_linked">திரை அணைந்திருக்கும்போதும் இணைப்பில் இரு</string>
+    <string name="settings_stay_linked_summary">Android Pocketdesk-ஐ இடைநிறுத்தாமல் இருக்க ஒரு அமைதியான அறிவிப்பை வைக்கிறது. சில தொலைபேசிகள் (OPPO, Xiaomi, Samsung) அது இல்லாமல் பயன்பாடுகளை இடைநிறுத்துகின்றன.</string>
     <plurals name="health_count">
         <item quantity="one">Pocketdesk-இல் சரிசெய்ய %1$d விஷயம்</item>
         <item quantity="other">Pocketdesk-இல் சரிசெய்ய %1$d விஷயங்கள்</item>

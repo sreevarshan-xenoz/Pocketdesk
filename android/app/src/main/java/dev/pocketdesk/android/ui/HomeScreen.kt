@@ -318,6 +318,11 @@ fun HomeScreen(
                             problems = healthProblems.orEmpty(),
                             onFix = { HealthCheck.openFix(context, it) },
                             onTurnOffControl = { Prefs.setControlFromComputer(context, false) },
+                            onTurnOnStayLinked = {
+                                Prefs.setStayLinked(context, true)
+                                val app = context.applicationContext
+                                Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
+                            },
                             onChooseFolder = chooseFolder,
                             onOpenSettings = onOpenSettings,
                             onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems.orEmpty())) },
@@ -847,6 +852,8 @@ private fun HealthCard(
     problems: List<HealthProblem>,
     onFix: (HealthProblem) -> Unit,
     onTurnOffControl: () -> Unit,
+    /** M1: turn "Stay linked with the screen off" on. */
+    onTurnOnStayLinked: () -> Unit,
     /** Pocketdesk's Settings: the download folder, screenshots. */
     onChooseFolder: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -880,6 +887,10 @@ private fun HealthCard(
                             TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
                         HealthProblem.SCREENSHOTS_STOPPED ->
                             TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.health_settings)) }
+                        HealthProblem.PAUSED_STAY_LINKED_OFF ->
+                            TextButton(onClick = onTurnOnStayLinked) { Text(stringResource(R.string.health_turn_on)) }
+                        HealthProblem.PAUSED_ANYWAY ->
+                            TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.bg_maker_guide)) }
                         else -> TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.health_fix)) }
                     }
                 }
@@ -903,6 +914,8 @@ private fun healthText(problem: HealthProblem): Int = when (problem) {
     HealthProblem.CONTROL_SERVICE -> R.string.health_control_service
     HealthProblem.CONTROL_BLOCKED -> R.string.health_control_blocked
     HealthProblem.DOWNLOAD_FOLDER -> R.string.health_download_folder
+    HealthProblem.PAUSED_STAY_LINKED_OFF -> R.string.health_paused_stay_linked_off
+    HealthProblem.PAUSED_ANYWAY -> R.string.health_paused_anyway
 }
 
 /** T2: Android may stop the features that work in the background. */

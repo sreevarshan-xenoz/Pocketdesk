@@ -138,6 +138,9 @@ class MainActivity : ComponentActivity() {
         // Android 17 puts an alarm volume back only while the app shows: a
         // ring that left it raised is put back here (N4 review).
         dev.pocketdesk.android.ring.PhoneRinger.restoreAfterDeath(this)
+        // M1: the app in front may start what Android refused from the background.
+        val app = applicationContext
+        Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
     }
 
     override fun onStop() {
