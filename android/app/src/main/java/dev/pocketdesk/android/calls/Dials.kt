@@ -52,6 +52,8 @@ object Dials {
             }
             val address = own?.address ?: continue
             if (inFront) open(context, number) else offer(context, address, number)
+            // What became of it, for the device checks (N1 review); never the number.
+            Log.i("Dials", if (inFront) "a number from the computer was opened" else "a number from the computer was offered")
         }
     }
 
