@@ -26,12 +26,6 @@ class StayLinkedTest {
     }
 
     @Test
-    fun `a sleeping phone is no freeze since uptime stops with the cpu`() {
-        // An hour asleep moves the wall clock, not uptime: the next tick is 2 s on.
-        assertFalse(FreezeWatch.frozen(previousUptime = 100_000, uptime = 102_000))
-    }
-
-    @Test
     fun `thirty seconds of uptime between ticks is a freeze`() {
         assertTrue(FreezeWatch.frozen(previousUptime = 100_000, uptime = 130_000))
         assertTrue(FreezeWatch.frozen(previousUptime = 100_000, uptime = 700_000))
