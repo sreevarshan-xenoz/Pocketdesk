@@ -578,6 +578,13 @@ pub const FEATURES: &[Feature] = &[
         android: "notification access",
     },
     Feature {
+        key: "computer_media",
+        what: "This computer's music in its media controls",
+        phone_switch: "Computer's music in my media controls",
+        permission_name: "Hear and change this computer's sound, and its media",
+        android: "notification access and its notifications",
+    },
+    Feature {
         key: "mute",
         what: "Muting it from here",
         phone_switch: "Let the computer mute this phone",
