@@ -113,7 +113,7 @@ object PhoneLink {
         val copy = JSONObject(body.toString())
         AlsoTo.ANSWERS.forEach { copy.remove(it) }
         synchronized(copiedIds) { copiedIds[body.optString("id")] = Unit }
-        sendCopies(targets, copy.toString(), acked = true)
+        sendCopies(targets, copy.toString())
     }
 
     /** Copy the cancel of notification [id], if a copy of it went (L8 review: whatever the own computer saw). */
@@ -122,7 +122,7 @@ object PhoneLink {
         if (!known) return
         val targets = copyTargets(ctx)
         if (targets.isEmpty()) return
-        sendCopies(targets, JSONObject().put("id", id).put("isCancel", true).toString(), acked = false)
+        sendCopies(targets, JSONObject().put("id", id).put("isCancel", true).toString())
     }
 
     private fun copyTargets(ctx: Context): List<HostStore.Host> {
@@ -137,15 +137,16 @@ object PhoneLink {
         return addresses.mapNotNull { address -> hosts.firstOrNull { it.address == address } }
     }
 
-    private fun sendCopies(targets: List<HostStore.Host>, body: String, acked: Boolean) {
+    /**
+     * Send [body] to each of [targets] the way the own computer's
+     * notifications go (C3's acked send; a plain phone packet refuses
+     * notifications, cancels included).
+     */
+    private fun sendCopies(targets: List<HostStore.Host>, body: String) {
         targets.forEach { host ->
             others.execute {
                 if (SystemClock.elapsedRealtime() < (othersPausedUntil[host.address] ?: 0L)) return@execute
-                val sent = if (acked) {
-                    RustCore.sendNotificationAcked(host.address, host.controlPort, body).map { }
-                } else {
-                    RustCore.sendPhonePacket(host.address, host.controlPort, "kdeconnect.notification", body)
-                }
+                val sent = RustCore.sendNotificationAcked(host.address, host.controlPort, body).map { }
                 sent.onFailure {
                     Log.d(TAG, "a copy was not sent to ${host.address}, pausing a minute: ${it.message}")
                     othersPausedUntil[host.address] = SystemClock.elapsedRealtime() + PAUSE_MS
