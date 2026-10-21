@@ -43,6 +43,7 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "links" to s(Prefs.linksFromComputer(ctx), mayPost),
         "ring" to s(Prefs.ringFromComputer(ctx), access && mayPost),
         "media" to s(Prefs.phoneMediaOnComputer(ctx), access),
+        "media_background" to s(Prefs.phoneMediaInBackground(ctx) && Prefs.phoneMediaOnComputer(ctx), access),
         "mute" to s(QuietPrefs.letComputerMute(ctx), access),
         "control" to s(Prefs.controlFromComputer(ctx), ControlRunner.serviceEnabled(ctx)),
         "dial" to s(Prefs.callsFromComputer(ctx), mayPost),
