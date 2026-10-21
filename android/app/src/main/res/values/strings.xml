@@ -558,7 +558,7 @@
     <string name="phone_notifications_wait_60">Wait up to an hour</string>
     <string name="phone_notifications_wait_0">Don\'t wait</string>
     <string name="phone_notifications_also">Other computers of mine</string>
-    <string name="phone_notifications_also_summary">Send this phone\'s notifications to these paired computers too, to see on each (at most three besides the one in use; on this network or the tailnet, not over the internet). Only the computer this phone uses most recently can answer or clear them</string>
+    <string name="phone_notifications_also_summary">Send this phone\'s notifications to these paired computers too, to see on each (at most three besides the one in use; on this network or the tailnet, not over the internet). Each can answer and clear them too while answering or clearing is on, as the computer in use can</string>
     <string name="phone_notifications_also_to">Also to %1$s</string>
     <string name="phone_notifications_also_own">The computer this phone uses now: it gets them anyway, and this counts when another is in use</string>
     <string name="channel_offers">Files from the computer</string>

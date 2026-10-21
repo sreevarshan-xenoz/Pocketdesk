@@ -554,7 +554,7 @@
     <string name="phone_notifications_wait_60">Esperar hasta una hora</string>
     <string name="phone_notifications_wait_0">No esperar</string>
     <string name="phone_notifications_also">Mis otros equipos</string>
-    <string name="phone_notifications_also_summary">Enviar también las notificaciones de este teléfono a estos equipos emparejados, para verlas en cada uno (como máximo tres además del que está en uso; en esta red o la tailnet, no por internet). Solo el equipo que este teléfono usó más recientemente puede responderlas o borrarlas</string>
+    <string name="phone_notifications_also_summary">Enviar también las notificaciones de este teléfono a estos equipos emparejados, para verlas en cada uno (como máximo tres además del que está en uso; en esta red o la tailnet, no por internet). Cada uno puede responderlas y borrarlas también mientras responder o borrar esté activado, como el equipo en uso</string>
     <string name="phone_notifications_also_to">También a %1$s</string>
     <string name="phone_notifications_also_own">El equipo que este teléfono usa ahora: las recibe de todos modos, y esto cuenta cuando otro está en uso</string>
     <string name="channel_offers">Archivos del equipo</string>

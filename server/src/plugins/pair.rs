@@ -1666,6 +1666,8 @@ forged log line"
             // The computer's state (F2): what a paired phone already sees of
             // the battery, with the CPU, memory, disks and uptime.
             "kdeconnect.pocketdesk.system",
+            // A link's role (L8 part 2): it only narrows what the link is for.
+            "kdeconnect.pocketdesk.link_role",
             // Which of its features a phone has on (L7): status about the
             // phone itself, as its battery is, booleans only.
             "kdeconnect.pocketdesk.switches",

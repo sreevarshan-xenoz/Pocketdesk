@@ -13,6 +13,7 @@ mod commands;
 mod deck;
 mod dials;
 mod download;
+mod extra_links;
 mod link;
 mod link_quiet;
 mod links;
@@ -1858,6 +1859,69 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendPho
         body,
     )));
     to_jstring(&mut env, json)
+}
+
+/// Open a link to another computer the owner picked (L8 part 2), on the
+/// home road: copies go on it, and its answers and clears come back.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeConnectExtra(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope_unit(RUNTIME.block_on(extra_links::connect(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// Send a notification, its cancel or how an answer went on the link to
+/// another computer (L8 part 2); an error when none is up.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendOnExtra(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    packet_type: JString<'_>,
+    body: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let packet_type = jstring_to_string(&mut env, &packet_type);
+    let body = jstring_to_string(&mut env, &body);
+    let json = envelope_unit(RUNTIME.block_on(extra_links::send(
+        &address,
+        port as u16,
+        &packet_type,
+        &body,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// Close the links to other computers not in `keep` (a JSON array of
+/// `{host, port}`), and say which are up, as the same kind of array.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeKeepExtra(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    keep: JString<'_>,
+) -> jstring {
+    let keep = jstring_to_string(&mut env, &keep);
+    let keep: Vec<(String, u16)> = serde_json::from_str::<Vec<serde_json::Value>>(&keep)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|v| {
+            Some((
+                v.get("host")?.as_str()?.to_string(),
+                u16::try_from(v.get("port")?.as_u64()?).ok()?,
+            ))
+        })
+        .collect();
+    let json = RUNTIME.block_on(async {
+        extra_links::keep_only(&keep).await;
+        extra_links::live_json().await
+    });
+    to_jstring(&mut env, envelope(Ok(json)))
 }
 
 #[unsafe(no_mangle)]

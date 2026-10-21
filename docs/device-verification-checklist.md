@@ -2347,6 +2347,15 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The computer in use swapped (a session with the second): the picks still mean the same computers.
 - [x] 2026-10-21, on the OPPO with two throwaway servers (the second on other ports, reached as `localhost`): a notification reached both, the copy a second after the own computer's; with the own server stopped, the second still got the next at once; the copied cancel reached the second server. Found there first: copied cancels went as a plain packet, which the bridge refuses for notifications (fixed).
 
+## 165. The other computers answer and clear (L8 part 2)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] Two throwaway servers, both paired, the second picked, answering on: the second's toast offers the buttons, and pressing one runs it on the phone.
+- [ ] A toast closed on the second computer is cleared on the phone.
+- [ ] The second computer's Overview does not show the phone as linked by that link, and its Send file says it cannot reach the phone.
+- [ ] One computer saved at two addresses and picked: no link to itself, no doubled toasts.
+- [ ] The second server stopped: its link is tried again a minute later, and copies fall back to one-offs.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

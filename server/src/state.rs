@@ -119,8 +119,33 @@ fn newest_per_device(clients: Vec<Arc<dyn DeviceSender>>) -> Vec<Arc<dyn DeviceS
     newest
 }
 
+/// The connections a phone opened only to carry copies of its notifications
+/// (L8 part 2): they take that computer's answers and clears, and nothing
+/// else, so they are no push target and no sign the phone is linked.
+static COPY_LINKS: LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// Mark `connection_id` as a phone's copies-only link.
+pub fn mark_copy_link(connection_id: &str) {
+    COPY_LINKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(connection_id.to_string());
+}
+
+fn is_copy_link(sender: &dyn DeviceSender) -> bool {
+    COPY_LINKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(sender.connection_id())
+}
+
 /// Remove a client by its connection ID.
 pub async fn unregister_client(connection_id: &str) {
+    COPY_LINKS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(connection_id);
     let mut clients = ACTIVE_CLIENTS.lock().await;
     clients.retain(|c| c.connection_id() != connection_id);
     tracing::info!(
@@ -180,6 +205,14 @@ fn push_targets(
 /// *sends* by the packet loop, and on what it *receives* here.
 pub async fn clone_clients() -> Vec<Arc<dyn DeviceSender>> {
     let clients = ACTIVE_CLIENTS.lock().await.clone();
+    // A copies-only link (L8 part 2) is no push target and no sign of a link.
+    push_targets(clients, |c| may_receive_pushes(c) && !is_copy_link(c))
+}
+
+/// Where answers and clears to a phone's notifications go (T10c, L1): as
+/// [`clone_clients`], copies-only links included, which exist to take them.
+pub async fn clone_answer_targets() -> Vec<Arc<dyn DeviceSender>> {
+    let clients = ACTIVE_CLIENTS.lock().await.clone();
     push_targets(clients, may_receive_pushes)
 }
 
@@ -238,5 +271,22 @@ mod tests {
         let impostor: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "impostor"));
         let targets = push_targets(vec![phone, impostor], |c| c.connection_id() != "impostor");
         assert_eq!(ids(&targets), ["real"]);
+    }
+
+    /// L8 part 2: a phone's copies-only link is no push target, so the
+    /// phone's own control link stays the one pushes take, and it goes from
+    /// the list when it closes.
+    #[tokio::test]
+    async fn a_copies_only_link_is_left_out_of_pushes() {
+        let control: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "l8b-control"));
+        let copies: Arc<dyn DeviceSender> = Arc::new(Conn("phone", "l8b-copies"));
+        mark_copy_link("l8b-copies");
+        let targets = push_targets(vec![control.clone(), copies.clone()], |c| !is_copy_link(c));
+        assert_eq!(ids(&targets), ["l8b-control"]);
+        // Answers may take it (the answer targets keep it).
+        let answers = push_targets(vec![control, copies], |_| true);
+        assert_eq!(ids(&answers), ["l8b-copies"]);
+        unregister_client("l8b-copies").await;
+        assert!(!is_copy_link(&Conn("phone", "l8b-copies")));
     }
 }

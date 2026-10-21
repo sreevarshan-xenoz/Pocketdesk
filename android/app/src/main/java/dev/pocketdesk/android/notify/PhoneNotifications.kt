@@ -530,6 +530,14 @@ class PhoneNotificationListener : NotificationListenerService() {
             )
         }
 
+    /**
+     * Whether an answer from [host]:[port] is from this phone's computers:
+     * its own, or another it picked and keeps a link to (L8 part 2).
+     */
+    private fun fromMine(host: String, port: Int, own: dev.pocketdesk.android.HostStore.Host?): Boolean =
+        NotificationActionRule.fromOwnComputer(host, port, own?.address, own?.controlPort) ||
+            PhoneLink.linkedOther(host, port)
+
     /** Run the computer's answers that pass [NotificationActionRule.decide]. */
     private fun runAnswers() {
         val own = PhoneLink.target(this)
@@ -546,6 +554,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         // keep a link all day).
         val clearing = Prefs.letComputerClear(this) && PhoneNotificationPrefs.enabled(this)
         val clearsWanted = clearing && SystemClock.elapsedRealtime() - lastSentMs < CLEAR_LINK_MS
+        // L8 part 2: links to the other computers picked, while they may
+        // answer, or clear within ten minutes of a notification (as the own
+        // link, L1 review: else a link to each all day).
+        PhoneLink.keepOthers(this, wanted = answering || clearsWanted)
         if ((answering || callsOn || clearsWanted) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
@@ -570,7 +582,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             // L1: a clear, not an answer.
             if (answer.cancel) {
                 val ownComputer =
-                    NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort)
+                    fromMine(answer.host, answer.port, own)
                 // On the worker, where the forward rule lives (L1 review).
                 worker.execute { clear(answer, clearing, ownComputer) }
                 continue
@@ -581,7 +593,7 @@ class PhoneNotificationListener : NotificationListenerService() {
                     key = answer.key,
                     action = answer.action,
                     ringing = calls.ringing,
-                    ownComputer = NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort),
+                    ownComputer = fromMine(answer.host, answer.port, own),
                     on = callsOn,
                     mayDecline = CallWatch.mayDecline(this),
                 )
@@ -599,7 +611,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             var decision =
                 NotificationActionRule.decide(
                     settingOn = answering,
-                    ownComputer = NotificationActionRule.fromOwnComputer(answer.host, answer.port, own?.address, own?.controlPort),
+                    ownComputer = fromMine(answer.host, answer.port, own),
                     known = entry != null,
                     offered = offered,
                     withinBudget = true,
@@ -636,16 +648,21 @@ class PhoneNotificationListener : NotificationListenerService() {
     }
 
     /**
-     * Tell the phone's own computer how [answer] went (E1), on its link, when
-     * the answer named itself; a computer before E1 names none.
+     * Tell the computer [answer] came from how it went (E1), on its link,
+     * when the answer named itself; a computer before E1 names none. Another
+     * computer of the phone's is told on its own link (L8 part 2).
      */
     private fun tell(answer: RustCore.NotificationAnswer, outcome: NotificationActionRule.Outcome) {
         val id = answer.answerId ?: return
-        val own = PhoneLink.target(this) ?: return
         val body = org.json.JSONObject().put("answerId", id).put("ok", outcome.ok)
         outcome.reason?.let { body.put("reason", it) }
-        RustCore.sendPhonePacketOnLink(own.address, own.controlPort, NotificationActionRule.ANSWERED, body.toString())
-            .onFailure { Log.w("PhoneNotifications", "how an answer went was not told", it) }
+        val sent = if (PhoneLink.linkedOther(answer.host, answer.port)) {
+            RustCore.sendOnExtra(answer.host, answer.port, NotificationActionRule.ANSWERED, body.toString())
+        } else {
+            val own = PhoneLink.target(this) ?: return
+            RustCore.sendPhonePacketOnLink(own.address, own.controlPort, NotificationActionRule.ANSWERED, body.toString())
+        }
+        sent.onFailure { Log.w("PhoneNotifications", "how an answer went was not told", it) }
     }
 
     /** Send what waited, oldest first, until one fails. */

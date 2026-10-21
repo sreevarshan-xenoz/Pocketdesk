@@ -113,7 +113,8 @@ object PhoneLink {
         val copy = JSONObject(body.toString())
         AlsoTo.ANSWERS.forEach { copy.remove(it) }
         synchronized(copiedIds) { copiedIds[body.optString("id")] = Unit }
-        sendCopies(targets, copy.toString())
+        // L8 part 2: a computer linked may answer, so its copy keeps them.
+        sendCopies(targets, linked = body.toString(), oneOff = copy.toString())
     }
 
     /** Copy the cancel of notification [id], if a copy of it went (L8 review: whatever the own computer saw). */
@@ -122,12 +123,24 @@ object PhoneLink {
         if (!known) return
         val targets = copyTargets(ctx)
         if (targets.isEmpty()) return
-        sendCopies(targets, JSONObject().put("id", id).put("isCancel", true).toString())
+        val cancel = JSONObject().put("id", id).put("isCancel", true).toString()
+        sendCopies(targets, linked = cancel, oneOff = cancel)
     }
+
+    /** The targets, kept a few seconds (as [target] is, N7): the answers tick asks every 2 s. */
+    private val recentTargets = Recent<Pair<Pair<Int, Set<String>>, List<HostStore.Host>>>(ttlMs = 5_000L)
 
     private fun copyTargets(ctx: Context): List<HostStore.Host> {
         val picked = AlsoToPrefs.picked(ctx)
         if (picked.isEmpty()) return emptyList()
+        val key = HostStore.generation.get() to picked
+        val kept = recentTargets.get(SystemClock.elapsedRealtime()) { key to readTargets(ctx, picked) }
+        if (kept.first == key) return kept.second
+        recentTargets.forget()
+        return recentTargets.get(SystemClock.elapsedRealtime()) { key to readTargets(ctx, picked) }.second
+    }
+
+    private fun readTargets(ctx: Context, picked: Set<String>): List<HostStore.Host> {
         val hosts = HostStore.hosts(ctx)
         val addresses = AlsoTo.targets(
             hosts.map { AlsoTo.Saved(it.address, HostStore.pairedDesktopId(ctx, it.address)) },
@@ -138,15 +151,20 @@ object PhoneLink {
     }
 
     /**
-     * Send [body] to each of [targets] the way the own computer's
-     * notifications go (C3's acked send; a plain phone packet refuses
-     * notifications, cancels included).
+     * Send to each of [targets]: [linked] on its link (L8 part 2), else
+     * [oneOff] the way the own computer's notifications go (C3's acked
+     * send; a plain phone packet refuses notifications, cancels included).
      */
-    private fun sendCopies(targets: List<HostStore.Host>, body: String) {
+    private fun sendCopies(targets: List<HostStore.Host>, linked: String, oneOff: String) {
         targets.forEach { host ->
             others.execute {
+                if ((host.address to host.controlPort) in linkedOthers &&
+                    RustCore.sendOnExtra(host.address, host.controlPort, "kdeconnect.notification", linked).isSuccess
+                ) {
+                    return@execute
+                }
                 if (SystemClock.elapsedRealtime() < (othersPausedUntil[host.address] ?: 0L)) return@execute
-                val sent = RustCore.sendNotificationAcked(host.address, host.controlPort, body).map { }
+                val sent = RustCore.sendNotificationAcked(host.address, host.controlPort, oneOff).map { }
                 sent.onFailure {
                     Log.d(TAG, "a copy was not sent to ${host.address}, pausing a minute: ${it.message}")
                     othersPausedUntil[host.address] = SystemClock.elapsedRealtime() + PAUSE_MS
@@ -154,4 +172,46 @@ object PhoneLink {
             }
         }
     }
+
+    /** The other computers linked now (L8 part 2), as `(address, control port)`. */
+    @Volatile
+    var linkedOthers: Set<Pair<String, Int>> = emptySet()
+        private set
+
+    /** When each other computer's link was last tried. */
+    private val othersTriedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** The links' own thread: dialing must never hold up the answers tick (L8 part 2 review). */
+    private val linker: ThreadPoolExecutor =
+        ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(1), ThreadPoolExecutor.DiscardPolicy())
+
+    /**
+     * Keep a link to each other computer picked (L8 part 2), so it may answer
+     * and clear the notifications it is sent, while [wanted] (answering on,
+     * or clearing within ten minutes of a notification, as the own link,
+     * L1); close the rest first, so a computer swapped in finds room. A
+     * failed link is tried again a minute later. Called from the listener's
+     * answers tick; the work is on its own thread, skipped while busy.
+     */
+    fun keepOthers(ctx: Context, wanted: Boolean) {
+        linker.execute {
+            val targets = if (wanted) copyTargets(ctx) else emptyList()
+            val keep = targets.map { it.address to it.controlPort }
+            linkedOthers = RustCore.keepExtra(keep)
+            val now = SystemClock.elapsedRealtime()
+            var dialed = false
+            targets.forEach { host ->
+                if ((host.address to host.controlPort) in linkedOthers) return@forEach
+                if (now - (othersTriedAt[host.address] ?: Long.MIN_VALUE / 2) < 60_000L) return@forEach
+                othersTriedAt[host.address] = now
+                dialed = true
+                RustCore.connectExtra(host.address, host.controlPort)
+                    .onFailure { Log.d(TAG, "no link to ${host.address}: ${it.message}") }
+            }
+            if (dialed) linkedOthers = RustCore.keepExtra(keep)
+        }
+    }
+
+    /** Whether [host]:[port] is another computer of this phone's, linked now (L8 part 2). */
+    fun linkedOther(host: String, port: Int): Boolean = (host to port) in linkedOthers
 }
