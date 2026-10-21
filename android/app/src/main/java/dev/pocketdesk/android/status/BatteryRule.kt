@@ -23,6 +23,32 @@ object BatteryRule {
         return Report(charge = charge, charging = plugged != 0, low = low)
     }
 
+    /** BatteryManager's status words (BATTERY_STATUS_*), kept here so the rule is tested. */
+    const val STATUS_CHARGING = 2
+    const val STATUS_DISCHARGING = 3
+    const val STATUS_NOT_CHARGING = 4
+    const val STATUS_FULL = 5
+
+    /**
+     * The report with the battery as BatteryManager says it now: its
+     * [capacity] (0–100, else unknown) and [status] over the sticky
+     * broadcast's, which ColorOS was seen to leave stale for an app in the
+     * background (the computer kept 72 % while the phone was at 79 %). Either
+     * unknown keeps the broadcast's; with no broadcast, the capacity alone.
+     */
+    fun fresh(sticky: Report?, capacity: Int, status: Int): Report? {
+        val charge = capacity.takeIf { it in 0..100 }
+        val charging = when (status) {
+            STATUS_CHARGING, STATUS_FULL -> true
+            STATUS_DISCHARGING, STATUS_NOT_CHARGING -> false
+            else -> null
+        }
+        if (sticky == null) {
+            return charge?.let { Report(charge = it, charging = charging ?: false, low = false) }
+        }
+        return sticky.copy(charge = charge ?: sticky.charge, charging = charging ?: sticky.charging)
+    }
+
     /**
      * Whether to send [now] at [nowMs], [last] having been sent at [lastMs]:
      * a change in the battery, or in the state [PhoneStateRule.changedNow]
