@@ -682,17 +682,20 @@ def n4_live(ctx: Ctx) -> tuple[str, str]:
     title = "N4 live " + secrets.token_hex(2)
     progress = lambda: (c := ctx.server.card(ctx.device, title)) and c["live"]["progress"]
     try:
-        for step in (10, 50, 52, 100):
+        for step in (10, 50, 52):
             ctx.phone.notify(nid, title, "file.bin", style="progress", progress=step)
             time.sleep(1)
-        # 52 is within a step of 50 and 100 is never held back: the last
-        # state arrives within the gap.
-        if not wait_for(lambda: progress() == 100, 20):
+        # 50 and 52 come within the gap after 10: held back, the last is
+        # looked at again once the gap passes (N4 review: 100 never waits).
+        if not wait_for(lambda: progress() == 52, 15):
+            return "TIMEOUT", f"the held-back state did not arrive: {progress()!r}"
+        ctx.phone.notify(nid, title, "file.bin", style="progress", progress=100)
+        if not wait_for(lambda: progress() == 100, 15):
             return "TIMEOUT", f"the card stopped at {progress()!r}"
     finally:
         ctx.phone.cancel(nid)
     gone = wait_for(lambda: ctx.server.card(ctx.device, title) is None, 20)
-    return ("PASS", "the card reached 100 % and went with its end") if gone else (
+    return ("PASS", "the held-back 52 % came, then 100 %, and the card went with its end") if gone else (
         "TIMEOUT", "the card stayed after its end")
 
 
