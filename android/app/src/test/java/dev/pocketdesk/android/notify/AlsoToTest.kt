@@ -32,6 +32,14 @@ class AlsoToTest {
     }
 
     @Test
+    fun oneComputerAtTwoAddressesIsOneAndNeverItselfAgain() {
+        // A is the own computer, saved at its LAN and its tailnet address;
+        // B is saved twice too.
+        val saved = listOf(s("a-lan", "A"), s("b-lan", "B"), s("a-tail", "A"), s("b-tail", "B"))
+        assertEquals(listOf("b-lan"), AlsoTo.targets(saved, setOf("A", "B"), own = "a-lan"))
+    }
+
+    @Test
     fun theOwnAndThreeMoreArePicked() {
         assertTrue(AlsoTo.mayPickMore(3))
         assertFalse(AlsoTo.mayPickMore(4))

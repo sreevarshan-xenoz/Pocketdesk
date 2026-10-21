@@ -554,8 +554,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         // keep a link all day).
         val clearing = Prefs.letComputerClear(this) && PhoneNotificationPrefs.enabled(this)
         val clearsWanted = clearing && SystemClock.elapsedRealtime() - lastSentMs < CLEAR_LINK_MS
-        // L8 part 2: links to the other computers picked, while they may answer or clear.
-        PhoneLink.keepOthers(this, wanted = answering || clearing)
+        // L8 part 2: links to the other computers picked, while they may
+        // answer, or clear within ten minutes of a notification (as the own
+        // link, L1 review: else a link to each all day).
+        PhoneLink.keepOthers(this, wanted = answering || clearsWanted)
         if ((answering || callsOn || clearsWanted) && own != null && RustCore.controlPeer() == null) {
             val now = SystemClock.elapsedRealtime()
             if (now - answerConnectMs >= 60_000L) {
