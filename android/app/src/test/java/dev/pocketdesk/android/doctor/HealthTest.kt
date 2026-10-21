@@ -214,4 +214,13 @@ class HealthTest {
             Health.problems(nothingOn.copy(frozenRecently = true, stayLinked = false)),
         )
     }
+
+    @Test
+    fun `a pause with the screen off is not an update's news`() {
+        assertFalse(Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_ANYWAY), seen = null, dismissed = null))
+        assertFalse(Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_STAY_LINKED_OFF), seen = null, dismissed = null))
+        assertTrue(
+            Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_ANYWAY, HealthProblem.PHOTOS), seen = null, dismissed = null),
+        )
+    }
 }

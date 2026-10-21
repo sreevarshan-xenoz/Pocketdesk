@@ -127,8 +127,11 @@ object Health {
      */
     fun notifyAfterUpdate(problems: List<HealthProblem>, seen: String?, dismissed: String?): Boolean {
         val known = names(seen) + names(dismissed)
-        return problems.any { it.name !in known }
+        // A pause with the screen off is no update's doing (M1 review).
+        return problems.any { it.name !in known && it !in PAUSED }
     }
+
+    private val PAUSED = setOf(HealthProblem.PAUSED_STAY_LINKED_OFF, HealthProblem.PAUSED_ANYWAY)
 
     private fun names(key: String?): Set<String> = key?.split(',')?.filter { it.isNotEmpty() }?.toSet().orEmpty()
 
