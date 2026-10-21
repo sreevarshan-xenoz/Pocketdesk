@@ -36,6 +36,10 @@ jobs:
       - name: Owed checks index
         run: python3 scripts/owed_checks.py --selftest && python3 scripts/owed_checks.py --check
 
+      # N1: the device checks runner's pure parts (the checks need a phone).
+      - name: Device checks runner
+        run: python3 -m unittest scripts/test_device_checks.py
+
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
