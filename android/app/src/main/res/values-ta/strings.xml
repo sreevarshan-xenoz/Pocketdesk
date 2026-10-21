@@ -923,4 +923,16 @@
     <string name="settings_typing_summary_off">கணினியில் \"ஃபோனில் தட்டச்சு செய்\" இங்கே முன்னால் உள்ள புலத்தில் தட்டச்சு செய்யும், திரையைக் காட்டாமல். கடவுச்சொல் புலத்திலும் ஃபோன் பூட்டியிருக்கும்போதும் ஒருபோதும் இல்லை. \"Pocketdesk control\" அணுகல்தன்மை சேவையைப் பயன்படுத்துகிறது</string>
     <string name="settings_typing_summary_needs_access">கிட்டத்தட்ட: கணினி தட்டச்சு செய்வதற்குக் காத்திருக்க Pocketdesk-க்கு அறிவிப்பு அணுகல் தேவை</string>
     <string name="settings_typing_summary_on">இயக்கத்தில்: இந்த ஃபோனின் சொந்தக் கணினியில் \"ஃபோனில் தட்டச்சு செய்\" இங்கே முன்னால் உள்ள புலத்தில் தட்டச்சு செய்யும், அப்போது ஒரு அறிவிப்புடன்</string>
+    <string name="card_phone_sound">இந்தத் தொலைபேசியின் ஒலியை அங்கே இயக்கு</string>
+    <string name="phone_sound_consent">Android இதைத் திரைப் பகிர்வு என்கிறது; ஒலி மட்டுமே அனுப்பப்படும்</string>
+    <string name="phone_sound_needs_mic">ஆப்ஸ் இயக்குவதை Pocketdesk பிடிக்க Android மைக்ரோஃபோன் அனுமதியைக் கேட்கிறது</string>
+    <string name="phone_sound_playing">இந்தத் தொலைபேசியின் ஒலி %1$s இல் இயங்குகிறது</string>
+    <string name="phone_sound_failed">%1$s இல் இந்தத் தொலைபேசியின் ஒலியை இயக்க முடியவில்லை: %2$s</string>
+    <string name="phone_sound_no_capture">Android அதைப் பிடிக்க Pocketdesk-ஐ அனுமதிக்கவில்லை</string>
+    <string name="phone_sound_not_allowed">அது இந்தத் தொலைபேசியின் ஒலியை இயக்குவதில்லை (சாதனங்கள், \"அதன் ஒலியை இங்கே இயக்கு\")</string>
+    <string name="phone_sound_not_played">அதன் Pocketdesk ஒலியை இயக்க முடியாது</string>
+    <string name="phone_sound_title">கணினியில் இந்தத் தொலைபேசியின் ஒலி</string>
+    <string name="phone_sound_stopped">இந்தத் தொலைபேசியின் ஒலி இனி அங்கே இயங்கவில்லை</string>
+    <string name="phone_sound_too_old">%1$s இல் உள்ள Pocketdesk இந்தத் தொலைபேசியின் ஒலியை இயக்க மிகப் பழையது. அதைப் புதுப்பிக்கவும்.</string>
+    <string name="phone_sound_busy">இந்தத் தொலைபேசி ஏற்கனவே ஒரு கணினியில் தன் திரையைக் காட்டுகிறது அல்லது ஒலியை இயக்குகிறது: முதலில் அதை நிறுத்தவும்</string>
 </resources>

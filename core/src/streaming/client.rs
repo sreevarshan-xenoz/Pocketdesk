@@ -61,6 +61,13 @@ pub const SESSION_MODE_CAST: u8 = 2;
 /// or input; it says when it is admitted with the ready stream.
 pub const SESSION_MODE_SOUND: u8 = 3;
 
+/// [`SESSION_MODE_MARKER`] mode: the phone's sound alone on the computer
+/// (M7). The phone sends what its apps play as a cast's sound streams
+/// ([`super::cast`]) and nothing else; the computer plays it, takes no
+/// input, opens no window, and says when it is admitted with the ready
+/// stream, whose byte says whether the sound is taken.
+pub const SESSION_MODE_PHONE_SOUND: u8 = 4;
+
 /// A sound session's ready stream carries one byte of what the computer
 /// allows (N5 review): this bit marks the byte as said, so a computer that
 /// says nothing reads as not known.
@@ -129,6 +136,8 @@ pub enum SessionMode {
     Cast,
     /// Sound both ways, no picture or input (N5).
     Sound,
+    /// The phone's sound on the computer, alone (M7).
+    PhoneSound,
 }
 
 impl SessionMode {
@@ -140,6 +149,7 @@ impl SessionMode {
             SessionMode::InputOnly => Some(SESSION_MODE_INPUT_ONLY),
             SessionMode::Cast => Some(SESSION_MODE_CAST),
             SessionMode::Sound => Some(SESSION_MODE_SOUND),
+            SessionMode::PhoneSound => Some(SESSION_MODE_PHONE_SOUND),
         }
     }
 
@@ -308,8 +318,11 @@ pub struct StreamingClient {
 pub struct RemoteFlags {
     /// The session gets no picture or sound: a remote or a cast.
     pub input_only: bool,
-    /// The session is a cast (T10k).
+    /// The session is a cast (T10k), or the phone's sound alone (M7): the
+    /// phone sends its stream.
     pub cast: bool,
+    /// The session is the phone's sound alone (M7).
+    pub phone_sound: bool,
     /// The session is sound only (N5): it takes the computer's sound, never
     /// a picture.
     pub sound: bool,
@@ -655,7 +668,8 @@ impl StreamingClient {
             video_bytes: Arc::default(),
             remote: RemoteFlags {
                 input_only,
-                cast: mode == SessionMode::Cast,
+                cast: matches!(mode, SessionMode::Cast | SessionMode::PhoneSound),
+                phone_sound: mode == SessionMode::PhoneSound,
                 sound: mode == SessionMode::Sound,
                 ..Default::default()
             },
@@ -1014,6 +1028,11 @@ mod remote_tests {
         assert_eq!(SessionMode::InputOnly.wire(), Some(SESSION_MODE_INPUT_ONLY));
         assert_eq!(SessionMode::Cast.wire(), Some(SESSION_MODE_CAST));
         assert_eq!(SessionMode::Sound.wire(), Some(SESSION_MODE_SOUND));
+        assert_eq!(
+            SessionMode::PhoneSound.wire(),
+            Some(SESSION_MODE_PHONE_SOUND)
+        );
+        assert!(!SessionMode::PhoneSound.gets_picture());
         assert!(SessionMode::Screen.gets_picture());
         assert!(!SessionMode::Cast.gets_picture());
         assert!(!SessionMode::Sound.gets_picture());

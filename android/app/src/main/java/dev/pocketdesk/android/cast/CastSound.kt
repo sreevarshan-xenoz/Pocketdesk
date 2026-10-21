@@ -24,6 +24,9 @@ class CastSound(private val projection: MediaProjection) {
     private var running = false
     private var worker: Thread? = null
 
+    /** Whether it still captures: it ends by itself when the capture or the link fails (M7). */
+    val alive: Boolean get() = running
+
     /** Start capturing; whether it runs. RECORD_AUDIO is the caller's check. */
     @SuppressLint("MissingPermission")
     @RequiresApi(29)

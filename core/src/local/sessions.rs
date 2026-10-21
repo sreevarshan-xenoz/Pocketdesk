@@ -49,6 +49,9 @@ pub struct MirrorSession {
     /// The phone is this computer's speaker and mic: sound only (N5).
     #[serde(default)]
     pub sound_only: bool,
+    /// The phone's own sound plays here, with no screen (M7).
+    #[serde(default)]
+    pub phone_sound_only: bool,
 }
 
 /// A phone with a control link to the server, in a session or not (T10d).
@@ -259,6 +262,7 @@ mod tests {
                 driving: false,
                 control_only: false,
                 sound_only: false,
+                phone_sound_only: false,
                 cast: false,
             }],
             false,
@@ -298,6 +302,7 @@ mod tests {
                 driving: true,
                 control_only: false,
                 sound_only: false,
+                phone_sound_only: false,
                 cast: true,
             }],
             true,

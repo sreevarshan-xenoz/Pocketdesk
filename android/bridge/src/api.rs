@@ -2610,7 +2610,9 @@ async fn install_streaming(
     let video_bytes = client.video_bytes();
     let remote = client.remote();
     let input_only = remote.input_only;
-    let mode = if remote.cast {
+    let mode = if remote.phone_sound {
+        pocketdesk_core::streaming::SessionMode::PhoneSound
+    } else if remote.cast {
         pocketdesk_core::streaming::SessionMode::Cast
     } else if remote.sound {
         pocketdesk_core::streaming::SessionMode::Sound
@@ -2714,7 +2716,12 @@ async fn install_streaming(
     *crate::session::SCREEN_FEATURES.lock().unwrap() =
         (!input_only).then(|| remote.screen_features.clone());
     *crate::session::REMOTE.lock().unwrap() = input_only.then_some(remote);
-    if mode == pocketdesk_core::streaming::SessionMode::Cast {
+    // The phone's sound alone (M7) sends a cast's sound streams.
+    if matches!(
+        mode,
+        pocketdesk_core::streaming::SessionMode::Cast
+            | pocketdesk_core::streaming::SessionMode::PhoneSound
+    ) {
         crate::cast::start(connection.clone(), client_cancel.clone());
     }
     *handle = Some(StreamingHandle {
@@ -3022,10 +3029,13 @@ fn state_name(flags: Option<&pocketdesk_core::streaming::RemoteFlags>, cast: boo
 pub async fn stop_cast() {
     let handle = {
         let mut guard = (*STREAMING_HANDLE).lock().await;
-        if guard
-            .as_ref()
-            .is_some_and(|h| h.mode == pocketdesk_core::streaming::SessionMode::Cast)
-        {
+        if guard.as_ref().is_some_and(|h| {
+            matches!(
+                h.mode,
+                pocketdesk_core::streaming::SessionMode::Cast
+                    | pocketdesk_core::streaming::SessionMode::PhoneSound
+            )
+        }) {
             guard.take()
         } else {
             None

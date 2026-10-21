@@ -88,6 +88,7 @@ fun HomeScreen(
     onSound: (HostStore.Host) -> Unit,
     onCast: (HostStore.Host) -> Unit,
     onCamera: (HostStore.Host) -> Unit,
+    onPhoneSound: (HostStore.Host) -> Unit,
     onConnectFound: (HostStore.Host) -> Unit,
     onAdd: () -> Unit,
     onScan: () -> Unit,
@@ -361,6 +362,7 @@ fun HomeScreen(
                         onSound = { onSound(host) },
                         onCast = { onCast(host) },
                         onCamera = { onCamera(host) },
+                        onPhoneSound = { onPhoneSound(host) },
                         onConnect = {
                             if (!Prefs.offerWake(context)) {
                                 onConnect(host)
@@ -710,6 +712,7 @@ private fun HostCard(
     onSound: () -> Unit,
     onCast: () -> Unit,
     onCamera: () -> Unit,
+    onPhoneSound: () -> Unit,
     onWake: () -> Unit,
     onWakeSettings: () -> Unit,
     onCheck: () -> Unit,
@@ -754,6 +757,10 @@ private fun HostCard(
                             add(R.string.card_state to onState)
                             // F6: the back camera, shown in the computer's window.
                             add(R.string.card_show_camera to onCamera)
+                            // M7: the phone's sound there, with no picture (Android 10+).
+                            if (dev.pocketdesk.android.cast.CastSoundRule.offeredAlone(android.os.Build.VERSION.SDK_INT)) {
+                                add(R.string.card_phone_sound to onPhoneSound)
+                            }
                             // D3: an earlier copy, sent to this computer again.
                             add(R.string.card_send_earlier_copy to onHistory)
                             if (hasWake) add(R.string.wake to onWake)

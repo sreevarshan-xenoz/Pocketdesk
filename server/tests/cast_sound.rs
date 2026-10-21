@@ -1,6 +1,8 @@
 //! The phone's sound with its screen (K5): a cast session over loopback
 //! QUIC whose sound streams reach the player with the phone's "Play its
 //! sound here" on, and are dropped with it off; the cast is told which.
+//! And without its screen (M7): a session of its own whose sound plays
+//! with no window, refused without the permission.
 
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
@@ -15,10 +17,24 @@ use pocketdesk_core::streaming::{
 };
 use tokio::sync::mpsc;
 
+/// What a session in `mode` came to: what the phone heard it may send, the
+/// packets that reached the player, whether the cast relay heard of it,
+/// and why it was closed, if it was refused.
+struct Heard {
+    features: u8,
+    got: Vec<Vec<u8>>,
+    relay_told: bool,
+    refused: Option<String>,
+}
+
 /// A cast's sound, as the server hands it to the player, with the phone's
-/// permission `allowed`: what the phone heard it may send, and the packets
-/// that reached the player.
+/// permission `allowed`.
 async fn cast_sound(allowed: bool) -> (u8, Vec<Vec<u8>>) {
+    let heard = session_sound(SessionMode::Cast, allowed).await;
+    (heard.features, heard.got)
+}
+
+async fn session_sound(mode: SessionMode, allowed: bool) -> Heard {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert = std::sync::Arc::new(CertManager::new().expect("cert manager"));
     let listen = StreamTransportConfig {
@@ -60,8 +76,14 @@ async fn cast_sound(allowed: bool) -> (u8, Vec<Vec<u8>>) {
             .run_on_connection(QuinnConnection::shared(connection))
             .await
     });
-    // The relay's events are not this test's; drain them.
-    tokio::spawn(async move { while cast_events.recv().await.is_some() {} });
+    // Whether the relay heard of the session (M7: never for sound alone).
+    let relay = tokio::spawn(async move {
+        let mut told = false;
+        while let Some(event) = cast_events.recv().await {
+            told |= matches!(event, CastEvent::Start { .. });
+        }
+        told
+    });
 
     let (mut client, _frames, _audio) = StreamingClient::connect(
         &addr.to_string(),
@@ -70,7 +92,7 @@ async fn cast_sound(allowed: bool) -> (u8, Vec<Vec<u8>>) {
         Some("sound-test"),
         None,
         None,
-        SessionMode::Cast,
+        mode,
     )
     .await
     .expect("connect");
@@ -79,6 +101,16 @@ async fn cast_sound(allowed: bool) -> (u8, Vec<Vec<u8>>) {
     let receiving = tokio::spawn(async move { client.start().await });
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     while !remote.ready.load(Ordering::Acquire) {
+        if let Some(reason) = conn.close_reason() {
+            receiving.abort();
+            let _ = tokio::time::timeout(Duration::from_secs(5), session).await;
+            return Heard {
+                features: 0,
+                got: Vec::new(),
+                relay_told: relay.await.unwrap_or(false),
+                refused: Some(reason),
+            };
+        }
         assert!(tokio::time::Instant::now() < deadline, "never admitted");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -104,7 +136,12 @@ async fn cast_sound(allowed: bool) -> (u8, Vec<Vec<u8>>) {
     receiving.abort();
     let _ = tokio::time::timeout(Duration::from_secs(5), session).await;
     got.sort();
-    (features, got)
+    Heard {
+        features,
+        got,
+        relay_told: relay.await.unwrap_or(false),
+        refused: None,
+    }
 }
 
 #[tokio::test]
@@ -127,4 +164,25 @@ async fn a_cast_s_sound_is_dropped_without_its_permission() {
         "told it is not taken"
     );
     assert!(got.is_empty(), "{} packets played", got.len());
+}
+
+#[tokio::test]
+async fn the_phone_s_sound_alone_plays_with_no_window() {
+    let heard = session_sound(SessionMode::PhoneSound, true).await;
+    assert_eq!(heard.refused, None);
+    assert_eq!(
+        heard.features & REMOTE_FEATURE_PHONE_SOUND,
+        REMOTE_FEATURE_PHONE_SOUND
+    );
+    let want: Vec<Vec<u8>> = (0..5u8).map(|n| vec![0xFC, n, n, n]).collect();
+    assert_eq!(heard.got, want);
+    assert!(!heard.relay_told, "no window is opened for sound alone");
+}
+
+#[tokio::test]
+async fn the_phone_s_sound_alone_is_refused_without_its_permission() {
+    let heard = session_sound(SessionMode::PhoneSound, false).await;
+    assert_eq!(heard.refused.as_deref(), Some("phone sound not allowed"));
+    assert!(heard.got.is_empty());
+    assert!(!heard.relay_told);
 }

@@ -51,6 +51,7 @@ class CastService : Service() {
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_RESULT_DATA = "resultData"
         const val EXTRA_CAMERA = "camera"
+        const val EXTRA_SOUND_ALONE = "soundAlone"
 
         private const val TAG = "CastService"
         private const val CHANNEL_ID = "pocketdesk-cast"
@@ -82,15 +83,19 @@ class CastService : Service() {
             )
         }
 
-        /** Start a cast to [address] with the consent Android returned. */
-        fun start(context: Context, address: String, port: Int, resultCode: Int, data: Intent) {
+        /**
+         * Start a cast to [address] with the consent Android returned; with
+         * [soundAlone], the phone's sound and no picture (M7).
+         */
+        fun start(context: Context, address: String, port: Int, resultCode: Int, data: Intent, soundAlone: Boolean = false) {
             context.startForegroundService(
                 Intent(context, CastService::class.java)
                     .setAction(ACTION_START)
                     .putExtra(EXTRA_ADDRESS, address)
                     .putExtra(EXTRA_PORT, port)
                     .putExtra(EXTRA_RESULT_CODE, resultCode)
-                    .putExtra(EXTRA_RESULT_DATA, data),
+                    .putExtra(EXTRA_RESULT_DATA, data)
+                    .putExtra(EXTRA_SOUND_ALONE, soundAlone),
             )
         }
     }
@@ -107,6 +112,9 @@ class CastService : Service() {
     /** F6: the back camera instead of the screen, and its feed once shown. */
     private var camera = false
     private var feed: CameraFeed? = null
+
+    /** M7: the phone's sound alone, no picture. */
+    private var soundAlone = false
     private var started = false
 
     @Volatile
@@ -151,6 +159,7 @@ class CastService : Service() {
             Thread({ run(port) }, "cast-session").start()
             return START_NOT_STICKY
         }
+        soundAlone = intent.getBooleanExtra(EXTRA_SOUND_ALONE, false)
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
         val data =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -193,14 +202,17 @@ class CastService : Service() {
     @Volatile
     private var sound: CastSound? = null
 
-    /** Start the cast's sound when everything says it may go (K5). */
+    /**
+     * Start the cast's sound when everything says it may go (K5); asked for
+     * alone (M7), the setting for the screen's sound does not apply.
+     */
     private fun startSound(castState: String) {
         val taken = projection ?: return
         val granted =
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!CastSoundRule.capture(
-                Prefs.castSound(this),
+                soundAlone || Prefs.castSound(this),
                 granted,
                 CastSoundRule.computerTakes(castState),
                 camera,
@@ -226,14 +238,14 @@ class CastService : Service() {
     /** The session: connect, wait to be admitted, show, and watch it. */
     private fun run(port: Int) {
         val connected =
-            RustCore.connectCast(address, port).recoverCatching { lan ->
+            RustCore.connectCast(address, port, soundAlone).recoverCatching { lan ->
                 if (finished) throw lan
                 val identity = HostStore.wanIdentity(this, address) ?: throw lan
-                RustCore.connectCastWan(address, identity).getOrThrow()
+                RustCore.connectCastWan(address, identity, soundAlone).getOrThrow()
             }
         if (finished) return
         connected.exceptionOrNull()?.let {
-            fail(getString(R.string.cast_failed, shown, plainErrorText(it.message)))
+            fail(failed(plainErrorText(it.message)))
             return
         }
         update(getString(R.string.cast_waiting, shown))
@@ -249,20 +261,35 @@ class CastService : Service() {
             val replaced = cast == "none" && state != State.Connecting
             state = RemoteSession.next(state, cast, closed.takeUnless { replaced })
             if (state == State.Waiting && SystemClock.elapsedRealtime() - since > WAIT_MS) {
-                fail(getString(R.string.cast_failed, shown, getString(R.string.cast_no_answer)))
+                fail(failed(getString(R.string.cast_no_answer)))
                 return
             }
+            // M7: the sound alone ended by itself (the capture or the
+            // link failed): nothing is left to do (M7 review: it stayed up
+            // silent until Stop).
+            if (soundAlone && showing && sound?.alive != true) {
+                return fail(failed(getString(R.string.phone_sound_no_capture)))
+            }
             when (state) {
-                State.TooOld -> return fail(getString(R.string.cast_too_old, shown))
+                State.TooOld ->
+                    return fail(getString(if (soundAlone) R.string.phone_sound_too_old else R.string.cast_too_old, shown))
                 State.Down -> {
                     if (replaced) return finish()
                     if (!showing || closed != null && closed != "session ended") {
-                        return fail(getString(R.string.cast_failed, shown, reasonText(closed)))
+                        return fail(failed(reasonText(closed)))
                     }
                     return finish()
                 }
                 State.Ready ->
-                    if (!showing) {
+                    if (!showing && soundAlone) {
+                        showing = true
+                        // M7: its sound only: no picture, no control.
+                        startSound(castState)
+                        if (sound == null) {
+                            return fail(failed(getString(R.string.phone_sound_no_capture)))
+                        }
+                        update(getString(R.string.phone_sound_playing, shown))
+                    } else if (!showing) {
                         showing = true
                         main.post(::startPicture)
                         startSound(castState)
@@ -280,9 +307,15 @@ class CastService : Service() {
         }
     }
 
+    /** Why it could not start, as a sentence naming the computer. */
+    private fun failed(reason: String): String =
+        getString(if (soundAlone) R.string.phone_sound_failed else R.string.cast_failed, shown, reason)
+
     private fun reasonText(closed: String?): String =
         when {
             closed == null -> getString(R.string.cast_lost)
+            closed.contains("phone sound not allowed") -> getString(R.string.phone_sound_not_allowed)
+            closed.contains("phone sound not played here") -> getString(R.string.phone_sound_not_played)
             closed.contains("phone screen not allowed") -> getString(R.string.cast_not_allowed)
             closed.contains("phone screen not shown here") -> getString(R.string.cast_not_shown_here)
             else -> closed
@@ -442,7 +475,7 @@ class CastService : Service() {
             )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(getString(R.string.cast_channel))
+            .setContentTitle(getString(if (soundAlone) R.string.phone_sound_title else R.string.cast_channel))
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
@@ -458,7 +491,7 @@ class CastService : Service() {
     private fun failedNotification(text: String): Notification =
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(getString(R.string.cast_stopped))
+            .setContentTitle(getString(if (soundAlone) R.string.phone_sound_stopped else R.string.cast_stopped))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setAutoCancel(true)

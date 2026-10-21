@@ -62,7 +62,12 @@ pub fn render_json(
             // A remote gives input; a sound session (N5) none.
             control_only: !s.streamed.video && !s.streamed.cast && s.streamed.input,
             cast: s.streamed.cast,
-            sound_only: !s.streamed.video && !s.streamed.cast && !s.streamed.input,
+            // The phone's sound alone (M7) gives no input either.
+            sound_only: !s.streamed.video
+                && !s.streamed.cast
+                && !s.streamed.input
+                && !s.streamed.phone_sound,
+            phone_sound_only: !s.streamed.video && !s.streamed.cast && s.streamed.phone_sound,
         })
         .collect();
     shared::render_mirror(&sessions, crate::driving::is_shared(), linked, now_unix)
@@ -155,6 +160,9 @@ async fn tell_phones(sessions: &[(u64, String)], driver: Option<u64>) {
 fn session_summary(streamed: &pocketdesk_core::streaming::sessions::Streamed) -> &'static str {
     if streamed.cast {
         "Pocketdesk: a phone is showing its screen here"
+    } else if streamed.phone_sound {
+        // The phone's sound alone (M7).
+        "Pocketdesk: a phone is playing its sound here"
     } else if streamed.video {
         "Pocketdesk: a device is streaming this desktop"
     } else if streamed.input {
@@ -402,6 +410,9 @@ fn changes(
         if !seen_sessions.iter().any(|(id, _)| *id == s.id) {
             let mode = if s.streamed.cast {
                 "cast"
+            } else if s.streamed.phone_sound {
+                // The phone's sound alone (M7).
+                "phone_sound"
             } else if s.streamed.video {
                 "screen"
             } else if s.streamed.input {
@@ -505,6 +516,8 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
                     .unwrap_or_else(|| "?".into());
                 let mode = if s.cast {
                     "  showing its screen"
+                } else if s.phone_sound_only {
+                    "  playing its sound"
                 } else if s.control_only {
                     "  control only"
                 } else if s.sound_only {
@@ -672,6 +685,51 @@ mod tests {
             vec![7],
             "off by default"
         );
+    }
+
+    /// M7: the phone's sound alone, told as such, and ended when its
+    /// permission goes.
+    #[test]
+    fn the_phone_s_sound_alone_is_told_and_ends_with_its_permission() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let alone = Streamed {
+            phone_sound: true,
+            ..Streamed::default()
+        };
+        assert_eq!(
+            session_summary(&alone),
+            "Pocketdesk: a phone is playing its sound here"
+        );
+        let mut session = session(Some("phone"), true);
+        session.streamed = alone;
+        let mut on = DevicePermissions::default();
+        on.set(Capability::PhoneSound, true);
+        assert!(narrowed_sessions(std::slice::from_ref(&session), |_| on.clone()).is_empty());
+        assert_eq!(
+            narrowed_sessions(&[session], |_| DevicePermissions::default()),
+            vec![7]
+        );
+    }
+
+    /// M7: the phone's sound alone is its own kind, not sound only.
+    #[test]
+    fn the_phone_s_sound_alone_is_its_own_kind() {
+        use pocketdesk_core::streaming::sessions::Streamed;
+        let mut alone = session(Some("phone"), true);
+        alone.streamed = Streamed {
+            phone_sound: true,
+            ..Streamed::default()
+        };
+        let mirror: serde_json::Value =
+            serde_json::from_str(&render_json(std::slice::from_ref(&alone), None, &[], 100))
+                .unwrap();
+        let row = &mirror["sessions"][0];
+        assert_eq!(row["phone_sound_only"], true);
+        assert_eq!(row["sound_only"], false);
+        assert_eq!(row["cast"], false);
+        let got = changes(&[], &[alone], &[], &[]);
+        assert_eq!(got[0].2["mode"], "phone_sound");
     }
 
     fn session(device: Option<&str>, lan: bool) -> LiveSession {

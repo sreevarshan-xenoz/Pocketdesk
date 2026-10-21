@@ -225,9 +225,14 @@ pub fn control_cell(
     sessions_live: usize,
     shared_control: bool,
 ) -> ControlCell {
-    // A sound session or a cast gives no input: made the driver, it would
-    // only block the phone that does (N5 review).
-    if sessions_live < 2 || session.id == 0 || shared_control || session.sound_only || session.cast
+    // A sound session, a cast or the phone's sound alone gives no input:
+    // made the driver, it would only block the phone that does (N5 review).
+    if sessions_live < 2
+        || session.id == 0
+        || shared_control
+        || session.sound_only
+        || session.cast
+        || session.phone_sound_only
     {
         ControlCell::Nothing
     } else if session.driving {
@@ -699,6 +704,8 @@ pub fn last_sessions(lines: &str) -> std::collections::HashMap<String, u64> {
 pub fn session_kind(session: &pocketdesk_core::local::sessions::MirrorSession) -> &'static str {
     if session.cast {
         "its screen or camera here"
+    } else if session.phone_sound_only {
+        "its sound here"
     } else if session.control_only {
         "control only"
     } else if session.sound_only {
@@ -1412,6 +1419,7 @@ mod tests {
                 cast,
                 control_only,
                 sound_only,
+                phone_sound_only: false,
                 id: 1,
                 device_id: None,
                 peer: String::new(),
@@ -1426,6 +1434,11 @@ mod tests {
         );
         assert_eq!(session_kind(&session(false, true, false)), "control only");
         assert_eq!(session_kind(&session(false, false, true)), "sound only");
+        let alone = pocketdesk_core::local::sessions::MirrorSession {
+            phone_sound_only: true,
+            ..session(false, false, false)
+        };
+        assert_eq!(session_kind(&alone), "its sound here");
     }
 
     /// J3: the Sessions page's recent sessions, newest first, in words.
@@ -2141,6 +2154,7 @@ mod tests {
             driving,
             control_only: false,
             sound_only: false,
+            phone_sound_only: false,
             cast: false,
         }
     }
@@ -2162,6 +2176,7 @@ mod tests {
     fn a_session_that_gives_no_input_is_never_offered_control() {
         let sound = sessions::MirrorSession {
             sound_only: true,
+            phone_sound_only: false,
             ..session(2, false)
         };
         assert_eq!(control_cell(&sound, 2, false), ControlCell::Nothing);
@@ -2170,6 +2185,12 @@ mod tests {
             ..session(3, false)
         };
         assert_eq!(control_cell(&cast, 2, false), ControlCell::Nothing);
+        // M7 review: the phone's sound alone takes no input either.
+        let alone = sessions::MirrorSession {
+            phone_sound_only: true,
+            ..session(4, false)
+        };
+        assert_eq!(control_cell(&alone, 2, false), ControlCell::Nothing);
     }
 
     #[test]

@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-813 open items.
+820 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 492 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 497 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 27 |
@@ -14,8 +14,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
 | A Linux desktop (the Azure VM serves for some) | 95 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 72 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 26 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 73 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -997,6 +997,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Japanese through Windows' input method: the committed text arrives.
 - The phone unlinked while the window is open: the window says why and sends nothing.
 
+**172. The phone's sound without its screen (M7)**
+
+- The OPPO with the throwaway tone app against a throwaway server with the WAV seam (`POCKETDESK_PHONE_AUDIO_FILE`): the tone's frequency and level; no cast window (the relay's log says nothing); the Sessions page says "its sound here".
+- "Play its sound here" off for the phone: refused, the phone saying why; turned off mid-session: it ends.
+- Stop from the phone's notification, and End on the Sessions page.
+- Started while the screen is shown: refused before Android's consent, saying why.
+- An hour with the screen off: the battery.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1814,6 +1822,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Android 10, and a KDE Connect device's share.
 
+**172. The phone's sound without its screen (M7)**
+
+- The microphone not granted on Android 13+: its request shows.
+
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -2040,3 +2052,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **169. Photos keep where they were taken (M5)**
 
 - A JPEG with GPS tags pushed to `DCIM/Camera` by adb, shared from the gallery to a throwaway server with the switch on: the tags arrive (an EXIF reader); with it off, they are gone.
+
+**172. The phone's sound without its screen (M7)**
+
+- By ear, and a real music app (the owner).

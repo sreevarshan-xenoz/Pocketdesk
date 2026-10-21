@@ -946,4 +946,16 @@
     <string name="settings_typing_summary_off">\"Type on the phone\" on the computer types into the field in front here, with no screen shown. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_typing_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer types</string>
     <string name="settings_typing_summary_on">On: \"Type on the phone\" on this phone\'s own computer types into the field in front here, with a notification while it does</string>
+    <string name="card_phone_sound">Play this phone\'s sound there</string>
+    <string name="phone_sound_consent">Android calls this screen sharing; only the sound is sent</string>
+    <string name="phone_sound_needs_mic">Android asks for the microphone permission to let Pocketdesk capture what apps play</string>
+    <string name="phone_sound_playing">This phone\'s sound plays on %1$s</string>
+    <string name="phone_sound_failed">Could not play this phone\'s sound on %1$s: %2$s</string>
+    <string name="phone_sound_no_capture">Android did not let Pocketdesk capture it</string>
+    <string name="phone_sound_not_allowed">it does not play this phone\'s sound (Devices, \"Play its sound here\")</string>
+    <string name="phone_sound_not_played">its Pocketdesk cannot play sound</string>
+    <string name="phone_sound_title">This phone\'s sound on a computer</string>
+    <string name="phone_sound_stopped">This phone\'s sound no longer plays there</string>
+    <string name="phone_sound_too_old">Pocketdesk on %1$s is too old to play this phone\'s sound. Update it.</string>
+    <string name="phone_sound_busy">This phone already shows its screen or plays its sound on a computer: stop that first</string>
 </resources>
