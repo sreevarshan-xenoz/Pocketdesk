@@ -311,6 +311,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             ScreenshotsSection()
             RecentPhotosSection()
+            // M5: a photo's place kept when it is sent.
+            PhotoPlaceSection()
             // T2: whether Android holds those back while the phone sleeps.
             BackgroundSection()
             SettingSwitch(
