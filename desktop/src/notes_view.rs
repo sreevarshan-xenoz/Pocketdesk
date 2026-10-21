@@ -126,6 +126,30 @@ impl NotesView {
     }
 
     /// Ask the phone to clear `note` (L1).
+    /// M8: ask the phone the call rang on to open its dialer with `number`.
+    fn call_back(&mut self, state_dir: &Path, note: &PhoneNote, number: &str, now_unix: u64) {
+        let allowed = pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+            state_dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+        )
+        .map(|store| {
+            store
+                .permissions(&note.device_id)
+                .allows(pocketdesk_core::protocol::permissions::Capability::Dial)
+        })
+        .unwrap_or(true);
+        self.notice = crate::notice::Notice::outcome(if !allowed {
+            Err("Not asked: Call numbers from here is off for this phone (Devices).".to_string())
+        } else {
+            pocketdesk_core::local::dials::request(state_dir, &note.device_id, number, now_unix)
+                .map(|_| {
+                    format!(
+                        "Asked the phone to open its dialer with {number}; it does with \u{201c}Calls from the computer\u{201d} on."
+                    )
+                })
+                .map_err(|e| format!("Not asked: {e}"))
+        });
+    }
+
     fn clear(&mut self, state_dir: &Path, note: &PhoneNote, now_unix: u64) {
         self.notice = match pocketdesk_core::local::note_clears::request(
             state_dir,
@@ -254,6 +278,15 @@ impl NotesView {
                         {
                             self.clear(state_dir, note, now_unix);
                         }
+                        // M8: a call's number, dialled back through the phone.
+                        if let Some(number) = call_back_number(note)
+                            && ui
+                                .button("Call back")
+                                .on_hover_text("The phone's dialer opens with the number; you press Call there")
+                                .clicked()
+                        {
+                            self.call_back(state_dir, note, &number, now_unix);
+                        }
                     });
                     if note.reply {
                         let key = (note.device_id.clone(), note.key.clone());
@@ -278,6 +311,21 @@ impl NotesView {
             }
         });
     }
+}
+
+/// The number a ringing call's note (F5) names, for Call back (M8): its
+/// title is "Call from Ann (+15550100)" or "Call from +15550100"; `None`
+/// for another note, or a caller with no number.
+pub fn call_back_number(note: &PhoneNote) -> Option<String> {
+    if !note.key.starts_with("pocketdesk:call:") {
+        return None;
+    }
+    let who = note.title.strip_prefix("Call from ")?;
+    let number = match who.strip_suffix(')').and_then(|w| w.rsplit_once(" (")) {
+        Some((_, number)) => number,
+        None => who,
+    };
+    pocketdesk_core::protocol::dial::clean_number(number)
 }
 
 /// How an answer's line reads.
@@ -465,6 +513,48 @@ mod tests {
         assert_eq!(
             timed[0].0,
             format!("Ann · {}: Hi", crate::words::ago(10_000, 10_000 - 120))
+        );
+    }
+
+    /// M8: Call back takes a call note's number, and nothing else's.
+    #[test]
+    fn a_call_note_s_number_for_call_back() {
+        let note = |key: &str, title: &str| PhoneNote {
+            device_id: "phone".into(),
+            key: key.into(),
+            app: "Pocketdesk".into(),
+            title: title.into(),
+            text: "Ringing on the phone".into(),
+            at_unix: 0,
+            actions: vec!["Silence".into()],
+            reply: false,
+            messages: Vec::new(),
+        };
+        assert_eq!(
+            call_back_number(&note("pocketdesk:call:3", "Call from Ann (+1 555-0100)")).as_deref(),
+            Some("+15550100")
+        );
+        assert_eq!(
+            call_back_number(&note("pocketdesk:call:3", "Call from +15550100")).as_deref(),
+            Some("+15550100")
+        );
+        assert_eq!(
+            call_back_number(&note("pocketdesk:call:3", "Call from Ann (Work)")),
+            None,
+            "a name in brackets is no number"
+        );
+        assert_eq!(
+            call_back_number(&note("pocketdesk:call:3", "Call from an unknown number")),
+            None
+        );
+        assert_eq!(
+            call_back_number(&note("chat:1", "Call from +15550100")),
+            None,
+            "not a call's note"
+        );
+        assert_eq!(
+            call_back_number(&note("pocketdesk:call:3", "Call from *#06#")),
+            None
         );
     }
 }
