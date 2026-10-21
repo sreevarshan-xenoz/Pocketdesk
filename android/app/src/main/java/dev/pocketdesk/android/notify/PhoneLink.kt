@@ -85,4 +85,73 @@ object PhoneLink {
             pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
         }.isSuccess
     }
+
+    /**
+     * The copies for the other computers (L8), on a worker of their own so a
+     * computer out of reach never holds up the phone's own; each paused a
+     * minute after it fails, and a copy dropped then (copies do not wait).
+     */
+    private val others: ThreadPoolExecutor =
+        ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue(100), ThreadPoolExecutor.DiscardOldestPolicy())
+
+    private val othersPausedUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** The notifications copied lately, by id, so each one's cancel is copied too (L8 review). */
+    private val copiedIds = object : LinkedHashMap<String, Unit>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Unit>?) = size > 500
+    }
+
+    /**
+     * Copy a notification the phone has just made ready ([body], filtered
+     * as the own computer's is) to the other computers picked: taken where
+     * it is made, not where it is sent, so a copy goes at once while the own
+     * computer is away (L8 review).
+     */
+    fun copy(ctx: Context, body: JSONObject) {
+        val targets = copyTargets(ctx)
+        if (targets.isEmpty()) return
+        val copy = JSONObject(body.toString())
+        AlsoTo.ANSWERS.forEach { copy.remove(it) }
+        synchronized(copiedIds) { copiedIds[body.optString("id")] = Unit }
+        sendCopies(targets, copy.toString())
+    }
+
+    /** Copy the cancel of notification [id], if a copy of it went (L8 review: whatever the own computer saw). */
+    fun copyCancel(ctx: Context, id: String) {
+        val known = synchronized(copiedIds) { copiedIds.remove(id) != null }
+        if (!known) return
+        val targets = copyTargets(ctx)
+        if (targets.isEmpty()) return
+        sendCopies(targets, JSONObject().put("id", id).put("isCancel", true).toString())
+    }
+
+    private fun copyTargets(ctx: Context): List<HostStore.Host> {
+        val picked = AlsoToPrefs.picked(ctx)
+        if (picked.isEmpty()) return emptyList()
+        val hosts = HostStore.hosts(ctx)
+        val addresses = AlsoTo.targets(
+            hosts.map { AlsoTo.Saved(it.address, HostStore.pairedDesktopId(ctx, it.address)) },
+            picked,
+            target(ctx)?.address,
+        )
+        return addresses.mapNotNull { address -> hosts.firstOrNull { it.address == address } }
+    }
+
+    /**
+     * Send [body] to each of [targets] the way the own computer's
+     * notifications go (C3's acked send; a plain phone packet refuses
+     * notifications, cancels included).
+     */
+    private fun sendCopies(targets: List<HostStore.Host>, body: String) {
+        targets.forEach { host ->
+            others.execute {
+                if (SystemClock.elapsedRealtime() < (othersPausedUntil[host.address] ?: 0L)) return@execute
+                val sent = RustCore.sendNotificationAcked(host.address, host.controlPort, body).map { }
+                sent.onFailure {
+                    Log.d(TAG, "a copy was not sent to ${host.address}, pausing a minute: ${it.message}")
+                    othersPausedUntil[host.address] = SystemClock.elapsedRealtime() + PAUSE_MS
+                }
+            }
+        }
+    }
 }

@@ -2336,6 +2336,17 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] A phone unpaired: its report gone from `phone_switches.json` within seconds.
 - [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: the switches arrived with the battery's tick, matching the phone (control on with its Accessibility service off, so "Android allows: no"; photos without photo access). Found there first: the bridge let only listed packets out, and the report was not on the list (fixed).
 
+## 164. Notifications to every computer of mine (L8)
+
+Built 2026-10-21; tested through units, nothing on a device yet.
+- [ ] Two throwaway servers, both paired, the second picked: a notification reaches both, and its cancel closes it on both.
+- [ ] The own server stopped: the second still gets each notification at once.
+- [ ] The second server stopped: the own one still gets every notification on time.
+- [ ] The second server shows no answer buttons, and no texts.
+- [ ] The same chat posting, being cleared and posting again: the second is cleared on both.
+- [ ] The computer in use swapped (a session with the second): the picks still mean the same computers.
+- [x] 2026-10-21, on the OPPO with two throwaway servers (the second on other ports, reached as `localhost`): a notification reached both, the copy a second after the own computer's; with the own server stopped, the second still got the next at once; the copied cancel reached the second server. Found there first: copied cancels went as a plain packet, which the bridge refuses for notifications (fixed).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
