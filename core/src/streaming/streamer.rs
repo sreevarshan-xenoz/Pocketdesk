@@ -2567,6 +2567,47 @@ mod tests {
         assert!(!claim.input_only && !claim.cast);
     }
 
+    /// M7: the phone's sound alone says so: input only to the server, no
+    /// cast and no sound session.
+    #[tokio::test]
+    async fn a_phone_sound_client_says_so() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        use super::super::client::StreamingClient;
+
+        let certs = std::sync::Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+
+        let (client, _frames, _audio) = StreamingClient::connect(
+            &addr.to_string(),
+            certs,
+            None,
+            Some("device-m7"),
+            None,
+            None,
+            super::super::client::SessionMode::PhoneSound,
+        )
+        .await
+        .expect("connect");
+        assert!(client.remote().phone_sound && client.remote().cast);
+        assert!(!client.remote().sound);
+
+        let server_conn = accept.await.expect("accept task");
+        let mut config = StreamingConfig::default();
+        let claim = read_client_config(&server_conn, &mut config, true).await;
+        assert!(claim.phone_sound && claim.input_only);
+        assert!(!claim.cast && !claim.sound);
+    }
+
     /// T10k: a cast says so, and is input only to the server: it is sent
     /// no picture.
     #[tokio::test]
