@@ -125,7 +125,6 @@ impl NotesView {
         }
     }
 
-    /// Ask the phone to clear `note` (L1).
     /// M8: ask the phone the call rang on to open its dialer with `number`.
     fn call_back(&mut self, state_dir: &Path, note: &PhoneNote, number: &str, now_unix: u64) {
         let allowed = pocketdesk_core::protocol::kdeconnect::TrustStore::read(
@@ -150,6 +149,7 @@ impl NotesView {
         });
     }
 
+    /// Ask the phone to clear `note` (L1).
     fn clear(&mut self, state_dir: &Path, note: &PhoneNote, now_unix: u64) {
         self.notice = match pocketdesk_core::local::note_clears::request(
             state_dir,
@@ -270,8 +270,20 @@ impl NotesView {
                                 );
                             }
                         }
-                        // L1: cleared here, cleared on the phone.
-                        if ui
+                        // L1: cleared here, cleared on the phone; an ended
+                        // call is gone there, so only here (M8 review).
+                        if ended_call(note) {
+                            if ui.button("Remove").on_hover_text("Remove it from this list").clicked() {
+                                self.notice = match pocketdesk_core::local::phone_notes::forget(
+                                    state_dir,
+                                    &note.device_id,
+                                    &note.key,
+                                ) {
+                                    Ok(()) => crate::notice::Notice::done("Removed."),
+                                    Err(e) => crate::notice::Notice::error(format!("Not removed: {e}")),
+                                };
+                            }
+                        } else if ui
                             .button("Clear")
                             .on_hover_text("Clear it on the phone too")
                             .clicked()
@@ -313,11 +325,23 @@ impl NotesView {
     }
 }
 
+/// A call's note whose call ended (M8 review): kept for Call back, with
+/// nothing left to answer.
+fn ended_call(note: &PhoneNote) -> bool {
+    note.key
+        .starts_with(pocketdesk_core::local::phone_notes::CALL_PREFIX)
+        && note.actions.is_empty()
+        && !note.reply
+}
+
 /// The number a ringing call's note (F5) names, for Call back (M8): its
 /// title is "Call from Ann (+15550100)" or "Call from +15550100"; `None`
 /// for another note, or a caller with no number.
 pub fn call_back_number(note: &PhoneNote) -> Option<String> {
-    if !note.key.starts_with("pocketdesk:call:") {
+    if !note
+        .key
+        .starts_with(pocketdesk_core::local::phone_notes::CALL_PREFIX)
+    {
         return None;
     }
     let who = note.title.strip_prefix("Call from ")?;

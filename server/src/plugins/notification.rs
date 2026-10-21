@@ -711,7 +711,8 @@ impl Plugin for NotificationPlugin {
                     if !id.is_empty()
                         && let Ok(dir) = crate::state::state_dir()
                     {
-                        let _ = phone_notes::forget(&dir, sender.device_id(), id);
+                        // A call's stays, for Call back (M8 review).
+                        let _ = phone_notes::end_call(&dir, sender.device_id(), id);
                         pocketdesk_core::local::notification_icons::forget_picture(
                             &dir,
                             sender.device_id(),
