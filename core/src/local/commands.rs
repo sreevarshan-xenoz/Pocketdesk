@@ -15,6 +15,40 @@ use crate::protocol::command::{valid_name, valid_text};
 /// How long a command waits for its phone: a minute.
 pub const COMMAND_TTL_SECS: u64 = 60;
 
+/// The most phone commands Home Assistant is offered (M9).
+pub const MAX_PHONE_COMMANDS: usize = 32;
+
+/// A command Home Assistant may press (M9): `[[phone_command]]` in
+/// config.toml.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhoneCommandSpec {
+    /// What its button is called.
+    pub label: String,
+    /// The phone (its paired device id).
+    pub phone: String,
+    /// L6's command name.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
+}
+
+impl PhoneCommandSpec {
+    /// What is wrong with it, if anything, in words for the user.
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.label.trim().is_empty() {
+            Some("it has no label")
+        } else if self.phone.is_empty() {
+            Some("no phone is chosen")
+        } else if !valid_name(&self.name) {
+            Some("its name must be 1 to 64 characters, none of them a control character")
+        } else if !valid_text(&self.text) {
+            Some("its text is too long or holds a control character")
+        } else {
+            None
+        }
+    }
+}
+
 /// One command for a phone's automation apps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandRequest {

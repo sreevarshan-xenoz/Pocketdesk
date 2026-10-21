@@ -54,6 +54,18 @@ pub struct Snapshot {
     pub phones: Vec<PhoneState>,
     /// The task names a phone may start.
     pub tasks: Vec<String>,
+    /// Commands for paired phones' automation apps (M9).
+    pub commands: Vec<CommandButton>,
+}
+
+/// A phone command Home Assistant may press (M9): only one whose phone is
+/// paired and whose name and text L6 takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandButton {
+    pub label: String,
+    pub device_id: String,
+    pub name: String,
+    pub text: String,
 }
 
 /// The first `n` letters and digits of `id`, lowercase.
@@ -109,6 +121,11 @@ impl Computer {
         format!("{}/task/+/run", self.base())
     }
 
+    /// The phone commands' buttons' topics, `…/command/<object>/run` (M9).
+    pub fn phone_commands(&self) -> String {
+        format!("{}/command/+/run", self.base())
+    }
+
     fn config_topic(&self, component: &str, object: &str) -> String {
         format!(
             "{DISCOVERY}/{component}/pocketdesk_{}/{object}/config",
@@ -159,6 +176,22 @@ impl Computer {
 /// Each task's object id (its name in lowercase letters, digits and `_`,
 /// made unique) beside its name, in order.
 pub fn task_objects(names: &[String]) -> Vec<(String, String)> {
+    objects("task", names)
+}
+
+/// Each phone command's object id, from its label as a task's is from its
+/// name (M9), beside the command, in order.
+pub fn command_objects(commands: &[CommandButton]) -> Vec<(String, CommandButton)> {
+    let labels: Vec<String> = commands.iter().map(|c| c.label.clone()).collect();
+    objects("cmd", &labels)
+        .into_iter()
+        .zip(commands.iter().cloned())
+        .map(|((object, _), command)| (object, command))
+        .collect()
+}
+
+/// `names` as object ids `<prefix>_<slug>`, made unique, beside each name.
+fn objects(prefix: &str, names: &[String]) -> Vec<(String, String)> {
     let mut used = HashSet::new();
     names
         .iter()
@@ -175,7 +208,7 @@ pub fn task_objects(names: &[String]) -> Vec<(String, String)> {
                 .collect();
             slug = slug.trim_matches('_').to_string();
             if slug.is_empty() {
-                slug = "task".into();
+                slug = prefix.into();
             }
             let mut unique = slug.clone();
             let mut n = 2;
@@ -183,7 +216,7 @@ pub fn task_objects(names: &[String]) -> Vec<(String, String)> {
                 unique = format!("{slug}_{n}");
                 n += 1;
             }
-            (format!("task_{unique}"), name.clone())
+            (format!("{prefix}_{unique}"), name.clone())
         })
         .collect()
 }
@@ -300,6 +333,20 @@ pub fn messages(computer: &Computer, snapshot: &Snapshot) -> BTreeMap<String, St
             }),
         );
     }
+    // M9: the label only; the name and text stay here.
+    for (object, command) in command_objects(&snapshot.commands) {
+        entity(
+            "button",
+            &object,
+            computer.device(),
+            json!({
+                "name": command.label,
+                "command_topic": format!("{base}/command/{object}/run"),
+                "payload_press": "PRESS",
+                "icon": "mdi:cellphone-play",
+            }),
+        );
+    }
     out.insert(format!("{base}/sessions"), snapshot.sessions.to_string());
     out.insert(format!("{base}/cast"), on_off(snapshot.cast).to_string());
     for phone in &snapshot.phones {
@@ -397,6 +444,64 @@ pub fn pressed_task(computer: &Computer, snapshot: &Snapshot, topic: &str) -> Op
         .map(|(_, name)| name)
 }
 
+/// The phone command a command topic presses, among `snapshot`'s (M9).
+pub fn pressed_command(
+    computer: &Computer,
+    snapshot: &Snapshot,
+    topic: &str,
+) -> Option<CommandButton> {
+    let prefix = format!("{}/command/", computer.base());
+    let object = topic.strip_prefix(&prefix)?.strip_suffix("/run")?;
+    command_objects(&snapshot.commands)
+        .into_iter()
+        .find(|(o, _)| o == object)
+        .map(|(_, command)| command)
+}
+
+/// Send a pressed phone command (M9) as `pocketdesk phone-command` does,
+/// held to the phone's Command permission; why not, when it is not sent.
+fn press_command(state_dir: &Path, command: &CommandButton) -> Result<(), String> {
+    use pocketdesk_core::protocol::permissions::Capability;
+    let store = pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+        state_dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+    )
+    .map_err(|e| format!("the paired phones could not be read: {e:#}"))?;
+    if !store
+        .permissions(&command.device_id)
+        .allows(Capability::Command)
+    {
+        return Err("Send commands to its automation apps is off for the phone".into());
+    }
+    pocketdesk_core::local::commands::request(
+        state_dir,
+        &command.device_id,
+        &command.name,
+        &command.text,
+        pocketdesk_core::local::pin::now_unix(),
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// The commands that become buttons: valid, for a paired phone, at most
+/// [`pocketdesk_core::local::commands::MAX_PHONE_COMMANDS`].
+pub fn command_buttons(
+    specs: &[pocketdesk_core::local::commands::PhoneCommandSpec],
+    paired: &[String],
+) -> Vec<CommandButton> {
+    specs
+        .iter()
+        .filter(|c| c.problem().is_none() && paired.contains(&c.phone))
+        .take(pocketdesk_core::local::commands::MAX_PHONE_COMMANDS)
+        .map(|c| CommandButton {
+            label: c.label.trim().to_string(),
+            device_id: c.phone.clone(),
+            name: c.name.clone(),
+            text: c.text.clone(),
+        })
+        .collect()
+}
+
 /// The snapshot from the state folder and `config`. A trust store or
 /// battery file that does not read (being replaced, held by a scanner)
 /// keeps `previous`'s phones and batteries: one failed read must not
@@ -439,6 +544,7 @@ fn read_snapshot(state_dir: &Path, config: &Config, previous: &Snapshot) -> Snap
         ),
         None => (0, false, HashSet::new()),
     };
+    let commands = command_buttons(&config.phone_command, &paired);
     Snapshot {
         sessions,
         cast,
@@ -451,6 +557,7 @@ fn read_snapshot(state_dir: &Path, config: &Config, previous: &Snapshot) -> Snap
             })
             .collect(),
         tasks: crate::plugins::tasks::offered_names(&config.tasks),
+        commands,
     }
 }
 
@@ -601,6 +708,7 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                     sent.clear();
                     let _ = client.try_publish(computer.availability(), QoS::AtLeastOnce, true, "online");
                     let _ = client.try_subscribe(computer.task_commands(), QoS::AtLeastOnce);
+                    let _ = client.try_subscribe(computer.phone_commands(), QoS::AtLeastOnce);
                     // The broker answers these with what it kept: entities
                     // gone since are cleared as they come.
                     let _ = client.try_subscribe(computer.own_configs(), QoS::AtLeastOnce);
@@ -623,6 +731,11 @@ async fn connected(state_dir: &Path, wanted: &Settings, last: &mut Option<Status
                         match crate::plugins::tasks::start_for_home_assistant(&task) {
                             Ok(()) => tracing::info!(task = %task, "Home Assistant started a task"),
                             Err(why) => tracing::info!(task = %task, "Home Assistant's start was refused: {why}"),
+                        }
+                    } else if let Some(command) = pressed_command(&computer, &snapshot, &message.topic) {
+                        match press_command(state_dir, &command) {
+                            Ok(()) => tracing::info!(label = %command.label, "Home Assistant sent a phone command"),
+                            Err(why) => tracing::info!(label = %command.label, "Home Assistant's phone command was refused: {why}"),
                         }
                     }
                 }
@@ -742,6 +855,20 @@ mod tests {
                 },
             ],
             tasks: vec!["Back up".into(), "back-up".into(), "!!".into()],
+            commands: vec![
+                CommandButton {
+                    label: "Lights off".into(),
+                    device_id: "00000000-0000-4000-8000-0000000000c4".into(),
+                    name: "lights".into(),
+                    text: "off".into(),
+                },
+                CommandButton {
+                    label: "Lights off".into(),
+                    device_id: "00000000-0000-4000-8000-0000000000c4".into(),
+                    name: "lights".into(),
+                    text: "all".into(),
+                },
+            ],
         }
     }
 
@@ -1029,6 +1156,86 @@ mod tests {
                 host: "192.0.2.5".into(),
                 port: 1883
             }
+        );
+    }
+
+    /// M9: a phone command is a button with its label only, pressed on a
+    /// topic of its own; ids are unique.
+    #[test]
+    fn phone_commands_are_buttons_with_their_labels_only() {
+        let c = computer();
+        let s = snapshot();
+        let all = messages(&c, &s);
+        let config: Value = serde_json::from_str(
+            &all["homeassistant/button/pocketdesk_1a2b3c4d5e6f/cmd_lights_off/config"],
+        )
+        .unwrap();
+        assert_eq!(config["name"], "Lights off");
+        assert_eq!(
+            config["command_topic"],
+            "pocketdesk/1a2b3c4d5e6f/command/cmd_lights_off/run"
+        );
+        let raw = config.to_string();
+        assert!(
+            !raw.contains("\"lights\"") && !raw.contains("\"off\""),
+            "no name or text"
+        );
+        assert!(
+            all.contains_key(
+                "homeassistant/button/pocketdesk_1a2b3c4d5e6f/cmd_lights_off_2/config"
+            )
+        );
+        assert_eq!(
+            pressed_command(
+                &c,
+                &s,
+                "pocketdesk/1a2b3c4d5e6f/command/cmd_lights_off_2/run"
+            )
+            .map(|b| b.text),
+            Some("all".to_string())
+        );
+        assert_eq!(
+            pressed_command(&c, &s, "pocketdesk/1a2b3c4d5e6f/command/cmd_gone/run"),
+            None
+        );
+        assert_eq!(
+            pressed_command(&c, &s, "pocketdesk/1a2b3c4d5e6f/task/cmd_lights_off/run"),
+            None
+        );
+        assert_eq!(
+            pressed_task(&c, &s, "pocketdesk/1a2b3c4d5e6f/command/task_back_up/run"),
+            None
+        );
+    }
+
+    /// M9: only a paired phone's valid commands become buttons.
+    #[test]
+    fn only_a_paired_phone_s_valid_commands_are_offered() {
+        use pocketdesk_core::local::commands::PhoneCommandSpec;
+        let paired = vec!["phone-a".to_string()];
+        let spec = |label: &str, phone: &str, name: &str| PhoneCommandSpec {
+            label: label.into(),
+            phone: phone.into(),
+            name: name.into(),
+            text: String::new(),
+        };
+        let buttons = command_buttons(
+            &[
+                spec("Go", "phone-a", "go"),
+                spec("Away", "phone-b", "go"),
+                spec(" ", "phone-a", "go"),
+                spec("Bad", "phone-a", ""),
+            ],
+            &paired,
+        );
+        assert_eq!(buttons.len(), 1);
+        assert_eq!(buttons[0].label, "Go");
+        let many: Vec<_> = (0..40)
+            .map(|i| spec(&format!("c{i}"), "phone-a", "go"))
+            .collect();
+        assert_eq!(
+            command_buttons(&many, &paired).len(),
+            pocketdesk_core::local::commands::MAX_PHONE_COMMANDS
         );
     }
 }

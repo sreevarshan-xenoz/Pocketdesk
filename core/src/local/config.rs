@@ -222,6 +222,10 @@ pub struct Config {
     /// Phones may list and press the deck's buttons.
     #[serde(default = "default_true")]
     pub deck_enabled: bool,
+    /// Commands for phones' automation apps that Home Assistant may press
+    /// (`[[phone_command]]`, M9).
+    #[serde(default)]
+    pub phone_command: Vec<super::commands::PhoneCommandSpec>,
     /// Publish this computer and its phones to Home Assistant through an
     /// MQTT broker (ecosystem 1e).
     #[serde(default)]
@@ -370,6 +374,7 @@ impl Default for Config {
             tasks: Vec::new(),
             deck: Vec::new(),
             deck_enabled: true,
+            phone_command: Vec::new(),
             home_assistant: false,
             mqtt_broker: String::new(),
             mqtt_user: String::new(),
@@ -593,6 +598,7 @@ impl Config {
         "tasks",
         "deck",
         "deck_enabled",
+        "phone_command",
         "home_assistant",
         "mqtt_broker",
         "mqtt_user",
@@ -712,6 +718,24 @@ mod tests {
         let again = Config::load_from(&path).unwrap();
         assert!(!again.open_links);
         assert_eq!(again.hooks, hand.hooks);
+    }
+
+    #[test]
+    fn phone_commands_are_saved_and_read_back() {
+        let path = temp("phone-command");
+        let mut config = Config::default();
+        config
+            .phone_command
+            .push(crate::local::commands::PhoneCommandSpec {
+                label: "Lights off".into(),
+                phone: "00000000-0000-4000-8000-0000000000c4".into(),
+                name: "lights".into(),
+                text: "off".into(),
+            });
+        config.save_to(&path).unwrap();
+        let again = Config::load_from(&path).unwrap();
+        assert_eq!(again.phone_command, config.phone_command);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
