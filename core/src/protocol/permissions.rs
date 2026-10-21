@@ -13,8 +13,13 @@ pub enum Capability {
     /// Pointer and keys: stream input and KDE mousepad/presenter.
     Input,
     Clipboard,
-    /// Sending files to the desktop and browsing its files.
+    /// Sending files to the desktop, and the phone's own folders and photos
+    /// here.
     Files,
+    /// Browsing this computer's folders from the phone and downloading from
+    /// them (split from Files in M2b, so a phone may send files without
+    /// reading the owner's).
+    Browse,
     /// The desktop's sound played on the phone.
     Audio,
     /// The phone's microphone fed to the desktop.
@@ -57,10 +62,11 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 19] = [
+    pub const ALL: [Capability; 20] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
+        Capability::Browse,
         Capability::Audio,
         Capability::Mic,
         Capability::Power,
@@ -115,10 +121,14 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.pocketdesk.clipboard_image"
         | "kdeconnect.pocketdesk.clipboard_image_fetch"
         | "kdeconnect.pocketdesk.notification_reply" => Capability::Clipboard,
+        // Browsing this computer, and a folder from it (M2b). A file fetched
+        // by its path needs Browse too, which the share plugin checks: the
+        // same packet fetches the desktop's offers, which are Files.
+        "kdeconnect.filebrowse.request" | "kdeconnect.pocketdesk.folder_fetch" => {
+            Capability::Browse
+        }
         "kdeconnect.share.request"
-        | "kdeconnect.filebrowse.request"
         | "kdeconnect.pocketdesk.file_fetch"
-        | "kdeconnect.pocketdesk.folder_fetch"
         | "kdeconnect.pocketdesk.file_offer_declined"
         // The phone's storage on the computer (T10g).
         | crate::protocol::phone_files::LIST
@@ -164,6 +174,8 @@ pub struct DevicePermissions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browse: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mic: Option<bool>,
@@ -206,6 +218,7 @@ impl DevicePermissions {
             Capability::Input => &mut self.input,
             Capability::Clipboard => &mut self.clipboard,
             Capability::Files => &mut self.files,
+            Capability::Browse => &mut self.browse,
             Capability::Audio => &mut self.audio,
             Capability::Mic => &mut self.mic,
             Capability::Power => &mut self.power,
@@ -230,6 +243,7 @@ impl DevicePermissions {
             Capability::Input => self.input,
             Capability::Clipboard => self.clipboard,
             Capability::Files => self.files,
+            Capability::Browse => self.browse,
             Capability::Audio => self.audio,
             Capability::Mic => self.mic,
             Capability::Power => self.power,
@@ -281,8 +295,10 @@ impl DevicePermissions {
     }
 
     /// What a phone that is not the owner's may do when it pairs (M2b),
-    /// as the Pair page's "Someone else's" and every guest: files and links,
-    /// nothing else. The owner can change each later.
+    /// as the Pair page's "Someone else's" and every guest: send files and
+    /// links, nothing else (not browse this computer's files), and every
+    /// session held for the owner, since a session that may not drive still
+    /// shows the screen (M2 review). The owner can change each later.
     pub fn someone_else() -> Self {
         let mut permissions = Self::default();
         for capability in Capability::ALL {
@@ -291,6 +307,22 @@ impl DevicePermissions {
                 matches!(capability, Capability::Files | Capability::Links),
             );
         }
+        permissions.ask_first = true;
+        permissions
+    }
+
+    /// These permissions kept only where `narrow` allows too, and held for
+    /// the owner if either is (M2 review: pairing an owner's phone again as
+    /// someone else's never turns on what the owner had turned off).
+    pub fn narrowed_to(&self, narrow: &Self) -> Self {
+        let mut permissions = Self::default();
+        for capability in Capability::ALL {
+            permissions.set(
+                capability,
+                self.allows(capability) && narrow.allows(capability),
+            );
+        }
+        permissions.ask_first = self.ask_first || narrow.ask_first;
         permissions
     }
 }
@@ -329,7 +361,7 @@ mod tests {
         // allowed for every phone.
         assert_eq!(
             capability_for("kdeconnect.pocketdesk.folder_fetch"),
-            Some(Capability::Files)
+            Some(Capability::Browse)
         );
     }
 
@@ -403,7 +435,7 @@ mod tests {
                 Some(Capability::Clipboard),
             ),
             ("kdeconnect.share.request", Some(Capability::Files)),
-            ("kdeconnect.filebrowse.request", Some(Capability::Files)),
+            ("kdeconnect.filebrowse.request", Some(Capability::Browse)),
             ("kdeconnect.pocketdesk.audio", Some(Capability::Audio)),
             ("kdeconnect.pocketdesk.power", Some(Capability::Power)),
             ("kdeconnect.pocketdesk.privacy", Some(Capability::Power)),
@@ -462,6 +494,38 @@ mod tests {
                 "{capability:?}"
             );
         }
-        assert!(!permissions.ask_first);
+        assert!(permissions.ask_first, "its sessions wait for the owner");
+        assert!(!permissions.allows(Capability::Browse));
+    }
+
+    #[test]
+    fn narrowing_keeps_what_the_owner_turned_off() {
+        let mut owner = DevicePermissions::default();
+        owner.set(Capability::Links, false);
+        let narrowed = owner.narrowed_to(&DevicePermissions::someone_else());
+        assert!(narrowed.allows(Capability::Files));
+        assert!(!narrowed.allows(Capability::Links), "stays off");
+        assert!(!narrowed.allows(Capability::Input));
+        assert!(narrowed.ask_first);
+    }
+
+    #[test]
+    fn browsing_this_computer_is_its_own_permission() {
+        assert_eq!(
+            capability_for("kdeconnect.filebrowse.request"),
+            Some(Capability::Browse)
+        );
+        assert_eq!(
+            capability_for("kdeconnect.pocketdesk.folder_fetch"),
+            Some(Capability::Browse)
+        );
+        assert_eq!(
+            capability_for("kdeconnect.share.request"),
+            Some(Capability::Files)
+        );
+        assert!(
+            Capability::Browse.default_allowed(),
+            "a phone paired before keeps browsing"
+        );
     }
 }

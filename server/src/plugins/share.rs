@@ -887,6 +887,12 @@ fn plan_fetch(
     // one of the phone's tries.
     let slot = transfer_slots().take(sender.device_id())?;
     let (path, size, offer) = if let Some(path) = body.get("path").and_then(|v| v.as_str()) {
+        // A file by its path is browsing this computer (M2b): the same
+        // permission as listing a folder, beyond Files, which the packet's
+        // gate checked for the desktop's offers.
+        if !crate::plugins::pair::permits(sender.device_id(), "kdeconnect.filebrowse.request") {
+            return Err("browsing this computer's files is off for this phone".to_string());
+        }
         let (path, size) = crate::plugins::file_browse::resolve_file(path)?;
         (path, size, None)
     } else if let Some(id) = body.get("offer").and_then(|v| v.as_str()) {

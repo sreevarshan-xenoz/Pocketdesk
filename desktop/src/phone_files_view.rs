@@ -191,7 +191,7 @@ impl PhoneFilesView {
                 Some(false) => {
                     self.waiting = None;
                     self.notice = crate::notice::Notice::error(
-                        "The phone did not answer. Is it connected, with \"Send and browse files\" on in Devices, \
+                        "The phone did not answer. Is it connected, with \"Send files\" on in Devices, \
                          and Pocketdesk allowed to run in the background on it?",
                     );
                 }

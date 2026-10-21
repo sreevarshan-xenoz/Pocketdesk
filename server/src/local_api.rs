@@ -101,6 +101,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::AwayLock => "away_lock",
         Capability::PhoneSound => "phone_sound",
         Capability::Command => "command",
+        Capability::Browse => "browse",
         Capability::Dial => "dial",
     }
 }
