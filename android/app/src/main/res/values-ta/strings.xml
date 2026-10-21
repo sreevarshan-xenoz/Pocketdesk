@@ -807,6 +807,7 @@
     <string name="allowed_phone_on">இந்தத் தொலைபேசி: இயக்கத்தில்</string>
     <string name="allowed_phone_off">இந்தத் தொலைபேசி: அணைப்பில்</string>
     <string name="allowed_phone_android">இந்தத் தொலைபேசி: இயக்கத்தில், ஆனால் Android அனுமதிக்கவில்லை</string>
+    <string name="allowed_phone_own_only">இந்தத் தொலைபேசி: அதன் சொந்தக் கணினியுடன் மட்டும்</string>
     <string name="allowed_computer_yes">கணினி: அனுமதிக்கப்பட்டது</string>
     <string name="allowed_computer_permission">கணினி: இந்தத் தொலைபேசிக்கு அணைப்பில்</string>
     <string name="allowed_computer_setting">கணினி: அதன் அமைப்புகளில் அணைப்பில்</string>

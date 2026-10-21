@@ -813,6 +813,7 @@
     <string name="allowed_phone_on">Este teléfono: activado</string>
     <string name="allowed_phone_off">Este teléfono: desactivado</string>
     <string name="allowed_phone_android">Este teléfono: activado, pero Android no lo permite</string>
+    <string name="allowed_phone_own_only">Este teléfono: solo con su propio ordenador</string>
     <string name="allowed_computer_yes">El ordenador: permitido</string>
     <string name="allowed_computer_permission">El ordenador: desactivado para este teléfono</string>
     <string name="allowed_computer_setting">El ordenador: desactivado en sus ajustes</string>

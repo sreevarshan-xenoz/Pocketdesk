@@ -816,6 +816,7 @@
     <string name="allowed_phone_on">This phone: on</string>
     <string name="allowed_phone_off">This phone: off</string>
     <string name="allowed_phone_android">This phone: on, but Android does not allow it</string>
+    <string name="allowed_phone_own_only">This phone: with its own computer only</string>
     <string name="allowed_computer_yes">The computer: allowed</string>
     <string name="allowed_computer_permission">The computer: off for this phone</string>
     <string name="allowed_computer_setting">The computer: off in its Settings</string>

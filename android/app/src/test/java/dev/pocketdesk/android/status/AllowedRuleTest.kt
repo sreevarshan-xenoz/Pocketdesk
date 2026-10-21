@@ -63,4 +63,14 @@ class AllowedRuleTest {
         assertFalse(AllowedRule.rows(allowed, switches).single { it.feature == "files" }.heldBack)
         assertTrue(AllowedRule.rows(allowed, phoneOn).single { it.feature == "files" }.heldBack)
     }
+
+    @Test
+    fun `another computer gets none of the background features, a picked one the notifications`() {
+        val other = AllowedRule.rows(allOn, phoneOn, AllowedRule.Reach.OTHER)
+        assertTrue(other.all { it.phone == AllowedRule.Phone.OWN_COMPUTER_ONLY && !it.works && !it.heldBack })
+        val picked = AllowedRule.rows(allOn, phoneOn, AllowedRule.Reach.COPIES).associateBy { it.feature }
+        assertTrue(picked.getValue("notifications").works)
+        assertTrue(picked.getValue("answers").works)
+        assertEquals(AllowedRule.Phone.OWN_COMPUTER_ONLY, picked.getValue("clipboard").phone)
+    }
 }

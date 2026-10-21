@@ -12,16 +12,30 @@ object AllowedRule {
 
     enum class Computer { ALLOWED, PERMISSION_OFF, SETTING_OFF, UNKNOWN }
 
-    enum class Phone { ON, OFF, ANDROID_REFUSES }
+    enum class Phone { ON, OFF, ANDROID_REFUSES, OWN_COMPUTER_ONLY }
+
+    /**
+     * What the phone's background features reach on this computer: all of
+     * them on its own computer, its notifications (and their answers) on one
+     * picked under "Other computers of mine" (L8), none on another (M2 review).
+     */
+    enum class Reach { OWN, COPIES, OTHER }
+
+    /** The features a picked computer gets copies of (L8). */
+    private val COPIED = setOf("notifications", "answers")
 
     data class Row(val feature: String, val phone: Phone, val computer: Computer) {
         val works: Boolean get() = phone == Phone.ON && computer == Computer.ALLOWED
 
         /** On here, but held back on the computer or by Android: the row to look at. */
-        val heldBack: Boolean get() = phone != Phone.OFF && !works
+        val heldBack: Boolean get() = phone != Phone.OFF && phone != Phone.OWN_COMPUTER_ONLY && !works
     }
 
-    fun rows(allowed: Map<String, Side>, switches: Map<String, SwitchReport.Switch>): List<Row> =
+    fun rows(
+        allowed: Map<String, Side>,
+        switches: Map<String, SwitchReport.Switch>,
+        reach: Reach = Reach.OWN,
+    ): List<Row> =
         SwitchReport.FEATURES.map { feature ->
             val side = allowed[feature]
             // The permission first: it is this phone's own, the Settings every phone's.
@@ -32,7 +46,9 @@ object AllowedRule {
                 else -> Computer.ALLOWED
             }
             val switch = switches[feature]
+            val reached = reach == Reach.OWN || (reach == Reach.COPIES && feature in COPIED)
             val phone = when {
+                !reached -> Phone.OWN_COMPUTER_ONLY
                 switch == null || !switch.on -> Phone.OFF
                 switch.android == false -> Phone.ANDROID_REFUSES
                 else -> Phone.ON

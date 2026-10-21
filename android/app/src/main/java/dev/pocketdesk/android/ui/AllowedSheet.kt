@@ -23,8 +23,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.notify.AlsoToPrefs
+import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.status.AllowedRule
 import dev.pocketdesk.android.status.readSwitches
 import kotlinx.coroutines.Dispatchers
@@ -47,10 +50,12 @@ fun AllowedSheet(address: String, controlPort: Int, computer: String, onDismiss:
 
     LaunchedEffect(address, controlPort, asks) {
         failure = null
-        val switches = withContext(Dispatchers.Default) { runCatching { readSwitches(context) }.getOrDefault(emptyMap()) }
+        val (switches, reach) = withContext(Dispatchers.IO) {
+            runCatching { readSwitches(context) }.getOrDefault(emptyMap()) to reachOf(context, address)
+        }
         withContext(Dispatchers.IO) { RustCore.allowed(address, controlPort) }
             .mapCatching { parseAllowed(it) }
-            .onSuccess { rows = AllowedRule.rows(it, switches) }
+            .onSuccess { rows = AllowedRule.rows(it, switches, reach) }
             .onFailure { failure = context.plainErrorText(it.message) }
     }
 
@@ -80,6 +85,22 @@ fun AllowedSheet(address: String, controlPort: Int, computer: String, onDismiss:
     }
 }
 
+/**
+ * What the phone's background features reach on the computer at [address]:
+ * its own computer (the same one at another address too), one picked under
+ * "Other computers of mine", or another (M2 review).
+ */
+private fun reachOf(ctx: android.content.Context, address: String): AllowedRule.Reach {
+    val here = HostStore.pairedDesktopId(ctx, address)
+    val own = PhoneLink.target(ctx)
+    val ownId = own?.let { HostStore.pairedDesktopId(ctx, it.address) }
+    return when {
+        own?.address == address || (here != null && here == ownId) -> AllowedRule.Reach.OWN
+        here != null && here in AlsoToPrefs.picked(ctx) -> AllowedRule.Reach.COPIES
+        else -> AllowedRule.Reach.OTHER
+    }
+}
+
 /** The computer's answer: each feature's two booleans; anything else left out. */
 private fun parseAllowed(json: String): Map<String, AllowedRule.Side> {
     val allowed = JSONObject(json).optJSONObject("allowed") ?: return emptyMap()
@@ -102,6 +123,7 @@ private fun AllowedRowView(row: AllowedRule.Row) {
             AllowedRule.Phone.ON -> R.string.allowed_phone_on
             AllowedRule.Phone.OFF -> R.string.allowed_phone_off
             AllowedRule.Phone.ANDROID_REFUSES -> R.string.allowed_phone_android
+            AllowedRule.Phone.OWN_COMPUTER_ONLY -> R.string.allowed_phone_own_only
         }
         val computer = when (row.computer) {
             AllowedRule.Computer.ALLOWED -> R.string.allowed_computer_yes
