@@ -2,12 +2,12 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-778 open items.
+783 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 463 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 18 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 466 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 26 |
 | A second phone | 9 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 9 |
 | A Linux desktop (the Azure VM serves for some) | 94 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 70 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 71 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -950,6 +950,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - One computer saved at two addresses and picked: no link to itself, no doubled toasts.
 - The second server stopped: its link is tried again a minute later, and copies fall back to one-offs.
 
+**166. Linked with the screen off (M1)**
+
+- On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
+- A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
+- Renaming the computer changes the notification's words.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1002,6 +1008,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **89. The phone's navigation and feedback (U2)**
 
 - Lock confirmed, and refused with Power off (the server's answer is unit-tested): never against this box, so on the VM or a spare computer.
+
+**166. Linked with the screen off (M1)**
+
+- After a reboot, the "Keeps the link" notification is back without opening the app.
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
@@ -1969,3 +1979,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **163. Features on both sides (L7)**
 
 - Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
+
+**166. Linked with the screen off (M1)**
+
+- The Health card on screen: "Turn on" with the switch off, and this phone's own setting after a pause with it on; Not now.

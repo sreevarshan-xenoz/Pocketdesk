@@ -2356,6 +2356,15 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] One computer saved at two addresses and picked: no link to itself, no doubled toasts.
 - [ ] The second server stopped: its link is tried again a minute later, and copies fall back to one-offs.
 
+## 166. Linked with the screen off (M1)
+
+Built 2026-10-21. Checked on the OPPO by adb: the service started from the background, Pocketdesk unfrozen for 5 minutes with the screen off, and frozen with the switch off, the pause logged once the screen woke.
+- [ ] The Health card on screen: "Turn on" with the switch off, and this phone's own setting after a pause with it on; Not now.
+- [ ] After a reboot, the "Keeps the link" notification is back without opening the app.
+- [ ] On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
+- [ ] A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
+- [ ] Renaming the computer changes the notification's words.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
