@@ -52,6 +52,14 @@ class LinkKeeperService : Service() {
         @Volatile
         private var refusedAt = 0L
 
+        /** What [StayLinked.wanted] says for this phone now. */
+        fun wanted(app: Context): Boolean = StayLinked.wanted(
+            on = Prefs.stayLinked(app),
+            features = HealthCheck.listenerFeatures(app),
+            access = PhoneNotificationPrefs.accessGranted(app),
+            paired = PhoneLink.target(app) != null,
+        )
+
         /**
          * Start or stop the service as [StayLinked.wanted] says. Cheap enough
          * for the listener's 2 s tick: the reads are cached prefs and
@@ -60,12 +68,7 @@ class LinkKeeperService : Service() {
          */
         fun sync(ctx: Context) {
             val app = ctx.applicationContext
-            val wanted = StayLinked.wanted(
-                on = Prefs.stayLinked(app),
-                features = HealthCheck.listenerFeatures(app),
-                access = PhoneNotificationPrefs.accessGranted(app),
-                paired = PhoneLink.target(app) != null,
-            )
+            val wanted = wanted(app)
             if (wanted == running) return
             if (wanted) {
                 val now = android.os.SystemClock.elapsedRealtime()
@@ -89,6 +92,8 @@ class LinkKeeperService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun wantedHere(): Boolean = wanted(applicationContext)
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
         val notification = buildNotification()
@@ -104,6 +109,15 @@ class LinkKeeperService : Service() {
             // crash the process, and let the next start try again (M1 review).
             Log.w(TAG, "Could not go to the foreground: $e")
             refusedAt = android.os.SystemClock.elapsedRealtime()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // A start that raced the reason going (access taken away as the
+        // listener stopped, the last feature turned off) ends here, once in
+        // the foreground: a service started so must get there before it
+        // stops, or Android ends the app (M1 review).
+        if (!wantedHere()) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
