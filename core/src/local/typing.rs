@@ -166,11 +166,10 @@ mod tests {
         let dir = dir("order");
         let a = vec![TypeEvent::Text("a".into())];
         let b = vec![TypeEvent::Text("b".into())];
-        let c = vec![TypeEvent::Enter];
         // Two flushes in one millisecond keep their order by count; a flush
         // keeps its batches' order.
-        request(&dir, "phone", 2, &[c.clone()], 1_000).unwrap();
-        request(&dir, "phone", 1, &[a.clone(), b.clone()], 1_000).unwrap();
+        request(&dir, "phone", 2, &[vec![TypeEvent::Enter]], 1_000).unwrap();
+        request(&dir, "phone", 1, &[a, b], 1_000).unwrap();
         let taken = take_all(&dir, 1_100);
         let events: Vec<_> = taken.iter().flat_map(|b| b.events.clone()).collect();
         assert_eq!(
