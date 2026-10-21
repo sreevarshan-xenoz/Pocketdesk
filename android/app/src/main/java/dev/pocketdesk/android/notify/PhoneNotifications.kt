@@ -417,15 +417,28 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         // N4: an ongoing one's bar or timer, with the switch on; one held
         // back by the gap is looked at again once it passes.
-        val live = if (note.ongoing && Prefs.liveUpdates(this)) readLive(sbn, note.ongoing) else null
+        // Only to a computer that shows them as one card: an older one pops
+        // a toast at each update (N4 review).
+        val takes = note.ongoing && Prefs.liveUpdates(this) &&
+            PhoneLink.target(this)?.let { RustCore.takesLive(it.address) } == true
+        val live = if (takes) readLive(sbn, note.ongoing) else null
+        // What makes it new to [rule]: its bar when one is due; the last one
+        // sent when not, so a change to its buttons still goes (N4 review).
+        var liveMarked = live
+        var firstLive = false
         if (live != null) {
-            val due = synchronized(liveSent) {
-                LiveRule.due(liveSent[sbn.key], live, note.title.orEmpty(), note.text.orEmpty(), SystemClock.elapsedRealtime())
-            } ?: return
-            if (due > 0) {
-                lookAgain(sbn.key, due)
-                return
+            val (due, last) = synchronized(liveSent) {
+                LiveRule.due(liveSent[sbn.key], live, note.title.orEmpty(), note.text.orEmpty(), SystemClock.elapsedRealtime()) to
+                    liveSent[sbn.key]
             }
+            when {
+                due == null -> liveMarked = last?.live ?: live
+                due > 0 -> {
+                    lookAgain(sbn.key, due)
+                    return
+                }
+            }
+            firstLive = last == null
         }
         // What it offers the computer to answer (T10c), part of what is sent.
         val actions = if (Prefs.answerNotifications(this)) sbn.notification.actions?.toList().orEmpty() else emptyList()
@@ -450,7 +463,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         val canOpen = Prefs.letComputerOpen(this) && sbn.notification.contentIntent != null
         val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString())
         // A live update's bar is part of what makes it new (N4).
-        val liveMark = live?.let { "|live:${it.percent}:${it.indeterminate}:${it.chronometer}:${it.countdown}" }.orEmpty()
+        val liveMark = liveMarked?.let { "|live:${it.percent}:${it.indeterminate}:${it.chronometer}:${it.countdown}" }.orEmpty()
         val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer + liveMark, live = live != null)
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
@@ -469,6 +482,9 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        // A redacted one's bar goes nowhere (N4 review): its hidden words
+        // would only make it look new.
+        if (live != null && !out.full) return
         if (live != null) {
             body.put(
                 "live",
@@ -477,7 +493,10 @@ class PhoneNotificationListener : NotificationListenerService() {
                     .put("max", live.max)
                     .put("indeterminate", live.indeterminate)
                     .put("countdown", live.countdown)
-                    .apply { live.chronometer?.let { put("chronometer", it) } },
+                    .apply {
+                        live.chronometer?.let { put("chronometer", it) }
+                        live.words?.let { put("words", it) }
+                    },
             )
             synchronized(liveSent) {
                 liveSent[sbn.key] = LiveRule.Sent(SystemClock.elapsedRealtime(), live, note.title.orEmpty(), note.text.orEmpty())
@@ -503,7 +522,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         // Sent now, or behind what waits; one given up on is forgotten.
         outbox.maxAgeMs = PhoneNotificationPrefs.waitMinutes(this) * 60_000L
         // L8: the other computers picked get a copy now, whatever the own one is doing.
-        PhoneLink.copy(this, body)
+        // A live card's copy goes only with its first (N4 review): another
+        // computer would pop a toast at each update.
+        if (live == null || firstLive) PhoneLink.copy(this, body)
         outbox.post(out.id, note.pkg, body, SystemClock.elapsedRealtime(), ::sendable, ::sendBody)
             .forEach { rule.removed(it) }
     }
@@ -539,7 +560,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     private fun readLive(sbn: StatusBarNotification, ongoing: Boolean): LiveRule.Live? {
         val n = sbn.notification
         val e = n.extras
-        return LiveRule.read(
+        val live = LiveRule.read(
             ongoing = ongoing,
             own = sbn.packageName == packageName,
             media = e.containsKey(Notification.EXTRA_MEDIA_SESSION),
@@ -550,7 +571,14 @@ class PhoneNotificationListener : NotificationListenerService() {
             showChronometer = e.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER),
             whenMs = n.`when`,
             countdown = e.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN),
-        )
+        ) ?: return null
+        // A timer in this phone's clock and words, which the computer shows
+        // as they are (N4 review: words worked out there froze).
+        val words = live.chronometer?.let { base ->
+            val at = android.text.format.DateFormat.getTimeFormat(this).format(java.util.Date(base))
+            getString(if (live.countdown) dev.pocketdesk.android.R.string.live_ends_at else dev.pocketdesk.android.R.string.live_started_at, at)
+        }
+        return live.copy(words = words)
     }
 
     /** Look at [key]'s live update again in [delayMs], so its last state is sent (N4). */
@@ -561,7 +589,9 @@ class PhoneNotificationListener : NotificationListenerService() {
                 {
                     synchronized(liveSent) { liveLooks.remove(key) }
                     val sbn = runCatching { getActiveNotifications(arrayOf(key))?.firstOrNull() }.getOrNull()
-                    if (sbn != null) worker.execute { handle(sbn, rankingVisibility(sbn)) }
+                    // As if posted now: Do Not Disturb and the phone in
+                    // hand are read again (N4 review).
+                    if (sbn != null) onNotificationPosted(sbn)
                 },
                 delayMs,
                 java.util.concurrent.TimeUnit.MILLISECONDS,

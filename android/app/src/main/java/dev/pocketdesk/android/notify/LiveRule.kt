@@ -19,6 +19,8 @@ object LiveRule {
         /** A timer's base, Unix ms; null without one. */
         val chronometer: Long?,
         val countdown: Boolean,
+        /** What its timer says in this phone's clock and words ("Ends at 14:32"). */
+        val words: String? = null,
     ) {
         /** How far along, 0 to 100, for a measured bar. */
         val percent: Int?
