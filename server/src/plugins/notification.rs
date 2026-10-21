@@ -616,6 +616,12 @@ fn given_name(body: &serde_json::Value, field: &str) -> bool {
         .is_some_and(|app| !app.trim().is_empty())
 }
 
+/// Whether the phone says it was in use when the notification came (M6,
+/// `phoneInUse`): then no toast shows it here.
+fn phone_in_use(body: &serde_json::Value) -> bool {
+    body.get("phoneInUse").and_then(|v| v.as_bool()) == Some(true)
+}
+
 /// Whether a notification is held here: its app `muted` (K2b), or this
 /// computer paused (K2a).
 fn held_here(muted: bool) -> bool {
@@ -735,7 +741,10 @@ impl Plugin for NotificationPlugin {
                 // Paused (K2a): held as a muted app's are, but still counted
                 // (K2a review: a week's pause must not unbound a phone).
                 let muted = muted_here(&app);
-                let held = held_here(muted);
+                // M6: one that came while the phone was in hand is held as a
+                // pause holds it: kept, logged, counted, not shown.
+                let in_hand = phone_in_use(&packet.body);
+                let held = held_here(muted) || in_hand;
                 let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
                 if !muted
                     && !flood_guard()
@@ -764,11 +773,14 @@ impl Plugin for NotificationPlugin {
                 // the phone's notifications without the toasts), as it would
                 // be shown: one the phone hides stays hidden in the log too.
                 // Late as the toast says it (a minute or more, C3 review).
-                let meta = if late_line(waited).is_some() {
+                let mut meta = if late_line(waited).is_some() {
                     serde_json::json!({ "app": app, "late_secs": waited })
                 } else {
                     serde_json::json!({ "app": app })
                 };
+                if in_hand {
+                    meta["phone_in_use"] = serde_json::json!(true);
+                }
                 crate::events::emit(
                     "notification",
                     Some(sender.device_id()),
@@ -1657,6 +1669,14 @@ mod tests {
 
     /// K2b: an app muted here is muted for the next notification, whatever
     /// the case of its name.
+    #[test]
+    fn a_notification_from_a_phone_in_hand_is_held() {
+        assert!(phone_in_use(&serde_json::json!({ "phoneInUse": true })));
+        assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": false })));
+        assert!(!phone_in_use(&serde_json::json!({ "phoneInUse": "yes" })));
+        assert!(!phone_in_use(&serde_json::json!({})));
+    }
+
     #[test]
     fn a_muted_app_is_muted_here() {
         let dir = pocketdesk_core::local::paths::use_state_dir(
