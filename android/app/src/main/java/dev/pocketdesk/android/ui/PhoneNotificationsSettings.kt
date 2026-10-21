@@ -153,7 +153,7 @@ fun PhoneNotificationsSection() {
             indent = true,
         )
     }
-    // L8: other computers of mine get a copy, to see but not to answer;
+    // L8: other computers of mine get a copy, and while linked may answer it (part 2);
     // after the app list, so its switches keep their heading (L8 review).
     // Every paired computer is listed, the own one too: its pick counts
     // when another is the one in use (L8 review).
