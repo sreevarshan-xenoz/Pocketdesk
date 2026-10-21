@@ -2469,6 +2469,16 @@ Built 2026-10-21; checked on the OPPO against a throwaway server, by `scripts/de
 - [ ] A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits).
 - [ ] Android 15 and 16 (`ALLOW_ALWAYS`).
 
+## 178. The phone's ongoing updates on the computer (N4)
+
+Built 2026-10-21; checked on the OPPO against a throwaway server, by `scripts/device_checks.py` (`n4-live`): the fixture's progress notification at 10, 50 and 52 % reaching the computer's card at 52 % (held back by the gap, then sent), then 100 %, and its end clearing the card; one event for the card. Checked here by an ignored live test: the toast shown at 10 % and updated in place with new words. Owed:
+- [ ] A real download or upload (Chrome, Drive), a timer (Clock) and a delivery or ride app, by eye on the toast: no pop-up after the first, the words changing.
+- [ ] Android 16's Live Updates (`ProgressStyle`) on a phone that has them.
+- [ ] Closing the toast mid-download: it stays closed; the card stays on the page.
+- [ ] The phone in hand at the first update: the toast comes once it is put down.
+- [ ] A Linux desktop (the `value` hint, the bar, a close).
+- [ ] The battery with a long download.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -157,4 +157,20 @@ class NotificationForwardRuleTest {
         assertEquals("the oldest is forgotten", "k0", rule.decide(note(key = "k0"), true, chat)?.id)
         assertNull("the newest is still remembered", rule.decide(note(key = "k${NotificationForwardRule.REMEMBERED}"), true, chat))
     }
+
+    /** N4: an ongoing one goes only as a live update, its bar making it new. */
+    @Test
+    fun anOngoingOneGoesOnlyAsALiveUpdate() {
+        val rule = NotificationForwardRule("dev.pocketdesk.android")
+        val download = PostedNote(
+            key = "0|files|7|null|10", pkg = "files", appLabel = "Files", ongoing = true, groupSummary = false,
+            title = "Downloading", text = "file.bin", visibility = NotificationForwardRule.VISIBILITY_PUBLIC,
+            publicTitle = null, publicText = null, localOnly = false, otherProfile = false, clearable = false,
+        )
+        val shared = setOf("files")
+        org.junit.Assert.assertNull(rule.decide(download, true, shared))
+        org.junit.Assert.assertNotNull(rule.decide(download, true, shared, offer = "|live:10", live = true))
+        org.junit.Assert.assertNull("the same bar", rule.decide(download, true, shared, offer = "|live:10", live = true))
+        org.junit.Assert.assertNotNull("a new bar", rule.decide(download, true, shared, offer = "|live:50", live = true))
+    }
 }

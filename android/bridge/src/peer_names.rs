@@ -18,10 +18,21 @@ fn acks() -> &'static Mutex<HashMap<String, bool>> {
     ACKS.get_or_init(Default::default)
 }
 
+fn lives() -> &'static Mutex<HashMap<String, bool>> {
+    static LIVES: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+    LIVES.get_or_init(Default::default)
+}
+
 /// Keep what the computer at `address` said (its name already cleaned by
 /// the core's handshake); no name keeps the last one heard, and no identity
 /// keeps the last word on answering.
 pub(crate) fn note(address: &str, claims: PeerClaims) {
+    if let Some(takes) = claims.takes_live() {
+        lives()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(address.to_string(), takes);
+    }
     if let Some(answers) = claims.acks_notifications() {
         acks()
             .lock()
@@ -40,6 +51,17 @@ pub(crate) fn note(address: &str, claims: PeerClaims) {
 /// answers a phone notification that asks (C3).
 pub(crate) fn acks_notifications(address: &str) -> bool {
     acks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(address)
+        .copied()
+        .unwrap_or(false)
+}
+
+/// Whether the computer at `address` said, when last heard, that it shows
+/// a phone's ongoing updates as one card (N4).
+pub fn takes_live(address: &str) -> bool {
+    lives()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(address)
@@ -96,5 +118,22 @@ mod tests {
         assert!(acks_notifications("192.0.2.50"), "no identity, no change");
         note("192.0.2.50", says(false));
         assert!(!acks_notifications("192.0.2.50"), "an older computer now");
+    }
+
+    /// N4: a computer that sends N3's open takes live cards.
+    #[test]
+    fn a_computer_of_this_cycle_takes_live_cards() {
+        let says = |sends: Vec<&str>| PeerClaims {
+            name: None,
+            sends: Some(sends.into_iter().map(str::to_string).collect()),
+        };
+        assert!(!takes_live("192.0.2.60"));
+        note(
+            "192.0.2.60",
+            says(vec!["kdeconnect.pocketdesk.notification_open"]),
+        );
+        assert!(takes_live("192.0.2.60"));
+        note("192.0.2.60", says(vec!["kdeconnect.notification.ack"]));
+        assert!(!takes_live("192.0.2.60"), "an older computer");
     }
 }

@@ -160,6 +160,17 @@ impl PeerClaims {
             .as_ref()
             .map(|sends| sends.iter().any(|t| t == "kdeconnect.notification.ack"))
     }
+
+    /// Whether it shows a phone's ongoing updates as one card (N4): a
+    /// computer that sends N3's open, which came in the same release, does;
+    /// an older one would pop a toast at each update (N4 review).
+    pub fn takes_live(&self) -> Option<bool> {
+        self.sends.as_ref().map(|sends| {
+            sends
+                .iter()
+                .any(|t| t == crate::protocol::notification_action::NOTIFICATION_OPEN)
+        })
+    }
 }
 
 /// What a desktop says of itself in its identity line.

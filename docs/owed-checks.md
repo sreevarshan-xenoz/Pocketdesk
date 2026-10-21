@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-843 open items.
+849 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 510 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 514 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 97 |
+| A Linux desktop (the Azure VM serves for some) | 98 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 28 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 77 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 78 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1033,6 +1033,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits).
 - Android 15 and 16 (`ALLOW_ALWAYS`).
 
+**178. The phone's ongoing updates on the computer (N4)**
+
+- Android 16's Live Updates (`ProgressStyle`) on a phone that has them.
+- Closing the toast mid-download: it stays closed; the card stays on the page.
+- The phone in hand at the first update: the toast comes once it is put down.
+- The battery with a long download.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1776,6 +1783,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The button by hand on the Notifications page, in a Windows toast, and as a Linux D-Bus action.
 
+**178. The phone's ongoing updates on the computer (N4)**
+
+- A Linux desktop (the `value` hint, the bar, a close).
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -2118,3 +2129,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A real player (Spotify, YouTube Music) with the screen off, an hour: its cover, presses, and the battery by N7's script.
 - Windows' media controls with the tray program running: the phone's song and cover in the volume flyout, the media keys (with the owner).
 - The Overview's music line and buttons, and the tray's menu, by hand.
+
+**178. The phone's ongoing updates on the computer (N4)**
+
+- A real download or upload (Chrome, Drive), a timer (Clock) and a delivery or ride app, by eye on the toast: no pop-up after the first, the words changing.

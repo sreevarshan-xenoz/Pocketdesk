@@ -342,6 +342,13 @@ object Prefs {
         bump()
     }
 
+    /** Whether a shared app's ongoing progress and timers go to the computer (N4). Off by default. */
+    fun liveUpdates(ctx: Context): Boolean = prefs(ctx).getBoolean("live_updates", false)
+
+    fun setLiveUpdates(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("live_updates", enabled) }
+    }
+
     /** Whether the computer may open one of this phone's notifications here (N3). Off by default. */
     fun letComputerOpen(ctx: Context): Boolean = prefs(ctx).getBoolean("let_computer_open", false)
 

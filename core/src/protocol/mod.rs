@@ -7,6 +7,7 @@ pub mod dial;
 pub mod file_time;
 pub mod kdeconnect;
 pub mod link;
+pub mod live;
 pub mod notification_action;
 pub mod partials;
 pub mod permissions;
