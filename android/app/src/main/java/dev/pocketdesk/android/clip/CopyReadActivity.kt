@@ -21,22 +21,38 @@ class CopyReadActivity : Activity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        // Focus that never comes (the screen off, split screen) must not
+        // leave it over the app (M10 review).
+        window.decorView.postDelayed({ if (!done) close() }, DEADLINE_MS)
+    }
+
+    /** Close at once, with no animation. */
+    private fun close() {
+        done = true
+        finish()
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus || done) return
-        done = true
         val app = applicationContext
         val text = localClipboardText(this)
         val private = SendClipboard.clipIsPrivate(this)
         val host = PhoneLink.target(app)
-        finish()
-        overridePendingTransition(0, 0)
-        if (host == null || !CopyWatchRule.send(text, private, ClipboardShared.lastExchanged)) {
+        close()
+        if (host == null || !CopyWatchRule.send(text, private, ClipboardShared.lastExchanged, CopyMemory.lastRead)) {
             Log.i(TAG, "A copy not sent (${if (private) "sensitive" else "nothing new"})")
             return
         }
+        // Noted before the send, so a read while it is on its way does not
+        // send it again (M10 review).
+        CopyMemory.lastRead = text
         // The process stays: the notification listener and this service are bound.
         Thread({
             if (ClipboardSend.toComputer(app, host, text!!)) {
@@ -50,5 +66,8 @@ class CopyReadActivity : Activity() {
 
     private companion object {
         const val TAG = "CopyRead"
+
+        /** How long it waits for focus. */
+        const val DEADLINE_MS = 2_000L
     }
 }

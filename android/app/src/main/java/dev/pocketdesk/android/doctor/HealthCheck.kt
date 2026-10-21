@@ -54,7 +54,6 @@ object HealthCheck {
             dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(ctx) ||
             Prefs.filesInBackground(ctx) ||
             Prefs.typingFromComputer(ctx) ||
-            Prefs.copiesByThemselves(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
             PhoneFolders.all(ctx).isNotEmpty()
@@ -86,7 +85,8 @@ object HealthCheck {
             ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
         }
         // M4: typing needs the same Accessibility service.
-        val control = Prefs.controlFromComputer(ctx) || Prefs.typingFromComputer(ctx) || Prefs.copiesByThemselves(ctx)
+        val control = Prefs.controlFromComputer(ctx) || Prefs.typingFromComputer(ctx) ||
+            (Prefs.copiesByThemselves(ctx) && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT))
         return HealthSnapshot(
             listenerFeatures = listenerFeatures(ctx),
             accessFeatures = accessFeatures(ctx),

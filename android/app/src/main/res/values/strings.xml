@@ -746,7 +746,7 @@
     <string name="texts_show_summary_17">Texts this phone receives appear in Messages on the computer you used last. Android holds a text with a code for three hours first</string>
     <string name="settings_capture_mouse_summary_17">During a session, a mouse or touchpad connected to this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="control_service_label">Pocketdesk control</string>
-    <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. With “Typing from the computer’s keyboard” on, it can also type into that field with no screen shown, never a password field. With “Send my copies by themselves” on, it watches only SystemUI’s clipboard preview to know when you copy. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into, and sends nothing it reads anywhere.</string>
+    <string name="control_service_description">While this phone shows its screen on your computer with Pocketdesk, and you allow it in Pocketdesk\'s Settings, that computer can tap, swipe, scroll, type into the field you are in, and press Back, Home and Recents. With “Typing from the computer’s keyboard” on, it can also type into that field with no screen shown, never a password field. With “Send my copies by themselves” on, it looks for the clipboard preview Android shows when you copy, by its views’ names and a fingerprint of what it shows (never kept as text), and then reads your copy to send it to that computer. Android lets the service read what is on the screen; Pocketdesk reads only the field it types into and, for copies, the clipboard, and sends nothing else it reads anywhere.</string>
     <string name="settings_cast_sound">The phone\'s sound with its screen</string>
     <string name="settings_cast_sound_summary">\"Show screen\" also sends what the phone\'s apps play, to play on the computer (its \"Play its sound here\" on). Android asks for the microphone permission to capture other apps\' sound; calls and apps that forbid it stay silent</string>
     <string name="settings_cast_sound_needs_mic">Needs the microphone permission: Android asks for it to capture other apps\' sound</string>
@@ -777,7 +777,7 @@
     <string name="health_contacts">Texts show numbers, not names: Pocketdesk isn\'t allowed to read contacts.</string>
     <string name="health_photos">Screenshots and photos can\'t reach the computer: Pocketdesk isn\'t allowed to see photos.</string>
     <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
-    <string name="health_control_service">The computer can\'t control this phone: \"Pocketdesk control\" is off in Android\'s Accessibility settings.</string>
+    <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone or type on it, and copies are not sent by themselves.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
@@ -959,7 +959,6 @@
     <string name="phone_sound_too_old">Pocketdesk on %1$s is too old to play this phone\'s sound. Update it.</string>
     <string name="phone_sound_busy">This phone already shows its screen or plays its sound on a computer: stop that first</string>
     <string name="settings_copies">Send my copies by themselves</string>
-    <string name="settings_copies_summary_off">What you copy on this phone goes to its computer’s clipboard by itself, not only from the clipboard tile. Never a copy an app marks sensitive (a password). Uses the “Pocketdesk control” Accessibility service, and needs the phone to show its clipboard preview when you copy</string>
-    <string name="settings_copies_summary_needs_access">Almost: Pocketdesk needs notification access to keep the link to the computer</string>
+    <string name="settings_copies_summary_off">What you copy on this phone goes to its computer’s clipboard by itself, not only from the clipboard tile. Never a copy an app marks sensitive (a password). Uses the “Pocketdesk control” Accessibility service, and needs Android’s clipboard preview, shown when you copy</string>
     <string name="settings_copies_summary_on">On: what you copy goes to this phone’s own computer by itself, never a sensitive copy. Android says “Pocketdesk pasted from your clipboard” each time</string>
 </resources>
