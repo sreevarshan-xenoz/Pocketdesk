@@ -96,6 +96,9 @@ object PhoneNotificationPrefs {
 /** How long after a notification went a link is kept for the computer's clears (L1). */
 private const val CLEAR_LINK_MS = 10 * 60_000L
 
+/** The channel of "Tap to open" (N3). */
+private const val OPEN_CHANNEL = "opens"
+
 /**
  * Reads the phone's notifications, once the user grants access, and sends
  * those [NotificationForwardRule] lets through to the most recently used
@@ -404,7 +407,11 @@ class PhoneNotificationListener : NotificationListenerService() {
             } else {
                 null
             }
-        val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString())
+        // N3: a notification sent in full that has a tap action may be
+        // opened here from the computer, with the switch on.
+        val canOpen = Prefs.letComputerOpen(this) && sbn.notification.contentIntent != null
+        val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString()) +
+            (if (canOpen) "|open" else "")
         val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer)
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
@@ -423,6 +430,7 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
+        if (out.full && canOpen) body.put("canOpen", true)
         // K3: the app's icon once, and its picture with the setting on;
         // whatever an app put in its extras never stops the listener.
         // M6: one the computer holds shows no picture there, so none goes
@@ -467,6 +475,83 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         runCatching { cancelNotification(answer.key) }
             .onFailure { Log.w("PhoneNotifications", "a clear failed: ${it.message}") }
+    }
+
+    /**
+     * Open [answer]'s notification here, as a tap on it would (N3), if
+     * [OpenRule] lets it: its own tap action sent with Android 14's opt-in
+     * to a background start, which the bound Accessibility service allows,
+     * else offered in a notification of our own carrying that tap action.
+     */
+    private fun open(answer: RustCore.NotificationAnswer, ownComputer: Boolean) {
+        val shown = runCatching { getActiveNotifications(arrayOf(answer.key))?.firstOrNull() }.getOrNull()
+        val tap = shown?.notification?.contentIntent
+        val keyguard = getSystemService(android.app.KeyguardManager::class.java)
+        // Unknown counts as locked: an app must never show over the lock screen.
+        val locked = keyguard?.isKeyguardLocked ?: true
+        val service = dev.pocketdesk.android.control.ControlService.instance != null
+        var decision = OpenRule.decide(
+            settingOn = Prefs.letComputerOpen(this),
+            ownComputer = ownComputer,
+            locked = locked,
+            shown = tap != null,
+            service = service,
+            withinBudget = true,
+        )
+        if ((decision == OpenRule.Decision.OPEN || decision == OpenRule.Decision.OFFER) &&
+            !answerBudget.take(SystemClock.elapsedRealtime())
+        ) {
+            decision = OpenRule.Decision.TOO_MANY
+        }
+        val done = when (decision) {
+            OpenRule.Decision.OPEN -> runCatching { tap!!.send(this, 0, null, null, null, null, openOptions()) }
+                .onFailure { Log.w("PhoneNotifications", "an open failed: ${it.message}") }
+                .isSuccess
+            OpenRule.Decision.OFFER -> offerOpen(answer.key, tap!!, shown.packageName, answer.host)
+            else -> false
+        }
+        Log.i("PhoneNotifications", "an open from the computer: $decision${if (done) "" else " (not done)"}")
+        OpenRule.outcome(decision, done)?.let { tell(answer, it) }
+    }
+
+    /**
+     * Android 14's opt-in for a tap action sent from the background: this
+     * app may start one while its Accessibility service is bound.
+     */
+    @Suppress("DEPRECATION")
+    private fun openOptions(): android.os.Bundle? = when {
+        Build.VERSION.SDK_INT >= 36 -> android.app.ActivityOptions.makeBasic()
+            .setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS)
+            .toBundle()
+        Build.VERSION.SDK_INT >= 34 -> android.app.ActivityOptions.makeBasic()
+            .setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            .toBundle()
+        else -> null
+    }
+
+    /** "Tap to open" with [tap], the notification's own tap action; whether it was posted. */
+    private fun offerOpen(key: String, tap: android.app.PendingIntent, pkg: String, host: String): Boolean {
+        val manager = getSystemService(android.app.NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return false
+        if (manager.getNotificationChannel(OPEN_CHANNEL) == null) {
+            manager.createNotificationChannel(
+                android.app.NotificationChannel(
+                    OPEN_CHANNEL,
+                    getString(dev.pocketdesk.android.R.string.channel_opens),
+                    android.app.NotificationManager.IMPORTANCE_HIGH,
+                ),
+            )
+        }
+        val notification = Notification.Builder(this, OPEN_CHANNEL)
+            .setSmallIcon(dev.pocketdesk.android.R.drawable.ic_stat_pocketdesk)
+            .setContentTitle(getString(dev.pocketdesk.android.R.string.open_tap_title, appLabel(pkg)))
+            .setContentText(getString(dev.pocketdesk.android.R.string.open_tap_text, dev.pocketdesk.android.HostStore.shownName(this, host)))
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .build()
+        return runCatching { manager.notify("open", key.hashCode(), notification) }
+            .onFailure { Log.w("PhoneNotifications", "an open was not offered: ${it.message}") }
+            .isSuccess
     }
 
     /**
@@ -642,6 +727,12 @@ class PhoneNotificationListener : NotificationListenerService() {
         val answers = RustCore.takeNotificationAnswers()
         if (answers.isEmpty()) return
         for (answer in answers) {
+            // N3: an open, not an answer.
+            if (answer.open) {
+                val ownComputer = fromMine(answer.host, answer.port, own)
+                worker.execute { open(answer, ownComputer) }
+                continue
+            }
             // L1: a clear, not an answer.
             if (answer.cancel) {
                 val ownComputer =

@@ -343,6 +343,13 @@ object Prefs {
     }
 
     /** L1: a notification closed on the computer is cleared here (on by default). */
+    /** Whether the computer may open one of this phone's notifications here (N3). Off by default. */
+    fun letComputerOpen(ctx: Context): Boolean = prefs(ctx).getBoolean("let_computer_open", false)
+
+    fun setLetComputerOpen(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("let_computer_open", enabled) }
+    }
+
     fun letComputerClear(ctx: Context): Boolean = prefs(ctx).getBoolean("let_computer_clear", true)
 
     fun setLetComputerClear(ctx: Context, enabled: Boolean) {
