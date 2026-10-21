@@ -773,8 +773,8 @@
     <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>
     <string name="channel_linked">Conexión mantenida</string>
     <string name="channel_linked_desc">Mantiene Pocketdesk conectado a tu ordenador con la pantalla apagada, para que Android no lo pause.</string>
-    <string name="linked_to">Conectado a %1$s</string>
-    <string name="linked_to_computer">Conectado a tu ordenador</string>
+    <string name="linked_to">Mantiene la conexión con %1$s con la pantalla apagada</string>
+    <string name="linked_to_computer">Mantiene la conexión con tu ordenador con la pantalla apagada</string>
     <string name="health_turn_on">Activar</string>
     <string name="health_paused_stay_linked_off">Android pausó Pocketdesk con la pantalla apagada, así que los mensajes del ordenador esperaron. Activa «Seguir conectado con la pantalla apagada».</string>
     <string name="health_paused_anyway">Android pausó Pocketdesk con la pantalla apagada, aunque seguía conectado. El ajuste propio de este teléfono debe dejar que funcione en segundo plano.</string>

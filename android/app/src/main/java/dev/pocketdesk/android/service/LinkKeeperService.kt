@@ -52,6 +52,41 @@ class LinkKeeperService : Service() {
         @Volatile
         private var refusedAt = 0L
 
+        /** The notification's words as last posted. */
+        @Volatile
+        private var postedText: String? = null
+
+        private fun text(ctx: Context): String {
+            val own = PhoneLink.target(ctx)
+            return if (own != null) {
+                ctx.getString(R.string.linked_to, HostStore.shownName(ctx, own.address))
+            } else {
+                ctx.getString(R.string.linked_to_computer)
+            }
+        }
+
+        private fun build(ctx: Context): Notification {
+            val open = PendingIntent.getActivity(
+                ctx,
+                0,
+                Intent(ctx, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val words = text(ctx)
+            postedText = words
+            return Notification.Builder(ctx, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_pocketdesk)
+                .setContentTitle(ctx.getString(R.string.app_name))
+                .setContentText(words)
+                .setContentIntent(open)
+                .setOngoing(true)
+                .build()
+        }
+
+        private fun post(ctx: Context) {
+            (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIFICATION_ID, build(ctx))
+        }
+
         /** What [StayLinked.wanted] says for this phone now. */
         fun wanted(app: Context): Boolean = StayLinked.wanted(
             on = Prefs.stayLinked(app),
@@ -69,6 +104,12 @@ class LinkKeeperService : Service() {
         fun sync(ctx: Context) {
             val app = ctx.applicationContext
             val wanted = wanted(app)
+            if (wanted && running) {
+                // The computer renamed, or another became the phone's own:
+                // the notification follows (M1 review).
+                if (text(app) != postedText) runCatching { post(app) }
+                return
+            }
             if (wanted == running) return
             if (wanted) {
                 val now = android.os.SystemClock.elapsedRealtime()
@@ -96,7 +137,7 @@ class LinkKeeperService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
-        val notification = buildNotification()
+        val notification = build(this)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
@@ -142,27 +183,5 @@ class LinkKeeperService : Service() {
         channel.setShowBadge(false)
         channel.description = getString(R.string.channel_linked_desc)
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
-    }
-
-    private fun buildNotification(): Notification {
-        val open = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val own = PhoneLink.target(this)
-        val text = if (own != null) {
-            getString(R.string.linked_to, HostStore.shownName(this, own.address))
-        } else {
-            getString(R.string.linked_to_computer)
-        }
-        return Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_pocketdesk)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(text)
-            .setContentIntent(open)
-            .setOngoing(true)
-            .build()
     }
 }
