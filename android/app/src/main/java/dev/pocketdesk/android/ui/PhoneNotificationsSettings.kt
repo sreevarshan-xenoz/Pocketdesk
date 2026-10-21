@@ -79,6 +79,16 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // N4: a shared app's progress and timers, one card each on the computer.
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_live),
+        stringResource(R.string.phone_notifications_live_summary),
+        version.let { Prefs.liveUpdates(context) },
+        {
+            Prefs.setLiveUpdates(context, it)
+            version++
+        },
+    )
     // N3: the computer may open a notification here, as a tap on it would.
     SettingSwitch(
         stringResource(R.string.phone_notifications_open),

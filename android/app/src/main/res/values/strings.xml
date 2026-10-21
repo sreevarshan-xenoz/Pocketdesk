@@ -555,6 +555,8 @@
     <string name="phone_notifications_pictures_summary">A notification\'s picture or contact photo goes with it, as on the phone. Never for one the lock screen hides or that holds a code. Each app\'s icon always goes</string>
     <string name="phone_notifications_clear">Let the computer clear my notifications</string>
     <string name="phone_notifications_clear_summary">A notification closed on the computer (its ✕, Clear, or closing it on Linux) is cleared here too. Calls never are</string>
+    <string name="phone_notifications_live">Ongoing updates on the computer</string>
+    <string name="phone_notifications_live_summary">A shared app\'s progress bar or timer (a download, a delivery, a timer) shows on the computer as one card that updates. A navigation or delivery app\'s updates say where the phone is</string>
     <string name="phone_notifications_open">Let the computer open my notifications</string>
     <string name="phone_notifications_open_summary">\"Open on the phone\" beside a notification on the computer opens it here, as a tap on it would, while the phone is unlocked. With Pocketdesk control on in Accessibility it opens at once; without, a notification here offers it</string>
     <string name="open_tap_title">Tap to open: %1$s</string>

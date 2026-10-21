@@ -54,9 +54,16 @@ class NotificationForwardRule(private val ownPackage: String) {
      * ([NotificationActionRule.signature]): a change to it is sent again,
      * even when the title and text stay the same.
      */
-    fun decide(note: PostedNote, enabled: Boolean, shared: Set<String>, offer: String = ""): Outgoing? {
+    fun decide(
+        note: PostedNote,
+        enabled: Boolean,
+        shared: Set<String>,
+        offer: String = "",
+        live: Boolean = false,
+    ): Outgoing? {
         if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
-        if (note.ongoing || note.groupSummary || note.localOnly || note.otherProfile) return null
+        // N4: an ongoing one goes only as a live update ([LiveRule]).
+        if ((note.ongoing && !live) || note.groupSummary || note.localOnly || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
         val (title, text, full) = shown(note) ?: return null
         if (sent[note.key] == Triple(title, text, offer)) return null
