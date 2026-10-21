@@ -35,6 +35,18 @@ class BatteryRuleTest {
     }
 
     @Test
+    fun batteryManagersReadingIsTakenOverAStaleBroadcast() {
+        val stale = BatteryRule.Report(charge = 72, charging = true, low = false)
+        assertEquals(79, BatteryRule.fresh(stale, 79, BatteryRule.STATUS_CHARGING)?.charge)
+        assertEquals("full is still on the charger", true, BatteryRule.fresh(stale, 100, BatteryRule.STATUS_FULL)?.charging)
+        assertEquals("unplugged", false, BatteryRule.fresh(stale, 70, BatteryRule.STATUS_DISCHARGING)?.charging)
+        assertEquals("unknown capacity keeps the broadcast's", 72, BatteryRule.fresh(stale, Int.MIN_VALUE, 1)?.charge)
+        assertEquals("unknown status keeps the broadcast's", true, BatteryRule.fresh(stale, 50, 1)?.charging)
+        assertEquals("no broadcast, the capacity alone", 40, BatteryRule.fresh(null, 40, BatteryRule.STATUS_DISCHARGING)?.charge)
+        assertNull(BatteryRule.fresh(null, -1, 1))
+    }
+
+    @Test
     fun theBodyIsKdeConnectsBatteryPacket() {
         assertEquals(
             """{"currentCharge":54,"isCharging":false,"thresholdEvent":0}""",

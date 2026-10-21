@@ -90,14 +90,24 @@ fun BatteryEffect(address: String, controlPort: Int) {
  * (the network's kind and the ringer), which costs less.
  */
 internal fun readBattery(context: Context, full: Boolean = true): BatteryRule.Report? {
-    val intent: Intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        ?: return null
-    val low = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-        intent.getBooleanExtra(BatteryManager.EXTRA_BATTERY_LOW, false)
-    return BatteryRule.report(
-        level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1),
-        scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1),
-        plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
-        low = low,
-    )?.copy(state = readPhoneState(context, full))
+    val intent: Intent? = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val sticky = intent?.let {
+        val low = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            it.getBooleanExtra(BatteryManager.EXTRA_BATTERY_LOW, false)
+        BatteryRule.report(
+            level = it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1),
+            scale = it.getIntExtra(BatteryManager.EXTRA_SCALE, -1),
+            plugged = it.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0),
+            low = low,
+        )
+    }
+    // Asked of BatteryManager too: the broadcast was seen stale in the
+    // background on ColorOS (found checking L3 on the OPPO).
+    val manager = context.getSystemService(BatteryManager::class.java)
+    val report = BatteryRule.fresh(
+        sticky,
+        manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: Int.MIN_VALUE,
+        manager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_STATUS) ?: Int.MIN_VALUE,
+    )
+    return report?.copy(state = readPhoneState(context, full))
 }
