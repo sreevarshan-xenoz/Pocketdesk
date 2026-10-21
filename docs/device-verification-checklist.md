@@ -2411,6 +2411,16 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The switch off, or the app's notifications off: nothing typed.
 - [ ] Japanese through Windows' input method: the committed text arrives.
 - [ ] The phone unlinked while the window is open: the window says why and sends nothing.
+## 172. The phone's sound without its screen (M7)
+
+Built 2026-10-21; tested through units and a loopback session, nothing on a device yet.
+- [ ] The OPPO with the throwaway tone app against a throwaway server with the WAV seam (`POCKETDESK_PHONE_AUDIO_FILE`): the tone's frequency and level; no cast window (the relay's log says nothing); the Sessions page says "its sound here".
+- [ ] "Play its sound here" off for the phone: refused, the phone saying why; turned off mid-session: it ends.
+- [ ] Stop from the phone's notification, and End on the Sessions page.
+- [ ] The microphone not granted on Android 13+: its request shows.
+- [ ] Started while the screen is shown: refused before Android's consent, saying why.
+- [ ] An hour with the screen off: the battery.
+- [ ] By ear, and a real music app (the owner).
 
 ## Recording results
 
