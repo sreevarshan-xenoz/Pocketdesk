@@ -1116,6 +1116,22 @@ pub fn link_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<Stri
         .find(|id| paired.contains(id) && store.permissions(id).allows(Capability::Links))
 }
 
+/// The phones linked now, in a session or by the background link (M8).
+pub fn linked_phones(state_dir: &Path, now_unix: u64, running: bool) -> Vec<String> {
+    let Some(mirror) = live_mirror(state_dir, now_unix, running) else {
+        return Vec::new();
+    };
+    let mut ids: Vec<String> = mirror
+        .sessions
+        .iter()
+        .filter_map(|s| s.device_id.clone())
+        .chain(mirror.linked.iter().map(|p| p.device_id.clone()))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 pub fn default_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<String> {
     let mirror = live_mirror(state_dir, now_unix, running)?;
     let paired = trust_store(state_dir).ok()?.trusted_devices();

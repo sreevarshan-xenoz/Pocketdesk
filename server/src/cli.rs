@@ -191,6 +191,22 @@ pub enum Commands {
         /// The files and folders
         paths: Vec<std::path::PathBuf>,
     },
+    /// Have the phone dial the number a tel: or callto: link names (M8):
+    /// what the link handler runs. With several phones that may, the
+    /// desktop app asks which. Says how it went in a desktop notification.
+    /// Exit codes: 0 queued or asked, 1 failed, 2 not a number, 3 no server
+    Tel {
+        /// The link, such as tel:+1-555-0100
+        uri: String,
+    },
+    /// Open tel: and callto: links on the phone (M8), or stop with
+    /// --remove. On Windows, pick Pocketdesk when Windows asks, or in
+    /// Default apps
+    TelHandler {
+        /// Remove it
+        #[arg(long)]
+        remove: bool,
+    },
     /// Add "Send to phone" to the file manager (Explorer's Send To; the
     /// Nautilus, Nemo and Dolphin menus), or remove it with --remove
     SendMenu {

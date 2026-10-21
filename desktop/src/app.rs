@@ -319,6 +319,11 @@ pub struct PocketdeskApp {
     /// The browsers the extension's host is registered with, as last read
     /// (ecosystem 1d); `Some(None)` when it is not.
     browser_registered: Option<Option<Vec<String>>>,
+    /// Whether phone numbers' links open on the phone, as last read (M8).
+    tel_registered: Option<bool>,
+    /// A link's number waiting for a phone (M8), and when it was read.
+    tel_ask: Option<pocketdesk_core::local::tel_ask::TelAsk>,
+    tel_ask_read: Option<std::time::Instant>,
     /// The window showing a phone's screen (T10k), started on the first pass.
     cast: Option<crate::cast_view::CastView>,
     /// M4: the typing window, while it types on a phone.
@@ -380,6 +385,9 @@ impl PocketdeskApp {
             photos: Default::default(),
             send_menu_installed: None,
             browser_registered: None,
+            tel_registered: None,
+            tel_ask: None,
+            tel_ask_read: None,
             cast: None,
             type_view: Default::default(),
             activity: Default::default(),
@@ -436,6 +444,7 @@ impl PocketdeskApp {
         // Read again: they changed.
         self.send_menu_installed = None;
         self.browser_registered = None;
+        self.tel_registered = None;
     }
 
     fn finish_job(&mut self) {
@@ -535,6 +544,7 @@ impl PocketdeskApp {
             // Read again on each visit: it may have changed outside the app.
             self.send_menu_installed = None;
             self.browser_registered = None;
+            self.tel_registered = None;
         }
         if tab == Tab::Settings && self.settings.is_none() {
             self.settings = Some(
@@ -1237,6 +1247,7 @@ impl PocketdeskApp {
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
+        self.tel_question(ui);
         ui.label(RichText::new("Your phones").strong());
         let now = now_unix();
         let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
@@ -2030,6 +2041,9 @@ impl PocketdeskApp {
                         if extra(crate::settings_view::EXTRA_BROWSER) {
                             self.browser_setting(ui);
                         }
+                        if extra(crate::settings_view::EXTRA_TEL) {
+                            self.tel_setting(ui);
+                        }
                     }
                     crate::settings_view::Section::Computers
                         if extra(crate::settings_view::EXTRA_COMPUTERS) =>
@@ -2171,6 +2185,128 @@ impl PocketdeskApp {
                 } else {
                     said
                 })
+            } else {
+                Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+            }
+        });
+    }
+
+    /// A `tel:` link with several phones to take it (M8): which calls it.
+    fn tel_question(&mut self, ui: &mut egui::Ui) {
+        use pocketdesk_core::local::tel_ask;
+        let now = now_unix();
+        // Read once a second, not every frame.
+        if self
+            .tel_ask_read
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(1))
+        {
+            self.tel_ask_read = Some(std::time::Instant::now());
+            self.tel_ask = tel_ask::read(&self.state_dir, now);
+        }
+        let Some(ask) = self.tel_ask.clone() else {
+            return;
+        };
+        let phones: Vec<(String, String)> = self
+            .snapshot
+            .devices
+            .iter()
+            .filter(|d| !d.computer && d.permissions.allows(Capability::Dial))
+            .map(|d| {
+                (
+                    d.id.clone(),
+                    model::device_label(&self.snapshot.devices, &d.id),
+                )
+            })
+            .collect();
+        let mut chosen = None;
+        let mut cancelled = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.label(RichText::new(format!("Call {} on:", ask.number)).strong());
+            ui.horizontal_wrapped(|ui| {
+                for (id, name) in &phones {
+                    if ui.button(name).clicked() {
+                        chosen = Some(id.clone());
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    cancelled = true;
+                }
+            });
+            if phones.is_empty() {
+                ui.label("No paired phone allows \"Call numbers from here\" (Devices).");
+            }
+            ui.label(
+                RichText::new("The phone's dialer opens with the number; you press Call there.")
+                    .small()
+                    .color(crate::theme::muted(ui)),
+            );
+        });
+        ui.add_space(8.0);
+        if let Some(id) = &chosen {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::dials::request(&self.state_dir, id, &ask.number, now)
+                    .map(|_| {
+                        "Asked the phone to open its dialer with the number; it does with \u{201c}Calls from the computer\u{201d} on.".to_string()
+                    })
+                    .map_err(|e| format!("Not asked: {e}")),
+            );
+        }
+        if chosen.is_some() || cancelled {
+            tel_ask::clear(&self.state_dir, &ask);
+            self.tel_ask = None;
+        }
+    }
+
+    /// Phone numbers' links open on the phone (M8): registered by the
+    /// server program, which says so in `<config>/tel_handler.json`.
+    fn tel_setting(&mut self, ui: &mut egui::Ui) {
+        let Ok(config) = pocketdesk_core::local::paths::config_dir() else {
+            return;
+        };
+        let installed = *self
+            .tel_registered
+            .get_or_insert_with(|| config.join("tel_handler.json").exists());
+        let mut on = installed;
+        ui.add_enabled(
+            self.setting_job.is_none(),
+            egui::Checkbox::new(
+                &mut on,
+                "Open phone numbers on the phone (tel: links open its dialer)",
+            ),
+        );
+        if installed && cfg!(windows) {
+            ui.label(
+                RichText::new("Pick Pocketdesk when Windows asks which app opens a phone number, or in Settings, Apps, Default apps.")
+                    .small()
+                    .color(crate::theme::muted(ui)),
+            );
+        }
+        if on == installed {
+            return;
+        }
+        let Some(exe) = crate::restart::server_exe_beside_app() else {
+            self.notice = crate::notice::Notice::error(
+                "Not changed: the server program is not beside this app",
+            );
+            return;
+        };
+        let doing = if on {
+            "Taking phone numbers' links"
+        } else {
+            "Leaving phone numbers' links"
+        };
+        let args: &'static [&'static str] = if on {
+            &["tel-handler"]
+        } else {
+            &["tel-handler", "--remove"]
+        };
+        self.run_setting(doing, move || {
+            let out = crate::restart::quiet(exe)
+                .args(args)
+                .output()
+                .map_err(|e| e.to_string())?;
+            if out.status.success() {
+                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
             } else {
                 Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
             }

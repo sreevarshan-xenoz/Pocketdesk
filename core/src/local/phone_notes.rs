@@ -102,6 +102,33 @@ pub fn forget(state_dir: &Path, device_id: &str, key: &str) -> io::Result<()> {
     write(state_dir, notes)
 }
 
+/// The keys of a ringing call's note (F5), as the phone makes them.
+pub const CALL_PREFIX: &str = "pocketdesk:call:";
+
+/// What an ended call's note says.
+pub const CALL_ENDED: &str = "The call ended";
+
+/// A call's note the phone closed (M8 review): kept, with nothing left to
+/// answer, so its number can still be called back; another note is
+/// dropped as [`forget`] does.
+pub fn end_call(state_dir: &Path, device_id: &str, key: &str) -> io::Result<()> {
+    if !key.starts_with(CALL_PREFIX) {
+        return forget(state_dir, device_id, key);
+    }
+    let _one = writing();
+    let mut notes = read(state_dir);
+    let Some(note) = notes
+        .iter_mut()
+        .find(|n| n.device_id == device_id && n.key == key)
+    else {
+        return Ok(());
+    };
+    note.actions.clear();
+    note.reply = false;
+    note.text = CALL_ENDED.to_string();
+    write(state_dir, notes)
+}
+
 /// Drop them all (at start: they belong to a run that ended).
 pub fn clear(state_dir: &Path) -> io::Result<()> {
     let _one = writing();
@@ -246,6 +273,23 @@ mod tests {
             reply: true,
             messages: vec![],
         }
+    }
+
+    /// M8 review: an ended call stays, with nothing to answer; another
+    /// closed note goes.
+    #[test]
+    fn an_ended_call_stays_to_call_back() {
+        let dir = temp_dir("call");
+        keep(&dir, note("p", "pocketdesk:call:3", 1)).unwrap();
+        keep(&dir, note("p", "chat", 1)).unwrap();
+        end_call(&dir, "p", "pocketdesk:call:3").unwrap();
+        end_call(&dir, "p", "chat").unwrap();
+        let notes = read(&dir);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].key, "pocketdesk:call:3");
+        assert!(notes[0].actions.is_empty() && !notes[0].reply);
+        assert_eq!(notes[0].text, CALL_ENDED);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

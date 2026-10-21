@@ -916,6 +916,76 @@ fn the_notifications_page_clears_on_the_phone() {
     );
 }
 
+/// M8: a tel: link with several phones is asked on the Overview, and the
+/// phone chosen dials it.
+#[test]
+fn the_overview_asks_which_phone_calls_a_link() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    pair_phone(
+        fixture.state(),
+        "00000000-0000-4000-8000-0000000000c5",
+        "Other Phone",
+    );
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    pocketdesk_core::local::tel_ask::put(fixture.state(), "+15550100", now).expect("asked");
+    let mut app = fixture.open(Some(Tab::Status));
+    assert!(app.query_by_label("Call +15550100 on:").is_some());
+    app.get_by_role_and_label(egui::accesskit::Role::Button, "Test Phone")
+        .click();
+    app.run_steps(3);
+    // Read after the click: the request carries the clock's second then.
+    let now = now + 2;
+    let dialled: Vec<_> = pocketdesk_core::local::dials::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|d| (d.device_id, d.number))
+        .collect();
+    assert_eq!(dialled, vec![(PHONE.to_string(), "+15550100".to_string())]);
+    assert_eq!(
+        pocketdesk_core::local::tel_ask::read(fixture.state(), now),
+        None,
+        "answered"
+    );
+    assert!(app.query_by_label("Call +15550100 on:").is_none());
+}
+
+/// M8: Call back on a ringing call's note dials its number.
+#[test]
+fn the_notifications_page_calls_back() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    pocketdesk_core::local::phone_notes::keep(
+        fixture.state(),
+        pocketdesk_core::local::phone_notes::PhoneNote {
+            device_id: PHONE.to_string(),
+            key: "pocketdesk:call:3".to_string(),
+            app: "Pocketdesk".to_string(),
+            title: "Call from Ann (+15550100)".to_string(),
+            text: "Ringing on the phone".to_string(),
+            at_unix: 1,
+            actions: vec!["Silence".to_string()],
+            reply: false,
+            messages: Vec::new(),
+        },
+    )
+    .expect("note");
+    let mut app = fixture.open(Some(Tab::Notifications));
+    app.get_by_label("Call back").click();
+    app.run_steps(3);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let dialled: Vec<_> = pocketdesk_core::local::dials::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|d| (d.device_id, d.number))
+        .collect();
+    assert_eq!(dialled, vec![(PHONE.to_string(), "+15550100".to_string())]);
+}
+
 /// L4: Call beside a conversation's number asks its phone to dial it.
 #[test]
 fn the_messages_page_calls_a_number() {

@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-820 open items.
+826 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 497 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 500 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
-| A phone with a SIM | 27 |
-| A second phone | 9 |
+| A phone with a SIM | 28 |
+| A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 95 |
+| A Linux desktop (the Azure VM serves for some) | 96 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 26 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 73 |
 
@@ -1005,6 +1005,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Started while the screen is shown: refused before Android's consent, saying why.
 - An hour with the screen off: the battery.
 
+**173. tel: links and Call back (M8)**
+
+- `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so.
+- Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window.
+- Off again: the keys are gone and Windows asks for another app.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1303,6 +1309,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then.
 
+**173. tel: links and Call back (M8)**
+
+- Call back from a ringing call's note, and from one whose call ended (a SIM).
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -1340,6 +1350,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **147. Dropped files ask where they go (J5)**
 
 - Two (a phone and another computer, or two phones): "Send 3 files to:" with a button each; each button sends all three, one notice; Cancel and Esc send nothing.
+
+**173. tel: links and Call back (M8)**
+
+- Two phones that may dial, neither linked: the Overview asks; a choice dials; Cancel, and two minutes, drop it.
 
 ## Away from home: another network, or through a router
 
@@ -1731,6 +1745,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **168. Image copies without a session (M3)**
 
 - GNOME (no `wl-paste --watch`): an image on the clipboard is read at most every 30 s.
+
+**173. tel: links and Call back (M8)**
+
+- Linux: the desktop file and `xdg-open tel:5550100`; removed, `mimeapps.list` no longer names it.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

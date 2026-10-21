@@ -128,6 +128,7 @@ These are real gaps in the current design. Plan around them.
 41. **A photo's place goes with it when the phone's switch says so** (M5): with "Photos keep where they were taken" on (off by default), a photo the phone sends to its computer keeps its GPS tags, which say where it was taken, and so where someone was. Only in a photo the person sent, or one the computer was allowed to fetch (recent photos, screenshots, the drive); a photo the phone could not open whole goes without its place, as before.
 [docs/protocol.md](docs/protocol.md) lists every port, packet, file and outside party, and what each one sees.
 42. **The computer can type on the phone without seeing it** (M4): with the phone's "Typing from the computer's keyboard" on (off by default), its own computer can type into the field in front and press Back, Home and Recents, with no picture of the screen, so it cannot see where the text lands. The phone refuses password fields and a locked phone, types only while its notification (with Stop) can be shown, and drops typing more than 10 seconds old; the computer needs its Settings "Control phones from their screen window" and the phone's "Show its screen or camera here".
+43. **A web page can start a dial** (M8): with "Open phone numbers on the phone" on (off by default), a `tel:` or `callto:` link a page offers, once clicked, opens the phone's dialer with its number. The owner still presses Call there, and codes (`*`, `#`), extensions and parameters are refused, as L4's numbers are.
 
 ## Using it safely today
 
