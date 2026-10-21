@@ -30,6 +30,14 @@ object ComputerMediaRule {
     const val NEXT = "next"
     const val PREVIOUS = "previous"
 
+    /**
+     * Whether a Play ([wantPlaying]) or a Pause sends the computer its one
+     * toggle, by what shows ([shownPlaying], null when unknown): a Pause
+     * key while the computer is paused must not start its music (N5 review).
+     */
+    fun toggles(wantPlaying: Boolean, shownPlaying: Boolean?): Boolean =
+        shownPlaying == null || shownPlaying != wantPlaying
+
     /** Whether a push from [host]:[port] is the own computer's, the only one shown. */
     fun fromOwn(host: String, port: Int, ownAddress: String?, ownPort: Int?): Boolean =
         ownAddress != null && host == ownAddress && port == ownPort

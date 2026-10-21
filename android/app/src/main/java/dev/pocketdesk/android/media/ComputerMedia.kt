@@ -216,9 +216,14 @@ class ComputerMedia(private val app: Context) {
     }
 
     private val callback = object : MediaSession.Callback() {
-        override fun onPlay() = press(ComputerMediaRule.PLAY_PAUSE)
+        // The computer takes one toggle: sent only when it changes what shows.
+        override fun onPlay() {
+            if (ComputerMediaRule.toggles(true, drawn?.first?.isPlaying)) press(ComputerMediaRule.PLAY_PAUSE)
+        }
 
-        override fun onPause() = press(ComputerMediaRule.PLAY_PAUSE)
+        override fun onPause() {
+            if (ComputerMediaRule.toggles(false, drawn?.first?.isPlaying)) press(ComputerMediaRule.PLAY_PAUSE)
+        }
 
         override fun onSkipToNext() = press(ComputerMediaRule.NEXT)
 

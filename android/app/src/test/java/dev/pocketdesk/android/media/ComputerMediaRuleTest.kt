@@ -60,6 +60,15 @@ class ComputerMediaRuleTest {
     }
 
     @Test
+    fun playAndPauseToggleOnlyWhenTheyChangeWhatShows() {
+        assertTrue(ComputerMediaRule.toggles(wantPlaying = true, shownPlaying = false))
+        assertFalse(ComputerMediaRule.toggles(wantPlaying = true, shownPlaying = true))
+        assertTrue(ComputerMediaRule.toggles(wantPlaying = false, shownPlaying = true))
+        assertFalse(ComputerMediaRule.toggles(wantPlaying = false, shownPlaying = false))
+        assertTrue(ComputerMediaRule.toggles(wantPlaying = false, shownPlaying = null))
+    }
+
+    @Test
     fun onlyTheOwnComputersPushShows() {
         assertTrue(ComputerMediaRule.fromOwn("192.0.2.5", 1716, "192.0.2.5", 1716))
         assertFalse(ComputerMediaRule.fromOwn("192.0.2.6", 1716, "192.0.2.5", 1716))
