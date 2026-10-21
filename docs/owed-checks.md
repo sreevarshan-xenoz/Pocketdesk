@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-790 open items.
+796 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 473 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 476 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
-| A phone with a SIM | 26 |
+| A phone with a SIM | 27 |
 | A second phone | 9 |
-| Away from home: another network, or through a router | 10 |
+| Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 94 |
+| A Linux desktop (the Azure VM serves for some) | 95 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 25 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 71 |
 
@@ -966,6 +966,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone paired as mine, paired again as someone else's: what was off stays off.
 - `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
+**168. Image copies without a session (M3)**
+
+- A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app.
+- A screenshot copied on Windows (Win+Shift+S) with a phone linked: it goes once, even while the Snipping Tool holds the clipboard.
+- A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1260,6 +1266,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The second server shows no answer buttons, and no texts.
 
+**168. Image copies without a session (M3)**
+
+- Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then.
+
 ## A second phone
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
@@ -1336,6 +1346,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **159. Call a number from the computer (L4)**
 
 - With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
+
+**168. Image copies without a session (M3)**
+
+- The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
 
 ## A second computer
 
@@ -1680,6 +1694,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **156. Cleared on the computer, cleared on the phone (L1)**
 
 - Linux (GNOME): closing a notification clears it; pressing its button does not.
+
+**168. Image copies without a session (M3)**
+
+- GNOME (no `wl-paste --watch`): an image on the clipboard is read at most every 30 s.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
