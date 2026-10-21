@@ -143,8 +143,9 @@ mod windows_player {
     use super::{Button, Choice, command};
 
     /// The name Windows shows for it: the one the server registers for its
-    /// toasts, so the flyout says Pocketdesk, not the program's file.
-    const AUMID: windows::core::PCWSTR = w!("Pocketdesk.Server");
+    /// toasts, so the flyout says Pocketdesk, not the program's file; and
+    /// the one the server skips reading the computer's music (N5).
+    use pocketdesk_core::local::phone_media::MEDIA_CONTROLS_APP_ID as AUMID;
 
     /// Ready this thread and process for the media controls, before any
     /// window (K7 review): WinRT on the tray's thread, and the name the
@@ -152,8 +153,11 @@ mod windows_player {
     pub fn prepare() {
         // One already set up makes this a harmless error.
         let _ = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) };
-        let _ =
-            unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(AUMID) };
+        let _ = unsafe {
+            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(
+                AUMID,
+            ))
+        };
     }
 
     /// The phone shown, and whether it plays, for a press.

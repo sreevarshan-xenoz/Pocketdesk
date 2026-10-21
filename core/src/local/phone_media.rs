@@ -15,6 +15,11 @@ use super::approval::is_valid_id;
 use super::paths::{PHONE_MEDIA_ART_DIR, PHONE_MEDIA_DIR, PHONE_MEDIA_FILE};
 use crate::protocol::phone_media::{PhoneMedia, is_command};
 
+/// The app id Pocketdesk's own entry in Windows' media controls goes by
+/// (K7: the tray shows a phone's music there), which the server's reading
+/// of the computer's music must skip (N5): one name for both.
+pub const MEDIA_CONTROLS_APP_ID: &str = "Pocketdesk.Server";
+
 /// How long a press waits for the server before it is dropped: a press is
 /// for now, not for whenever the phone comes back.
 pub const PRESS_TTL_SECS: u64 = 10;

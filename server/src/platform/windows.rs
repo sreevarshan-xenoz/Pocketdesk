@@ -24,7 +24,7 @@ use windows::core::{HSTRING, IInspectable, Interface, PCWSTR, w};
 
 /// The identity toasts are shown under. An unpackaged app needs one registered
 /// under `HKCU\Software\Classes\AppUserModelId` for Windows to display them.
-const AUMID: &str = "Pocketdesk.Server";
+const AUMID: &str = pocketdesk_core::local::phone_media::MEDIA_CONTROLS_APP_ID;
 
 /// A tool in the real System32, located by asking Windows (not `%SystemRoot%`,
 /// which the user can point anywhere).
