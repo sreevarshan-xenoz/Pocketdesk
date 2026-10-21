@@ -777,7 +777,7 @@
     <string name="linked_to_computer">Mantiene la conexión con tu ordenador con la pantalla apagada</string>
     <string name="health_turn_on">Activar</string>
     <string name="health_paused_stay_linked_off">Android pausó Pocketdesk con la pantalla apagada, así que los mensajes del ordenador esperaron. Activa «Seguir conectado con la pantalla apagada».</string>
-    <string name="health_paused_anyway">Android pausó Pocketdesk con la pantalla apagada, aunque seguía conectado. El ajuste propio de este teléfono debe dejar que funcione en segundo plano.</string>
+    <string name="health_paused_anyway">Android pausó Pocketdesk con la pantalla apagada, aunque «Seguir conectado con la pantalla apagada» estaba activado. El ajuste propio de este teléfono debe dejar que funcione en segundo plano.</string>
     <string name="settings_stay_linked">Seguir conectado con la pantalla apagada</string>
     <string name="settings_stay_linked_summary">Muestra una notificación discreta para que Android no pause Pocketdesk. Algunos teléfonos (OPPO, Xiaomi, Samsung) pausan las apps sin ella.</string>
     <plurals name="health_count">
