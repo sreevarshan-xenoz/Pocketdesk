@@ -802,7 +802,7 @@
     <string name="allowed_title">%1$s எதை அனுமதிக்கிறது</string>
     <string name="allowed_hint">ஒரு வசதி இங்கே இயக்கத்தில் இருந்து கணினியும் அனுமதித்தால் இயங்கும்.</string>
     <string name="allowed_asking">கணினியிடம் கேட்கிறது…</string>
-    <string name="allowed_failed">கணினி பதிலளிக்கவில்லை: %1$s</string>
+    <string name="allowed_failed">கணினி பதிலளிக்கவில்லை. பழைய Pocketdesk உள்ள கணினியால் எதை அனுமதிக்கிறது என்று சொல்ல முடியாது.</string>
     <string name="allowed_not_paired">கணினிக்கு இந்தத் தொலைபேசி தெரியாது. மீண்டும் இணைக்கவும்.</string>
     <string name="allowed_phone_on">இந்தத் தொலைபேசி: இயக்கத்தில்</string>
     <string name="allowed_phone_off">இந்தத் தொலைபேசி: அணைப்பில்</string>
@@ -811,7 +811,7 @@
     <string name="allowed_computer_yes">கணினி: அனுமதிக்கப்பட்டது</string>
     <string name="allowed_computer_permission">கணினி: இந்தத் தொலைபேசிக்கு அணைப்பில்</string>
     <string name="allowed_computer_setting">கணினி: அதன் அமைப்புகளில் அணைப்பில்</string>
-    <string name="allowed_computer_unknown">கணினி: பதில் இல்லை</string>
+    <string name="allowed_computer_unknown">கணினி: சொல்லவில்லை</string>
     <string name="state_title">%1$s இன் நிலை</string>
     <string name="state_loading">கணினியைக் கேட்கிறது…</string>
     <string name="state_failed">கணினியைக் கேட்க முடியவில்லை: %1$s</string>

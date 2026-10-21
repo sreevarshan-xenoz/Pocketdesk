@@ -811,7 +811,7 @@
     <string name="allowed_title">What %1$s allows</string>
     <string name="allowed_hint">A feature works when it is on here and the computer allows it.</string>
     <string name="allowed_asking">Asking the computer…</string>
-    <string name="allowed_failed">The computer did not answer: %1$s</string>
+    <string name="allowed_failed">The computer did not answer. One with an older Pocketdesk cannot tell what it allows.</string>
     <string name="allowed_not_paired">The computer does not know this phone. Pair it again.</string>
     <string name="allowed_phone_on">This phone: on</string>
     <string name="allowed_phone_off">This phone: off</string>
@@ -820,7 +820,7 @@
     <string name="allowed_computer_yes">The computer: allowed</string>
     <string name="allowed_computer_permission">The computer: off for this phone</string>
     <string name="allowed_computer_setting">The computer: off in its Settings</string>
-    <string name="allowed_computer_unknown">The computer: no answer</string>
+    <string name="allowed_computer_unknown">The computer: does not say</string>
     <string name="state_title">How %1$s is doing</string>
     <string name="state_loading">Asking the computer…</string>
     <string name="state_failed">Could not ask the computer: %1$s</string>

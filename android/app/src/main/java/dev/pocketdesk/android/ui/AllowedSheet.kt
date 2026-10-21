@@ -56,7 +56,10 @@ fun AllowedSheet(address: String, controlPort: Int, computer: String, onDismiss:
         withContext(Dispatchers.IO) { RustCore.allowed(address, controlPort) }
             .mapCatching { parseAllowed(it) }
             .onSuccess { rows = AllowedRule.rows(it, switches, reach) }
-            .onFailure { failure = context.plainErrorText(it.message) }
+            .onFailure {
+                android.util.Log.i("AllowedSheet", "No answer: ${it.message}")
+                failure = it.message.orEmpty()
+            }
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -73,7 +76,7 @@ fun AllowedSheet(address: String, controlPort: Int, computer: String, onDismiss:
             val shown = rows
             when {
                 failure != null -> {
-                    Text(stringResource(R.string.allowed_failed, failure.orEmpty()))
+                    Text(stringResource(R.string.allowed_failed))
                     TextButton(onClick = { asks++ }) { Text(stringResource(R.string.retry)) }
                 }
                 shown == null -> Text(stringResource(R.string.allowed_asking))
