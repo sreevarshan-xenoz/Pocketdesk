@@ -3091,7 +3091,7 @@ mod tests {
         for feature in crate::model::FEATURES {
             let label = super::PERMISSIONS
                 .iter()
-                .find(|(c, _, _)| *c == feature.permission)
+                .find(|(c, _, _)| *c == feature.permission())
                 .map(|(_, label, _)| *label);
             assert_eq!(label, Some(feature.permission_name), "{}", feature.key);
         }

@@ -435,10 +435,18 @@ pub struct Feature {
     pub key: &'static str,
     pub what: &'static str,
     pub phone_switch: &'static str,
-    pub permission: Capability,
     /// The permission's label on the Devices page (a test there holds it).
     pub permission_name: &'static str,
     pub android: &'static str,
+}
+
+impl Feature {
+    /// This computer's permission for it, from core's one table (M2), which
+    /// the phone's mirror reads too.
+    pub fn permission(&self) -> Capability {
+        pocketdesk_core::local::phone_switches::capability(self.key)
+            .expect("every feature has a permission")
+    }
 }
 
 /// The features the Devices page lines up, in the phone's order
@@ -448,7 +456,6 @@ pub const FEATURES: &[Feature] = &[
         key: "notifications",
         what: "Its notifications here",
         phone_switch: "This phone's notifications on my computer",
-        permission: Capability::Notifications,
         permission_name: "Show its notifications here",
         android: "notification access",
     },
@@ -456,7 +463,6 @@ pub const FEATURES: &[Feature] = &[
         key: "answers",
         what: "Answering them from here",
         phone_switch: "Let the computer answer notifications",
-        permission: Capability::Notifications,
         permission_name: "Show its notifications here",
         android: "notification access",
     },
@@ -464,7 +470,6 @@ pub const FEATURES: &[Feature] = &[
         key: "texts",
         what: "Its texts here",
         phone_switch: "Show texts on my computer",
-        permission: Capability::Texts,
         permission_name: "Show its texts and send replies",
         android: "the SMS permission",
     },
@@ -472,7 +477,6 @@ pub const FEATURES: &[Feature] = &[
         key: "clipboard",
         what: "The clipboard without a session",
         phone_switch: "Computer's clipboard in the background",
-        permission: Capability::Clipboard,
         permission_name: "Share the clipboard",
         android: "notification access",
     },
@@ -480,7 +484,6 @@ pub const FEATURES: &[Feature] = &[
         key: "files",
         what: "Files from here without a session",
         phone_switch: "Files from the computer in the background",
-        permission: Capability::Files,
         permission_name: "Send and browse files",
         android: "notification access and its notifications",
     },
@@ -488,7 +491,6 @@ pub const FEATURES: &[Feature] = &[
         key: "folders",
         what: "Its folders here",
         phone_switch: "Folders the computer may open",
-        permission: Capability::Files,
         permission_name: "Send and browse files",
         android: "notification access",
     },
@@ -496,7 +498,6 @@ pub const FEATURES: &[Feature] = &[
         key: "photos",
         what: "Its recent photos here",
         phone_switch: "Recent photos on the computer",
-        permission: Capability::Files,
         permission_name: "Send and browse files",
         android: "notification access and photo access",
     },
@@ -504,7 +505,6 @@ pub const FEATURES: &[Feature] = &[
         key: "screenshots",
         what: "Its new screenshots here",
         phone_switch: "Send new screenshots",
-        permission: Capability::Files,
         permission_name: "Send and browse files",
         android: "notification access and photo access",
     },
@@ -512,7 +512,6 @@ pub const FEATURES: &[Feature] = &[
         key: "camera",
         what: "Photos asked from here",
         phone_switch: "Photos the computer asks for",
-        permission: Capability::Files,
         permission_name: "Send and browse files",
         android: "notification access and its notifications",
     },
@@ -520,7 +519,6 @@ pub const FEATURES: &[Feature] = &[
         key: "links",
         what: "Links from here",
         phone_switch: "Links from the computer",
-        permission: Capability::Links,
         permission_name: "Open its links here",
         android: "its notifications",
     },
@@ -528,7 +526,6 @@ pub const FEATURES: &[Feature] = &[
         key: "ring",
         what: "Ringing it from here",
         phone_switch: "Ring from the computer",
-        permission: Capability::Ring,
         permission_name: "Ring this phone from here",
         android: "notification access and its notifications",
     },
@@ -536,7 +533,6 @@ pub const FEATURES: &[Feature] = &[
         key: "media",
         what: "Its music here",
         phone_switch: "My media on the computer",
-        permission: Capability::Media,
         permission_name: "Show and control its media here",
         android: "notification access",
     },
@@ -544,7 +540,6 @@ pub const FEATURES: &[Feature] = &[
         key: "mute",
         what: "Muting it from here",
         phone_switch: "Let the computer mute this phone",
-        permission: Capability::Mute,
         permission_name: "Mute this phone from here",
         android: "notification access",
     },
@@ -552,7 +547,6 @@ pub const FEATURES: &[Feature] = &[
         key: "control",
         what: "Controlling it from its screen here",
         phone_switch: "Let the computer control this phone",
-        permission: Capability::Cast,
         permission_name: "Show its screen or camera here",
         android: "the Pocketdesk control Accessibility service",
     },
@@ -560,7 +554,6 @@ pub const FEATURES: &[Feature] = &[
         key: "dial",
         what: "Calling numbers from here",
         phone_switch: "Calls from the computer",
-        permission: Capability::Dial,
         permission_name: "Call numbers from here",
         android: "its notifications",
     },
@@ -568,7 +561,6 @@ pub const FEATURES: &[Feature] = &[
         key: "commands",
         what: "Commands to its automation apps",
         phone_switch: "Commands from the computer to my automation apps",
-        permission: Capability::Command,
         permission_name: "Send commands to its automation apps",
         android: "notification access",
     },
@@ -587,25 +579,9 @@ pub struct SwitchRow {
     pub advice: Option<String>,
 }
 
-/// The features this computer's Settings turn off for every phone (L7
-/// review), each with the setting's label: they hold the feature back
-/// whatever the phone's permission says.
-pub fn settings_off(
-    config: &pocketdesk_core::local::config::Config,
-) -> Vec<(&'static str, &'static str)> {
-    let mut off = Vec::new();
-    if !config.phone_notifications {
-        off.push(("notifications", "Phone notifications"));
-        off.push(("answers", "Phone notifications"));
-    }
-    if !config.clipboard_push {
-        off.push(("clipboard", "Clipboard to phones"));
-    }
-    if !config.cast_control {
-        off.push(("control", "Control phones from their screen window"));
-    }
-    off
-}
+/// The features this computer's Settings turn off (L7 review), in core
+/// since M2, where the phone's mirror reads it too.
+pub use pocketdesk_core::local::phone_switches::settings_off;
 
 /// The Devices page's rows for a phone: every feature, with advice for
 /// each side that holds back one the phone has on, this computer's first.
@@ -623,7 +599,7 @@ pub fn switch_rows(
                 .iter()
                 .find(|(key, _)| *key == f.key)
                 .map(|(_, label)| *label);
-            let allowed = permissions.allows(f.permission);
+            let allowed = permissions.allows(f.permission());
             let here = allowed && setting.is_none();
             let said = switches.and_then(|s| s.switches.get(f.key));
             let phone = said.map(|s| s.on);

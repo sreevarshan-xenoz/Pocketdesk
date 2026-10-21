@@ -13,7 +13,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::config::Config;
 use super::paths::PHONE_SWITCHES_FILE;
+use crate::protocol::permissions::{Capability, DevicePermissions};
 
 /// The packet a phone tells its switches with.
 pub const SWITCHES: &str = "kdeconnect.pocketdesk.switches";
@@ -103,6 +105,66 @@ pub fn write(state_dir: &Path, phones: &BTreeMap<String, PhoneSwitches>) -> io::
     std::fs::rename(&tmp, &path)
 }
 
+/// The packet a phone asks what this computer allows it with (M2): `{}`
+/// asked, [`allowed_body`] answered.
+pub const ALLOWED: &str = "kdeconnect.pocketdesk.allowed";
+
+/// The per-phone permission a feature needs on this computer (L7, M2): the
+/// one table the Devices page and the phone's mirror both read.
+pub fn capability(feature: &str) -> Option<Capability> {
+    Some(match feature {
+        "notifications" | "answers" => Capability::Notifications,
+        "texts" => Capability::Texts,
+        "clipboard" => Capability::Clipboard,
+        "files" | "folders" | "photos" | "screenshots" | "camera" => Capability::Files,
+        "links" => Capability::Links,
+        "ring" => Capability::Ring,
+        "media" => Capability::Media,
+        "mute" => Capability::Mute,
+        "control" => Capability::Cast,
+        "dial" => Capability::Dial,
+        "commands" => Capability::Command,
+        _ => return None,
+    })
+}
+
+/// The features this computer's Settings turn off for every phone (L7
+/// review), each with the setting's label: they hold the feature back
+/// whatever the phone's permission says.
+pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
+    let mut off = Vec::new();
+    if !config.phone_notifications {
+        off.push(("notifications", "Phone notifications"));
+        off.push(("answers", "Phone notifications"));
+    }
+    if !config.clipboard_push {
+        off.push(("clipboard", "Clipboard to phones"));
+    }
+    if !config.cast_control {
+        off.push(("control", "Control phones from their screen window"));
+    }
+    off
+}
+
+/// What this computer allows a phone (M2), as the phone's mirror reads it:
+/// for each feature, whether this phone's permission allows it and whether
+/// this computer's Settings let any phone have it. Booleans only.
+pub fn allowed_body(permissions: &DevicePermissions, config: &Config) -> serde_json::Value {
+    let off = settings_off(config);
+    let allowed: serde_json::Map<String, serde_json::Value> = FEATURES
+        .iter()
+        .map(|feature| {
+            let permission = capability(feature).is_some_and(|c| permissions.allows(c));
+            let setting = !off.iter().any(|(key, _)| key == feature);
+            (
+                feature.to_string(),
+                serde_json::json!({"permission": permission, "setting": setting}),
+            )
+        })
+        .collect();
+    serde_json::json!({ "allowed": allowed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +234,69 @@ mod tests {
         std::fs::write(dir.join(PHONE_SWITCHES_FILE), "not json").unwrap();
         assert!(read(&dir).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_feature_names_the_permission_it_needs() {
+        use crate::protocol::permissions::Capability;
+        for feature in FEATURES {
+            assert!(capability(feature).is_some(), "{feature}");
+        }
+        assert_eq!(capability("files"), Some(Capability::Files));
+        assert_eq!(capability("answers"), Some(Capability::Notifications));
+        assert_eq!(capability("control"), Some(Capability::Cast));
+        assert_eq!(capability("commands"), Some(Capability::Command));
+        assert_eq!(capability("com.example"), None);
+    }
+
+    #[test]
+    fn settings_turn_off_their_features_for_every_phone() {
+        let on = crate::local::config::Config::default();
+        assert!(settings_off(&on).is_empty());
+        let off = crate::local::config::Config {
+            phone_notifications: false,
+            clipboard_push: false,
+            cast_control: false,
+            ..on
+        };
+        assert_eq!(
+            settings_off(&off),
+            [
+                ("notifications", "Phone notifications"),
+                ("answers", "Phone notifications"),
+                ("clipboard", "Clipboard to phones"),
+                ("control", "Control phones from their screen window"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_answer_says_each_side_this_computer_holds() {
+        use crate::protocol::permissions::{Capability, DevicePermissions};
+        let mut perms = DevicePermissions::default();
+        perms.set(Capability::Files, false);
+        let config = crate::local::config::Config {
+            clipboard_push: false,
+            ..Default::default()
+        };
+        let body = allowed_body(&perms, &config);
+        let allowed = body["allowed"].as_object().unwrap();
+        assert_eq!(allowed.len(), FEATURES.len());
+        assert_eq!(
+            body["allowed"]["files"],
+            json!({"permission": false, "setting": true})
+        );
+        assert_eq!(
+            body["allowed"]["photos"],
+            json!({"permission": false, "setting": true})
+        );
+        assert_eq!(
+            body["allowed"]["clipboard"],
+            json!({"permission": true, "setting": false})
+        );
+        assert_eq!(
+            body["allowed"]["links"],
+            json!({"permission": true, "setting": true})
+        );
     }
 }
