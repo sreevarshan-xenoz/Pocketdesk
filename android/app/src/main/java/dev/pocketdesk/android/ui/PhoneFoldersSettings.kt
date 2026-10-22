@@ -66,10 +66,12 @@ fun PhoneFoldersSection() {
             }
         }
 
-    SettingRow(
-        stringResource(R.string.settings_phone_folders),
-        stringResource(if (folders.isEmpty()) R.string.phone_folders_empty else R.string.settings_phone_folders_summary),
-    )
+    val foldersTitle = stringResource(R.string.settings_phone_folders)
+    val foldersSummary = stringResource(if (folders.isEmpty()) R.string.phone_folders_empty else R.string.settings_phone_folders_summary)
+    SettingRow(foldersTitle, foldersSummary)
+    // Each folder's rows hide with the row above them (O8 review).
+    val addFiles = stringResource(R.string.phone_folders_add_files)
+    SettingsBlock(foldersTitle, foldersSummary, addFiles, *folders.map { it.name }.toTypedArray()) {
     folders.forEach { folder ->
         ListItem(
             headlineContent = { Text(folder.name) },
@@ -115,6 +117,7 @@ fun PhoneFoldersSection() {
                 )
             },
         )
+    }
     }
     // A row like its neighbours, as it opens the picker (E6).
     SettingLink(stringResource(R.string.phone_folders_add), null) { runCatching { pick.launch(null) } }

@@ -26,3 +26,25 @@ Date: 2026-10-22. Plan: `docs/research/2026-10-22-o-cycle.md` §O8.
 
 - **Unit tests:** nothing typed shows every row; every word must be found, across title, summary and group; a group shows while a row is found; words split on any space.
 - **On the OPPO:** a search, a group's name, nothing found, Clear and Back (checklist §191).
+
+## Review
+
+A fresh review found 0 Critical, 3 Important and 7 Minor issues. The OPPO check found one more.
+
+**Found on the OPPO:**
+- **"ring" found "Keep screen on"**, through "dur*ing*" and "stream*ing*". A word typed now matches the start of a word.
+- **Accents:** "conexion" now finds "conexión".
+
+**Important, fixed:**
+- **Choices left showing while searching.** The choices under a row stayed on screen with their row hidden: the pen's pressures, the deck's columns, the notification wait, and each shared folder's rows. They now hide with it.
+- **A flash at each key.** A new filter for each search started with nothing found, so the headings and "No setting matches" flashed at every key. One filter now lasts the screen's life, and rows tell it as they are drawn.
+- **Untested state.** The filter's state is now tested (`SettingsFilterTest`).
+
+**Minor, fixed:**
+- the keyboard's Search key closes it;
+- "No setting matches" is said to TalkBack as it comes.
+
+**Minor, not done:**
+- a hidden row's ⓘ comes back a frame late;
+- a row can stop matching when its own switch changes its summary;
+- the wrapped groups keep their old indentation.

@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -70,8 +71,10 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
 
     var query by rememberSaveable { mutableStateOf("") }
-    val filter = remember(query) { SettingsFilter(query) }
+    val filter = remember { SettingsFilter() }
+    filter.query = query
     BackHandler(enabled = query.isNotEmpty()) { query = "" }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -110,6 +113,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     null
                 },
                 singleLine = true,
+                // Search closes the keyboard (O8 review).
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -119,7 +127,10 @@ fun SettingsScreen(onBack: () -> Unit) {
                     stringResource(R.string.settings_find_none, query.trim()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    // Said to TalkBack as it comes (O8 review).
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
                 )
             }
             CompositionLocalProvider(LocalSettingsFilter provides filter) {
@@ -618,8 +629,12 @@ private fun PenPressure() {
     // Read again when a choice is saved, so the chosen one redraws (E6 review).
     Prefs.observedVersion()
     val chosen = Prefs.penCurve(context)
-    // A row like its neighbours (E6): title and summary, the choice under.
-    SettingRow(stringResource(R.string.settings_pen_pressure), stringResource(R.string.settings_pen_pressure_summary))
+    // A row like its neighbours (E6): title and summary, the choice under,
+    // which hides with it (O8 review).
+    val title = stringResource(R.string.settings_pen_pressure)
+    val summary = stringResource(R.string.settings_pen_pressure_summary)
+    if (!rememberSettingShown(title, summary)) return
+    SettingRow(title, summary)
     ChoiceRow(
         null,
         listOf(
@@ -638,7 +653,10 @@ private fun DeckColumns() {
     val context = LocalContext.current
     Prefs.observedVersion()
     val choices = listOf(2, 3, 4)
-    SettingRow(stringResource(R.string.settings_deck_columns), stringResource(R.string.settings_deck_columns_summary))
+    val title = stringResource(R.string.settings_deck_columns)
+    val summary = stringResource(R.string.settings_deck_columns_summary)
+    if (!rememberSettingShown(title, summary)) return
+    SettingRow(title, summary)
     ChoiceRow(
         null,
         choices.map { it.toString() },

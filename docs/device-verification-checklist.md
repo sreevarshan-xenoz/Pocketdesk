@@ -2564,10 +2564,13 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 
 ## 191. Find a setting on the phone (O8)
 
-Built 2026-10-22. Owed:
-- [ ] "ring" shows "Ring from the computer" under its group's heading, and no other group's heading.
-- [ ] A group's name ("Wake") shows all its rows; "zzz" says no setting matches.
-- [ ] Clear, and Back with the box full, empty it; Back again leaves Settings.
+Built 2026-10-22. Checked on the OPPO:
+- [x] "ring" showed the Ring and ringer rows under their groups' headings, and no other heading (it had found "during" before the review).
+- [x] "wake" showed the Wake group; "zzz" said no setting matches, with no choice rows left over.
+- [x] Back with the box full emptied it, the whole list back.
+
+Owed:
+- [ ] Clear by tap; Back again leaves Settings.
 - [ ] TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
 ## 188. Copies kept on the computer by program or by look (O4)
 

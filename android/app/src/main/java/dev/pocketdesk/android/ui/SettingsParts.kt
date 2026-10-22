@@ -14,6 +14,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.getValue
@@ -43,24 +44,31 @@ import dev.pocketdesk.android.R
  */
 
 /**
- * O8: what Settings' search box holds, and which rows each group's search
- * found (a group's heading shows while one is). A new one per search.
+ * O8: what Settings' search box holds, and each row's group and whether the
+ * search shows it, as last drawn. One for the screen's life, so a new word
+ * starts from what the last showed, not from nothing: headings and "No
+ * setting matches" would flash at each key (O8 review).
  */
-class SettingsFilter(val query: String) {
-    val found = mutableStateMapOf<String, Set<Any>>()
+class SettingsFilter {
+    var query by mutableStateOf("")
+    internal val rows = mutableStateMapOf<Any, Pair<String, Boolean>>()
 
-    /** Whether nothing a search could find was found: one frame behind the rows. */
-    fun nothingFound(): Boolean = SettingsSearch.searching(query) && found.values.all { it.isEmpty() }
+    /** How many of [group]'s rows show. */
+    fun found(group: String): Int = rows.values.count { it.first == group && it.second }
+
+    /** Whether a search shows no row at all. */
+    fun nothingFound(): Boolean = SettingsSearch.searching(query) && rows.values.none { it.second }
 }
 
-val LocalSettingsFilter = compositionLocalOf { SettingsFilter("") }
+/** The screen's filter; outside Settings (the Sound screen's rows) one that never searches. */
+val LocalSettingsFilter = compositionLocalOf { SettingsFilter() }
 private val LocalSettingsGroup = compositionLocalOf { "" }
 
 /** A group: its heading, shown unless a search found nothing in it, then its rows. */
 @Composable
 fun SettingsGroup(label: String, content: @Composable () -> Unit) {
     val filter = LocalSettingsFilter.current
-    if (SettingsSearch.groupShown(filter.query, filter.found[label].orEmpty().size)) SettingsHeader(label)
+    if (SettingsSearch.groupShown(filter.query, filter.found(label))) SettingsHeader(label)
     CompositionLocalProvider(LocalSettingsGroup provides label) { content() }
 }
 
@@ -74,10 +82,9 @@ fun rememberSettingShown(vararg texts: String?): Boolean {
     val group = LocalSettingsGroup.current
     val shown = SettingsSearch.rowShown(filter.query, texts.filterNotNull(), group)
     val key = remember { Any() }
-    DisposableEffect(filter, group, shown) {
-        if (shown && SettingsSearch.searching(filter.query)) filter.found[group] = filter.found[group].orEmpty() + key
-        onDispose { filter.found[group]?.let { filter.found[group] = it - key } }
-    }
+    val entry = group to shown
+    SideEffect { if (filter.rows[key] != entry) filter.rows[key] = entry }
+    DisposableEffect(filter, key) { onDispose { filter.rows.remove(key) } }
     return shown
 }
 

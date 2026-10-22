@@ -157,6 +157,8 @@ fun PhoneNotificationsSection() {
     // C3: how long a notification waits for a computer out of reach.
     val wait = version.let { PhoneNotificationPrefs.waitMinutes(context) }
     SettingRow(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary))
+    // Its choices hide with it (O8 review).
+    SettingsBlock(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary)) {
     Column(Modifier.selectableGroup()) {
         PhoneNotificationPrefs.WAIT_CHOICES.forEach { minutes ->
             val label = when (minutes) {
@@ -175,6 +177,7 @@ fun PhoneNotificationsSection() {
                     .padding(start = 24.dp),
             )
         }
+    }
     }
     if (seen.isEmpty()) {
         // O8: shown as a row is, for the search.
