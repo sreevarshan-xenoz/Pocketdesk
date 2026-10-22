@@ -90,6 +90,44 @@ object FoundComputers {
         return View(unsaved, savedOnline)
     }
 
+    /** O3: a saved computer that may have moved to [found]'s address. */
+    data class Moved(val found: FoundComputer, val saved: HostStore.Host)
+
+    /** The most addresses tried for one card (O3 review: a spoofed record must not block the real one). */
+    const val MAX_TRIES_PER_CARD = 3
+
+    /**
+     * The saved computers that may now be at a found computer's address:
+     * the record names the id [pairedIdOf] gives a saved IPv4 address, at a
+     * private IPv4 address no card holds, at most [MAX_TRIES_PER_CARD] for a
+     * card. Only a candidate: mDNS is unauthenticated, so the card moves
+     * only once the computer there proves the key that address was pinned
+     * to, and its old address no longer answers as it. A computer saved by
+     * name keeps its name; two cards for one id are left alone.
+     */
+    fun moved(
+        found: List<FoundComputer>,
+        saved: List<HostStore.Host>,
+        pairedIdOf: (String) -> String?,
+    ): List<Moved> {
+        val savedAddresses = saved.map { it.address }.toSet()
+        val byId = saved.filter { isIpv4(it.address) }
+            .mapNotNull { host -> pairedIdOf(host.address)?.let { it to host } }
+            .groupBy({ it.first }, { it.second })
+            .filterValues { it.size == 1 }
+            .mapValues { it.value.single() }
+        return found
+            .filter {
+                it.id.isNotBlank() && isIpv4(it.address) && isPrivateIpv4(it.address) &&
+                    it.address !in savedAddresses
+            }
+            .mapNotNull { computer -> byId[computer.id]?.let { Moved(computer, it) } }
+            .distinctBy { it.saved.address to it.found.address }
+            .groupBy { it.saved.address }
+            .values
+            .flatMap { it.take(MAX_TRIES_PER_CARD) }
+    }
+
     private fun isIpv4(address: String): Boolean {
         val parts = address.split('.')
         return parts.size == 4 && parts.all { p -> p.toIntOrNull()?.let { it in 0..255 } == true }

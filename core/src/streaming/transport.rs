@@ -291,6 +291,27 @@ impl CertManager {
         Ok(())
     }
 
+    /// Pin for `to_address` what is pinned for `from_address` (O3: a paired
+    /// computer found again at a new address, after it proved that key
+    /// there). Returns whether there was a pin to copy.
+    pub fn copy_pin(&self, from_address: &str, to_address: &str) -> Result<bool> {
+        let (Some(from), Some(to)) = (
+            peer_label_for_address(from_address),
+            peer_label_for_address(to_address),
+        ) else {
+            return Ok(false);
+        };
+        let pinned = match &self.peers_path {
+            Some(path) => read_pins(path)?.get(&from).copied(),
+            None => self.known_peers.lock().unwrap().get(&from).copied(),
+        };
+        let Some(hash) = pinned else {
+            return Ok(false);
+        };
+        self.pin_peer(&to, hash)?;
+        Ok(true)
+    }
+
     /// Forget the peer `label`, here and on disk. Returns whether it was
     /// pinned.
     pub fn remove_peer(&self, label: &str) -> Result<bool> {
@@ -492,7 +513,22 @@ impl CertManager {
         port: u16,
         timeout: std::time::Duration,
     ) -> IdentityProbe {
-        let Some(label) = peer_label_for_address(address) else {
+        self.probe_identity_as(address, port, address, timeout)
+            .await
+    }
+
+    /// [`probe_identity`](Self::probe_identity) of whoever answers at
+    /// `address`, judged against the pin held for `pinned_address` (O3: a
+    /// paired computer announcing itself at a new address must prove the
+    /// key its old address was pinned to before the phone follows it).
+    pub async fn probe_identity_as(
+        &self,
+        address: &str,
+        port: u16,
+        pinned_address: &str,
+        timeout: std::time::Duration,
+    ) -> IdentityProbe {
+        let Some(label) = peer_label_for_address(pinned_address) else {
             return IdentityProbe::Failed;
         };
         let pinned = match &self.peers_path {
@@ -1387,6 +1423,28 @@ mod tests {
             "a computer saved by name is pinned under its name"
         );
         assert_eq!(peer_label_for_address(""), None);
+    }
+
+    /// O3: a pin follows a computer to its new address, and only a pin.
+    #[test]
+    fn a_pin_is_copied_to_a_new_address() {
+        let dir = pin_dir("copy");
+        let manager = CertManager::load_or_create(&dir).unwrap();
+        let old = peer_label_for_address("192.0.2.20").unwrap();
+        manager.pin_peer(&old, [9u8; 32]).unwrap();
+        assert!(manager.copy_pin("192.0.2.20", "192.0.2.21").unwrap());
+        let next = CertManager::load_or_create(&dir).unwrap();
+        let new = peer_label_for_address("192.0.2.21").unwrap();
+        assert!(next.known_peers().contains(&(new, [9u8; 32])));
+        assert!(
+            next.known_peers().contains(&(old, [9u8; 32])),
+            "the old stays until the card moves"
+        );
+        assert!(
+            !manager.copy_pin("192.0.2.99", "192.0.2.22").unwrap(),
+            "nothing pinned"
+        );
+        assert!(!manager.copy_pin("", "192.0.2.22").unwrap());
     }
 
     #[test]

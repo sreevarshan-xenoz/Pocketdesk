@@ -83,6 +83,7 @@
     <string name="auto_connect">Conectar al abrir la app</string>
     <string name="connect">Conectar</string>
     <string name="send_wol">Enviar Wake-on-LAN</string>
+    <string name="home_computer_moved">Se encontró %1$s en su nueva dirección, %2$s, y se movió allí.</string>
     <string name="wake_sent">Encendido enviado a %1$s.</string>
     <string name="wake_failed">Error al despertar: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>

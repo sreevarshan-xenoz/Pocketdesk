@@ -92,6 +92,7 @@
     <string name="auto_connect">Connect to it when the app opens</string>
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
+    <string name="home_computer_moved">Found %1$s at its new address, %2$s, and moved it there.</string>
     <string name="wake_sent">Wake sent to %1$s.</string>
     <string name="wake_failed">Wake failed: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>

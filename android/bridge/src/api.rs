@@ -114,6 +114,20 @@ pub fn forget_peer_certificate(address: String) -> Result<bool, String> {
     forget_peer_certificate_in(&dir, &address)
 }
 
+/// Pin for `to` what is pinned for `from` (O3), once the computer at `to`
+/// proved that key; whether there was one.
+pub fn copy_peer_certificate(from: String, to: String) -> Result<bool, String> {
+    let dir = crate::CERT_DIR
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "no data directory configured".to_string())?;
+    pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
+        .map_err(|e| e.to_string())?
+        .copy_pin(&from, &to)
+        .map_err(|e| e.to_string())
+}
+
 pub(crate) fn forget_peer_certificate_in(
     cert_dir: &std::path::Path,
     address: &str,
@@ -474,6 +488,17 @@ pub(crate) fn control_manager(timeout: Duration) -> Result<ConnectionManager, St
 /// address, for the Connection Doctor (T1): `matches`, `changed`,
 /// `not_pinned`, `not_pocketdesk`, `closed` or `failed`. Never saves a pin.
 pub async fn check_identity(address: String, port: u16) -> Result<String, String> {
+    check_identity_as(address.clone(), port, address).await
+}
+
+/// [`check_identity`] of whoever answers at `address`, judged against the
+/// pin held for `pinned_address` (O3: a saved computer announcing itself at
+/// a new address). It never saves a pin.
+pub async fn check_identity_as(
+    address: String,
+    port: u16,
+    pinned_address: String,
+) -> Result<String, String> {
     use pocketdesk_core::streaming::transport::IdentityProbe;
     let dir = crate::CERT_DIR
         .lock()
@@ -483,7 +508,7 @@ pub async fn check_identity(address: String, port: u16) -> Result<String, String
     let certs = pocketdesk_core::streaming::transport::CertManager::load_or_create(&dir)
         .map_err(|e| format!("This phone's certificate: {e}"))?;
     let verdict = certs
-        .probe_identity(&address, port, Duration::from_secs(3))
+        .probe_identity_as(&address, port, &pinned_address, Duration::from_secs(3))
         .await;
     Ok(match verdict {
         IdentityProbe::Matches => "matches",
