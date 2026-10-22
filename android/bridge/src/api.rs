@@ -803,6 +803,14 @@ pub async fn connect_to_peer(
                                 // The computer's clipboard (T10b), kept
                                 // for the app; still passed on, since it is
                                 // also the answer to the phone's request.
+                                // N7: whether the computer is in use.
+                                if trimmed.contains("in_use_answer")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type
+                                        == pocketdesk_core::protocol::in_use::ANSWER
+                                {
+                                    crate::in_use::receive(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // N5: the computer's music, kept for the app.
                                 if trimmed.contains("computer_media")
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
@@ -1167,7 +1175,9 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
 /// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 10] = [
+const PHONE_PACKETS: [&str; 11] = [
+    // N7: is the computer in use?
+    pocketdesk_core::protocol::in_use::ASK,
     // N5: tell me the computer's music, or stop.
     pocketdesk_core::protocol::computer_media::WATCH,
     // E1: how an answer from the computer went.

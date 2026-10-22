@@ -21,11 +21,12 @@ pub(crate) const MAX_LINKS: usize = 3;
 /// The packet that names the link's role to the computer (L8 part 2).
 const LINK_ROLE: &str = "kdeconnect.pocketdesk.link_role";
 
-/// What is sent on such a link: a notification or its cancel, and how an
-/// answer from that computer went (E1).
-const SENT: [&str; 2] = [
+/// What is sent on such a link: a notification or its cancel, how an
+/// answer from that computer went (E1), and whether it is in use (N7).
+const SENT: [&str; 3] = [
     "kdeconnect.notification",
     pocketdesk_core::protocol::notification_action::NOTIFICATION_ANSWERED,
+    pocketdesk_core::protocol::in_use::ASK,
 ];
 
 type Writer = Arc<Mutex<ControlWriter>>;
@@ -94,6 +95,13 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
         let mut lines = tokio::io::BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let trimmed = line.trim();
+            // Whether that computer is in use (N7), kept with it.
+            if trimmed.contains("in_use_answer")
+                && let Ok(packet) = NetworkPacket::from_wire(trimmed)
+                && packet.packet_type == pocketdesk_core::protocol::in_use::ANSWER
+            {
+                crate::in_use::receive(&packet.body, &address, port);
+            }
             // The computer's answers and clears (T10c, L1), kept with it.
             if (trimmed.contains("kdeconnect.notification.")
                 || trimmed.contains("notification_open"))

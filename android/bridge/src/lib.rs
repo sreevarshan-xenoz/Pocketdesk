@@ -15,6 +15,7 @@ mod deck;
 mod dials;
 mod download;
 mod extra_links;
+mod in_use;
 mod link;
 mod link_quiet;
 mod links;
@@ -1593,6 +1594,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeCom
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(computer_media::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// Each computer's last word on whether it is in use (N7), as
+/// `{"ok": "{\"host:port\": {inUse, ageMs}}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeInUseAnswers(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(in_use::json()));
     to_jstring(&mut env, json)
 }
 
