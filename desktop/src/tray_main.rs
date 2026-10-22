@@ -34,7 +34,15 @@ fn main() {
         }
     };
     let mut tray = match Tray::new() {
-        Ok(tray) => tray,
+        Ok(tray) => Some(tray),
+        // N10: a Linux desktop with no tray host (GNOME as it comes, a bare
+        // Sway) keeps this program without an icon: it still holds the
+        // phone's player in the media controls and opens the window for
+        // what asks the owner. The window never counted on its icon.
+        Err(e) if cfg!(target_os = "linux") => {
+            eprintln!("Pocketdesk tray: no tray icon ({e}); running without one");
+            None
+        }
         Err(e) => {
             eprintln!("Pocketdesk tray: no tray icon ({e})");
             std::process::exit(1);
@@ -67,11 +75,11 @@ fn main() {
     let mut player = pocketdesk_desktop::phone_player::Watch::default();
     loop {
         let (pressed, typing_pressed) = wait(&woken, REFRESH);
-        if tray.closed() {
+        if tray.as_ref().is_some_and(Tray::closed) {
             // No icon any more: free the claim, so a tray can start again.
             return;
         }
-        for action in tray.take_actions() {
+        for action in tray.as_ref().map(Tray::take_actions).unwrap_or_default() {
             if !act(&state_dir, action) {
                 return;
             }
@@ -143,7 +151,9 @@ fn main() {
                     &hotkey::display(&key.status.key),
                 );
             }
-            tray.show(entries);
+            if let Some(tray) = tray.as_mut() {
+                tray.show(entries);
+            }
             refreshed = Some(Instant::now());
         }
     }
