@@ -1312,7 +1312,7 @@ impl PocketdeskApp {
             ) {
                 Ok(_) => Ok(match action {
                     PhoneAction::Screenshot => format!(
-                        "Asked {who} for a screenshot: it arrives as its new screenshots do (\"Send new screenshots\" on in its Settings)."
+                        "Asked {who} for a screenshot: it arrives as its new screenshots do, with \"Send new screenshots\" on in its Settings and Files allowed for it here."
                     ),
                     PhoneAction::Lock => format!("Asked {who} to lock its screen."),
                 }),

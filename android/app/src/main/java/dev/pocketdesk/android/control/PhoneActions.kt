@@ -38,7 +38,10 @@ object PhoneActions {
                 sdk = Build.VERSION.SDK_INT,
                 locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true,
                 awake = context.getSystemService(PowerManager::class.java)?.isInteractive ?: false,
-                screenshots = ScreenshotPrefs.on(context) && ScreenshotPrefs.granted(context),
+                // T10h carries it, to the clipboard or Downloads (O2 review: with
+                // both off, it would be taken and go nowhere).
+                screenshots = ScreenshotPrefs.on(context) && ScreenshotPrefs.granted(context) &&
+                    (ScreenshotPrefs.clipboard(context) || ScreenshotPrefs.save(context)),
                 withinBudget = true,
             )
             if (decision == PhoneActionRule.Decision.DO && !budget.take(SystemClock.elapsedRealtime())) {

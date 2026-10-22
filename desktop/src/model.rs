@@ -617,7 +617,7 @@ pub const FEATURES: &[Feature] = &[
         what: "Screenshots of it and locking it from here",
         phone_switch: "Let the computer take screenshots and lock this phone",
         permission_name: "Take screenshots of it and lock it from here",
-        android: "the Pocketdesk control Accessibility service",
+        android: "the Pocketdesk control Accessibility service and notification access",
     },
 ];
 
