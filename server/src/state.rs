@@ -120,8 +120,9 @@ fn newest_per_device(clients: Vec<Arc<dyn DeviceSender>>) -> Vec<Arc<dyn DeviceS
 }
 
 /// The connections a phone opened only to carry copies of its notifications
-/// (L8 part 2): they take that computer's answers and clears, and nothing
-/// else, so they are no push target and no sign the phone is linked.
+/// (L8 part 2): they take that computer's answers and clears, and whether
+/// it is in use (N7), and nothing else, so they are no push target and no
+/// sign the phone is linked.
 static COPY_LINKS: LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
     LazyLock::new(Default::default);
 

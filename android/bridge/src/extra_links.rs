@@ -1,7 +1,8 @@
 //! Links to the phone's other computers (L8 part 2): besides the control
 //! link to its own computer, one link to each other computer its owner
 //! picked, on the home road. A copy of a notification goes on it, and the
-//! answers and clears that computer sends back come in on it, kept with the
+//! answers and clears that computer sends back come in on it (and whether
+//! it is in use, N7), kept with the
 //! computer they came from, as the own link's are. Nothing else on such a
 //! link is taken: the phone works with its own computer only.
 

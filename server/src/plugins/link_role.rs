@@ -2,9 +2,10 @@
 //! to another computer of its owner's only to carry copies of its
 //! notifications says so as the link opens, with
 //! `kdeconnect.pocketdesk.link_role {role: "copies"}`. That connection then
-//! takes this computer's answers and clears to its notifications and
-//! nothing else: it is no push target, and the phone is not shown as linked
-//! by it (`state::mark_copy_link`).
+//! takes this computer's answers and clears to its notifications, and the
+//! answer to whether it is in use (N7), and nothing else: it is no push
+//! target, and the phone is not shown as linked by it
+//! (`state::mark_copy_link`).
 //!
 //! It only narrows what the connection is used for, so any connection may
 //! say it, paired or not.
