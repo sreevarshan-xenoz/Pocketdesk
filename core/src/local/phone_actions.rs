@@ -23,6 +23,9 @@ pub struct PhoneActionRequest {
     pub device_id: String,
     /// The action's word ([`PhoneAction::as_str`]).
     pub action: String,
+    /// The app an `open` opens (P2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
     pub created_unix: u64,
 }
 
@@ -40,6 +43,29 @@ pub fn request(
     action: PhoneAction,
     now_unix: u64,
 ) -> io::Result<PhoneActionRequest> {
+    write_request(state_dir, device_id, action, None, now_unix)
+}
+
+/// P2: ask the server to have `device_id` open the app `app`.
+pub fn request_open(
+    state_dir: &Path,
+    device_id: &str,
+    app: &str,
+    now_unix: u64,
+) -> io::Result<PhoneActionRequest> {
+    if !crate::protocol::phone_action::valid_app_id(app) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not an app"));
+    }
+    write_request(state_dir, device_id, PhoneAction::Open, Some(app), now_unix)
+}
+
+fn write_request(
+    state_dir: &Path,
+    device_id: &str,
+    action: PhoneAction,
+    app: Option<&str>,
+    now_unix: u64,
+) -> io::Result<PhoneActionRequest> {
     if device_id.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "no phone"));
     }
@@ -47,6 +73,7 @@ pub fn request(
         id: uuid::Uuid::new_v4().to_string(),
         device_id: device_id.to_string(),
         action: action.as_str().to_string(),
+        app: app.map(str::to_string),
         created_unix: now_unix,
     };
     let file = path(state_dir, &request.id)?;
@@ -86,7 +113,16 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<PhoneActionRequest> {
         };
         let fresh =
             request.created_unix <= now_unix && now_unix - request.created_unix <= ACTION_TTL_SECS;
-        if fresh && request.id == stem && is_valid_id(&request.id) && request.action().is_some() {
+        // An open names a valid app, and nothing else names one (P2).
+        let app_right = match request.action() {
+            Some(PhoneAction::Open) => request
+                .app
+                .as_deref()
+                .is_some_and(crate::protocol::phone_action::valid_app_id),
+            Some(_) => request.app.is_none(),
+            None => false,
+        };
+        if fresh && request.id == stem && is_valid_id(&request.id) && app_right {
             taken.push(request);
         }
     }
@@ -139,6 +175,18 @@ mod tests {
         .unwrap();
         assert!(take_all(&dir, 1_000).is_empty(), "not an action");
         assert!(request(&dir, "", PhoneAction::Lock, 1).is_err());
+        // P2: an open carries its app; a bad one is refused or dropped.
+        let open = request_open(&dir, "phone-a", "org.example.app", 1_000).unwrap();
+        assert_eq!(take_all(&dir, 1_000), vec![open]);
+        assert!(request_open(&dir, "phone-a", "bad id", 1_000).is_err());
+        let mut odd = request(&dir, "phone-a", PhoneAction::Open, 1_000).unwrap();
+        odd.app = None;
+        std::fs::write(
+            path(&dir, &odd.id).unwrap(),
+            serde_json::to_string(&odd).unwrap(),
+        )
+        .unwrap();
+        assert!(take_all(&dir, 1_000).is_empty(), "an open without its app");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

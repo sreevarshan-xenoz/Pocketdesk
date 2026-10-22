@@ -14,6 +14,7 @@ pub mod monitors;
 pub mod notification;
 pub mod notification_reply;
 pub mod pair;
+pub mod phone_apps;
 pub mod phone_battery;
 pub mod phone_files;
 pub mod phone_media;
@@ -77,6 +78,7 @@ pub fn register_all() -> PluginSet {
     registry.register(allowed::AllowedPlugin);
     registry.register(typing::TypingPlugin);
     registry.register(phone_switches::PhoneSwitchesPlugin);
+    registry.register(phone_apps::PhoneAppsPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(computer_media::ComputerMediaPlugin);
     registry.register(in_use::InUsePlugin);
