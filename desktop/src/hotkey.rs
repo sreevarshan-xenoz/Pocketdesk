@@ -1,6 +1,7 @@
-//! The key that sends this computer's clipboard to a phone (H3): parsed
-//! from desktop Settings ("ctrl+alt+p"), and which phone it goes to. Kept
-//! apart from Windows so it is tested; `tray_main` registers it with
+//! The key that sends this computer's clipboard to a phone (H3), and the
+//! one that opens the window typing on a phone (N9): parsed from desktop
+//! Settings ("ctrl+alt+p"), and which phone each goes to. Kept apart from
+//! Windows so it is tested; `tray_main` registers them with
 //! `RegisterHotKey` and acts on `WM_HOTKEY`.
 
 use std::path::Path;
@@ -10,6 +11,9 @@ use crate::model::PhoneRow;
 /// What the tray program says of the key (H3 review): the tray has no
 /// console, so Settings shows this instead.
 pub const STATUS_FILE: &str = "clipboard_hotkey.json";
+
+/// The typing key's (N9).
+pub const TYPING_STATUS_FILE: &str = "typing_hotkey.json";
 
 /// The key as the tray program last saw it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -25,17 +29,27 @@ pub struct Status {
 }
 
 pub fn write_status(state_dir: &Path, status: &Status) {
+    write_status_to(state_dir, STATUS_FILE, status);
+}
+
+/// The status of the key whose file is `file`.
+pub fn write_status_to(state_dir: &Path, file: &str, status: &Status) {
     let body = serde_json::json!({
         "key": status.key,
         "registered": status.registered,
         "taken": status.taken,
         "no_phone": status.no_phone,
     });
-    let _ = std::fs::write(state_dir.join(STATUS_FILE), body.to_string());
+    let _ = std::fs::write(state_dir.join(file), body.to_string());
 }
 
 pub fn read_status(state_dir: &Path) -> Option<Status> {
-    let raw = std::fs::read_to_string(state_dir.join(STATUS_FILE)).ok()?;
+    read_status_from(state_dir, STATUS_FILE)
+}
+
+/// The status of the key whose file is `file`.
+pub fn read_status_from(state_dir: &Path, file: &str) -> Option<Status> {
+    let raw = std::fs::read_to_string(state_dir.join(file)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let flag = |k: &str| {
         v.get(k)
@@ -53,6 +67,28 @@ pub fn read_status(state_dir: &Path) -> Option<Status> {
 /// What Settings says of the key `text` from the tray's [Status]; None when
 /// there is nothing to say, or the status is of another key.
 pub fn status_words(text: &str, status: Option<&Status>) -> Option<&'static str> {
+    status_words_saying(
+        text,
+        status,
+        "Registered. The last press found no phone the clipboard reaches.",
+    )
+}
+
+/// The typing key's words (N9).
+pub fn typing_status_words(text: &str, status: Option<&Status>) -> Option<&'static str> {
+    status_words_saying(
+        text,
+        status,
+        "Registered. The last press found no linked phone this computer may type on.",
+    )
+}
+
+/// [status_words], saying `no_phone` after a press that found none.
+fn status_words_saying(
+    text: &str,
+    status: Option<&Status>,
+    no_phone: &'static str,
+) -> Option<&'static str> {
     let text = text.trim();
     if text.is_empty() || parse(text).is_none() {
         return None;
@@ -64,9 +100,7 @@ pub fn status_words(text: &str, status: Option<&Status>) -> Option<&'static str>
         Some(s) if s.taken => {
             Some("Another app holds this combination; the tray tries again every 30 s.")
         }
-        Some(s) if s.no_phone => {
-            Some("Registered. The last press found no phone the clipboard reaches.")
-        }
+        Some(s) if s.no_phone => Some(no_phone),
         Some(s) if s.registered => Some("Registered."),
         Some(_) => None,
     }
@@ -144,6 +178,20 @@ pub fn display(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("+")
+}
+
+/// The phone the typing key opens the window for (N9): a linked one this
+/// computer may control, the one in the newest session first.
+pub fn typing_phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
+    rows.iter()
+        .filter(|r| {
+            r.device.linked
+                && r.device
+                    .permissions
+                    .allows(pocketdesk_core::protocol::permissions::Capability::Cast)
+        })
+        .max_by_key(|r| r.last_session.unwrap_or(0))
+        .map(|r| r.device.id.as_str())
 }
 
 /// The phone the key sends to: one the clipboard reaches now, the one in
@@ -235,6 +283,12 @@ mod tests {
                 .unwrap()
                 .contains("no phone")
         );
+        // N9: the typing key's own words.
+        assert!(
+            typing_status_words("ctrl+alt+p", Some(&pressed))
+                .unwrap()
+                .contains("type on")
+        );
     }
 
     #[test]
@@ -276,5 +330,48 @@ mod tests {
             Some("a")
         );
         assert_eq!(phone(&[row(&devices[0], None, false)]), None);
+    }
+
+    /// N9: the typing key opens the window for a linked phone this computer
+    /// may control, the newest session's first.
+    #[test]
+    fn the_typing_key_goes_to_a_linked_phone_it_may_control() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let device = |id: &str, linked: bool, cast: bool| {
+            let mut d = Device {
+                id: id.to_string(),
+                linked,
+                ..Default::default()
+            };
+            d.permissions.set(Capability::Cast, cast);
+            d
+        };
+        let devices: &'static [Device; 3] = Box::leak(Box::new([
+            device("a", true, true),
+            device("b", true, false),
+            device("c", false, true),
+        ]));
+        let row = |device: &'static Device, last: Option<u64>| PhoneRow {
+            device,
+            place: crate::model::Place::Away,
+            last_session: last,
+            ring: Err("x"),
+            mute: Err("x"),
+            file: Err("x"),
+            link: Err("x"),
+            clipboard: Err("x"),
+            playing: None,
+        };
+        let rows = [
+            row(&devices[0], Some(1)),
+            row(&devices[1], Some(9)),
+            row(&devices[2], Some(9)),
+        ];
+        assert_eq!(
+            typing_phone(&rows),
+            Some("a"),
+            "linked and controllable only"
+        );
+        assert_eq!(typing_phone(&rows[1..]), None);
     }
 }

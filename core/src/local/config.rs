@@ -163,6 +163,10 @@ pub struct Config {
     /// Windows. Empty (the default) is off.
     #[serde(default)]
     pub clipboard_hotkey: String,
+    /// A key that opens the window typing on a phone from anywhere (N9,
+    /// M4 part 2), through the tray program on Windows. Empty is off.
+    #[serde(default)]
+    pub typing_hotkey: String,
     /// Show a phone's player in this computer's own media controls (K7):
     /// Windows' volume flyout and media keys, through the tray program.
     /// Off by default.
@@ -197,6 +201,9 @@ pub struct Config {
     /// off (the default), else 80, 90 or 100.
     #[serde(default)]
     pub charged_alert: u8,
+    /// Whether a phone running out of room is told of once (N9). On.
+    #[serde(default = "default_true")]
+    pub phone_storage_alerts: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -372,6 +379,7 @@ impl Default for Config {
             computer_clipboard: false,
             clipboard_history: 0,
             clipboard_hotkey: String::new(),
+            typing_hotkey: String::new(),
             phone_media_controls: false,
             phone_drive: false,
             phone_drive_write: true,
@@ -380,6 +388,7 @@ impl Default for Config {
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             charged_alert: 0,
+            phone_storage_alerts: true,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -595,6 +604,7 @@ impl Config {
         "clipboard_push",
         "clipboard_images",
         "clipboard_hotkey",
+        "typing_hotkey",
         "phone_media_controls",
         "computer_clipboard",
         "clipboard_history",
@@ -605,6 +615,7 @@ impl Config {
         "kdeconnect_compat",
         "phone_battery_alerts",
         "charged_alert",
+        "phone_storage_alerts",
         "sms_keep",
         "sms_names",
         "wake_announce",

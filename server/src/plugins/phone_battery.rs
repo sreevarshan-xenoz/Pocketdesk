@@ -83,6 +83,60 @@ impl LowBatteryWatch {
     }
 }
 
+/// A phone running out of room (N9): told once when its free storage falls
+/// under [`full_limit_mb`], and again only after it has had
+/// [`ROOM_AGAIN_MB`] more than that since.
+#[derive(Debug, Default)]
+struct FullWatch {
+    told: std::collections::HashSet<String>,
+}
+
+/// Free storage under this always counts as nearly full: a gigabyte, as the
+/// phone counts (decimal).
+const FULL_MB: u64 = 1000;
+
+/// Room above the limit a phone must have again before it is told again.
+const ROOM_AGAIN_MB: u64 = 512;
+
+/// The free storage under which a phone of `total_mb` is nearly full: a
+/// gigabyte, or 2 % of a large one.
+fn full_limit_mb(total_mb: Option<u64>) -> u64 {
+    FULL_MB.max(total_mb.unwrap_or(0) / 50)
+}
+
+impl FullWatch {
+    /// `device`'s free and total storage; the free megabytes to tell of when
+    /// it has just become nearly full and `on`.
+    fn report(
+        &mut self,
+        device: &str,
+        free_mb: Option<u64>,
+        total_mb: Option<u64>,
+        on: bool,
+    ) -> Option<u64> {
+        let free = free_mb?;
+        let limit = full_limit_mb(total_mb);
+        if free >= limit + ROOM_AGAIN_MB {
+            self.told.remove(device);
+            return None;
+        }
+        if !on || free >= limit || !self.told.insert(device.to_string()) {
+            return None;
+        }
+        Some(free)
+    }
+}
+
+/// `mb` megabytes as a person reads them, as the Overview says them: the
+/// phone counts in decimal and in 100 MB steps (N9 review).
+fn megabytes(mb: u64) -> String {
+    match mb {
+        0 => "under 100 MB".to_string(),
+        1000.. => format!("{:.1} GB", mb as f64 / 1000.0),
+        _ => format!("{mb} MB"),
+    }
+}
+
 /// When a phone has charged to a level (L3): once a charge, armed again
 /// once it is unplugged or 5 % under the level.
 #[derive(Default)]
@@ -135,6 +189,7 @@ struct Reports {
     dirty: bool,
     watch: LowBatteryWatch,
     charged: ChargedWatch,
+    full: FullWatch,
     /// Whether the last report taken fell low (warned or not, as the
     /// setting says), for the event log.
     last_low: bool,
@@ -148,6 +203,7 @@ impl Reports {
         }
         self.watch.phones.remove(device);
         self.charged.armed.remove(device);
+        self.full.told.remove(device);
     }
 
     /// Forget every phone not in `paired`: one removed or unpaired leaves
@@ -158,6 +214,7 @@ impl Reports {
             .keys()
             .chain(self.watch.phones.keys())
             .chain(self.charged.armed.keys())
+            .chain(self.full.told.iter())
             .filter(|id| !paired.contains(*id))
             .cloned()
             .collect();
@@ -285,6 +342,24 @@ pub(crate) fn take_from(device: &str, body: &serde_json::Value) {
             Instant::now(),
         );
         let changed = before != Some((report.charge, report.charging));
+        // N9: a phone nearly full, once; looked at only when nothing else is
+        // said and it can be (N9 review: told while another warning or a
+        // pause took its place, it was never said).
+        let full = (warning.is_none() && !crate::paused::now())
+            .then(|| {
+                reports.full.report(
+                    device,
+                    report.state.storage_free_mb,
+                    report.state.storage_total_mb,
+                    crate::events::current_config().phone_storage_alerts,
+                )
+            })
+            .flatten()
+            .map(|free| {
+                let short: String = device.chars().take(8).collect();
+                format!("Phone {short}: nearly full ({} free)", megabytes(free))
+            });
+        let warning = warning.or(full);
         (warning, changed, reports.last_low)
     };
     if changed {
@@ -364,6 +439,45 @@ pub async fn run_writer() {
 
 #[cfg(test)]
 mod tests {
+    /// N9: nearly full once, again only after it has had room.
+    #[test]
+    fn nearly_full_tells_once_until_there_is_room_again() {
+        let mut watch = FullWatch::default();
+        assert_eq!(watch.report("p", Some(5_000), Some(64_000), true), None);
+        assert_eq!(watch.report("p", Some(900), Some(64_000), true), Some(900));
+        assert_eq!(
+            watch.report("p", Some(800), Some(64_000), true),
+            None,
+            "once"
+        );
+        assert_eq!(
+            watch.report("p", Some(1_300), Some(64_000), true),
+            None,
+            "not room enough yet"
+        );
+        assert_eq!(watch.report("p", Some(700), Some(64_000), true), None);
+        assert_eq!(
+            watch.report("p", Some(2_000), Some(64_000), true),
+            None,
+            "room again"
+        );
+        assert_eq!(watch.report("p", Some(900), Some(64_000), true), Some(900));
+        // A large phone: 2 % of it.
+        assert_eq!(
+            watch.report("q", Some(4_000), Some(256_000), true),
+            Some(4_000)
+        );
+        assert_eq!(watch.report("r", Some(10), None, false), None, "off");
+        assert_eq!(
+            watch.report("s", None, Some(64_000), true),
+            None,
+            "not said"
+        );
+        assert_eq!(megabytes(900), "900 MB");
+        assert_eq!(megabytes(4_100), "4.1 GB");
+        assert_eq!(megabytes(0), "under 100 MB");
+    }
+
     /// L3: charged to the level once a charge, at or above it, armed again
     /// unplugged or 5 % under; nothing with it off.
     #[test]

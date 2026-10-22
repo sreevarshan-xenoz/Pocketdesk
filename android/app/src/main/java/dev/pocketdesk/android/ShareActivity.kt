@@ -80,9 +80,10 @@ class ShareActivity : ComponentActivity() {
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
         if (intent.component?.className == OPEN_ON_COMPUTER) {
-            val url = text?.let { LinkRule.find(it) }
-                ?: return done(getString(R.string.link_not_web))
-            return sendLink(host, url)
+            // N9: every link it holds, as KDE Connect sends them.
+            val urls = text?.let { LinkRule.findAll(it) }.orEmpty()
+            if (urls.isEmpty()) return done(getString(R.string.link_not_web))
+            return sendLinks(host, urls)
         }
         when {
             uris.isNotEmpty() && !ShortcutPlan.shareable(uris.map { it.scheme }) ->
@@ -134,15 +135,27 @@ class ShareActivity : ComponentActivity() {
         }.start()
     }
 
-    private fun sendLink(host: HostStore.Host, url: String) {
+    private fun sendLinks(host: HostStore.Host, urls: List<String>) {
         Thread {
-            val result = RustCore.sendLink(host.address, host.controlPort, url)
+            // In order, stopping at the first that does not go.
+            var sent = 0
+            var failure: Throwable? = null
+            for (url in urls) {
+                val result = RustCore.sendLink(host.address, host.controlPort, url)
+                if (result.isFailure) {
+                    failure = result.exceptionOrNull()
+                    break
+                }
+                sent++
+            }
             runOnUiThread {
                 done(
-                    if (result.isSuccess) {
-                        getString(R.string.link_sent)
-                    } else {
-                        getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
+                    when {
+                        failure == null && sent == 1 -> getString(R.string.link_sent)
+                        failure == null -> resources.getQuantityString(R.plurals.links_sent, sent, sent)
+                        // How many went first (N9 review: a retry would send them again).
+                        sent > 0 -> getString(R.string.links_sent_then_failed, sent, urls.size, plainErrorText(failure.message))
+                        else -> getString(R.string.share_failed, plainErrorText(failure.message))
                     },
                 )
             }

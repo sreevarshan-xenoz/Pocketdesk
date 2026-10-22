@@ -136,6 +136,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "typing_hotkey",
+        "Type on the phone with a key",
+        Section::Phones,
+    ),
+    (
         "phone_media_controls",
         "The phone's music in this computer's media controls",
         Section::Phones,
@@ -161,6 +166,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     (
         "charged_alert",
         "Tell me when a phone has charged to",
+        Section::Phones,
+    ),
+    (
+        "phone_storage_alerts",
+        "Tell me when a phone is nearly full",
         Section::Phones,
     ),
     (
@@ -320,7 +330,11 @@ fn drawn_in(key: &str) -> &str {
 fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
-        "clipboard_hotkey" | "away_lock_minutes" | "mic_relay_device" | "phone_media_controls" => {
+        "clipboard_hotkey"
+        | "typing_hotkey"
+        | "away_lock_minutes"
+        | "mic_relay_device"
+        | "phone_media_controls" => {
             cfg!(windows)
         }
         _ => true,
@@ -406,10 +420,12 @@ pub fn applies_live(key: &str) -> bool {
             | "clipboard_history"
             | "clipboard_images"
             | "clipboard_hotkey"
+            | "typing_hotkey"
             | "phone_media_controls"
             | "phone_drive"
             | "phone_drive_write"
             | "charged_alert"
+            | "phone_storage_alerts"
             | "away_lock_minutes"
     )
 }
@@ -866,6 +882,53 @@ impl SettingsForm {
                         );
                     });
                 }
+                // N9: M4's typing window, from anywhere. Windows only, as H3's.
+                if cfg!(windows) {
+                    row(ui, "typing_hotkey", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut e.typing_hotkey)
+                                .hint_text("win+shift+t")
+                                .desired_width(140.0),
+                        );
+                        let text = e.typing_hotkey.trim();
+                        // N9 review: one combination cannot do both.
+                        if !text.is_empty() && text.eq_ignore_ascii_case(e.clipboard_hotkey.trim())
+                        {
+                            ui.label(
+                                egui::RichText::new(
+                                    "The same key as \"Send the clipboard with a key\": give each its own.",
+                                )
+                                .color(crate::theme::bad(ui)),
+                            );
+                        }
+                        let status =
+                            pocketdesk_core::local::paths::state_dir()
+                                .ok()
+                                .and_then(|dir| {
+                                    pocketdesk_desktop::hotkey::read_status_from(
+                                        &dir,
+                                        pocketdesk_desktop::hotkey::TYPING_STATUS_FILE,
+                                    )
+                                });
+                        if let Some(words) =
+                            pocketdesk_desktop::hotkey::typing_status_words(text, status.as_ref())
+                        {
+                            note(ui, words);
+                        }
+                        if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                                )
+                                .color(crate::theme::bad(ui)),
+                            );
+                        }
+                        note(
+                            ui,
+                            "Pressed anywhere, opens the window that types on the phone (the one in the newest session when several are linked), as \"Type on the phone\" on the Overview does. It needs the tray program (pocketdesk-tray) beside the app. Empty is off.",
+                        );
+                    });
+                }
                 // Windows only: Linux's MPRIS player is not built (K7).
                 if cfg!(windows) {
                     row(ui, "phone_media_controls", |ui| {
@@ -948,6 +1011,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "One notification each time a phone charging reaches it, again once it is unplugged or 5 % under. A phone that stops itself at 80 % (Android's own charging limit) never reaches 100.",
+                    );
+                });
+                // N9: the phone nearly full, which L9 reports.
+                row(ui, "phone_storage_alerts", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_storage_alerts,
+                        "a notification when a phone is nearly full",
+                    );
+                    note(
+                        ui,
+                        "Once, when its free storage falls under a gigabyte (or 2 % of a large phone), again only after it has had room. The phone says its storage with \"Share the phone's state with the computer\" on.",
                     );
                 });
                 row(ui, "virtual_screens", |ui| {

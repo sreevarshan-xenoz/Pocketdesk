@@ -503,6 +503,12 @@
     <string name="open_on_computer_label">Abrir en el equipo</string>
     <string name="to_computer_label">Al ordenador</string>
     <string name="link_sent">Enviado al equipo, que lo abre si admite enlaces.</string>
+    <plurals name="links_sent">
+        <item quantity="one">%1$d enlace enviado al equipo, para abrirlo allí si permite enlaces.</item>
+        <item quantity="many">%1$d enlaces enviados al equipo, para abrirlos allí si permite enlaces.</item>
+        <item quantity="other">%1$d enlaces enviados al equipo, para abrirlos allí si permite enlaces.</item>
+    </plurals>
+    <string name="links_sent_then_failed">%1$d de %2$d enlaces enviados; después: %3$s</string>
     <string name="link_not_web">No hay un enlace web que abrir (solo enlaces http y https).</string>
     <string name="link_from_computer">Un enlace de %1$s</string>
     <string name="channel_links">Enlaces del equipo</string>

@@ -74,8 +74,20 @@ object LinkRule {
     }
 
     /** The first link in [text] that may be opened (a browser shares "title link"). */
-    fun find(text: String): String? =
-        text.split(Regex("""\s+""")).map { trimmed(it) }.firstOrNull { openable(it) }
+    fun find(text: String): String? = findAll(text, 1).firstOrNull()
+
+    /**
+     * The computer opens this many links from a phone a minute
+     * (`server::plugins::links::MAX_PER_MINUTE`): a share sends at most these.
+     */
+    const val MAX_PER_SHARE = 5
+
+    /**
+     * Each link in [text] that may be opened, once, in order, at most [max]
+     * (N9: KDE Connect sends every link a share holds).
+     */
+    fun findAll(text: String, max: Int = MAX_PER_SHARE): List<String> =
+        text.split(Regex("""\s+""")).map { trimmed(it) }.filter { openable(it) }.distinct().take(max)
 
     /**
      * [word] without the punctuation a sentence puts around a link: quotes,
