@@ -111,11 +111,16 @@ object HostStore {
     fun move(ctx: Context, old: String, new: Host): Boolean {
         val list = hosts(ctx)
         if (list.none { it.address == old } || list.any { it.address == new.address }) return false
-        writeHosts(ctx, list.map { if (it.address == old) new else it })
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val all = prefs.all
-        prefs.edit {
+        // The records first, the card last (O3 review: the card seen at its
+        // new address without its pairing could be passed over meanwhile).
+        prefs.edit(commit = true) {
+            // What the computer taught for its old network (its broadcast)
+            // is taught again at the next connection (O3 review).
+            remove("$KEY_WAKE_INFO_PREFIX$old")
             for (prefix in PER_ADDRESS) {
+                if (prefix == KEY_WAKE_INFO_PREFIX) continue
                 when (val value = all["$prefix$old"]) {
                     is String -> putString("$prefix${new.address}", value)
                     is Int -> putInt("$prefix${new.address}", value)
@@ -126,6 +131,7 @@ object HostStore {
                 remove("$prefix$old")
             }
         }
+        writeHosts(ctx, list.map { if (it.address == old) new else it })
         return true
     }
 

@@ -71,10 +71,40 @@ import dev.pocketdesk.android.doctor.HealthReceiver
 import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.wake.Waker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** How a move of a saved computer to a found address went (O3). */
+private enum class MoveOutcome { MOVED, REFUSED, UNREACHED }
+
+/**
+ * O3: move [move]'s card when the computer at the new address proves the
+ * key its old address was pinned to and the old address no longer answers
+ * as it (O3 review: a computer saved by its tailnet or Ethernet address
+ * still reached there stays where it is). Blocking.
+ */
+private fun tryMove(context: android.content.Context, move: FoundComputers.Moved): MoveOutcome {
+    val old = move.saved.address
+    val new = move.found.address
+    when (RustCore.checkIdentityAs(new, move.found.controlPort, old).getOrNull()) {
+        "matches" -> {}
+        "failed", "closed", null -> return MoveOutcome.UNREACHED
+        else -> return MoveOutcome.REFUSED
+    }
+    if (RustCore.checkIdentity(old, move.saved.controlPort).getOrNull() == "matches") return MoveOutcome.REFUSED
+    if (!RustCore.copyPeerCertificate(old, new).getOrDefault(false)) return MoveOutcome.REFUSED
+    if (!HostStore.move(context, old, HostStore.Host(new, move.found.streamPort, move.found.controlPort))) {
+        // The card went or another took the address meanwhile: the copied pin goes too.
+        RustCore.forgetPeerCertificate(new)
+        return MoveOutcome.REFUSED
+    }
+    // Its old pin goes once the card has left it.
+    RustCore.forgetPeerCertificate(old)
+    return MoveOutcome.MOVED
+}
 
 /**
  * Landing screen: the saved-desktop card list. Tapping a card connects;
@@ -140,25 +170,16 @@ fun HomeScreen(
     val moves = FoundComputers.moved(found, hosts) { HostStore.pairedDesktopId(context, it) }
     val triedMoves = remember { mutableSetOf<Pair<String, String>>() }
     LaunchedEffect(moves) {
+        val movedCards = mutableSetOf<String>()
         for (move in moves) {
-            if (!triedMoves.add(move.saved.address to move.found.address)) continue
-            val moved = withContext(Dispatchers.IO) {
-                val proved = RustCore.checkIdentityAs(
-                    move.found.address,
-                    move.found.controlPort,
-                    move.saved.address,
-                ).getOrNull() == "matches"
-                proved &&
-                    RustCore.copyPeerCertificate(move.saved.address, move.found.address).getOrDefault(false) &&
-                    HostStore.move(
-                        context,
-                        move.saved.address,
-                        HostStore.Host(move.found.address, move.found.streamPort, move.found.controlPort),
-                    )
-            }
-            if (moved) {
-                // Its old pin goes once the card has left it.
-                withContext(Dispatchers.IO) { RustCore.forgetPeerCertificate(move.saved.address) }
+            if (move.saved.address in movedCards || (move.saved.address to move.found.address) in triedMoves) continue
+            // The whole move or none of it (O3 review: a cancel between the
+            // card's move and its old pin's forgetting left that pin).
+            val outcome = withContext(NonCancellable + Dispatchers.IO) { tryMove(context, move) }
+            // Tried again on a later look only after an answer that may change.
+            if (outcome != MoveOutcome.UNREACHED) triedMoves.add(move.saved.address to move.found.address)
+            if (outcome == MoveOutcome.MOVED) {
+                movedCards += move.saved.address
                 hosts = HostStore.hosts(context)
                 wakeSaid = resources.getString(
                     R.string.home_computer_moved,
