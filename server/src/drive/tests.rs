@@ -42,6 +42,7 @@ fn stand_in(name: &str) -> Arc<StandIn> {
     let roots = vec![Root {
         id: 7,
         name: "DCIM".to_string(),
+        add: false,
     }];
     let listing = |root: Option<u32>, path: Vec<String>, entries: Vec<Entry>| Listing {
         roots: roots.clone(),
@@ -472,14 +473,17 @@ fn phones_and_folders_sharing_a_name_are_told_apart() {
             Root {
                 id: 1,
                 name: "Download".into(),
+                add: false,
             },
             Root {
                 id: 2,
                 name: "Download".into(),
+                add: false,
             },
             Root {
                 id: 3,
                 name: "DCIM".into(),
+                add: false,
             },
         ],
         root: None,

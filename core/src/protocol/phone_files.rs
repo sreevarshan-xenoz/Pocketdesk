@@ -15,6 +15,17 @@ pub const LISTING: &str = "kdeconnect.pocketdesk.phone_files.listing";
 /// Computer → phone: `{root, path}`, send that file to the computer.
 pub const FETCH: &str = "kdeconnect.pocketdesk.phone_files.fetch";
 
+/// Computer → phone: `{root, path}`, make that folder in a folder the
+/// phone lets the computer add to (N6); answered with its listing.
+pub const MKDIR: &str = "kdeconnect.pocketdesk.phone_files.mkdir";
+
+/// Computer → phone: `{root, path, name, id, size}`, fetch the computer's
+/// offer `id` into that folder as `name` (N6).
+pub const PUT: &str = "kdeconnect.pocketdesk.phone_files.put";
+
+/// The largest file the computer's drive takes for a phone (N6).
+pub const MAX_PUT_BYTES: u64 = 4 << 30;
+
 /// Entries one listing carries, at most.
 pub const MAX_ENTRIES: usize = 2000;
 
@@ -49,6 +60,49 @@ pub fn valid_path(path: &[String]) -> bool {
 pub struct Root {
     pub id: u32,
     pub name: String,
+    /// The phone's owner lets the computer add files and folders here (N6).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub add: bool,
+}
+
+/// Whether `name` may be added to a phone's folder (N6): a [`valid_name`]
+/// that is not hidden, so nothing lands where the listing never shows it.
+pub fn addable_name(name: &str) -> bool {
+    valid_name(name) && !name.starts_with('.')
+}
+
+/// Whether `id` names an offer as the computer makes one: 32 lowercase hex
+/// digits.
+pub fn valid_offer_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// A [`MKDIR`] body, or `None` out of bounds: a folder below the root,
+/// every name addable.
+pub fn mkdir_body(root: u32, path: &[String]) -> Option<serde_json::Value> {
+    (!path.is_empty() && path.iter().all(|n| addable_name(n)))
+        .then(|| request_body(root, path))
+        .flatten()
+}
+
+/// A [`PUT`] body, or `None` out of bounds: `folder` below the root (every
+/// name addable), an addable `name`, an offer id and a size within
+/// [`MAX_PUT_BYTES`].
+pub fn put_body(
+    root: u32,
+    folder: &[String],
+    name: &str,
+    id: &str,
+    size: u64,
+) -> Option<serde_json::Value> {
+    let fits = folder.len() < MAX_DEPTH
+        && folder.iter().all(|n| addable_name(n))
+        && addable_name(name)
+        && valid_offer_id(id)
+        && size <= MAX_PUT_BYTES;
+    fits.then(|| {
+        serde_json::json!({ "root": root, "path": folder, "name": name, "id": id, "size": size })
+    })
 }
 
 /// One entry of a folder.
@@ -115,6 +169,39 @@ pub fn request_body(root: u32, path: &[String]) -> Option<serde_json::Value> {
 mod tests {
     use super::*;
 
+    /// N6: what may be added, and where.
+    #[test]
+    fn only_shown_names_go_into_a_phone_s_folder() {
+        assert!(addable_name("report.pdf") && !addable_name(".hidden") && !addable_name("a/b"));
+        let id = "0123456789abcdef0123456789abcdef";
+        assert!(
+            valid_offer_id(id) && !valid_offer_id("0123") && !valid_offer_id(&id.to_uppercase())
+        );
+        assert!(mkdir_body(0, &[]).is_none(), "not the root itself");
+        assert!(mkdir_body(0, &["New".into(), ".git".into()]).is_none());
+        assert_eq!(mkdir_body(2, &["New".into()]).unwrap()["path"][0], "New");
+        let put = put_body(1, &["Docs".into()], "a.txt", id, 3).unwrap();
+        assert_eq!(
+            (put["name"].as_str(), put["size"].as_u64()),
+            (Some("a.txt"), Some(3))
+        );
+        assert!(put_body(1, &[], ".a", id, 3).is_none());
+        assert!(put_body(1, &[".x".into()], "a", id, 3).is_none());
+        assert!(put_body(1, &[], "a", "nope", 3).is_none());
+        assert!(put_body(1, &[], "a", id, MAX_PUT_BYTES + 1).is_none());
+        // A root says it takes files only when it does; an older phone's
+        // root reads as not.
+        let old: Root = serde_json::from_value(serde_json::json!({"id": 0, "name": "A"})).unwrap();
+        assert!(!old.add);
+        let marked = Root {
+            id: 1,
+            name: "B".into(),
+            add: true,
+        };
+        assert_eq!(serde_json::to_value(&marked).unwrap()["add"], true);
+        assert!(serde_json::to_value(&old).unwrap().get("add").is_none());
+    }
+
     #[test]
     fn a_path_is_names_and_nothing_that_climbs() {
         assert!(valid_name("DCIM") && valid_name("photo 1.jpg") && valid_name(".hidden"));
@@ -175,7 +262,8 @@ mod tests {
             listing.roots,
             vec![Root {
                 id: 1,
-                name: "Download".into()
+                name: "Download".into(),
+                add: false,
             }]
         );
     }
