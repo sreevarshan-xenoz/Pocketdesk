@@ -568,7 +568,7 @@
     <string name="phone_notifications_in_hand">Silencio en el equipo mientras uso el teléfono</string>
     <string name="phone_notifications_in_hand_summary">Una notificación que llega con este teléfono desbloqueado y la pantalla encendida no aparece en el equipo: queda en su página Actividad, y en Notificaciones cuando el equipo puede responderla. No con el Mando de Pocketdesk abierto</string>
     <string name="phone_notifications_toast_where">Avisos solo en el equipo que uso</string>
-    <string name="phone_notifications_toast_where_summary">Si las notificaciones de este teléfono van a más de un equipo tuyo, solo el que estás usando las muestra como aviso; los demás las guardan en su página de notificaciones. Cada equipo dice solo si tuvo actividad en los últimos dos minutos. Mantiene un enlace con cada equipo</string>
+    <string name="phone_notifications_toast_where_summary">Si las notificaciones de este teléfono van a más de un equipo tuyo, solo el que estás usando las muestra como aviso; los demás las anotan en su página de actividad y guardan en su página de notificaciones las que pueden responder. Cada equipo dice solo si tuvo actividad en los últimos dos minutos. Mantiene un enlace con cada equipo durante diez minutos tras una notificación</string>
     <string name="phone_notifications_wait">Cuando el equipo no está al alcance</string>
     <string name="phone_notifications_wait_summary">Las notificaciones esperan en este teléfono, solo en memoria, y se envían cuando el equipo responde, marcadas como tardías con lo que esperaron. Esperan 20 como máximo</string>
     <string name="phone_notifications_wait_10">Esperar hasta 10 minutos</string>

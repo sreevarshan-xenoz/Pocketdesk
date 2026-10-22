@@ -1037,7 +1037,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "With \"Toast only on the computer I'm using\" on in Pocketdesk's Settings on the phone, a phone notification then pops up only on the computer in use; the others keep it on their Notifications page. Off, this computer always shows them. The phone hears only whether input came in the last two minutes.",
+                        "With \"Toast only on the computer I'm using\" on in Pocketdesk's Settings on the phone, a phone notification then pops up only on the computer in use; the others log it on their Activity page, and keep it on their Notifications page when they may answer it. Off, or paused, this computer always shows them. Any paired phone with Notifications on may ask, and hears only whether input came in the last two minutes. Windows only: Linux does not say yet.",
                     );
                 });
                 row(ui, "notification_pictures", |ui| {
