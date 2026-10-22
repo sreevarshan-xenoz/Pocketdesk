@@ -1,6 +1,7 @@
 //! The phone's folders as a drive (D8): the folders phones share (T10g),
-//! served read-only as WebDAV on loopback behind a token, with
-//! `phone_drive` on. A folder is listed by asking its phone (T10g's
+//! served as WebDAV on loopback behind a token, with `phone_drive` on;
+//! with `phone_drive_write` on, files and folders go into those a phone's
+//! owner marked (N6), never over what is there. A folder is listed by asking its phone (T10g's
 //! `list`), kept 30 s; a file is fetched by asking its phone to send it
 //! (T10g's `fetch` with `drive`), into `<state>/drive_cache/`, served, and
 //! removed. The answers are in [`answer`], over the [`Phones`] the server
@@ -14,7 +15,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pocketdesk_core::protocol::phone_files::{Entry, Listing, valid_name};
+use pocketdesk_core::protocol::phone_files::{
+    EXISTS, Entry, Listing, MAX_PUT_BYTES, addable_name, valid_name,
+};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use dav::Prop;
@@ -29,6 +33,33 @@ pub const FILE_KEEP: Duration = Duration::from_secs(60);
 /// Files fetched from phones at once, at most: the phone sends one at a
 /// time, so more only wait, each holding a connection.
 pub const FETCHES_AT_ONCE: usize = 2;
+
+/// How long a file copied in waits for its phone to take it before the
+/// copy is answered as still under way (N6).
+pub const PUT_WAIT: Duration = Duration::from_secs(45);
+
+/// How long an empty file is held here for its content (N6): Windows makes
+/// a file empty, then writes it on close.
+pub const STUB_KEEP: Duration = Duration::from_secs(120);
+
+/// How long each piece of a copied file may take to arrive.
+const BODY_WAIT: Duration = Duration::from_secs(30);
+
+/// Empty files held at once, at most (N6 review).
+const MAX_STUBS: usize = 64;
+
+/// How a phone took a file the drive gave it (N6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Put {
+    /// Saved in its folder.
+    Saved,
+    /// Still on its way: it carries on, and a failure is said later.
+    UnderWay,
+    /// The phone would not take it, and why.
+    Refused(String),
+    /// Not room for it on the phone.
+    NoRoom(String),
+}
 
 /// Why the drive could not answer from a phone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +95,24 @@ pub trait Phones: Send + Sync {
     -> Result<Listing, Fail>;
     /// A file, fetched whole into the cache; its place there.
     async fn fetch(&self, device: &str, root: u32, path: &[String]) -> Result<PathBuf, Fail>;
+    /// Make the folder `path` (N6): its listing, or one whose error says why
+    /// ([`EXISTS`] when the name is taken).
+    async fn mkdir(&self, device: &str, root: u32, path: &[String]) -> Result<Listing, Fail>;
+    /// Tell the owner that `name`, copied onto the drive, did not reach the
+    /// phone, and why (N6): no one waited for the answer.
+    fn tell(&self, _name: &str, _why: &str) {}
+    /// Give `file` (of `size` bytes) to the phone, into `folder` as `name`
+    /// (N6). The file is the phone's to remove ([`remove_upload`]) from here
+    /// on, however it ends.
+    async fn put(
+        &self,
+        device: &str,
+        root: u32,
+        folder: &[String],
+        name: &str,
+        file: PathBuf,
+        size: u64,
+    ) -> Result<Put, Fail>;
 }
 
 /// Each phone as a folder: its name, with its short id when two share one.
@@ -129,6 +178,9 @@ enum Node {
     File(String, u32, Vec<String>, Entry),
 }
 
+/// A place in a phone's folder: its phone, root and path, name included.
+type Place = (String, u32, Vec<String>);
+
 /// The drive: its token, its phones, and the listings it keeps.
 pub struct Drive {
     token: String,
@@ -138,6 +190,13 @@ pub struct Drive {
     fetched: Mutex<HashMap<Asked, (Instant, PathBuf)>>,
     file_keep: Duration,
     fetching: tokio::sync::Semaphore,
+    /// Whether files and folders may be added (N6).
+    write: AtomicBool,
+    /// Where files copied in wait for their phone (N6); none takes none.
+    uploads: Option<PathBuf>,
+    /// Empty files held for their content (N6): since when.
+    stubs: Mutex<HashMap<Place, Instant>>,
+    stub_keep: Duration,
 }
 
 /// A listing asked for: its phone, root (none for the roots alone) and path.
@@ -152,6 +211,142 @@ impl Drive {
             fetched: Mutex::new(HashMap::new()),
             file_keep: FILE_KEEP,
             fetching: tokio::sync::Semaphore::new(FETCHES_AT_ONCE),
+            write: AtomicBool::new(false),
+            uploads: None,
+            stubs: Mutex::new(HashMap::new()),
+            stub_keep: STUB_KEEP,
+        }
+    }
+
+    /// The same, taking files into `dir` while they wait for their phone
+    /// (N6).
+    pub fn taking_files_into(mut self, dir: PathBuf) -> Self {
+        self.uploads = Some(dir);
+        self
+    }
+
+    /// Let files and folders be added, or not (`phone_drive_write`, N6).
+    pub fn set_write(&self, on: bool) {
+        self.write.store(on, Ordering::Relaxed);
+    }
+
+    pub(crate) fn writes(&self) -> bool {
+        self.write.load(Ordering::Relaxed)
+    }
+
+    /// The same, holding empty files `keep` (tests).
+    #[cfg(test)]
+    fn holding_stubs(mut self, keep: Duration) -> Self {
+        self.stub_keep = keep;
+        self
+    }
+
+    /// Where a write to `parts` goes (N6): a folder below a root its phone's
+    /// owner marked, and a name shown in listings; or the status refusing
+    /// it. A folder above that is not there is a conflict, as WebDAV has it.
+    async fn write_target(&self, parts: &[String]) -> Result<Place, u16> {
+        if !self.writes() {
+            return Err(405);
+        }
+        let Some((name, parent)) = parts.split_last() else {
+            return Err(403);
+        };
+        // Only below a root: never a phone or a root itself.
+        if parent.len() < 2 || !addable_name(name) {
+            return Err(403);
+        }
+        let (device, root, folder) = match self.resolve(parent).await {
+            Ok(Node::Dir(device, root, folder)) => (device, root, folder),
+            Ok(_) | Err(Fail::NotFound) => return Err(409),
+            Err(fail) => return Err(fail.status()),
+        };
+        let roots = self
+            .listing(&device, None, &[])
+            .await
+            .map_err(Fail::status)?;
+        if !roots.roots.iter().any(|r| r.id == root && r.add) {
+            return Err(403);
+        }
+        let mut path = folder;
+        path.push(name.clone());
+        Ok((device, root, path))
+    }
+
+    /// Forget what is kept of the folder `place` is in, so its next look
+    /// shows what was added (N6).
+    fn forget_folder(&self, place: &Place) {
+        let (device, root, path) = place;
+        let folder = path[..path.len().saturating_sub(1)].to_vec();
+        self.kept
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(device.clone(), Some(*root), folder));
+    }
+
+    /// The empty files held in `device`'s folder `folder` of `root` (N6).
+    fn stubs_in(&self, device: &str, root: u32, folder: &[String]) -> Vec<String> {
+        self.stubs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .filter(|(d, r, p)| {
+                d == device && *r == root && p.len() == folder.len() + 1 && p.starts_with(folder)
+            })
+            .filter_map(|(_, _, p)| p.last().cloned())
+            .collect()
+    }
+
+    /// A lock or times set on an empty file held here: Windows is still at
+    /// work on it, so it is held longer (N6 review).
+    fn touch_stub(&self, place: &Place) {
+        if let Some(at) = self
+            .stubs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(place)
+        {
+            *at = Instant::now();
+        }
+    }
+
+    fn is_stub(&self, place: &Place) -> bool {
+        self.stubs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(place)
+    }
+
+    /// Give each empty file held past [`STUB_KEEP`] to its phone as it is:
+    /// nothing came to write in it (N6).
+    pub fn deliver_stale_stubs(&self) {
+        let Some(dir) = &self.uploads else {
+            return;
+        };
+        let stale: Vec<Place> = {
+            let mut stubs = self.stubs.lock().unwrap_or_else(|e| e.into_inner());
+            let stale: Vec<Place> = stubs
+                .iter()
+                .filter(|(_, at)| at.elapsed() >= self.stub_keep)
+                .map(|(place, _)| place.clone())
+                .collect();
+            for place in &stale {
+                stubs.remove(place);
+            }
+            stale
+        };
+        for place in stale {
+            let name = place.2.last().cloned().unwrap_or_default();
+            let Ok(file) = new_upload(dir, &name) else {
+                continue;
+            };
+            self.forget_folder(&place);
+            let phones = self.phones.clone();
+            tokio::spawn(async move {
+                let (device, root, path) = place;
+                if let Some((name, folder)) = path.split_last() {
+                    let _ = phones.put(&device, root, folder, name, file.0, 0).await;
+                }
+            });
         }
     }
 
@@ -264,11 +459,17 @@ impl Drive {
         }
         // From the folder it is in: a name not there is not asked for.
         let listing = self.folder(&device, root, parent).await?;
-        let entry = listing
-            .entries
-            .into_iter()
-            .find(|e| &e.name == name)
-            .ok_or(Fail::NotFound)?;
+        let entry = match listing.entries.into_iter().find(|e| &e.name == name) {
+            Some(entry) => entry,
+            // An empty file held here for its content (N6).
+            None if self.is_stub(&(device.clone(), root, path.to_vec())) => Entry {
+                name: name.clone(),
+                dir: false,
+                size: 0,
+                modified: 0,
+            },
+            None => return Err(Fail::NotFound),
+        };
         Ok(if entry.dir {
             Node::Dir(device, root, path.to_vec())
         } else {
@@ -317,7 +518,19 @@ impl Drive {
                 }
             }
             Node::Dir(device, root, path) => {
-                for entry in self.folder(device, *root, path).await?.entries {
+                let entries = self.folder(device, *root, path).await?.entries;
+                for name in self.stubs_in(device, *root, path) {
+                    if !entries.iter().any(|e| e.name == name) {
+                        let stub = Entry {
+                            name: name.clone(),
+                            dir: false,
+                            size: 0,
+                            modified: 0,
+                        };
+                        props.push(file_prop(&child(&name), &stub));
+                    }
+                }
+                for entry in entries {
                     props.push(if entry.dir {
                         folder(&child(&entry.name), &entry.name)
                     } else {
@@ -351,6 +564,51 @@ enum Answer {
 
 const ALLOW: &str = "OPTIONS, PROPFIND, GET, HEAD";
 
+/// What the drive takes with writing on (N6).
+const ALLOW_WRITE: &str = "OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, LOCK, UNLOCK, PROPPATCH";
+
+fn allow(drive: &Drive) -> String {
+    if drive.writes() { ALLOW_WRITE } else { ALLOW }.to_string()
+}
+
+/// A new file to take a copy named `name` into, in a folder of its own in
+/// `dir` (owner-only), so the Files page names it as it is (N6 review):
+/// its path and the open file.
+fn new_upload(dir: &std::path::Path, name: &str) -> std::io::Result<(PathBuf, std::fs::File)> {
+    pocketdesk_core::secure_fs::create_private_dir(dir)?;
+    let own = dir.join(uuid::Uuid::new_v4().simple().to_string());
+    std::fs::create_dir(&own)?;
+    let name = if addable_name(name) { name } else { "file" };
+    let path = own.join(name);
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    Ok((path, file))
+}
+
+/// Remove an upload and the folder of its own it was in.
+pub(crate) fn remove_upload(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+    if let Some(own) = path.parent() {
+        let _ = std::fs::remove_dir(own);
+    }
+}
+
+/// A lock that holds nothing (N6): Windows writes only to a drive that
+/// answers `LOCK`, and nothing here changes what is there.
+fn lock_answer() -> Answer {
+    let token = format!("opaquelocktoken:{}", uuid::Uuid::new_v4());
+    Answer::Text(
+        200,
+        vec![
+            ("Content-Type", "application/xml; charset=utf-8".to_string()),
+            ("Lock-Token", format!("<{token}>")),
+        ],
+        dav::lock_discovery(&token),
+    )
+}
+
 fn status(code: u16) -> Answer {
     Answer::Text(code, Vec::new(), String::new())
 }
@@ -359,12 +617,14 @@ fn status(code: u16) -> Answer {
 async fn answer(drive: &Drive, request: &dav::Request) -> Answer {
     // OPTIONS says what this is, anywhere: a client asks it first.
     if request.method == "OPTIONS" {
+        // Class 2 only with writing on: Windows writes to no other.
+        let dav = if drive.writes() { "1, 2" } else { "1" };
         return Answer::Text(
             200,
             vec![
-                ("DAV", "1".to_string()),
+                ("DAV", dav.to_string()),
                 ("MS-Author-Via", "DAV".to_string()),
-                ("Allow", ALLOW.to_string()),
+                ("Allow", allow(drive)),
             ],
             String::new(),
         );
@@ -378,8 +638,44 @@ async fn answer(drive: &Drive, request: &dav::Request) -> Answer {
     if token != &drive.token {
         return status(404);
     }
-    if !matches!(request.method.as_str(), "PROPFIND" | "GET" | "HEAD") {
-        return Answer::Text(405, vec![("Allow", ALLOW.to_string())], String::new());
+    let writing = drive.writes()
+        && matches!(
+            request.method.as_str(),
+            "MKCOL" | "LOCK" | "UNLOCK" | "PROPPATCH"
+        );
+    if !writing && !matches!(request.method.as_str(), "PROPFIND" | "GET" | "HEAD") {
+        return Answer::Text(405, vec![("Allow", allow(drive))], String::new());
+    }
+    match request.method.as_str() {
+        "MKCOL" => return make_folder(drive, parts).await,
+        "UNLOCK" => return status(204),
+        // A lock on what may be written (a new file's place included), and
+        // times set on a file, taken and kept nowhere.
+        "LOCK" | "PROPPATCH" => {
+            let at = match drive.resolve(parts).await {
+                Ok(Node::File(device, root, path, _)) => {
+                    drive.touch_stub(&(device, root, path));
+                    Ok(())
+                }
+                Ok(_) => Ok(()),
+                Err(Fail::NotFound) => drive.write_target(parts).await.map(|_| ()),
+                Err(fail) => Err(fail.status()),
+            };
+            return match at {
+                Err(code) => status(code),
+                Ok(()) if request.method == "LOCK" => lock_answer(),
+                Ok(()) => {
+                    let mut full = vec![drive.token.clone()];
+                    full.extend_from_slice(parts);
+                    Answer::Text(
+                        207,
+                        vec![("Content-Type", "application/xml; charset=utf-8".to_string())],
+                        dav::props_set(&dav::href(&full, false)),
+                    )
+                }
+            };
+        }
+        _ => {}
     }
     let node = match drive.resolve(parts).await {
         Ok(node) => node,
@@ -399,6 +695,12 @@ async fn answer(drive: &Drive, request: &dav::Request) -> Answer {
             _ => status(200),
         },
         _ => match node {
+            // An empty file held here: empty.
+            Node::File(device, root, path, _)
+                if drive.is_stub(&(device.clone(), root, path.clone())) =>
+            {
+                Answer::Text(200, Vec::new(), String::new())
+            }
             Node::File(device, root, path, _) => match drive.file(&device, root, &path).await {
                 Ok(file) => {
                     let size = std::fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
@@ -423,6 +725,211 @@ async fn answer(drive: &Drive, request: &dav::Request) -> Answer {
                 "A folder of a phone: open it in a file manager.\n".to_string(),
             ),
         },
+    }
+}
+
+/// `MKCOL` (N6): the folder made on the phone, or why not.
+async fn make_folder(drive: &Drive, parts: &[String]) -> Answer {
+    let place = match drive.write_target(parts).await {
+        Ok(place) => place,
+        Err(code) => return status(code),
+    };
+    // A name the folder holds already: WebDAV's 405.
+    if drive.resolve(parts).await.is_ok() {
+        return status(405);
+    }
+    let (device, root, path) = &place;
+    let made = drive.phones.mkdir(device, *root, path).await;
+    drive.forget_folder(&place);
+    match made {
+        Ok(listing) => match listing.error {
+            None => status(201),
+            Some(error) if error == EXISTS => status(405),
+            Some(error) => Answer::Text(403, Vec::new(), error),
+        },
+        Err(fail) => status(fail.status()),
+    }
+}
+
+/// `PUT` (N6): the body taken into a file here, given to the phone, and
+/// answered by how the phone took it, within [`PUT_WAIT`]. An empty body is
+/// held for its content ([`STUB_KEEP`]).
+async fn put<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    drive: &Drive,
+    stream: &mut S,
+    request: &dav::Request,
+    early: &[u8],
+) -> std::io::Result<()> {
+    let refuse = |code: u16| Answer::Text(code, Vec::new(), String::new());
+    let target = match dav::segments(&request.path) {
+        None => Err(400),
+        Some(parts) => match parts.split_first() {
+            Some((token, parts)) if token == &drive.token => drive.write_target(parts).await,
+            _ => Err(404),
+        },
+    };
+    let place = match target {
+        Ok(place) => place,
+        Err(405) => {
+            return write_text(stream, 405, &[("Allow", allow(drive))], "", false).await;
+        }
+        Err(code) => return answer_with(stream, refuse(code)).await,
+    };
+    if !request.has_length {
+        return write_text(stream, 411, &[], "", false).await;
+    }
+    if request.content_length > MAX_PUT_BYTES {
+        return write_text(stream, 413, &[], "", false).await;
+    }
+    if request.content_length == 0 {
+        let full = {
+            let mut stubs = drive.stubs.lock().unwrap_or_else(|e| e.into_inner());
+            let full = stubs.len() >= MAX_STUBS && !stubs.contains_key(&place);
+            if !full {
+                stubs.insert(place.clone(), Instant::now());
+            }
+            full
+        };
+        if full {
+            return write_text(stream, 503, &[("Retry-After", "30".to_string())], "", false).await;
+        }
+        drive.forget_folder(&place);
+        return write_text(stream, 201, &[], "", false).await;
+    }
+    // Its empty file, held here, is out of the sweep while its content
+    // comes, and back if the content never comes whole (N6 review).
+    let held = drive
+        .stubs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&place)
+        .is_some();
+    let read = take_body(drive, stream, request, early, &place).await;
+    if !matches!(read, Ok(Some(_))) && held {
+        drive
+            .stubs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(place.clone(), Instant::now());
+    }
+    let Some(path) = read? else {
+        return Ok(());
+    };
+    give(drive, stream, place, path, request.content_length).await
+}
+
+/// How long a copy of `size` bytes may take to arrive in all: a minute,
+/// and a second for every 32 KiB (N6 review: a trickle holds no slot for
+/// hours).
+fn body_deadline(size: u64) -> Duration {
+    Duration::from_secs(60 + size / (32 * 1024))
+}
+
+/// Take `request`'s body into a new upload: its path once whole, `None`
+/// when the client left or stalled.
+async fn take_body<S: tokio::io::AsyncRead + Unpin>(
+    drive: &Drive,
+    stream: &mut S,
+    request: &dav::Request,
+    early: &[u8],
+    place: &Place,
+) -> std::io::Result<Option<PathBuf>> {
+    let Some(dir) = &drive.uploads else {
+        return Ok(None);
+    };
+    let name = place.2.last().cloned().unwrap_or_default();
+    let (path, file) = new_upload(dir, &name)?;
+    // Removed unless it reaches the phone, which owns it from then on.
+    struct Upload(Option<PathBuf>);
+    impl Drop for Upload {
+        fn drop(&mut self) {
+            if let Some(path) = self.0.take() {
+                remove_upload(&path);
+            }
+        }
+    }
+    let by = tokio::time::Instant::now() + body_deadline(request.content_length);
+    let mut upload = Upload(Some(path.clone()));
+    let mut file = tokio::fs::File::from_std(file);
+    let size = request.content_length;
+    let early = &early[..early.len().min(size as usize)];
+    file.write_all(early).await?;
+    let mut left = size - early.len() as u64;
+    let mut chunk = vec![0u8; 64 * 1024];
+    while left > 0 {
+        let want = chunk.len().min(left as usize);
+        let wait = BODY_WAIT.min(by.saturating_duration_since(tokio::time::Instant::now()));
+        let n = match tokio::time::timeout(wait, stream.read(&mut chunk[..want])).await {
+            Ok(Ok(n)) => n,
+            Ok(Err(_)) | Err(_) => return Ok(None),
+        };
+        if n == 0 {
+            return Ok(None);
+        }
+        file.write_all(&chunk[..n]).await?;
+        left -= n as u64;
+    }
+    file.flush().await?;
+    drop(file);
+    Ok(upload.0.take())
+}
+
+/// Give the copy at `path` to its phone, and answer how it took it.
+async fn give<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
+    drive: &Drive,
+    stream: &mut S,
+    place: Place,
+    path: PathBuf,
+    size: u64,
+) -> std::io::Result<()> {
+    let refuse = |code: u16| Answer::Text(code, Vec::new(), String::new());
+    let (device, root, full) = place.clone();
+    let Some((name, folder)) = full.split_last() else {
+        return Ok(());
+    };
+    let (name, folder) = (name.clone(), folder.to_vec());
+    let phones = drive.phones.clone();
+    let shown = name.clone();
+    // Given on a task of its own: a client that leaves does not take the
+    // file back from the phone.
+    let mut given =
+        tokio::spawn(async move { phones.put(&device, root, &folder, &name, path, size).await });
+    let taken = tokio::select! {
+        taken = &mut given => taken.unwrap_or(Err(Fail::Phone)),
+        () = gone(stream) => {
+            // No one hears the answer (N6 review): the owner is told of a
+            // refusal or a failure another way.
+            let phones = drive.phones.clone();
+            tokio::spawn(async move {
+                let why = match given.await {
+                    Ok(Ok(Put::Refused(why) | Put::NoRoom(why))) => why,
+                    Ok(Err(_)) | Err(_) => "the phone did not take it".to_string(),
+                    Ok(Ok(Put::Saved | Put::UnderWay)) => return,
+                };
+                phones.tell(&shown, &why);
+            });
+            return Ok(());
+        }
+    };
+    drive.forget_folder(&place);
+    let answer = match taken {
+        Ok(Put::Saved) => refuse(201),
+        Ok(Put::UnderWay) => refuse(202),
+        Ok(Put::Refused(why)) => Answer::Text(403, Vec::new(), why),
+        Ok(Put::NoRoom(why)) => Answer::Text(507, Vec::new(), why),
+        Err(fail) => refuse(fail.status()),
+    };
+    answer_with(stream, answer).await
+}
+
+/// Write a text `answer`.
+async fn answer_with<S: tokio::io::AsyncWrite + Unpin>(
+    stream: &mut S,
+    answer: Answer,
+) -> std::io::Result<()> {
+    match answer {
+        Answer::Text(code, headers, body) => write_text(stream, code, &headers, &body, false).await,
+        _ => write_text(stream, 500, &[], "", false).await,
     }
 }
 
@@ -459,6 +966,10 @@ async fn serve_one<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     };
     if request.chunked {
         return write_text(&mut stream, 501, &[], "", false).await;
+    }
+    // A copy's body is taken as it comes, not set aside (N6).
+    if request.method == "PUT" {
+        return put(drive, &mut stream, &request, &buf[end + 4..]).await;
     }
     if request.content_length > dav::MAX_BODY {
         return write_text(&mut stream, 413, &[], "", false).await;
@@ -574,6 +1085,19 @@ pub async fn serve(
     stop: tokio_util::sync::CancellationToken,
 ) {
     let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTIONS));
+    // Empty files nothing came to write in go to their phone as they are.
+    {
+        let (drive, stop) = (drive.clone(), stop.clone());
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(Duration::from_secs(15));
+            loop {
+                tokio::select! {
+                    _ = stop.cancelled() => return,
+                    _ = every.tick() => drive.deliver_stale_stubs(),
+                }
+            }
+        });
+    }
     loop {
         let accepted = tokio::select! {
             _ = stop.cancelled() => return,

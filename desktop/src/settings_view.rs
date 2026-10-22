@@ -146,6 +146,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_drive_write",
+        "The phone's folders take files",
+        Section::Phones,
+    ),
+    (
         "away_lock_minutes",
         "Lock after the phone leaves",
         Section::Phones,
@@ -397,6 +402,7 @@ pub fn applies_live(key: &str) -> bool {
             | "clipboard_hotkey"
             | "phone_media_controls"
             | "phone_drive"
+            | "phone_drive_write"
             | "charged_alert"
             | "away_lock_minutes"
     )
@@ -870,11 +876,22 @@ impl SettingsForm {
                 row(ui, "phone_drive", |ui| {
                     ui.checkbox(
                         &mut e.phone_drive,
-                        "open the folders a phone shares in the file manager, read-only",
+                        "open the folders a phone shares in the file manager",
                     );
                     note(
                         ui,
                         "Served on this computer only, at an address with a secret in it that the Phone page shows. Any program you run can read those folders while this is on.",
+                    );
+                });
+                // N6: into the folders the phone marks, never over a file.
+                row(ui, "phone_drive_write", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_drive_write,
+                        "let files and folders copied onto the drive go to the phone",
+                    );
+                    note(
+                        ui,
+                        "Only into a folder whose \"The computer may add files\" is on in Pocketdesk's Settings on the phone. Nothing on the phone is replaced, removed or renamed: a name taken gets the next free one.",
                     );
                 });
                 // Only where it locks (E5): Linux cannot tell yet whether

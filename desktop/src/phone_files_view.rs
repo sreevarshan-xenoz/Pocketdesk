@@ -128,7 +128,7 @@ impl PhoneFilesView {
         ui.ctx().request_repaint_after(REFRESH);
         if let Some(info) = &self.drive {
             let (address, how) = drive_address(info);
-            ui.label(RichText::new("As a drive, read-only").strong());
+            ui.label(RichText::new("As a drive").strong());
             ui.horizontal_wrapped(|ui| {
                 ui.monospace(&address);
                 if ui.button("Copy").clicked() {
@@ -138,6 +138,16 @@ impl PhoneFilesView {
                 crate::notice::copied(ui, &mut self.drive_copied);
             });
             ui.label(RichText::new(how).small().color(crate::theme::muted(ui)));
+            // N6: where a copy onto it may go.
+            ui.label(
+                RichText::new(
+                    "Files copied onto it go only into a folder whose \"The computer may add files\" \
+                     is on in Pocketdesk's Settings on the phone, with \"The phone's folders take files\" \
+                     on here; elsewhere it is read-only.",
+                )
+                .small()
+                .color(crate::theme::muted(ui)),
+            );
             ui.add_space(8.0);
         }
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();

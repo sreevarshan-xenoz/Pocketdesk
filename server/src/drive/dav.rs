@@ -1,5 +1,6 @@
 //! The WebDAV the drive speaks (D8), pure: a request's head, a path's
-//! parts, and the multistatus a `PROPFIND` answers. Read-only, class 1.
+//! parts, and the multistatus a `PROPFIND` answers. Class 1, and class 2's
+//! answers with writing on (N6).
 
 use std::fmt::Write as _;
 
@@ -19,6 +20,8 @@ pub struct Request {
     /// `Depth`: 0, or 1 for anything else (`infinity` is answered as 1).
     pub depth: u8,
     pub content_length: u64,
+    /// Whether `Content-Length` was given (a copy needs it, N6).
+    pub has_length: bool,
     pub chunked: bool,
     /// `Range`, as sent.
     pub range: Option<String>,
@@ -52,6 +55,7 @@ pub fn parse_head(head: &[u8]) -> Option<Request> {
         path: path.to_string(),
         depth: 1,
         content_length: 0,
+        has_length: false,
         chunked: false,
         range: None,
     };
@@ -62,7 +66,10 @@ pub fn parse_head(head: &[u8]) -> Option<Request> {
         let value = value.trim();
         match name.trim().to_ascii_lowercase().as_str() {
             "depth" => request.depth = u8::from(value != "0"),
-            "content-length" => request.content_length = value.parse().ok()?,
+            "content-length" => {
+                request.content_length = value.parse().ok()?;
+                request.has_length = true;
+            }
             "transfer-encoding" => request.chunked = !value.eq_ignore_ascii_case("identity"),
             "range" => request.range = Some(value.to_string()),
             _ => {}
@@ -250,17 +257,24 @@ pub fn http_date(unix: u64) -> String {
 pub fn head(status: u16, headers: &[(&str, String)], length: u64) -> String {
     let reason = match status {
         200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
         206 => "Partial Content",
         207 => "Multi-Status",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
+        411 => "Length Required",
         413 => "Content Too Large",
         416 => "Range Not Satisfiable",
         501 => "Not Implemented",
         502 => "Bad Gateway",
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
+        507 => "Insufficient Storage",
         _ => "Error",
     };
     let mut out =
@@ -270,6 +284,27 @@ pub fn head(status: u16, headers: &[(&str, String)], length: u64) -> String {
     }
     out.push_str("\r\n");
     out
+}
+
+/// A `LOCK`'s answer for `token` (N6): exclusive, write, an hour.
+pub fn lock_discovery(token: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<D:prop xmlns:D=\"DAV:\"><D:lockdiscovery><D:activelock>\
+         <D:locktype><D:write/></D:locktype><D:lockscope><D:exclusive/></D:lockscope>\
+         <D:depth>0</D:depth><D:timeout>Second-3600</D:timeout>\
+         <D:locktoken><D:href>{}</D:href></D:locktoken></D:activelock></D:lockdiscovery></D:prop>",
+        escape(token)
+    )
+}
+
+/// A `PROPPATCH`'s answer for `href` (N6): what was set is taken.
+pub fn props_set(href: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<D:multistatus xmlns:D=\"DAV:\"><D:response>\
+         <D:href>{}</D:href><D:propstat><D:prop/><D:status>HTTP/1.1 200 OK</D:status></D:propstat>\
+         </D:response></D:multistatus>",
+        escape(href)
+    )
 }
 
 #[cfg(test)]
@@ -289,10 +324,13 @@ mod tests {
                 path: "/t/a%20b/".into(),
                 depth: 0,
                 content_length: 12,
+                has_length: true,
                 chunked: false,
                 range: None,
             }
         );
+        // N6: a copy needs its length said.
+        assert!(!parse_head(b"PUT /x HTTP/1.1\r\n").unwrap().has_length);
         let r = parse_head(b"GET http://127.0.0.1:9/t/x HTTP/1.1\r\nDepth: infinity\r\n").unwrap();
         assert_eq!((r.path.as_str(), r.depth), ("/t/x", 1));
         assert!(

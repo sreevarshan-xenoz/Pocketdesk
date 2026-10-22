@@ -10,7 +10,9 @@ use std::time::Duration;
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::phone_files::{self as store, Kind};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
-use pocketdesk_core::protocol::phone_files::{FETCH, LIST, LISTING, Listing, request_body};
+use pocketdesk_core::protocol::phone_files::{
+    FETCH, LIST, LISTING, Listing, MKDIR, PUT, request_body,
+};
 
 pub struct PhoneFilesPlugin;
 
@@ -32,7 +34,8 @@ impl Plugin for PhoneFilesPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        &[LIST, FETCH]
+        // MKDIR and PUT: the drive's (N6).
+        &[LIST, FETCH, MKDIR, PUT]
     }
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {

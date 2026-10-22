@@ -92,6 +92,9 @@ pub const PHONE_FILES_DIR: &str = "phone_files_out";
 pub const DRIVE_FILE: &str = "drive.json";
 /// Files fetched for the drive, each removed once served (D8).
 pub const DRIVE_CACHE_DIR: &str = "drive_cache";
+
+/// Files copied onto the drive (N6), each kept until its phone took it.
+pub const DRIVE_UPLOADS_DIR: &str = "drive_uploads";
 /// Each phone's last recent photos (C7).
 pub const PHONE_PHOTOS_FILE: &str = "phone_photos.json";
 /// Their thumbnails, a folder per phone (C7).

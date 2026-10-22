@@ -593,6 +593,10 @@
     <string name="phone_folders_remove_named">Remove %1$s</string>
     <string name="phone_folders_storage">Storage</string>
     <string name="phone_folders_not_kept">Android did not let Pocketdesk keep access to that folder</string>
+    <string name="phone_folders_add_files">The computer may add files</string>
+    <string name="phone_folders_add_files_summary">Files and folders copied onto the computer\'s drive go here. Nothing here is replaced, removed or renamed. Android asks you to pick this folder again</string>
+    <string name="phone_folders_add_files_named">The computer may add files to %1$s</string>
+    <string name="phone_folders_add_same">Pick the same folder to let the computer add files to it</string>
     <string name="screenshots_on">Send new screenshots</string>
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
     <string name="recent_photos_on">Recent photos on the computer</string>

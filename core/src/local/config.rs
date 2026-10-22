@@ -172,6 +172,10 @@ pub struct Config {
     /// loopback, behind a token (D8). Off by default.
     #[serde(default)]
     pub phone_drive: bool,
+    /// Whether the drive takes files and folders into a phone's folders its
+    /// owner marked (N6). On: nothing is written without the phone's mark.
+    #[serde(default = "default_true")]
+    pub phone_drive_write: bool,
     /// How long a phone with "Lock this computer when it leaves" on must be
     /// gone before the computer locks (D9), in minutes, 2 to 60.
     #[serde(default = "default_away_lock_minutes")]
@@ -365,6 +369,7 @@ impl Default for Config {
             clipboard_hotkey: String::new(),
             phone_media_controls: false,
             phone_drive: false,
+            phone_drive_write: true,
             away_lock_minutes: default_away_lock_minutes(),
             kdeconnect_compat: true,
             phone_battery_alerts: true,
@@ -588,6 +593,7 @@ impl Config {
         "computer_clipboard",
         "clipboard_history",
         "phone_drive",
+        "phone_drive_write",
         "away_lock_minutes",
         "kdeconnect_compat",
         "phone_battery_alerts",

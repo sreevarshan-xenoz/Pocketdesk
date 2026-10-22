@@ -119,6 +119,14 @@ object DownloadTarget {
     }.getOrNull()
 
     /**
+     * A new, empty file named like [name] in the shared folder [tree] (N6),
+     * under [folders] (found or made), as a part renamed once whole; `null`
+     * when none can be made.
+     */
+    fun createIn(context: Context, tree: Uri, name: String, folders: List<String>): Target? =
+        runCatching { createInTree(context, tree, DownloadName.safe(name), folders) }.getOrNull()
+
+    /**
      * A name for a folder from the computer under Downloads/Pocketdesk that
      * none of this app's downloads use yet: [base], else `base (1)`…
      */

@@ -26,6 +26,23 @@ class PureParts(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertTrue(got[0]["phone_in_use"])
 
+    def test_the_drive_s_folders(self):
+        xml = (
+            "<D:multistatus><D:response><D:href>/t/</D:href></D:response>"
+            "<D:response><D:href>/t/Pixel%20%28ab%29/</D:href></D:response>"
+            "<D:response><D:href>/t/Pixel%20%28ab%29/Docs/</D:href></D:response></D:multistatus>"
+        )
+        self.assertEqual(dc.dav_children(xml, "/t/"), ["Pixel (ab)"])
+        self.assertEqual(dc.drive_root(["Docs (1)", "Docs (2)", "DCIM"], "Docs"), "Docs (1)")
+        self.assertEqual(dc.drive_root(["DCIM"], "Docs"), None)
+        self.assertEqual(dc.drive_root(["Docs"], None), None)
+
+    def test_the_marked_folder(self):
+        prefs = '[{"id": 0, "name": "DCIM"}, {"id": 1, "name": "Docs", "add": true}]'
+        self.assertEqual(dc.marked_folder(prefs), ("Docs", "DCIM"))
+        self.assertEqual(dc.marked_folder('[{"id": 0, "name": "DCIM"}]'), (None, "DCIM"))
+        self.assertEqual(dc.marked_folder("not json"), (None, None))
+
     def test_a_media_session_shown(self):
         dump = (
             "MEDIA SESSION SERVICE (dumpsys media_session)\n"

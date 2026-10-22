@@ -2,19 +2,19 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-855 open items.
+864 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 517 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 524 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 99 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 28 |
+| A Linux desktop (the Azure VM serves for some) | 100 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 29 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 80 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -1046,6 +1046,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The link dropped: the session gone within 150 s; back by itself when the link returns.
 - Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
 
+**180. Files into the phone's folders from the computer's drive (N6)**
+
+- A file's write into the marked folder on the LAN road (or the internet road), its SHA-256 read back through the drive.
+- Unmarking: the write grant given back.
+- File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one).
+- A file larger than the phone's free space: refused, said in Explorer.
+- Desktop Settings "The phone's folders take files" off: the drive read-only again.
+- Explorer's rename, delete and "New folder" (MOVE and DELETE are refused): what Explorer says.
+- A folder that is also where files from computers go: unmarking it leaves downloads there working.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1797,6 +1807,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A Linux computer (`playerctl`, `mpris:artUrl`).
 
+**180. Files into the phone's folders from the computer's drive (N6)**
+
+- A Linux file manager (Nautilus, Dolphin) over `dav://`.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -1898,6 +1912,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **176. The phone's music without a session, with its cover (N2)**
 
 - Another maker's Android, and Android 10.
+
+**180. Files into the phone's folders from the computer's drive (N6)**
+
+- A marked folder on an SD card with too little room: the phone checks only its own storage, so the copy fails part way and says so.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
