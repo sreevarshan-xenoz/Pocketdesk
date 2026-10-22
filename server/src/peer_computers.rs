@@ -1,6 +1,6 @@
 //! The owner's other computers (2f): pairing with one from its pairing
 //! link, and the link this computer keeps to each over the internet road.
-//! Design: `docs/superpowers/specs/2026-10-17-computers-design.md`.
+//! Phase 2f–2h in `docs/status-history.md`.
 //!
 //! Pairing runs over TLS on the other computer's control port, its
 //! certificate pinned from the link before the first byte; this computer

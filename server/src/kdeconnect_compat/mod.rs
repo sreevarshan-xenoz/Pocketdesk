@@ -1,6 +1,6 @@
 //! Working with KDE Connect devices (3a–3c), a bridge from the protocol's
 //! behaviour, never KDE's code. Design:
-//! `docs/superpowers/specs/2026-10-17-kdeconnect-bridge-design.md`.
+//! Phase 3a–3c in `docs/status-history.md`.
 //!
 //! 3a: a separate identity, this computer's identity broadcast while the
 //! desktop app looks for devices (and once a network change), and the v8

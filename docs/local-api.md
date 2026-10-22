@@ -2,7 +2,7 @@
 
 Scripts on this computer can ask Pocketdesk what is going on and tell it what to do, through the `pocketdesk` program with `--json`. There is nothing to turn on and nothing listening: no socket and no HTTP port. It is this program, run as you, reading and writing Pocketdesk's state folder, which is already yours alone. Anything that can run it as you could already read those files.
 
-Design: `docs/superpowers/specs/2026-10-15-local-api-design.md`. Source: `server/src/local_api.rs`.
+Source: `server/src/local_api.rs`.
 
 ## The rules
 
@@ -90,7 +90,7 @@ A sent row's `state` is `offered` (the phone has not taken it yet), `sent` (save
 
 ### `pocketdesk events [--since-start] --json`
 
-What Pocketdesk does as it happens, one object per line, until stopped: the server's event log (`<state>/events.jsonl`, owner-only, design `docs/superpowers/specs/2026-10-16-events-design.md`). `--since-start` prints the events already in the log first.
+What Pocketdesk does as it happens, one object per line, until stopped: the server's event log (`<state>/events.jsonl`, owner-only). `--since-start` prints the events already in the log first.
 
 ```json
 {"api": 1, "at": 1792050000, "event": "file_received", "device_id": "0d7c3a52-…", "size": 30412}

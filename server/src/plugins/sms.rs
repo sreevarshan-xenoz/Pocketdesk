@@ -1,5 +1,5 @@
 //! Texts (SMS) from a phone, and replies to them from this desktop (roadmap
-//! N5b; spec `docs/superpowers/specs/2026-10-14-sms-design.md`).
+//! N5b in `docs/status-history.md`).
 //!
 //! A phone that shares its texts sends `kdeconnect.sms.messages`; each is
 //! kept in the conversation (`core::local::sms`) and, with `sms_notify`,

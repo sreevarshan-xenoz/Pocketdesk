@@ -696,15 +696,13 @@ Pocketdesk/
 ├── fastlane/               # The phone app's store listing
 ├── assets/                 # The mark, banner and launch video
 ├── aur/                    # AUR packaging (PKGBUILD)
-├── docs/                   # Specs, plans, the protocol and the device checklist
+├── docs/                   # The protocol, the device checklist, the status history
 ├── man/                    # Man pages
 ├── scripts/                # Install script, winget manifests, owed-checks index
 ├── .github/workflows/      # CI/CD (build, test, release, audit)
-├── CHANGELOG.md            # Changelog of the early (Flutter-era) design, historical
 ├── CONTRIBUTING.md         # Contributor guidelines
 ├── config.toml.example     # Example configuration
-├── pocketdesk.service      # systemd user unit
-└── plan.md                 # The early development plan, historical
+└── pocketdesk.service      # systemd user unit
 ```
 
 ## Quality Gates
@@ -769,10 +767,7 @@ What is *not* done is verification and hardening, so treat this as beta rather t
 - [ ] Cross-network (cellular ↔ LAN) WAN test over iroh; the Tailscale path is device-verified
 - [x] Published releases, from `v0.2.0` on, on [the releases page](https://github.com/sreevarshan-xenoz/Pocketdesk/releases)
 
-The full backlog, with every item's verified status against this tree, is
-[docs/roadmap-3000.md](docs/roadmap-3000.md); how that backlog gets executed is
-[docs/roadmap-execution-plan.md](docs/roadmap-execution-plan.md). See [plan.md](plan.md) for the
-development journal.
+The build journal, one entry per feature, newest first, is [docs/status-history.md](docs/status-history.md).
 
 ## License
 

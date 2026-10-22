@@ -17,8 +17,8 @@ import java.nio.ByteBuffer
  * Plays the desktop's sound on the phone: one thread polls the bridge for
  * Opus packets, decodes them with MediaCodec and writes PCM to a low-latency
  * AudioTrack. [PlayoutPolicy] keeps the latency budget. Audio focus decides
- * whether anything is heard at all: a call or another media app wins. Spec:
- * docs/superpowers/specs/2026-10-12-phone-audio-playback-design.md.
+ * whether anything is heard at all: a call or another media app wins. Its
+ * entry in docs/status-history.md says more.
  */
 class DesktopAudioPlayer {
     @Volatile

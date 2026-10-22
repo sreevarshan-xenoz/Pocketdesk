@@ -2,7 +2,7 @@ package dev.pocketdesk.android.compat
 
 /**
  * What Android 17 (API 37, which the app targets) changes for this app (N4,
- * `docs/superpowers/specs/2026-10-17-android-17-design.md`), as rules of the
+ * the status history), as rules of the
  * SDK level so they are tested without a device.
  */
 object Android17 {

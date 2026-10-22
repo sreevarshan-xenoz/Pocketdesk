@@ -169,7 +169,7 @@ async fn input_packets_survive_a_video_flood_under_loss() {
 /// 2.2-3.8 s, max 6.3 s, with all 50 packets delivered every time — so nothing
 /// is lost, the urgent queue is simply seconds deep. At 0% loss the same flood
 /// measures 12-89 ms. quinn's stream priority does not bound the queue once
-/// retransmission pressure starts. See roadmap-3000 §"146-149" and id 2449
+/// retransmission pressure starts. See the old backlog's §"146-149" and id 2449 (git history)
 /// (fairness scheduler with a documented algorithm); run with
 /// `cargo test -p pocketdesk-core -- --ignored`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
