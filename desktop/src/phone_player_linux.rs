@@ -84,6 +84,9 @@ impl Root {
 struct Player {
     current: Current,
     state_dir: PathBuf,
+    /// The player's own thread, told of a press's change so it is said at
+    /// once (N10 review); weak, so the tray letting go still ends it.
+    said: tokio::sync::mpsc::WeakUnboundedSender<()>,
 }
 
 impl Player {
@@ -115,6 +118,10 @@ impl Player {
             let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(shown) = current.as_mut() {
                 shown.playing = !shown.playing;
+            }
+            drop(current);
+            if let Some(said) = self.said.upgrade() {
+                let _ = said.send(());
             }
         }
     }
@@ -266,6 +273,7 @@ fn serve(
     current: Current,
 ) -> Result<tokio::sync::mpsc::UnboundedSender<()>, String> {
     let (tell, mut told) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let said = tell.clone();
     let (ready, started) = std::sync::mpsc::channel::<Result<(), String>>();
     std::thread::Builder::new()
         .name("mpris-player".into())
@@ -281,10 +289,14 @@ fn serve(
                 }
             };
             runtime.block_on(async move {
-                let player = Player { current, state_dir };
+                let player = Player {
+                    current: current.clone(),
+                    state_dir,
+                    said: said.downgrade(),
+                };
+                drop(said);
                 let connection = async {
                     zbus::connection::Builder::session()?
-                        .name(BUS_NAME)?
                         .serve_at(PATH, Root)?
                         .serve_at(PATH, player)?
                         .build()
@@ -306,8 +318,19 @@ fn serve(
                 else {
                     return;
                 };
+                // The name is held only while a phone's song shows (N10
+                // review: a stopped player listed first took playerctl's
+                // presses, and crowded KDE's list).
+                let mut named = false;
                 // Each change said, so the desktop's controls follow it.
                 while told.recv().await.is_some() {
+                    let showing = current.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+                    if showing && !named {
+                        named = connection.request_name(BUS_NAME).await.is_ok();
+                    } else if !showing && named {
+                        let _ = connection.release_name(BUS_NAME).await;
+                        named = false;
+                    }
                     let emitter = player.signal_emitter();
                     let player = player.get().await;
                     let _ = player.playback_status_changed(emitter).await;
@@ -335,6 +358,10 @@ pub struct Watch {
     read: bool,
     on: bool,
     current: Current,
+    /// The phone's last report as shown, kept apart from `current`, which a
+    /// press changes ahead of the phone (N10 review: a press was undone by
+    /// the next look, until the phone's own report came).
+    report: Option<Shown>,
     tell: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     /// When a player that could not serve was last tried: a minute later
     /// again (no session bus yet at sign-in).
@@ -374,17 +401,21 @@ impl Watch {
         if !self.on {
             // Its sender gone, its thread ends and the name is let go.
             self.tell = None;
+            self.report = None;
+            *self.current.lock().unwrap_or_else(|e| e.into_inner()) = None;
             return;
         }
         let shown = self
             .choice
             .pick(phones, in_session, linked, now_unix)
             .map(|(id, state)| shown(state_dir, id, state));
+        let mut new = false;
         if self.tell.is_none() && self.failed.is_none_or(|at| at.elapsed() >= RETRY) {
             match serve(state_dir.to_path_buf(), self.current.clone()) {
                 Ok(tell) => {
                     self.tell = Some(tell);
                     self.failed = None;
+                    new = true;
                 }
                 Err(e) => {
                     eprintln!("Pocketdesk tray: no media controls ({e})");
@@ -392,13 +423,12 @@ impl Watch {
                 }
             }
         }
-        let changed = {
-            let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
-            let changed = *current != shown;
-            *current = shown;
-            changed
-        };
-        if changed
+        let changed = self.report != shown;
+        if changed {
+            self.report = shown.clone();
+            *self.current.lock().unwrap_or_else(|e| e.into_inner()) = shown;
+        }
+        if (changed || new)
             && let Some(tell) = &self.tell
             && tell.send(()).is_err()
         {
@@ -415,7 +445,7 @@ fn shown(state_dir: &Path, phone: &str, state: &PhoneMediaState) -> Shown {
         .art
         .as_deref()
         .and_then(|name| pocketdesk_core::local::phone_media::art_path(state_dir, name))
-        .map(|path| format!("file://{}", path.display()));
+        .map(|path| file_url(&path));
     Shown {
         phone: phone.to_string(),
         title: state.media.title.clone(),
@@ -427,6 +457,22 @@ fn shown(state_dir: &Path, phone: &str, state: &PhoneMediaState) -> Shown {
         can_previous: state.media.can_previous,
         art,
     }
+}
+
+/// `path` as a `file://` URL, its bytes outside a path's plain ones
+/// percent-encoded (N10 review: a space or `#` in the state folder made
+/// the cover's URL one no shell read).
+fn file_url(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut url = String::from("file://");
+    for &byte in path.as_os_str().as_bytes() {
+        if byte.is_ascii_alphanumeric() || b"/-_.~".contains(&byte) {
+            url.push(char::from(byte));
+        } else {
+            url.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    url
 }
 
 #[cfg(test)]
@@ -448,5 +494,13 @@ mod tests {
         assert_eq!(map["mpris:artUrl"], value("file:///tmp/cover.jpg"));
         assert!(map.contains_key("mpris:trackid") && map.contains_key("xesam:artist"));
         assert!(metadata(None).is_empty());
+    }
+
+    #[test]
+    fn a_cover_url_is_percent_encoded() {
+        assert_eq!(
+            file_url(Path::new("/home/a b/#state/c.jpg")),
+            "file:///home/a%20b/%23state/c.jpg"
+        );
     }
 }
