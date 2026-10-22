@@ -289,7 +289,7 @@ Every `kdeconnect.pocketdesk.*` packet carries `"llVersion": 1` (`kdeconnect.rs`
 | 13 | `LinkFeedback` | The phone's RTT and lost packets | Measurement, stored in session records |
 | 14 | `ClientSamples` | Kind (decode, render or e2e) plus u32 µs values | Measurement, stored in session records |
 | 15 | `Pen` | Exactly 10 bytes: x, y normalized u16; pressure u16; tilt x, y i8 degrees (±90); flags u8 (contact, in range, barrel, eraser) | Injected as a pen (Windows' synthetic pen, a uinput tablet), else as the mouse; Input |
-| 16 | `Laser` | Exactly 6 bytes: dx, dy i16 pointer pixels; show u8 (0 hides) | A red dot drawn above every window, the pointer left where it is (Windows); Input |
+| 16 | `Laser` | Exactly 6 bytes: dx, dy i16 pointer pixels; show u8 (0 hides) | A red dot drawn above every window, the pointer left where it is (Windows; the layer shell on Linux); Input |
 
 ### 3.3 The v2 multiplexer
 

@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-873 open items.
+877 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
 | A second computer | 10 |
-| A Linux desktop (the Azure VM serves for some) | 101 |
+| A Linux desktop (the Azure VM serves for some) | 105 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 29 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 81 |
 
@@ -1830,6 +1830,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **181. Toasts only on the computer in use (N7)**
 
 - A Linux computer: it does not say, and always pops up.
+
+**183. Linux catch-up: the phone's music in MPRIS, the laser dot, the typing and cast windows (N10)**
+
+- The laser dot moved by turning the phone (the phone lay still), and across two outputs.
+- GNOME's and KDE's media controls by eye, and the media keys.
+- A press on the cast window's picture (the VM has no pointer). (where: linux)
+- Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

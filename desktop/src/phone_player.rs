@@ -1,8 +1,8 @@
 //! A phone's player in this computer's own media controls (K7): while a
 //! phone reports what it plays (T8d), Windows' media controls (the volume
 //! flyout, the keyboard's media keys) show its song with Previous,
-//! Play/Pause and Next, and a press goes to the phone as the Sessions
-//! page's does. The tray program holds it, with Settings'
+//! Play/Pause and Next (on Linux, an MPRIS player: N10), and a press goes
+//! to the phone as the Sessions page's does. The tray program holds it, with Settings'
 //! `phone_media_controls` on.
 
 use std::collections::BTreeMap;
@@ -113,6 +113,13 @@ pub fn command(button: Button, playing: bool) -> Option<&'static str> {
 
 #[cfg(windows)]
 pub use windows_player::{Player, Watch, prepare};
+
+// N10: on Linux the player is an MPRIS one.
+#[cfg(target_os = "linux")]
+#[path = "phone_player_linux.rs"]
+mod mpris_player;
+#[cfg(target_os = "linux")]
+pub use mpris_player::Watch;
 
 #[cfg(windows)]
 mod windows_player {

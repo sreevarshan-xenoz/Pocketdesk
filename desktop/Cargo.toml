@@ -56,7 +56,16 @@ sha2 = "0.10"
 tray-icon = "0.26"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ksni = { version = "0.3", features = ["blocking"] }
+# zbus on async-io, never tokio, in this crate (N10): AccessKit's Linux
+# backend runs zbus on its own async-io executor, and zbus with `tokio` on
+# panics there, which left screen readers without the window. The release
+# builds the server (zbus with tokio) apart for the same reason, and CI
+# holds this crate's zbus to it.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+# N10: a phone's player as an MPRIS player (K7 on Linux), served by a small
+# runtime of its own.
+zbus = "5.7"
+tokio = { workspace = true, features = ["rt", "sync"] }
 
 [features]
 snapshots = ["dep:egui_kittest"]

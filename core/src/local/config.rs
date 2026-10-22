@@ -43,7 +43,7 @@ pub struct Config {
     pub slow_link_frame_rate: bool,
     /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
     /// dot on the screen instead of the pointer. On by default; drawn on
-    /// Windows only for now.
+    /// Windows and on wlroots compositors (N10).
     #[serde(default = "default_true")]
     pub laser_pointer: bool,
     /// Move files with a phone linked by the internet road (2c), on a
@@ -168,7 +168,8 @@ pub struct Config {
     #[serde(default)]
     pub typing_hotkey: String,
     /// Show a phone's player in this computer's own media controls (K7):
-    /// Windows' volume flyout and media keys, through the tray program.
+    /// Windows' volume flyout and media keys, or an MPRIS player on Linux
+    /// (N10), through the tray program.
     /// Off by default.
     #[serde(default)]
     pub phone_media_controls: bool,

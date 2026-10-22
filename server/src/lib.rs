@@ -33,6 +33,8 @@ pub mod iroh_endpoint;
 pub mod kde;
 pub mod kdeconnect_compat;
 pub mod laser;
+#[cfg(target_os = "linux")]
+mod laser_linux;
 #[cfg(windows)]
 mod laser_windows;
 pub mod live_sessions;
