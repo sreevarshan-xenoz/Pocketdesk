@@ -14,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
+import androidx.core.net.toUri
 import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
@@ -69,6 +70,8 @@ class TransferService : Service() {
             val folder: RustCore.FolderPart?,
             /** Its date where it came from, ms since 1970 (K1); 0 for none. */
             val lastModified: Long = 0L,
+            /** The shared folder it goes into (N6), and the folders below it; null for Downloads. */
+            val into: Pair<Int, List<String>>? = null,
         ) : Job
     }
 
@@ -199,6 +202,9 @@ class TransferService : Service() {
                 intent.getStringExtra(EXTRA_SOURCE) ?: "",
                 folderOf(intent),
                 intent.getLongExtra(EXTRA_LAST_MODIFIED, 0L),
+                intent.getIntExtra(EXTRA_INTO_ROOT, -1).takeIf { it >= 0 }?.let { root ->
+                    root to intent.getStringArrayListExtra(EXTRA_INTO_PATH).orEmpty()
+                },
             )
         }
         androidx.core.content.IntentCompat.getParcelableExtra(intent, EXTRA_TREE, Uri::class.java)?.let { return Job.SendFolder(address, port, it) }
@@ -604,6 +610,31 @@ class TransferService : Service() {
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
             return refuse(job, getString(R.string.transfer_no_space, job.name))
         }
+        // N6: into a shared folder its owner marked, never anywhere else.
+        job.into?.let { (root, path) ->
+            val folder = dev.pocketdesk.android.files.PhoneFolders.all(this).firstOrNull { it.id == root && it.add }
+                ?: return refuse(job, dev.pocketdesk.android.files.AddRule.NOT_MARKED)
+            if (dev.pocketdesk.android.files.AddRule.decide(true, true, path, job.name) != dev.pocketdesk.android.files.AddRule.Decision.ADD) {
+                return refuse(job, dev.pocketdesk.android.files.AddRule.BAD_NAME)
+            }
+            val target = DownloadTarget.createIn(this, folder.uri.toUri(), job.name, path)
+                ?: return refuse(job, "cannot create ${job.name}")
+            return try {
+                val saved = withProgress({ job.size }, onProgress) {
+                    RustCore.fetchFile(job.address, job.port, true, job.value, target.descriptor.detachFd(), "", job.name, target.location)
+                }
+                if (saved.isSuccess) {
+                    target.publish()
+                    Result.success(target.viewUri)
+                } else {
+                    target.discard()
+                    Result.failure(saved.exceptionOrNull() ?: IllegalStateException("not saved"))
+                }
+            } catch (t: Throwable) {
+                target.discard()
+                Result.failure(t)
+            }
+        }
         // A file of a folder from the computer (T6b) goes under that send's
         // own new folder, at its place, every name checked again here.
         val folders = job.folder?.let { part ->
@@ -858,6 +889,8 @@ class TransferService : Service() {
         private const val EXTRA_FOLDER = "folder"
         private const val EXTRA_PATH = "path"
         private const val EXTRA_DRIVE = "drive"
+        private const val EXTRA_INTO_ROOT = "into_root"
+        private const val EXTRA_INTO_PATH = "into_path"
 
         /**
          * The top folder each folder send from the computer was saved in
@@ -924,6 +957,17 @@ class TransferService : Service() {
             lastModified: Long = 0L,
         ) {
             context.startForegroundService(receiveIntent(context, address, port, isOffer, value, name, size, source, folder, lastModified))
+        }
+
+        /**
+         * Fetch the computer's offer [id] into the shared folder [root],
+         * under [path], as [name] (N6: a file copied onto its drive).
+         */
+        fun receiveInto(context: Context, address: String, port: Int, id: String, name: String, size: Long, root: Int, path: List<String>) {
+            val intent = receiveIntent(context, address, port, true, id, name, size, "")
+                .putExtra(EXTRA_INTO_ROOT, root)
+                .putStringArrayListExtra(EXTRA_INTO_PATH, ArrayList(path))
+            context.startForegroundService(intent)
         }
 
         /** The intent that starts a download, to start now or from a notification's tap (T10d). */

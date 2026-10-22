@@ -31,6 +31,12 @@ class PhoneFiles(private val ctx: Context) {
         val path: List<String>,
         /** The computer's drive asked for this file (D8): its share says so. */
         val drive: String? = null,
+        /** "list", "fetch", or the drive's additions "mkdir" and "put" (N6). */
+        val kind: String = if (fetch) "fetch" else "list",
+        /** A put's file: its name, the computer's offer and its size (N6). */
+        val name: String? = null,
+        val id: String? = null,
+        val size: Long = 0,
     )
 
     fun tick() {
@@ -48,8 +54,19 @@ class PhoneFiles(private val ctx: Context) {
         }
         for (request in requests) {
             if (!PhoneFilesRule.fromOwnComputer(request.host, request.port, own?.address, own?.controlPort)) continue
-            if (!PhoneFilesRule.reachable(request.path)) continue
-            runCatching { if (request.fetch) fetch(request, folders) else list(request, folders) }
+            if (!PhoneFilesRule.reachable(request.path)) {
+                // An addition named so it cannot be made is told why (N6).
+                if (request.kind == "put") decline(request, AddRule.BAD_NAME)
+                continue
+            }
+            runCatching {
+                when (request.kind) {
+                    "fetch" -> fetch(request, folders)
+                    "mkdir" -> mkdir(request, folders)
+                    "put" -> put(request, folders)
+                    else -> list(request, folders)
+                }
+            }
                 .onFailure { Log.w(TAG, "a request for this phone's files failed", it) }
         }
     }
@@ -67,6 +84,10 @@ class PhoneFiles(private val ctx: Context) {
                     o.getInt("root"),
                     (0 until path.length()).map { path.getString(it) },
                     o.optString("drive").takeIf { PhoneFilesRule.validDrive(it) },
+                    o.optString("kind").ifEmpty { if (o.getBoolean("fetch")) "fetch" else "list" },
+                    o.optString("name").ifEmpty { null },
+                    o.optString("id").takeIf { PhoneFilesRule.validDrive(it) },
+                    o.optLong("size", 0),
                 )
             }
         }.getOrDefault(emptyList())
@@ -128,11 +149,7 @@ class PhoneFiles(private val ctx: Context) {
      * answered with why, never left unanswered.
      */
     private fun list(request: Request, folders: List<PhoneFolders.Folder>, note: String? = null) {
-        val roots = JSONArray()
-        folders.forEach {
-            roots.put(JSONObject().put("id", it.id).put("name", PhoneFilesRule.rootName(it.name, "Folder ${it.id + 1}")))
-        }
-        val body = JSONObject().put("roots", roots).put("path", JSONArray(request.path))
+        val body = JSONObject().put("roots", rootsJson(folders)).put("path", JSONArray(request.path))
         val folder = PhoneFilesRule.root(folders, request.root) ?: folders.firstOrNull()
         if (folder != null) {
             body.put("root", folder.id)
@@ -173,6 +190,17 @@ class PhoneFiles(private val ctx: Context) {
         RustCore.sendPhonePacket(request.host, request.port, LISTING, body.toString())
     }
 
+    /** The shared folders as a listing names them; a marked one says the computer may add (N6). */
+    private fun rootsJson(folders: List<PhoneFolders.Folder>): JSONArray {
+        val roots = JSONArray()
+        folders.forEach {
+            val root = JSONObject().put("id", it.id).put("name", PhoneFilesRule.rootName(it.name, "Folder ${it.id + 1}"))
+            if (it.add) root.put("add", true)
+            roots.put(root)
+        }
+        return roots
+    }
+
     /**
      * Send the file [request] names, as the share sheet does; when it cannot
      * be sent, answer with its folder's listing and why.
@@ -198,6 +226,81 @@ class PhoneFiles(private val ctx: Context) {
                 "The phone could not send $name: open Pocketdesk on the phone and try again"
             }
         if (problem != null) list(request.copy(path = request.path.dropLast(1)), folders, problem)
+    }
+
+    /**
+     * Make the folder [request] names in a marked folder (N6) and answer with
+     * its listing; when it cannot be made, its folder's listing and why
+     * ([AddRule.EXISTS] for a name taken).
+     */
+    private fun mkdir(request: Request, folders: List<PhoneFolders.Folder>) {
+        val folder = PhoneFilesRule.root(folders, request.root)
+        val parent = request.path.dropLast(1)
+        val name = request.path.lastOrNull() ?: return
+        val decision = AddRule.decide(true, folder?.add == true, request.path, null)
+        if (folder == null || decision != AddRule.Decision.ADD) {
+            refuseAt(request, folders, AddRule.reason(decision) ?: AddRule.NOT_MARKED)
+            return
+        }
+        val tree = folder.uri.toUri()
+        val problem = runCatching {
+            val (docId, dir) = resolve(tree, parent) ?: return@runCatching "That folder is not on the phone any more"
+            if (!dir) return@runCatching "That is not a folder"
+            var taken = false
+            eachChild(tree, docId) {
+                if (it.name == name) taken = true
+                !taken
+            }
+            if (taken) return@runCatching AddRule.EXISTS
+            DocumentsContract.createDocument(
+                ctx.contentResolver,
+                DocumentsContract.buildDocumentUriUsingTree(tree, docId),
+                DocumentsContract.Document.MIME_TYPE_DIR,
+                name,
+            ) ?: return@runCatching "The phone could not make $name"
+            null
+        }.getOrElse {
+            Log.w(TAG, "could not make a folder", it)
+            "The phone could not make $name"
+        }
+        if (problem == null) list(request, folders) else refuseAt(request, folders, problem)
+    }
+
+    /**
+     * Answer [request] with why it was not done, at the path it named, so
+     * the computer waiting for that path hears it (N6).
+     */
+    private fun refuseAt(request: Request, folders: List<PhoneFolders.Folder>, error: String) {
+        val body = JSONObject()
+            .put("roots", rootsJson(folders))
+            .put("root", request.root)
+            .put("path", JSONArray(request.path))
+            .put("error", error)
+        RustCore.sendPhonePacket(request.host, request.port, LISTING, body.toString())
+    }
+
+    /**
+     * Fetch the computer's offer into a marked folder (N6), as a download
+     * into a picked folder is written; one it may not take is declined
+     * with why.
+     */
+    private fun put(request: Request, folders: List<PhoneFolders.Folder>) {
+        val id = request.id ?: return
+        val name = request.name ?: return decline(request, AddRule.BAD_NAME)
+        val folder = PhoneFilesRule.root(folders, request.root)
+        val decision = AddRule.decide(true, folder?.add == true, request.path, name)
+        if (folder == null || decision != AddRule.Decision.ADD) {
+            decline(request, AddRule.reason(decision) ?: AddRule.NOT_MARKED)
+            return
+        }
+        TransferService.receiveInto(ctx, request.host, request.port, id, name, request.size, folder.id, request.path)
+    }
+
+    /** Decline [request]'s offer with [reason], so the computer's copy hears it. */
+    private fun decline(request: Request, reason: String) {
+        val id = request.id ?: return
+        RustCore.declineOffer(request.host, request.port, id, reason)
+            .onFailure { Log.w(TAG, "could not decline a copy: ${it.message}") }
     }
 
     private companion object {
