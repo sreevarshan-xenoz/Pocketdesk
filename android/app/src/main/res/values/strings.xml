@@ -24,6 +24,9 @@
     <string name="found_confirm_connect">Connect</string>
     <string name="no_computers">No computers yet.</string>
     <string name="home_explainer">Needs a Linux or Windows computer running the Pocketdesk service on your network.</string>
+    <string name="settings_find">Find a setting</string>
+    <string name="settings_find_clear">Clear the search</string>
+    <string name="settings_find_none">No setting matches “%1$s”</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_appearance">Appearance</string>

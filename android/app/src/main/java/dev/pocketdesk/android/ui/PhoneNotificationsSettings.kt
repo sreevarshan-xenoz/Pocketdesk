@@ -177,12 +177,15 @@ fun PhoneNotificationsSection() {
         }
     }
     if (seen.isEmpty()) {
-        Text(
-            stringResource(R.string.phone_notifications_apps_empty),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        // O8: shown as a row is, for the search.
+        SettingsBlock(stringResource(R.string.phone_notifications_apps_empty)) {
+            Text(
+                stringResource(R.string.phone_notifications_apps_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
     }
     seen.forEach { (pkg, label) ->
         SettingSwitch(

@@ -15,6 +15,9 @@
     <string name="found_confirm_connect">Conectar</string>
     <string name="no_computers">Aún no hay equipos.</string>
     <string name="home_explainer">Necesita un equipo Linux o Windows con el servicio Pocketdesk en su red.</string>
+    <string name="settings_find">Buscar un ajuste</string>
+    <string name="settings_find_clear">Borrar la búsqueda</string>
+    <string name="settings_find_none">Ningún ajuste coincide con «%1$s»</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_back">Atrás</string>
     <string name="settings_appearance">Apariencia</string>
