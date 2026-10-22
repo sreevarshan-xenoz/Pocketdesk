@@ -221,6 +221,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Native Kotlin app** (Jetpack Compose, Material 3), light or dark as the phone is, with Material You colours on Android 12 and newer
 - **Rust core** reused via a JNI bridge (no Flutter)
 - **Shortcuts** — long-press the app's icon for "Connect to …" or "Wake …" on a saved computer; the Pocketdesk Quick Settings tile connects to the last one
+- **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label. The computer announces itself again within 30 s when its addresses change (another network, a wake from sleep, a VPN), so phones find it at the new one
 - **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label
 - **Find a setting** — the box at the top of Settings shows only the settings whose title, summary or group hold every word typed; Back empties it first
 - **Remote desktop** with tap/drag/double-tap gesture input

@@ -2562,6 +2562,17 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 193. The computer's announcement follows its network (P1)
+
+Built 2026-10-22. Checked on the OPPO against a throwaway server (named apart from this computer's own, so its goodbye touched no other record), its addresses moved by the seam:
+- [x] Announced at this computer's address: the saved card read "On this network".
+- [x] Moved to a documentation address: "announced again" logged, and the card lost "On this network".
+- [x] Moved back: announced again, and the label returned.
+
+Owed:
+- [ ] A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
+- [ ] A wake from sleep with a new lease. (where: owner)
+- [ ] Linux. (where: linux)
 ## 192. Diagnostics' firewall row on Linux (O9)
 
 Built 2026-10-22. Owed (where: linux):
