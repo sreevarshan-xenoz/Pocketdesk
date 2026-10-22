@@ -72,9 +72,18 @@ object PhoneFolders {
         return true
     }
 
+    /**
+     * Whether [uri] is also where files from computers go (C2): its grants
+     * are that setting's too, and kept (grants are per folder, not per
+     * feature; N6 review).
+     */
+    private fun receivesFiles(ctx: Context, uri: String): Boolean =
+        dev.pocketdesk.android.Prefs.downloadTree(ctx) == uri
+
     /** Stop sharing a folder, and give its grants back. */
     fun remove(ctx: Context, folder: Folder) {
         save(ctx, all(ctx).filterNot { it.id == folder.id })
+        if (receivesFiles(ctx, folder.uri)) return
         val flags = if (folder.add) {
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         } else {
@@ -99,6 +108,7 @@ object PhoneFolders {
     /** The computer adds nothing more to [folder] (N6): its write grant goes back. */
     fun unmarkAdd(ctx: Context, folder: Folder) {
         save(ctx, all(ctx).map { if (it.id == folder.id) it.copy(add = false) else it })
+        if (receivesFiles(ctx, folder.uri)) return
         runCatching {
             ctx.contentResolver.releasePersistableUriPermission(folder.uri.toUri(), Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         }

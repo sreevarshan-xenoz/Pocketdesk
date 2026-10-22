@@ -84,16 +84,17 @@ fun rememberDownloadFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
 
 /**
  * Let go of this setting's grant on [tree]: the write, and the read too
- * unless "Folders the computer may open" shares the folder (grants are per
- * folder, not per feature).
+ * unless "Folders the computer may open" shares the folder; nothing while
+ * the computer may add to it there (N6 review; grants are per folder, not
+ * per feature).
  */
 private fun release(context: android.content.Context, tree: String?) {
     tree ?: return
-    val shared = dev.pocketdesk.android.files.PhoneFolders.all(context).any { it.uri == tree }
-    val flags = if (shared) {
-        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-    } else {
-        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+    val shared = dev.pocketdesk.android.files.PhoneFolders.all(context).firstOrNull { it.uri == tree }
+    val flags = when {
+        shared?.add == true -> return
+        shared != null -> Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        else -> Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
     }
     runCatching { context.contentResolver.releasePersistableUriPermission(tree.toUri(), flags) }
 }
