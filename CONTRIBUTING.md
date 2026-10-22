@@ -76,7 +76,7 @@ Releases follow [docs/release-checklist.md](docs/release-checklist.md): every st
 
 ## Architecture Overview
 
-See the README's Architecture section, and `AGENTS.md` for the current state of every feature.
+See the README's Architecture section, and `docs/status-history.md` for the state of every feature, newest first.
 Key components:
 - `core/` — Shared protocol, streaming, and utility code
 - `server/` — the desktop server for Linux and Windows (the `pocketdesk` command, CLI + service)
