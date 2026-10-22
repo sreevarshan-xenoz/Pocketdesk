@@ -5,13 +5,19 @@
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::protocol::phone_action::PhoneAction;
 
 /// How many asks wait for the app at most.
 const MAX_WAITING: usize = 8;
 
-static WAITING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new());
+/// How long an ask waits for the app: a screenshot read later would be of
+/// another moment, a lock a surprise (O2 review: a frozen app read them
+/// minutes on).
+const FRESH: Duration = Duration::from_secs(60);
+
+static WAITING: Mutex<VecDeque<(Instant, serde_json::Value)>> = Mutex::new(VecDeque::new());
 
 /// Keep an ask the computer at `host:port` sent, if it is one.
 pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
@@ -24,7 +30,10 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
         return;
     };
     let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
-    waiting.push_back(serde_json::json!({ "host": host, "port": port, "action": action.as_str() }));
+    waiting.push_back((
+        Instant::now(),
+        serde_json::json!({ "host": host, "port": port, "action": action.as_str() }),
+    ));
     while waiting.len() > MAX_WAITING {
         waiting.pop_front();
     }
@@ -35,12 +44,19 @@ pub(crate) fn forget() {
     WAITING.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }
 
-/// The asks waiting, oldest first, as a JSON array; taken.
+/// The asks waiting, oldest first, as a JSON array; taken. One older than
+/// [`FRESH`] is dropped.
 pub(crate) fn take_json() -> String {
+    take_json_at(Instant::now())
+}
+
+fn take_json_at(now: Instant) -> String {
     let taken: Vec<serde_json::Value> = WAITING
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .drain(..)
+        .filter(|(at, _)| now.saturating_duration_since(*at) <= FRESH)
+        .map(|(_, ask)| ask)
         .collect();
     serde_json::Value::Array(taken).to_string()
 }
@@ -67,5 +83,19 @@ mod tests {
             serde_json::json!([{ "host": "192.0.2.7", "port": 1716, "action": "lock" }])
         );
         assert_eq!(take_json(), "[]");
+    }
+
+    /// O2 review: an ask read over a minute late is dropped.
+    #[tokio::test]
+    async fn an_ask_read_late_is_dropped() {
+        let _globals = crate::api::TRANSFER_TEST_LOCK.lock().await;
+        forget();
+        receive(
+            &serde_json::json!({ "action": "screenshot" }),
+            "192.0.2.7",
+            1716,
+        );
+        let later = Instant::now() + FRESH + Duration::from_secs(1);
+        assert_eq!(take_json_at(later), "[]");
     }
 }
