@@ -91,8 +91,9 @@ struct FullWatch {
     told: std::collections::HashSet<String>,
 }
 
-/// Free storage under this always counts as nearly full.
-const FULL_MB: u64 = 1024;
+/// Free storage under this always counts as nearly full: a gigabyte, as the
+/// phone counts (decimal).
+const FULL_MB: u64 = 1000;
 
 /// Room above the limit a phone must have again before it is told again.
 const ROOM_AGAIN_MB: u64 = 512;
@@ -126,12 +127,13 @@ impl FullWatch {
     }
 }
 
-/// `mb` megabytes as a person reads them.
+/// `mb` megabytes as a person reads them, as the Overview says them: the
+/// phone counts in decimal and in 100 MB steps (N9 review).
 fn megabytes(mb: u64) -> String {
-    if mb >= 1024 {
-        format!("{:.1} GB", mb as f64 / 1024.0)
-    } else {
-        format!("{mb} MB")
+    match mb {
+        0 => "under 100 MB".to_string(),
+        1000.. => format!("{:.1} GB", mb as f64 / 1000.0),
+        _ => format!("{mb} MB"),
     }
 }
 
@@ -340,15 +342,19 @@ pub(crate) fn take_from(device: &str, body: &serde_json::Value) {
             Instant::now(),
         );
         let changed = before != Some((report.charge, report.charging));
-        // N9: a phone nearly full, once.
-        let full = reports
-            .full
-            .report(
-                device,
-                report.state.storage_free_mb,
-                report.state.storage_total_mb,
-                crate::events::current_config().phone_storage_alerts,
-            )
+        // N9: a phone nearly full, once; looked at only when nothing else is
+        // said and it can be (N9 review: told while another warning or a
+        // pause took its place, it was never said).
+        let full = (warning.is_none() && !crate::paused::now())
+            .then(|| {
+                reports.full.report(
+                    device,
+                    report.state.storage_free_mb,
+                    report.state.storage_total_mb,
+                    crate::events::current_config().phone_storage_alerts,
+                )
+            })
+            .flatten()
             .map(|free| {
                 let short: String = device.chars().take(8).collect();
                 format!("Phone {short}: nearly full ({} free)", megabytes(free))
@@ -468,7 +474,8 @@ mod tests {
             "not said"
         );
         assert_eq!(megabytes(900), "900 MB");
-        assert_eq!(megabytes(4_096), "4.0 GB");
+        assert_eq!(megabytes(4_100), "4.1 GB");
+        assert_eq!(megabytes(0), "under 100 MB");
     }
 
     /// L3: charged to the level once a charge, at or above it, armed again
