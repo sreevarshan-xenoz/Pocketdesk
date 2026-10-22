@@ -180,8 +180,6 @@ pub fn display(text: &str) -> String {
         .join("+")
 }
 
-/// The phone the key sends to: one the clipboard reaches now, the one in
-/// the newest session when several do; else none.
 /// The phone the typing key opens the window for (N9): a linked one this
 /// computer may control, the one in the newest session first.
 pub fn typing_phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
@@ -196,6 +194,8 @@ pub fn typing_phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
         .map(|r| r.device.id.as_str())
 }
 
+/// The phone the key sends to: one the clipboard reaches now, the one in
+/// the newest session when several do; else none.
 pub fn phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
     rows.iter()
         .filter(|r| r.clipboard.is_ok())
@@ -330,5 +330,48 @@ mod tests {
             Some("a")
         );
         assert_eq!(phone(&[row(&devices[0], None, false)]), None);
+    }
+
+    /// N9: the typing key opens the window for a linked phone this computer
+    /// may control, the newest session's first.
+    #[test]
+    fn the_typing_key_goes_to_a_linked_phone_it_may_control() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let device = |id: &str, linked: bool, cast: bool| {
+            let mut d = Device {
+                id: id.to_string(),
+                linked,
+                ..Default::default()
+            };
+            d.permissions.set(Capability::Cast, cast);
+            d
+        };
+        let devices: &'static [Device; 3] = Box::leak(Box::new([
+            device("a", true, true),
+            device("b", true, false),
+            device("c", false, true),
+        ]));
+        let row = |device: &'static Device, last: Option<u64>| PhoneRow {
+            device,
+            place: crate::model::Place::Away,
+            last_session: last,
+            ring: Err("x"),
+            mute: Err("x"),
+            file: Err("x"),
+            link: Err("x"),
+            clipboard: Err("x"),
+            playing: None,
+        };
+        let rows = [
+            row(&devices[0], Some(1)),
+            row(&devices[1], Some(9)),
+            row(&devices[2], Some(9)),
+        ];
+        assert_eq!(
+            typing_phone(&rows),
+            Some("a"),
+            "linked and controllable only"
+        );
+        assert_eq!(typing_phone(&rows[1..]), None);
     }
 }

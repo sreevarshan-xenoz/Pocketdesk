@@ -891,6 +891,16 @@ impl SettingsForm {
                                 .desired_width(140.0),
                         );
                         let text = e.typing_hotkey.trim();
+                        // N9 review: one combination cannot do both.
+                        if !text.is_empty() && text.eq_ignore_ascii_case(e.clipboard_hotkey.trim())
+                        {
+                            ui.label(
+                                egui::RichText::new(
+                                    "The same key as \"Send the clipboard with a key\": give each its own.",
+                                )
+                                .color(crate::theme::bad(ui)),
+                            );
+                        }
                         let status =
                             pocketdesk_core::local::paths::state_dir()
                                 .ok()
