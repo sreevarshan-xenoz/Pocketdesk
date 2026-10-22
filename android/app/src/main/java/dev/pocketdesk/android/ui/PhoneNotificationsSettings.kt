@@ -194,6 +194,25 @@ fun PhoneNotificationsSection() {
             },
             indent = true,
         )
+        // O5: a shared app's kinds, each one that can stay on the phone.
+        if (pkg in shared) {
+            val kinds = version.let { PhoneNotificationPrefs.kinds(context, pkg) }
+            val kept = version.let { PhoneNotificationPrefs.keptKinds(context, pkg) }
+            if (kinds.size > 1 || kept.isNotEmpty()) {
+                kinds.forEach { kind ->
+                    SettingSwitch(
+                        kind.example.ifBlank { stringResource(R.string.phone_notifications_kind_untitled) },
+                        stringResource(R.string.phone_notifications_kind, kind.id),
+                        kind.id !in kept,
+                        {
+                            PhoneNotificationPrefs.setKindKept(context, pkg, kind.id, !it)
+                            version++
+                        },
+                        indent = true,
+                    )
+                }
+            }
+        }
     }
     // L8: other computers of mine get a copy, and while linked may answer it (part 2);
     // after the app list, so its switches keep their heading (L8 review).

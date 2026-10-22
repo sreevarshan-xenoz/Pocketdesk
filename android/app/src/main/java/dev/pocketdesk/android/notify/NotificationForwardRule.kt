@@ -18,6 +18,8 @@ data class PostedNote(
     /** Posted in another profile (a work profile) or user. */
     val otherProfile: Boolean,
     val clearable: Boolean,
+    /** O5: its Android notification channel's id, blank when it has none. */
+    val channel: String = "",
 )
 
 /**
@@ -37,7 +39,8 @@ data class Outgoing(
 /**
  * Which of the phone's notifications go to the desktop, and as what (N5a).
  *
- * Only apps the user switched on. Never this app's own, ongoing ones
+ * Only apps the user switched on, and of those not the kinds (channels,
+ * O5) the user kept on the phone. Never this app's own, ongoing ones
  * (music, navigation, calls, services), group summaries, ones with nothing
  * to show, ones the app keeps on this device (`FLAG_LOCAL_ONLY`), or another
  * profile's. The lock screen's rule is the desktop's too: a secret one is not
@@ -60,8 +63,11 @@ class NotificationForwardRule(private val ownPackage: String) {
         shared: Set<String>,
         offer: String = "",
         live: Boolean = false,
+        keptKinds: Set<String> = emptySet(),
     ): Outgoing? {
         if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
+        // O5: a kind the user keeps on the phone.
+        if (note.channel.isNotBlank() && note.channel in keptKinds) return null
         // N4: an ongoing one goes only as a live update ([LiveRule]).
         if ((note.ongoing && !live) || note.groupSummary || note.localOnly || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null

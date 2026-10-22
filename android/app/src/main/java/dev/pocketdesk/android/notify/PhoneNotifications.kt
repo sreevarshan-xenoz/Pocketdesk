@@ -84,6 +84,37 @@ object PhoneNotificationPrefs {
         prefs(ctx).edit { putString(KEY_SEEN, json.toString()) }
     }
 
+    private const val KEY_KINDS_PREFIX = "kinds:"
+    private const val KEY_KEPT_PREFIX = "kinds_kept:"
+
+    /** O5: the kinds [pkg] was seen to post, most recently seen first. */
+    fun kinds(ctx: Context, pkg: String): List<NotificationKinds.Kind> = runCatching {
+        val array = org.json.JSONArray(prefs(ctx).getString(KEY_KINDS_PREFIX + pkg, "[]") ?: "[]")
+        (0 until array.length()).map { i ->
+            val o = array.getJSONObject(i)
+            NotificationKinds.Kind(o.getString("id"), o.optString("example"))
+        }
+    }.getOrDefault(emptyList())
+
+    /** O5: [pkg] posted a notification of kind [channel], titled as [example]. */
+    @Synchronized
+    fun recordKind(ctx: Context, pkg: String, channel: String, example: String) {
+        val next = NotificationKinds.seen(kinds(ctx, pkg), channel, example) ?: return
+        val array = org.json.JSONArray()
+        next.forEach { array.put(JSONObject().put("id", it.id).put("example", it.example)) }
+        prefs(ctx).edit { putString(KEY_KINDS_PREFIX + pkg, array.toString()) }
+    }
+
+    /** O5: the kinds of [pkg] kept on the phone. */
+    fun keptKinds(ctx: Context, pkg: String): Set<String> =
+        prefs(ctx).getStringSet(KEY_KEPT_PREFIX + pkg, emptySet()).orEmpty().toSet()
+
+    @Synchronized
+    fun setKindKept(ctx: Context, pkg: String, channel: String, kept: Boolean) {
+        val now = keptKinds(ctx, pkg).toMutableSet().apply { if (kept) add(channel) else remove(channel) }
+        prefs(ctx).edit { putStringSet(KEY_KEPT_PREFIX + pkg, now) }
+    }
+
     /** Whether Android lets this app read notifications. */
     fun accessGranted(ctx: Context): Boolean =
         ctx.packageName in NotificationManagerCompat.getEnabledListenerPackages(ctx)
@@ -443,6 +474,16 @@ class PhoneNotificationListener : NotificationListenerService() {
         val note = runCatching { toNote(sbn, rankingVisibility) }.getOrNull() ?: return
         if (note.pkg != packageName && !note.ongoing && !note.otherProfile) {
             PhoneNotificationPrefs.recordSeen(this, note.pkg, note.appLabel)
+            // O5: a shared app's kinds, each with the title it was last seen
+            // with: what the lock screen shows of it, never more.
+            if (note.pkg in PhoneNotificationPrefs.shared(this)) {
+                val title = when (note.visibility) {
+                    NotificationForwardRule.VISIBILITY_PUBLIC -> note.title
+                    NotificationForwardRule.VISIBILITY_PRIVATE -> note.publicTitle
+                    else -> null
+                }
+                PhoneNotificationPrefs.recordKind(this, note.pkg, note.channel, NotificationKinds.example(title))
+            }
         }
         // N4: an ongoing one's bar or timer, with the switch on; one held
         // back by the gap is looked at again once it passes.
@@ -493,7 +534,14 @@ class PhoneNotificationListener : NotificationListenerService() {
         val offer = NotificationActionRule.signature(offered, reply != null) + ConversationRule.digest(thread?.toString())
         // A live update's bar is part of what makes it new (N4).
         val liveMark = liveMarked?.let { "|live:${it.percent}:${it.indeterminate}:${it.chronometer}:${it.countdown}" }.orEmpty()
-        val out = rule.decide(note, enabled = true, shared = PhoneNotificationPrefs.shared(this), offer = offer + liveMark, live = live != null)
+        val out = rule.decide(
+            note,
+            enabled = true,
+            shared = PhoneNotificationPrefs.shared(this),
+            offer = offer + liveMark,
+            live = live != null,
+            keptKinds = PhoneNotificationPrefs.keptKinds(this, note.pkg),
+        )
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
             // its intents, so the ones kept are refreshed.
@@ -1066,6 +1114,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             localOnly = n.flags and Notification.FLAG_LOCAL_ONLY != 0,
             otherProfile = sbn.user != Process.myUserHandle(),
             clearable = sbn.isClearable,
+            channel = n.channelId.orEmpty(),
         )
     }
 
