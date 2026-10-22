@@ -83,6 +83,32 @@ class FoundComputersTest {
         assertEquals(1, view.unsaved.size)
     }
 
+    /** O3: a saved computer's id announced at an address no card holds is a candidate, no more. */
+    @Test
+    fun aSavedComputerAtANewAddressIsACandidateToMove() {
+        val saved = listOf(
+            HostStore.Host("192.0.2.20", 4716),
+            HostStore.Host("mypc.local", 4716),
+            HostStore.Host("192.0.2.40", 4716),
+            HostStore.Host("192.0.2.41", 4716),
+        )
+        val ids = mapOf("192.0.2.20" to "desk", "mypc.local" to "named", "192.0.2.40" to "twin", "192.0.2.41" to "twin")
+        val found = listOf(
+            computer("Desk", "192.0.2.21", id = "desk"),
+            // Still at its saved address: not moved.
+            computer("Desk", "192.0.2.20", id = "desk"),
+            // Saved by name: it keeps its name.
+            computer("Named", "192.0.2.30", id = "named"),
+            // Two cards for one id: which one is not guessed.
+            computer("Twin", "192.0.2.42", id = "twin"),
+            // No id, or one no card was paired with.
+            computer("Other", "192.0.2.50"),
+            computer("Stranger", "192.0.2.51", id = "stranger"),
+        )
+        val moved = FoundComputers.moved(found, saved) { ids[it] }
+        assertEquals(listOf("192.0.2.20" to "192.0.2.21"), moved.map { it.saved.address to it.found.address })
+    }
+
     private fun computer(service: String, address: String, id: String = "") =
         FoundComputer(service, service, id, address, 1716, 4716)
 }

@@ -134,6 +134,40 @@ fun HomeScreen(
     // this screen is in front.
     val found by rememberFoundComputers()
     val network = FoundComputers.merge(found, hosts)
+    // O3: a saved computer announcing itself at a new address follows its
+    // card there once it proves, at the new address, the key its old one
+    // was pinned to; each candidate is tried once while Home is up.
+    val moves = FoundComputers.moved(found, hosts) { HostStore.pairedDesktopId(context, it) }
+    val triedMoves = remember { mutableSetOf<Pair<String, String>>() }
+    LaunchedEffect(moves) {
+        for (move in moves) {
+            if (!triedMoves.add(move.saved.address to move.found.address)) continue
+            val moved = withContext(Dispatchers.IO) {
+                val proved = RustCore.checkIdentityAs(
+                    move.found.address,
+                    move.found.controlPort,
+                    move.saved.address,
+                ).getOrNull() == "matches"
+                proved &&
+                    RustCore.copyPeerCertificate(move.saved.address, move.found.address).getOrDefault(false) &&
+                    HostStore.move(
+                        context,
+                        move.saved.address,
+                        HostStore.Host(move.found.address, move.found.streamPort, move.found.controlPort),
+                    )
+            }
+            if (moved) {
+                // Its old pin goes once the card has left it.
+                withContext(Dispatchers.IO) { RustCore.forgetPeerCertificate(move.saved.address) }
+                hosts = HostStore.hosts(context)
+                wakeSaid = resources.getString(
+                    R.string.home_computer_moved,
+                    HostStore.shownName(context, move.found.address),
+                    move.found.address,
+                )
+            }
+        }
+    }
     var confirming by remember { mutableStateOf<FoundComputer?>(null) }
     // N6: a computer being woken, watched until it answers.
     var waking by remember { mutableStateOf<Waking?>(null) }

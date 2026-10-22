@@ -83,16 +83,50 @@ object HostStore {
     /** Forget a desktop and every per-address record hanging off it. */
     fun remove(ctx: Context, address: String) {
         writeHosts(ctx, hosts(ctx).filterNot { it.address == address })
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .remove("$KEY_WOL_MAC_PREFIX$address")
-            .remove("$KEY_WAKE_INFO_PREFIX$address")
-            .remove("$KEY_WAKE_SETTINGS_PREFIX$address")
-            .remove("$KEY_WAN_IDENTITY_PREFIX$address")
-            .remove("$KEY_MONITOR_PREFIX$address")
-            .remove("$KEY_PAIRED_PREFIX$address")
-            .remove("$KEY_NAME_PREFIX$address")
-            .remove("$KEY_CHOSEN_NAME_PREFIX$address")
-            .apply()
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            for (prefix in PER_ADDRESS) remove("$prefix$address")
+        }
+    }
+
+    /** The records kept per saved address: removed with it, moved with it (O3). */
+    private val PER_ADDRESS by lazy {
+        listOf(
+            KEY_WOL_MAC_PREFIX,
+            KEY_WAKE_INFO_PREFIX,
+            KEY_WAKE_SETTINGS_PREFIX,
+            KEY_WAN_IDENTITY_PREFIX,
+            KEY_MONITOR_PREFIX,
+            KEY_PAIRED_PREFIX,
+            KEY_NAME_PREFIX,
+            KEY_CHOSEN_NAME_PREFIX,
+        )
+    }
+
+    /**
+     * O3: the saved computer at [old] is the one now at [new] (it proved the
+     * key [old] was pinned to there): its card takes the new address and
+     * ports, in its place in the list, with every per-address record.
+     * Nothing happens when [old] is not saved or [new] already is.
+     */
+    fun move(ctx: Context, old: String, new: Host): Boolean {
+        val list = hosts(ctx)
+        if (list.none { it.address == old } || list.any { it.address == new.address }) return false
+        writeHosts(ctx, list.map { if (it.address == old) new else it })
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val all = prefs.all
+        prefs.edit {
+            for (prefix in PER_ADDRESS) {
+                when (val value = all["$prefix$old"]) {
+                    is String -> putString("$prefix${new.address}", value)
+                    is Int -> putInt("$prefix${new.address}", value)
+                    is Long -> putLong("$prefix${new.address}", value)
+                    is Boolean -> putBoolean("$prefix${new.address}", value)
+                    else -> continue
+                }
+                remove("$prefix$old")
+            }
+        }
+        return true
     }
 
     private const val KEY_NAME_PREFIX = "computer_name:"

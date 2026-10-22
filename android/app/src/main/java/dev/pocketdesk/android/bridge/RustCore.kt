@@ -197,6 +197,8 @@ object RustCore {
     private external fun nativeSendFindMyDevice(address: String, port: Int): String
     private external fun nativeRequestPairPin(address: String, port: Int): String
     private external fun nativeCheckIdentity(address: String, port: Int): String
+    private external fun nativeCheckIdentityAs(address: String, port: Int, pinned: String): String
+    private external fun nativeCopyPeerCertificate(from: String, to: String): String
     private external fun nativePairWithPin(address: String, port: Int, pin: String): String
     private external fun nativeCheckPairResult(waitSecs: Long): String
     private external fun nativePairedServers(): String
@@ -1146,6 +1148,14 @@ object RustCore {
      */
     fun checkIdentity(address: String, port: Int): Result<String> =
         envelope(nativeCheckIdentity(address, port))
+
+    /** O3: [checkIdentity] at [address], judged against the pin held for [pinned]. */
+    fun checkIdentityAs(address: String, port: Int, pinned: String): Result<String> =
+        envelope(nativeCheckIdentityAs(address, port, pinned))
+
+    /** O3: pin for [to] what is pinned for [from]; whether there was one. */
+    fun copyPeerCertificate(from: String, to: String): Result<Boolean> =
+        envelope(nativeCopyPeerCertificate(from, to)).map { it.toBoolean() }
 
     // ---- PIN pairing (Tier-2 #11b) ----
 
