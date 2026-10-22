@@ -2562,7 +2562,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
-## 187. Copies kept on the computer by program or by look (O4)
+## 188. Copies kept on the computer by program or by look (O4)
 
 Built 2026-10-22. Checked on a throwaway server with the clipboard stand-in and the OPPO linked:
 - [x] A copy matching a "Never send copies that look like" pattern held, said once in the log; an ordinary copy not.
