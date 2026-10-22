@@ -905,6 +905,8 @@ pub async fn connect_to_peer(
                         crate::typing::forget();
                         crate::media_presses::forget();
                         crate::computer_media::forget();
+                        // N7 review: it can show nothing now.
+                        crate::in_use::forget(&from_peer.0, from_peer.1);
                         crate::clipboard_push::forget();
                         // L8 part 2: the other computers' answers still wait.
                         crate::notification_answers::forget_from(&from_peer.0, from_peer.1);

@@ -121,7 +121,10 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
             .get(&(address.clone(), port))
             .is_some_and(|live| Arc::ptr_eq(live, &writer))
         {
-            links.remove(&(address, port));
+            links.remove(&(address.clone(), port));
+            drop(links);
+            // N7 review: it can show nothing now.
+            crate::in_use::forget(&address, port);
         }
     });
     Ok(())
@@ -182,6 +185,9 @@ pub(crate) async fn keep_only(keep: &[(String, u16)]) {
             .filter(|k| !keep.contains(k))
             .cloned()
             .collect();
+        for (host, port) in &gone_keys {
+            crate::in_use::forget(host, *port);
+        }
         gone_keys.iter().filter_map(|k| links.remove(k)).collect()
     };
     for writer in gone {

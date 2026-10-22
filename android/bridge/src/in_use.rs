@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
 
-/// Each computer's last answer, by address and control port: in use or
-/// not (none when it does not say), and when it came.
-static ANSWERS: LazyLock<Mutex<HashMap<(String, u16), (Option<bool>, Instant)>>> =
-    LazyLock::new(Default::default);
+/// A computer's last answer: in use or not (none when it does not say), and
+/// when it came.
+type Answer = (Option<bool>, Instant);
+
+/// Each computer's last answer, by address and control port.
+static ANSWERS: LazyLock<Mutex<HashMap<(String, u16), Answer>>> = LazyLock::new(Default::default);
 
 /// Keep the answer `body` from the computer at `host:port`.
 pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
@@ -18,6 +20,16 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert((host.to_string(), port), (said, Instant::now()));
+}
+
+/// Forget what the computer at `host:port` said: its link ended, so it can
+/// show nothing (N7 review: an answer that outlived its link held the
+/// others' notifications for up to 30 s).
+pub(crate) fn forget(host: &str, port: u16) {
+    ANSWERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&(host.to_string(), port));
 }
 
 /// Every computer's last answer, as `{"host:port": {inUse, ageMs}}`
@@ -52,5 +64,8 @@ mod tests {
             "the newest: it does not say"
         );
         assert!(kept["192.0.2.61:1716"]["ageMs"].as_u64().unwrap() < 10_000);
+        forget("192.0.2.61", 1716);
+        let kept: serde_json::Value = serde_json::from_str(&json()).unwrap();
+        assert!(kept.get("192.0.2.61:1716").is_none(), "its link ended");
     }
 }
