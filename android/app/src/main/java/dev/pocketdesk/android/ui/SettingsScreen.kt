@@ -322,6 +322,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     enabled = Prefs.clipboardInBackground(context),
                     indent = true,
                 )
+                // O7: an image the computer sends, onto the clipboard as well.
+                SettingSwitch(
+                    stringResource(R.string.settings_received_images_clipboard),
+                    stringResource(R.string.settings_received_images_clipboard_summary),
+                    Prefs.receivedImagesToClipboard(context),
+                    { Prefs.setReceivedImagesToClipboard(context, it) },
+                )
                 SettingSwitch(
                     stringResource(R.string.settings_files_background),
                     stringResource(R.string.settings_files_background_summary),

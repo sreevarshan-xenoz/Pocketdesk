@@ -184,6 +184,35 @@ object ClipboardImages {
         return file
     }
 
+    /**
+     * O7: keep a copy of a received image file for the clipboard, at most
+     * [limit] bytes, as the only image kept there (a fetch's part aside).
+     * Null when it is larger or cannot be kept.
+     */
+    fun keepCopy(ctx: Context, input: InputStream, extension: String, limit: Long): File? {
+        val dir = receivedDir(ctx)
+        val part = dir.resolve("received.part")
+        val whole = part.outputStream().use { out ->
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                total += n
+                if (total > limit) return@use false
+                out.write(buffer, 0, n)
+            }
+            true
+        }
+        val file = dir.resolve("received-${System.currentTimeMillis()}.$extension")
+        if (!whole || !part.renameTo(file)) {
+            part.delete()
+            return null
+        }
+        dir.listFiles()?.forEach { if (it.name != file.name && !it.name.endsWith(".part")) it.delete() }
+        return file
+    }
+
     /** Put the received image [file] on the phone's clipboard. */
     fun writeLocal(ctx: Context, file: File) {
         val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return

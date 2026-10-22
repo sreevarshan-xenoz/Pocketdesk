@@ -562,6 +562,8 @@
     <string name="send_clipboard_private_send">Enviar</string>
     <string name="settings_clipboard_background">Portapapeles del equipo en segundo plano</string>
     <string name="settings_clipboard_background_summary">Lo que copias en el equipo llega a este teléfono sin una sesión, también fuera de casa. Necesita acceso a las notificaciones, que mantiene la conexión</string>
+    <string name="settings_received_images_clipboard">Imágenes del ordenador al portapapeles</string>
+    <string name="settings_received_images_clipboard_summary">Una imagen que el ordenador envía sola a este teléfono (PNG o JPEG de hasta 32 MB, no dentro de una carpeta) también va al portapapeles. Se guarda igualmente donde van los archivos.</string>
     <string name="settings_clipboard_images_background">Imágenes copiadas en el ordenador, en segundo plano</string>
     <string name="settings_clipboard_images_background_summary">Una imagen copiada en el ordenador llega también al portapapeles de este teléfono, solo por Wi-Fi. En el ordenador debe estar activado «Imágenes al portapapeles de los teléfonos».</string>
     <string name="phone_notifications_pictures">Imágenes en las notificaciones</string>

@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.service
 
+import dev.pocketdesk.android.clip.ReceivedImageClip
+import dev.pocketdesk.android.clip.ReceivedImageRule
 import dev.pocketdesk.android.ui.plainErrorText
 
 import dev.pocketdesk.android.automation.PhoneEventBroadcast
@@ -478,6 +480,11 @@ class TransferService : Service() {
                 job.address,
                 mapOf("mime" to mime, "size" to job.size),
             )
+            // O7: an image sent on its own goes onto the clipboard too.
+            val onItsOwn = job.folder == null && job.into == null
+            if (uri != null && ReceivedImageRule.takes(Prefs.receivedImagesToClipboard(this), onItsOwn, job.size)) {
+                ReceivedImageClip.put(this, uri)
+            }
         }.onFailure {
             lastError = it.message
             Log.w(TAG, "receiving ${job.name} failed: $lastError")

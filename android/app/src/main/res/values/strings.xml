@@ -565,6 +565,8 @@
     <string name="send_clipboard_private_send">Send</string>
     <string name="settings_clipboard_background">Computer\'s clipboard in the background</string>
     <string name="settings_clipboard_background_summary">What you copy on the computer reaches this phone without a session, also away from home. It needs notification access, which keeps the connection</string>
+    <string name="settings_received_images_clipboard">Images from the computer onto my clipboard</string>
+    <string name="settings_received_images_clipboard_summary">An image the computer sends this phone on its own (a PNG or a JPEG of at most 32 MB, not in a folder) also goes onto the clipboard. It is still saved where files go.</string>
     <string name="settings_clipboard_images_background">Computer\'s copied images in the background</string>
     <string name="settings_clipboard_images_background_summary">An image copied on the computer comes onto this phone\'s clipboard too, on Wi-Fi only. The computer\'s \"Images to phones\' clipboards\" must be on.</string>
     <string name="phone_notifications_pictures">Pictures in notifications</string>

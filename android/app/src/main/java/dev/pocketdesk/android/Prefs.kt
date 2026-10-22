@@ -40,6 +40,7 @@ object Prefs {
     private const val KEY_COMPUTER_MEDIA_CONTROLS = "computer_media_controls"
     private const val KEY_CLIPBOARD_BACKGROUND = "clipboard_in_background"
     private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
+    private const val KEY_RECEIVED_IMAGES_CLIPBOARD = "received_images_clipboard"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
     private const val KEY_QUIET_IN_HAND = "quiet_in_hand"
     private const val KEY_TOAST_WHERE_WORKING = "toast_where_working"
@@ -357,6 +358,18 @@ object Prefs {
     fun setClipboardImagesInBackground(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_CLIPBOARD_IMAGES_BACKGROUND, enabled) }
         bump()
+    }
+
+    /**
+     * O7: an image the computer sends this phone on its own also goes onto
+     * its clipboard. Off by default: a photo sent to keep would replace what
+     * was copied.
+     */
+    fun receivedImagesToClipboard(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_RECEIVED_IMAGES_CLIPBOARD, false)
+
+    fun setReceivedImagesToClipboard(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_RECEIVED_IMAGES_CLIPBOARD, enabled) }
     }
 
     /** A notification's picture goes to the computer with it (K3). Off by default: a picture may be private. */
