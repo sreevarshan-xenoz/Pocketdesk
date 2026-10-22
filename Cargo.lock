@@ -5660,9 +5660,11 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "skrifa",
+ "tokio",
  "tray-icon",
  "windows 0.62.2",
  "windows-future 0.3.2",
+ "zbus",
 ]
 
 [[package]]

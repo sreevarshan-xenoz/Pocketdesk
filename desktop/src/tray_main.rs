@@ -62,7 +62,8 @@ fn main() {
         hotkey::TYPING_STATUS_FILE,
     );
     // K7: a phone's player in this computer's media controls.
-    #[cfg(windows)]
+    // N10: an MPRIS player on Linux.
+    #[cfg(any(windows, target_os = "linux"))]
     let mut player = pocketdesk_desktop::phone_player::Watch::default();
     loop {
         let (pressed, typing_pressed) = wait(&woken, REFRESH);
@@ -80,7 +81,7 @@ fn main() {
             let snapshot = model::snapshot(&state_dir, now);
             key.follow(&state_dir);
             typing_key.follow(&state_dir);
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 let in_session: Vec<&str> = snapshot
                     .sessions
