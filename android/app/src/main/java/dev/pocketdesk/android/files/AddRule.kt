@@ -15,6 +15,12 @@ object AddRule {
     /** What the computer hears for a name the phone does not take. */
     const val BAD_NAME = "That name cannot be added on the phone"
 
+    /**
+     * `core::protocol::phone_files::NO_ROOM`, word for word, in every
+     * language: the computer reads it to answer 507 (N6 review).
+     */
+    const val NO_ROOM = "Not enough space on the phone"
+
     /** `core::protocol::phone_files::EXISTS`, word for word: the computer reads it. */
     const val EXISTS = "There is a folder or file of that name already"
 

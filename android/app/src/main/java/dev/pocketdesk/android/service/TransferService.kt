@@ -608,7 +608,9 @@ class TransferService : Service() {
     private fun receiveOne(job: Job.Receive, onProgress: (Int) -> Unit): Result<Uri?> {
         ensureLink(job.address, job.port)
         if (job.size > MAX_RECEIVE_BYTES || !DownloadTarget.hasRoomFor(this, job.size)) {
-            return refuse(job, getString(R.string.transfer_no_space, job.name))
+            // The drive's copy says so in words the computer reads (N6 review).
+            val why = if (job.into != null) dev.pocketdesk.android.files.AddRule.NO_ROOM else getString(R.string.transfer_no_space, job.name)
+            return refuse(job, why)
         }
         // N6: into a shared folder its owner marked, never anywhere else.
         job.into?.let { (root, path) ->

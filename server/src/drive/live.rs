@@ -25,11 +25,10 @@ pub const LIST_WAIT: Duration = Duration::from_secs(15);
 /// How long a file may take to arrive whole.
 pub const FETCH_WAIT: Duration = Duration::from_secs(10 * 60);
 
-/// How a phone's refusal of a copied file reads (N6): not room for it, or
-/// another reason.
+/// How a phone's refusal of a copied file reads (N6): not room for it, in
+/// the words the phone says it with, or another reason.
 fn refusal(why: String) -> Put {
-    let lower = why.to_lowercase();
-    if lower.contains("space") || lower.contains("room") {
+    if why.contains(pocketdesk_core::protocol::phone_files::NO_ROOM) {
         Put::NoRoom(why)
     } else {
         Put::Refused(why)

@@ -26,6 +26,10 @@ pub const PUT: &str = "kdeconnect.pocketdesk.phone_files.put";
 /// A [`MKDIR`]'s listing says this as its error when the name is taken.
 pub const EXISTS: &str = "There is a folder or file of that name already";
 
+/// A phone declines a [`PUT`] with this when it has no room for the file
+/// (N6 review: the computer answers 507 by it, in any language).
+pub const NO_ROOM: &str = "Not enough space on the phone";
+
 /// The largest file the computer's drive takes for a phone (N6).
 pub const MAX_PUT_BYTES: u64 = 4 << 30;
 
@@ -171,6 +175,18 @@ pub fn request_body(root: u32, path: &[String]) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// N6 review: the phone says these word for word, and the computer
+    /// reads them.
+    #[test]
+    fn the_phone_s_words_are_the_computer_s() {
+        let rule = include_str!(
+            "../../../android/app/src/main/java/dev/pocketdesk/android/files/AddRule.kt"
+        );
+        for words in [EXISTS, NO_ROOM] {
+            assert!(rule.contains(&format!("\"{words}\"")), "{words}");
+        }
+    }
 
     /// N6: what may be added, and where.
     #[test]
