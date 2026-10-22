@@ -2,7 +2,8 @@
 //! its switch on asks to be told (`computer_media_watch {on}`, held to its
 //! Audio permission); while any linked phone watches, what plays is read
 //! every 2 s and pushed to each on a change and again each minute, with the
-//! cover's bytes once per track and phone.
+//! cover's bytes once per track and phone. O6: a watch may name the player
+//! the phone chose (`player`), read for that phone; else the system's own.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -21,8 +22,9 @@ const LOOK_EVERY: Duration = Duration::from_secs(2);
 /// link still stands.
 pub const AGAIN_EVERY: Duration = Duration::from_secs(60);
 
-/// The phones that asked to be told, by device id.
-static WATCHERS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+/// The phones that asked to be told, by device id, with the player each
+/// chose (O6).
+static WATCHERS: LazyLock<Mutex<HashMap<String, Option<String>>>> = LazyLock::new(Default::default);
 static WOKEN: LazyLock<tokio::sync::Notify> = LazyLock::new(tokio::sync::Notify::new);
 
 /// The phones that asked since the last look: each is told afresh, the
@@ -56,7 +58,10 @@ impl Plugin for ComputerMediaPlugin {
         let on = packet.body.get("on").and_then(|v| v.as_bool()) == Some(true);
         let mut watchers = WATCHERS.lock().unwrap_or_else(|e| e.into_inner());
         if on {
-            watchers.insert(sender.device_id().to_string());
+            watchers.insert(
+                sender.device_id().to_string(),
+                crate::media::requested_player(&packet.body),
+            );
             ASKED
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -159,7 +164,8 @@ fn cover_due(cover: Option<&Cover>, track: &str) -> bool {
 /// Daemon task: push what plays to the phones that watch it.
 pub async fn run_watcher() {
     let mut pushes = Pushes::default();
-    let mut cover: Option<Cover> = None;
+    // Each player's cover, the system's own under `None` (O6).
+    let mut covers: HashMap<Option<String>, Cover> = HashMap::new();
     loop {
         let idle = WATCHERS
             .lock()
@@ -175,58 +181,85 @@ pub async fn run_watcher() {
         )
         .await;
         let clients = crate::state::clone_clients().await;
-        let watching: HashSet<String> = {
+        let watching: HashMap<String, Option<String>> = {
             let mut watchers = WATCHERS.lock().unwrap_or_else(|e| e.into_inner());
             // A phone that unlinked asks again when it links again.
-            watchers.retain(|id| clients.iter().any(|c| c.device_id() == id));
+            watchers.retain(|id, _| clients.iter().any(|c| c.device_id() == id));
             watchers
                 .iter()
-                .filter(|id| crate::plugins::pair::allows(id, Capability::Audio))
-                .cloned()
+                .filter(|(id, _)| crate::plugins::pair::allows(id, Capability::Audio))
+                .map(|(id, player)| (id.clone(), player.clone()))
                 .collect()
         };
         let asked = std::mem::take(&mut *ASKED.lock().unwrap_or_else(|e| e.into_inner()));
-        pushes.keep_only(&watching, &asked);
-        if watching.is_empty() {
-            continue;
+        pushes.keep_only(&watching.keys().cloned().collect(), &asked);
+        let players: HashSet<Option<String>> = watching.values().cloned().collect();
+        covers.retain(|player, _| players.contains(player));
+        for player in players {
+            look(&mut pushes, &mut covers, &clients, &watching, player).await;
         }
-        let playing = tokio::task::spawn_blocking(crate::media::now_playing)
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten();
+    }
+}
+
+/// Read what `player` plays (else the system's own player) and tell the
+/// phones in `watching` that chose it.
+async fn look(
+    pushes: &mut Pushes,
+    covers: &mut HashMap<Option<String>, Cover>,
+    clients: &[std::sync::Arc<dyn DeviceSender>],
+    watching: &HashMap<String, Option<String>>,
+    player: Option<String>,
+) {
+    {
+        let asked = player.clone();
+        let playing =
+            tokio::task::spawn_blocking(move || crate::media::now_playing(asked.as_deref()))
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .flatten();
         let answer = crate::media::answer(playing);
         let playing = answer.get("playing").cloned().unwrap_or(Value::Null);
         let this_track = (!playing.is_null()).then(|| track(&playing));
         match &this_track {
-            None => cover = None,
-            Some(t) if cover_due(cover.as_ref(), t) => {
-                let read = tokio::task::spawn_blocking(crate::media::cover)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|bytes| {
-                        use base64::Engine;
-                        (
-                            art_id(&bytes),
-                            base64::engine::general_purpose::STANDARD.encode(bytes),
-                        )
-                    });
-                let tries = match &cover {
+            None => {
+                covers.remove(&player);
+            }
+            Some(t) if cover_due(covers.get(&player), t) => {
+                let asked = player.clone();
+                let read =
+                    tokio::task::spawn_blocking(move || crate::media::cover(asked.as_deref()))
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|bytes| {
+                            use base64::Engine;
+                            (
+                                art_id(&bytes),
+                                base64::engine::general_purpose::STANDARD.encode(bytes),
+                            )
+                        });
+                let tries = match covers.get(&player) {
                     Some(c) if c.track == *t => c.tries + 1,
                     _ => 1,
                 };
-                cover = Some(Cover {
-                    track: t.clone(),
-                    art: read,
-                    tries,
-                });
+                covers.insert(
+                    player.clone(),
+                    Cover {
+                        track: t.clone(),
+                        art: read,
+                        tries,
+                    },
+                );
             }
             Some(_) => {}
         }
-        let art = cover.as_ref().and_then(|c| c.art.as_ref());
+        let art = covers.get(&player).and_then(|c| c.art.as_ref());
         let now = Instant::now();
-        for client in clients.iter().filter(|c| watching.contains(c.device_id())) {
+        for client in clients
+            .iter()
+            .filter(|c| watching.get(c.device_id()) == Some(&player))
+        {
             let Some(with_art) = pushes.due(
                 client.device_id(),
                 &playing,

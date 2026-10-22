@@ -218,7 +218,7 @@ impl DeckPlugin {
             DeckAction::Media(key) => {
                 let command = crate::media::Command::parse(key.as_str())
                     .ok_or_else(|| "not a media button".to_string())?;
-                tokio::task::spawn_blocking(move || crate::media::command(command))
+                tokio::task::spawn_blocking(move || crate::media::command(command, None))
                     .await
                     .map_err(|e| format!("the media controls failed: {e}"))?
             }

@@ -84,6 +84,8 @@ impl Plugin for AudioControlPlugin {
             .get("name")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        // O6: the player the phone chose, if it names one.
+        let player = crate::media::requested_player(&packet.body);
 
         // All helpers spawn blocking CLI processes.
         let action_owned = action.clone();
@@ -102,9 +104,18 @@ impl Plugin for AudioControlPlugin {
                 Some(name) => audio_control::select_sink(name).map(|_| json!({ "ok": true })),
                 None => Err("selectSink requires {name}".to_string()),
             },
-            "media" => crate::media::now_playing().map(crate::media::answer),
+            // The players too, for the phone to choose from (O6); a list
+            // that cannot be read leaves what plays to be said.
+            "media" => crate::media::now_playing(player.as_deref()).map(|p| {
+                crate::media::with_players(
+                    crate::media::answer(p),
+                    &crate::media::players().unwrap_or_default(),
+                )
+            }),
             "mediaControl" => match command.as_deref().and_then(crate::media::Command::parse) {
-                Some(command) => crate::media::command(command).map(|_| json!({ "ok": true })),
+                Some(command) => {
+                    crate::media::command(command, player.as_deref()).map(|_| json!({ "ok": true }))
+                }
                 None => Err("mediaControl takes playPause, next or previous".to_string()),
             },
             _ => audio_control::status(),
