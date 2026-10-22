@@ -670,6 +670,47 @@ fn rule_takes(rule: &str, port: u16, proto: &str) -> bool {
     })
 }
 
+/// A ufw rule line: what it is to (the words before the action, without
+/// "(v6)" and "on <interface>"), its action, and its direction (IN, OUT,
+/// FWD), if it says one. None for a line that is no rule.
+fn ufw_rule(line: &str) -> Option<(Vec<&str>, &str, Option<&str>)> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let at = words
+        .iter()
+        .position(|w| matches!(*w, "ALLOW" | "DENY" | "REJECT" | "LIMIT"))?;
+    let mut to = Vec::new();
+    let mut before = words[..at].iter();
+    while let Some(w) = before.next() {
+        match *w {
+            "(v6)" => {}
+            "on" => {
+                before.next();
+            }
+            _ => to.push(*w),
+        }
+    }
+    let direction = words
+        .get(at + 1)
+        .copied()
+        .filter(|w| matches!(*w, "IN" | "OUT" | "FWD"));
+    Some((to, words[at], direction))
+}
+
+/// Whether `word` is a ufw port part: `1716`, `1716/tcp`, `1714:1764/udp`,
+/// `1716,4716/tcp`; not an address.
+fn ufw_ports(word: &str) -> bool {
+    let ports = word
+        .strip_suffix("/tcp")
+        .or_else(|| word.strip_suffix("/udp"))
+        .unwrap_or(word);
+    !ports.is_empty()
+        && ports.starts_with(|c: char| c.is_ascii_digit())
+        && ports
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == ',' || c == ':')
+        && ports.split(',').all(|p| p.matches(':').count() <= 1)
+}
+
 /// O9: `ufw status verbose` read for the control and stream ports: off, or
 /// on with which of the two an ALLOW rule (or an allowing default) lets in.
 pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFirewall {
@@ -687,21 +728,30 @@ pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFire
     let mut control = allows_in;
     let mut stream = allows_in;
     for line in status.lines() {
-        let mut words = line.split_whitespace();
-        let Some(to) = words.next() else {
+        let Some((to, action, direction)) = ufw_rule(line) else {
             continue;
         };
-        // "ALLOW IN" with verbose, "ALLOW" without; a v6 rule says "(v6)".
-        let Some(action) = words.find(|w| *w != "(v6)") else {
-            continue;
-        };
-        if action != "ALLOW" {
+        // ALLOW and LIMIT let in; only rules for what comes in count (O9
+        // review: an OUT or FWD rule had read as open).
+        if !matches!(action, "ALLOW" | "LIMIT") || !matches!(direction, None | Some("IN")) {
             continue;
         }
-        // "Anywhere ALLOW IN 192.0.2.0/24": every port, from there.
-        let every = to == "Anywhere";
-        control |= every || rule_takes(to, control_port, "tcp");
-        stream |= every || rule_takes(to, stream_port, "udp");
+        let port = to.iter().find(|t| ufw_ports(t));
+        match port {
+            Some(port) => {
+                control |= rule_takes(port, control_port, "tcp");
+                stream |= rule_takes(port, stream_port, "udp");
+            }
+            // "Anywhere ALLOW IN 192.0.2.0/24", or one address: every port
+            // to it. An app profile ("OpenSSH") names no port read here.
+            None => {
+                let every = to
+                    .first()
+                    .is_some_and(|t| *t == "Anywhere" || t.contains(['.', ':', '/']));
+                control |= every;
+                stream |= every;
+            }
+        }
     }
     LinuxFirewall::On {
         tool,
@@ -711,8 +761,10 @@ pub fn parse_ufw(status: &str, control_port: u16, stream_port: u16) -> LinuxFire
 }
 
 /// O9: firewalld read for the two ports, from `firewall-cmd --state` and
-/// `--list-all` (the zone in use): its `ports:` and the `kdeconnect`
-/// service, which opens 1714-1764 both ways.
+/// `--list-all` of each active zone (their lists one after another; a port
+/// let in by any of them counts): its `ports:`, rich rules that accept a
+/// port, an ACCEPT target, and the `kdeconnect` service, which opens
+/// 1714-1764 both ways.
 pub fn parse_firewalld(
     state: &str,
     list_all: Option<&str>,
@@ -737,7 +789,25 @@ pub fn parse_firewalld(
             .collect()
     };
     let target_accepts = field("target").iter().any(|t| t == "ACCEPT");
-    let ports = field("ports");
+    let mut ports = field("ports");
+    // Rich rules (O9 review): `rule ... port port="1716" protocol="tcp" accept`.
+    for rule in list
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("rule "))
+    {
+        if !rule.split_whitespace().any(|w| w == "accept") {
+            continue;
+        }
+        let value = |key: &str| {
+            rule.split_whitespace()
+                .find_map(|w| w.strip_prefix(key))
+                .map(|v| v.trim_matches('"').to_string())
+        };
+        if let (Some(port), Some(proto)) = (value("port="), value("protocol=")) {
+            ports.push(format!("{}/{proto}", port.replace('-', ":")));
+        }
+    }
     let kde = field("services").iter().any(|s| s == "kdeconnect");
     let takes = |port: u16, proto: &str| {
         target_accepts
@@ -767,7 +837,7 @@ pub fn check_linux_firewall(
             finding(
                 check,
                 Status::Warn,
-                format!("{tool} is on, and its rules need root to read"),
+                format!("{tool} is on, and its rules could not be read (they may need root)"),
             ),
             match *tool {
                 "ufw" => format!(
@@ -1210,6 +1280,42 @@ mod tests {
             ),
             LinuxFirewall::Unreadable { tool: "ufw" }
         );
+        // O9 review: what an OUT or FWD rule, an interface or an address does.
+        assert_eq!(
+            parse_ufw(
+                &on("Anywhere ALLOW OUT Anywhere\nAnywhere ALLOW FWD 10.0.0.0/8\n"),
+                1716,
+                4716
+            ),
+            LinuxFirewall::On {
+                tool: "ufw",
+                control: false,
+                stream: false
+            },
+            "not for what comes in"
+        );
+        assert_eq!(
+            parse_ufw(
+                &on("1716/tcp on wlan0 ALLOW IN Anywhere\n192.0.2.5 4716/udp LIMIT IN Anywhere\n"),
+                1716,
+                4716
+            ),
+            LinuxFirewall::On {
+                tool: "ufw",
+                control: true,
+                stream: true
+            },
+            "an interface, an address and a limit"
+        );
+        assert_eq!(
+            parse_ufw(&on("OpenSSH ALLOW IN Anywhere\n"), 1716, 4716),
+            LinuxFirewall::On {
+                tool: "ufw",
+                control: false,
+                stream: false
+            },
+            "an app profile"
+        );
         let open = "Status: active\nDefault: allow (incoming), allow (outgoing)\n";
         assert_eq!(
             parse_ufw(open, 1716, 4716),
@@ -1263,6 +1369,16 @@ mod tests {
                 control: true,
                 stream: true
             }
+        );
+        let rich = "home (active)\n  ports:\n  rich rules:\n\trule family=\"ipv4\" port port=\"1716\" protocol=\"tcp\" accept\n\trule family=\"ipv4\" port port=\"4700-4800\" protocol=\"udp\" accept\n";
+        assert_eq!(
+            parse_firewalld("running", Some(rich), 1716, 4716),
+            LinuxFirewall::On {
+                tool: "firewalld",
+                control: true,
+                stream: true
+            },
+            "rich rules"
         );
         assert_eq!(
             parse_firewalld("not running", None, 1716, 4716),

@@ -34,3 +34,22 @@ Date: 2026-10-22. Plan: `docs/research/2026-10-22-o-cycle.md` §O9.
   - firewalld: ports, ranges, KDE Connect's service, off, unreadable;
   - the finding: each status and its hint.
 - **Owed:** the row on the VM with ufw on, off and with the ports allowed (checklist §192). The Linux code is built by CI only; this computer cannot build it.
+
+## Review
+
+A fresh review found 0 Critical, 3 Important and 5 Minor issues.
+
+**Important, fixed:**
+- **A helper that might not have compiled on Linux.** A closure returning a borrowed name is now a plain function.
+- **Rules that read as open but were not.** An `OUT` or `FWD` rule counted as letting phones in. Only rules for what comes in count now.
+- **Rules that read as shut but were not.** A rule on an interface (`on wlan0`), to one address, or a `LIMIT` rule was skipped. Each rule line is now read in full: what it is to, its action and its direction.
+
+**Minor, fixed:**
+- firewalld is read for every active zone, not the default one;
+- its rich rules that accept a port are read;
+- a ufw that is off no longer hides a firewalld that runs;
+- "could not be read (they may need root)", where it had said they need root (a ufw in another language also lands there).
+
+**Not done:**
+- **The order of ufw's rules.** A DENY above an ALLOW still reads as open.
+- **ufw's rules without root.** These cannot be read, so that row is mostly a warning with the command to run.

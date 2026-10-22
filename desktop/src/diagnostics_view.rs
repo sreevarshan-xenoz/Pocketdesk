@@ -315,36 +315,93 @@ fn firewall_state(_state_dir: &Path) -> Option<Result<diagnostics::FirewallState
 /// whether it is on without it.
 #[cfg(target_os = "linux")]
 fn linux_firewall(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+    let ufw = linux_ufw(control_port, stream_port);
+    // A ufw that is off does not hide a firewalld that runs (O9 review).
+    if !matches!(
+        ufw,
+        diagnostics::LinuxFirewall::None | diagnostics::LinuxFirewall::Off { .. }
+    ) {
+        return ufw;
+    }
+    match linux_firewalld(control_port, stream_port) {
+        diagnostics::LinuxFirewall::None => ufw,
+        diagnostics::LinuxFirewall::Off { .. } if ufw != diagnostics::LinuxFirewall::None => ufw,
+        firewalld => firewalld,
+    }
+}
+
+/// The first of `paths` that exists.
+#[cfg(target_os = "linux")]
+fn installed(paths: &[&'static str]) -> Option<&'static str> {
+    paths.iter().copied().find(|p| Path::new(p).exists())
+}
+
+#[cfg(target_os = "linux")]
+const FIREWALL_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// ufw: its status needs root; its config file says whether it is on
+/// without it.
+#[cfg(target_os = "linux")]
+fn linux_ufw(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
+    let Some(ufw) = installed(&["/usr/sbin/ufw", "/sbin/ufw", "/usr/bin/ufw"]) else {
+        return diagnostics::LinuxFirewall::None;
+    };
+    if let Some(out) =
+        pocketdesk_core::local::network::output_within(ufw, &["status", "verbose"], FIREWALL_WAIT)
+    {
+        return diagnostics::parse_ufw(&String::from_utf8_lossy(&out), control_port, stream_port);
+    }
+    let enabled = std::fs::read_to_string("/etc/ufw/ufw.conf")
+        .map(|conf| conf.lines().any(|l| l.trim() == "ENABLED=yes"))
+        .unwrap_or(true);
+    if enabled {
+        diagnostics::LinuxFirewall::Unreadable { tool: "ufw" }
+    } else {
+        diagnostics::LinuxFirewall::Off { tool: "ufw" }
+    }
+}
+
+/// firewalld: each active zone's list read (at most four), since phones
+/// may come in through any of them (O9 review).
+#[cfg(target_os = "linux")]
+fn linux_firewalld(control_port: u16, stream_port: u16) -> diagnostics::LinuxFirewall {
     use pocketdesk_core::local::network::output_within;
-    let within = std::time::Duration::from_secs(3);
-    let installed = |paths: &[&str]| paths.iter().find(|p| Path::new(p).exists()).copied();
-    if let Some(ufw) = installed(&["/usr/sbin/ufw", "/sbin/ufw", "/usr/bin/ufw"]) {
-        if let Some(out) = output_within(ufw, &["status", "verbose"], within) {
-            return diagnostics::parse_ufw(
-                &String::from_utf8_lossy(&out),
-                control_port,
-                stream_port,
-            );
-        }
-        let enabled = std::fs::read_to_string("/etc/ufw/ufw.conf")
-            .map(|conf| conf.lines().any(|l| l.trim() == "ENABLED=yes"))
-            .unwrap_or(true);
-        return if enabled {
-            diagnostics::LinuxFirewall::Unreadable { tool: "ufw" }
-        } else {
-            diagnostics::LinuxFirewall::Off { tool: "ufw" }
-        };
+    let Some(cmd) = installed(&["/usr/bin/firewall-cmd", "/bin/firewall-cmd"]) else {
+        return diagnostics::LinuxFirewall::None;
+    };
+    let text = |out: Vec<u8>| String::from_utf8_lossy(&out).into_owned();
+    // "not running" is answered with a failing exit, which reads as none.
+    let state = output_within(cmd, &["--state"], FIREWALL_WAIT)
+        .map(text)
+        .unwrap_or_default();
+    if state.trim() != "running" {
+        return diagnostics::parse_firewalld(&state, None, control_port, stream_port);
     }
-    if let Some(cmd) = installed(&["/usr/bin/firewall-cmd", "/bin/firewall-cmd"]) {
-        // "not running" is answered with a failing exit, which reads as none.
-        let state = output_within(cmd, &["--state"], within)
-            .map(|out| String::from_utf8_lossy(&out).into_owned())
-            .unwrap_or_default();
-        let list = output_within(cmd, &["--list-all"], within)
-            .map(|out| String::from_utf8_lossy(&out).into_owned());
-        return diagnostics::parse_firewalld(&state, list.as_deref(), control_port, stream_port);
-    }
-    diagnostics::LinuxFirewall::None
+    // Zone names start their line; the lines under them are indented.
+    let zones: Vec<String> = output_within(cmd, &["--get-active-zones"], FIREWALL_WAIT)
+        .map(text)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with(char::is_whitespace))
+        .map(|l| l.trim().to_string())
+        .take(4)
+        .collect();
+    let lists: Vec<String> = if zones.is_empty() {
+        output_within(cmd, &["--list-all"], FIREWALL_WAIT)
+            .map(text)
+            .into_iter()
+            .collect()
+    } else {
+        zones
+            .iter()
+            .filter_map(|zone| {
+                let arg = format!("--zone={zone}");
+                output_within(cmd, &["--list-all", arg.as_str()], FIREWALL_WAIT).map(text)
+            })
+            .collect()
+    };
+    let list = (!lists.is_empty()).then(|| lists.join("\n"));
+    diagnostics::parse_firewalld(&state, list.as_deref(), control_port, stream_port)
 }
 
 fn now_unix() -> u64 {
