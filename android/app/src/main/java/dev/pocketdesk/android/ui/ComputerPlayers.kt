@@ -16,9 +16,29 @@ object ComputerPlayers {
     /** The longest id a player may have. */
     const val MAX_ID = 256
 
-    /** Whether [id] may name a player: as the computer's own rule, short and plain, no comma. */
+    /** Whether [id] may name a player: as the computer's own rule, at most [MAX_ID] bytes, plain, no comma. */
     fun valid(id: String?): Boolean =
-        id != null && id.isNotEmpty() && id.length <= MAX_ID && id.none { it.isISOControl() || it == ',' }
+        id != null && id.isNotEmpty() && id.toByteArray(Charsets.UTF_8).size <= MAX_ID &&
+            id.none { it.isISOControl() || it == ',' }
+
+    /**
+     * What [p] is called in the list: its [name] through [shortName], with
+     * its id beside it when another player is called the same (two windows
+     * of one browser, O6 review).
+     */
+    fun label(players: List<Player>, p: Player, shortName: (String) -> String): String {
+        val name = shortName(p.name)
+        val shared = players.count { shortName(it.name) == name } > 1
+        return if (shared) "$name (${p.id})" else name
+    }
+
+    /**
+     * Whether a push read for [pushed] (null: the computer's choice; absent
+     * from an older computer, [hasPlayer] false) is for the player [chosen]
+     * now: one read before a new choice is not shown (O6 review).
+     */
+    fun pushFor(hasPlayer: Boolean, pushed: String?, chosen: String?): Boolean =
+        !hasPlayer || named(pushed) == named(chosen)
 
     /** The id to name on a request: [chosen] when it may name one, else none. */
     fun named(chosen: String?): String? = chosen?.takeIf { valid(it) }

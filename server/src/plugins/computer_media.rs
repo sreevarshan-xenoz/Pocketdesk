@@ -268,7 +268,9 @@ async fn look(
             ) else {
                 continue;
             };
-            let mut body = serde_json::json!({ "playing": playing });
+            // The player it was read for (O6 review): a phone that chose
+            // another since does not show it.
+            let mut body = serde_json::json!({ "playing": playing, "player": player });
             if let Some((id, bytes)) = art {
                 body["artId"] = Value::from(id.as_str());
                 if with_art {

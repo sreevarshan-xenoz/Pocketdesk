@@ -48,7 +48,14 @@ fn choose(
     let named = |c: &str| sessions.iter().position(|(app, _)| app == c);
     wanted
         .filter(|w| other(w))
-        .and_then(named)
+        .and_then(|w| {
+            // The app's playing session first: a browser's paused tab must
+            // not take the presses meant for its playing one (O6 review).
+            sessions
+                .iter()
+                .position(|(app, playing)| app == w && *playing)
+                .or_else(|| named(w))
+        })
         .or_else(|| current.filter(|c| other(c)).and_then(named))
         .or_else(|| {
             sessions
@@ -239,6 +246,16 @@ mod tests {
             "gone: the system's own"
         );
         assert_eq!(super::choose(Some(super::OWN), None, &sessions), Some(0));
+        // O6 review: of an app's two sessions, the playing one.
+        let tabs = [
+            s("Chrome", false),
+            s("Chrome", true),
+            s("Spotify.exe", true),
+        ];
+        assert_eq!(
+            super::choose(Some("Chrome"), Some("Spotify.exe"), &tabs),
+            Some(1)
+        );
     }
 
     /// Reads this computer's media session. Run by hand with something

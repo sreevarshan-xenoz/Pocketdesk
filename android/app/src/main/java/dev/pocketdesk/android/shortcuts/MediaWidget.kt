@@ -176,6 +176,13 @@ class MediaWidget : AppWidgetProvider() {
                 putLong(KEY_AT, System.currentTimeMillis())
             }
 
+            /** Forget what was kept for [computer]: another player's (O6). */
+            @Synchronized
+            fun forget(ctx: Context, computer: String) {
+                val p = prefs(ctx)
+                if (p.getString(KEY_FOR, null) == computer) p.edit { clear() }
+            }
+
             @Synchronized
             fun failed(ctx: Context, computer: String, line: String) {
                 if (!last(ctx, computer)) return
@@ -213,6 +220,16 @@ class MediaWidget : AppWidgetProvider() {
         /** The last computer may have changed: ask once when it was never asked. */
         fun follow(context: Context) {
             context.sendBroadcast(Intent(context, MediaWidget::class.java).setAction(ACTION_FOLLOW))
+        }
+
+        /**
+         * O6: another player was chosen for [computer]: what was kept is the
+         * old player's, so it goes and the widget asks again (O6 review).
+         */
+        fun playerChanged(context: Context, computer: String) {
+            Kept.forget(context, computer)
+            if (HostStore.lastHost(context)?.address != computer) return
+            context.sendBroadcast(Intent(context, MediaWidget::class.java).setAction(ACTION_REFRESH))
         }
 
         /** What the last computer plays as kept, for the music tile (G6). */

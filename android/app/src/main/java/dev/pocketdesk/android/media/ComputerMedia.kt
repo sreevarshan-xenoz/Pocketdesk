@@ -20,6 +20,7 @@ import android.util.Log
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.ui.ComputerPlayers
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneLink
 import org.json.JSONObject
@@ -79,6 +80,9 @@ class ComputerMedia(private val app: Context) {
     private var badCover: String? = null
     private var showingFor: String? = null
 
+    /** The player the last watch named (O6). */
+    private var watchedPlayer: String? = null
+
     /** Closed with the listener: nothing is drawn after (N5 review). */
     @Volatile
     private var closed = false
@@ -109,7 +113,7 @@ class ComputerMedia(private val app: Context) {
             worker.execute {
                 // Told to stop where it was asked, so the computer stops reading.
                 val own = PhoneLink.target(app)
-                val link = own?.let { watchKey(it, live(it)) }
+                val link = own?.let { live(it) }
                 if (own != null && link != null && watch.due(link, wanted = false) == false) {
                     send(own, false)
                 }
@@ -123,13 +127,6 @@ class ComputerMedia(private val app: Context) {
 
     private fun live(own: HostStore.Host): Pair<String, Int>? =
         RustCore.controlPeer()?.takeIf { it == own.address to own.controlPort }
-
-    /**
-     * What a watch is sent on: the live [link] and the player chosen for
-     * [own] (O6), so a new choice asks again as a new link would.
-     */
-    private fun watchKey(own: HostStore.Host, link: Pair<String, Int>?): Pair<Pair<String, Int>, String?>? =
-        link?.let { it to HostStore.player(app, own.address) }
 
     private fun send(own: HostStore.Host, on: Boolean): Boolean =
         RustCore.sendPhonePacketOnLink(
@@ -156,13 +153,24 @@ class ComputerMedia(private val app: Context) {
         RustCore.takeComputerMedia()?.let { push ->
             val host = push.optString("host")
             val port = push.optInt("port", -1)
-            if (wanted && ComputerMediaRule.fromOwn(host, port, own?.address, own?.controlPort)) heard(push, nowMs)
+            // O6: one read for a player chosen before is not shown (O6 review).
+            val pushed = if (push.isNull("player")) null else push.optString("player")
+            val forChosen = ComputerPlayers.pushFor(push.has("player"), pushed, own?.let { HostStore.player(app, it.address) })
+            if (wanted && forChosen && ComputerMediaRule.fromOwn(host, port, own?.address, own?.controlPort)) heard(push, nowMs)
         }
         val current = shown.current(nowMs)
-        val link = own?.let { watchKey(it, live(it)) }
+        val link = own?.let { live(it) }
+        val player = own?.let { HostStore.player(app, it.address) }
+        if (link == null) watchedPlayer = null
         val coverMissing = current?.artId != null && cover?.first != current.artId && badCover != current.artId
-        watch.due(link, wanted, nowMs, heardMs, coverMissing)?.let { on ->
-            if (own != null && link != null && send(own, on)) watch.sent(link, on, nowMs)
+        // O6: a new choice asks again with it, the link's rule unchanged.
+        val due = watch.due(link, wanted, nowMs, heardMs, coverMissing)
+            ?: true.takeIf { wanted && link != null && player != watchedPlayer }
+        due?.let { on ->
+            if (own != null && link != null && send(own, on)) {
+                watch.sent(link, on, nowMs)
+                watchedPlayer = if (on) player else null
+            }
         }
         val art = cover?.takeIf { it.first == current?.artId }?.second
         val computer = own?.let { HostStore.shownName(app, it.address) }.orEmpty()

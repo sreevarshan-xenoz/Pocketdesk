@@ -43,3 +43,25 @@ An id is at most 256 bytes, with no control character and no comma (`media::vali
   - the phone: `ComputerPlayers`.
 - **On the OPPO, with the seam:** two players listed, one chosen, and a press reaching the chosen one (checklist §189).
 - **Owed:** a press to a real player, which needs the owner.
+
+## Review
+
+A fresh review found 0 Critical, 3 Important and 5 Minor issues. It found no way to inject into `playerctl`: the arguments are passed as a list with no shell, and an id is one `-p` value with no comma.
+
+**Important, fixed:**
+- **The widget and tile kept the old player's track** while their presses went to the new one. A new choice now forgets what they held and asks again (`MediaWidget.playerChanged`).
+- **Choosing a browser on Windows took its first session**, a paused tab, not the playing one. The chosen app's playing session now comes first.
+- **Every `media` ask listed the players**, a second read each 2 s that could hold the link up to 6 s. Only the Sound sheet asks for the list now (`players: true`).
+
+**Minor, fixed:**
+- A push read for the player chosen before was shown after a new choice. Pushes now say their player, and the phone shows only the chosen one's (`ComputerPlayers.pushFor`).
+- A stop after a new choice could go unsent. The watch keeps its link rule, and a new choice asks again on its own.
+- The phone counted an id's length in characters where the computer counts bytes.
+- Two players of one name (two Firefox windows) read the same in the menu. Each now has its id beside it.
+- The menu's items said no selected state to TalkBack.
+- The seam listed its own player twice.
+- An older read could overwrite a choice's.
+
+**Tests added:** the seam's players, Windows' choice between two sessions of one app, the label and the push rule.
+
+**Not done:** a test of the watcher's grouping by player, which needs live clients.

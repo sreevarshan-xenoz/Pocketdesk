@@ -34,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -133,6 +135,8 @@ fun AudioControlSheet(
     // O6: the computer's players, and the one chosen for this computer.
     var players by remember { mutableStateOf<List<ComputerPlayers.Player>>(emptyList()) }
     var chosenPlayer by remember(address) { mutableStateOf(HostStore.player(context, address)) }
+    // The newest read writes: a choice's read must not be undone by an older poll (O6 review).
+    val mediaReads = remember { java.util.concurrent.atomic.AtomicInteger() }
 
     /** [body] naming the chosen player, if one is. */
     fun withPlayer(body: JSONObject): JSONObject =
@@ -155,7 +159,9 @@ fun AudioControlSheet(
     }
 
     suspend fun refreshMedia() {
-        val answer = media(withPlayer(JSONObject().put("action", "media")))
+        val read = mediaReads.incrementAndGet()
+        val answer = media(withPlayer(JSONObject().put("action", "media").put("players", true)))
+        if (read != mediaReads.get()) return
         // A read that failed shows only why: the last track's buttons would
         // fail the same way.
         playing = answer?.let { parsePlaying(it) }
@@ -240,6 +246,8 @@ fun AudioControlSheet(
                 onChoose = { id ->
                     HostStore.setPlayer(context, address, id)
                     chosenPlayer = HostStore.player(context, address)
+                    // The widget kept the other player's track (O6 review).
+                    dev.pocketdesk.android.shortcuts.MediaWidget.playerChanged(context, address)
                     scope.launch { refreshMedia() }
                 },
             )
@@ -489,6 +497,7 @@ private fun PlayerPicker(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
                 text = { Text(system) },
+                modifier = Modifier.semantics { selected = current == null },
                 leadingIcon = { RadioButton(selected = current == null, onClick = null) },
                 onClick = {
                     open = false
@@ -496,9 +505,10 @@ private fun PlayerPicker(
                 },
             )
             players.forEach { p ->
-                val name = NowPlaying.appName(p.name)
+                val name = ComputerPlayers.label(players, p) { NowPlaying.appName(it) }
                 DropdownMenuItem(
                     text = { Text(if (p.isPlaying) stringResource(R.string.media_player_playing, name) else name) },
+                    modifier = Modifier.semantics { selected = current?.id == p.id },
                     leadingIcon = { RadioButton(selected = current?.id == p.id, onClick = null) },
                     onClick = {
                         open = false

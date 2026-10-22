@@ -19,6 +19,8 @@ class ComputerPlayersTest {
         assertFalse(ComputerPlayers.valid("spotify,%any"))
         assertFalse(ComputerPlayers.valid("a\nb"))
         assertFalse(ComputerPlayers.valid("x".repeat(ComputerPlayers.MAX_ID + 1)))
+        // Bytes, as the computer counts them (O6 review).
+        assertFalse(ComputerPlayers.valid("é".repeat(ComputerPlayers.MAX_ID / 2 + 1)))
         assertNull(ComputerPlayers.named("a,b"))
         assertEquals("vlc", ComputerPlayers.named("vlc"))
     }
@@ -37,6 +39,24 @@ class ComputerPlayersTest {
         assertEquals(chrome, ComputerPlayers.current(listOf(spotify, chrome), "Chrome"))
         assertNull(ComputerPlayers.current(listOf(spotify), "Chrome"))
         assertNull(ComputerPlayers.current(listOf(spotify), null))
+    }
+
+    @Test
+    fun `two players of one name are told apart by their id`() {
+        val a = Player("firefox.instance_1", "firefox", true)
+        val b = Player("firefox.instance_2", "firefox", false)
+        val short = { name: String -> name }
+        assertEquals("firefox (firefox.instance_1)", ComputerPlayers.label(listOf(a, b, spotify), a, short))
+        assertEquals("Spotify.exe", ComputerPlayers.label(listOf(a, b, spotify), spotify, short))
+    }
+
+    @Test
+    fun `a push read for another player is not shown`() {
+        assertTrue(ComputerPlayers.pushFor(hasPlayer = false, pushed = null, chosen = "Chrome"))
+        assertTrue(ComputerPlayers.pushFor(hasPlayer = true, pushed = "Chrome", chosen = "Chrome"))
+        assertTrue(ComputerPlayers.pushFor(hasPlayer = true, pushed = null, chosen = null))
+        assertFalse(ComputerPlayers.pushFor(hasPlayer = true, pushed = "Spotify.exe", chosen = "Chrome"))
+        assertFalse(ComputerPlayers.pushFor(hasPlayer = true, pushed = null, chosen = "Chrome"))
     }
 
     @Test

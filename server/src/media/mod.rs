@@ -41,6 +41,26 @@ fn seam_value(file: &std::path::Path) -> Option<Value> {
     serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
 }
 
+/// The seam's players: its own (its top level), then its `players`.
+fn seam_players(v: &Value) -> Vec<Player> {
+    let mut list: Vec<Value> = v
+        .get("players")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+    if v.get("app").is_some() {
+        list.insert(0, v.clone());
+    }
+    list.iter()
+        .map(seam_playing)
+        .map(|p| Player {
+            id: p.app.clone(),
+            name: p.app,
+            playing: p.is_playing,
+        })
+        .collect()
+}
+
 /// The seam's player named `player`, else its own (its top level).
 fn seam_player(v: &Value, player: Option<&str>) -> Value {
     player
@@ -106,27 +126,11 @@ pub fn requested_player(body: &Value) -> Option<String> {
 pub fn players() -> Result<Vec<Player>, String> {
     let mut all = match seam() {
         None => platform::players()?,
-        Some(file) => {
-            let v = seam_value(&file).unwrap_or(Value::Null);
-            let mut list: Vec<Value> = v
-                .get("players")
-                .and_then(|p| p.as_array())
-                .cloned()
-                .unwrap_or_default();
-            if v.get("app").is_some() {
-                list.insert(0, v.clone());
-            }
-            list.iter()
-                .map(seam_playing)
-                .map(|p| Player {
-                    id: p.app.clone(),
-                    name: p.app,
-                    playing: p.is_playing,
-                })
-                .collect()
-        }
+        Some(file) => seam_players(&seam_value(&file).unwrap_or(Value::Null)),
     };
-    all.retain(|p| valid_player(&p.id));
+    // Each once (O6 review: the seam's own player is also in its list).
+    let mut seen = std::collections::HashSet::new();
+    all.retain(|p| valid_player(&p.id) && seen.insert(p.id.clone()));
     all.truncate(MAX_PLAYERS);
     Ok(all)
 }
@@ -416,6 +420,26 @@ mod tests {
         );
         assert_eq!(requested_player(&json!({"player": 3})), None);
         assert_eq!(requested_player(&json!({})), None);
+    }
+
+    #[test]
+    fn the_seam_stands_for_several_players() {
+        let v = json!({
+            "title": "Tab", "app": "Chrome", "isPlaying": false,
+            "players": [{"title": "Song", "app": "Spotify.exe", "isPlaying": true}]
+        });
+        let ids: Vec<String> = seam_players(&v).into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["Chrome", "Spotify.exe"]);
+        assert_eq!(
+            seam_playing(&seam_player(&v, Some("Spotify.exe"))).title,
+            "Song"
+        );
+        assert_eq!(
+            seam_playing(&seam_player(&v, Some("Gone"))).title,
+            "Tab",
+            "gone: its own"
+        );
+        assert_eq!(seam_playing(&seam_player(&v, None)).title, "Tab");
     }
 
     #[test]
