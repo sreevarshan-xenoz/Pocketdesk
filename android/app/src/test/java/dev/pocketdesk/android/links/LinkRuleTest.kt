@@ -82,4 +82,17 @@ class LinkRuleTest {
             LinkRule.find("Read https://en.wikipedia.org/wiki/Foo_(bar)!"),
         )
     }
+
+    /** N9: every link a share holds, once, in order, at most five. */
+    @Test
+    fun eachLinkInAShareIsTakenOnceUpToFive() {
+        assertEquals(
+            listOf("https://a.example/1", "https://b.example/2"),
+            LinkRule.findAll("see https://a.example/1, and (https://b.example/2) or https://a.example/1 javascript:x"),
+        )
+        val many = (1..8).joinToString(" ") { "https://c.example/$it" }
+        assertEquals(LinkRule.MAX_PER_SHARE, LinkRule.findAll(many).size)
+        assertEquals(listOf<String>(), LinkRule.findAll("no links here"))
+        assertEquals("https://a.example/1", LinkRule.find("x https://a.example/1 https://b.example/2"))
+    }
 }

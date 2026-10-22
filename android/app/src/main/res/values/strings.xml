@@ -507,6 +507,10 @@
     <string name="open_on_computer_label">Open on computer</string>
     <string name="to_computer_label">To computer</string>
     <string name="link_sent">Sent to the computer, to open there if it allows links.</string>
+    <plurals name="links_sent">
+        <item quantity="one">%1$d link sent to the computer, to open there if it allows links.</item>
+        <item quantity="other">%1$d links sent to the computer, to open there if it allows links.</item>
+    </plurals>
     <string name="link_not_web">No web link to open (only http and https links).</string>
     <string name="link_from_computer">A link from %1$s</string>
     <string name="channel_links">Links from the computer</string>
