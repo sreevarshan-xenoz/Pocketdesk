@@ -40,6 +40,7 @@ object Prefs {
     private const val KEY_CLIPBOARD_IMAGES_BACKGROUND = "clipboard_images_in_background"
     private const val KEY_ANSWER_NOTIFICATIONS = "answer_notifications"
     private const val KEY_QUIET_IN_HAND = "quiet_in_hand"
+    private const val KEY_TOAST_WHERE_WORKING = "toast_where_working"
     private const val KEY_FILES_BACKGROUND = "files_in_background"
     private const val KEY_RING_FROM_COMPUTER = "ring_from_computer"
     private const val KEY_CAPTURE_MOUSE = "capture_mouse"
@@ -396,6 +397,19 @@ object Prefs {
 
     fun setQuietInHand(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_QUIET_IN_HAND, enabled) }
+        bump()
+    }
+
+    /**
+     * N7: a notification pops up only on the computer in use, while one is;
+     * the others keep it on their Notifications page. Keeps a link to each
+     * other computer picked. Off by default.
+     */
+    fun toastWhereWorking(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_TOAST_WHERE_WORKING, false)
+
+    fun setToastWhereWorking(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_TOAST_WHERE_WORKING, enabled) }
         bump()
     }
 
