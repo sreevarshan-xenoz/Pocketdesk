@@ -2570,7 +2570,7 @@ Owed:
 - [ ] Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
 - [ ] A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
 - [ ] The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
-## 189. Notifications held by their words (P4)
+## 196. Notifications held by their words (P4)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the fixture app's notifications, the config changed while it ran:
 - [x] `big sale` held "Today only: BIG SALE" (logged with `held_by_words`); `Pocketdesk fixture: standup` held "Standup at 10"; "Lunch?" was not held.
