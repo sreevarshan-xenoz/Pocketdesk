@@ -2561,7 +2561,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
-## 187. Open an app on the phone from the computer (P2)
+## 194. Open an app on the phone from the computer (P2)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the requests written as the desktop app writes them:
 - [x] The apps asked for: 77 listed on the computer (Settings among them, Pocketdesk left out).
