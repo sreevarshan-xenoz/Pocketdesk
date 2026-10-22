@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
+/// A file given to the stand-in phone (N6): its folder, name and bytes.
+type Given = (Vec<String>, String, Vec<u8>);
+
 /// A phone from memory: its listings, and files written to a temp folder
 /// when fetched.
 struct StandIn {
@@ -16,8 +19,10 @@ struct StandIn {
     cache: PathBuf,
     /// Folders made (N6).
     made: Mutex<Vec<Vec<String>>>,
-    /// Files given (N6): the folder, the name and the bytes.
-    given: Mutex<Vec<(Vec<String>, String, Vec<u8>)>>,
+    /// Files given (N6).
+    given: Mutex<Vec<Given>>,
+    /// What the owner was told of copies no one waited for (N6 review).
+    told: Mutex<Vec<(String, String)>>,
 }
 
 /// Counts a fetch dropped before it finished.
@@ -108,6 +113,7 @@ fn stand_in(name: &str) -> Arc<StandIn> {
         cache,
         made: Mutex::new(Vec::new()),
         given: Mutex::new(Vec::new()),
+        told: Mutex::new(Vec::new()),
     })
 }
 
@@ -146,6 +152,12 @@ impl Phones for StandIn {
         std::fs::write(&file, bytes).unwrap();
         Ok(file)
     }
+    fn tell(&self, name: &str, why: &str) {
+        self.told
+            .lock()
+            .unwrap()
+            .push((name.to_string(), why.to_string()));
+    }
     async fn mkdir(&self, _device: &str, root: u32, path: &[String]) -> Result<Listing, Fail> {
         assert_eq!(root, 8, "only the marked root");
         self.made.lock().unwrap().push(path.to_vec());
@@ -173,13 +185,18 @@ impl Phones for StandIn {
         assert_eq!(root, 8, "only the marked root");
         let bytes = std::fs::read(&file).unwrap();
         assert_eq!(bytes.len() as u64, size);
-        std::fs::remove_file(&file).unwrap();
+        // Named as it was copied (N6 review).
+        assert_eq!(file.file_name().unwrap().to_str(), Some(name));
+        remove_upload(&file);
         self.given
             .lock()
             .unwrap()
             .push((folder.to_vec(), name.to_string(), bytes));
+        if name == "late-refused.txt" {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
         Ok(match name {
-            "refused.txt" => Put::Refused("not allowed".to_string()),
+            "refused.txt" | "late-refused.txt" => Put::Refused("not allowed".to_string()),
             "full.bin" => Put::NoRoom("not enough space".to_string()),
             "slow.txt" => Put::UnderWay,
             _ => Put::Saved,
@@ -777,5 +794,53 @@ async fn locks_and_times_are_answered_where_files_may_go() {
     let patched = ask(addr, "PROPPATCH", &format!("{docs}/taken.txt"), "").await;
     assert_eq!(code(&patched), 207, "{patched}");
     assert!(patched.contains("200 OK"), "{patched}");
+    stop.cancel();
+}
+
+/// N6 review: a copy whose client left before the phone answered is still
+/// given, and a refusal is told to the owner another way.
+#[tokio::test]
+async fn a_refusal_no_one_waits_for_is_told() {
+    let phone = stand_in("w-told");
+    let (addr, stop, _) = start_writing(phone.clone(), STUB_KEEP).await;
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "PUT /{TOKEN}/Pixel/Docs/late-refused.txt HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nhi"
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    // Gone once the body is in, before the phone answers.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(stream);
+    for _ in 0..100 {
+        if !phone.told.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        phone.told.lock().unwrap().first(),
+        Some(&("late-refused.txt".to_string(), "not allowed".to_string()))
+    );
+    stop.cancel();
+}
+
+/// N6 review: an empty file whose content never comes whole is still held.
+#[tokio::test]
+async fn an_empty_file_outlives_content_that_never_came() {
+    let phone = stand_in("w-broken");
+    let (addr, stop, _) = start_writing(phone.clone(), STUB_KEEP).await;
+    let docs = format!("/{TOKEN}/Pixel/Docs/");
+    send(addr, "PUT", &format!("{docs}x.txt"), b"").await;
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "PUT {docs}x.txt HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\nonly ten b"
+    );
+    stream.write_all(head.as_bytes()).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let listed = ask(addr, "PROPFIND", &docs, "Depth: 1\r\n").await;
+    assert!(listed.contains("x.txt"), "{listed}");
+    assert!(phone.given.lock().unwrap().is_empty());
     stop.cancel();
 }

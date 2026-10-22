@@ -257,17 +257,24 @@ pub fn http_date(unix: u64) -> String {
 pub fn head(status: u16, headers: &[(&str, String)], length: u64) -> String {
     let reason = match status {
         200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
         206 => "Partial Content",
         207 => "Multi-Status",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
+        411 => "Length Required",
         413 => "Content Too Large",
         416 => "Range Not Satisfiable",
         501 => "Not Implemented",
         502 => "Bad Gateway",
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
+        507 => "Insufficient Storage",
         _ => "Error",
     };
     let mut out =

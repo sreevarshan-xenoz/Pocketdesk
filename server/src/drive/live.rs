@@ -36,6 +36,18 @@ fn refusal(why: String) -> Put {
     }
 }
 
+/// Say in a desktop notification that `name` did not reach the phone (N6).
+fn late(name: &str, why: &str) {
+    let body = format!("{name}: {why}");
+    tokio::task::spawn_blocking(move || {
+        crate::platform::notify(
+            "A file did not reach the phone",
+            &body,
+            Duration::from_secs(10),
+        )
+    });
+}
+
 /// A waiting fetch's phone, and where to say its file arrived.
 type Waiter = (String, oneshot::Sender<PathBuf>);
 
@@ -178,6 +190,10 @@ impl Phones for LivePhones {
             .collect()
     }
 
+    fn tell(&self, name: &str, why: &str) {
+        late(name, why);
+    }
+
     async fn mkdir(&self, device: &str, root: u32, path: &[String]) -> Result<Listing, Fail> {
         let phone = self.phone(device).await?;
         let body = mkdir_body(root, path).ok_or(Fail::NotFound)?;
@@ -201,10 +217,29 @@ impl Phones for LivePhones {
         ) {
             (Ok(phone), Some(body)) => (phone, body),
             (fail, _) => {
-                let _ = std::fs::remove_file(&file);
+                super::remove_upload(&file);
                 return Err(fail.err().unwrap_or(Fail::NotFound));
             }
         };
+        // In the sent list as any send to the phone, named where it goes
+        // (N6 review).
+        if let Ok(dir) = crate::state::state_dir() {
+            let mut shown = folder.to_vec();
+            shown.push(name.to_string());
+            let _ = pocketdesk_core::local::sent::record(
+                &dir,
+                pocketdesk_core::local::sent::SentFile {
+                    id: id.clone(),
+                    name: name.to_string(),
+                    path: format!("the phone's drive: {}", shown.join("/")),
+                    size,
+                    device_id: device.to_string(),
+                    sent_unix: pocketdesk_core::local::pin::now_unix(),
+                    state: pocketdesk_core::local::sent::SentState::Offered,
+                    note: None,
+                },
+            );
+        }
         // Offered first, so the phone's fetch finds it; the file goes when
         // the offer ends, however it ends.
         let ended = crate::offers::watch(&id);
@@ -215,21 +250,13 @@ impl Phones for LivePhones {
             let outcome = ended
                 .await
                 .unwrap_or_else(|_| Err("it was not given".to_string()));
-            let _ = std::fs::remove_file(&file);
+            super::remove_upload(&file);
             // No one waits any more (answered as under way): the owner
             // hears a failure in a notification.
             if let Err(outcome) = said.send(outcome)
                 && let Err(why) = outcome
             {
-                let body = format!("{shown}: {why}");
-                let _ = tokio::task::spawn_blocking(move || {
-                    crate::platform::notify(
-                        "A file did not reach the phone",
-                        &body,
-                        Duration::from_secs(10),
-                    )
-                })
-                .await;
+                late(&shown, &why);
             }
         });
         if phone
