@@ -235,13 +235,17 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             return;
         }
     };
+    let from = sender.device_id().to_string();
     tokio::spawn(async move {
         let _slot = slot;
-        let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async {
+        let from = &from;
+        let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async move {
             if !crate::platform::clip_image::is_png(&png) {
                 return Err(share::io_error("clipboard", "not a PNG"));
             }
             let image = Arc::new(Image::new(png));
+            // Not told back to the phone it came from (O7 review of M3).
+            crate::clipboard_push::note_image_from(from, &image.id);
             set_clipboard_image(&image).await?;
             Ok(())
         })

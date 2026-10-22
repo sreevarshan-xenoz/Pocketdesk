@@ -148,6 +148,25 @@ pub(crate) fn note_from_phone(device_id: &str, text: &str) {
         Some((device_id.to_string(), text.to_string()));
 }
 
+/// The device the clipboard's image came from, with the image's id (O7):
+/// M3's push does not tell it back to that device.
+static IMAGE_FROM: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Note that `device_id` just put the image `id` on the clipboard.
+pub(crate) fn note_image_from(device_id: &str, id: &str) {
+    *IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((device_id.to_string(), id.to_string()));
+}
+
+/// Whether the image `id` came from `device_id`: not told back to it.
+fn image_came_from(device_id: &str, id: &str) -> bool {
+    IMAGE_FROM
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|(from, image)| from == device_id && image == id)
+}
+
 /// The note, used once: the next change it explains, or not. A copy of the
 /// same text later is the computer's own, and goes to that phone too.
 fn take_from_phone() -> Option<(String, String)> {
@@ -470,7 +489,7 @@ async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
     let packet = image_packet(id, size);
     for target in clients
         .into_iter()
-        .filter(|c| may_push_image(c.device_id()))
+        .filter(|c| may_push_image(c.device_id()) && !image_came_from(c.device_id(), id))
     {
         if let Err(e) = target.send_packet(&packet).await {
             tracing::debug!("Clipboard image not told to {}: {e}", target.device_id());
