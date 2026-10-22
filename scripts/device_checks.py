@@ -90,6 +90,27 @@ def marked_folder(prefs_json: str) -> tuple[Optional[str], Optional[str]]:
     return marked, unmarked
 
 
+def dav_children(xml: str, base: str) -> list[str]:
+    """The names a PROPFIND of `base` lists right below it, decoded."""
+    from urllib.parse import unquote
+    out = []
+    for href in re.findall(r"<D:href>([^<]+)</D:href>", xml):
+        path = unquote(html.unescape(href))
+        if path.startswith(base) and path != base:
+            rest = path[len(base):].strip("/")
+            if rest and "/" not in rest:
+                out.append(rest)
+    return out
+
+
+def drive_root(roots: list[str], name: Optional[str]) -> Optional[str]:
+    """The drive's folder for the phone's shared folder `name`: the name, or
+    with its id after it when two share it (N6 review)."""
+    if name is None:
+        return None
+    return next((r for r in roots if r == name or (r.startswith(name + " (") and r.endswith(")"))), None)
+
+
 def dav(port: int, method: str, path: str, body: bytes = b"", depth: Optional[str] = None) -> tuple[int, bytes]:
     """A WebDAV request to the drive on loopback, within a minute."""
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
@@ -799,12 +820,23 @@ def n6_put(ctx: Ctx) -> tuple[str, str]:
     marked, unmarked = marked_folder(folders if isinstance(folders, str) else "[]")
     if not marked:
         return "SKIP", "share a folder on the phone and turn on its \"The computer may add files\""
-    # The phone's folder on the drive: the first one listed.
+    # The phone on the drive whose folders show the marked one (N6 review:
+    # not merely the first paired phone).
     status, top = dav(port, "PROPFIND", f"/{token}/", depth="1")
-    phones = re.findall(rf"<D:href>/{token}/([^<]+)/</D:href>", top.decode("utf-8", "replace"))
+    phones = dav_children(top.decode("utf-8", "replace"), f"/{token}/")
     if status != 207 or not phones:
         return "FAIL", f"the drive lists no phone ({status})"
-    base = f"/{token}/{phones[0]}"
+    found = None
+    for phone in phones:
+        status, listing = dav(port, "PROPFIND", f"/{token}/{quote(phone)}/", depth="1")
+        roots = dav_children(listing.decode("utf-8", "replace"), f"/{token}/{phone}/") if status == 207 else []
+        if drive_root(roots, marked):
+            found = (phone, drive_root(roots, marked), drive_root(roots, unmarked))
+            break
+    if not found:
+        return "FAIL", f"no phone on the drive shows {marked!r}: is the phone linked?"
+    phone, marked, unmarked = found
+    base = f"/{token}/{quote(phone)}"
     folder = "N6 check " + secrets.token_hex(3)
     made = dav(port, "MKCOL", f"{base}/{quote(marked)}/{quote(folder)}")[0]
     if made != 201:
