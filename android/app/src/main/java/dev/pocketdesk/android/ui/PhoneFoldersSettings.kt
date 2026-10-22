@@ -99,7 +99,13 @@ fun PhoneFoldersSection() {
                         if (on) {
                             marking = folder
                             // At the folder itself: the write grant is for it alone.
-                            runCatching { markPick.launch(folder.uri.toUri()) }
+                            // The picker opens at a folder's document, not its tree
+                            // (N6: on the OPPO it opened at the last folder instead).
+                            val tree = folder.uri.toUri()
+                            val at = runCatching {
+                                DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+                            }.getOrDefault(tree)
+                            runCatching { markPick.launch(at) }
                         } else {
                             PhoneFolders.unmarkAdd(context, folder)
                             version++
