@@ -1292,10 +1292,7 @@ impl SettingsForm {
                         egui::TextEdit::multiline(words)
                             .desired_rows(3)
                             .desired_width(f32::INFINITY)
-                            .hint_text(
-                                "Sale
-Slack: standup",
-                            ),
+                            .hint_text("Sale\nSlack: standup"),
                     );
                     note(
                         ui,
