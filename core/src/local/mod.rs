@@ -9,6 +9,7 @@ pub mod answers;
 pub mod app_open;
 pub mod approval;
 pub mod cast;
+pub mod clip_filter;
 pub mod clip_history;
 pub mod commands;
 pub mod computers;

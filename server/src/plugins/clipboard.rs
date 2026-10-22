@@ -364,14 +364,89 @@ pub(crate) fn is_pairing_link(text: &str) -> bool {
 /// a copy a password manager marked private, or a pairing link.
 /// An error says the clipboard could not be read (another app held it).
 pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
-    let text = match stand_in() {
-        Some(path) => std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+    let (text, owner) = match stand_in() {
+        Some(path) => (
+            std::fs::read_to_string(path).ok().filter(|t| !t.is_empty()),
+            None,
+        ),
         // The image stand-in alone: the stand-ins are the clipboard, and
         // there is no text (M3 review).
-        None if image_stand_in().is_some() => None,
-        None => read_system_text().await?,
+        None if image_stand_in().is_some() => (None, None),
+        None => (read_system_text().await?, clipboard_owner()),
     };
-    Ok(text.filter(|t| !is_pairing_link(t)))
+    Ok(text.filter(|t| !is_pairing_link(t) && !held_here(Some(t), owner.as_deref())))
+}
+
+/// The program that made the clipboard's copy, when the system says
+/// (Windows; O4).
+fn clipboard_owner() -> Option<String> {
+    #[cfg(windows)]
+    return crate::platform::clipboard_windows::owner_program();
+    #[cfg(not(windows))]
+    None
+}
+
+/// The rules of desktop Settings "Never send copies from" and "… that look
+/// like" (O4), built again only when the settings change.
+/// The settings a filter was built for, and the filter.
+type BuiltFilter = (
+    (Vec<String>, Vec<String>),
+    Arc<pocketdesk_core::local::clip_filter::ClipFilter>,
+);
+
+static FILTER: std::sync::Mutex<Option<BuiltFilter>> = std::sync::Mutex::new(None);
+
+/// Whether a copy stays on this computer by its program or its look (O4):
+/// its `text` (`None` for an image, which only its program holds back),
+/// made by `owner`.
+pub(crate) fn held_here(text: Option<&str>, owner: Option<&str>) -> bool {
+    let config = crate::events::current_config();
+    if config.clipboard_never_from.is_empty() && config.clipboard_never_like.is_empty() {
+        return false;
+    }
+    let key = (config.clipboard_never_from, config.clipboard_never_like);
+    let filter = {
+        let mut cached = FILTER.lock().unwrap_or_else(|e| e.into_inner());
+        match cached.as_ref() {
+            Some((made_for, filter)) if *made_for == key => filter.clone(),
+            _ => {
+                let filter = Arc::new(pocketdesk_core::local::clip_filter::ClipFilter::new(
+                    &key.0, &key.1,
+                ));
+                *cached = Some((key, filter.clone()));
+                filter
+            }
+        }
+    };
+    let held = !filter.lets_out(text, owner);
+    if held {
+        // Said once a copy, never the copy itself (O4): a copy is read again
+        // at each look while it stays.
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (text, owner).hash(&mut hasher);
+        let seen = hasher.finish();
+        static SAID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        if SAID.swap(seen, std::sync::atomic::Ordering::Relaxed) != seen {
+            tracing::info!("A copy stays on this computer: Settings keep it here");
+        }
+    }
+    held
+}
+
+/// [`read_clipboard_unfiltered`], less what Settings keep here (O4).
+async fn read_clipboard() -> Result<Clip> {
+    let clip = read_clipboard_unfiltered().await?;
+    let owner = if stand_in().is_none() && image_stand_in().is_none() {
+        clipboard_owner()
+    } else {
+        None
+    };
+    Ok(match &clip {
+        Clip::Text(text) if held_here(Some(text), owner.as_deref()) => Clip::Empty,
+        Clip::Image(_) if held_here(None, owner.as_deref()) => Clip::Empty,
+        _ => clip,
+    })
 }
 
 /// Set the clipboard's text.
@@ -434,7 +509,7 @@ async fn set_system_clipboard(content: &str) -> Result<()> {
 /// What the clipboard holds: text when it has any, else an image, read again
 /// only when the clipboard's sequence number moved.
 #[cfg(windows)]
-async fn read_clipboard() -> Result<Clip> {
+async fn read_clipboard_unfiltered() -> Result<Clip> {
     use crate::platform::clipboard_windows as win;
     if let Some(path) = image_stand_in() {
         return Ok(stand_in_clip(&path));
@@ -567,7 +642,7 @@ async fn wl_paste(args: &[&str]) -> Result<Vec<u8>> {
 
 /// What the clipboard holds: text when it offers any, else a PNG.
 #[cfg(not(windows))]
-async fn read_clipboard() -> Result<Clip> {
+async fn read_clipboard_unfiltered() -> Result<Clip> {
     if let Some(path) = image_stand_in() {
         return Ok(stand_in_clip(&path));
     }

@@ -44,13 +44,15 @@ wan = ["dep:iroh", "dep:iroh-mainline-address-lookup", "dep:n0-mainline"]
 
 # The files the server and the desktop app share (config, pairing PIN, live
 # sessions, identity): `core::local`. No tokio, no transport.
-local = ["dep:toml", "dep:toml_edit", "dep:base64", "dep:netdev"]
+local = ["dep:toml", "dep:toml_edit", "dep:base64", "dep:netdev", "dep:regex"]
 
 [dependencies]
 anyhow.workspace = true
 base64 = { version = "0.22", optional = true }
 toml = { version = "0.8", optional = true }
 toml_edit = { version = "0.22", optional = true }
+# O4: the patterns that keep a copy on this computer (`local::clip_filter`).
+regex = { version = "1", optional = true }
 # The adapter a phone reaches this computer on, for waking it (N6); already
 # in the graph through iroh.
 netdev = { version = "0.46", optional = true }

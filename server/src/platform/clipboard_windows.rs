@@ -13,15 +13,20 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardOwner,
+    GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
+    RegisterClipboardFormatW, SetClipboardData,
 };
 use windows::Win32::System::Memory::{
     GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
 };
 use windows::Win32::System::Ole::{CF_DIB, CF_UNICODETEXT};
+use windows::Win32::System::Threading::{
+    OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE,
+    CreateWindowExW, DestroyWindow, GetWindowThreadProcessId, HWND_MESSAGE, WINDOW_EX_STYLE,
+    WINDOW_STYLE,
 };
 use windows::core::w;
 
@@ -302,6 +307,37 @@ pub(crate) fn get_text() -> io::Result<String> {
     };
     let _ = unsafe { GlobalUnlock(memory) };
     Ok(text)
+}
+
+/// The program that put the clipboard's data there (O4): the path of the
+/// process that owns the clipboard's window, or `None` when no window owns
+/// it or the process cannot be read. Opens neither the clipboard nor the
+/// process for more than its name.
+pub fn owner_program() -> Option<String> {
+    let owner = unsafe { GetClipboardOwner() }.ok()?;
+    if owner.is_invalid() {
+        return None;
+    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(owner, Some(&mut pid)) };
+    if pid == 0 {
+        return None;
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut buffer = [0u16; 1024];
+    let mut len = buffer.len() as u32;
+    let named = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
+    named
+        .is_ok()
+        .then(|| String::from_utf16_lossy(&buffer[..len as usize]))
 }
 
 #[cfg(test)]

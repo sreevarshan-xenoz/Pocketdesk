@@ -158,6 +158,14 @@ pub struct Config {
     /// stay on disk, owner-only.
     #[serde(default)]
     pub clipboard_history: u32,
+    /// Programs whose copies never leave this computer (O4), by their file
+    /// name (`KeePassXC.exe`): a copy names its program on Windows only.
+    #[serde(default)]
+    pub clipboard_never_from: Vec<String>,
+    /// Copies matching any of these regular expressions never leave this
+    /// computer (O4): a private key, a token.
+    #[serde(default)]
+    pub clipboard_never_like: Vec<String>,
     /// A key that sends this computer's clipboard to a phone from anywhere
     /// (H3): "win+shift+c" and the like, through the tray program on
     /// Windows. Empty (the default) is off.
@@ -379,6 +387,8 @@ impl Default for Config {
             clipboard_images: false,
             computer_clipboard: false,
             clipboard_history: 0,
+            clipboard_never_from: Vec::new(),
+            clipboard_never_like: Vec::new(),
             clipboard_hotkey: String::new(),
             typing_hotkey: String::new(),
             phone_media_controls: false,
@@ -609,6 +619,8 @@ impl Config {
         "phone_media_controls",
         "computer_clipboard",
         "clipboard_history",
+        "clipboard_never_from",
+        "clipboard_never_like",
         "phone_drive",
         "phone_drive_write",
         "away_lock_minutes",

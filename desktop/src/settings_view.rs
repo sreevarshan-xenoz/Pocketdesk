@@ -131,6 +131,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
+        "clipboard_never_from",
+        "Never send copies from",
+        Section::Phones,
+    ),
+    (
+        "clipboard_never_like",
+        "Never send copies that look like",
+        Section::Phones,
+    ),
+    (
         "clipboard_hotkey",
         "Send the clipboard with a key",
         Section::Phones,
@@ -267,6 +277,29 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("relay_urls", "Your own relays", Section::Advanced),
     ("dht_publish", "Found by id (DHT)", Section::Advanced),
 ];
+
+/// The lines of a list's text box (O4): trimmed, blank ones left out.
+fn lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Add each of `items` not in the box `text` yet, one a line (O4).
+fn add_lines(text: &mut String, items: &[&str]) {
+    let have = lines(text);
+    for item in items {
+        if !have.iter().any(|line| line == item) {
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(item);
+            text.push('\n');
+        }
+    }
+}
 
 /// A setting's name on the page.
 pub fn name(key: &str) -> &'static str {
@@ -416,6 +449,8 @@ pub fn applies_live(key: &str) -> bool {
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
+            | "clipboard_never_from"
+            | "clipboard_never_like"
             | "clipboard_images"
             | "clipboard_hotkey"
             | "typing_hotkey"
@@ -453,6 +488,9 @@ pub struct SettingsForm {
     pub relay_urls_text: String,
     /// The text box behind `[hooks]`: `kind = command`, one per line.
     pub hooks_text: String,
+    /// The text boxes behind `clipboard_never_from` and `clipboard_never_like` (O4), one a line.
+    pub never_from_text: String,
+    pub never_like_text: String,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -485,6 +523,8 @@ impl SettingsForm {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
             hooks_text: hooks_text(&config.hooks),
+            never_from_text: config.clipboard_never_from.join("\n"),
+            never_like_text: config.clipboard_never_like.join("\n"),
             saved: config.clone(),
             running: config.clone(),
             edited: config,
@@ -507,6 +547,8 @@ impl SettingsForm {
             .map(str::to_string)
             .collect();
         self.edited.hooks = parse_hooks(&self.hooks_text).0;
+        self.edited.clipboard_never_from = lines(&self.never_from_text);
+        self.edited.clipboard_never_like = lines(&self.never_like_text);
     }
 
     pub fn dirty(&self) -> bool {
@@ -540,6 +582,12 @@ impl SettingsForm {
     /// The problems, each with the key it is about, so its section opens.
     fn problems_by_key(&self) -> Vec<(&'static str, String)> {
         let mut problems = Vec::new();
+        // O4: a pattern that does not read would keep nothing back.
+        for pattern in &self.edited.clipboard_never_like {
+            if let Some(problem) = pocketdesk_core::local::clip_filter::pattern_problem(pattern) {
+                problems.push(("clipboard_never_like", problem));
+            }
+        }
         for (name, port) in [
             ("control", self.edited.control_port),
             ("streaming", self.edited.streaming_port),
@@ -824,6 +872,47 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.clipboard_push,
                         "send what I copy to connected phones (those with \"Share the clipboard\" on in Devices)",
+                    );
+                });
+                // O4: copies kept here by their program or their look.
+                let never_from = &mut self.never_from_text;
+                row(ui, "clipboard_never_from", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(never_from)
+                            .desired_rows(2)
+                            .hint_text("one program a line, as KeePassXC.exe"),
+                    );
+                    if ui.button("Add the usual password managers").clicked() {
+                        add_lines(
+                            never_from,
+                            pocketdesk_core::local::clip_filter::USUAL_PROGRAMS,
+                        );
+                    }
+                    note(
+                        ui,
+                        if cfg!(windows) {
+                            "A copy one of these programs makes never leaves this computer, by any road: not to phones, not to computers, not into the history. On top of the private marks a password manager sets, which not every one does."
+                        } else {
+                            "Windows only: a copy names the program that made it there. Here, use the patterns below."
+                        },
+                    );
+                });
+                let never_like = &mut self.never_like_text;
+                row(ui, "clipboard_never_like", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(never_like)
+                            .desired_rows(2)
+                            .hint_text("one pattern a line (a regular expression)"),
+                    );
+                    if ui.button("Add keys and tokens").clicked() {
+                        add_lines(
+                            never_like,
+                            pocketdesk_core::local::clip_filter::USUAL_PATTERNS,
+                        );
+                    }
+                    note(
+                        ui,
+                        "A copy with text matching one of these never leaves this computer: \"Add keys and tokens\" adds a private key's first line and common access tokens' shapes.",
                     );
                 });
                 row(ui, "clipboard_images", |ui| {
@@ -2001,6 +2090,40 @@ mod tests {
                 "{bad:?} passed"
             );
         }
+    }
+
+    /// O4: the lists are read one a line, the usual ones added once, and a
+    /// pattern that does not read keeps Save off.
+    #[test]
+    fn the_never_send_lists_are_read_a_line_each_and_checked() {
+        let mut form = SettingsForm::from_config(Config::default());
+        add_lines(
+            &mut form.never_from_text,
+            pocketdesk_core::local::clip_filter::USUAL_PROGRAMS,
+        );
+        add_lines(
+            &mut form.never_from_text,
+            pocketdesk_core::local::clip_filter::USUAL_PROGRAMS,
+        );
+        form.never_like_text = " -----BEGIN \n\n".into();
+        form.apply_text_fields();
+        assert_eq!(
+            form.edited.clipboard_never_from.len(),
+            pocketdesk_core::local::clip_filter::USUAL_PROGRAMS.len(),
+            "each once"
+        );
+        assert_eq!(
+            form.edited.clipboard_never_like,
+            vec!["-----BEGIN".to_string()]
+        );
+        assert!(form.problems().is_empty());
+        form.never_like_text = "(unclosed".into();
+        form.apply_text_fields();
+        assert!(
+            form.problems_by_key()
+                .iter()
+                .any(|(key, _)| *key == "clipboard_never_like")
+        );
     }
 
     #[test]
