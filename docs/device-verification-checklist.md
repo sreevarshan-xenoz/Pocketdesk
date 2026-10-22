@@ -2562,6 +2562,12 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 189. Choose the computer's player (O6)
+
+Built 2026-10-22. Owed:
+- [ ] Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
+- [ ] The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
+- [ ] Linux: two MPRIS players under `playerctl`. (where: linux)
 ## 190. Received images onto the clipboard (O7)
 
 Built 2026-10-22. Owed:
