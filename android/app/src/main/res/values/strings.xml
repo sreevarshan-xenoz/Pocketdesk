@@ -40,6 +40,8 @@
     <string name="settings_auto_reconnect_summary">When the link drops (the computer restarts its server, wakes up, or the network returns), try again for 10 minutes</string>
     <string name="settings_others_choose">Let other apps choose a computer</string>
     <string name="settings_others_choose_summary">An automation app (Tasker and the like) may name which saved computer its share goes to. Off: shares go to the last computer used</string>
+    <string name="settings_others_run_tasks">Let other apps run the computer\'s tasks</string>
+    <string name="settings_others_run_tasks_summary">An automation app (Tasker and the like) may start one of a saved computer\'s tasks or press one of its deck buttons by name, at most 10 a minute. Any app on this phone could, so only turn it on if you trust them. The computer\'s own permissions still hold</string>
     <string name="settings_tell_other_apps">Tell other apps what happens</string>
     <string name="settings_tell_other_apps_summary">Automation apps (Tasker and the like) hear when a session starts or ends, a file or link arrives, files finish sending, or a task ends. Any app may listen, so they hear only which computer, what kind, and a few facts (a file\'s type and size, a task\'s name and exit code): no file names, links or task output</string>
     <string name="share_not_content">Only files another app shares can be sent, not a path to one</string>

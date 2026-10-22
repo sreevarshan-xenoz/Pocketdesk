@@ -48,9 +48,25 @@ Without the address, the text goes to the last computer used. Naming a computer 
 
 The files land in the computer's Downloads (or the folder chosen in its Settings), each resumable, as a share from any app does. The automation app must grant read access to the URI (Tasker: tick "Grant read permission"). Only `content://` URIs are taken: a share naming a `file://` path is refused, since the app would open it with its own rights.
 
+## Start a computer's task, or press a deck button
+
+| | |
+|---|---|
+| Target | Broadcast to `dev.pocketdesk.android/.automation.AutomationReceiver` |
+| Action | `dev.pocketdesk.android.action.RUN_TASK` (a task), or `dev.pocketdesk.android.action.PRESS_DECK` (a deck button) |
+| Extras | `dev.pocketdesk.android.extra.ADDRESS` = the saved computer's address; `dev.pocketdesk.android.extra.NAME` = the task's name, or the button's label, exactly as the Tasks sheet or the deck lists it |
+
+Starts one of the computer's named tasks, as the Tasks sheet does, or presses one of its deck buttons, as the deck does, with no app on screen. The name is at most 64 characters, matched exactly; of two buttons with one label, the first is pressed.
+
+- **The switch.** It needs **Settings → Let other apps run the computer's tasks**, off by default, since any app on the phone can send it.
+- **Limits.** At most 10 a minute, from all apps together.
+- **The computer's rules still hold:** the phone's "Start my tasks" and Input permissions, and a task that asks first still asks at the desk.
+- **The outcome** comes back as `TASK_FINISHED` or `DECK_PRESSED` (below) with **Settings → Tell other apps what happens** on, and in `adb logcat -s Automation`.
+- **How long a task is followed.** A task's end is followed while Android keeps Pocketdesk running, which it may not for long without a session or a background feature.
+
 ## What to expect
 
-- **No result comes back** to the automation app. Pocketdesk shows the outcome as a toast or its transfer notification.
+- **No result comes back** to the automation app for the intents above, except tasks and deck buttons (their events). Pocketdesk shows the outcome as a toast or its transfer notification.
 - **A computer that is not saved**, named in the address extra, is refused with "No saved computer has that address"; with the setting off, with "Other apps may not choose a computer". The share never goes to another computer instead.
 - **Android may block** an activity started from an app in the background. Automation apps usually need "Display over other apps" (Tasker asks for it) to start one from the background.
 
@@ -78,7 +94,8 @@ With **Settings → Tell other apps what happens** on (off by default), Pocketde
 | `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is saved (Downloads/Pocketdesk, or the folder picked in Settings); one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
 | `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` (meant to be sent and not) |
 | `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown during a screen session, with "Links from the computer" on | none |
-| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` |
+| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed, or another app's `RUN_TASK` (O1) ended or was refused | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` (the computer's `denied`, `busy`, `unknown`, `not_permitted`; the phone's `not_allowed`, `not_saved`, `bad_name`, `too_many`) |
+| `dev.pocketdesk.android.event.DECK_PRESSED` | Another app's `PRESS_DECK` (O1) was pressed, or why not | `LABEL`, `STATE` (`done`, `waiting` for the owner, `refused`, `not_sent`), and `REASON` when refused (the computer's words, `unknown` for no such button, or the phone's reasons as above) |
 
 Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carries `dev.pocketdesk.android.extra.ADDRESS`, the computer's saved address, which the intents above take back, and `dev.pocketdesk.android.extra.EVENT`, the kind in lowercase (`session_started`…).
 
@@ -86,7 +103,16 @@ Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carri
 
 Also worth knowing: `no_answer` means the phone stopped waiting (75 s for a task that asks first, else 20 s), not that the task never ran; a session the app is swiped away from, or that the phone kills, may get no `SESSION_ENDED`; and turning the switch off mid-session tells nothing more, its end included.
 
-### Example
+### Examples
+
+Tasker, task action *Send Intent*: Action `dev.pocketdesk.android.action.RUN_TASK`, Extra `dev.pocketdesk.android.extra.ADDRESS:192.0.2.20`, Extra `dev.pocketdesk.android.extra.NAME:Backup`, Package `dev.pocketdesk.android`, Class `dev.pocketdesk.android.automation.AutomationReceiver`, Target *Broadcast Receiver*. This starts the computer's task "Backup". From a computer with adb:
+
+```
+adb shell am broadcast -n dev.pocketdesk.android/.automation.AutomationReceiver \
+  -a dev.pocketdesk.android.action.PRESS_DECK \
+  --es dev.pocketdesk.android.extra.ADDRESS 192.0.2.20 \
+  --es dev.pocketdesk.android.extra.NAME Mute
+```
 
 Tasker, profile *Event → System → Intent Received*: Action `dev.pocketdesk.android.event.FILE_RECEIVED`. The task gets each extra as a local variable named after it (Tasker's variable list in the task shows the exact names, which depend on its version), so a test of the `MIME` extra against `image/*` can open the gallery. The same with `SESSION_ENDED` and a test of `REASON` for `lost` can say "the computer went away". Not yet tried with Tasker itself (checklist §83).
 

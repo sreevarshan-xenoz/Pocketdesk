@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -271,6 +272,20 @@
         <receiver
             android:name=".shortcuts.WakeTileReceiver"
             android:exported="false" />
+
+        <!-- O1: automation apps start the computer's tasks and press its
+             deck by name. Exported, since any app may send it: the
+             receiver takes it only with Settings "Let other apps run the
+             computer's tasks" on (off), for a saved computer. -->
+        <receiver
+            android:name=".automation.AutomationReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="dev.pocketdesk.android.action.RUN_TASK" />
+                <action android:name="dev.pocketdesk.android.action.PRESS_DECK" />
+            </intent-filter>
+        </receiver>
 
         <!-- F11: one tap to the last computer from Quick Settings. -->
         <service

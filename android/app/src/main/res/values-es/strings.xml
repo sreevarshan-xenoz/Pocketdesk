@@ -31,6 +31,8 @@
     <string name="settings_auto_reconnect_summary">Si el enlace se corta (el equipo reinicia su servidor, despierta o vuelve la red), reintentar durante 10 minutos</string>
     <string name="settings_others_choose">Permitir que otras apps elijan un equipo</string>
     <string name="settings_others_choose_summary">Una app de automatización (Tasker y similares) puede indicar a qué equipo guardado va lo que comparte. Desactivado: va al último equipo usado</string>
+    <string name="settings_others_run_tasks">Permitir que otras apps ejecuten las tareas del equipo</string>
+    <string name="settings_others_run_tasks_summary">Una app de automatización (Tasker y similares) puede iniciar una tarea de un equipo guardado o pulsar un botón de su panel por su nombre, hasta 10 por minuto. Cualquier app de este teléfono podría hacerlo, así que actívalo solo si confías en ellas. Los permisos del propio equipo siguen valiendo</string>
     <string name="settings_tell_other_apps">Avisar a otras apps de lo que pasa</string>
     <string name="settings_tell_other_apps_summary">Las apps de automatización (Tasker y similares) se enteran cuando empieza o termina una sesión, llega un archivo o un enlace, terminan de enviarse archivos o acaba una tarea. Cualquier app puede escuchar, así que solo oyen qué ordenador, de qué tipo y algunos datos (el tipo y tamaño de un archivo, el nombre y código de salida de una tarea): ni nombres de archivo, ni enlaces, ni la salida de las tareas</string>
     <string name="share_not_content">Solo se pueden enviar archivos que otra app comparte, no una ruta a uno</string>

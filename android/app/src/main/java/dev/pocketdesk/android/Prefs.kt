@@ -30,6 +30,7 @@ object Prefs {
     private const val KEY_INTERNET_FILES = "internet_files"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
+    private const val KEY_OTHERS_RUN_TASKS = "others_run_tasks"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
@@ -222,6 +223,15 @@ object Prefs {
      * Whether sessions, files, links and tasks are told to other apps as
      * broadcasts (ecosystem 1f). Off by default: any app may receive them.
      */
+    /** O1: automation apps may start the computer's tasks and press its deck (off). */
+    fun othersRunTasks(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_OTHERS_RUN_TASKS, false)
+
+    fun setOthersRunTasks(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_OTHERS_RUN_TASKS, enabled) }
+        bump()
+    }
+
     fun tellOtherApps(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_TELL_OTHER_APPS, false)
 
