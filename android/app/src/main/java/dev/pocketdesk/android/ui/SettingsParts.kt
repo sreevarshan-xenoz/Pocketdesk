@@ -65,15 +65,17 @@ fun SettingSwitch(
     enabled: Boolean = true,
     warning: Boolean = false,
     indent: Boolean = false,
+    nested: Boolean = false,
 ) {
     SettingRow(
         title = title,
         summary = summary,
         warning = warning,
-        // The indent inside the toggle, so it is no dead strip (U4 review).
+        // The indent inside the toggle, so it is no dead strip (U4 review);
+        // a nested row (O5's kinds under their app) twice as deep.
         modifier = Modifier
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
-            .padding(start = if (indent) 24.dp else 0.dp),
+            .padding(start = if (nested) 48.dp else if (indent) 24.dp else 0.dp),
     ) {
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }

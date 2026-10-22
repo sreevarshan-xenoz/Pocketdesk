@@ -64,7 +64,12 @@ object PhoneNotificationPrefs {
 
     fun setShared(ctx: Context, pkg: String, shared: Boolean) {
         val now = shared(ctx).toMutableSet().apply { if (shared) add(pkg) else remove(pkg) }
-        prefs(ctx).edit { putStringSet(KEY_SHARED, now) }
+        prefs(ctx).edit {
+            putStringSet(KEY_SHARED, now)
+            // O5 review: an app no longer shared keeps none of its titles;
+            // the kinds kept on the phone stay, as the user chose them.
+            if (!shared) remove(KEY_KINDS_PREFIX + pkg)
+        }
     }
 
     /** The apps seen to notify, package to label, most recent first. */
@@ -99,7 +104,7 @@ object PhoneNotificationPrefs {
     /** O5: [pkg] posted a notification of kind [channel], titled as [example]. */
     @Synchronized
     fun recordKind(ctx: Context, pkg: String, channel: String, example: String) {
-        val next = NotificationKinds.seen(kinds(ctx, pkg), channel, example) ?: return
+        val next = NotificationKinds.seen(kinds(ctx, pkg), channel, example, keptKinds(ctx, pkg)) ?: return
         val array = org.json.JSONArray()
         next.forEach { array.put(JSONObject().put("id", it.id).put("example", it.example)) }
         prefs(ctx).edit { putString(KEY_KINDS_PREFIX + pkg, array.toString()) }
@@ -155,6 +160,9 @@ class PhoneNotificationListener : NotificationListenerService() {
      * one closed meanwhile must not be sent later.
      */
     private val closedKeys: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** O5: each notification's kind, so one waiting is held to a kind kept since. */
+    private val kindOf = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** Replies from the computer (N5b): Android keeps this service bound, so it hosts them. */
     private val replies by lazy { SmsReplies(applicationContext) }
@@ -418,6 +426,7 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         closedKeys.add(sbn.key)
+        kindOf.remove(sbn.key)
         // N4: its live update is over.
         synchronized(liveSent) {
             liveSent.remove(sbn.key)
@@ -428,21 +437,25 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (openable.remove(sbn.key)) {
             runCatching { getSystemService(android.app.NotificationManager::class.java)?.cancel("open", sbn.key.hashCode()) }
         }
-        worker.execute {
-            // Closed on the phone: closed on the computer too (N5c), but only
-            // one the computer was shown. What of it still waits is dropped.
-            rule.removed(sbn.key)
-            // L8: a copy's cancel, whatever the own computer saw of it.
-            PhoneLink.copyCancel(this, sbn.key)
-            if (outbox.closed(sbn.key) && PhoneNotificationPrefs.enabled(this)) {
-                PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", sbn.key).put("isCancel", true))
-            }
+        // Closed on the phone: closed on the computer too (N5c), but only
+        // one the computer was shown. What of it still waits is dropped.
+        worker.execute { withdraw(sbn.key) }
+    }
+
+    /** [key] closed on the computers it reached, its waiting copy dropped. On the worker. */
+    private fun withdraw(key: String) {
+        rule.removed(key)
+        // L8: a copy's cancel, whatever the own computer saw of it.
+        PhoneLink.copyCancel(this, key)
+        if (outbox.closed(key) && PhoneNotificationPrefs.enabled(this)) {
+            PhoneLink.sendNow(this, "kdeconnect.notification", JSONObject().put("id", key).put("isCancel", true))
         }
     }
 
-    /** Whether a waiting notification may still go: not closed, forwarding and its app still on. */
+    /** Whether a waiting notification may still go: not closed, forwarding, its app and its kind still on. */
     private fun sendable(id: String, pkg: String): Boolean =
-        id !in closedKeys && PhoneNotificationPrefs.enabled(this) && pkg in PhoneNotificationPrefs.shared(this)
+        id !in closedKeys && PhoneNotificationPrefs.enabled(this) && pkg in PhoneNotificationPrefs.shared(this) &&
+            kindOf[id]?.let { it in PhoneNotificationPrefs.keptKinds(this, pkg) } != true
 
     /**
      * Send [body]; one that waited says for how long, in whole seconds, so
@@ -474,16 +487,24 @@ class PhoneNotificationListener : NotificationListenerService() {
         val note = runCatching { toNote(sbn, rankingVisibility) }.getOrNull() ?: return
         if (note.pkg != packageName && !note.ongoing && !note.otherProfile) {
             PhoneNotificationPrefs.recordSeen(this, note.pkg, note.appLabel)
-            // O5: a shared app's kinds, each with the title it was last seen
-            // with: what the lock screen shows of it, never more.
-            if (note.pkg in PhoneNotificationPrefs.shared(this)) {
+            // O5: a shared app's kinds, each with the title it first came
+            // with: what the lock screen shows of it, never more, never a
+            // code, and none from one that never leaves the phone (O5 review).
+            if (note.pkg in PhoneNotificationPrefs.shared(this) && !note.localOnly && !note.groupSummary) {
                 val title = when (note.visibility) {
                     NotificationForwardRule.VISIBILITY_PUBLIC -> note.title
                     NotificationForwardRule.VISIBILITY_PRIVATE -> note.publicTitle
                     else -> null
-                }
+                }?.takeUnless { NotificationForwardRule.looksLikeCode(it) }
                 PhoneNotificationPrefs.recordKind(this, note.pkg, note.channel, NotificationKinds.example(title))
             }
+        }
+        // O5: a kind kept on the phone goes no further, and one of it the
+        // computers were shown before it was kept leaves them (O5 review).
+        if (note.channel.isNotBlank()) kindOf[sbn.key] = note.channel
+        if (note.channel.isNotBlank() && note.channel in PhoneNotificationPrefs.keptKinds(this, note.pkg)) {
+            if (rule.wasSent(sbn.key)) worker.execute { withdraw(sbn.key) }
+            return
         }
         // N4: an ongoing one's bar or timer, with the switch on; one held
         // back by the gap is looked at again once it passes.
