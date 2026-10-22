@@ -2562,7 +2562,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
-## 188. Notifications shared by their kind as well as their app (O5)
+## 187. Notifications shared by their kind as well as their app (O5)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) with the fixture app's two channels against a throwaway server:
 - [x] Both kinds listed under the app by their titles ("Message A", "Updating messages"), and both sent while on.

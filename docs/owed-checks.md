@@ -2231,7 +2231,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
 
-**188. Notifications shared by their kind as well as their app (O5)**
+**187. Notifications shared by their kind as well as their app (O5)**
 
 - A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
 - TalkBack reads each kind's switch with its kind.
