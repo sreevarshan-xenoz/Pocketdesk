@@ -840,8 +840,20 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             running()
                 .spawn(running_key, async move {
                     let _slot = fetch.slot;
-                    let sent =
-                        send_file_counted(fetch.route, &key, &fetch.path, tracker.progress()).await;
+                    // An offer being fetched stays while bytes go (N6 review).
+                    let mut shown = tracker.progress();
+                    let alive = fetch.offer.clone();
+                    let mut touched = std::time::Instant::now();
+                    let progress = move |sent: u64| {
+                        shown(sent);
+                        if let Some(id) = &alive
+                            && touched.elapsed() >= std::time::Duration::from_secs(60)
+                        {
+                            crate::offers::keep_alive(id);
+                            touched = std::time::Instant::now();
+                        }
+                    };
+                    let sent = send_file_counted(fetch.route, &key, &fetch.path, progress).await;
                     drop(tracker);
                     match &sent {
                         Ok(size) => {

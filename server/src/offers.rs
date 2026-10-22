@@ -182,6 +182,14 @@ impl Offer {
     }
 }
 
+/// The phone is still fetching offer `id` (N6 review): it keeps a whole
+/// TTL, so a long fetch is not swept as expired under it.
+pub(crate) fn keep_alive(id: &str) {
+    if let Some(offer) = offers().lock().unwrap_or_else(|e| e.into_inner()).get(id) {
+        offer.touch(Instant::now());
+    }
+}
+
 /// The file offered as `id`, for a fetch by `device_id`. The offer stays
 /// until a fetch settles it ([`finish`]); an offer for another phone is
 /// refused and left for its own phone.
