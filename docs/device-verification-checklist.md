@@ -2510,6 +2510,13 @@ Built 2026-10-22. Owed:
 - [ ] "Tell phones when this computer is in use" off on one: it always pops up.
 - [ ] The battery with the links kept, by N7's background-cost script.
 - [ ] A Linux computer: it does not say, and always pops up.
+## 182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)
+
+Built 2026-10-22. Owed:
+- [ ] The tray's "Type on the phone" for a linked phone: the typing window opens (both trays).
+- [ ] "Type on the phone with a key": registered, a press opening the window; another app holding it said in Settings.
+- [ ] A share with three links sent to "Open on computer": three open on the computer, and the toast says three.
+- [ ] A phone with under a gigabyte free: one notification, none again until it has had room.
 
 ## Recording results
 

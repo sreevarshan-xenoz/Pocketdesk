@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-869 open items.
+873 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 527 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 530 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 10 |
 | A Linux desktop (the Azure VM serves for some) | 101 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 29 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 80 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 81 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1061,6 +1061,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Neither in use: both pop up. One's server stopped: the other pops up within 30 s of its last answer.
 - "Tell phones when this computer is in use" off on one: it always pops up.
 - The battery with the links kept, by N7's background-cost script.
+
+**182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
+
+- "Type on the phone with a key": registered, a press opening the window; another app holding it said in Settings.
+- A share with three links sent to "Open on computer": three open on the computer, and the toast says three.
+- A phone with under a gigabyte free: one notification, none again until it has had room.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2180,3 +2186,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The lock screen and the shade's media controls by eye: title, artist, cover, and Previous, Play/Pause, Next as the computer's player offers them.
 - A real player on this computer (Spotify, a browser), with the owner: a press from the phone plays, pauses and skips it; never Pocketdesk's own entry (the phone's music) sent back.
+
+**182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
+
+- The tray's "Type on the phone" for a linked phone: the typing window opens (both trays).
