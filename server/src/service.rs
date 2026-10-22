@@ -244,6 +244,10 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::info!("Not announced on the local network (lan_discovery = false)");
         None
     };
+    // P1: announced again when this computer's addresses change (a new
+    // network, a wake, a VPN), so phones find it at the new one.
+    let announcement = std::sync::Arc::new(std::sync::Mutex::new(announcement));
+    tokio::spawn(follow_addresses(announcement.clone()));
 
     // Also run LAN discovery browser to detect other Pocketdesk servers
     let mut lan_rx = lan_discovery.subscribe();
@@ -736,7 +740,8 @@ pub async fn run(config: Config) -> Result<()> {
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
                 // Tell phones on the network this computer is going away.
-                if let Some(announcement) = announcement {
+                let current = announcement.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(announcement) = current {
                     let _ = tokio::task::spawn_blocking(move || announcement.withdraw()).await;
                 }
                 break;
@@ -2740,5 +2745,60 @@ mod status_tests {
             tailscale_status_line(Ok("100.64.0.1 desk".to_string())),
             "100.64.0.1 desk"
         );
+    }
+}
+
+/// How often the computer's addresses are read for its announcement (P1).
+const ADDRESSES_EVERY: Duration = Duration::from_secs(30);
+
+/// P1: read this computer's addresses every [`ADDRESSES_EVERY`] and
+/// announce again on a change. A test seam: with `POCKETDESK_LOCAL_IPS_FILE`
+/// (absolute) set, the addresses are that file's lines.
+async fn follow_addresses(
+    announcement: std::sync::Arc<
+        std::sync::Mutex<Option<pocketdesk_core::tailscale::lan::Announcement>>,
+    >,
+) {
+    let seam = std::env::var_os("POCKETDESK_LOCAL_IPS_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute());
+    if let Some(file) = &seam {
+        tracing::warn!(
+            "POCKETDESK_LOCAL_IPS_FILE is set: {} stands in (a test seam)",
+            file.display()
+        );
+    }
+    loop {
+        tokio::time::sleep(ADDRESSES_EVERY).await;
+        let ips = match &seam {
+            Some(file) => std::fs::read_to_string(file)
+                .map(|s| {
+                    s.lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => pocketdesk_core::tailscale::lan::get_local_ips().await,
+        };
+        let held = announcement.clone();
+        let renewed = tokio::task::spawn_blocking(move || {
+            let mut slot = held.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(current) = slot.as_mut() else {
+                return Ok(None);
+            };
+            current
+                .renew(ips)
+                .map(|changed| changed.then(|| current.addresses().join(", ")))
+        })
+        .await;
+        match renewed {
+            Ok(Ok(Some(addresses))) => {
+                tracing::info!("This computer's addresses changed: announced again at {addresses}");
+            }
+            Ok(Ok(None)) => {}
+            Ok(Err(e)) => tracing::warn!("Could not announce again at the new addresses: {e}"),
+            Err(_) => {}
+        }
     }
 }

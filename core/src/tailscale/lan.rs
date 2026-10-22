@@ -46,9 +46,47 @@ pub enum LanEvent {
 pub struct Announcement {
     daemon: ServiceDaemon,
     fullname: String,
+    /// What it was made with, to make it again at new addresses (P1).
+    name: String,
+    device_id: String,
+    port: u16,
+    stream_port: u16,
+    /// The addresses it announces, sorted.
+    addresses: Vec<String>,
 }
 
 impl Announcement {
+    /// The addresses it announces, as [`announced_addresses`] has them.
+    pub fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
+
+    /// P1: announce again at `ips` (the old record withdrawn with a goodbye
+    /// first, so phones drop the old address), if they differ from those
+    /// announced. Whether it changed. Blocks up to a second for the goodbye.
+    pub fn renew(&mut self, ips: Vec<String>) -> Result<bool> {
+        let addresses = announced_addresses(ips);
+        if !addresses_changed(&self.addresses, &addresses) {
+            return Ok(false);
+        }
+        if let Ok(done) = self.daemon.unregister(&self.fullname) {
+            let _ = done.recv_timeout(Duration::from_secs(1));
+        }
+        let info = service_info(
+            &self.name,
+            &self.device_id,
+            self.port,
+            self.stream_port,
+            &addresses,
+        )?;
+        self.fullname = info.get_fullname().to_string();
+        self.daemon
+            .register(info)
+            .map_err(|e| anyhow::anyhow!("mDNS registration failed: {e}"))?;
+        self.addresses = addresses;
+        Ok(true)
+    }
+
     /// Send the goodbye and wait (briefly) for it to go out.
     pub fn withdraw(self) {
         match self.daemon.unregister(&self.fullname) {
@@ -93,22 +131,9 @@ impl LanDiscoveryService {
         let span = tracing::info_span!("mdns_register", service = %name, %port);
         let _enter = span.enter();
 
-        let hostname = format!("{}.local.", name);
-        let service_type = SERVICE_TYPE.to_string();
         let instance_name = name.to_string();
-
-        let properties = announcement_properties(name, device_id, stream_port);
-
-        let ips = announceable(ips);
-        let service_info = ServiceInfo::new(
-            &service_type,
-            &instance_name,
-            &hostname,
-            &ips.iter().map(|s| s.as_str()).collect::<Vec<_>>()[..],
-            port,
-            Some(properties),
-        )
-        .context("Failed to create service info")?;
+        let addresses = announced_addresses(ips);
+        let service_info = service_info(name, device_id, port, stream_port, &addresses)?;
         let fullname = service_info.get_fullname().to_string();
 
         self.daemon.register(service_info).map_err(|e| {
@@ -128,6 +153,11 @@ impl LanDiscoveryService {
         Ok(Announcement {
             daemon: self.daemon.clone(),
             fullname,
+            name: name.to_string(),
+            device_id: device_id.to_string(),
+            port,
+            stream_port,
+            addresses,
         })
     }
 
@@ -281,6 +311,42 @@ fn announcement_properties(
         ("id".to_string(), device_id.to_string()),
         ("stream".to_string(), stream_port.to_string()),
     ])
+}
+
+/// The record announcing `name` at `addresses`.
+fn service_info(
+    name: &str,
+    device_id: &str,
+    port: u16,
+    stream_port: u16,
+    addresses: &[String],
+) -> Result<ServiceInfo> {
+    let properties = announcement_properties(name, device_id, stream_port);
+    ServiceInfo::new(
+        SERVICE_TYPE,
+        name,
+        &format!("{name}.local."),
+        &addresses.iter().map(|s| s.as_str()).collect::<Vec<_>>()[..],
+        port,
+        Some(properties),
+    )
+    .context("Failed to create service info")
+}
+
+/// P1: the addresses an announcement holds for `ips`: the tailnet's left
+/// out, each once, sorted, so two readings compare whatever their order.
+pub fn announced_addresses(ips: Vec<String>) -> Vec<String> {
+    let mut addresses = announceable(ips);
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+/// P1: whether `now` (as [`announced_addresses`] has them) differs from
+/// `before`. An empty reading is no change: an adapter between networks,
+/// or a failed read, must not withdraw the computer.
+pub fn addresses_changed(before: &[String], now: &[String]) -> bool {
+    !now.is_empty() && before != now
 }
 
 /// Convert an mDNS `ServiceInfo` to a `PeerInfo`.
@@ -452,6 +518,32 @@ mod tests {
             }
         }
         let _ = browser.shutdown();
+    }
+
+    /// P1: an announcement is made again only for other addresses, never
+    /// for none.
+    #[test]
+    fn the_announcement_follows_its_addresses() {
+        let a = announced_addresses(vec![
+            "192.0.2.7".into(),
+            "198.51.100.3".into(),
+            "192.0.2.7".into(),
+        ]);
+        assert_eq!(a, vec!["192.0.2.7".to_string(), "198.51.100.3".to_string()]);
+        let same = announced_addresses(vec!["198.51.100.3".into(), "192.0.2.7".into()]);
+        assert!(!addresses_changed(&a, &same), "order aside");
+        let moved = announced_addresses(vec!["203.0.113.9".into()]);
+        assert!(addresses_changed(&a, &moved));
+        assert!(!addresses_changed(&a, &[]), "no addresses read: kept");
+        let with_tailnet = announced_addresses(vec![
+            "192.0.2.7".into(),
+            "100.64.1.2".into(),
+            "198.51.100.3".into(),
+        ]);
+        assert!(
+            !addresses_changed(&a, &with_tailnet),
+            "a tailnet address beside the others is not announced"
+        );
     }
 
     #[test]
