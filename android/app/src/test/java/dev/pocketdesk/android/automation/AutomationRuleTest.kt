@@ -18,22 +18,34 @@ class AutomationRuleTest {
     }
 
     @Test
-    fun `an ask is refused in order - the switch, the computer, the name, the pace`() {
-        assertEquals(Refusal.OFF, AutomationRule.refusal(false, false, null, emptyList(), 0))
-        assertEquals(Refusal.NOT_SAVED, AutomationRule.refusal(true, false, "Backup", emptyList(), 0))
-        assertEquals(Refusal.BAD_NAME, AutomationRule.refusal(true, true, null, emptyList(), 0))
-        assertNull(AutomationRule.refusal(true, true, "Backup", emptyList(), 0))
+    fun `an ask is refused in order - the computer, the name, the pace`() {
+        assertEquals(Refusal.NOT_SAVED, AutomationRule.refusal(false, null, emptyList(), 0))
+        assertEquals(Refusal.BAD_NAME, AutomationRule.refusal(true, null, emptyList(), 0))
+        assertNull(AutomationRule.refusal(true, "Backup", emptyList(), 0))
+    }
+
+    @Test
+    fun `a start uses or brings up a link only to the own computer`() {
+        val own = "192.0.2.20" to 1716
+        val other = "192.0.2.30" to 1716
+        assertEquals(AutomationRule.Link.LINKED, AutomationRule.link(other, other, own))
+        assertEquals(AutomationRule.Link.LINKED_ELSEWHERE, AutomationRule.link(own, other, own))
+        assertEquals(AutomationRule.Link.CONNECT, AutomationRule.link(null, own, own))
+        assertEquals(AutomationRule.Link.CONNECT, AutomationRule.link(null, other, null))
+        assertEquals(AutomationRule.Link.NOT_LINKED, AutomationRule.link(null, other, own))
+        // The same address on another port is another computer.
+        assertEquals(AutomationRule.Link.NOT_LINKED, AutomationRule.link(null, "192.0.2.20" to 1726, own))
     }
 
     @Test
     fun `at most ten a minute`() {
         val now = 600_000L
         val nine = List(9) { now - 1_000L * it }
-        assertNull(AutomationRule.refusal(true, true, "Backup", nine, now))
-        assertEquals(Refusal.TOO_MANY, AutomationRule.refusal(true, true, "Backup", nine + (now - 59_999), now))
+        assertNull(AutomationRule.refusal(true, "Backup", nine, now))
+        assertEquals(Refusal.TOO_MANY, AutomationRule.refusal(true, "Backup", nine + (now - 59_999), now))
         // One a minute ago no longer counts, nor one from a clock gone back.
-        assertNull(AutomationRule.refusal(true, true, "Backup", nine + (now - 60_000), now))
-        assertNull(AutomationRule.refusal(true, true, "Backup", nine + (now + 5_000), now))
+        assertNull(AutomationRule.refusal(true, "Backup", nine + (now - 60_000), now))
+        assertNull(AutomationRule.refusal(true, "Backup", nine + (now + 5_000), now))
         assertEquals(listOf(now), AutomationRule.kept(listOf(now - 60_000, now), now))
     }
 

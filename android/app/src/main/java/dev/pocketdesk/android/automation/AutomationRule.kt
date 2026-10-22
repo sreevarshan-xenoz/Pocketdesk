@@ -21,9 +21,6 @@ object AutomationRule {
 
     /** Why an ask is not sent, as the event's `REASON` says it. */
     enum class Refusal(val reason: String) {
-        /** "Let other apps run the computer's tasks" is off. */
-        OFF("not_allowed"),
-
         /** The address names no saved computer. */
         NOT_SAVED("not_saved"),
 
@@ -39,17 +36,45 @@ object AutomationRule {
         raw?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_NAME && it.none(Char::isISOControl) }
 
     /**
-     * Why the ask is refused, or null to send it: the switch [on], a
-     * [saved] computer, a [name] that passed [name], and fewer than
-     * [PER_MINUTE] of the asks at [recentMs] within a minute of [nowMs].
+     * Why the ask is refused, or null to send it: a [saved] computer, a
+     * [name] that passed [name], and fewer than [PER_MINUTE] of the asks at
+     * [recentMs] within a minute of [nowMs]. The switch is read before any
+     * of it (O1 review), so an ask with it off is never here.
      */
-    fun refusal(on: Boolean, saved: Boolean, name: String?, recentMs: List<Long>, nowMs: Long): Refusal? =
+    fun refusal(saved: Boolean, name: String?, recentMs: List<Long>, nowMs: Long): Refusal? =
         when {
-            !on -> Refusal.OFF
             !saved -> Refusal.NOT_SAVED
             name == null -> Refusal.BAD_NAME
             recentMs.count { nowMs - it in 0 until MINUTE_MS } >= PER_MINUTE -> Refusal.TOO_MANY
             else -> null
+        }
+
+    /** What a task's start does about the phone's one control link; [reason] as the event's. */
+    enum class Link(val reason: String) {
+        /** Linked to that computer already. */
+        LINKED(""),
+
+        /** No link, and that computer is the phone's own: brought up. */
+        CONNECT(""),
+
+        /** Linked to another computer, which keeps its link. */
+        LINKED_ELSEWHERE("linked_elsewhere"),
+
+        /** No link, and that computer is not the phone's own: a link to it would take the background features there. */
+        NOT_LINKED("not_linked"),
+    }
+
+    /**
+     * Whether a start for the computer [wanted] (address and port) may use
+     * the link [linked] to, bring one up, or not, with [own] the phone's own
+     * computer (null when it has none, so any saved one may be linked).
+     */
+    fun link(linked: Pair<String, Int>?, wanted: Pair<String, Int>, own: Pair<String, Int>?): Link =
+        when {
+            linked == wanted -> Link.LINKED
+            linked != null -> Link.LINKED_ELSEWHERE
+            own == null || own == wanted -> Link.CONNECT
+            else -> Link.NOT_LINKED
         }
 
     /** The asks of [recentMs] still within a minute of [nowMs], to keep. */

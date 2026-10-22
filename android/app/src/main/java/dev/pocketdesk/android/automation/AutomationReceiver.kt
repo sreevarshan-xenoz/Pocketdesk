@@ -8,6 +8,7 @@ import android.util.Log
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.shortcuts.ShortcutPlan
 import dev.pocketdesk.android.shortcuts.WidgetAsk
 import dev.pocketdesk.android.ui.Deck
@@ -30,14 +31,26 @@ class AutomationReceiver : BroadcastReceiver() {
             else -> return
         }
         val app = context.applicationContext
-        val address = intent.getStringExtra(PhoneEvents.EXTRA_ADDRESS)?.trim().orEmpty()
+        // The switch first, and quietly (O1 review): with it off, nothing an
+        // app sends is read, so an extra Pocketdesk cannot unpack never
+        // reaches the process.
+        if (!Prefs.othersRunTasks(app)) {
+            Log.i(TAG, "Not sent: Let other apps run the computer's tasks is off")
+            return
+        }
+        val (rawAddress, rawName) =
+            runCatching { intent.getStringExtra(PhoneEvents.EXTRA_ADDRESS) to intent.getStringExtra(EXTRA_NAME) }
+                .getOrDefault(null to null)
+        val address = rawAddress?.trim().orEmpty()
         val host = ShortcutPlan.savedHost(address, HostStore.hosts(app))
-        val name = AutomationRule.name(intent.getStringExtra(EXTRA_NAME))
-        val refusal = admit(Prefs.othersRunTasks(app), host != null, name)
+        val name = AutomationRule.name(rawName)
+        val refusal = admit(host != null, name)
         if (refusal != null || host == null || name == null) {
             Log.i(TAG, "Not sent (${intent.action}): ${refusal?.reason}")
             val told = mapOf("state" to "refused", "reason" to refusal?.reason)
-            if (runsTask) tellTask(app, address, name.orEmpty(), told) else tellPress(app, address, name.orEmpty(), told)
+            // An unsaved address is the caller's, of any length: told cut short.
+            val toldAddress = address.take(MAX_TOLD_ADDRESS)
+            if (runsTask) tellTask(app, toldAddress, name.orEmpty(), told) else tellPress(app, toldAddress, name.orEmpty(), told)
             return
         }
         if (runsTask) runTask(app, host, name) else press(app, host, name)
@@ -62,16 +75,27 @@ class AutomationReceiver : BroadcastReceiver() {
                 return@bounded
             }
             val asks = task.optBoolean("ask", true)
-            // A start and its result ride the control link (1c review), which
-            // is brought up as the clipboard tile does; one to another
-            // computer is not taken from it.
-            val peer = RustCore.controlPeer()
-            if (peer != null && peer != (host.address to host.controlPort)) {
-                Log.i(TAG, "Not started: linked to another computer")
-                TaskFollow.tellFinished(app, host.address, name, TaskRun.Status.NotSent("linked to another computer"))
+            // A start and its result ride the control link (1c review). It is
+            // brought up only to the phone's own computer, whose link the
+            // background features keep anyway, and never taken from another
+            // (O1 review: a link to a second computer would have pointed them
+            // all there).
+            val peer = runCatching { RustCore.controlPeer() }.getOrNull()
+            val own = PhoneLink.target(app)
+            val link = AutomationRule.link(
+                linked = peer,
+                wanted = host.address to host.controlPort,
+                own = own?.let { it.address to it.controlPort },
+            )
+            if (link == AutomationRule.Link.LINKED_ELSEWHERE || link == AutomationRule.Link.NOT_LINKED) {
+                Log.i(TAG, "Not started: ${link.reason}")
+                tellTask(app, host.address, name, mapOf("state" to "not_sent", "reason" to link.reason))
                 return@bounded
             }
-            if (peer == null) RustCore.connectToPeer(host.address, host.controlPort, HostStore.wanIdentity(app, host.address))
+            if (link == AutomationRule.Link.CONNECT) {
+                runCatching { RustCore.connectToPeer(host.address, host.controlPort, HostStore.wanIdentity(app, host.address)) }
+                    .onFailure { Log.i(TAG, "No link: ${it.message}") }
+            }
             val id = UUID.randomUUID().toString()
             val since = SystemClock.elapsedRealtime()
             val started = WidgetAsk.ask(app) { RustCore.runTask(host.address, host.controlPort, name, id).map { "" } }
@@ -116,15 +140,18 @@ class AutomationReceiver : BroadcastReceiver() {
         /** The task's name or the button's label, exactly as the computer lists it. */
         const val EXTRA_NAME = PhoneEvents.EXTRA_PREFIX + "NAME"
 
+        /** The most of an unsaved address an event repeats. */
+        private const val MAX_TOLD_ADDRESS = 64
+
         /** When the asks of the last minute came (elapsed realtime), from all apps. */
         private val recent = ArrayList<Long>()
 
-        private fun admit(on: Boolean, saved: Boolean, name: String?): AutomationRule.Refusal? = synchronized(recent) {
+        private fun admit(saved: Boolean, name: String?): AutomationRule.Refusal? = synchronized(recent) {
             val now = SystemClock.elapsedRealtime()
             val kept = AutomationRule.kept(recent, now)
             recent.clear()
             recent.addAll(kept)
-            AutomationRule.refusal(on, saved, name, recent, now).also { if (it == null) recent.add(now) }
+            AutomationRule.refusal(saved, name, recent, now).also { if (it == null) recent.add(now) }
         }
 
         private fun tellTask(app: Context, address: String, task: String, fields: Map<String, Any?>) =

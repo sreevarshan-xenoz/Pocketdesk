@@ -219,10 +219,6 @@ object Prefs {
         bump()
     }
 
-    /**
-     * Whether sessions, files, links and tasks are told to other apps as
-     * broadcasts (ecosystem 1f). Off by default: any app may receive them.
-     */
     /** O1: automation apps may start the computer's tasks and press its deck (off). */
     fun othersRunTasks(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_OTHERS_RUN_TASKS, false)
@@ -232,6 +228,10 @@ object Prefs {
         bump()
     }
 
+    /**
+     * Whether sessions, files, links and tasks are told to other apps as
+     * broadcasts (ecosystem 1f). Off by default: any app may receive them.
+     */
     fun tellOtherApps(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_TELL_OTHER_APPS, false)
 

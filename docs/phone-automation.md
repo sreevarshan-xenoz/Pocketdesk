@@ -58,9 +58,11 @@ The files land in the computer's Downloads (or the folder chosen in its Settings
 
 Starts one of the computer's named tasks, as the Tasks sheet does, or presses one of its deck buttons, as the deck does, with no app on screen. The name is at most 64 characters, matched exactly; of two buttons with one label, the first is pressed.
 
-- **The switch.** It needs **Settings → Let other apps run the computer's tasks**, off by default, since any app on the phone can send it.
+- **The switch.** It needs **Settings → Let other apps run the computer's tasks**, off by default, since any app on the phone can send it. With it off, nothing is sent, said or read beyond the log line.
 - **Limits.** At most 10 a minute, from all apps together.
 - **The computer's rules still hold:** the phone's "Start my tasks" and Input permissions, and a task that asks first still asks at the desk.
+- **A task rides the phone's link to the computer.** With no link, one is brought up only to the phone's own computer (the one its background features work with); a task for another saved computer needs a session open with it (`not_linked`), and while the phone is linked to one computer, a task for another is not sent (`linked_elsewhere`). A deck button needs no link.
+- **Android's ten seconds.** A cold app asked over the internet road may take longer than Android gives the broadcast, and Android may then stop Pocketdesk before the task starts; keeping a background feature on avoids it.
 - **The outcome** comes back as `TASK_FINISHED` or `DECK_PRESSED` (below) with **Settings → Tell other apps what happens** on, and in `adb logcat -s Automation`.
 - **How long a task is followed.** A task's end is followed while Android keeps Pocketdesk running, which it may not for long without a session or a background feature.
 
@@ -94,8 +96,8 @@ With **Settings → Tell other apps what happens** on (off by default), Pocketde
 | `dev.pocketdesk.android.event.FILE_RECEIVED` | A file from the computer is saved (Downloads/Pocketdesk, or the folder picked in Settings); one per file of a folder | `MIME`, `SIZE` (bytes, as the computer gave it) |
 | `dev.pocketdesk.android.event.FILES_SENT` | A share or folder to the computer finished | `COUNT` (sent), `FAILED` (meant to be sent and not) |
 | `dev.pocketdesk.android.event.LINK_RECEIVED` | A link from the computer was shown during a screen session, with "Links from the computer" on | none |
-| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed, or another app's `RUN_TASK` (O1) ended or was refused | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` (the computer's `denied`, `busy`, `unknown`, `not_permitted`; the phone's `not_allowed`, `not_saved`, `bad_name`, `too_many`) |
-| `dev.pocketdesk.android.event.DECK_PRESSED` | Another app's `PRESS_DECK` (O1) was pressed, or why not | `LABEL`, `STATE` (`done`, `waiting` for the owner, `refused`, `not_sent`), and `REASON` when refused (the computer's words, `unknown` for no such button, or the phone's reasons as above) |
+| `dev.pocketdesk.android.event.TASK_FINISHED` | A task started from this phone ended, even after its sheet closed, or another app's `RUN_TASK` (O1) ended or was refused | `TASK` (its name), `STATE` (`done`, `refused`, `not_sent`, `no_answer`), and `CODE`, `TIMED_OUT` or `REASON` (the computer's `denied`, `busy`, `unknown`, `not_permitted`; the phone's `not_saved`, `bad_name`, `too_many`, `linked_elsewhere`, `not_linked`) |
+| `dev.pocketdesk.android.event.DECK_PRESSED` | Another app's `PRESS_DECK` (O1) was pressed, or why not | `LABEL`, `STATE` (`done`, `waiting` for the owner, `refused`, `not_sent`), and `REASON` when refused (the computer's words, `unknown` for no such button, or the phone's `not_saved`, `bad_name`, `too_many`) |
 
 Every extra is named `dev.pocketdesk.android.extra.<NAME>`. Each broadcast carries `dev.pocketdesk.android.extra.ADDRESS`, the computer's saved address, which the intents above take back, and `dev.pocketdesk.android.extra.EVENT`, the kind in lowercase (`session_started`…).
 
