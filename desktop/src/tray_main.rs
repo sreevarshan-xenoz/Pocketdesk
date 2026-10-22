@@ -50,12 +50,22 @@ fn main() {
     // What only the window shows (E2 review): it is started for each new one.
     let mut seen = tray_watch::Seen::default();
     // H3: the key that sends the clipboard, as Settings has it now.
-    let mut key = Key::default();
+    let mut key = Key::new(
+        HOTKEY_ID,
+        |c| c.clipboard_hotkey.clone(),
+        hotkey::STATUS_FILE,
+    );
+    // N9: the key that opens the window typing on a phone.
+    let mut typing_key = Key::new(
+        TYPING_HOTKEY_ID,
+        |c| c.typing_hotkey.clone(),
+        hotkey::TYPING_STATUS_FILE,
+    );
     // K7: a phone's player in this computer's media controls.
     #[cfg(windows)]
     let mut player = pocketdesk_desktop::phone_player::Watch::default();
     loop {
-        let pressed = wait(&woken, REFRESH);
+        let (pressed, typing_pressed) = wait(&woken, REFRESH);
         if tray.closed() {
             // No icon any more: free the claim, so a tray can start again.
             return;
@@ -65,10 +75,11 @@ fn main() {
                 return;
             }
         }
-        if pressed || refreshed.is_none_or(|at| at.elapsed() >= REFRESH) {
+        if pressed || typing_pressed || refreshed.is_none_or(|at| at.elapsed() >= REFRESH) {
             let now = now_unix();
             let snapshot = model::snapshot(&state_dir, now);
             key.follow(&state_dir);
+            typing_key.follow(&state_dir);
             #[cfg(windows)]
             {
                 let in_session: Vec<&str> = snapshot
@@ -108,6 +119,14 @@ fn main() {
                     act(&state_dir, TrayAction::SendClipboard(id.to_string()));
                 }
             }
+            // N9: the typing window, for the phone it may type on.
+            if typing_pressed && typing_key.status.registered {
+                let to = hotkey::typing_phone(&rows);
+                typing_key.said_press(&state_dir, to.is_some());
+                if let Some(id) = to {
+                    act(&state_dir, TrayAction::Type(id.to_string()));
+                }
+            }
             let mut entries = pocketdesk_desktop::tray_menu::with_pause(
                 pocketdesk_desktop::tray_menu::menu(&rows, &snapshot.devices, now),
                 pocketdesk_core::local::pause::current(&state_dir, now).as_ref(),
@@ -130,14 +149,23 @@ fn main() {
 }
 
 /// The send-the-clipboard key's id with `RegisterHotKey` (H3).
-#[cfg(windows)]
 const HOTKEY_ID: i32 = 0x5044;
 
-/// The send-the-clipboard key as registered (H3), kept to Settings: read
-/// again at each refresh, and registered on this thread, which pumps the
-/// `WM_HOTKEY` it posts. Windows only; elsewhere it does nothing.
-#[derive(Default)]
+/// The typing key's (N9).
+const TYPING_HOTKEY_ID: i32 = 0x5045;
+
+/// A key as registered (H3: send the clipboard; N9: type on the phone),
+/// kept to Settings: read again at each refresh, and registered on this
+/// thread, which pumps the `WM_HOTKEY` it posts. Windows only; elsewhere it
+/// does nothing.
 struct Key {
+    /// Its id with `RegisterHotKey`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    id: i32,
+    /// Its text in the config.
+    field: fn(&pocketdesk_core::local::config::Config) -> String,
+    /// Where Settings reads what became of it.
+    file: &'static str,
     text: Option<String>,
     status: hotkey::Status,
     /// When a taken key was last tried again.
@@ -152,10 +180,28 @@ struct Key {
 const RETRY_TAKEN: Duration = Duration::from_secs(30);
 
 impl Key {
+    fn new(
+        id: i32,
+        field: fn(&pocketdesk_core::local::config::Config) -> String,
+        file: &'static str,
+    ) -> Self {
+        Self {
+            id,
+            field,
+            file,
+            text: None,
+            status: hotkey::Status::default(),
+            tried: None,
+            stamp: None,
+            #[cfg(windows)]
+            registered: false,
+        }
+    }
+
     /// Say a press's outcome in the status Settings shows.
     fn said_press(&mut self, state_dir: &Path, reached: bool) {
         self.status.no_phone = !reached;
-        hotkey::write_status(state_dir, &self.status);
+        hotkey::write_status_to(state_dir, self.file, &self.status);
     }
 
     fn follow(&mut self, state_dir: &Path) {
@@ -171,7 +217,7 @@ impl Key {
         // A config that does not read (a typo, a save under way) keeps the
         // key as it is (H3 review); it is read again when it changes.
         let text = match pocketdesk_core::local::config::Config::load() {
-            Ok(config) => config.clipboard_hotkey.trim().to_string(),
+            Ok(config) => (self.field)(&config).trim().to_string(),
             Err(_) if self.text.is_some() => return,
             Err(_) => String::new(),
         };
@@ -192,13 +238,13 @@ impl Key {
             };
             if self.registered {
                 // SAFETY: this thread registered it.
-                let _ = unsafe { UnregisterHotKey(None, HOTKEY_ID) };
+                let _ = unsafe { UnregisterHotKey(None, self.id) };
                 self.registered = false;
             }
             if let Some(key) = hotkey::parse(&text) {
                 // SAFETY: no window: WM_HOTKEY goes to this thread's queue.
                 match unsafe {
-                    RegisterHotKey(None, HOTKEY_ID, HOT_KEY_MODIFIERS(key.modifiers), key.key)
+                    RegisterHotKey(None, self.id, HOT_KEY_MODIFIERS(key.modifiers), key.key)
                 } {
                     Ok(()) => self.registered = true,
                     // Another app holds the combination.
@@ -207,15 +253,15 @@ impl Key {
             }
             self.status.registered = self.registered;
         }
-        hotkey::write_status(state_dir, &self.status);
+        hotkey::write_status_to(state_dir, self.file, &self.status);
     }
 }
 
 /// Wait up to `timeout` for a pick. On Windows the tray's menu works through
 /// this thread's messages, so they are pumped meanwhile (a pick is queued
-/// while its message is handled). Whether the send-the-clipboard key was
-/// pressed (H3).
-fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> bool {
+/// while its message is handled). Whether the send-the-clipboard key (H3)
+/// and the typing key (N9) were pressed.
+fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> (bool, bool) {
     #[cfg(windows)]
     {
         let _ = woken;
@@ -229,6 +275,7 @@ fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> bool {
         }
         let mut msg = MSG::default();
         let mut pressed = false;
+        let mut typing = false;
         // SAFETY: a valid MSG to fill; each is translated and dispatched.
         while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
             // The thread's own WM_HOTKEY has no window to go to.
@@ -236,17 +283,21 @@ fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> bool {
                 pressed = true;
                 continue;
             }
+            if msg.message == WM_HOTKEY && msg.wParam.0 == TYPING_HOTKEY_ID as usize {
+                typing = true;
+                continue;
+            }
             unsafe {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }
-        pressed
+        (pressed, typing)
     }
     #[cfg(not(windows))]
     {
         let _ = woken.recv_timeout(timeout);
-        false
+        (false, false)
     }
 }
 

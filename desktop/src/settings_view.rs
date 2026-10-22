@@ -136,6 +136,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "typing_hotkey",
+        "Type on the phone with a key",
+        Section::Phones,
+    ),
+    (
         "phone_media_controls",
         "The phone's music in this computer's media controls",
         Section::Phones,
@@ -325,7 +330,11 @@ fn drawn_in(key: &str) -> &str {
 fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
-        "clipboard_hotkey" | "away_lock_minutes" | "mic_relay_device" | "phone_media_controls" => {
+        "clipboard_hotkey"
+        | "typing_hotkey"
+        | "away_lock_minutes"
+        | "mic_relay_device"
+        | "phone_media_controls" => {
             cfg!(windows)
         }
         _ => true,
@@ -411,6 +420,7 @@ pub fn applies_live(key: &str) -> bool {
             | "clipboard_history"
             | "clipboard_images"
             | "clipboard_hotkey"
+            | "typing_hotkey"
             | "phone_media_controls"
             | "phone_drive"
             | "phone_drive_write"
@@ -869,6 +879,43 @@ impl SettingsForm {
                         note(
                             ui,
                             "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer.",
+                        );
+                    });
+                }
+                // N9: M4's typing window, from anywhere. Windows only, as H3's.
+                if cfg!(windows) {
+                    row(ui, "typing_hotkey", |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut e.typing_hotkey)
+                                .hint_text("win+shift+t")
+                                .desired_width(140.0),
+                        );
+                        let text = e.typing_hotkey.trim();
+                        let status =
+                            pocketdesk_core::local::paths::state_dir()
+                                .ok()
+                                .and_then(|dir| {
+                                    pocketdesk_desktop::hotkey::read_status_from(
+                                        &dir,
+                                        pocketdesk_desktop::hotkey::TYPING_STATUS_FILE,
+                                    )
+                                });
+                        if let Some(words) =
+                            pocketdesk_desktop::hotkey::typing_status_words(text, status.as_ref())
+                        {
+                            note(ui, words);
+                        }
+                        if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                                )
+                                .color(crate::theme::bad(ui)),
+                            );
+                        }
+                        note(
+                            ui,
+                            "Pressed anywhere, opens the window that types on the phone (the one in the newest session when several are linked), as \"Type on the phone\" on the Overview does. It needs the tray program (pocketdesk-tray) beside the app. Empty is off.",
                         );
                     });
                 }

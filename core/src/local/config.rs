@@ -163,6 +163,10 @@ pub struct Config {
     /// Windows. Empty (the default) is off.
     #[serde(default)]
     pub clipboard_hotkey: String,
+    /// A key that opens the window typing on a phone from anywhere (N9,
+    /// M4 part 2), through the tray program on Windows. Empty is off.
+    #[serde(default)]
+    pub typing_hotkey: String,
     /// Show a phone's player in this computer's own media controls (K7):
     /// Windows' volume flyout and media keys, through the tray program.
     /// Off by default.
@@ -375,6 +379,7 @@ impl Default for Config {
             computer_clipboard: false,
             clipboard_history: 0,
             clipboard_hotkey: String::new(),
+            typing_hotkey: String::new(),
             phone_media_controls: false,
             phone_drive: false,
             phone_drive_write: true,
@@ -599,6 +604,7 @@ impl Config {
         "clipboard_push",
         "clipboard_images",
         "clipboard_hotkey",
+        "typing_hotkey",
         "phone_media_controls",
         "computer_clipboard",
         "clipboard_history",
