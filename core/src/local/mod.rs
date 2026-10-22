@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub mod dials;
 pub mod drive;
 pub mod events;
+pub mod hold_words;
 pub mod home_assistant;
 pub mod identity;
 pub mod kdeconnect;

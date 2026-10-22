@@ -645,7 +645,9 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // A muted app's never counts against the limit (K2b review); a pause
     // holds them all alike, still counted, so a phone's burst stays bounded
     // (K2a review).
-    let muted = muted_here(&app);
+    // P4: one held by its words is held as a muted app's.
+    let words = held_by_words(&app, &title, &text);
+    let muted = muted_here(&app) || words.is_some();
     // P3: quiet hours, or presenting, hold them as a pause does.
     let quiet = crate::quiet_hours::now();
     let held = held_here(muted, quiet.is_some());
@@ -661,6 +663,9 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     let mut meta = serde_json::json!({ "app": app });
     if let Some(quiet) = quiet {
         meta[quiet.field()] = serde_json::json!(true);
+    }
+    if let Some(rule) = &words {
+        meta["held_by"] = serde_json::json!(rule);
     }
     crate::events::emit(
         "notification",
@@ -795,6 +800,19 @@ fn held_here(muted: bool, in_hand: bool) -> bool {
 /// Whether `app` is muted on this computer (K2b): its notifications are
 /// logged and kept to answer, never shown. Read at each notification, so a
 /// mute from the desktop app or a toast applies to the next one.
+/// The rule of desktop Settings "Hold notifications with these words" that
+/// holds a notification (P4), as its line; read at each one, so a change in
+/// Settings applies to the next.
+fn held_by_words(app: &str, title: &str, text: &str) -> Option<String> {
+    let lines = crate::events::current_config().hold_words;
+    if lines.is_empty() {
+        return None;
+    }
+    let rules = pocketdesk_core::local::hold_words::rules(&lines);
+    pocketdesk_core::local::hold_words::held_by(&rules, app, title, text)
+        .map(pocketdesk_core::local::hold_words::Rule::line)
+}
+
 fn muted_here(app: &str) -> bool {
     crate::state::state_dir()
         .map(|dir| {
@@ -919,7 +937,9 @@ impl Plugin for NotificationPlugin {
                 // (K2b review: a muted app's burst dropped the others).
                 // Paused (K2a): held as a muted app's are, but still counted
                 // (K2a review: a week's pause must not unbound a phone).
-                let muted = muted_here(&app);
+                // P4: held by its words, as a muted app's is.
+                let words = held_by_words(&app, &title, &text);
+                let muted = muted_here(&app) || words.is_some();
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
@@ -1016,6 +1036,9 @@ impl Plugin for NotificationPlugin {
                 }
                 if let Some(quiet) = quiet {
                     meta[quiet.field()] = serde_json::json!(true);
+                }
+                if let Some(rule) = &words {
+                    meta["held_by"] = serde_json::json!(rule);
                 }
                 if live.is_some() {
                     meta["live"] = serde_json::json!(true);
