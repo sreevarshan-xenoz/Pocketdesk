@@ -216,7 +216,13 @@ fn encode_png(image: &Rgba) -> Result<Vec<u8>, String> {
 /// is refused.
 pub fn png_from_file(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if is_png(bytes) {
-        decode_png(bytes)?;
+        // Its header only: decoding it whole to check it would take as much
+        // memory as the picture (O7 review); the clipboard decodes it later
+        // under the same limits.
+        let reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .map_err(|e| format!("not a PNG: {e}"))?;
+        checked_size(reader.info().width, reader.info().height)?;
         return Ok(bytes.to_vec());
     }
     if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -267,6 +273,17 @@ mod tests {
     use super::*;
 
     /// O7: a received PNG goes as it is, a JPEG as PNG, anything else not.
+    #[test]
+    fn a_received_png_claiming_a_huge_picture_is_refused() {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, 20_000, 20_000);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::One);
+        // Its header alone: refused before any picture is read.
+        std::mem::forget(encoder.write_header().unwrap());
+        assert!(png_from_file(&out).is_err());
+    }
+
     #[test]
     fn a_received_png_or_jpeg_is_a_clipboard_png() {
         let png = encode_png(&picture()).unwrap();

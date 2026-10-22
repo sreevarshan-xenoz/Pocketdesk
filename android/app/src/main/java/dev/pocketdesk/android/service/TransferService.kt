@@ -480,8 +480,10 @@ class TransferService : Service() {
                 job.address,
                 mapOf("mime" to mime, "size" to job.size),
             )
-            // O7: an image sent on its own goes onto the clipboard too.
-            val onItsOwn = job.folder == null && job.into == null
+            // O7: an image the computer sent on its own goes onto the
+            // clipboard too; never a file asked for here, as from the
+            // computer's files (O7 review).
+            val onItsOwn = job.isOffer && job.folder == null && job.into == null
             if (uri != null && ReceivedImageRule.takes(Prefs.receivedImagesToClipboard(this), onItsOwn, job.size)) {
                 ReceivedImageClip.put(this, uri)
             }

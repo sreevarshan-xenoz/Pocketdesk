@@ -117,6 +117,13 @@ pub async fn run_watcher() {
                 );
                 continue;
             };
+            // The file that answers is not one sent unasked (O7 review).
+            if matches!(request.kind, Kind::Fetch) {
+                crate::plugins::share::asked()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .note(&request.device_id, std::time::Instant::now());
+            }
             if let Err(e) = phone.send_packet(&packet).await {
                 tracing::warn!("A request for a phone's files was not sent: {e}");
             }

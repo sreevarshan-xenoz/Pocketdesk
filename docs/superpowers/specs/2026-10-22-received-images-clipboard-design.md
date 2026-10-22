@@ -36,3 +36,27 @@ Date: 2026-10-22. Plan: `docs/research/2026-10-22-o-cycle.md` §O7.
   - the computer: a PNG as it is, a JPEG as PNG, anything else or a cut PNG refused;
   - the phone: the kind by its first bytes, and the switch, folders and size.
 - **Owed:** on the OPPO, a photo each way pasted into an app (checklist §190).
+
+## Review
+
+A fresh review found 0 Critical, 5 Important and several Minor issues.
+
+**Important, fixed:**
+- **The clipboard permission was bypassed.** Someone else's phone, a guest (Files and Links only, M2b), a computer with `computer_clipboard` off, or a KDE device with its Clipboard switch off could each replace the clipboard by sending an image. It now takes a device allowed the clipboard (`clipboard_push::may_set_clipboard`).
+- **Files asked for went onto the clipboard too.**
+  - On the computer: the Phone page's Save, a recent photo, a photo taken (F3). Each fetch or take this computer sends now counts as one file to come from that phone within ten minutes, which is not put on the clipboard (`share::Asked`, tested).
+  - On the phone: a file fetched from the computer's folders. Only an offer, a file the computer sent unasked, goes now.
+- **Memory unbounded.** Conversions now run one at a time. A PNG is checked by its header, not decoded whole, and the JPEG's limit is counted in RGBA.
+- **Size unchecked.** A JPEG made PNG is held to N4's 32 MB.
+- **The phone could fetch its own image back.** A phone in a session asks for the clipboard every 4 s and would fetch back the image it had just sent. The computer now answers that phone as empty while the image is its own.
+
+**Minor, fixed:**
+- the note forgotten when the write fails;
+- the clipboard set only once the file is listed;
+- the desktop row's words, which said a phone only.
+
+**Tests added:** the note, a PNG claiming a huge picture, and `Asked`.
+
+**Not done:**
+- **An EXIF-rotated JPEG test.** Building EXIF in a test is heavy; checked by hand instead (checklist §190).
+- **Two images arriving together.** The one decoded last wins.

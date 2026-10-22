@@ -947,11 +947,11 @@ impl SettingsForm {
                 row(ui, "received_images_clipboard", |ui| {
                     ui.checkbox(
                         &mut e.received_images_clipboard,
-                        "put an image a phone sends here on the clipboard too",
+                        "put an image sent here on the clipboard too",
                     );
                     note(
                         ui,
-                        "A PNG or a JPEG of at most 32 MB, sent on its own (not in a folder). It stays in the folder it landed in as well.",
+                        "From a phone, a computer or a KDE device allowed the clipboard: a PNG or a JPEG of at most 32 MB, sent on its own (not in a folder, nor a file you asked the phone for). It stays in the folder it landed in as well.",
                     );
                 });
                 row(ui, "clipboard_history", |ui| {

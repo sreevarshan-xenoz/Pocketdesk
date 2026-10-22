@@ -1236,6 +1236,46 @@ async fn present_key<S: tokio::io::AsyncWrite + Unpin>(stream: &mut S, key: &str
     stream.flush().await.map_err(|e| io_error("write", e))
 }
 
+/// The files this computer asked phones for and has not had yet (O7
+/// review): each ask is one file to come from that phone within ten
+/// minutes, so it is not put on the clipboard as one sent unasked.
+#[derive(Debug, Default)]
+pub(crate) struct Asked {
+    asks: Vec<(String, std::time::Instant)>,
+}
+
+impl Asked {
+    /// How long an ask waits for its file.
+    const FOR: Duration = Duration::from_secs(600);
+
+    /// `device` was asked for a file at `now`.
+    pub(crate) fn note(&mut self, device: &str, now: std::time::Instant) {
+        self.asks
+            .retain(|(_, at)| now.duration_since(*at) < Self::FOR);
+        self.asks.push((device.to_string(), now));
+    }
+
+    /// Whether a file from `device` at `now` answers an ask: the oldest
+    /// still waiting is taken.
+    pub(crate) fn take(&mut self, device: &str, now: std::time::Instant) -> bool {
+        self.asks
+            .retain(|(_, at)| now.duration_since(*at) < Self::FOR);
+        match self.asks.iter().position(|(d, _)| d == device) {
+            Some(i) => {
+                self.asks.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// The asks made.
+pub(crate) fn asked() -> &'static std::sync::Mutex<Asked> {
+    static ASKED: std::sync::Mutex<Asked> = std::sync::Mutex::new(Asked { asks: Vec::new() });
+    &ASKED
+}
+
 /// Tell the owner a file arrived: a desktop notification, and a row in the
 /// received-files list the desktop app shows (roadmap F7).
 /// A file from `from` was saved at `path`; `top` is the folder of the
@@ -1245,14 +1285,26 @@ pub(crate) fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
-    // O7: an image sent on its own also goes onto the clipboard, with the
-    // switch on; the clipboard is not held by a pause (K2a).
-    if top.is_none() && crate::events::current_config().received_images_clipboard {
-        crate::plugins::clipboard::put_received_image(path.to_path_buf(), size, from.to_string());
-    }
+    // A file this computer asked the phone for (O7 review): the Phone
+    // page's Save, a recent photo, a photo taken.
+    let asked = top.is_none()
+        && asked()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take(from, std::time::Instant::now());
     let Some((summary, body)) = received_in(&dir, path, size, from, top) else {
         return;
     };
+    // O7: an image sent on its own, not asked for, also goes onto the
+    // clipboard, with the switch on and from a device allowed the
+    // clipboard; the clipboard is not held by a pause (K2a).
+    if top.is_none()
+        && !asked
+        && crate::events::current_config().received_images_clipboard
+        && crate::clipboard_push::may_set_clipboard(from)
+    {
+        crate::plugins::clipboard::put_received_image(path.to_path_buf(), size, from.to_string());
+    }
     // Paused (K2a): listed on the Files page, not announced (its name
     // could show on a shared screen).
     if crate::paused::now() {
@@ -1883,6 +1935,25 @@ pub(crate) fn io_error(operation: &'static str, detail: impl std::fmt::Display) 
 
 #[cfg(test)]
 mod tests {
+    /// O7 review: each ask is one file from that phone, for ten minutes.
+    #[test]
+    fn a_file_asked_for_is_told_apart_from_one_sent_unasked() {
+        let t0 = std::time::Instant::now();
+        let mut asked = Asked::default();
+        assert!(!asked.take("phone", t0), "nothing asked");
+        asked.note("phone", t0);
+        asked.note("phone", t0);
+        assert!(!asked.take("other", t0), "another phone");
+        assert!(asked.take("phone", t0));
+        assert!(asked.take("phone", t0));
+        assert!(!asked.take("phone", t0), "two asks, two files");
+        asked.note("phone", t0);
+        assert!(
+            !asked.take("phone", t0 + Duration::from_secs(601)),
+            "ten minutes on"
+        );
+    }
+
     use super::*;
 
     /// K1 review: with "Keep files' dates" off, a body's date is no date.

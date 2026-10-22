@@ -26,8 +26,8 @@ object ReceivedImageRule {
 
     /**
      * Whether a file of [size] bytes goes: the switch [enabled], sent
-     * [onItsOwn] (not one of a folder's files, nor into a shared folder of
-     * N6's), not empty and at most [MAX_BYTES].
+     * [onItsOwn] (offered by the computer, not asked for here; not one of a
+     * folder's files, nor into a shared folder of N6's), not empty and at most [MAX_BYTES].
      */
     fun takes(enabled: Boolean, onItsOwn: Boolean, size: Long): Boolean =
         enabled && onItsOwn && size in 1..MAX_BYTES
