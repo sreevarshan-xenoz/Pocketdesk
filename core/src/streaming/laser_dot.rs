@@ -34,6 +34,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
     self, Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1,
 };
 
+/// How many round trips a new dot waits for its first configure.
+const CONFIGURE_TRIES: usize = 10;
+
 /// The dot's colour (a presenter's red, as on Windows) and opacity.
 const RGB: (u8, u8, u8) = (230, 30, 40);
 const ALPHA: u8 = 230;
@@ -242,6 +245,11 @@ impl Overlay {
         if let Some(shown) = self.shown.take() {
             shown.layer.destroy();
             shown.surface.destroy();
+            // A proxy is not destroyed when dropped (N10 review: each move
+            // to another output left its picture on the compositor).
+            let (_, pool, buffer) = &shown._picture;
+            buffer.destroy();
+            pool.destroy();
             let _ = self.conn.flush();
         }
         self.state.configure = None;
@@ -272,15 +280,20 @@ impl Overlay {
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         surface.commit();
         self.state.configure = None;
-        let serial = loop {
+        // A compositor that neither configures nor closes it is let go
+        // (N10 review: the wait had no end).
+        let mut serial = None;
+        for _ in 0..CONFIGURE_TRIES {
             self.queue.roundtrip(&mut self.state).ok()?;
             if self.state.closed {
                 return None;
             }
-            if let Some(serial) = self.state.configure.take() {
-                break serial;
+            serial = self.state.configure.take();
+            if serial.is_some() {
+                break;
             }
-        };
+        }
+        let serial = serial?;
         let picture = picture(&self.shm, &qh, size)?;
         layer.ack_configure(serial);
         surface.attach(Some(&picture.2), 0, 0);
