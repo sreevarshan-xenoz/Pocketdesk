@@ -7,6 +7,7 @@
 use pocketdesk_core::error::Result;
 use pocketdesk_core::protocol::in_use::{ANSWER, ASK, answer_body};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use serde_json::Value;
 
 #[derive(Debug, Default)]
 pub struct InUsePlugin;
@@ -31,12 +32,47 @@ impl Plugin for InUsePlugin {
             return Ok(());
         }
         let telling = crate::events::current_config().tell_in_use;
-        let idle = if telling {
+        // A computer that would not show a phone's notification never says
+        // it is in use (N7 review: the others would hold it, and no one
+        // would see it).
+        let showing = crate::plugins::notification::shows_phones() && !crate::paused::now();
+        let idle = if telling && showing {
             crate::away_lock::idle_secs()
         } else {
             None
         };
-        let answer = NetworkPacket::new(ANSWER).with_body(answer_body(telling, idle));
+        let answer = NetworkPacket::new(ANSWER).with_body(answer_for(telling, showing, idle));
         sender.send_packet(&answer).await
+    }
+}
+
+/// The answer, by whether this computer tells (`tell_in_use`), would show a
+/// phone's notification now (not paused, phones' notifications on), and
+/// how long its input has been quiet.
+fn answer_for(telling: bool, showing: bool, idle_secs: Option<u64>) -> Value {
+    answer_body(telling && showing, idle_secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pocketdesk_core::protocol::in_use::in_use;
+
+    /// N7 review: a computer that would not show the notification never
+    /// says it is in use.
+    #[test]
+    fn only_a_computer_that_would_show_it_says_it_is_in_use() {
+        assert_eq!(in_use(&answer_for(true, true, Some(3))), Some(true));
+        assert_eq!(
+            in_use(&answer_for(true, false, Some(3))),
+            None,
+            "paused, or not showing phones'"
+        );
+        assert_eq!(
+            in_use(&answer_for(false, true, Some(3))),
+            None,
+            "not telling"
+        );
+        assert_eq!(in_use(&answer_for(true, true, None)), None, "cannot tell");
     }
 }

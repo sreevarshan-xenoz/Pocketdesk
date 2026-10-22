@@ -762,6 +762,20 @@ fn given_name(body: &serde_json::Value, field: &str) -> bool {
 
 /// Whether the phone says it was in use when the notification came (M6,
 /// `phoneInUse`): then no toast shows it here.
+/// Whether the phone marked it as come while another computer was in use
+/// (N7).
+fn marked_elsewhere(body: &serde_json::Value) -> bool {
+    body.get(pocketdesk_core::protocol::in_use::ELSEWHERE)
+        .and_then(|v| v.as_bool())
+        == Some(true)
+}
+
+/// Whether phones' notifications are shown here at all (N7: a computer
+/// that would not show one never says it is in use).
+pub(crate) fn shows_phones() -> bool {
+    SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn phone_in_use(body: &serde_json::Value) -> bool {
     body.get("phoneInUse").and_then(|v| v.as_bool()) == Some(true)
 }
@@ -904,11 +918,7 @@ impl Plugin for NotificationPlugin {
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
                 // N7: another computer of the owner's is in use, not this one.
-                let elsewhere = packet
-                    .body
-                    .get(pocketdesk_core::protocol::in_use::ELSEWHERE)
-                    .and_then(|v| v.as_bool())
-                    == Some(true);
+                let elsewhere = marked_elsewhere(&packet.body);
                 let held = held_here(muted, in_hand || elsewhere);
                 // N4: an ongoing update is one card, updated in place; only
                 // its first counts against the limit and is an event.
@@ -2038,6 +2048,19 @@ mod tests {
         assert!(!given_name(&json!({"app": "  "}), "app"));
         assert!(!given_name(&json!({"title": "x"}), "app"));
         assert!(given_name(&json!({"appName": "Chat"}), "appName"));
+    }
+
+    #[test]
+    fn one_marked_as_come_while_another_computer_was_in_use_is_held() {
+        assert!(marked_elsewhere(&serde_json::json!({ "elsewhere": true })));
+        assert!(!marked_elsewhere(
+            &serde_json::json!({ "elsewhere": "yes" })
+        ));
+        assert!(!marked_elsewhere(&serde_json::json!({})));
+        assert!(held_here(
+            false,
+            marked_elsewhere(&serde_json::json!({ "elsewhere": true }))
+        ));
     }
 
     #[test]
