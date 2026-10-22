@@ -502,6 +502,7 @@
         <item quantity="one">%1$d இணைப்பு கணினிக்கு அனுப்பப்பட்டது; இணைப்புகளை அனுமதித்தால் அங்கே திறக்கும்.</item>
         <item quantity="other">%1$d இணைப்புகள் கணினிக்கு அனுப்பப்பட்டன; இணைப்புகளை அனுமதித்தால் அங்கே திறக்கும்.</item>
     </plurals>
+    <string name="links_sent_then_failed">%2$d இணைப்புகளில் %1$d அனுப்பப்பட்டன; பிறகு: %3$s</string>
     <string name="link_not_web">திறக்க இணைய இணைப்பு இல்லை (http, https இணைப்புகள் மட்டும்).</string>
     <string name="link_from_computer">%1$s இலிருந்து ஓர் இணைப்பு</string>
     <string name="channel_links">கணினியிலிருந்து இணைப்புகள்</string>

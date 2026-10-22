@@ -153,6 +153,8 @@ class ShareActivity : ComponentActivity() {
                     when {
                         failure == null && sent == 1 -> getString(R.string.link_sent)
                         failure == null -> resources.getQuantityString(R.plurals.links_sent, sent, sent)
+                        // How many went first (N9 review: a retry would send them again).
+                        sent > 0 -> getString(R.string.links_sent_then_failed, sent, urls.size, plainErrorText(failure.message))
                         else -> getString(R.string.share_failed, plainErrorText(failure.message))
                     },
                 )
