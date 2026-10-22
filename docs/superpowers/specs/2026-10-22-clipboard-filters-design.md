@@ -37,3 +37,18 @@ So a held copy goes nowhere, on top of the private marks a password manager sets
 - **Unit tests:** the rules (names, patterns, images, bad patterns) and the Settings form (lists a line each, the usual ones added once, a bad pattern keeps Save off).
 - **A throwaway server** with the clipboard stand-in and the OPPO linked: a copy with an AWS-shaped key was held, once in the log, and an ordinary copy was not.
 - **Owed:** a real KeePassXC copy on Windows (checklist §187).
+
+## Review
+
+A fresh review found 0 Critical, 2 Important and 5 Minor. Every road out was checked and found to go through the two reads. Fixed in two commits:
+
+- **A copy's program was read a moment after its text** (Important). A copy made between them was judged by the other's program. The clipboard's sequence number is now held across both reads, and the read is tried again when it moved.
+- **What cannot be caught was unsaid** (Important). A copy whose program Windows does not name passes the program rule. That covers a program that has closed, another user's, and a browser extension's copy, which is the browser's. The note, README and this spec now say so, and point to the patterns.
+- **Minor:**
+  - the history's Resend is held to the rules as they are now;
+  - the tray's refusal names Settings' rules;
+  - Settings checks a pattern once per text, not every frame;
+  - an unreadable pattern from a hand edit is logged;
+  - a pattern's length is counted in characters.
+
+Left: a server test of the reads with the stand-ins. The seams read the owner's config, so it waits for a test config folder of its own.
