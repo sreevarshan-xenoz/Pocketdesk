@@ -17,7 +17,8 @@ class PhoneActionRuleTest {
         awake: Boolean = true,
         screenshots: Boolean = true,
         withinBudget: Boolean = true,
-    ) = PhoneActionRule.decide(action, on, own, service, sdk, locked, awake, screenshots, withinBudget)
+        appsOn: Boolean = true,
+    ) = PhoneActionRule.decide(action, on, own, service, sdk, locked, awake, screenshots, withinBudget, appsOn)
 
     @Test
     fun `an action reads back from its word, and nothing else does`() {
@@ -43,5 +44,24 @@ class PhoneActionRuleTest {
         assertEquals(Decision.ASLEEP, decide(awake = false))
         assertEquals(Decision.SCREENSHOTS_OFF, decide(screenshots = false))
         assertEquals(Decision.DO, decide(action = Action.LOCK, locked = true, awake = false, screenshots = false))
+    }
+
+    @Test
+    fun `apps are listed with their own switch, no service needed`() {
+        assertEquals(Action.APPS, Action.parse("apps"))
+        assertEquals(Decision.DO, decide(action = Action.APPS, on = false, service = false, locked = true, awake = false, sdk = 21))
+        assertEquals(Decision.OFF, decide(action = Action.APPS, appsOn = false))
+        assertEquals(Decision.NOT_OWN, decide(action = Action.APPS, own = false))
+        assertEquals(Decision.TOO_MANY, decide(action = Action.APPS, withinBudget = false))
+    }
+
+    @Test
+    fun `an app is opened on an unlocked phone, awake, through the service`() {
+        assertEquals(Action.OPEN, Action.parse("open"))
+        assertEquals(Decision.DO, decide(action = Action.OPEN, on = false, screenshots = false))
+        assertEquals(Decision.OFF, decide(action = Action.OPEN, appsOn = false))
+        assertEquals(Decision.NO_SERVICE, decide(action = Action.OPEN, service = false))
+        assertEquals(Decision.LOCKED, decide(action = Action.OPEN, locked = true))
+        assertEquals(Decision.ASLEEP, decide(action = Action.OPEN, awake = false))
     }
 }

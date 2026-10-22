@@ -1053,7 +1053,7 @@ object RustCore {
         }.getOrDefault(emptyList())
 
     /** A screenshot or a lock the computer at [host]:[port] asked for (O2). */
-    data class PhoneActionAsk(val host: String, val port: Int, val action: String)
+    data class PhoneActionAsk(val host: String, val port: Int, val action: String, val app: String = "")
 
     /** The screenshots and locks waiting (O2), taken. */
     fun takePhoneActions(): List<PhoneActionAsk> =
@@ -1061,7 +1061,7 @@ object RustCore {
             val array = org.json.JSONArray(envelope(nativeTakePhoneActions()).getOrDefault("[]"))
             (0 until array.length()).map { i ->
                 val a = array.getJSONObject(i)
-                PhoneActionAsk(a.getString("host"), a.getInt("port"), a.getString("action"))
+                PhoneActionAsk(a.getString("host"), a.getInt("port"), a.getString("action"), a.optString("app"))
             }
         }.getOrDefault(emptyList())
 
