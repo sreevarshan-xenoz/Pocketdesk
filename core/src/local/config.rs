@@ -149,6 +149,11 @@ pub struct Config {
     /// would go to every phone.
     #[serde(default)]
     pub clipboard_images: bool,
+    /// An image a phone, a computer or a KDE device sends here (a PNG or a
+    /// JPEG, not in a folder) also goes onto this computer's clipboard (O7).
+    /// Off by default: a photo sent to keep would replace what was copied.
+    #[serde(default)]
+    pub received_images_clipboard: bool,
     /// Share what is copied with the owner's other paired computers, both
     /// ways (2g). Off by default: the content crosses machines.
     #[serde(default)]
@@ -385,6 +390,7 @@ impl Default for Config {
             virtual_screens: true,
             clipboard_push: true,
             clipboard_images: false,
+            received_images_clipboard: false,
             computer_clipboard: false,
             clipboard_history: 0,
             clipboard_never_from: Vec::new(),
@@ -614,6 +620,7 @@ impl Config {
         "virtual_screens",
         "clipboard_push",
         "clipboard_images",
+        "received_images_clipboard",
         "clipboard_hotkey",
         "typing_hotkey",
         "phone_media_controls",

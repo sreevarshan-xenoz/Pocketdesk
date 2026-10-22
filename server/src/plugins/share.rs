@@ -1245,6 +1245,11 @@ pub(crate) fn on_received(path: &Path, size: u64, from: &str, top: Option<&Path>
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
+    // O7: an image sent on its own also goes onto the clipboard, with the
+    // switch on; the clipboard is not held by a pause (K2a).
+    if top.is_none() && crate::events::current_config().received_images_clipboard {
+        crate::plugins::clipboard::put_received_image(path.to_path_buf(), size, from.to_string());
+    }
     let Some((summary, body)) = received_in(&dir, path, size, from, top) else {
         return;
     };

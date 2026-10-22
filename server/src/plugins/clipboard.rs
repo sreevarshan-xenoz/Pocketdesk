@@ -257,6 +257,51 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     });
 }
 
+/// The largest image file put on the clipboard as it arrives (O7), as N4's.
+pub(crate) const MAX_RECEIVED_IMAGE: u64 = 32 << 20;
+
+/// O7: put the image file `from` sent, saved at `path`, on the clipboard, if
+/// it is a PNG or a JPEG of at most [`MAX_RECEIVED_IMAGE`]; read and
+/// converted off the runtime. Not told back to `from` (M3's push).
+pub(crate) fn put_received_image(path: std::path::PathBuf, size: u64, from: String) {
+    if size > MAX_RECEIVED_IMAGE {
+        return;
+    }
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    runtime.spawn(async move {
+        let read = tokio::task::spawn_blocking(move || -> std::result::Result<Vec<u8>, String> {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)
+                .map_err(|e| e.to_string())?
+                .take(MAX_RECEIVED_IMAGE + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_RECEIVED_IMAGE {
+                return Err("too large".to_string());
+            }
+            crate::platform::clip_image::png_from_file(&bytes)
+        })
+        .await;
+        let png = match read {
+            Ok(Ok(png)) => png,
+            Ok(Err(e)) => {
+                tracing::debug!("A received file is not put on the clipboard: {e}");
+                return;
+            }
+            Err(_) => return,
+        };
+        let image = Arc::new(Image::new(png));
+        crate::clipboard_push::note_image_from(&from, &image.id);
+        match set_clipboard_image(&image).await {
+            Ok(()) => tracing::info!("A received image is on the clipboard"),
+            Err(e) => tracing::warn!("A received image could not go onto the clipboard: {e}"),
+        }
+    });
+}
+
 /// The image the last clipboard reply named, to the phone that asks.
 async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     let Some(key) = transfer_key(packet) else {

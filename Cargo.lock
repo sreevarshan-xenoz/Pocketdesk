@@ -5687,6 +5687,7 @@ dependencies = [
  "enigo",
  "evdev",
  "futures-lite",
+ "image",
  "iroh",
  "iroh-mainline-address-lookup",
  "iroh-relay",
