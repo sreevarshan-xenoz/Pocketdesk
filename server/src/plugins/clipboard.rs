@@ -288,7 +288,6 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     });
 }
 
-#[cfg(windows)]
 fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
     share::io_error("clipboard", e)
 }
