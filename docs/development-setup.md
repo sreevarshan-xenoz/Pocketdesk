@@ -202,4 +202,4 @@ the Flutter-era `android/rust/src/api.rs`) via 34 `native*` JNI functions under
 `android/app/.../bridge/RustCore.kt`. Fallible calls return a `{"ok":...}` /
 `{"error":...}` JSON envelope; H.264 frames and Opus audio cross the boundary as
 big-endian binary blobs. MediaCodec decode (feeding frames to a `Surface`) and
-the Compose screens are the next step — see AGENTS.md *Current Status*.
+the Compose screens are the next step — see `docs/status-history.md`.
