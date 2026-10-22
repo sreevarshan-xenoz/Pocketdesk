@@ -2527,6 +2527,7 @@ Built 2026-10-22. Run on a throwaway Azure VM (Ubuntu 24.04, headless Sway with 
 - [x] The typing window opens from the tray's request (`app_open` page `type`), and `wtype` into it types `Linux typing é` into the fixture's field.
 - [x] "Show screen" opens the phone's window on the VM, live, with its Screenshot, Record and control bars.
 - [x] Remote offers "Laser pointer" there; held, a red dot is drawn at the screen's middle through the layer shell, and gone once let go.
+- [x] After the fixes, with no tray host: the tray program runs without an icon and still lists the phone's song in MPRIS; the window starts with no panic.
 Owed:
 - [ ] The laser dot moved by turning the phone (the phone lay still), and across two outputs.
 - [ ] GNOME's and KDE's media controls by eye, and the media keys.
