@@ -2566,7 +2566,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 
 Built 2026-10-22. Checked on the OPPO against a throwaway server (named apart from this computer's own, so its goodbye touched no other record), its addresses moved by the seam:
 - [x] Announced at this computer's address: the saved card read "On this network".
-- [x] Moved to a documentation address: "announced again" logged, and the card lost "On this network".
+- [x] Moved to a documentation address: "announced again" logged after two readings, and the card lost "On this network" (without the goodbye it had kept it: Android holds an old resolution).
 - [x] Moved back: announced again, and the label returned.
 
 Owed:

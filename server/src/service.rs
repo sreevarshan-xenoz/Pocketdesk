@@ -740,10 +740,16 @@ pub async fn run(config: Config) -> Result<()> {
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
                 // Tell phones on the network this computer is going away.
-                let current = announcement.lock().unwrap_or_else(|e| e.into_inner()).take();
-                if let Some(announcement) = current {
-                    let _ = tokio::task::spawn_blocking(move || announcement.withdraw()).await;
-                }
+                // Taken off the loop: an announcement under way holds the
+                // lock (P1 review).
+                let held = announcement.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let current = held.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(announcement) = current {
+                        announcement.withdraw();
+                    }
+                })
+                .await;
                 break;
             }
             event = discovery_rx.recv() => {
@@ -2759,9 +2765,12 @@ async fn follow_addresses(
         std::sync::Mutex<Option<pocketdesk_core::tailscale::lan::Announcement>>,
     >,
 ) {
-    let seam = std::env::var_os("POCKETDESK_LOCAL_IPS_FILE")
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.is_absolute());
+    let seam = std::env::var_os("POCKETDESK_LOCAL_IPS_FILE").map(std::path::PathBuf::from);
+    if seam.as_ref().is_some_and(|p| !p.is_absolute()) {
+        tracing::warn!("POCKETDESK_LOCAL_IPS_FILE is not absolute: not used");
+    }
+    let seam = seam.filter(|p| p.is_absolute());
+    let mut settle = pocketdesk_core::tailscale::lan::Settle::default();
     if let Some(file) = &seam {
         tracing::warn!(
             "POCKETDESK_LOCAL_IPS_FILE is set: {} stands in (a test seam)",
@@ -2781,20 +2790,38 @@ async fn follow_addresses(
                 .unwrap_or_default(),
             None => pocketdesk_core::tailscale::lan::get_local_ips().await,
         };
+        let reading = pocketdesk_core::tailscale::lan::announced_addresses(ips);
+        let current = announcement
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|a| a.addresses().to_vec());
+        let Some(current) = current else {
+            continue;
+        };
+        let Some(addresses) = settle.next(&current, reading) else {
+            continue;
+        };
+        let count = addresses.len();
         let held = announcement.clone();
-        let renewed = tokio::task::spawn_blocking(move || {
+        let announced = tokio::task::spawn_blocking(move || {
             let mut slot = held.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(current) = slot.as_mut() else {
-                return Ok(None);
-            };
-            current
-                .renew(ips)
-                .map(|changed| changed.then(|| current.addresses().join(", ")))
+            match slot.as_mut() {
+                Some(current) => current
+                    .announce_at(addresses.clone())
+                    .map(|()| Some(addresses)),
+                None => Ok(None),
+            }
         })
         .await;
-        match renewed {
+        match announced {
+            // The addresses themselves at debug only: the Logs page's Copy
+            // goes into reports (P1 review).
             Ok(Ok(Some(addresses))) => {
-                tracing::info!("This computer's addresses changed: announced again at {addresses}");
+                tracing::info!(
+                    "This computer's addresses changed: announced again at {count} address(es)"
+                );
+                tracing::debug!("Announced at {}", addresses.join(", "));
             }
             Ok(Ok(None)) => {}
             Ok(Err(e)) => tracing::warn!("Could not announce again at the new addresses: {e}"),
