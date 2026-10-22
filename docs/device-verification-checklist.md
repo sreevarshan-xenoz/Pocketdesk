@@ -2562,7 +2562,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
-## 189. Choose the computer's player (O6)
+## 191. Choose the computer's player (O6)
 
 Built 2026-10-22. Checked on the OPPO against a throwaway server with the media seam holding two players:
 - [x] The Sound sheet's card offered "Player" with the computer's choice, Chrome and "Spotify (playing)"; choosing Spotify showed its song, and Next reached it (`next Spotify.exe`).
