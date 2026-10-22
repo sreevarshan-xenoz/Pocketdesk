@@ -49,7 +49,8 @@ object TaskFollow {
         val app = context.applicationContext
         followers.launch {
             while (true) {
-                val (status, _) = latest(id, asks, sinceMs)
+                val (answered, _) = latest(id, asks, sinceMs)
+                val status = TaskRun.followedTooLong(answered, SystemClock.elapsedRealtime() - sinceMs)
                 if (TaskRun.finished(status)) {
                     tellFinished(app, address, task, status)
                     break
