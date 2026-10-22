@@ -2518,6 +2518,21 @@ Built 2026-10-22. Owed:
 - [ ] A share with three links sent to "Open on computer": three open on the computer, and the toast says three.
 - [ ] A phone with under a gigabyte free: one notification, none again until it has had room.
 
+## 183. Linux catch-up: the phone's music in MPRIS, the laser dot, the typing and cast windows (N10)
+
+Built 2026-10-22. Run on a throwaway Azure VM (Ubuntu 24.04, headless Sway with waybar as the tray host, the release workflow's Linux build) with the OPPO (CPH2359) over the internet:
+- [x] The phone's song in the desktop's media controls: `playerctl -l` lists `pocketdesk_phone`, with its title, artist, app and cover (`file://` in the state folder).
+- [x] Pause and Play from `playerctl` reach the phone's player within 2 to 3 s, Paused shown at once and kept.
+- [x] The player leaves the bus within 3 s of the phone's player stopping.
+- [x] The typing window opens from the tray's request (`app_open` page `type`), and `wtype` into it types `Linux typing é` into the fixture's field.
+- [x] "Show screen" opens the phone's window on the VM, live, with its Screenshot, Record and control bars.
+- [x] Remote offers "Laser pointer" there; held, a red dot is drawn at the screen's middle through the layer shell, and gone once let go.
+Owed:
+- [ ] The laser dot moved by turning the phone (the phone lay still), and across two outputs.
+- [ ] GNOME's and KDE's media controls by eye, and the media keys.
+- [ ] A press on the cast window's picture (the VM has no pointer). (where: linux)
+- [ ] Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

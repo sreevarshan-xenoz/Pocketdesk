@@ -41,3 +41,25 @@ A phone cannot reach the VM's windows in a way that is checked by eye, so the ru
 
 - **GNOME and KDE's laser.** They have no layer shell. A dot there would need a fullscreen transparent window per output, which the desktop may not keep above others.
 - **A pointer start.** On Hyprland the dot could start where the pointer is (`j/cursorpos`); left for when a Hyprland box is at hand.
+
+## As built and checked
+
+The VM run is in checklist §183. Found on the way, and fixed with their own commits:
+
+- **The tray program left with no tray host.** With no StatusNotifierWatcher (a bare Sway, GNOME as it comes) it exited, taking the MPRIS player and the window's prompts with it. On Linux it now runs without an icon there.
+- **AccessKit's thread panicked at start in the Linux window.** zbus had its `tokio` feature on: ksni's default since N6's tray, and the server's in the release's one build. AccessKit runs zbus on async-io, so screen readers had no window.
+  - The fix: ksni and the desktop's zbus take async-io, and the release builds the server apart.
+  - CI fails if the desktop's zbus takes `tokio` again.
+
+## Review
+
+A fresh review found 0 Critical, 2 Important and 4 Minor, fixed one commit per layer:
+
+- **The compositor was asked on the server's accept loop**, once per connection (Important). It is now asked by a thread of its own each minute.
+- **A press's play or pause was undone by the next look** (Important). The phone's report is now kept apart from what a press shows, and the press is said at once.
+- **The name was held with nothing playing** (Minor). It is now held only while a song shows.
+- **Covers' URLs were not encoded** (Minor). A space or `#` in the state folder made a URL no shell read.
+- **The configure wait had no end** (Minor). It is now bounded.
+- **A picture was left on the compositor at each move to another output** (Minor). It is now freed.
+
+Left: a bus that goes away is not noticed until the tray program starts again.
