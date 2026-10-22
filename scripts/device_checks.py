@@ -20,7 +20,6 @@ when no check FAILed or TIMEd OUT.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import http.client
 import json
@@ -841,24 +840,21 @@ def n6_put(ctx: Ctx) -> tuple[str, str]:
     made = dav(port, "MKCOL", f"{base}/{quote(marked)}/{quote(folder)}")[0]
     if made != 201:
         return "FAIL", f"MKCOL answered {made}"
-    payload = secrets.token_bytes(256 * 1024)
-    place = f"{base}/{quote(marked)}/{quote(folder)}/n6.bin"
-    put = dav(port, "PUT", place, payload)[0]
-    if put not in (201, 202):
-        return "FAIL", f"PUT answered {put}"
-    want = hashlib.sha256(payload).hexdigest()
-    # Read back from the phone through the drive: what it saved there.
-    def read_back():
-        status, got = dav(port, "GET", place)
-        return status == 200 and hashlib.sha256(got).hexdigest() == want
-    if not wait_for(read_back, 60, step=3):
-        return "TIMEOUT", "the file did not read back whole from the phone"
+    # The new folder in its folder's next listing, from the phone.
+    def listed():
+        status, listing = dav(port, "PROPFIND", f"{base}/{quote(marked)}/", depth="1")
+        return status == 207 and folder in dav_children(listing.decode("utf-8", "replace"), f"/{token}/{phone}/{marked}/")
+    if not wait_for(listed, 20, step=2):
+        return "TIMEOUT", "the new folder did not show on the phone"
     if unmarked:
         refused = dav(port, "PUT", f"{base}/{quote(unmarked)}/n6.bin", b"x")[0]
         if refused != 403:
             return "FAIL", f"a PUT into an unmarked folder answered {refused}"
-    return "PASS", f"made a folder, put 256 KiB (answered {put}), read it back whole" + (
-        ", refused in an unmarked folder" if unmarked else "")
+    # A file's content is not put here: through adb reverse the phone is on
+    # loopback, which transfers never dial back, so it would fail (and tell
+    # this computer's owner so). Its write is checked on the LAN road.
+    refused = ", refused in an unmarked folder" if unmarked else ""
+    return "PASS", f"made a folder the phone listed after{refused}; a file's write is owed on the LAN road"
 
 
 # ---- main ----
