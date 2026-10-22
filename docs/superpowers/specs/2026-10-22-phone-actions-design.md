@@ -39,3 +39,19 @@ Found there and fixed before the commit:
 - **The screen off.** With the screen off but the phone not yet locked, the service said it took the screenshot, and Android logged "Attempted to take screenshot while display was off": no picture. The screen must now be on (`ASLEEP`).
 - **The keyguard.** A phone without a PIN reports `isDeviceLocked` false with the keyguard up, so the lock-screen check now reads `isKeyguardLocked`.
 - **Android's Accessibility page** lists what the service does: the new actions are named there.
+
+## Review
+
+A fresh review found 0 Critical, 2 Important and 4 Minor, fixed in two commits:
+
+- **The switch was not counted among the listener's features** (Important). So:
+  - no link keeper ran for a phone with only this on, and ColorOS froze it with the ask unread;
+  - a stopped listener was never bound again;
+  - a lost Accessibility grant was not flagged.
+- **An ask had no age on the phone** (Important). A frozen app read a screenshot or lock minutes later. Asks over a minute old are now dropped.
+- **Minor:**
+  - a screenshot taken with T10h's clipboard and Downloads both off went nowhere; it now needs one on;
+  - the Devices page named only the service, not notification access;
+  - the notice now says the Files permission carries the picture.
+
+Left: a harness test of the Overview's buttons. The harness has no linked phone, so they are checked by hand (§185).
