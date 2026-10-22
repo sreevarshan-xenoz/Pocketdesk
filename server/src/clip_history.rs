@@ -154,7 +154,7 @@ async fn send(
         // Held as a push is (D5 review): never blank, never past a push's
         // size, which the phone's control line takes.
         let text = now_text.await.filter(|t| !t.trim().is_empty()).ok_or(
-            "nothing to send: the clipboard holds no text, or a private copy or a pairing link",
+            "nothing to send: the clipboard holds no text, or a copy kept here (a private one, a pairing link, or one Settings keep: \"Never send copies from\" or \"… that look like\")",
         )?;
         if text.len() > crate::clipboard_push::MAX_PUSH {
             return Err(format!(
@@ -164,6 +164,14 @@ async fn send(
         }
         text
     } else {
+        // An earlier text sent again is held to Settings' rules as it is
+        // now (O4 review: one kept before a rule existed went out).
+        if crate::plugins::clipboard::held_here(Some(&request.text), None) {
+            return Err(
+                "Settings keep this text on this computer (\"Never send copies that look like\")"
+                    .to_string(),
+            );
+        }
         request.text.clone()
     };
     phone

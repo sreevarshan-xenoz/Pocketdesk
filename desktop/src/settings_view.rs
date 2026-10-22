@@ -491,6 +491,9 @@ pub struct SettingsForm {
     /// The text boxes behind `clipboard_never_from` and `clipboard_never_like` (O4), one a line.
     pub never_from_text: String,
     pub never_like_text: String,
+    /// Each pattern's problem as last checked (O4 review: compiled once a
+    /// text, not on every frame the page is drawn).
+    pattern_checks: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -525,6 +528,7 @@ impl SettingsForm {
             hooks_text: hooks_text(&config.hooks),
             never_from_text: config.clipboard_never_from.join("\n"),
             never_like_text: config.clipboard_never_like.join("\n"),
+            pattern_checks: Default::default(),
             saved: config.clone(),
             running: config.clone(),
             edited: config,
@@ -584,7 +588,13 @@ impl SettingsForm {
         let mut problems = Vec::new();
         // O4: a pattern that does not read would keep nothing back.
         for pattern in &self.edited.clipboard_never_like {
-            if let Some(problem) = pocketdesk_core::local::clip_filter::pattern_problem(pattern) {
+            let problem = self
+                .pattern_checks
+                .borrow_mut()
+                .entry(pattern.clone())
+                .or_insert_with(|| pocketdesk_core::local::clip_filter::pattern_problem(pattern))
+                .clone();
+            if let Some(problem) = problem {
                 problems.push(("clipboard_never_like", problem));
             }
         }
@@ -891,7 +901,7 @@ impl SettingsForm {
                     note(
                         ui,
                         if cfg!(windows) {
-                            "A copy one of these programs makes never leaves this computer, by any road: not to phones, not to computers, not into the history. On top of the private marks a password manager sets, which not every one does."
+                            "A copy one of these programs makes never leaves this computer: not to phones, not to computers, not into the history. On top of the private marks a password manager sets, which not every one does. Windows does not always say which program copied (one that has closed, or one run as another user), and a browser extension's copy is the browser's: the patterns below catch those."
                         } else {
                             "Windows only: a copy names the program that made it there. Here, use the patterns below."
                         },

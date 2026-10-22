@@ -31,7 +31,7 @@ pub const USUAL_PATTERNS: &[&str] = &[
 
 /// Why `pattern` cannot be one, or `None` when it can.
 pub fn pattern_problem(pattern: &str) -> Option<String> {
-    if pattern.len() > MAX_PATTERN {
+    if pattern.chars().count() > MAX_PATTERN {
         return Some(format!("A pattern is at most {MAX_PATTERN} characters."));
     }
     Regex::new(pattern).err().map(|e| {
