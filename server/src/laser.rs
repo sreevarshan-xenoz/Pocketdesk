@@ -126,9 +126,47 @@ fn held_to(wanted: (i32, i32), from: (i32, i32), screens: &[Area]) -> Option<(i3
 /// compositor with the layer shell (N10; GNOME, KDE and X11 have none).
 pub fn available() -> bool {
     #[cfg(target_os = "linux")]
-    return pocketdesk_core::streaming::laser_dot::available();
+    return compositor_draws();
     #[cfg(not(target_os = "linux"))]
     cfg!(windows)
+}
+
+/// How often the compositor is asked again whether it draws the dot.
+#[cfg(target_os = "linux")]
+const ASK_EVERY: Duration = Duration::from_secs(60);
+
+/// The longest the first answer is waited for.
+#[cfg(target_os = "linux")]
+const FIRST_WAIT: Duration = Duration::from_millis(300);
+
+/// The compositor's answer, kept by a thread of its own that asks it each
+/// [`ASK_EVERY`] (N10 review: asked on the accept loop for every
+/// connection, a stalled compositor stopped the server taking any).
+#[cfg(target_os = "linux")]
+fn compositor_draws() -> bool {
+    use std::sync::Once;
+    use std::sync::atomic::{AtomicU8, Ordering};
+    const UNKNOWN: u8 = 0;
+    const YES: u8 = 1;
+    const NO: u8 = 2;
+    static ANSWER: AtomicU8 = AtomicU8::new(UNKNOWN);
+    static ASKER: Once = Once::new();
+    ASKER.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("laser-ask".into())
+            .spawn(|| {
+                loop {
+                    let draws = pocketdesk_core::streaming::laser_dot::available();
+                    ANSWER.store(if draws { YES } else { NO }, Ordering::Relaxed);
+                    std::thread::sleep(ASK_EVERY);
+                }
+            });
+    });
+    let until = Instant::now() + FIRST_WAIT;
+    while ANSWER.load(Ordering::Relaxed) == UNKNOWN && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    ANSWER.load(Ordering::Relaxed) == YES
 }
 
 /// The phone's laser packet: move the dot, or hide it with `show: false`.
