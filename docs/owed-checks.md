@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-883 open items.
+886 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 533 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 534 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
-| Away from home: another network, or through a router | 11 |
-| A second computer | 10 |
+| Away from home: another network, or through a router | 12 |
+| A second computer | 11 |
 | A Linux desktop (the Azure VM serves for some) | 105 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 83 |
@@ -1077,6 +1077,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1).
 
+**186. A paired computer found again at a new address (O3)**
+
+- A card saved by name (`mypc.local`) is left alone.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1464,6 +1468,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
 
+**186. A paired computer found again at a new address (O3)**
+
+- The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
+
 ## A second computer
 
 **29. Computers on this network**
@@ -1502,6 +1510,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **181. Toasts only on the computer in use (N7)**
 
 - Two throwaway servers, both picked on the OPPO (L8), the switch on: a notification while one is in use pops up there only, and the other's Notifications page and Activity have it ("not shown: another computer was in use").
+
+**186. A paired computer found again at a new address (O3)**
+
+- Another computer announcing the first one's id at a new address (its own certificate): no move.
 
 ## A Linux desktop (the Azure VM serves for some)
 

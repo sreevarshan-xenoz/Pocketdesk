@@ -2555,6 +2555,12 @@ Owed:
 - [ ] The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1).
 - [ ] The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
 - [ ] Android 9 to 12, and a phone with a PIN.
+## 186. A paired computer found again at a new address (O3)
+
+Built 2026-10-22. Owed (it moves this computer to a second address, so with the owner):
+- [ ] The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
+- [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
+- [ ] A card saved by name (`mypc.local`) is left alone.
 
 ## Recording results
 
