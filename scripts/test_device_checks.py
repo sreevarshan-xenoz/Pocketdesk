@@ -26,6 +26,12 @@ class PureParts(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertTrue(got[0]["phone_in_use"])
 
+    def test_the_marked_folder(self):
+        prefs = '[{"id": 0, "name": "DCIM"}, {"id": 1, "name": "Docs", "add": true}]'
+        self.assertEqual(dc.marked_folder(prefs), ("Docs", "DCIM"))
+        self.assertEqual(dc.marked_folder('[{"id": 0, "name": "DCIM"}]'), (None, "DCIM"))
+        self.assertEqual(dc.marked_folder("not json"), (None, None))
+
     def test_a_media_session_shown(self):
         dump = (
             "MEDIA SESSION SERVICE (dumpsys media_session)\n"

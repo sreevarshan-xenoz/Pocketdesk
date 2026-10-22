@@ -20,7 +20,9 @@ when no check FAILed or TIMEd OUT.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
+import http.client
 import json
 import os
 import pathlib
@@ -74,6 +76,32 @@ def media_session_shows(dump: str, package: str, title: str) -> bool:
         if f"package={package}" in block and "active=true" in block and title in block:
             return True
     return False
+
+
+def marked_folder(prefs_json: str) -> tuple[Optional[str], Optional[str]]:
+    """The names of a shared folder the phone marked for the computer to add
+    to, and of one it did not (N6), from its `folders` preference."""
+    try:
+        folders = json.loads(prefs_json or "[]")
+    except ValueError:
+        return None, None
+    marked = next((f["name"] for f in folders if f.get("add")), None)
+    unmarked = next((f["name"] for f in folders if not f.get("add")), None)
+    return marked, unmarked
+
+
+def dav(port: int, method: str, path: str, body: bytes = b"", depth: Optional[str] = None) -> tuple[int, bytes]:
+    """A WebDAV request to the drive on loopback, within a minute."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+    try:
+        headers = {"Content-Length": str(len(body))}
+        if depth is not None:
+            headers["Depth"] = depth
+        conn.request(method, path, body=body, headers=headers)
+        response = conn.getresponse()
+        return response.status, response.read()
+    finally:
+        conn.close()
 
 
 def field_text(dump: str, description: str = "fixture-field") -> Optional[str]:
@@ -757,6 +785,48 @@ def n5_media(ctx: Ctx) -> tuple[str, str]:
     gone = wait_for(lambda: not ctx.phone.shows_media(title), 20, step=2)
     return ("PASS", "shown in the phone's media controls, Next reached the computer, gone when it stopped") if gone else (
         "TIMEOUT", "the session stayed after the computer stopped playing")
+
+
+@check("n6-put", "§180")
+def n6_put(ctx: Ctx) -> tuple[str, str]:
+    from urllib.parse import quote
+    drive = ctx.server.root / "state" / "drive.json"
+    if not drive.exists():
+        return "SKIP", "set phone_drive = true in the throwaway server's config.toml"
+    info = json.loads(drive.read_text(encoding="utf-8"))
+    port, token = info["port"], info["token"]
+    folders = ctx.phone.prefs("pocketdesk-phone-folders").get("folders")
+    marked, unmarked = marked_folder(folders if isinstance(folders, str) else "[]")
+    if not marked:
+        return "SKIP", "share a folder on the phone and turn on its \"The computer may add files\""
+    # The phone's folder on the drive: the first one listed.
+    status, top = dav(port, "PROPFIND", f"/{token}/", depth="1")
+    phones = re.findall(rf"<D:href>/{token}/([^<]+)/</D:href>", top.decode("utf-8", "replace"))
+    if status != 207 or not phones:
+        return "FAIL", f"the drive lists no phone ({status})"
+    base = f"/{token}/{phones[0]}"
+    folder = "N6 check " + secrets.token_hex(3)
+    made = dav(port, "MKCOL", f"{base}/{quote(marked)}/{quote(folder)}")[0]
+    if made != 201:
+        return "FAIL", f"MKCOL answered {made}"
+    payload = secrets.token_bytes(256 * 1024)
+    place = f"{base}/{quote(marked)}/{quote(folder)}/n6.bin"
+    put = dav(port, "PUT", place, payload)[0]
+    if put not in (201, 202):
+        return "FAIL", f"PUT answered {put}"
+    want = hashlib.sha256(payload).hexdigest()
+    # Read back from the phone through the drive: what it saved there.
+    def read_back():
+        status, got = dav(port, "GET", place)
+        return status == 200 and hashlib.sha256(got).hexdigest() == want
+    if not wait_for(read_back, 60, step=3):
+        return "TIMEOUT", "the file did not read back whole from the phone"
+    if unmarked:
+        refused = dav(port, "PUT", f"{base}/{quote(unmarked)}/n6.bin", b"x")[0]
+        if refused != 403:
+            return "FAIL", f"a PUT into an unmarked folder answered {refused}"
+    return "PASS", f"made a folder, put 256 KiB (answered {put}), read it back whole" + (
+        ", refused in an unmarked folder" if unmarked else "")
 
 
 # ---- main ----
