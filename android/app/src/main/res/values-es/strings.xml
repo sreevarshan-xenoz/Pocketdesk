@@ -589,6 +589,10 @@
     <string name="phone_folders_remove_named">Quitar %1$s</string>
     <string name="phone_folders_storage">Almacenamiento</string>
     <string name="phone_folders_not_kept">Android no dejó que Pocketdesk conservara el acceso a esa carpeta</string>
+    <string name="phone_folders_add_files">El equipo puede añadir archivos</string>
+    <string name="phone_folders_add_files_summary">Los archivos y carpetas copiados en la unidad del equipo llegan aquí. Nada de aquí se reemplaza, borra ni renombra. Android te pide elegir esta carpeta otra vez</string>
+    <string name="phone_folders_add_files_named">El equipo puede añadir archivos a %1$s</string>
+    <string name="phone_folders_add_same">Elige la misma carpeta para que el equipo pueda añadir archivos</string>
     <string name="screenshots_on">Enviar capturas nuevas</string>
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="recent_photos_on">Fotos recientes en el equipo</string>

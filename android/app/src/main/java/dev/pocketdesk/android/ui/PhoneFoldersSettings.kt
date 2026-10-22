@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -14,6 +15,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.core.net.toUri
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -26,7 +29,8 @@ import dev.pocketdesk.android.files.PhoneFolders
 /**
  * Settings "Folders the computer may open" (T10g): each folder picked with
  * Android's folder picker, with Remove; nothing else on the phone is
- * reachable from the computer.
+ * reachable from the computer. Under each, "The computer may add files"
+ * (N6), which asks the picker again for a write grant to that folder.
  */
 @Composable
 fun PhoneFoldersSection() {
@@ -35,6 +39,18 @@ fun PhoneFoldersSection() {
     val folders = version.let { PhoneFolders.all(context) }
     val storageName = stringResource(R.string.phone_folders_storage)
     val notKept = stringResource(R.string.phone_folders_not_kept)
+    val addSame = stringResource(R.string.phone_folders_add_same)
+    // N6: the folder a write grant is being asked for.
+    var marking by remember { mutableStateOf<PhoneFolders.Folder?>(null) }
+    val markPick =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree: Uri? ->
+            val folder = marking
+            marking = null
+            if (tree != null && folder != null && !PhoneFolders.markAdd(context, folder, tree)) {
+                Toast.makeText(context, addSame, Toast.LENGTH_LONG).show()
+            }
+            version++
+        }
     val pick =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree: Uri? ->
             if (tree != null) {
@@ -68,6 +84,29 @@ fun PhoneFoldersSection() {
                     },
                     modifier = Modifier.semantics { contentDescription = removeLabel },
                 ) { Text(stringResource(R.string.phone_folders_remove)) }
+            },
+        )
+        // N6: one row, one switch, one TalkBack stop.
+        ListItem(
+            headlineContent = { Text(stringResource(R.string.phone_folders_add_files)) },
+            supportingContent = { Text(stringResource(R.string.phone_folders_add_files_summary)) },
+            modifier = Modifier.padding(start = 40.dp),
+            trailingContent = {
+                val label = stringResource(R.string.phone_folders_add_files_named, folder.name)
+                Switch(
+                    checked = folder.add,
+                    onCheckedChange = { on ->
+                        if (on) {
+                            marking = folder
+                            // At the folder itself: the write grant is for it alone.
+                            runCatching { markPick.launch(folder.uri.toUri()) }
+                        } else {
+                            PhoneFolders.unmarkAdd(context, folder)
+                            version++
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = label },
+                )
             },
         )
     }
