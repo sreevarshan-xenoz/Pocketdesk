@@ -2491,9 +2491,9 @@ Built 2026-10-21; checked on the OPPO against a throwaway server whose music com
 
 ## 180. Files into the phone's folders from the computer's drive (N6)
 
-Built 2026-10-22; to be checked on the OPPO against a throwaway server with `phone_drive = true`, by `scripts/device_checks.py` (`n6-put`), with a folder shared and marked by hand. Owed:
-- [ ] The runner's `n6-put` on the OPPO.
-- [ ] Marking a folder on the phone: the picker opens at it, a different folder picked is refused with its message, unmarking gives the write grant back.
+Built 2026-10-22; checked on the OPPO against a throwaway server with `phone_drive = true` (2026-10-22): two folders shared through Settings by adb, one marked (the picker opened at it, after a fix; another folder picked left it unmarked); `scripts/device_checks.py`'s `n6-put` PASS (a folder made through the drive and in the phone's next listing, a PUT into the unmarked folder 403); a PUT's file reached the phone as a fetch, which the computer refused to dial back over `adb reverse` (loopback, as for F3). Owed:
+- [ ] A file's write into the marked folder on the LAN road (or the internet road), its SHA-256 read back through the drive.
+- [ ] Unmarking: the write grant given back.
 - [ ] File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one).
 - [ ] A file larger than the phone's free space: refused, said in Explorer.
 - [ ] A Linux file manager (Nautilus, Dolphin) over `dav://`.

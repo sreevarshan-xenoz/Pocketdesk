@@ -1048,8 +1048,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **180. Files into the phone's folders from the computer's drive (N6)**
 
-- The runner's `n6-put` on the OPPO.
-- Marking a folder on the phone: the picker opens at it, a different folder picked is refused with its message, unmarking gives the write grant back.
+- A file's write into the marked folder on the LAN road (or the internet road), its SHA-256 read back through the drive.
+- Unmarking: the write grant given back.
 - File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one).
 - A file larger than the phone's free space: refused, said in Explorer.
 - Desktop Settings "The phone's folders take files" off: the drive read-only again.

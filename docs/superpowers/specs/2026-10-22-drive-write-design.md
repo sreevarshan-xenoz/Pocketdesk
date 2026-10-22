@@ -51,3 +51,31 @@ Plan: `docs/research/2026-10-21-n-cycle.md`, N6.
 - **Bridge:** the new requests kept within bounds.
 - **Phone:** `AddRule` on the JVM.
 - **On the OPPO, by the runner (`n6-put`),** with a folder shared and marked by hand once (the runner never changes the phone's settings, and Android's picker is the only way to a grant): curl's MKCOL and PUT through the drive, the file read back by the drive's GET with its SHA-256 matching, and a PUT into an unmarked folder refused.
+
+## As built
+
+- **As designed, with the review's fixes.**
+  - A copy is taken into a folder of its own under `drive_uploads/`, under its own name, so the Files page's "Under way" names it; it is in the sent list as "the phone's drive: <folder>/<name>".
+  - An empty file held for its content is out of the two minutes' sweep while its content comes, back if it never comes whole; a `LOCK` or `PROPPATCH` on it holds it longer. At most 64 are held.
+  - A copy's body has 30 s for each piece and a minute plus a second per 32 KiB in all.
+  - An offer being fetched stays while bytes go (each minute), for every offer: a long fetch is no longer swept as expired under the phone.
+  - A refusal no client waited for (Explorer gave up first) is said in a desktop notification, as one after a 202 is.
+  - The phone declines a copy it has no room for with `NO_ROOM` and a name taken in other case with `EXISTS`, word for word in every language; a core test holds the phone's words to core's.
+  - A folder that is both shared and where files from computers go (C2) keeps the grants each setting uses.
+- **The run on the OPPO** (2026-10-22): two folders shared and one marked through Settings by adb; `n6-put` PASS: a folder made through the drive appeared on the phone and in its next listing, and a PUT into the unmarked folder was 403. A PUT's file reached the phone as a fetch, which the computer refused to dial back over `adb reverse` (loopback, by design, as F3 found), so the write itself is owed on the LAN road. Found there and fixed: the picker opened at the last folder used, not the one being marked (it takes a folder's document, not its tree).
+- **Seen:** a test's client socket stayed open after it was dropped while another test's hook ran `cmd.exe`; a child process on Windows can hold a copy of a socket. The tests now close by FIN.
+- **Limits found on the way:** File Explorer cannot rename, delete or move on the drive, so its "New folder" keeps that name; a marked folder on another volume is checked against the phone's own storage only; a file that arrives after a 202 shows at the folder's next look, within 30 s.
+
+## Review
+
+A fresh review found 0 Critical, 5 Important and 12 Minor. Fixed:
+
+- **Important:**
+  - an empty file sent as it was while its content was still arriving;
+  - a folder's grants taken from under the download folder (C2), and the reverse;
+  - an offer swept as expired while its phone fetched it;
+  - uploads named by their random id on the Files page, and missing from the sent list;
+  - a refusal unsaid when the client had left.
+- **Minor:** the no-room word in other languages, a name taken in other case, missing reason phrases, a body with no deadline in all, empty files held without bound, the Kotlin and core words untied, the runner's phone and folder names, and the docs (Explorer's limits, the owed checks).
+- **Left as they are:** a refused copy may reach Explorer as a reset (the body is not drained), a put racing a folder's removal makes the folder again, and the bridge keeps 20 requests (a burst of listings could push out a copy, which then times out).
+
