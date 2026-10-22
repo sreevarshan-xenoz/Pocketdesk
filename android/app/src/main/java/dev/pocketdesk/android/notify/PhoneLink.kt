@@ -115,7 +115,8 @@ object PhoneLink {
         AlsoTo.ANSWERS.forEach { copy.remove(it) }
         synchronized(copiedIds) { copiedIds[body.optString("id")] = Unit }
         // N7: one to a computer not in use, while another is, says so.
-        val on = Prefs.toastWhereWorking(ctx)
+        // A ringing call rings everywhere, as M6 never holds one.
+        val on = Prefs.toastWhereWorking(ctx) && !CallRule.isCall(body.optString("id"))
         val elsewhere = { host: HostStore.Host ->
             on && ToastWhere.marks(ToastWhere.key(host.address, host.controlPort), RustCore.inUseAnswers(), true)
         }
