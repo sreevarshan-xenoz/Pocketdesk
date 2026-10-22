@@ -2534,6 +2534,18 @@ Owed:
 - [ ] A press on the cast window's picture (the VM has no pointer). (where: linux)
 - [ ] Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
 
+## 184. Automation apps start the computer's tasks and press its deck (O1)
+
+Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, by `adb shell am broadcast`:
+- [x] From a cold app, `RUN_TASK` ran the task within a second; `TASK_FINISHED` told done, code 0.
+- [x] `PRESS_DECK` ran a task-kind button; `DECK_PRESSED` told done.
+- [x] Refusals told: no such task or button (`unknown`), an unsaved address (`not_saved`), an empty name (`bad_name`), the 11th in a minute (`too_many`), another computer than the phone's own with no link (`not_linked`).
+- [x] With the switch off, nothing ran and nothing was told.
+Owed:
+- [ ] Tasker itself: a Send Intent to the receiver, and Intent Received for the events.
+- [ ] A task that asks first, allowed at the desk.
+- [ ] Over the internet road, cold.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

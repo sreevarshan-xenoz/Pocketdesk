@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-877 open items.
+880 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 530 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 532 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 10 |
 | A Linux desktop (the Azure VM serves for some) | 105 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 29 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 81 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 82 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1067,6 +1067,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - "Type on the phone with a key": registered, a press opening the window; another app holding it said in Settings.
 - A share with three links sent to "Open on computer": three open on the computer, and the toast says three.
 - A phone with under a gigabyte free: one notification, none again until it has had room.
+
+**184. Automation apps start the computer's tasks and press its deck (O1)**
+
+- A task that asks first, allowed at the desk.
+- Over the internet road, cold.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2197,3 +2202,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
 
 - The tray's "Type on the phone" for a linked phone: the typing window opens (both trays).
+
+**184. Automation apps start the computer's tasks and press its deck (O1)**
+
+- Tasker itself: a Send Intent to the receiver, and Intent Received for the events.
