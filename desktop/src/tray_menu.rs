@@ -21,6 +21,8 @@ pub enum TrayAction {
     SendFile(String),
     /// G2: the phone offers its camera; the photo lands here (F3).
     TakePhoto(String),
+    /// N9: open the window that types on this phone (M4).
+    Type(String),
     /// K2a: pause for these minutes, or until resumed with `None`.
     Pause(Option<u32>),
     /// K2a: end the pause.
@@ -222,6 +224,17 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                     item(
                         "Take a photo",
                         row.file.is_ok().then(|| TrayAction::TakePhoto(id())),
+                    ),
+                    // N9: M4's typing window, for a linked phone this
+                    // computer may control; the window says what else it needs.
+                    item(
+                        "Type on the phone",
+                        (row.device.linked
+                            && row
+                                .device
+                                .permissions
+                                .allows(pocketdesk_core::protocol::permissions::Capability::Cast))
+                        .then(|| TrayAction::Type(id())),
                     ),
                 ])
                 .collect(),
@@ -466,6 +479,10 @@ mod tests {
                 Entry::Item {
                     label: "Take a photo".to_string(),
                     action: Some(TrayAction::TakePhoto("ready".to_string()))
+                },
+                Entry::Item {
+                    label: "Type on the phone".to_string(),
+                    action: Some(TrayAction::Type("ready".to_string()))
                 },
             ]
         );

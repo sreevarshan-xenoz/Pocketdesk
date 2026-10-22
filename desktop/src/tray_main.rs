@@ -266,6 +266,10 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
         TrayAction::Open => open_window(state_dir, "overview", None),
         TrayAction::Pair => open_window(state_dir, "pair", None),
         TrayAction::SendFile(id) => open_window(state_dir, "files", Some(id)),
+        // N9: the window opens its typing window for the phone.
+        TrayAction::Type(id) => {
+            open_window(state_dir, pocketdesk_core::local::app_open::TYPE, Some(id))
+        }
         TrayAction::TakePhoto(id) => pocketdesk_core::local::phone_photos::request(
             state_dir,
             id,

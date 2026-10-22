@@ -35,6 +35,10 @@ impl OpenRequest {
     }
 }
 
+/// The page asked for to open the typing window on a phone (N9; M4's
+/// window, not a page of its own).
+pub const TYPE: &str = "type";
+
 /// Ask the window to open `page` (for `phone`).
 pub fn request(state_dir: &Path, page: &str, phone: Option<&str>, now_unix: u64) -> io::Result<()> {
     let request = OpenRequest {

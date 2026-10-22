@@ -616,6 +616,10 @@ impl PocketdeskApp {
                     self.take_photo(&id);
                     false
                 }
+                TrayAction::Type(id) => {
+                    self.type_on(&id);
+                    true
+                }
                 TrayAction::Pause(minutes) => {
                     self.pause(minutes);
                     false
@@ -655,7 +659,12 @@ impl PocketdeskApp {
             }
             return;
         }
-        if let Some(tab) = Tab::from_key(&open.page) {
+        // N9: the typing window, from the tray program or its key.
+        if open.page == pocketdesk_core::local::app_open::TYPE {
+            if let Some(id) = &open.phone {
+                self.type_on(id);
+            }
+        } else if let Some(tab) = Tab::from_key(&open.page) {
             if tab == Tab::Files && open.phone.is_some() {
                 self.send_to = open.phone;
             }
@@ -664,6 +673,12 @@ impl PocketdeskApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// Open the typing window on phone `id` (M4), by its name as shown.
+    fn type_on(&mut self, id: &str) {
+        let name = crate::model::device_label(&self.snapshot.devices, id);
+        self.type_view.open(&self.state_dir, id, &name);
     }
 
     /// The tray's menu for the phones as last read (D5); rebuilt by the
