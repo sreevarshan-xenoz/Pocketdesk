@@ -2562,7 +2562,7 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
-## 191. Find a setting on the phone (O8)
+## 189. Find a setting on the phone (O8)
 
 Built 2026-10-22. Checked on the OPPO:
 - [x] "ring" showed the Ring and ringer rows under their groups' headings, and no other heading (it had found "during" before the review).
