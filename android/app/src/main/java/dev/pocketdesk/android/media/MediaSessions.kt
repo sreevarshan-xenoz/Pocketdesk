@@ -22,15 +22,23 @@ internal const val PHONE_MEDIA = "kdeconnect.pocketdesk.phone_media"
  * is open (T8d), and the listener's in the background (N2).
  */
 internal object MediaSessions {
-    /** The active media sessions, most recent first; none without notification access. */
+    /**
+     * The active media sessions, most recent first, never this app's own
+     * (N5: the computer's music shown here must not go back to it as the
+     * phone's); none without notification access.
+     */
     fun controllers(context: Context): List<MediaController> {
         val manager = context.getSystemService(MediaSessionManager::class.java) ?: return emptyList()
         return try {
-            manager.getActiveSessions(ComponentName(context, PhoneNotificationListener::class.java))
+            others(context, manager.getActiveSessions(ComponentName(context, PhoneNotificationListener::class.java)))
         } catch (e: SecurityException) {
             emptyList()
         }
     }
+
+    /** [controllers] without this app's own sessions (N5). */
+    fun others(context: Context, controllers: List<MediaController>): List<MediaController> =
+        controllers.filter { it.packageName != context.packageName }
 
     /** Apps' names by package, looked up once (a report asks for each session's). */
     private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()

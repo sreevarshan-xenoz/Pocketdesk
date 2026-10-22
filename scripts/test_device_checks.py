@@ -26,6 +26,23 @@ class PureParts(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertTrue(got[0]["phone_in_use"])
 
+    def test_a_media_session_shown(self):
+        dump = (
+            "MEDIA SESSION SERVICE (dumpsys media_session)\n"
+            "  Sessions Stack - have 2 sessions:\n"
+            "    Pocketdesk computer dev.pocketdesk.android/Pocketdesk computer (userId=0)\n"
+            "      package=dev.pocketdesk.android\n"
+            "      active=true\n"
+            "      metadata: size=3, description=N5 check 1, N5 artist, N5 player\n"
+            "    Player dev.pocketdesk.fixture/Player (userId=0)\n"
+            "      package=dev.pocketdesk.fixture\n"
+            "      active=true\n"
+            "      metadata: size=2, description=Other song, Artist\n"
+        )
+        self.assertTrue(dc.media_session_shows(dump, "dev.pocketdesk.android", "N5 check 1"))
+        self.assertFalse(dc.media_session_shows(dump, "dev.pocketdesk.android", "Other song"))
+        self.assertFalse(dc.media_session_shows(dump.replace("active=true", "active=false", 1), "dev.pocketdesk.android", "N5 check 1"))
+
     def test_the_fixture_field_s_text(self):
         dump = (
             '<hierarchy><node index="0" text="other" content-desc="" />'

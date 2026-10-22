@@ -2479,6 +2479,16 @@ Built 2026-10-21; checked on the OPPO against a throwaway server, by `scripts/de
 - [ ] A Linux desktop (the `value` hint, the bar, a close).
 - [ ] The battery with a long download.
 
+## 179. The computer's music in the phone's media controls (N5)
+
+Built 2026-10-21; checked on the OPPO against a throwaway server whose music comes from a file (`POCKETDESK_MEDIA_FILE`), by `scripts/device_checks.py` (`n5-media`): the song in Pocketdesk's media session, not sent back as the phone's music with N2 on, a media key's Next reaching the file's presses, the session gone when nothing plays; `n2-media` passing beside it. Owed:
+- [ ] The lock screen and the shade's media controls by eye: title, artist, cover, and Previous, Play/Pause, Next as the computer's player offers them.
+- [ ] A real player on this computer (Spotify, a browser), with the owner: a press from the phone plays, pauses and skips it; never Pocketdesk's own entry (the phone's music) sent back.
+- [ ] A headset's button and a watch's controls.
+- [ ] The link dropped: the session gone within 150 s; back by itself when the link returns.
+- [ ] Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
+- [ ] A Linux computer (`playerctl`, `mpris:artUrl`).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

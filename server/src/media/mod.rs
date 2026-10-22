@@ -13,12 +13,93 @@ use serde_json::{Value, json};
 #[cfg(not(windows))]
 mod playerctl;
 #[cfg(not(windows))]
-pub use playerctl::{command, now_playing};
+use playerctl as platform;
 
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{command, now_playing};
+use windows as platform;
+
+/// A test seam (N5): with `POCKETDESK_MEDIA_FILE` set, what plays is read
+/// from that JSON file (`{title, artist, app, isPlaying, art}`, `art` a
+/// picture's path) and presses are written beside it (`<file>.presses`, a
+/// line each), so a device check never touches this computer's players.
+fn seam() -> Option<std::path::PathBuf> {
+    // Absolute only, as the other seams (N5 review).
+    std::env::var_os("POCKETDESK_MEDIA_FILE")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+}
+
+fn seam_value(file: &std::path::Path) -> Option<Value> {
+    serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
+}
+
+/// What is playing now, or `None` when nothing is.
+pub fn now_playing() -> Result<Option<NowPlaying>, String> {
+    let Some(file) = seam() else {
+        return platform::now_playing();
+    };
+    Ok(seam_value(&file).map(|v| {
+        let text = |key: &str| {
+            v.get(key)
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string()
+        };
+        NowPlaying {
+            title: text("title"),
+            artist: text("artist"),
+            app: text("app"),
+            is_playing: v
+                .get("isPlaying")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false),
+            can_play_pause: true,
+            can_next: true,
+            can_previous: true,
+        }
+    }))
+}
+
+/// Ask the player to play or pause, or skip.
+pub fn command(command: Command) -> Result<(), String> {
+    let Some(file) = seam() else {
+        return platform::command(command);
+    };
+    use std::io::Write;
+    let name = match command {
+        Command::PlayPause => "playPause",
+        Command::Next => "next",
+        Command::Previous => "previous",
+    };
+    let mut presses = file.as_os_str().to_owned();
+    presses.push(".presses");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(std::path::PathBuf::from(presses))
+        .and_then(|mut f| writeln!(f, "{name}"))
+        .map_err(|e| e.to_string())
+}
+
+/// The largest cover sent, in bytes.
+pub const MAX_COVER: usize = 256 << 10;
+
+/// The playing track's cover, if it has one: a JPEG or a PNG by its header,
+/// at most [`MAX_COVER`] (N5).
+pub fn cover() -> Option<Vec<u8>> {
+    let bytes = match seam() {
+        Some(file) => {
+            let path = seam_value(&file)?.get("art")?.as_str()?.to_string();
+            std::fs::read(path).ok()?
+        }
+        None => platform::cover()?,
+    };
+    let picture =
+        bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || bytes.starts_with(&[0x89, b'P', b'N', b'G']);
+    (picture && bytes.len() <= MAX_COVER).then_some(bytes)
+}
 
 /// The longest a player is waited for: the phone's control connection waits
 /// on the answer, so a player that hangs must not hold it.

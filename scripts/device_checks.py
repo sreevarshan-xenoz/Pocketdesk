@@ -66,6 +66,16 @@ def events_after(lines: list[str], after_unix: int, kind: str) -> list[dict]:
     return out
 
 
+def media_session_shows(dump: str, package: str, title: str) -> bool:
+    """Whether `dumpsys media_session` lists an active session of `package`
+    whose metadata names `title` (N5)."""
+    # Each session starts on a line indented four spaces; its details six.
+    for block in re.split(r"\n {4}(?=\S)", dump)[1:]:
+        if f"package={package}" in block and "active=true" in block and title in block:
+            return True
+    return False
+
+
 def field_text(dump: str, description: str = "fixture-field") -> Optional[str]:
     """The text of the view `uiautomator dump` names `description`."""
     for node in re.findall(r"<node [^>]*>", dump):
@@ -267,6 +277,10 @@ class Phone:
     def logcat(self, tag: str) -> str:
         return adb("logcat", "-d", "-s", f"{tag}:*")
 
+    def shows_media(self, title: str) -> bool:
+        """Pocketdesk's own media session shows `title` (N5)."""
+        return media_session_shows(adb("shell", "dumpsys", "media_session"), APP, title)
+
 
 @dataclass
 class Server:
@@ -280,6 +294,8 @@ class Server:
             "POCKETDESK_STATE_DIR": str(self.root / "state"),
             "POCKETDESK_CONFIG_DIR": str(self.root / "config"),
             "POCKETDESK_CLIPBOARD_FILE": str(self.root / "clip.txt"),
+            # N5: what plays here, read from a file, so this box's players are untouched.
+            "POCKETDESK_MEDIA_FILE": str(self.root / "computer_media.json"),
         }
 
     def running(self) -> bool:
@@ -351,6 +367,21 @@ class Server:
     def clipboard(self) -> str:
         path = self.root / "clip.txt"
         return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def plays(self, title: Optional[str], playing: bool = True) -> None:
+        """What this computer plays, as the seam reads it (N5); None: nothing."""
+        path = self.root / "computer_media.json"
+        if title is None:
+            path.unlink(missing_ok=True)
+            return
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"title": title, "artist": "N5 artist", "app": "N5 player", "isPlaying": playing}), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def computer_presses(self) -> list[str]:
+        """The presses the seam took (N5), oldest first."""
+        path = self.root / "computer_media.json.presses"
+        return path.read_text(encoding="utf-8").split() if path.exists() else []
 
     def media(self, device: str) -> Optional[dict]:
         """`device`'s player as the server keeps it (N2), with its cover's file."""
@@ -697,6 +728,35 @@ def n4_live(ctx: Ctx) -> tuple[str, str]:
     gone = wait_for(lambda: ctx.server.card(ctx.device, title) is None, 20)
     return ("PASS", "the held-back 52 % came, then 100 %, and the card went with its end") if gone else (
         "TIMEOUT", "the card stayed after its end")
+
+
+@check("n5-media", "§179")
+def n5_media(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("computer_media_controls"):
+        return "SKIP", "turn on Computer's music in my media controls in the phone's Settings"
+    title = "N5 check " + secrets.token_hex(3)
+    try:
+        ctx.server.plays(title)
+        if not wait_for(lambda: ctx.phone.shows_media(title), 30, step=2):
+            return "TIMEOUT", "the computer's song never showed in the phone's media session"
+        # Never sent back as the phone's own music (N2's reporter is on here).
+        time.sleep(4)
+        echo = ctx.server.media(ctx.device)
+        if echo and echo["media"].get("title") == title:
+            return "FAIL", "the computer's song came back as the phone's music"
+        # A media key goes to the session playing: the computer's, here.
+        before = len(ctx.server.computer_presses())
+        adb("shell", "cmd", "media_session", "dispatch", "next")
+        pressed = wait_for(lambda: ctx.server.computer_presses()[before:], 15)
+        if not pressed:
+            return "FAIL", "shown, but a media key did not reach the computer (another player may hold the keys)"
+        if pressed[0] != "next":
+            return "FAIL", f"shown, but the press came as {pressed[0]!r}"
+    finally:
+        ctx.server.plays(None)
+    gone = wait_for(lambda: not ctx.phone.shows_media(title), 20, step=2)
+    return ("PASS", "shown in the phone's media controls, Next reached the computer, gone when it stopped") if gone else (
+        "TIMEOUT", "the session stayed after the computer stopped playing")
 
 
 # ---- main ----

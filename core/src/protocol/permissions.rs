@@ -139,7 +139,10 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | crate::protocol::phone_photos::PHOTOS
         | crate::protocol::phone_photos::FETCH
         | crate::protocol::phone_photos::TAKE => Capability::Files,
-        "kdeconnect.pocketdesk.audio" => Capability::Audio,
+        "kdeconnect.pocketdesk.audio"
+        // The computer's music in the phone's media controls (N5).
+        | crate::protocol::computer_media::WATCH
+        | crate::protocol::computer_media::PUSH => Capability::Audio,
         // Waking another machine through this one is a power action too.
         "kdeconnect.pocketdesk.power"
         | "kdeconnect.pocketdesk.privacy"

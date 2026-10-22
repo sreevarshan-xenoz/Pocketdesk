@@ -48,6 +48,44 @@ pub fn now_playing() -> Result<Option<NowPlaying>, String> {
     Ok(parse_playerctl(&String::from_utf8_lossy(&output.stdout)))
 }
 
+/// The track's cover, where the player names a local file (`mpris:artUrl`).
+pub fn cover() -> Option<Vec<u8>> {
+    let output = playerctl(&["metadata", "mpris:artUrl"]).ok()?;
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = url.strip_prefix("file://")?;
+    // Its percent-escapes, as a file URI has them.
+    let mut bytes = Vec::with_capacity(path.len());
+    let raw = path.as_bytes();
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == b'%'
+            && let Some(hex) = path.get(i + 1..i + 3)
+            && let Ok(b) = u8::from_str_radix(hex, 16)
+        {
+            bytes.push(b);
+            i += 3;
+        } else {
+            bytes.push(raw[i]);
+            i += 1;
+        }
+    }
+    let path = String::from_utf8(bytes).ok()?;
+    // A player names the file: only a plain file is read, and never past
+    // the limit (N5 review: a FIFO or a device would hang the watcher).
+    let meta = std::fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > super::MAX_COVER as u64 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    use std::io::Read;
+    std::fs::File::open(path)
+        .ok()?
+        .take(super::MAX_COVER as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= super::MAX_COVER).then_some(bytes)
+}
+
 /// Ask the current player to play or pause, or skip.
 pub fn command(command: Command) -> Result<(), String> {
     let verb = match command {

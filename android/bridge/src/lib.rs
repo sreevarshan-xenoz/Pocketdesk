@@ -10,6 +10,7 @@ mod cancel;
 mod cast;
 mod clipboard_push;
 mod commands;
+mod computer_media;
 mod deck;
 mod dials;
 mod download;
@@ -1581,6 +1582,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeQui
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(quiet_requests::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's music as it last pushed it (N5), taken: `{"ok": ""}`
+/// when none came since.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeComputerMedia(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(computer_media::take_json()));
     to_jstring(&mut env, json)
 }
 

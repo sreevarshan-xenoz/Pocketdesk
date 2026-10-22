@@ -2,6 +2,7 @@ pub mod allowed;
 pub mod audio_control;
 pub mod battery;
 pub mod clipboard;
+pub mod computer_media;
 pub mod deck;
 pub mod exec;
 pub mod file_browse;
@@ -76,6 +77,7 @@ pub fn register_all() -> PluginSet {
     registry.register(typing::TypingPlugin);
     registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
+    registry.register(computer_media::ComputerMediaPlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
     registry.register(crate::quiet_phone::PhoneQuietPlugin);

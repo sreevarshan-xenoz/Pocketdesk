@@ -1,6 +1,7 @@
 pub mod backoff;
 pub mod clipboard;
 pub mod command;
+pub mod computer_media;
 pub mod connection;
 pub mod conversation;
 pub mod dial;

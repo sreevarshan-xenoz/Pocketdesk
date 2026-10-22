@@ -155,6 +155,7 @@ private fun featureName(feature: String): Int = when (feature) {
     "ring" -> R.string.settings_ring_from_computer
     "media" -> R.string.settings_phone_media
     "media_background" -> R.string.settings_phone_media_background
+    "computer_media" -> R.string.settings_computer_media_controls
     "mute" -> R.string.settings_let_computer_mute
     "control" -> R.string.settings_control_from_computer
     "dial" -> R.string.settings_calls_from_computer

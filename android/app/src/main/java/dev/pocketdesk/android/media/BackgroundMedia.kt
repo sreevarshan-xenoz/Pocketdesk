@@ -118,7 +118,7 @@ class BackgroundMedia(private val app: Context) {
         lateinit var onChange: MediaSessionManager.OnActiveSessionsChangedListener
         onChange = MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
             // One queued before an unregister is let go (N2 review).
-            if (listener === onChange) watch(controllers.orEmpty())
+            if (listener === onChange) watch(MediaSessions.others(app, controllers.orEmpty()))
         }
         try {
             manager.addOnActiveSessionsChangedListener(onChange, component, main)
@@ -136,7 +136,7 @@ class BackgroundMedia(private val app: Context) {
             return
         }
         active = true
-        watch(controllers)
+        watch(MediaSessions.others(app, controllers))
     }
 
     private fun unregister() {

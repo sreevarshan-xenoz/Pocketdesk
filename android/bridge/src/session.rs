@@ -442,6 +442,7 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_OPEN
+        || packet_type == pocketdesk_core::protocol::computer_media::PUSH
         || packet_type == pocketdesk_core::protocol::phone_files::LIST
         || packet_type == pocketdesk_core::protocol::phone_files::FETCH
         || packet_type == pocketdesk_core::protocol::phone_photos::LIST
