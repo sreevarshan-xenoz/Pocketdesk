@@ -193,7 +193,7 @@ impl Phones for StandIn {
             .unwrap()
             .push((folder.to_vec(), name.to_string(), bytes));
         if name == "late-refused.txt" {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
         Ok(match name {
             "refused.txt" | "late-refused.txt" => Put::Refused("not allowed".to_string()),
@@ -808,10 +808,18 @@ async fn a_refusal_no_one_waits_for_is_told() {
         "PUT /{TOKEN}/Pixel/Docs/late-refused.txt HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\nhi"
     );
     stream.write_all(head.as_bytes()).await.unwrap();
-    // Gone once the body is in, before the phone answers.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Gone once the phone has it, before it answers (it takes 2 s).
+    for _ in 0..250 {
+        if !phone.given.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Closed by its FIN: a child process another test starts may hold a
+    // copy of the socket, so dropping it alone may close nothing.
+    let _ = stream.shutdown().await;
     drop(stream);
-    for _ in 0..100 {
+    for _ in 0..250 {
         if !phone.told.lock().unwrap().is_empty() {
             break;
         }
@@ -819,7 +827,9 @@ async fn a_refusal_no_one_waits_for_is_told() {
     }
     assert_eq!(
         phone.told.lock().unwrap().first(),
-        Some(&("late-refused.txt".to_string(), "not allowed".to_string()))
+        Some(&("late-refused.txt".to_string(), "not allowed".to_string())),
+        "given {}",
+        phone.given.lock().unwrap().len()
     );
     stop.cancel();
 }
@@ -836,10 +846,17 @@ async fn an_empty_file_outlives_content_that_never_came() {
         "PUT {docs}x.txt HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\nonly ten b"
     );
     stream.write_all(head.as_bytes()).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let _ = stream.shutdown().await;
     drop(stream);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let listed = ask(addr, "PROPFIND", &docs, "Depth: 1\r\n").await;
+    // Held again once the server sees the copy end short.
+    let mut listed = String::new();
+    for _ in 0..250 {
+        listed = ask(addr, "PROPFIND", &docs, "Depth: 1\r\n").await;
+        if listed.contains("x.txt") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(listed.contains("x.txt"), "{listed}");
     assert!(phone.given.lock().unwrap().is_empty());
     stop.cancel();
