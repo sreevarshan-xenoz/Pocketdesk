@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import dev.pocketdesk.android.HostStore
+import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import org.json.JSONObject
 import java.util.concurrent.ArrayBlockingQueue
@@ -113,8 +114,14 @@ object PhoneLink {
         val copy = JSONObject(body.toString())
         AlsoTo.ANSWERS.forEach { copy.remove(it) }
         synchronized(copiedIds) { copiedIds[body.optString("id")] = Unit }
+        // N7: one to a computer not in use, while another is, says so.
+        // A ringing call rings everywhere, as M6 never holds one.
+        val on = Prefs.toastWhereWorking(ctx) && !CallRule.isCall(body.optString("id"))
+        val elsewhere = { host: HostStore.Host ->
+            on && ToastWhere.marks(ToastWhere.key(host.address, host.controlPort), RustCore.inUseAnswers(), true)
+        }
         // L8 part 2: a computer linked may answer, so its copy keeps them.
-        sendCopies(targets, linked = body.toString(), oneOff = copy.toString())
+        sendCopies(targets, linked = body.toString(), oneOff = copy.toString(), elsewhere = elsewhere)
     }
 
     /** Copy the cancel of notification [id], if a copy of it went (L8 review: whatever the own computer saw). */
@@ -155,9 +162,21 @@ object PhoneLink {
      * [oneOff] the way the own computer's notifications go (C3's acked
      * send; a plain phone packet refuses notifications, cancels included).
      */
-    private fun sendCopies(targets: List<HostStore.Host>, linked: String, oneOff: String) {
+    private fun sendCopies(
+        targets: List<HostStore.Host>,
+        linked: String,
+        oneOff: String,
+        elsewhere: (HostStore.Host) -> Boolean = { false },
+    ) {
         targets.forEach { host ->
             others.execute {
+                // N7: decided as it goes, by what each computer said lately.
+                val marked = elsewhere(host)
+                val mark = { json: String ->
+                    if (marked) JSONObject(json).put(ToastWhere.ELSEWHERE, true).toString() else json
+                }
+                val linked = mark(linked)
+                val oneOff = mark(oneOff)
                 if ((host.address to host.controlPort) in linkedOthers &&
                     RustCore.sendOnExtra(host.address, host.controlPort, "kdeconnect.notification", linked).isSuccess
                 ) {

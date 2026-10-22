@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-864 open items.
+869 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 524 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 527 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 11 |
-| A second computer | 9 |
-| A Linux desktop (the Azure VM serves for some) | 100 |
+| A second computer | 10 |
+| A Linux desktop (the Azure VM serves for some) | 101 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 29 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 80 |
 
@@ -1056,6 +1056,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Explorer's rename, delete and "New folder" (MOVE and DELETE are refused): what Explorer says.
 - A folder that is also where files from computers go: unmarking it leaves downloads there working.
 
+**181. Toasts only on the computer in use (N7)**
+
+- Neither in use: both pop up. One's server stopped: the other pops up within 30 s of its last answer.
+- "Tell phones when this computer is in use" off on one: it always pops up.
+- The battery with the links kept, by N7's background-cost script.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1478,6 +1484,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A toast closed on the second computer is cleared on the phone.
 - The second computer's Overview does not show the phone as linked by that link, and its Send file says it cannot reach the phone.
 
+**181. Toasts only on the computer in use (N7)**
+
+- Two throwaway servers, both picked on the OPPO (L8), the switch on: a notification while one is in use pops up there only, and the other's Notifications page and Activity have it ("not shown: another computer was in use").
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **0. Prerequisites**
@@ -1810,6 +1820,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **180. Files into the phone's folders from the computer's drive (N6)**
 
 - A Linux file manager (Nautilus, Dolphin) over `dav://`.
+
+**181. Toasts only on the computer in use (N7)**
+
+- A Linux computer: it does not say, and always pops up.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

@@ -2502,6 +2502,15 @@ Built 2026-10-22; checked on the OPPO against a throwaway server with `phone_dri
 - [ ] A folder that is also where files from computers go: unmarking it leaves downloads there working.
 - [ ] A marked folder on an SD card with too little room: the phone checks only its own storage, so the copy fails part way and says so.
 
+## 181. Toasts only on the computer in use (N7)
+
+Built 2026-10-22. Owed:
+- [ ] Two throwaway servers, both picked on the OPPO (L8), the switch on: a notification while one is in use pops up there only, and the other's Notifications page and Activity have it ("not shown: another computer was in use").
+- [ ] Neither in use: both pop up. One's server stopped: the other pops up within 30 s of its last answer.
+- [ ] "Tell phones when this computer is in use" off on one: it always pops up.
+- [ ] The battery with the links kept, by N7's background-cost script.
+- [ ] A Linux computer: it does not say, and always pops up.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

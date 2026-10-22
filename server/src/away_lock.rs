@@ -86,7 +86,7 @@ impl AwayLock {
 
 /// How long the keyboard and mouse have been quiet, when the system says.
 #[cfg(windows)]
-fn idle_secs() -> Option<u64> {
+pub(crate) fn idle_secs() -> Option<u64> {
     use windows::Win32::System::SystemInformation::GetTickCount;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
     let mut info = LASTINPUTINFO {
@@ -111,7 +111,7 @@ fn quiet_ms(now: u32, last_input: u32) -> u64 {
 }
 
 #[cfg(not(windows))]
-fn idle_secs() -> Option<u64> {
+pub(crate) fn idle_secs() -> Option<u64> {
     None
 }
 

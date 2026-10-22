@@ -1,7 +1,8 @@
 //! Links to the phone's other computers (L8 part 2): besides the control
 //! link to its own computer, one link to each other computer its owner
 //! picked, on the home road. A copy of a notification goes on it, and the
-//! answers and clears that computer sends back come in on it, kept with the
+//! answers and clears that computer sends back come in on it (and whether
+//! it is in use, N7), kept with the
 //! computer they came from, as the own link's are. Nothing else on such a
 //! link is taken: the phone works with its own computer only.
 
@@ -21,11 +22,12 @@ pub(crate) const MAX_LINKS: usize = 3;
 /// The packet that names the link's role to the computer (L8 part 2).
 const LINK_ROLE: &str = "kdeconnect.pocketdesk.link_role";
 
-/// What is sent on such a link: a notification or its cancel, and how an
-/// answer from that computer went (E1).
-const SENT: [&str; 2] = [
+/// What is sent on such a link: a notification or its cancel, how an
+/// answer from that computer went (E1), and whether it is in use (N7).
+const SENT: [&str; 3] = [
     "kdeconnect.notification",
     pocketdesk_core::protocol::notification_action::NOTIFICATION_ANSWERED,
+    pocketdesk_core::protocol::in_use::ASK,
 ];
 
 type Writer = Arc<Mutex<ControlWriter>>;
@@ -94,6 +96,13 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
         let mut lines = tokio::io::BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let trimmed = line.trim();
+            // Whether that computer is in use (N7), kept with it.
+            if trimmed.contains("in_use_answer")
+                && let Ok(packet) = NetworkPacket::from_wire(trimmed)
+                && packet.packet_type == pocketdesk_core::protocol::in_use::ANSWER
+            {
+                crate::in_use::receive(&packet.body, &address, port);
+            }
             // The computer's answers and clears (T10c, L1), kept with it.
             if (trimmed.contains("kdeconnect.notification.")
                 || trimmed.contains("notification_open"))
@@ -113,7 +122,10 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
             .get(&(address.clone(), port))
             .is_some_and(|live| Arc::ptr_eq(live, &writer))
         {
-            links.remove(&(address, port));
+            links.remove(&(address.clone(), port));
+            drop(links);
+            // N7 review: it can show nothing now.
+            crate::in_use::forget(&address, port);
         }
     });
     Ok(())
@@ -174,6 +186,9 @@ pub(crate) async fn keep_only(keep: &[(String, u16)]) {
             .filter(|k| !keep.contains(k))
             .cloned()
             .collect();
+        for (host, port) in &gone_keys {
+            crate::in_use::forget(host, *port);
+        }
         gone_keys.iter().filter_map(|k| links.remove(k)).collect()
     };
     for writer in gone {

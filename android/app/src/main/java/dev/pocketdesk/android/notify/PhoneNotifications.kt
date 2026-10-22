@@ -160,6 +160,19 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** The notifications sent in full offering to be opened (N3): only these are. */
     private val openable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+    /** When the computers were last asked whether they are in use (N7). */
+    private var inUseAskedMs = Long.MIN_VALUE / 2
+
+    /** The asks' own thread (N7 review), one at a time, a busy one skipped. */
+    private val inUseAsker = java.util.concurrent.ThreadPoolExecutor(
+        1,
+        1,
+        0,
+        TimeUnit.MILLISECONDS,
+        java.util.concurrent.ArrayBlockingQueue(1),
+        java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+    )
+
     /** When a notification last went to the computer (L1). */
     @Volatile
     private var lastSentMs = Long.MIN_VALUE / 2
@@ -315,6 +328,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         calls.stop()
         answerTicker.shutdownNow()
+        inUseAsker.shutdownNow()
         keeperTicker.shutdownNow()
         // Access taken away ends the listener: stop the link's service with it (M1).
         runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(this) }
@@ -405,7 +419,18 @@ class PhoneNotificationListener : NotificationListenerService() {
      * measures it, so the two clocks need not agree.
      */
     private fun sendBody(body: JSONObject, waitedMs: Long): Boolean {
-        val out = if (waitedMs >= 1_000) JSONObject(body.toString()).put("waited", waitedMs / 1_000) else body
+        // N7: decided as it goes, by what each computer said lately.
+        val own = PhoneLink.target(this)
+        val elsewhere = own != null &&
+            ToastWhere.marks(ToastWhere.key(own.address, own.controlPort), RustCore.inUseAnswers(), Prefs.toastWhereWorking(this))
+        val out = if (waitedMs >= 1_000 || elsewhere) {
+            JSONObject(body.toString()).apply {
+                if (waitedMs >= 1_000) put("waited", waitedMs / 1_000)
+                if (elsewhere) put(ToastWhere.ELSEWHERE, true)
+            }
+        } else {
+            body
+        }
         val sent = PhoneLink.sendNow(this, "kdeconnect.notification", out)
         if (sent) lastSentMs = SystemClock.elapsedRealtime()
         // Its app's icon reached this computer (K3 review).
@@ -836,7 +861,20 @@ class PhoneNotificationListener : NotificationListenerService() {
         // L8 part 2: links to the other computers picked, while they may
         // answer, or clear within ten minutes of a notification (as the own
         // link, L1 review: else a link to each all day).
-        PhoneLink.keepOthers(this, wanted = answering || clearsWanted || opensWanted)
+        // N7: whether each computer is in use, asked on the own link and the
+        // others', which are kept for it.
+        // Only in the ten minutes after a notification went, as clears are
+        // (N7 review: not links and asks all day); the first one after a
+        // quiet spell goes to every computer as it would without the switch.
+        val toastWhere = Prefs.toastWhereWorking(this) && PhoneNotificationPrefs.enabled(this) &&
+            SystemClock.elapsedRealtime() - lastSentMs < CLEAR_LINK_MS
+        if (ToastWhere.askDue(toastWhere, SystemClock.elapsedRealtime() - inUseAskedMs)) {
+            inUseAskedMs = SystemClock.elapsedRealtime()
+            // On a thread of its own (N7 review): a half-open link waits
+            // seconds, and the answers tick must not.
+            inUseAsker.execute { runCatching { askInUse(own) } }
+        }
+        PhoneLink.keepOthers(this, wanted = answering || clearsWanted || opensWanted || toastWhere)
         // M4: typing comes on the own computer's link, kept while it may come.
         val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
         // N2: the phone's music, while what it reports is current.
@@ -845,7 +883,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         // N5: the computer's music, while its switch is on.
         computerMedia.tick()
         val computerMediaWanted = computerMedia.linkWanted()
-        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || mediaWanted || computerMediaWanted) &&
+        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || mediaWanted || computerMediaWanted || toastWhere) &&
             own != null && RustCore.controlPeer() == null
         ) {
             val now = SystemClock.elapsedRealtime()
@@ -960,6 +998,14 @@ class PhoneNotificationListener : NotificationListenerService() {
         sent.onFailure { Log.w("PhoneNotifications", "how an answer went was not told", it) }
     }
 
+    /** Ask the own computer and each other one linked whether it is in use (N7); the bridge keeps the answers. */
+    private fun askInUse(own: dev.pocketdesk.android.HostStore.Host?) {
+        if (own != null && RustCore.controlPeer() == (own.address to own.controlPort)) {
+            RustCore.sendPhonePacketOnLink(own.address, own.controlPort, IN_USE_ASK, "{}")
+        }
+        PhoneLink.linkedOthers.forEach { (host, port) -> RustCore.sendOnExtra(host, port, IN_USE_ASK, "{}") }
+    }
+
     /** Send what waited, oldest first, until one fails. */
     private fun sendWaiting() {
         if (outbox.isEmpty()) return
@@ -1057,6 +1103,9 @@ class PhoneNotificationListener : NotificationListenerService() {
 
 /** A notification's buttons by title, and the button that takes a reply (T10c). */
 private class Answerable(val actions: Map<String, Notification.Action>, val reply: Notification.Action?)
+
+/** Phone → computer: are you in use? (`core::protocol::in_use::ASK`, N7) */
+private const val IN_USE_ASK = "kdeconnect.pocketdesk.in_use"
 
 /** Answerable notifications remembered, at most. */
 private const val MAX_ANSWERABLE = 100

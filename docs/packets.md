@@ -44,6 +44,8 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.folder_fetch_reply` |  | yes |  | share |
 | `kdeconnect.pocketdesk.hyprland.event` |  | yes |  | server |
 | `kdeconnect.pocketdesk.hyprland.state` |  | yes |  | server |
+| `kdeconnect.pocketdesk.in_use` | yes |  | Notifications | in_use |
+| `kdeconnect.pocketdesk.in_use_answer` |  | yes |  | in_use |
 | `kdeconnect.pocketdesk.link` | yes | yes | Links | links |
 | `kdeconnect.pocketdesk.link_role` | yes |  | none (any paired phone) | link_role |
 | `kdeconnect.pocketdesk.monitors` | yes | yes | none (any paired phone) | monitors |

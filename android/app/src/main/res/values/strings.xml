@@ -571,6 +571,8 @@
     <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications page, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
     <string name="phone_notifications_in_hand">Quiet on the computer while I use the phone</string>
     <string name="phone_notifications_in_hand_summary">A notification that comes while this phone is unlocked and its screen on shows no pop-up on the computer: it is logged on its Activity page, and kept on its Notifications page when the computer may answer it. Not while Pocketdesk\'s Remote is open</string>
+    <string name="phone_notifications_toast_where">Toast only on the computer I\'m using</string>
+    <string name="phone_notifications_toast_where_summary">With this phone\'s notifications going to more than one computer of yours, only the one you are using pops them up; the others log them on their Activity page, and keep on their Notifications page those they may answer. Each computer says only whether it had input in the last two minutes. Keeps a link to each computer for ten minutes after a notification</string>
     <string name="phone_notifications_wait">When the computer is out of reach</string>
     <string name="phone_notifications_wait_summary">Notifications wait on this phone, in memory only, and go when the computer answers, marked late with how long they waited. At most 20 wait</string>
     <string name="phone_notifications_wait_10">Wait up to 10 minutes</string>

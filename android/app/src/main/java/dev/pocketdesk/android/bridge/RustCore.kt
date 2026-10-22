@@ -178,6 +178,7 @@ object RustCore {
     private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeComputerMedia(): String
+    private external fun nativeInUseAnswers(): String
     private external fun nativeTakeClipboardPush(): String
     private external fun nativeTakeNotificationAnswers(): String
     private external fun nativeTakePhoneFileRequests(): String
@@ -930,6 +931,19 @@ object RustCore {
     /** Hand [url] to the computer, which opens it in its browser (T8a). */
     fun sendLink(address: String, port: Int, url: String): Result<Unit> =
         envelope(nativeSendLink(address, port, url)).map { }
+
+    /** Each computer's last word on whether it is in use (N7), by "address:port". */
+    fun inUseAnswers(): Map<String, dev.pocketdesk.android.notify.ToastWhere.Answer> =
+        runCatching {
+            val json = JSONObject(envelope(nativeInUseAnswers()).getOrDefault("{}"))
+            json.keys().asSequence().associateWith { key ->
+                val o = json.getJSONObject(key)
+                dev.pocketdesk.android.notify.ToastWhere.Answer(
+                    if (o.isNull("inUse")) null else o.optBoolean("inUse"),
+                    o.optLong("ageMs", Long.MAX_VALUE),
+                )
+            }
+        }.getOrDefault(emptyMap())
 
     /** The computer's music as it last pushed it (N5), taken; null when none came since. */
     fun takeComputerMedia(): org.json.JSONObject? =

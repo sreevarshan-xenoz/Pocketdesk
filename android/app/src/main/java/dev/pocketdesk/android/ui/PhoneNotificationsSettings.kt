@@ -120,6 +120,17 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // N7: a pop-up only on the computer in use.
+    val toastWhere = version.let { Prefs.toastWhereWorking(context) }
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_toast_where),
+        stringResource(R.string.phone_notifications_toast_where_summary),
+        toastWhere,
+        {
+            Prefs.setToastWhereWorking(context, it)
+            version++
+        },
+    )
     // K3: a notification's picture with it, off by default.
     val pictures = version.let { Prefs.notificationPictures(context) }
     SettingSwitch(
