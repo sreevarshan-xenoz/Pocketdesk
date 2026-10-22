@@ -50,5 +50,7 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "control" to s(Prefs.controlFromComputer(ctx), ControlRunner.serviceEnabled(ctx)),
         "dial" to s(Prefs.callsFromComputer(ctx), mayPost),
         "commands" to s(Prefs.commandsFromComputer(ctx), access),
+        // O2: the control service does them; the listener waits for the asks.
+        "phone_actions" to s(Prefs.phoneActionsFromComputer(ctx), ControlRunner.serviceEnabled(ctx) && access),
     )
 }

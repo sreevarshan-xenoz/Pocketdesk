@@ -612,7 +612,27 @@ pub const FEATURES: &[Feature] = &[
         permission_name: "Send commands to its automation apps",
         android: "notification access",
     },
+    Feature {
+        key: "phone_actions",
+        what: "Screenshots of it and locking it from here",
+        phone_switch: "Let the computer take screenshots and lock this phone",
+        permission_name: "Take screenshots of it and lock it from here",
+        android: "the Pocketdesk control Accessibility service",
+    },
 ];
+
+/// Whether O2's screenshot and lock reach a phone now: [`linked`] to this
+/// computer, with its Phone actions permission ([`allowed`]) on; else why
+/// not, as the Overview and the tray say it.
+pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static str> {
+    if !allowed {
+        Err("This phone's \"Take screenshots of it and lock it from here\" is off in Devices.")
+    } else if !linked {
+        Err("The phone is not linked now: a session, or one of its background features, links it.")
+    } else {
+        Ok(())
+    }
+}
 
 /// One feature as both sides stand (L7): this computer's permission (and
 /// its Settings, L7 review), the phone's switch and Android's grant as the
@@ -1175,6 +1195,28 @@ mod tests {
     fn the_pages_features_are_the_phones() {
         let ours: Vec<&str> = super::FEATURES.iter().map(|f| f.key).collect();
         assert_eq!(ours, pocketdesk_core::local::phone_switches::FEATURES);
+    }
+
+    /// O2: a screenshot and a lock reach a linked phone with its permission
+    /// on; the permission is said first, since linking it would not help.
+    #[test]
+    fn a_phone_action_reaches_a_linked_phone_it_may_ask() {
+        assert_eq!(super::phone_action_reach(true, true), Ok(()));
+        assert!(
+            super::phone_action_reach(true, false)
+                .unwrap_err()
+                .contains("Devices")
+        );
+        assert!(
+            super::phone_action_reach(false, false)
+                .unwrap_err()
+                .contains("Devices")
+        );
+        assert!(
+            super::phone_action_reach(false, true)
+                .unwrap_err()
+                .contains("not linked")
+        );
     }
 
     #[test]

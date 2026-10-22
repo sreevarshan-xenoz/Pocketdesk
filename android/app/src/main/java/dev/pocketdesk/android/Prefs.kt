@@ -27,6 +27,7 @@ object Prefs {
     private const val KEY_KEEP_FILE_DATES = "keep_file_dates"
     private const val KEY_DOWNLOAD_TREE = "download_tree"
     private const val KEY_CONTROL_FROM_COMPUTER = "control_from_computer"
+    private const val KEY_PHONE_ACTIONS_FROM_COMPUTER = "phone_actions_from_computer"
     private const val KEY_INTERNET_FILES = "internet_files"
     private const val KEY_OTHERS_CHOOSE_COMPUTER = "others_choose_computer"
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
@@ -467,6 +468,15 @@ object Prefs {
 
     fun setCastSound(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean("cast_sound", enabled) }
+        bump()
+    }
+
+    /** O2: the phone's own computer may take screenshots and lock it (off by default). */
+    fun phoneActionsFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_PHONE_ACTIONS_FROM_COMPUTER, false)
+
+    fun setPhoneActionsFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_PHONE_ACTIONS_FROM_COMPUTER, enabled) }
         bump()
     }
 

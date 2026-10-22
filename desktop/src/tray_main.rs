@@ -339,6 +339,9 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
             now,
         )
         .map(|_| ()),
+        TrayAction::PhoneAction(id, action) => {
+            pocketdesk_core::local::phone_actions::request(state_dir, id, *action, now).map(|_| ())
+        }
         TrayAction::Pause(minutes) => {
             pocketdesk_core::local::pause::pause(state_dir, *minutes, now).map(|_| ())
         }

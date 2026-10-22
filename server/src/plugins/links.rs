@@ -160,6 +160,69 @@ pub async fn run_dials() {
     }
 }
 
+/// Send the screenshots and locks asked of phones (O2), each to its own
+/// phone if it is connected within a minute and its Phone actions
+/// permission is on. Runs for the server's life.
+pub async fn run_phone_actions() {
+    use pocketdesk_core::local::phone_actions;
+    use pocketdesk_core::protocol::phone_action::{PHONE_ACTION, body};
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let mut waiting: Vec<phone_actions::PhoneActionRequest> = Vec::new();
+    loop {
+        if waiting.is_empty() {
+            crate::inbox::wait(
+                pocketdesk_core::local::paths::PHONE_ACTIONS_DIR,
+                Duration::from_millis(500),
+            )
+            .await;
+        } else {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let now = pocketdesk_core::local::pin::now_unix();
+        waiting.extend(phone_actions::take_all(&dir, now));
+        if waiting.is_empty() {
+            continue;
+        }
+        let clients = crate::state::clone_clients().await;
+        let mut still = Vec::new();
+        for ask in waiting.drain(..) {
+            let Some(action) = ask.action() else {
+                continue;
+            };
+            // Paired now, not only allowed by default, as a call is.
+            if !crate::plugins::pair::allows(
+                &ask.device_id,
+                pocketdesk_core::protocol::permissions::Capability::PhoneActions,
+            ) {
+                tracing::info!(
+                    "A {} was not asked: the phone's Phone actions permission is off",
+                    action.as_str()
+                );
+                continue;
+            }
+            let Some(phone) = clients.iter().find(|c| c.device_id() == ask.device_id) else {
+                if now.saturating_sub(ask.created_unix) < phone_actions::ACTION_TTL_SECS {
+                    still.push(ask);
+                } else {
+                    tracing::info!(
+                        "A {} was not asked: the phone did not connect within a minute",
+                        action.as_str()
+                    );
+                }
+                continue;
+            };
+            let packet = NetworkPacket::new(PHONE_ACTION).with_body(body(action));
+            match phone.send_packet(&packet).await {
+                Ok(()) => tracing::info!("Asked the phone for a {}", action.as_str()),
+                Err(e) => tracing::warn!("A {} was not asked of the phone: {e}", action.as_str()),
+            }
+        }
+        waiting = still;
+    }
+}
+
 /// Send the commands queued for phones' automation apps (L6), each to its
 /// own phone if it is connected within a minute and its Command permission
 /// is on. Runs for the server's life.
@@ -227,12 +290,13 @@ impl Plugin for LinksPlugin {
     }
 
     fn outgoing_capabilities(&self) -> &'static [&'static str] {
-        // A number to dial (L4) and a command for the phone's automation
-        // apps (L6) go on the same road as a link.
+        // A number to dial (L4), a command for the phone's automation apps
+        // (L6) and a screenshot or lock (O2) go on the same road as a link.
         &[
             LINK,
             pocketdesk_core::protocol::dial::DIAL,
             pocketdesk_core::protocol::command::COMMAND,
+            pocketdesk_core::protocol::phone_action::PHONE_ACTION,
         ]
     }
 

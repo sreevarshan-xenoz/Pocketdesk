@@ -437,6 +437,7 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == pocketdesk_core::protocol::link::LINK
         || packet_type == pocketdesk_core::protocol::command::COMMAND
         || packet_type == pocketdesk_core::protocol::dial::DIAL
+        || packet_type == pocketdesk_core::protocol::phone_action::PHONE_ACTION
         || packet_type == pocketdesk_core::protocol::typing::TYPE
         || packet_type == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION

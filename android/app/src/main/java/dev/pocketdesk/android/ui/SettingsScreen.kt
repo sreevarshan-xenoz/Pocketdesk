@@ -108,6 +108,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             ControlSetting()
             TypingSetting()
+            PhoneActionsSetting()
             CopiesSetting()
             CastSoundSetting()
 

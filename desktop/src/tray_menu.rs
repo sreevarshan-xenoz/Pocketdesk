@@ -23,12 +23,25 @@ pub enum TrayAction {
     TakePhoto(String),
     /// N9: open the window that types on this phone (M4).
     Type(String),
+    /// O2: a screenshot of the phone, or its screen locked.
+    PhoneAction(String, pocketdesk_core::protocol::phone_action::PhoneAction),
     /// K2a: pause for these minutes, or until resumed with `None`.
     Pause(Option<u32>),
     /// K2a: end the pause.
     Resume,
     /// N2: a press for the phone's player (`playPause` or `next`).
     PhoneMedia(String, &'static str),
+}
+
+/// Whether O2's screenshot and lock reach the phone of `row` now.
+fn phone_action_reach(row: &crate::model::PhoneRow) -> bool {
+    crate::model::phone_action_reach(
+        row.device.linked,
+        row.device
+            .permissions
+            .allows(pocketdesk_core::protocol::permissions::Capability::PhoneActions),
+    )
+    .is_ok()
 }
 
 /// The longest song line the tray shows, in characters.
@@ -224,6 +237,25 @@ pub fn menu(rows: &[PhoneRow], devices: &[Device], now_unix: u64) -> Vec<Entry> 
                     item(
                         "Take a photo",
                         row.file.is_ok().then(|| TrayAction::TakePhoto(id())),
+                    ),
+                    // O2: as the Overview offers them, for a linked phone.
+                    item(
+                        "Screenshot of the phone",
+                        phone_action_reach(row).then(|| {
+                            TrayAction::PhoneAction(
+                                id(),
+                                pocketdesk_core::protocol::phone_action::PhoneAction::Screenshot,
+                            )
+                        }),
+                    ),
+                    item(
+                        "Lock the phone",
+                        phone_action_reach(row).then(|| {
+                            TrayAction::PhoneAction(
+                                id(),
+                                pocketdesk_core::protocol::phone_action::PhoneAction::Lock,
+                            )
+                        }),
                     ),
                     // N9: M4's typing window, for a linked phone this
                     // computer may control; the window says what else it needs.
@@ -479,6 +511,20 @@ mod tests {
                 Entry::Item {
                     label: "Take a photo".to_string(),
                     action: Some(TrayAction::TakePhoto("ready".to_string()))
+                },
+                Entry::Item {
+                    label: "Screenshot of the phone".to_string(),
+                    action: Some(TrayAction::PhoneAction(
+                        "ready".to_string(),
+                        pocketdesk_core::protocol::phone_action::PhoneAction::Screenshot
+                    ))
+                },
+                Entry::Item {
+                    label: "Lock the phone".to_string(),
+                    action: Some(TrayAction::PhoneAction(
+                        "ready".to_string(),
+                        pocketdesk_core::protocol::phone_action::PhoneAction::Lock
+                    ))
                 },
                 Entry::Item {
                     label: "Type on the phone".to_string(),

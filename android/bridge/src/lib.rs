@@ -23,6 +23,7 @@ mod logcat;
 mod media_presses;
 mod notification_answers;
 mod peer_names;
+mod phone_actions;
 mod phone_file_requests;
 mod photo_requests;
 mod quiet_requests;
@@ -1616,6 +1617,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeMed
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(media_presses::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The screenshots and locks the computer asked of this phone (O2), with
+/// their computer, as a JSON array; taken.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePhoneActions(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(phone_actions::take_json()));
     to_jstring(&mut env, json)
 }
 

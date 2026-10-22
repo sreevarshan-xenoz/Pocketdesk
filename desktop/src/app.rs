@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 20] = [
+const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -168,6 +168,11 @@ const PERMISSIONS: [(Capability, &str, &str); 20] = [
         "A script here can hand a name and a text to Tasker, Automate or MacroDroid on the phone, with \u{201c}Commands from the computer\u{201d} on there.",
     ),
     (
+        Capability::PhoneActions,
+        "Take screenshots of it and lock it from here",
+        "Screenshot of the phone and Lock the phone, on the Overview and in the tray. The phone takes them with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service; a screenshot arrives as its new screenshots do.",
+    ),
+    (
         Capability::PhoneSound,
         "Play its sound here",
         "With its screen shown here, what the phone's apps play comes out of this computer's speakers (when the phone's own setting sends it).",
@@ -207,6 +212,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::PhoneSound
                 | Capability::Dial
                 | Capability::Command
+                | Capability::PhoneActions
         ))
 }
 
@@ -619,6 +625,10 @@ impl PocketdeskApp {
                 TrayAction::Type(id) => {
                     self.type_on(&id);
                     true
+                }
+                TrayAction::PhoneAction(id, action) => {
+                    self.phone_action(&id, action);
+                    false
                 }
                 TrayAction::Pause(minutes) => {
                     self.pause(minutes);
@@ -1285,6 +1295,32 @@ impl PocketdeskApp {
         );
     }
 
+    /// Ask the phone `id` for a screenshot or to lock (O2), and say how that went.
+    fn phone_action(
+        &mut self,
+        id: &str,
+        action: pocketdesk_core::protocol::phone_action::PhoneAction,
+    ) {
+        use pocketdesk_core::protocol::phone_action::PhoneAction;
+        let who = self.label(id);
+        self.notice = crate::notice::Notice::outcome(
+            match pocketdesk_core::local::phone_actions::request(
+                &self.state_dir,
+                id,
+                action,
+                now_unix(),
+            ) {
+                Ok(_) => Ok(match action {
+                    PhoneAction::Screenshot => format!(
+                        "Asked {who} for a screenshot: it arrives as its new screenshots do (\"Send new screenshots\" on in its Settings)."
+                    ),
+                    PhoneAction::Lock => format!("Asked {who} to lock its screen."),
+                }),
+                Err(e) => Err(format!("Could not ask {who}: {e}")),
+            },
+        );
+    }
+
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
@@ -1306,6 +1342,7 @@ impl PocketdeskApp {
         let mut open_link = None;
         let mut send_clip = None;
         let mut take_photo = None;
+        let mut phone_action = None;
         let mut type_to = None;
         let mut media_press = None;
         let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
@@ -1498,6 +1535,33 @@ impl PocketdeskApp {
                     {
                         take_photo = Some(device.id.clone());
                     }
+                    // O2: a screenshot of the phone, or its screen locked.
+                    let action_reach = model::phone_action_reach(
+                        device.linked,
+                        device.permissions.allows(Capability::PhoneActions),
+                    );
+                    for (label, action, why) in [
+                        (
+                            "Screenshot of the phone",
+                            pocketdesk_core::protocol::phone_action::PhoneAction::Screenshot,
+                            "The phone takes a screenshot, which comes here as its new screenshots do. On the phone it needs \"Let the computer take screenshots and lock this phone\" and \"Send new screenshots\" on, and the Pocketdesk control service.",
+                        ),
+                        (
+                            "Lock the phone",
+                            pocketdesk_core::protocol::phone_action::PhoneAction::Lock,
+                            "The phone locks its screen. On the phone it needs \"Let the computer take screenshots and lock this phone\" on, and the Pocketdesk control service.",
+                        ),
+                    ] {
+                        let why = action_reach.err().unwrap_or(why);
+                        if ui
+                            .add_enabled(action_reach.is_ok(), egui::Button::new(label))
+                            .on_hover_text(why)
+                            .on_disabled_hover_text(why)
+                            .clicked()
+                        {
+                            phone_action = Some((device.id.clone(), action));
+                        }
+                    }
                     // M4: this computer's keyboard typing on the phone.
                     // Linked, not a link's reach (M4 review: that one asks
                         // for Links, which typing does not need).
@@ -1557,6 +1621,9 @@ impl PocketdeskApp {
         }
         if let Some(id) = take_photo {
             self.take_photo(&id);
+        }
+        if let Some((id, action)) = phone_action {
+            self.phone_action(&id, action);
         }
         if let Some((id, name)) = type_to {
             self.type_view.open(&self.state_dir, &id, &name);
@@ -3345,6 +3412,7 @@ mod tests {
             Capability::PhoneSound,
             Capability::Dial,
             Capability::Command,
+            Capability::PhoneActions,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

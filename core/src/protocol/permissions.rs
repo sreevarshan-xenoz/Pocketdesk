@@ -59,10 +59,13 @@ pub enum Capability {
     /// Send commands to the phone's automation apps (L6). About what the
     /// computer sends, as Ring is.
     Command,
+    /// Have the phone take a screenshot or lock itself (O2). About what the
+    /// computer sends, as Ring is.
+    PhoneActions,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 20] = [
+    pub const ALL: [Capability; 21] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -83,6 +86,7 @@ impl Capability {
         Capability::PhoneSound,
         Capability::Dial,
         Capability::Command,
+        Capability::PhoneActions,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -165,6 +169,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::dial::DIAL => Capability::Dial,
         // A command for the phone's automation apps (L6), the computer's own.
         crate::protocol::command::COMMAND => Capability::Command,
+        // A screenshot or a lock for the phone (O2), the computer's own.
+        crate::protocol::phone_action::PHONE_ACTION => Capability::PhoneActions,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         _ => return None,
@@ -214,6 +220,8 @@ pub struct DevicePermissions {
     pub dial: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone_actions: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -242,6 +250,7 @@ impl DevicePermissions {
             Capability::PhoneSound => &mut self.phone_sound,
             Capability::Dial => &mut self.dial,
             Capability::Command => &mut self.command,
+            Capability::PhoneActions => &mut self.phone_actions,
         }
     }
 
@@ -267,6 +276,7 @@ impl DevicePermissions {
             Capability::PhoneSound => self.phone_sound,
             Capability::Dial => self.dial,
             Capability::Command => self.command,
+            Capability::PhoneActions => self.phone_actions,
         };
         value.unwrap_or(capability.default_allowed())
     }
