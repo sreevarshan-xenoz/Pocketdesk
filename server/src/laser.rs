@@ -1,8 +1,9 @@
 //! The phone's laser dot (G4): a red dot the air mouse moves on the
 //! computer's screen without moving its pointer, for a talk. Where it is
 //! and when it hides is decided here, kept apart from the screen so it is
-//! tested; the dot is drawn by `laser_windows` (elsewhere it is not drawn,
-//! and the phone is not offered it: [`available`]).
+//! tested; the dot is drawn by `laser_windows`, or on Linux by
+//! `laser_linux` on a compositor with the layer shell (N10); elsewhere it
+//! is not drawn, and the phone is not offered it: [`available`].
 
 use std::time::{Duration, Instant};
 
@@ -121,8 +122,12 @@ fn held_to(wanted: (i32, i32), from: (i32, i32), screens: &[Area]) -> Option<(i3
     ))
 }
 
-/// Whether this computer can draw the dot.
+/// Whether this computer can draw the dot: Windows, or a Wayland
+/// compositor with the layer shell (N10; GNOME, KDE and X11 have none).
 pub fn available() -> bool {
+    #[cfg(target_os = "linux")]
+    return pocketdesk_core::streaming::laser_dot::available();
+    #[cfg(not(target_os = "linux"))]
     cfg!(windows)
 }
 
@@ -130,7 +135,9 @@ pub fn available() -> bool {
 pub fn handle(dx: i16, dy: i16, show: bool) {
     #[cfg(windows)]
     crate::laser_windows::handle(dx, dy, show);
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    crate::laser_linux::handle(dx, dy, show);
+    #[cfg(not(any(windows, target_os = "linux")))]
     let _ = (dx, dy, show);
 }
 

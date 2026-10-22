@@ -794,7 +794,9 @@ impl SettingsForm {
                     )
                     .on_hover_text(
                         "A dot above every window that never takes a click, for a talk. \
-                         Drawn on Windows; elsewhere the phone is not offered it yet.",
+                         Drawn on Windows and on Wayland desktops with the layer shell \
+                         (Sway, Hyprland, other wlroots ones); elsewhere the phone is \
+                         not offered it.",
                     );
                 });
                 row(ui, "input_control", |ui| {

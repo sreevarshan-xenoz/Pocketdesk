@@ -18,6 +18,7 @@ capture = [
     "dep:xcap",
     "dep:wayland-client",
     "dep:wayland-protocols-wlr",
+    "dep:wayland-protocols",
     "dep:wayland-scanner",
     "dep:wayland-backend",
     "dep:bitflags",
@@ -117,6 +118,9 @@ wayland-client = { version = "0.31", optional = true }
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = [
     "client",
 ], optional = true }
+# N10: xdg_output, for the laser dot's screens as the compositor lays them
+# out (already in the tree through wayland-protocols-wlr).
+wayland-protocols = { version = "0.32", features = ["client", "unstable"], optional = true }
 # R4 B2: in-crate code generation for hyprland-toplevel-export-v1
 # (core/protocols/*.xml, BSD-3 vendored). Generated bindings reference
 # `wayland_backend` and `bitflags` directly, so they must be in scope.

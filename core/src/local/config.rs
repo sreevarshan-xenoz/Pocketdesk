@@ -43,7 +43,7 @@ pub struct Config {
     pub slow_link_frame_rate: bool,
     /// Draw a phone's laser dot (G4): the air mouse in Remote moves a red
     /// dot on the screen instead of the pointer. On by default; drawn on
-    /// Windows only for now.
+    /// Windows and on wlroots compositors (N10).
     #[serde(default = "default_true")]
     pub laser_pointer: bool,
     /// Move files with a phone linked by the internet road (2c), on a
