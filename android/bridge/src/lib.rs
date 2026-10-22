@@ -1842,6 +1842,36 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckId
     to_jstring(&mut env, json)
 }
 
+/// O3: the identity check of whoever answers at `address`, judged against
+/// the pin held for `pinned`: the same answers as `nativeCheckIdentity`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckIdentityAs(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    pinned: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let pinned = jstring_to_string(&mut env, &pinned);
+    let json = envelope(RUNTIME.block_on(api::check_identity_as(address, port as u16, pinned)));
+    to_jstring(&mut env, json)
+}
+
+/// O3: pin for `to` what is pinned for `from`; `{"ok":true|false}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCopyPeerCertificate(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    from: JString<'_>,
+    to: JString<'_>,
+) -> jstring {
+    let from = jstring_to_string(&mut env, &from);
+    let to = jstring_to_string(&mut env, &to);
+    let json = envelope(api::copy_peer_certificate(from, to));
+    to_jstring(&mut env, json)
+}
+
 /// Submit a pairing PIN; `{"ok":"<deviceId>"}` when the desktop paired us,
 /// `{"ok":null}` for a wrong/expired PIN.
 #[unsafe(no_mangle)]
