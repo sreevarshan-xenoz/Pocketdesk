@@ -164,6 +164,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "phone_storage_alerts",
+        "Tell me when a phone is nearly full",
+        Section::Phones,
+    ),
+    (
         "virtual_screens",
         "Phones may add a screen",
         Section::Phones,
@@ -410,6 +415,7 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_drive"
             | "phone_drive_write"
             | "charged_alert"
+            | "phone_storage_alerts"
             | "away_lock_minutes"
     )
 }
@@ -948,6 +954,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "One notification each time a phone charging reaches it, again once it is unplugged or 5 % under. A phone that stops itself at 80 % (Android's own charging limit) never reaches 100.",
+                    );
+                });
+                // N9: the phone nearly full, which L9 reports.
+                row(ui, "phone_storage_alerts", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_storage_alerts,
+                        "a notification when a phone is nearly full",
+                    );
+                    note(
+                        ui,
+                        "Once, when its free storage falls under a gigabyte (or 2 % of a large phone), again only after it has had room. The phone says its storage with \"Share the phone's state with the computer\" on.",
                     );
                 });
                 row(ui, "virtual_screens", |ui| {

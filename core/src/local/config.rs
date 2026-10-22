@@ -197,6 +197,9 @@ pub struct Config {
     /// off (the default), else 80, 90 or 100.
     #[serde(default)]
     pub charged_alert: u8,
+    /// Whether a phone running out of room is told of once (N9). On.
+    #[serde(default = "default_true")]
+    pub phone_storage_alerts: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -380,6 +383,7 @@ impl Default for Config {
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             charged_alert: 0,
+            phone_storage_alerts: true,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -605,6 +609,7 @@ impl Config {
         "kdeconnect_compat",
         "phone_battery_alerts",
         "charged_alert",
+        "phone_storage_alerts",
         "sms_keep",
         "sms_names",
         "wake_announce",
