@@ -728,6 +728,15 @@ pub async fn connect_to_peer(
                                 {
                                     crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
                                 }
+                                // A screenshot or a lock the computer asks
+                                // of this phone (O2), kept with its computer.
+                                if trimmed.contains("pocketdesk.phone_action")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type
+                                        == pocketdesk_core::protocol::phone_action::PHONE_ACTION
+                                {
+                                    crate::phone_actions::receive(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // What the computer types here (M4), kept
                                 // in order with its computer.
                                 if trimmed.contains("pocketdesk.type")
@@ -902,6 +911,7 @@ pub async fn connect_to_peer(
                         crate::links::forget();
                         crate::commands::forget();
                         crate::dials::forget();
+                        crate::phone_actions::forget();
                         crate::typing::forget();
                         crate::media_presses::forget();
                         crate::computer_media::forget();

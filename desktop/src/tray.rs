@@ -135,6 +135,7 @@ fn action_id(action: &TrayAction) -> String {
         TrayAction::SendFile(id) => format!("file:{id}"),
         TrayAction::TakePhoto(id) => format!("photo:{id}"),
         TrayAction::Type(id) => format!("type:{id}"),
+        TrayAction::PhoneAction(id, action) => format!("act:{}:{id}", action.as_str()),
         TrayAction::Pause(Some(minutes)) => format!("pause:{minutes}"),
         TrayAction::Pause(None) => "pause:resumed".to_string(),
         TrayAction::Resume => "resume".to_string(),
@@ -169,6 +170,14 @@ mod tests {
             TrayAction::SendFile("p".into()),
             TrayAction::TakePhoto("p".into()),
             TrayAction::Type("p".into()),
+            TrayAction::PhoneAction(
+                "p".into(),
+                pocketdesk_core::protocol::phone_action::PhoneAction::Screenshot,
+            ),
+            TrayAction::PhoneAction(
+                "p".into(),
+                pocketdesk_core::protocol::phone_action::PhoneAction::Lock,
+            ),
             TrayAction::Pause(Some(60)),
             TrayAction::Pause(Some(480)),
             TrayAction::Pause(None),

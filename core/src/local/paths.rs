@@ -35,6 +35,8 @@ pub const LINKS_DIR: &str = "links_out";
 pub const COMMANDS_DIR: &str = "commands_out";
 /// Numbers for phones to dial (L4), one file a call.
 pub const DIALS_DIR: &str = "dials_out";
+/// Screenshots and locks asked of phones (O2), one file an ask.
+pub const PHONE_ACTIONS_DIR: &str = "phone_actions_out";
 /// What the computer types on a phone (M4), batch by batch.
 pub const TYPING_DIR: &str = "typing_out";
 /// Rings the desktop app or the local API asks the server to send to a phone (N1).

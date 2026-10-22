@@ -877,13 +877,15 @@ class PhoneNotificationListener : NotificationListenerService() {
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted || opensWanted || toastWhere)
         // M4: typing comes on the own computer's link, kept while it may come.
         val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
+        // O2: the computer's screenshots and locks wait on this link too.
+        val actionsOn = Prefs.phoneActionsFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
         // N2: the phone's music, while what it reports is current.
         media.tick()
         val mediaWanted = media.linkWanted()
         // N5: the computer's music, while its switch is on.
         computerMedia.tick()
         val computerMediaWanted = computerMedia.linkWanted()
-        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || mediaWanted || computerMediaWanted || toastWhere) &&
+        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || actionsOn || mediaWanted || computerMediaWanted || toastWhere) &&
             own != null && RustCore.controlPeer() == null
         ) {
             val now = SystemClock.elapsedRealtime()
@@ -897,6 +899,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (!dev.pocketdesk.android.calls.Dials.inSession) {
             dev.pocketdesk.android.calls.Dials.take(this, own, inFront = false)
         }
+        // O2: screenshots and locks the computer asks for, taken whatever
+        // the switch says, so they never wait for a later turn of it.
+        dev.pocketdesk.android.control.PhoneActions.take(this, own)
         // L6: commands for the phone's automation apps, outside a session.
         if (dev.pocketdesk.android.automation.Commands.sessions.get() == 0) {
             dev.pocketdesk.android.automation.Commands.take(this) { host, port ->

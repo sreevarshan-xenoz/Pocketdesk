@@ -2545,6 +2545,16 @@ Owed:
 - [ ] Tasker itself: a Send Intent to the receiver, and Intent Received for the events.
 - [ ] A task that asks first, allowed at the desk.
 - [ ] Over the internet road, cold.
+## 185. A screenshot of the phone and its screen locked from the computer (O2)
+
+Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the requests written as the desktop app writes them:
+- [x] A screenshot asked: taken (ColorOS saved it) and picked up by "Send new screenshots".
+- [x] A lock asked: the keyguard shown, the phone asleep.
+- [x] Not done: a screenshot on the lock screen, a screenshot with the screen off, a lock with the computer's permission off.
+Owed:
+- [ ] The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1).
+- [ ] The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
+- [ ] Android 9 to 12, and a phone with a PIN.
 
 ## Recording results
 

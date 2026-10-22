@@ -32,6 +32,7 @@ pub mod outbox;
 pub mod pair_link;
 pub mod paths;
 pub mod pause;
+pub mod phone_actions;
 pub mod phone_files;
 pub mod phone_live;
 pub mod phone_media;

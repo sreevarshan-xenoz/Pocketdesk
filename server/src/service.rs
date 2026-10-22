@@ -203,6 +203,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_commands());
     // L4: numbers for phones to dial.
     tokio::spawn(crate::plugins::links::run_dials());
+    // O2: screenshots and locks asked of phones.
+    tokio::spawn(crate::plugins::links::run_phone_actions());
     // M4: what the typing window types on a phone.
     tokio::spawn(crate::plugins::typing::run());
     // The clipboard to connected phones as it changes (T10b), and shared

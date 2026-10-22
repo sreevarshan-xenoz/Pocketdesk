@@ -175,6 +175,7 @@ object RustCore {
     private external fun nativeTakeLinks(): String
     private external fun nativeTakeCommands(): String
     private external fun nativeTakeDials(): String
+    private external fun nativeTakePhoneActions(): String
     private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeComputerMedia(): String
@@ -1046,6 +1047,19 @@ object RustCore {
             (0 until array.length()).map { i ->
                 val d = array.getJSONObject(i)
                 Dial(d.getString("host"), d.getInt("port"), d.getString("number"))
+            }
+        }.getOrDefault(emptyList())
+
+    /** A screenshot or a lock the computer at [host]:[port] asked for (O2). */
+    data class PhoneActionAsk(val host: String, val port: Int, val action: String)
+
+    /** The screenshots and locks waiting (O2), taken. */
+    fun takePhoneActions(): List<PhoneActionAsk> =
+        runCatching {
+            val array = org.json.JSONArray(envelope(nativeTakePhoneActions()).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val a = array.getJSONObject(i)
+                PhoneActionAsk(a.getString("host"), a.getInt("port"), a.getString("action"))
             }
         }.getOrDefault(emptyList())
 

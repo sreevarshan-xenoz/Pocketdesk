@@ -159,5 +159,6 @@ private fun featureName(feature: String): Int = when (feature) {
     "mute" -> R.string.settings_let_computer_mute
     "control" -> R.string.settings_control_from_computer
     "dial" -> R.string.settings_calls_from_computer
+    "phone_actions" -> R.string.settings_phone_actions
     else -> R.string.settings_commands_from_computer
 }
