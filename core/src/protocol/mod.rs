@@ -6,6 +6,7 @@ pub mod connection;
 pub mod conversation;
 pub mod dial;
 pub mod file_time;
+pub mod in_use;
 pub mod kdeconnect;
 pub mod link;
 pub mod live;

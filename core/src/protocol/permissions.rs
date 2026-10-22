@@ -139,6 +139,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | crate::protocol::phone_photos::PHOTOS
         | crate::protocol::phone_photos::FETCH
         | crate::protocol::phone_photos::TAKE => Capability::Files,
+        // Whether this computer is in use, for toasts only where it is (N7).
+        crate::protocol::in_use::ASK | crate::protocol::in_use::ANSWER => Capability::Notifications,
         "kdeconnect.pocketdesk.audio"
         // The computer's music in the phone's media controls (N5).
         | crate::protocol::computer_media::WATCH
