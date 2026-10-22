@@ -46,6 +46,15 @@ jobs:
       - name: Build
         run: cargo build --workspace --release
 
+      # N10: zbus with `tokio` panics AccessKit's thread in the window, so
+      # the desktop crate keeps it on async-io (the release builds it apart
+      # from the server).
+      - name: The desktop's zbus stays on async-io
+        run: |
+          if cargo tree -p pocketdesk-desktop -e features -i zbus | grep -q 'zbus feature "tokio"'; then
+            echo "pocketdesk-desktop pulls zbus with tokio"; exit 1
+          fi
+
       - name: Test
         run: cargo test --workspace
 

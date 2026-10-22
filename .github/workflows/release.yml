@@ -72,8 +72,12 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
+      # Two builds, so the server's zbus `tokio` is not unified into the
+      # window's: AccessKit runs zbus on async-io there (N10).
       - name: Build release binaries
-        run: cargo build --release --bin pocketdesk --bin pocketdesk-app --bin pocketdesk-tray
+        run: |
+          cargo build --release --bin pocketdesk
+          cargo build --release -p pocketdesk-desktop --bin pocketdesk-app --bin pocketdesk-tray
 
       - name: Run tests
         run: cargo test --workspace

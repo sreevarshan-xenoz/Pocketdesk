@@ -11,7 +11,7 @@ On Windows the tray program shows a phone's player in the system media controls 
 - **Same rules as Windows.** It follows the same Settings switch, "The phone's music in this computer's media controls" (`phone_media_controls`, off by default), and the same choice of phone (`phone_player::Choice`: a session, or a linked phone's background report; a paused one stays five minutes).
 - **What it shows:** the song as `xesam:title`, `xesam:artist` and `xesam:album` (the phone's app), with the cover as a `file://` URL of the server's owner-only copy.
 - **Presses.** PlayPause, Play, Pause, Next and Previous go through `model::press_phone_media`, as the Sessions page's buttons do. Stop pauses. Seek, SetPosition and OpenUri do nothing, and say so with `CanSeek` false.
-- **Where it runs.** It runs on a thread of its own with a current-thread tokio runtime for zbus. The tray loop tells it of a change, and it sends PropertiesChanged.
+- **Where it runs.** It runs on a thread of its own with a current-thread tokio runtime; zbus stays on async-io in this crate, since AccessKit's Linux backend panics with zbus's `tokio` on (it had left screen readers without the window since N6's tray brought ksni's default `tokio` in), and the release builds the server apart. The tray loop tells it of a change, and it sends PropertiesChanged.
   - With the switch off, the sender is dropped, which ends the thread and lets go of the name.
   - A bus that cannot be reached is tried again a minute later, as Windows' player is.
 
