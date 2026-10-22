@@ -1243,9 +1243,14 @@ impl PocketdeskApp {
             )
             && schedule.holds(at)
         {
+            // The same time twice is the whole day (P3 review).
+            let until = if schedule.from == schedule.to {
+                "the day ends".to_string()
+            } else {
+                config.quiet_to.trim().to_string()
+            };
             ui.label(format!(
-                "Quiet hours until {}: phones' notifications and texts are not shown here, as in a pause. Change them in Settings.",
-                config.quiet_to.trim()
+                "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause. Change them in Settings."
             ));
         }
         if let Some(minutes) = picked {

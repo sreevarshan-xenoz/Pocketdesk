@@ -160,10 +160,15 @@ impl Plugin for SmsPlugin {
                         Some(name) => format!("{name} ({address})"),
                         None => address.clone(),
                     };
+                    // P3: why it was not shown, as a notification's says.
+                    let mut meta = serde_json::json!({});
+                    if let Some(quiet) = crate::quiet_hours::now() {
+                        meta[quiet.field()] = serde_json::json!(true);
+                    }
                     crate::events::emit(
                         "text_received",
                         Some(&phone),
-                        serde_json::json!({}),
+                        meta,
                         serde_json::json!({ "from": from, "body": body }),
                     );
                 }
@@ -470,6 +475,13 @@ mod tests {
         let shown = super::NOTIFY.load(Ordering::Relaxed);
         assert_eq!(super::shows_texts(), shown);
         let _paused = crate::paused::paused_for_test();
+        assert!(!super::shows_texts());
+    }
+
+    /// P3: quiet hours hold texts as a pause does.
+    #[test]
+    fn quiet_hours_hold_texts() {
+        let _quiet = crate::quiet_hours::quiet_for_test(crate::quiet_hours::Quiet::Hours);
         assert!(!super::shows_texts());
     }
 

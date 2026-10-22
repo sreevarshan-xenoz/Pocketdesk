@@ -49,11 +49,41 @@ pub fn now() -> Option<Quiet> {
     )
 }
 
-/// In tests, never: a hold must not depend on the time the tests run at,
-/// nor on the owner's config.
+/// In tests, only the thread's own answer (P3 review), never the owner's
+/// config or the time the tests run at.
 #[cfg(test)]
 pub fn now() -> Option<Quiet> {
-    None
+    QUIET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(id, _)| *id == std::thread::current().id())
+        .map(|(_, quiet)| *quiet)
+}
+
+/// The test threads quiet now, and why.
+#[cfg(test)]
+static QUIET: std::sync::Mutex<Vec<(std::thread::ThreadId, Quiet)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Quiet on this thread until the guard drops (tests).
+#[cfg(test)]
+pub fn quiet_for_test(quiet: Quiet) -> impl Drop {
+    struct Loud(std::thread::ThreadId);
+    impl Drop for Loud {
+        fn drop(&mut self) {
+            QUIET
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|(id, _)| *id != self.0);
+        }
+    }
+    let id = std::thread::current().id();
+    QUIET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((id, quiet));
+    Loud(id)
 }
 
 /// Whether Windows says this computer is presenting, or runs a full-screen
@@ -61,7 +91,13 @@ pub fn now() -> Option<Quiet> {
 /// `POCKETDESK_PRESENTING_FILE`, answers by whether that file exists.
 #[cfg_attr(test, allow(dead_code))]
 fn presenting() -> bool {
-    if let Some(path) = std::env::var_os("POCKETDESK_PRESENTING_FILE") {
+    presenting_with(std::env::var_os("POCKETDESK_PRESENTING_FILE"))
+}
+
+/// [`presenting`], with the seam's file (P3 review: tested without
+/// changing the process's environment).
+fn presenting_with(seam: Option<std::ffi::OsString>) -> bool {
+    if let Some(path) = seam {
         return std::path::Path::new(&path).exists();
     }
     #[cfg(windows)]
@@ -138,13 +174,19 @@ mod tests {
     fn the_seam_answers_by_its_file() {
         let path = std::env::temp_dir().join(format!("pd-presenting-{}", std::process::id()));
         let _ = std::fs::remove_file(&path);
-        // SAFETY: only this test reads the variable.
-        unsafe { std::env::set_var("POCKETDESK_PRESENTING_FILE", &path) };
-        assert!(!presenting());
+        assert!(!presenting_with(Some(path.clone().into())));
         std::fs::write(&path, b"").unwrap();
-        assert!(presenting());
+        assert!(presenting_with(Some(path.clone().into())));
         let _ = std::fs::remove_file(&path);
-        unsafe { std::env::remove_var("POCKETDESK_PRESENTING_FILE") };
+    }
+
+    #[test]
+    fn a_test_is_quiet_only_by_its_guard() {
+        assert_eq!(now(), None);
+        let guard = quiet_for_test(Quiet::Presenting);
+        assert_eq!(now(), Some(Quiet::Presenting));
+        drop(guard);
+        assert_eq!(now(), None);
     }
 
     #[test]

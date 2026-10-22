@@ -79,7 +79,7 @@ impl Schedule {
 pub fn local_now() -> Option<LocalTime> {
     #[cfg(windows)]
     {
-        // SAFETY: GetLocalTime fills the struct it is given.
+        // SAFETY: GetLocalTime takes nothing and returns the time.
         let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
         // wDayOfWeek counts from Sunday.
         Some(LocalTime {

@@ -1272,7 +1272,7 @@ impl SettingsForm {
                     }
                     note(
                         ui,
-                        "Held as a pause holds them: logged on the Activity page, and kept on the Notifications page when the phone lets this computer answer them, but no pop-up. Times are this computer's (22:00); a span past midnight belongs to the day it starts on.",
+                        "Held as a pause holds them: logged on the Activity page, and kept on the Notifications page when the phone lets this computer answer them, but no pop-up. Times are this computer's (22:00); a span past midnight belongs to the day it starts on, and the same time twice is that whole day.",
                     );
                 });
                 row(ui, "quiet_presenting", |ui| {
