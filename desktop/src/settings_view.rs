@@ -876,7 +876,7 @@ impl SettingsForm {
                 row(ui, "phone_drive", |ui| {
                     ui.checkbox(
                         &mut e.phone_drive,
-                        "open the folders a phone shares in the file manager, read-only",
+                        "open the folders a phone shares in the file manager",
                     );
                     note(
                         ui,
