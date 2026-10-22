@@ -95,8 +95,10 @@ class NotifyReceiver : BroadcastReceiver() {
             manager.cancel(id)
             return
         }
+        // O5: a second kind on its own channel, named by the "channel" extra.
+        val channel = intent.getStringExtra("channel")?.takeIf { it.isNotBlank() } ?: CHANNEL
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Fixture", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(channel, if (channel == CHANNEL) "Fixture" else "Fixture $channel", NotificationManager.IMPORTANCE_DEFAULT),
         )
         val title = intent.getStringExtra("title") ?: "Fixture"
         val text = intent.getStringExtra("text") ?: "A notification"
@@ -109,7 +111,7 @@ class NotifyReceiver : BroadcastReceiver() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val builder = Notification.Builder(context, CHANNEL)
+        val builder = Notification.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(text)
