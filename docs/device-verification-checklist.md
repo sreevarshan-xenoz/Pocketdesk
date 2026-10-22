@@ -2562,6 +2562,12 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 188. Notifications shared by their kind as well as their app (O5)
+
+Built 2026-10-22. Owed:
+- [ ] A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
+- [ ] TalkBack reads each kind's switch with its kind.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

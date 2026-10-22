@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-886 open items.
+888 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 11 |
 | A Linux desktop (the Azure VM serves for some) | 105 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 83 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 85 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -2230,3 +2230,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
+
+**188. Notifications shared by their kind as well as their app (O5)**
+
+- A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
+- TalkBack reads each kind's switch with its kind.
