@@ -30,3 +30,20 @@ Each candidate is tried once while Home is up:
 - The rule's cases, in a JVM test: moved, still at its address, saved by name, two cards for one id, no id or an unknown one.
 - The pin copy, in a core test.
 - On a device: owed (checklist §186). It needs this computer at a second address the phone reaches, such as the phone's hotspot, which changes this computer's network: with the owner.
+
+## Review
+
+A fresh review found 0 Critical, 4 Important and 6 Minor. The key proof was confirmed to be a real signature over the connection's transcript. Fixed in one commit:
+
+- **A card moved off an address that still worked** (Important). For example, its tailnet address, while mDNS announced its LAN one. A card now moves only when its old address no longer answers as that computer.
+- **A relay on the network can redirect a card** (Important). A host that forwards to the real computer passes the proof while the old address is down. This is said in SECURITY.md limit 54: what crosses stays end to end with the pinned computer.
+- **A cancelled move could leave the old pin** (Important). The move now runs whole, uncancellable.
+- **A spoofed record could block the real one** (Important). Up to three addresses are tried for each card.
+- **Minor:**
+  - the copied pin is now rolled back when the card cannot take it;
+  - the records move before the card;
+  - only private addresses are tried;
+  - an address that did not answer is tried again;
+  - the old network's wake broadcast is taught again.
+
+Left: the home-screen widgets' keeping by address (they ask again).
