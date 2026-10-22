@@ -45,6 +45,7 @@ pub mod phone_status;
 pub mod phone_switches;
 pub mod pin;
 pub mod quiet;
+pub mod quiet_hours;
 pub mod received;
 pub mod rings;
 pub mod send_menu;

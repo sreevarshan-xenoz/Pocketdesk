@@ -35,7 +35,10 @@ impl Plugin for InUsePlugin {
         // A computer that would not show a phone's notification never says
         // it is in use (N7 review: the others would hold it, and no one
         // would see it).
-        let showing = crate::plugins::notification::shows_phones() && !crate::paused::now();
+        // Quiet hours and presenting (P3) hold them too.
+        let showing = crate::plugins::notification::shows_phones()
+            && !crate::paused::now()
+            && crate::quiet_hours::now().is_none();
         let idle = if telling && showing {
             crate::away_lock::idle_secs()
         } else {

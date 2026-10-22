@@ -646,7 +646,9 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // holds them all alike, still counted, so a phone's burst stays bounded
     // (K2a review).
     let muted = muted_here(&app);
-    let held = held_here(muted, false);
+    // P3: quiet hours, or presenting, hold them as a pause does.
+    let quiet = crate::quiet_hours::now();
+    let held = held_here(muted, quiet.is_some());
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -656,10 +658,14 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     {
         return;
     }
+    let mut meta = serde_json::json!({ "app": app });
+    if let Some(quiet) = quiet {
+        meta[quiet.field()] = serde_json::json!(true);
+    }
     crate::events::emit(
         "notification",
         Some(device_id),
-        serde_json::json!({ "app": app }),
+        meta,
         serde_json::json!({ "title": title, "text": text }),
     );
     if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || held {
@@ -919,7 +925,9 @@ impl Plugin for NotificationPlugin {
                 let in_hand = phone_in_use(&packet.body);
                 // N7: another computer of the owner's is in use, not this one.
                 let elsewhere = marked_elsewhere(&packet.body);
-                let held = held_here(muted, in_hand || elsewhere);
+                // P3: quiet hours, or presenting, hold it as a pause does.
+                let quiet = crate::quiet_hours::now();
+                let held = held_here(muted, in_hand || elsewhere || quiet.is_some());
                 // N4: an ongoing update is one card, updated in place; only
                 // its first counts against the limit and is an event.
                 let live = pocketdesk_core::protocol::live::Live::from_body(&packet.body);
@@ -1005,6 +1013,9 @@ impl Plugin for NotificationPlugin {
                 }
                 if elsewhere {
                     meta["in_use_elsewhere"] = serde_json::json!(true);
+                }
+                if let Some(quiet) = quiet {
+                    meta[quiet.field()] = serde_json::json!(true);
                 }
                 if live.is_some() {
                     meta["live"] = serde_json::json!(true);

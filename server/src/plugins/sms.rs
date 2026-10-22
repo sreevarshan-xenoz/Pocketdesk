@@ -436,9 +436,9 @@ fn forget(dir: &Path, id: &str) {
 /// Daemon task: hand the desktop app's replies to their phones, and give up
 /// on those never confirmed.
 /// Whether a text that came is shown here: text notifications on, and this
-/// computer not paused (K2a).
+/// computer not paused (K2a) nor quiet (P3).
 fn shows_texts() -> bool {
-    NOTIFY.load(Ordering::Relaxed) && !crate::paused::now()
+    NOTIFY.load(Ordering::Relaxed) && !crate::paused::now() && crate::quiet_hours::now().is_none()
 }
 
 pub async fn run_watcher() {

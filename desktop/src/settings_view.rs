@@ -214,6 +214,15 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Notifications a minute, per phone",
         Section::Notifications,
     ),
+    ("quiet_hours", "Quiet hours", Section::Notifications),
+    ("quiet_from", "Quiet hours start", Section::Notifications),
+    ("quiet_to", "Quiet hours end", Section::Notifications),
+    ("quiet_days", "Quiet hours' days", Section::Notifications),
+    (
+        "quiet_presenting",
+        "While presenting or in full screen",
+        Section::Notifications,
+    ),
     (
         "toast_answers",
         "Answer in the notification",
@@ -359,6 +368,7 @@ fn drawn_in(key: &str) -> &str {
     match key {
         "mqtt_broker" | "mqtt_user" | "mqtt_password" => "home_assistant",
         "events_detail" => "events",
+        "quiet_from" | "quiet_to" | "quiet_days" => "quiet_hours",
         _ => key,
     }
 }
@@ -368,6 +378,8 @@ fn drawn_in(key: &str) -> &str {
 fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
+        // P3: Windows says when it is presenting; Linux does not.
+        "quiet_presenting" => cfg!(windows),
         "clipboard_hotkey" | "typing_hotkey" | "away_lock_minutes" | "mic_relay_device" => {
             cfg!(windows)
         }
@@ -465,6 +477,11 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_drive_write"
             | "charged_alert"
             | "phone_storage_alerts"
+            | "quiet_hours"
+            | "quiet_from"
+            | "quiet_to"
+            | "quiet_days"
+            | "quiet_presenting"
             | "away_lock_minutes"
     )
 }
@@ -1216,6 +1233,54 @@ impl SettingsForm {
                             .suffix(" a minute"),
                     );
                 });
+                // P3: phones' notifications held at times of the owner's.
+                row(ui, "quiet_hours", |ui| {
+                    ui.checkbox(
+                        &mut e.quiet_hours,
+                        "hold phones' notifications and texts at these times",
+                    );
+                    ui.add_enabled_ui(e.quiet_hours, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("From");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.quiet_from)
+                                    .hint_text("22:00")
+                                    .desired_width(56.0),
+                            );
+                            ui.label("to");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut e.quiet_to)
+                                    .hint_text("07:00")
+                                    .desired_width(56.0),
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            let days = &mut e.quiet_days;
+                            for (day, label) in pocketdesk_core::local::quiet_hours::DAYS
+                                .iter()
+                                .zip(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+                            {
+                                let mut on = days.iter().any(|d| d.eq_ignore_ascii_case(day));
+                                if ui.checkbox(&mut on, label).changed() {
+                                    *days = with_day(days, day, on);
+                                }
+                            }
+                        });
+                    });
+                    if let Some(problem) = quiet_problem(e) {
+                        ui.label(RichText::new(problem).small().color(crate::theme::warn(ui)));
+                    }
+                    note(
+                        ui,
+                        "Held as a pause holds them: logged on the Activity page, and kept on the Notifications page when the phone lets this computer answer them, but no pop-up. Times are this computer's (22:00); a span past midnight belongs to the day it starts on.",
+                    );
+                });
+                row(ui, "quiet_presenting", |ui| {
+                    ui.checkbox(
+                        &mut e.quiet_presenting,
+                        "hold them while Windows says this computer is presenting or runs something in full screen",
+                    );
+                });
                 row(ui, "toast_answers", |ui| {
                     ui.checkbox(
                         &mut e.toast_answers,
@@ -1903,6 +1968,35 @@ fn row(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui)) {
     add(ui);
 }
 
+/// `days` with `day` on or off, in the week's order.
+fn with_day(days: &[String], day: &str, on: bool) -> Vec<String> {
+    pocketdesk_core::local::quiet_hours::DAYS
+        .iter()
+        .filter(|d| {
+            if d.eq_ignore_ascii_case(day) {
+                on
+            } else {
+                days.iter().any(|x| x.eq_ignore_ascii_case(d))
+            }
+        })
+        .map(|d| d.to_string())
+        .collect()
+}
+
+/// What keeps quiet hours from holding anything, said beside them.
+fn quiet_problem(config: &Config) -> Option<&'static str> {
+    use pocketdesk_core::local::quiet_hours::{days_mask, parse_time};
+    if !config.quiet_hours {
+        return None;
+    }
+    if parse_time(&config.quiet_from).is_none() || parse_time(&config.quiet_to).is_none() {
+        return Some(
+            "Write the times as hours and minutes, such as 22:00 and 07:00. Until then nothing is held.",
+        );
+    }
+    (days_mask(&config.quiet_days) == 0).then_some("No day is chosen, so nothing is held.")
+}
+
 /// A row's note, small and quiet.
 fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).small().weak());
@@ -1958,6 +2052,30 @@ mod tests {
         assert!(!row_shown("laser", "control_port"));
         assert!(row_shown("", "control_port"));
         assert!(row_shown("  ", "control_port"), "only spaces is nothing");
+    }
+
+    /// P3: days stay in the week's order, and the row says what holds nothing.
+    #[test]
+    fn quiet_hours_days_and_problems() {
+        use super::{quiet_problem, with_day};
+        let days = |d: &[&str]| d.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            with_day(&days(&["fri"]), "mon", true),
+            days(&["mon", "fri"])
+        );
+        assert_eq!(
+            with_day(&days(&["mon", "fri"]), "mon", false),
+            days(&["fri"])
+        );
+        let mut config = pocketdesk_core::local::config::Config::default();
+        assert_eq!(quiet_problem(&config), None, "off: nothing to say");
+        config.quiet_hours = true;
+        assert_eq!(quiet_problem(&config), None);
+        config.quiet_from = "10pm".into();
+        assert!(quiet_problem(&config).unwrap().contains("22:00"));
+        config.quiet_from = "22:00".into();
+        config.quiet_days.clear();
+        assert!(quiet_problem(&config).unwrap().contains("No day"));
     }
 
     /// J2 review: a setting drawn in another's row is found through that

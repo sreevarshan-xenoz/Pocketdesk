@@ -338,6 +338,11 @@ pub fn describe(event: &Event) -> String {
             {
                 // N7: shown where the owner was working instead.
                 line.push_str(" (not shown: another computer was in use)");
+            } else if event.fields.get("quiet_hours").and_then(Value::as_bool) == Some(true) {
+                // P3.
+                line.push_str(" (not shown: quiet hours)");
+            } else if event.fields.get("presenting").and_then(Value::as_bool) == Some(true) {
+                line.push_str(" (not shown: presenting or in full screen)");
             }
             line
         }
@@ -588,6 +593,20 @@ mod tests {
                 json!({"app": "Signal", "in_use_elsewhere": true})
             )),
             "Notification from Signal (not shown: another computer was in use)"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Signal", "quiet_hours": true})
+            )),
+            "Notification from Signal (not shown: quiet hours)"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Signal", "presenting": true})
+            )),
+            "Notification from Signal (not shown: presenting or in full screen)"
         );
         assert_eq!(describe(&event("text_received", json!({}))), "A text");
         assert_eq!(

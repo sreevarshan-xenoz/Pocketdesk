@@ -57,6 +57,7 @@ pub mod phone_sound;
 pub mod platform;
 pub mod plugins;
 pub mod privacy;
+pub mod quiet_hours;
 pub mod quiet_phone;
 pub mod relay;
 pub mod ring_phone;

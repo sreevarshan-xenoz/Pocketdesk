@@ -218,6 +218,23 @@ pub struct Config {
     /// Whether a phone running out of room is told of once (N9). On.
     #[serde(default = "default_true")]
     pub phone_storage_alerts: bool,
+    /// Quiet hours (P3): phones' notifications held, as a pause holds them,
+    /// from `quiet_from` to `quiet_to` on `quiet_days`. Off.
+    #[serde(default)]
+    pub quiet_hours: bool,
+    /// When quiet hours start, `HH:MM` in this computer's time.
+    #[serde(default = "default_quiet_from")]
+    pub quiet_from: String,
+    /// When quiet hours end; before `quiet_from` for a span past midnight.
+    #[serde(default = "default_quiet_to")]
+    pub quiet_to: String,
+    /// The days quiet hours start on (`mon` to `sun`); every day.
+    #[serde(default = "default_quiet_days")]
+    pub quiet_days: Vec<String>,
+    /// Phones' notifications held while this computer is presenting or
+    /// runs something in full screen (P3; Windows). Off.
+    #[serde(default)]
+    pub quiet_presenting: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -277,6 +294,21 @@ pub struct Config {
 
 fn default_transfer_keep_hours() -> u32 {
     24
+}
+
+fn default_quiet_from() -> String {
+    "22:00".to_string()
+}
+
+fn default_quiet_to() -> String {
+    "07:00".to_string()
+}
+
+fn default_quiet_days() -> Vec<String> {
+    super::quiet_hours::DAYS
+        .iter()
+        .map(|d| d.to_string())
+        .collect()
 }
 
 fn default_away_lock_minutes() -> u32 {
@@ -406,6 +438,11 @@ impl Default for Config {
             phone_battery_alerts: true,
             charged_alert: 0,
             phone_storage_alerts: true,
+            quiet_hours: false,
+            quiet_from: default_quiet_from(),
+            quiet_to: default_quiet_to(),
+            quiet_days: default_quiet_days(),
+            quiet_presenting: false,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -636,6 +673,11 @@ impl Config {
         "phone_battery_alerts",
         "charged_alert",
         "phone_storage_alerts",
+        "quiet_hours",
+        "quiet_from",
+        "quiet_to",
+        "quiet_days",
+        "quiet_presenting",
         "sms_keep",
         "sms_names",
         "wake_announce",
