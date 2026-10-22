@@ -372,9 +372,36 @@ pub(crate) async fn read_text() -> std::io::Result<Option<String>> {
         // The image stand-in alone: the stand-ins are the clipboard, and
         // there is no text (M3 review).
         None if image_stand_in().is_some() => (None, None),
-        None => (read_system_text().await?, clipboard_owner()),
+        None => {
+            let before = clipboard_sequence();
+            let text = read_system_text().await?;
+            let owner = clipboard_owner();
+            same_copy(before)?;
+            (text, owner)
+        }
     };
     Ok(text.filter(|t| !is_pairing_link(t) && !held_here(Some(t), owner.as_deref())))
+}
+
+/// The clipboard's sequence number, where the system keeps one (Windows).
+fn clipboard_sequence() -> Option<u32> {
+    #[cfg(windows)]
+    return Some(crate::platform::clipboard_windows::sequence());
+    #[cfg(not(windows))]
+    None
+}
+
+/// An error when the clipboard changed since `before` (O4 review): its
+/// content and its owner were read a moment apart, so a copy made between
+/// them would be judged by another copy's program. The read is tried again.
+fn same_copy(before: Option<u32>) -> std::io::Result<()> {
+    if clipboard_sequence() == before {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(
+            "the clipboard changed while it was read",
+        ))
+    }
 }
 
 /// The program that made the clipboard's copy, when the system says
@@ -410,6 +437,16 @@ pub(crate) fn held_here(text: Option<&str>, owner: Option<&str>) -> bool {
         match cached.as_ref() {
             Some((made_for, filter)) if *made_for == key => filter.clone(),
             _ => {
+                // A pattern a hand edit left unreadable is said, once a change
+                // (O4 review: it was dropped without a word).
+                for pattern in &key.1 {
+                    if let Some(problem) =
+                        pocketdesk_core::local::clip_filter::pattern_problem(pattern.trim())
+                        && !pattern.trim().is_empty()
+                    {
+                        tracing::warn!("Settings' \"Never send copies that look like\": {problem}");
+                    }
+                }
                 let filter = Arc::new(pocketdesk_core::local::clip_filter::ClipFilter::new(
                     &key.0, &key.1,
                 ));
@@ -436,12 +473,13 @@ pub(crate) fn held_here(text: Option<&str>, owner: Option<&str>) -> bool {
 
 /// [`read_clipboard_unfiltered`], less what Settings keep here (O4).
 async fn read_clipboard() -> Result<Clip> {
+    let system = stand_in().is_none() && image_stand_in().is_none();
+    let before = clipboard_sequence();
     let clip = read_clipboard_unfiltered().await?;
-    let owner = if stand_in().is_none() && image_stand_in().is_none() {
-        clipboard_owner()
-    } else {
-        None
-    };
+    let owner = if system { clipboard_owner() } else { None };
+    if system {
+        same_copy(before).map_err(other)?;
+    }
     Ok(match &clip {
         Clip::Text(text) if held_here(Some(text), owner.as_deref()) => Clip::Empty,
         Clip::Image(_) if held_here(None, owner.as_deref()) => Clip::Empty,
