@@ -23,6 +23,9 @@ object PhoneEvents {
         FILES_SENT,
         LINK_RECEIVED,
         TASK_FINISHED,
+
+        /** O1: a deck button an automation app asked for was pressed, or why not. */
+        DECK_PRESSED,
         ;
 
         val action: String get() = ACTION_PREFIX + name
@@ -37,6 +40,7 @@ object PhoneEvents {
         Kind.FILES_SENT to setOf("count", "failed"),
         Kind.LINK_RECEIVED to emptySet(),
         Kind.TASK_FINISHED to setOf("task", "state", "code", "timed_out", "reason"),
+        Kind.DECK_PRESSED to setOf("label", "state", "reason"),
     )
 
     /** One event, ready to broadcast. */

@@ -58,4 +58,13 @@ class TaskRunTest {
         assertEquals(true, TaskRun.told(Status.StoppedAtDeadline)["timed_out"])
         assertFalse(TaskRun.told(Status.NotSent("secret reason")).values.contains("secret reason"))
     }
+
+    @Test
+    fun aRunFollowedTooLongIsGivenUp() {
+        val long = TaskRun.FOLLOW_MS + 1
+        // A link that dropped after "running" brings no end (O1 review).
+        assertEquals(Status.NoAnswer, TaskRun.followedTooLong(Status.Running, long))
+        assertEquals(Status.Running, TaskRun.followedTooLong(Status.Running, TaskRun.FOLLOW_MS))
+        assertEquals(Status.Done(0), TaskRun.followedTooLong(Status.Done(0), long))
+    }
 }

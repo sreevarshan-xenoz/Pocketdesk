@@ -372,6 +372,12 @@ fun SettingsScreen(onBack: () -> Unit) {
                 { Prefs.setOthersChooseComputer(context, it) },
             )
             SettingSwitch(
+                stringResource(R.string.settings_others_run_tasks),
+                stringResource(R.string.settings_others_run_tasks_summary),
+                Prefs.othersRunTasks(context),
+                { Prefs.setOthersRunTasks(context, it) },
+            )
+            SettingSwitch(
                 stringResource(R.string.settings_tell_other_apps),
                 stringResource(R.string.settings_tell_other_apps_summary),
                 Prefs.tellOtherApps(context),

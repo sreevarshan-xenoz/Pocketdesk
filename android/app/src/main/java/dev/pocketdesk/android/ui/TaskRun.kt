@@ -63,6 +63,16 @@ object TaskRun {
             else -> Status.Waiting(asks)
         }
 
+    /**
+     * How long a run is followed from outside a screen (O1 review): a link
+     * that dropped after "running" brings no end, so the follow stops.
+     */
+    const val FOLLOW_MS = 15 * 60_000L
+
+    /** [status], or [Status.NoAnswer] once a run not over was followed [followedMs] past [FOLLOW_MS]. */
+    fun followedTooLong(status: Status, followedMs: Long): Status =
+        if (!finished(status) && followedMs > FOLLOW_MS) Status.NoAnswer else status
+
     /** Whether the run is over, so the app stops asking for its result. */
     fun finished(status: Status): Boolean = status !is Status.Waiting && status != Status.Running
 
