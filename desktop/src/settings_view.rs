@@ -330,13 +330,11 @@ fn drawn_in(key: &str) -> &str {
 fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
-        "clipboard_hotkey"
-        | "typing_hotkey"
-        | "away_lock_minutes"
-        | "mic_relay_device"
-        | "phone_media_controls" => {
+        "clipboard_hotkey" | "typing_hotkey" | "away_lock_minutes" | "mic_relay_device" => {
             cfg!(windows)
         }
+        // N10: an MPRIS player on Linux.
+        "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
     }
 }
@@ -929,16 +927,24 @@ impl SettingsForm {
                         );
                     });
                 }
-                // Windows only: Linux's MPRIS player is not built (K7).
-                if cfg!(windows) {
+                // Windows, and Linux through MPRIS (N10).
+                if cfg!(any(windows, target_os = "linux")) {
                     row(ui, "phone_media_controls", |ui| {
                         ui.checkbox(
                             &mut e.phone_media_controls,
-                            "show a phone's player in the volume flyout, with its buttons",
+                            if cfg!(windows) {
+                                "show a phone's player in the volume flyout, with its buttons"
+                            } else {
+                                "show a phone's player in the desktop's media controls, with its buttons"
+                            },
                         );
                         note(
                             ui,
-                            "While a phone in a session plays music and says so (\"My media on the computer\" on in its Settings, Pocketdesk in front on the phone, and Media on the Devices page here), Windows' media controls show its song with Previous, Play/Pause and Next; a paused one stays five minutes. The keyboard's media keys may then go to the phone instead of a player here. It needs the tray program (pocketdesk-tray) beside the app.",
+                            if cfg!(windows) {
+                                "While a phone in a session plays music and says so (\"My media on the computer\" on in its Settings, Pocketdesk in front on the phone, and Media on the Devices page here), Windows' media controls show its song with Previous, Play/Pause and Next; a paused one stays five minutes. The keyboard's media keys may then go to the phone instead of a player here. It needs the tray program (pocketdesk-tray) beside the app."
+                            } else {
+                                "While a phone in a session plays music and says so (\"My media on the computer\" on in its Settings, Pocketdesk in front on the phone, and Media on the Devices page here), the desktop's media controls (GNOME's and KDE's, playerctl) show its song as a player named \"Pocketdesk (the phone's music)\", with Previous, Play/Pause and Next; a paused one stays five minutes. Media keys your desktop sends to the newest player may then go to the phone. It needs the tray program (pocketdesk-tray) beside the app."
+                            },
                         );
                     });
                 }

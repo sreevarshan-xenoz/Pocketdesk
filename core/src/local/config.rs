@@ -168,7 +168,8 @@ pub struct Config {
     #[serde(default)]
     pub typing_hotkey: String,
     /// Show a phone's player in this computer's own media controls (K7):
-    /// Windows' volume flyout and media keys, through the tray program.
+    /// Windows' volume flyout and media keys, or an MPRIS player on Linux
+    /// (N10), through the tray program.
     /// Off by default.
     #[serde(default)]
     pub phone_media_controls: bool,
