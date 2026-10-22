@@ -439,7 +439,7 @@ Items below are re-scored against that build.
 
 ## 22. Owed verification register
 
-**This is the gate for Phase 0 of [roadmap-execution-plan.md](roadmap-execution-plan.md) item 5 — nothing
+**This was the gate for Phase 0, item 5 — nothing
 in Phase 1 starts while it is open.** Every line here is a claim the repo already makes that no human has
 checked on hardware, or a fix that shipped without its one confirming observation.
 
@@ -490,14 +490,14 @@ Requires: SIM with data, Wi-Fi off, and an external relay or a second network.
 Recording these here so a tester does not file them as regressions:
 
 - Desktop audio audible on the phone — there is no client-side Opus player (`receiveAudio` has no caller);
-  see roadmap-3000 **2791-2800**, and §10's "audio" results are about *control* (routing/volume), not playout.
+  see the old backlog's **2791-2800** (in git history), and §10's "audio" results are about *control* (routing/volume), not playout.
 - The file browser — the server plugin answers, `listRemoteFiles` has zero call sites (**2874**).
 - Notification per-app channels, grouping, icons, privacy modes (**2898-2905**).
 - Every K (virtual display) and L (macro/automation) behaviour — neither subsystem exists.
 
 ## 23. Windows host (W1: core remote desktop)
 
-Built on `feat/windows-host`; plan `docs/superpowers/plans/2026-10-09-windows-host.md`. Box-verified
+Built on `feat/windows-host`. Box-verified
 already (ignored live tests, run on the dev PC): WGC and DXGI capture of a real frame, NVENC/AMF/MF
 encodes, SendInput pointer + key, clipboard round-trip, toast accepted.
 
@@ -556,7 +556,7 @@ Get-Content "$env:LOCALAPPDATA\pocketdesk\logs\pocketdesk.*.log" -Wait
 
 ## 24. Desktop app and QR pairing
 
-Built on `feat/pocketdesk`; spec `docs/superpowers/specs/2026-10-12-pocketdesk-desktop-app-design.md`.
+Built on `feat/pocketdesk`.
 
 Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
 - every tab against the live server;
@@ -579,7 +579,7 @@ Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
 
 ## 25. Desktop sound on the phone
 
-Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio-playback-design.md`. First device run 2026-10-12 (Galaxy A71, USB + WAN direct, Windows desktop): the player starts with the session, a 48 kHz stereo low-latency AudioTrack reaches `state:started` and keeps serving frames, and the playout thread averages about 4.5 % of a core. Not yet checked by ear: how it sounds, latency, the switch, focus with calls or other apps, PiP.
+Built on `feat/phone-audio`. First device run 2026-10-12 (Galaxy A71, USB + WAN direct, Windows desktop): the player starts with the session, a 48 kHz stereo low-latency AudioTrack reaches `state:started` and keeps serving frames, and the playout thread averages about 4.5 % of a core. Not yet checked by ear: how it sounds, latency, the switch, focus with calls or other apps, PiP.
 
 - [ ] Play a video on the desktop during a session: the phone plays its sound, and the lag behind the picture is small (≤ ~150 ms by ear).
 - [ ] Quick Settings → "Desktop sound on this phone" off: silent at once; on again: sound returns within a second. The setting survives an app restart.
@@ -592,7 +592,7 @@ Built on `feat/phone-audio`; spec `docs/superpowers/specs/2026-10-12-phone-audio
 
 ## 26. In-session keyboard
 
-Built on `feat/in-session-keyboard`; spec `docs/superpowers/specs/2026-10-12-in-session-keyboard-design.md`.
+Built on `feat/in-session-keyboard`.
 
 Checked on 2026-10-12 with the Galaxy A71 against the Windows host, typing into Notepad and reading it back through UI Automation:
 - the keyboard chip opens Gboard on the sink view, the bar docks above it, and the stream sits above both;
@@ -613,7 +613,7 @@ Checked on 2026-10-12 with the Galaxy A71 against the Windows host, typing into 
 
 ## 27. Trackpad gestures
 
-Built on `feat/trackpad-gestures`; roadmap F3 (`docs/superpowers/specs/2026-10-12-feature-roadmap.md`).
+Built on `feat/trackpad-gestures`; roadmap F3.
 
 Checked on 2026-10-12 with the Galaxy A71 against Windows:
 - a tap, then a touch-and-drag within 300 ms, selected a Notepad line (read back through UI Automation);
@@ -629,7 +629,7 @@ Checked on 2026-10-12 with the Galaxy A71 against Windows:
 
 ## 28. Permissions and session approval
 
-Built on `feat/approvals-permissions`; spec `docs/superpowers/specs/2026-10-13-approvals-permissions-design.md`.
+Built on `feat/approvals-permissions`.
 
 Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. The answers were written to the answer file directly, as the app does; nobody clicked the prompt.
 - with "ask first" on, the session is held, the request appears in `pending_approvals.json`, and the phone shows "waiting for the picture" with the approval hint;
@@ -647,7 +647,7 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host, over WAN. Th
 
 ## 29. Computers on this network
 
-Built on `feat/lan-discovery`; spec `docs/superpowers/specs/2026-10-13-lan-discovery-design.md`.
+Built on `feat/lan-discovery`.
 
 Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi:
 - the host was found in about 0.2 s at its LAN address (not its link-local or Tailscale address), and the saved card, saved as 127.0.0.1 and matched by its paired id, showed "On this network";
@@ -667,7 +667,7 @@ Checked on 2026-10-13 with the Galaxy A71 and the Windows host on the same Wi-Fi
 
 ## 30. Sending files to the desktop
 
-Built on `feat/file-transfer`; spec `docs/superpowers/specs/2026-10-13-file-transfer-design.md`.
+Built on `feat/file-transfer`.
 
 Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN. Three shares 1.5 s apart (2, 4 and 6 MB) queued on the phone and were sent one after another with matching MD5s. All three appear in `received.json`, and the final notification read "Sent 3 files to …".
 
@@ -679,7 +679,7 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN. Thr
 
 ## 31. Files both ways and the remote browser
 
-Built on `feat/file-transfer-b`; spec `docs/superpowers/specs/2026-10-13-file-transfer-b-design.md`.
+Built on `feat/file-transfer-b`.
 
 Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - Files on this computer opened at the home folder, a sub-folder, and Up.
@@ -898,7 +898,7 @@ Still owed on Linux:
 
 ## 45. Phase R3 and R4: hostile connections, and idle cost
 
-R3 is tested in code (the table in `docs/superpowers/specs/2026-10-14-phase-r-reliability.md`). On a device:
+R3 is tested in code (see its status-history entry). On a device:
 - [x] A LAN session still connects with the stream port's QUIC Retry (A71 → Windows, 2026-10-14; view-only held).
 - [x] Three shares back to back (0.8, 1.6, 2.4 MB): all three saved with matching MD5s, about 0.3 s apart, none refused (A71 → Windows, 2026-10-14). A single SEND_MULTIPLE of three is still owed: `am` cannot build one.
 - [x] A folder of 15 000 files: the sheet says at the top that only the first items are shown, and lists them (A71 → Windows, 2026-10-14).
@@ -2565,5 +2565,5 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
-tick plan.md's Tier checkboxes with real device results — items marked
+record real device results — items marked
 "device behavior unverified" are not done until this file says they are.

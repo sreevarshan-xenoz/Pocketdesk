@@ -128,7 +128,7 @@ wayland-scanner = { version = "0.31", optional = true }
 wayland-backend = { version = "0.3", optional = true }
 bitflags = { version = "2", optional = true }
 # In-process FFmpeg (software x264 + VAAPI). Windows encodes through the
-# ffmpeg sidecar only; see docs/superpowers/specs/2026-10-08-windows-host-design.md §4.
+# ffmpeg sidecar only (W0-W1 in docs/status-history.md).
 ffmpeg-next = { workspace = true, optional = true }
 # Input injection via uinput
 evdev = { workspace = true, optional = true }

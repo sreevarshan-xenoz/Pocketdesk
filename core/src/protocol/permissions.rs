@@ -1,5 +1,5 @@
-//! What a paired device may do (roadmap F5; spec
-//! `docs/superpowers/specs/2026-10-13-approvals-permissions-design.md`).
+//! What a paired device may do (roadmap F5; its entry in
+//! `docs/status-history.md`).
 //!
 //! Stored per device in `trusted_devices.json` beside its trust. An entry
 //! keeps only what differs from the defaults, so a capability added later
