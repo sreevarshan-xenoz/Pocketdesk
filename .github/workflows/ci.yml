@@ -25,9 +25,10 @@ jobs:
 
       - name: Install system dependencies
         # The runner's Microsoft package source has hung or failed this step
-        # for an hour at a time; nothing here comes from it.
-        timeout-minutes: 15
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -86,9 +87,10 @@ jobs:
 
       - name: Install system dependencies
         # The runner's Microsoft package source has hung or failed this step
-        # for an hour at a time; nothing here comes from it.
-        timeout-minutes: 15
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -169,9 +171,10 @@ jobs:
 
       - name: Install system dependencies
         # The runner's Microsoft package source has hung or failed this step
-        # for an hour at a time; nothing here comes from it.
-        timeout-minutes: 15
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -245,9 +248,10 @@ jobs:
 
       - name: Install system dependencies
         # The runner's Microsoft package source has hung or failed this step
-        # for an hour at a time; nothing here comes from it.
-        timeout-minutes: 15
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -294,9 +298,10 @@ jobs:
 
       - name: Install system dependencies
         # The runner's Microsoft package source has hung or failed this step
-        # for an hour at a time; nothing here comes from it.
-        timeout-minutes: 15
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev mesa-vulkan-drivers
+        # for an hour at a time; nothing here comes from it. Recommends are left
+        # out: the slow mirror took 15 minutes on them alone.
+        timeout-minutes: 30
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod* && sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && sudo apt-get install -y --no-install-recommends libpipewire-0.3-dev libwayland-dev libegl1-mesa-dev libgbm-dev pkg-config libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev mesa-vulkan-drivers
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
