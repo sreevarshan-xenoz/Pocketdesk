@@ -2564,7 +2564,10 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 
 ## 188. Notifications shared by their kind as well as their app (O5)
 
-Built 2026-10-22. Owed:
+Built 2026-10-22. Checked on the OPPO (CPH2359) with the fixture app's two channels against a throwaway server:
+- [x] Both kinds listed under the app by their titles ("Message A", "Updating messages"), and both sent while on.
+- [x] "Updating messages" switched off in Settings: the next one in that kind stayed on the phone, the next message went.
+Owed:
 - [ ] A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
 - [ ] TalkBack reads each kind's switch with its kind.
 
