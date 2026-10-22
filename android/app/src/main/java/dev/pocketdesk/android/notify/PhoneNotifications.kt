@@ -163,6 +163,16 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** When the computers were last asked whether they are in use (N7). */
     private var inUseAskedMs = Long.MIN_VALUE / 2
 
+    /** The asks' own thread (N7 review), one at a time, a busy one skipped. */
+    private val inUseAsker = java.util.concurrent.ThreadPoolExecutor(
+        1,
+        1,
+        0,
+        TimeUnit.MILLISECONDS,
+        java.util.concurrent.ArrayBlockingQueue(1),
+        java.util.concurrent.ThreadPoolExecutor.DiscardPolicy(),
+    )
+
     /** When a notification last went to the computer (L1). */
     @Volatile
     private var lastSentMs = Long.MIN_VALUE / 2
@@ -318,6 +328,7 @@ class PhoneNotificationListener : NotificationListenerService() {
     override fun onDestroy() {
         calls.stop()
         answerTicker.shutdownNow()
+        inUseAsker.shutdownNow()
         keeperTicker.shutdownNow()
         // Access taken away ends the listener: stop the link's service with it (M1).
         runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(this) }
@@ -852,10 +863,16 @@ class PhoneNotificationListener : NotificationListenerService() {
         // link, L1 review: else a link to each all day).
         // N7: whether each computer is in use, asked on the own link and the
         // others', which are kept for it.
-        val toastWhere = Prefs.toastWhereWorking(this) && PhoneNotificationPrefs.enabled(this)
+        // Only in the ten minutes after a notification went, as clears are
+        // (N7 review: not links and asks all day); the first one after a
+        // quiet spell goes to every computer as it would without the switch.
+        val toastWhere = Prefs.toastWhereWorking(this) && PhoneNotificationPrefs.enabled(this) &&
+            SystemClock.elapsedRealtime() - lastSentMs < CLEAR_LINK_MS
         if (ToastWhere.askDue(toastWhere, SystemClock.elapsedRealtime() - inUseAskedMs)) {
             inUseAskedMs = SystemClock.elapsedRealtime()
-            askInUse(own)
+            // On a thread of its own (N7 review): a half-open link waits
+            // seconds, and the answers tick must not.
+            inUseAsker.execute { runCatching { askInUse(own) } }
         }
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted || opensWanted || toastWhere)
         // M4: typing comes on the own computer's link, kept while it may come.
