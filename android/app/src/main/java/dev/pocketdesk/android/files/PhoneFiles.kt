@@ -247,8 +247,9 @@ class PhoneFiles(private val ctx: Context) {
             val (docId, dir) = resolve(tree, parent) ?: return@runCatching "That folder is not on the phone any more"
             if (!dir) return@runCatching "That is not a folder"
             var taken = false
+            // As a provider that ignores case would see it (N6 review).
             eachChild(tree, docId) {
-                if (it.name == name) taken = true
+                if (it.name.equals(name, ignoreCase = true)) taken = true
                 !taken
             }
             if (taken) return@runCatching AddRule.EXISTS
