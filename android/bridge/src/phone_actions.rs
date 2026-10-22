@@ -33,7 +33,9 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
     let app = body.get("app").and_then(|v| v.as_str());
     let mut ask = serde_json::json!({ "host": host, "port": port, "action": action.as_str() });
     match (action, app) {
-        (PhoneAction::Open, Some(app)) if pocketdesk_core::protocol::phone_action::valid_app_id(app) => {
+        (PhoneAction::Open, Some(app))
+            if pocketdesk_core::protocol::phone_action::valid_app_id(app) =>
+        {
             ask["app"] = serde_json::Value::from(app);
         }
         (PhoneAction::Open, _) => {

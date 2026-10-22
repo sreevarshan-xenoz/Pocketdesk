@@ -64,6 +64,9 @@ object PhoneActionRule {
 
         /** More than [PER_MINUTE] in a minute. */
         TOO_MANY,
+
+        /** P2: an app the phone did not list for the computer. */
+        NOT_LISTED,
     }
 
     /**
@@ -86,20 +89,24 @@ object PhoneActionRule {
         screenshots: Boolean,
         withinBudget: Boolean,
         appsOn: Boolean = false,
+        listed: Boolean = false,
     ): Decision = when {
         // P2: a list needs no service and shows nothing on the phone; an
         // open needs the service (Android lets a bound one start an app
         // from the background), an unlocked phone, awake.
+        // The list, only for an unlocked phone (P2 review: it names every app).
         action == Action.APPS -> when {
             !appsOn -> Decision.OFF
             !own -> Decision.NOT_OWN
+            locked -> Decision.LOCKED
             !withinBudget -> Decision.TOO_MANY
             else -> Decision.DO
         }
+        // An open needs no service: without it, "Tap to open" (P2 review).
         action == Action.OPEN -> when {
             !appsOn -> Decision.OFF
             !own -> Decision.NOT_OWN
-            !service -> Decision.NO_SERVICE
+            !listed -> Decision.NOT_LISTED
             locked -> Decision.LOCKED
             !awake -> Decision.ASLEEP
             !withinBudget -> Decision.TOO_MANY

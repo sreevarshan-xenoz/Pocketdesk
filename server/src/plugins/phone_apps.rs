@@ -39,8 +39,11 @@ impl Plugin for PhoneAppsPlugin {
             return Ok(());
         };
         let count = apps.len();
-        // Off the runtime: a read and a write of a small file.
+        // Off the runtime: a read and a write of a small file, one writer at
+        // a time (P2 review: two lists at once could lose one).
+        static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let kept = tokio::task::spawn_blocking(move || {
+            let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
             pocketdesk_core::local::phone_apps::keep(
                 &dir,
                 &device,

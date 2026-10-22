@@ -11,6 +11,9 @@ use pocketdesk_core::protocol::phone_action::PhoneApp;
 /// How often the box reads the phone's list while it shows.
 const READ_EVERY: Duration = Duration::from_secs(1);
 
+/// How long the box waits for the phone's answer before saying it has none.
+const ANSWER_WITHIN_SECS: u64 = 15;
+
 /// The most apps drawn at once: a search narrows the rest.
 const MAX_SHOWN: usize = 60;
 
@@ -71,11 +74,15 @@ impl AppsBox {
                     action = Some(Action::Close);
                 }
             });
-            let fresh = self.listed_at.is_some_and(|at| at + 2 >= self.asked_at);
-            if self.apps.is_empty() || !fresh {
-                ui.label(
-                    "Asking the phone for its apps… It answers with \"Let the computer open my apps\" on in Pocketdesk's Settings there.",
-                );
+            // A list made since this ask; an older one is shown greyed (P2 review).
+            let fresh = list_fresh(self.listed_at, self.asked_at);
+            if !fresh {
+                let waited = now_unix().saturating_sub(self.asked_at);
+                ui.label(if waited < ANSWER_WITHIN_SECS {
+                    "Asking the phone for its apps…"
+                } else {
+                    "No answer from the phone. It answers while unlocked, with \"Let the computer open my apps\" on in Pocketdesk's Settings there."
+                });
                 if self.apps.is_empty() {
                     return;
                 }
@@ -96,7 +103,7 @@ impl AppsBox {
                 for app in found.iter().take(MAX_SHOWN) {
                     ui.horizontal(|ui| {
                         if ui
-                            .button("Open")
+                            .add_enabled(fresh, egui::Button::new("Open"))
                             .on_hover_text(format!("Open {} on the phone", app.name))
                             .clicked()
                         {
@@ -112,6 +119,19 @@ impl AppsBox {
         });
         action
     }
+}
+
+/// Whether a list made at `listed_at` answers the ask made at `asked_at`
+/// (both this computer's clock).
+pub fn list_fresh(listed_at: Option<u64>, asked_at: u64) -> bool {
+    listed_at.is_some_and(|at| at >= asked_at)
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// The apps `query` finds: every word in its name or id, any case, in the
@@ -148,5 +168,13 @@ mod tests {
         assert_eq!(shown(&apps, "MUSIC")[0].id, "org.example.music");
         assert_eq!(shown(&apps, "example maps")[0].name, "Maps");
         assert!(shown(&apps, "music maps").is_empty());
+    }
+
+    /// P2 review: only a list made since the ask answers it.
+    #[test]
+    fn a_list_answers_only_the_ask_before_it() {
+        assert!(list_fresh(Some(100), 100));
+        assert!(!list_fresh(Some(99), 100));
+        assert!(!list_fresh(None, 100));
     }
 }
