@@ -109,7 +109,7 @@ class ComputerMedia(private val app: Context) {
             worker.execute {
                 // Told to stop where it was asked, so the computer stops reading.
                 val own = PhoneLink.target(app)
-                val link = own?.let { live(it) }
+                val link = own?.let { watchKey(it, live(it)) }
                 if (own != null && link != null && watch.due(link, wanted = false) == false) {
                     send(own, false)
                 }
@@ -124,8 +124,20 @@ class ComputerMedia(private val app: Context) {
     private fun live(own: HostStore.Host): Pair<String, Int>? =
         RustCore.controlPeer()?.takeIf { it == own.address to own.controlPort }
 
+    /**
+     * What a watch is sent on: the live [link] and the player chosen for
+     * [own] (O6), so a new choice asks again as a new link would.
+     */
+    private fun watchKey(own: HostStore.Host, link: Pair<String, Int>?): Pair<Pair<String, Int>, String?>? =
+        link?.let { it to HostStore.player(app, own.address) }
+
     private fun send(own: HostStore.Host, on: Boolean): Boolean =
-        RustCore.sendPhonePacketOnLink(own.address, own.controlPort, WATCH, JSONObject().put("on", on).toString())
+        RustCore.sendPhonePacketOnLink(
+            own.address,
+            own.controlPort,
+            WATCH,
+            JSONObject().put("on", on).apply { HostStore.player(app, own.address)?.let { put("player", it) } }.toString(),
+        )
             .onFailure { Log.d(TAG, "The watch was not sent: ${it.message}") }
             .isSuccess
 
@@ -147,7 +159,7 @@ class ComputerMedia(private val app: Context) {
             if (wanted && ComputerMediaRule.fromOwn(host, port, own?.address, own?.controlPort)) heard(push, nowMs)
         }
         val current = shown.current(nowMs)
-        val link = own?.let { live(it) }
+        val link = own?.let { watchKey(it, live(it)) }
         val coverMissing = current?.artId != null && cover?.first != current.artId && badCover != current.artId
         watch.due(link, wanted, nowMs, heardMs, coverMissing)?.let { on ->
             if (own != null && link != null && send(own, on)) watch.sent(link, on, nowMs)
@@ -208,6 +220,7 @@ class ComputerMedia(private val app: Context) {
                 if (!wanted()) return@execute
                 val own = PhoneLink.target(app) ?: return@execute
                 val body = JSONObject().put("action", "mediaControl").put("command", command)
+                HostStore.player(app, own.address)?.let { body.put("player", it) }
                 RustCore.audioControl(own.address, own.controlPort, body.toString())
                     .onFailure { Log.i(TAG, "A press did not reach the computer: ${it.message}") }
                 // The computer pushes its new state within 2 s.

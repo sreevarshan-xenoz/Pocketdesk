@@ -536,6 +536,9 @@
     <string name="settings_links_from_computer_summary">A link the computer sends shows as a notification that opens it. Off: such links are dropped</string>
     <string name="settings_share_battery">Share the phone\'s state with the computer</string>
     <string name="settings_share_battery_summary">The computer shows this phone\'s battery, free storage, network (Wi-Fi or mobile data and its bars, never its name) and ringer, and which of its features are on, and can warn when the battery runs low: during a session, and in the background while another background feature keeps the phone connected</string>
+    <string name="media_player_label">Player: %1$s</string>
+    <string name="media_player_system">The computer\'s choice</string>
+    <string name="media_player_playing">%1$s (playing)</string>
     <string name="media_now_playing">Now playing on the computer</string>
     <string name="media_nothing">Nothing is playing</string>
     <string name="media_previous">Previous</string>

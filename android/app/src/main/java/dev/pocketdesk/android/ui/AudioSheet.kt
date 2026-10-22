@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -8,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -18,6 +21,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +74,19 @@ internal fun parsePlaying(body: JSONObject): NowPlaying? {
         canPlayPause = o.optBoolean("canPlayPause"),
         canNext = o.optBoolean("canNext"),
         canPrevious = o.optBoolean("canPrevious"),
+        player = o.optString("player"),
     )
+}
+
+/** The `players` of a `media` answer (O6), as [ComputerPlayers] keeps them. */
+internal fun parsePlayers(body: JSONObject): List<ComputerPlayers.Player> {
+    val arr = body.optJSONArray("players") ?: return emptyList()
+    val players = (0 until arr.length()).mapNotNull { i ->
+        val o = arr.optJSONObject(i) ?: return@mapNotNull null
+        val id = o.optString("id")
+        ComputerPlayers.Player(id, o.optString("name").ifBlank { id }, o.optBoolean("isPlaying"))
+    }
+    return ComputerPlayers.kept(players)
 }
 
 /** How often the card reads what is playing while the sheet is open. */
@@ -113,6 +130,13 @@ fun AudioControlSheet(
     var mediaRead by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf<NowPlaying?>(null) }
     var mediaError by remember { mutableStateOf<String?>(null) }
+    // O6: the computer's players, and the one chosen for this computer.
+    var players by remember { mutableStateOf<List<ComputerPlayers.Player>>(emptyList()) }
+    var chosenPlayer by remember(address) { mutableStateOf(HostStore.player(context, address)) }
+
+    /** [body] naming the chosen player, if one is. */
+    fun withPlayer(body: JSONObject): JSONObject =
+        body.apply { ComputerPlayers.named(chosenPlayer)?.let { put("player", it) } }
 
     suspend fun media(body: JSONObject): JSONObject? {
         val result = withContext(Dispatchers.IO) {
@@ -131,16 +155,17 @@ fun AudioControlSheet(
     }
 
     suspend fun refreshMedia() {
-        val answer = media(JSONObject().put("action", "media"))
+        val answer = media(withPlayer(JSONObject().put("action", "media")))
         // A read that failed shows only why: the last track's buttons would
         // fail the same way.
         playing = answer?.let { parsePlaying(it) }
+        if (answer != null) players = parsePlayers(answer)
         mediaRead = answer != null
     }
 
     fun mediaCommand(command: String) {
         scope.launch {
-            media(JSONObject().put("action", "mediaControl").put("command", command))
+            media(withPlayer(JSONObject().put("action", "mediaControl").put("command", command)))
             refreshMedia()
         }
     }
@@ -210,6 +235,13 @@ fun AudioControlSheet(
                 playing = playing,
                 error = mediaError,
                 onCommand = ::mediaCommand,
+                players = players,
+                chosen = chosenPlayer,
+                onChoose = { id ->
+                    HostStore.setPlayer(context, address, id)
+                    chosenPlayer = HostStore.player(context, address)
+                    scope.launch { refreshMedia() }
+                },
             )
             val s = snapshot
             val error = errorText ?: errorRes?.let { stringResource(it) }
@@ -364,6 +396,9 @@ private fun NowPlayingCard(
     playing: NowPlaying?,
     error: String?,
     onCommand: (String) -> Unit,
+    players: List<ComputerPlayers.Player> = emptyList(),
+    chosen: String? = null,
+    onChoose: (String?) -> Unit = {},
 ) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         Text(
@@ -371,6 +406,7 @@ private fun NowPlayingCard(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (ComputerPlayers.offered(players, chosen)) PlayerPicker(players, chosen, onChoose)
         when {
             playing != null -> {
                 Text(
@@ -424,5 +460,52 @@ private fun NowPlayingCard(
             )
         }
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/**
+ * O6: which of the computer's players the phone's controls follow, the
+ * computer's own choice first. A chosen player that has gone reads as the
+ * computer's choice, which the computer then makes, and is kept should it
+ * come back.
+ */
+@Composable
+private fun PlayerPicker(
+    players: List<ComputerPlayers.Player>,
+    chosen: String?,
+    onChoose: (String?) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val current = ComputerPlayers.current(players, chosen)
+    val system = stringResource(R.string.media_player_system)
+    Box {
+        TextButton(onClick = { open = true }) {
+            Text(
+                stringResource(R.string.media_player_label, current?.let { NowPlaying.appName(it.name) } ?: system),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(system) },
+                leadingIcon = { RadioButton(selected = current == null, onClick = null) },
+                onClick = {
+                    open = false
+                    onChoose(null)
+                },
+            )
+            players.forEach { p ->
+                val name = NowPlaying.appName(p.name)
+                DropdownMenuItem(
+                    text = { Text(if (p.isPlaying) stringResource(R.string.media_player_playing, name) else name) },
+                    leadingIcon = { RadioButton(selected = current?.id == p.id, onClick = null) },
+                    onClick = {
+                        open = false
+                        onChoose(p.id)
+                    },
+                )
+            }
+        }
     }
 }

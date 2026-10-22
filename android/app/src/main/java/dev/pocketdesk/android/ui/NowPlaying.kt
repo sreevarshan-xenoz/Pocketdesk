@@ -13,6 +13,8 @@ data class NowPlaying(
     val canPlayPause: Boolean,
     val canNext: Boolean,
     val canPrevious: Boolean,
+    /** The player's id, as the computer lists its players (O6). */
+    val player: String = "",
 ) {
     /** The title, or the app's name when the player gives none. */
     fun headline(): String = title.trim().ifEmpty { appName(app) }
