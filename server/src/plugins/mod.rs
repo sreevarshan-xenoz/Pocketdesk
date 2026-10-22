@@ -6,6 +6,7 @@ pub mod computer_media;
 pub mod deck;
 pub mod exec;
 pub mod file_browse;
+pub mod in_use;
 pub mod input;
 pub mod link_role;
 pub mod links;
@@ -78,6 +79,7 @@ pub fn register_all() -> PluginSet {
     registry.register(phone_switches::PhoneSwitchesPlugin);
     registry.register(phone_media::PhoneMediaPlugin);
     registry.register(computer_media::ComputerMediaPlugin);
+    registry.register(in_use::InUsePlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
     registry.register(crate::quiet_phone::PhoneQuietPlugin);

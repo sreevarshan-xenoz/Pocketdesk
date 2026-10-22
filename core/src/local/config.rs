@@ -180,6 +180,11 @@ pub struct Config {
     /// gone before the computer locks (D9), in minutes, 2 to 60.
     #[serde(default = "default_away_lock_minutes")]
     pub away_lock_minutes: u32,
+    /// Whether phones are told when this computer is in use (N7), so a
+    /// phone with "Toast only on the computer I'm using" on keeps its
+    /// notifications off the others' screens. On.
+    #[serde(default = "default_true")]
+    pub tell_in_use: bool,
     /// Work with KDE Connect devices (3a–3c): on by default (the owner's
     /// decision); off, a connection opening with `{` is refused as before.
     #[serde(default = "default_true")]
@@ -371,6 +376,7 @@ impl Default for Config {
             phone_drive: false,
             phone_drive_write: true,
             away_lock_minutes: default_away_lock_minutes(),
+            tell_in_use: true,
             kdeconnect_compat: true,
             phone_battery_alerts: true,
             charged_alert: 0,
@@ -595,6 +601,7 @@ impl Config {
         "phone_drive",
         "phone_drive_write",
         "away_lock_minutes",
+        "tell_in_use",
         "kdeconnect_compat",
         "phone_battery_alerts",
         "charged_alert",

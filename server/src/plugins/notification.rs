@@ -903,7 +903,13 @@ impl Plugin for NotificationPlugin {
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
-                let held = held_here(muted, in_hand);
+                // N7: another computer of the owner's is in use, not this one.
+                let elsewhere = packet
+                    .body
+                    .get(pocketdesk_core::protocol::in_use::ELSEWHERE)
+                    .and_then(|v| v.as_bool())
+                    == Some(true);
+                let held = held_here(muted, in_hand || elsewhere);
                 // N4: an ongoing update is one card, updated in place; only
                 // its first counts against the limit and is an event.
                 let live = pocketdesk_core::protocol::live::Live::from_body(&packet.body);
@@ -986,6 +992,9 @@ impl Plugin for NotificationPlugin {
                 };
                 if in_hand {
                     meta["phone_in_use"] = serde_json::json!(true);
+                }
+                if elsewhere {
+                    meta["in_use_elsewhere"] = serde_json::json!(true);
                 }
                 if live.is_some() {
                     meta["live"] = serde_json::json!(true);
