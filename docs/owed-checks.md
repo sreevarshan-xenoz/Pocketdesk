@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-913 open items.
+892 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 547 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 538 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
-| A phone with a SIM | 28 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
+| A phone with a SIM | 29 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 113 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 87 |
+| A Linux desktop (the Azure VM serves for some) | 106 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 83 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1081,39 +1081,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A card saved by name (`mypc.local`) is left alone.
 
-**195. Quiet hours, and quiet while presenting (P3)**
+**188. Quiet hours, and quiet while presenting (P3)**
 
 - Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
 - A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
 
-**194. Open an app on the phone from the computer (P2)**
+**189. Notifications held by their words (P4)**
 
-- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
-- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
-
-**193. The computer's announcement follows its network (P1)**
-
-- A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
-
-**191. Choose the computer's player (O6)**
-
-- Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
-- The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
-
-**190. Received images onto the clipboard (O7)**
-
-- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
-- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
-- Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
-
-**189. Find a setting on the phone (O8)**
-
-- Clear by tap; Back again leaves Settings.
-
-**188. Copies kept on the computer by program or by look (O4)**
-
-- A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
-- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
+- The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
+- An update held by its words closing the toast its first showed.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1330,10 +1306,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With control on: Ctrl+V into a scratch field, read back with `uiautomator dump`; a long paste says it was cut.
 
-**193. The computer's announcement follows its network (P1)**
-
-- A wake from sleep with a new lease. (where: owner)
-
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -1420,6 +1392,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **173. tel: links and Call back (M8)**
 
 - Call back from a ringing call's note, and from one whose call ended (a SIM).
+
+**189. Notifications held by their words (P4)**
+
+- A call's note with words in it (a SIM): still shown.
 
 ## A second phone
 
@@ -1897,28 +1873,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A press on the cast window's picture (the VM has no pointer). (where: linux)
 - Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
 
-**195. Quiet hours, and quiet while presenting (P3)**
+**188. Quiet hours, and quiet while presenting (P3)**
 
 - The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
-
-**193. The computer's announcement follows its network (P1)**
-
-- Linux. (where: linux)
-
-**192. Diagnostics' firewall row on Linux (O9)**
-
-- No ufw: "no firewall found". (where: linux)
-- ufw on with the default deny: the row is red, naming 1716/tcp and 4716/udp with `sudo ufw allow …`; after allowing them, green. (where: linux)
-- The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
-- firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
-
-**191. Choose the computer's player (O6)**
-
-- Linux: two MPRIS players under `playerctl`. (where: linux)
-
-**190. Received images onto the clipboard (O7)**
-
-- Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -2029,10 +1986,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
 - Android 9 to 12, and a phone with a PIN.
-
-**194. Open an app on the phone from the computer (P2)**
-
-- Android 13 and older, and a work profile's apps.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
@@ -2295,16 +2248,3 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
-
-**189. Find a setting on the phone (O8)**
-
-- TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
-
-**188. Copies kept on the computer by program or by look (O4)**
-
-- A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
-
-**187. Notifications shared by their kind as well as their app (O5)**
-
-- A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
-- TalkBack reads each kind's switch with its kind.
