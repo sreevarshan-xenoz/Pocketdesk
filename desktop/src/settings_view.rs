@@ -195,6 +195,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Notifications,
     ),
     (
+        "tell_in_use",
+        "Tell phones when this computer is in use",
+        Section::Notifications,
+    ),
+    (
         "clear_on_phone",
         "Clearing here clears it on the phone",
         Section::Notifications,
@@ -391,6 +396,7 @@ pub fn applies_live(key: &str) -> bool {
             | "internet_files"
             | "keep_file_dates"
             | "toast_answers"
+            | "tell_in_use"
             | "clear_on_phone"
             | "phone_live_updates"
             | "notification_pictures"
@@ -1021,6 +1027,17 @@ impl SettingsForm {
                     note(
                         ui,
                         "Only for notifications the phone lets this computer answer, while this server runs. The Notifications page answers them too.",
+                    );
+                });
+                // N7: for phones that toast only on the computer in use.
+                row(ui, "tell_in_use", |ui| {
+                    ui.checkbox(
+                        &mut e.tell_in_use,
+                        "a phone may ask whether someone uses this computer's keyboard or mouse",
+                    );
+                    note(
+                        ui,
+                        "With \"Toast only on the computer I'm using\" on in Pocketdesk's Settings on the phone, a phone notification then pops up only on the computer in use; the others keep it on their Notifications page. Off, this computer always shows them. The phone hears only whether input came in the last two minutes.",
                     );
                 });
                 row(ui, "notification_pictures", |ui| {
