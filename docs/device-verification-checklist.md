@@ -2561,6 +2561,15 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
+## 188. Quiet hours, and quiet while presenting (P3)
+
+Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the fixture app's notifications, the config changed while it ran:
+- [x] "While presenting or in full screen" on with the seam's file (`POCKETDESK_PRESENTING_FILE`): logged with `presenting`; without the file, not.
+- [x] Quiet hours from two minutes ago to ten minutes on: logged with `quiet_hours`; with a span later today, not.
+Owed:
+- [ ] Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
+- [ ] A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
+- [ ] The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
 ## 194. Open an app on the phone from the computer (P2)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the requests written as the desktop app writes them:
