@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-888 open items.
+889 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 534 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 536 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 11 |
 | A Linux desktop (the Azure VM serves for some) | 105 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 85 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 84 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1080,6 +1080,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **186. A paired computer found again at a new address (O3)**
 
 - A card saved by name (`mypc.local`) is left alone.
+
+**187. Copies kept on the computer by program or by look (O4)**
+
+- A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
+- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2231,7 +2236,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
 
-**187. Notifications shared by their kind as well as their app (O5)**
+**187. Copies kept on the computer by program or by look (O4)**
 
-- A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
-- TalkBack reads each kind's switch with its kind.
+- A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
