@@ -9,18 +9,32 @@ use std::time::Duration;
 
 use pocketdesk_core::local::drive::{self as store, DriveInfo};
 use pocketdesk_core::local::paths::DRIVE_CACHE_DIR;
+use pocketdesk_core::local::paths::DRIVE_UPLOADS_DIR;
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, TrustStore};
 use pocketdesk_core::protocol::permissions::Capability;
-use pocketdesk_core::protocol::phone_files::{FETCH, LIST, Listing, request_body};
+use pocketdesk_core::protocol::phone_files::{
+    FETCH, LIST, Listing, MKDIR, PUT, mkdir_body, put_body, request_body,
+};
 use tokio::sync::oneshot;
 
-use super::{Drive, Fail, Phones};
+use super::{Drive, Fail, Phones, Put};
 
 /// How long a listing may take: the phone answers on its next look.
 pub const LIST_WAIT: Duration = Duration::from_secs(15);
 
 /// How long a file may take to arrive whole.
 pub const FETCH_WAIT: Duration = Duration::from_secs(10 * 60);
+
+/// How a phone's refusal of a copied file reads (N6): not room for it, or
+/// another reason.
+fn refusal(why: String) -> Put {
+    let lower = why.to_lowercase();
+    if lower.contains("space") || lower.contains("room") {
+        Put::NoRoom(why)
+    } else {
+        Put::Refused(why)
+    }
+}
 
 /// A waiting fetch's phone, and where to say its file arrived.
 type Waiter = (String, oneshot::Sender<PathBuf>);
@@ -98,40 +112,22 @@ impl LivePhones {
             .find(|c| c.device_id() == device)
             .ok_or(Fail::Unreachable)
     }
-}
 
-#[async_trait::async_trait]
-impl Phones for LivePhones {
-    fn phones(&self) -> Vec<(String, String)> {
-        let Some(store) = crate::state::trust_store_path()
-            .ok()
-            .and_then(|path| TrustStore::load_or_create(path).ok())
-        else {
-            return Vec::new();
-        };
-        store
-            .paired_devices()
-            .into_iter()
-            .filter(|id| !store.is_computer(id) && store.permissions(id).allows(Capability::Files))
-            .map(|id| {
-                let name = store.name(&id).unwrap_or_default().to_string();
-                (id, name)
-            })
-            .collect()
-    }
-
-    async fn list(
+    /// Send `packet_type` with `body` and wait for the listing it is
+    /// answered with: of `path` in `root`, or with no root, any.
+    async fn ask(
         &self,
         device: &str,
+        phone: Arc<dyn DeviceSender>,
+        packet_type: &str,
+        body: serde_json::Value,
         root: Option<u32>,
         path: &[String],
     ) -> Result<Listing, Fail> {
-        let phone = self.phone(device).await?;
-        let body = request_body(root.unwrap_or(0), path).ok_or(Fail::NotFound)?;
         // Listening before asking, so the answer cannot be missed.
         let mut listings = LISTINGS.subscribe();
         phone
-            .send_packet(&NetworkPacket::new(LIST).with_body(body))
+            .send_packet(&NetworkPacket::new(packet_type).with_body(body))
             .await
             .map_err(|_| Fail::Unreachable)?;
         let wait = async {
@@ -159,6 +155,108 @@ impl Phones for LivePhones {
         tokio::time::timeout(LIST_WAIT, wait)
             .await
             .unwrap_or(Err(Fail::Timeout))
+    }
+}
+
+#[async_trait::async_trait]
+impl Phones for LivePhones {
+    fn phones(&self) -> Vec<(String, String)> {
+        let Some(store) = crate::state::trust_store_path()
+            .ok()
+            .and_then(|path| TrustStore::load_or_create(path).ok())
+        else {
+            return Vec::new();
+        };
+        store
+            .paired_devices()
+            .into_iter()
+            .filter(|id| !store.is_computer(id) && store.permissions(id).allows(Capability::Files))
+            .map(|id| {
+                let name = store.name(&id).unwrap_or_default().to_string();
+                (id, name)
+            })
+            .collect()
+    }
+
+    async fn mkdir(&self, device: &str, root: u32, path: &[String]) -> Result<Listing, Fail> {
+        let phone = self.phone(device).await?;
+        let body = mkdir_body(root, path).ok_or(Fail::NotFound)?;
+        // Answered with the new folder's listing, or why not.
+        self.ask(device, phone, MKDIR, body, Some(root), path).await
+    }
+
+    async fn put(
+        &self,
+        device: &str,
+        root: u32,
+        folder: &[String],
+        name: &str,
+        file: PathBuf,
+        size: u64,
+    ) -> Result<Put, Fail> {
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let (phone, body) = match (
+            self.phone(device).await,
+            put_body(root, folder, name, &id, size),
+        ) {
+            (Ok(phone), Some(body)) => (phone, body),
+            (fail, _) => {
+                let _ = std::fs::remove_file(&file);
+                return Err(fail.err().unwrap_or(Fail::NotFound));
+            }
+        };
+        // Offered first, so the phone's fetch finds it; the file goes when
+        // the offer ends, however it ends.
+        let ended = crate::offers::watch(&id);
+        crate::offers::offer_at(&id, file.clone(), device, std::time::Instant::now());
+        let (said, heard) = oneshot::channel();
+        let shown = name.to_string();
+        tokio::spawn(async move {
+            let outcome = ended
+                .await
+                .unwrap_or_else(|_| Err("it was not given".to_string()));
+            let _ = std::fs::remove_file(&file);
+            // No one waits any more (answered as under way): the owner
+            // hears a failure in a notification.
+            if let Err(outcome) = said.send(outcome)
+                && let Err(why) = outcome
+            {
+                let body = format!("{shown}: {why}");
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::platform::notify(
+                        "A file did not reach the phone",
+                        &body,
+                        Duration::from_secs(10),
+                    )
+                })
+                .await;
+            }
+        });
+        if phone
+            .send_packet(&NetworkPacket::new(PUT).with_body(body))
+            .await
+            .is_err()
+        {
+            crate::offers::fail(&id, "phone not connected".to_string());
+            return Err(Fail::Unreachable);
+        }
+        Ok(match tokio::time::timeout(super::PUT_WAIT, heard).await {
+            Ok(Ok(Ok(()))) => Put::Saved,
+            Ok(Ok(Err(why))) => refusal(why),
+            Ok(Err(_)) => return Err(Fail::Phone),
+            Err(_) => Put::UnderWay,
+        })
+    }
+
+    async fn list(
+        &self,
+        device: &str,
+        root: Option<u32>,
+        path: &[String],
+    ) -> Result<Listing, Fail> {
+        let phone = self.phone(device).await?;
+        let body = request_body(root.unwrap_or(0), path).ok_or(Fail::NotFound)?;
+        self.ask(device, phone, LIST, body, root, path).await
     }
 
     async fn fetch(&self, device: &str, root: u32, path: &[String]) -> Result<PathBuf, Fail> {
@@ -218,28 +316,40 @@ pub async fn run() {
     // What an earlier run left: its address and its files.
     let _ = store::clear(&dir);
     let _ = std::fs::remove_dir_all(dir.join(DRIVE_CACHE_DIR));
-    let mut serving: Option<tokio_util::sync::CancellationToken> = None;
+    let _ = std::fs::remove_dir_all(dir.join(DRIVE_UPLOADS_DIR));
+    let mut serving: Option<(tokio_util::sync::CancellationToken, Arc<Drive>)> = None;
     let mut said = false;
     loop {
         // A config that does not read now (written meanwhile) keeps what
         // was: a new address would break a drive the owner mapped (D8
         // review).
-        let on = match pocketdesk_core::local::config::Config::load() {
-            Ok(config) => config.phone_drive,
-            Err(_) => serving.is_some(),
+        let (on, write) = match pocketdesk_core::local::config::Config::load() {
+            Ok(config) => (config.phone_drive, config.phone_drive_write),
+            Err(_) => (
+                serving.is_some(),
+                serving.as_ref().is_some_and(|(_, d)| d.writes()),
+            ),
         };
+        // Followed live (N6).
+        if let Some((_, drive)) = &serving {
+            drive.set_write(write);
+        }
         match (on, serving.is_some()) {
             (true, false) => match tokio::net::TcpListener::bind("127.0.0.1:0").await {
                 Ok(listener) => {
                     let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
                     let info = DriveInfo::new(port);
                     let stop = tokio_util::sync::CancellationToken::new();
-                    let drive = Arc::new(Drive::new(info.token.clone(), Arc::new(LivePhones)));
-                    tokio::spawn(super::serve(listener, drive, stop.clone()));
+                    let drive = Arc::new(
+                        Drive::new(info.token.clone(), Arc::new(LivePhones))
+                            .taking_files_into(dir.join(DRIVE_UPLOADS_DIR)),
+                    );
+                    drive.set_write(write);
+                    tokio::spawn(super::serve(listener, drive.clone(), stop.clone()));
                     match store::write(&dir, &info) {
                         Ok(()) => {
                             tracing::info!("Serving the phones' folders as a drive on port {port}");
-                            serving = Some(stop);
+                            serving = Some((stop, drive));
                             said = false;
                         }
                         Err(e) => {
@@ -256,7 +366,7 @@ pub async fn run() {
                 }
             },
             (false, true) => {
-                if let Some(stop) = serving.take() {
+                if let Some((stop, _)) = serving.take() {
                     stop.cancel();
                 }
                 let _ = store::clear(&dir);

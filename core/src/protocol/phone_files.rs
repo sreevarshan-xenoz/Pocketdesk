@@ -23,6 +23,9 @@ pub const MKDIR: &str = "kdeconnect.pocketdesk.phone_files.mkdir";
 /// offer `id` into that folder as `name` (N6).
 pub const PUT: &str = "kdeconnect.pocketdesk.phone_files.put";
 
+/// A [`MKDIR`]'s listing says this as its error when the name is taken.
+pub const EXISTS: &str = "There is a folder or file of that name already";
+
 /// The largest file the computer's drive takes for a phone (N6).
 pub const MAX_PUT_BYTES: u64 = 4 << 30;
 

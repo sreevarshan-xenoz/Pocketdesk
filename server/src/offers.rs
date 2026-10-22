@@ -378,7 +378,33 @@ fn start_group(group: &str, offer_ids: &[&str]) {
 
 /// Record that offer `id` ended with `outcome`: its own row, or, for a
 /// file of a folder send, its folder's row once every file has ended.
+/// Who waits for an offer's end (N6), told how it ended.
+type Watchers = Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>;
+
+fn watchers() -> &'static Watchers {
+    static WATCHERS: OnceLock<Watchers> = OnceLock::new();
+    WATCHERS.get_or_init(Default::default)
+}
+
+/// Be told how offer `id` ends, however it ends (N6: a file copied onto the
+/// drive waits for its phone this way).
+pub(crate) fn watch(id: &str) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
+    let (tell, told) = tokio::sync::oneshot::channel();
+    watchers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), tell);
+    told
+}
+
 fn end_offer(dir: &Path, id: &str, outcome: Result<(), String>) {
+    if let Some(tell) = watchers()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(id)
+    {
+        let _ = tell.send(outcome.clone());
+    }
     let folder_done = {
         let mut g = groups().lock().unwrap_or_else(|e| e.into_inner());
         match g.member_of.remove(id) {
@@ -1465,6 +1491,18 @@ mod tests {
         let found = folder_files_with(&root, &[]).unwrap();
         let paths: Vec<Vec<String>> = found.files.iter().map(|f| f.path.clone()).collect();
         assert_eq!(paths, vec![vec!["a.txt".to_string()]]);
+    }
+
+    /// N6: a file copied onto the drive hears how its offer ended, once.
+    #[test]
+    fn an_offer_s_end_is_told_to_who_watches_it() {
+        let dir = temp_dir("watched");
+        let mut told = watch("w-1");
+        end_offer(&dir, "w-1", Err("no room".to_string()));
+        assert_eq!(told.try_recv().unwrap(), Err("no room".to_string()));
+        let mut quiet = watch("w-2");
+        end_offer(&dir, "w-other", Ok(()));
+        assert!(quiet.try_recv().is_err(), "another offer's end");
     }
 
     #[test]
