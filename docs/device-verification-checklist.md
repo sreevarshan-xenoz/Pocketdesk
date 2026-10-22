@@ -2489,6 +2489,16 @@ Built 2026-10-21; checked on the OPPO against a throwaway server whose music com
 - [ ] Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
 - [ ] A Linux computer (`playerctl`, `mpris:artUrl`).
 
+## 180. Files into the phone's folders from the computer's drive (N6)
+
+Built 2026-10-22; to be checked on the OPPO against a throwaway server with `phone_drive = true`, by `scripts/device_checks.py` (`n6-put`), with a folder shared and marked by hand. Owed:
+- [ ] The runner's `n6-put` on the OPPO.
+- [ ] Marking a folder on the phone: the picker opens at it, a different folder picked is refused with its message, unmarking gives the write grant back.
+- [ ] File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one).
+- [ ] A file larger than the phone's free space: refused, said in Explorer.
+- [ ] A Linux file manager (Nautilus, Dolphin) over `dav://`.
+- [ ] Desktop Settings "The phone's folders take files" off: the drive read-only again.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
