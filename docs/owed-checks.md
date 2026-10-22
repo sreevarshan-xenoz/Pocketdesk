@@ -1081,6 +1081,35 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A card saved by name (`mypc.local`) is left alone.
 
+**188. Copies kept on the computer by program or by look (O4)**
+
+- A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
+- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
+
+**189. Find a setting on the phone (O8)**
+
+- Clear by tap; Back again leaves Settings.
+
+**190. Received images onto the clipboard (O7)**
+
+- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
+- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
+- Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
+
+**191. Choose the computer's player (O6)**
+
+- Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
+- The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
+
+**193. The computer's announcement follows its network (P1)**
+
+- A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
+
+**194. Open an app on the phone from the computer (P2)**
+
+- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
+- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
+
 **195. Quiet hours, and quiet while presenting (P3)**
 
 - Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
@@ -1090,35 +1119,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
 - An update held by its words closing the toast its first showed.
-
-**194. Open an app on the phone from the computer (P2)**
-
-- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
-- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
-
-**193. The computer's announcement follows its network (P1)**
-
-- A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
-
-**191. Choose the computer's player (O6)**
-
-- Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
-- The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
-
-**190. Received images onto the clipboard (O7)**
-
-- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
-- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
-- Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
-
-**189. Find a setting on the phone (O8)**
-
-- Clear by tap; Back again leaves Settings.
-
-**188. Copies kept on the computer by program or by look (O4)**
-
-- A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
-- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1906,13 +1906,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A press on the cast window's picture (the VM has no pointer). (where: linux)
 - Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
 
-**195. Quiet hours, and quiet while presenting (P3)**
+**190. Received images onto the clipboard (O7)**
 
-- The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
+- Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
 
-**193. The computer's announcement follows its network (P1)**
+**191. Choose the computer's player (O6)**
 
-- Linux. (where: linux)
+- Linux: two MPRIS players under `playerctl`. (where: linux)
 
 **192. Diagnostics' firewall row on Linux (O9)**
 
@@ -1921,13 +1921,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
 - firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
 
-**191. Choose the computer's player (O6)**
+**193. The computer's announcement follows its network (P1)**
 
-- Linux: two MPRIS players under `playerctl`. (where: linux)
+- Linux. (where: linux)
 
-**190. Received images onto the clipboard (O7)**
+**195. Quiet hours, and quiet while presenting (P3)**
 
-- Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
+- The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -2305,15 +2305,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
 
-**189. Find a setting on the phone (O8)**
+**187. Notifications shared by their kind as well as their app (O5)**
 
-- TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
+- A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
+- TalkBack reads each kind's switch with its kind.
 
 **188. Copies kept on the computer by program or by look (O4)**
 
 - A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
 
-**187. Notifications shared by their kind as well as their app (O5)**
+**189. Find a setting on the phone (O8)**
 
-- A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
-- TalkBack reads each kind's switch with its kind.
+- TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
