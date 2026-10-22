@@ -10,7 +10,7 @@ Date: 2026-10-22. Plan: `docs/research/2026-10-22-p-cycle.md` §P1.
 
 **What counts as a change.** The addresses an announcement holds are compared, order aside, as `lan::announced_addresses` has them: the tailnet's left out where others exist, each once, sorted. The IPv4 addresses decide where there are any, so IPv6's rotating temporary addresses do not count.
 
-**What happens on a change** (`Announcement::renew`):
+**What happens on a change** (`Announcement::announce_at`):
 - the old record is withdrawn with an mDNS goodbye, so phones drop the old address at once;
 - after a 300 ms wait, the computer is announced again at the new addresses;
 - the log says so.
