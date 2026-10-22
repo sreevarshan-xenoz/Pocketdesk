@@ -1300,10 +1300,14 @@ Slack: standup",
                     note(
                         ui,
                         format!(
-                            "One a line: words a phone notification's title or text holds (case aside), or an app's name, \": \" and the words, for that app only (start a line with \": \" for words that have one). A match is held as a muted app's: logged on the Activity page with the line that held it, kept on the Notifications page when the phone lets this computer answer it, never shown. At most {} lines.",
+                            "One a line: words a phone notification's title or text holds (case aside), or an app's name, \": \" and the words, for that app only (start a line with \": \" for words that have one). A match is held as a pause holds it: logged on the Activity page (with the line that held it when \"Details in events\" is on), kept on the Notifications page when the phone lets this computer answer it, never shown. A call is never held. At most {} lines.",
                             pocketdesk_core::local::hold_words::MAX_RULES
                         ),
                     );
+                    let lines: Vec<String> = words.lines().map(str::to_string).collect();
+                    if let Some(problem) = pocketdesk_core::local::hold_words::problem(&lines) {
+                        ui.label(RichText::new(problem).small().color(crate::theme::warn(ui)));
+                    }
                 });
                 row(ui, "quiet_presenting", |ui| {
                     ui.checkbox(

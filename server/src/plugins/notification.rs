@@ -645,12 +645,13 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     // A muted app's never counts against the limit (K2b review); a pause
     // holds them all alike, still counted, so a phone's burst stays bounded
     // (K2a review).
-    // P4: one held by its words is held as a muted app's.
-    let words = held_by_words(&app, &title, &text);
-    let muted = muted_here(&app) || words.is_some();
+    let muted = muted_here(&app);
+    // P4: one held by its words is held as a pause holds it, still counted
+    // (P4 review: the words are the sender's to choose).
+    let words = held_by_words(&app, body);
     // P3: quiet hours, or presenting, hold them as a pause does.
     let quiet = crate::quiet_hours::now();
-    let held = held_here(muted, quiet.is_some());
+    let held = held_here(muted, quiet.is_some() || words.is_some());
     let limit = LIMIT.load(std::sync::atomic::Ordering::Relaxed);
     if !muted
         && !flood_guard()
@@ -664,15 +665,15 @@ pub(crate) async fn show_from_kde(device_id: &str, body: &serde_json::Value) {
     if let Some(quiet) = quiet {
         meta[quiet.field()] = serde_json::json!(true);
     }
-    if let Some(rule) = &words {
-        meta["held_by"] = serde_json::json!(rule);
+    let mut content = serde_json::json!({ "title": title, "text": text });
+    held_by_fields(&words, &mut meta, &mut content);
+    crate::events::emit("notification", Some(device_id), meta, content);
+    // An update held by its words closes the toast an earlier one showed.
+    if words.is_some()
+        && let Some(tag) = &tag
+    {
+        close_desktop_notification(tag).await;
     }
-    crate::events::emit(
-        "notification",
-        Some(device_id),
-        meta,
-        serde_json::json!({ "title": title, "text": text }),
-    );
     if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) || held {
         return;
     }
@@ -797,22 +798,45 @@ fn held_here(muted: bool, in_hand: bool) -> bool {
     muted || in_hand || crate::paused::now()
 }
 
-/// Whether `app` is muted on this computer (K2b): its notifications are
-/// logged and kept to answer, never shown. Read at each notification, so a
-/// mute from the desktop app or a toast applies to the next one.
 /// The rule of desktop Settings "Hold notifications with these words" that
 /// holds a notification (P4), as its line; read at each one, so a change in
-/// Settings applies to the next.
-fn held_by_words(app: &str, title: &str, text: &str) -> Option<String> {
+/// Settings applies to the next. Held to the title and text as sent, not
+/// the "Notification" this computer shows for none (P4 review).
+fn held_by_words(app: &str, body: &serde_json::Value) -> Option<String> {
     let lines = crate::events::current_config().hold_words;
     if lines.is_empty() {
         return None;
     }
+    let field = |key: &str| body.get(key).and_then(|v| v.as_str()).unwrap_or("");
     let rules = pocketdesk_core::local::hold_words::rules(&lines);
-    pocketdesk_core::local::hold_words::held_by(&rules, app, title, text)
+    pocketdesk_core::local::hold_words::held_by(&rules, app, field("title"), field("text"))
         .map(pocketdesk_core::local::hold_words::Rule::line)
 }
 
+/// A notification held by its words says so in its event, and names the
+/// line only in its content, which is logged with "details in events" on
+/// (P4 review: the owner's words are not metadata).
+fn held_by_fields(
+    words: &Option<String>,
+    meta: &mut serde_json::Value,
+    content: &mut serde_json::Value,
+) {
+    if let Some(rule) = words {
+        meta["held_by_words"] = serde_json::json!(true);
+        content["held_by"] = serde_json::json!(rule);
+    }
+}
+
+/// Whether it is the phone's note of a ringing call (F5).
+fn is_call(body: &serde_json::Value) -> bool {
+    body.get("id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|id| id.starts_with("pocketdesk:call:"))
+}
+
+/// Whether `app` is muted on this computer (K2b): its notifications are
+/// logged and kept to answer, never shown. Read at each notification, so a
+/// mute from the desktop app or a toast applies to the next one.
 fn muted_here(app: &str) -> bool {
     crate::state::state_dir()
         .map(|dir| {
@@ -937,9 +961,14 @@ impl Plugin for NotificationPlugin {
                 // (K2b review: a muted app's burst dropped the others).
                 // Paused (K2a): held as a muted app's are, but still counted
                 // (K2a review: a week's pause must not unbound a phone).
-                // P4: held by its words, as a muted app's is.
-                let words = held_by_words(&app, &title, &text);
-                let muted = muted_here(&app) || words.is_some();
+                let muted = muted_here(&app);
+                // P4: held by its words, as a pause holds it, still counted
+                // (P4 review); never a call's note, which M6 and N7 never hold.
+                let words = if is_call(&packet.body) {
+                    None
+                } else {
+                    held_by_words(&app, &packet.body)
+                };
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
                 let in_hand = phone_in_use(&packet.body);
@@ -947,7 +976,10 @@ impl Plugin for NotificationPlugin {
                 let elsewhere = marked_elsewhere(&packet.body);
                 // P3: quiet hours, or presenting, hold it as a pause does.
                 let quiet = crate::quiet_hours::now();
-                let held = held_here(muted, in_hand || elsewhere || quiet.is_some());
+                let held = held_here(
+                    muted,
+                    in_hand || elsewhere || quiet.is_some() || words.is_some(),
+                );
                 // N4: an ongoing update is one card, updated in place; only
                 // its first counts against the limit and is an event.
                 let live = pocketdesk_core::protocol::live::Live::from_body(&packet.body);
@@ -1037,21 +1069,15 @@ impl Plugin for NotificationPlugin {
                 if let Some(quiet) = quiet {
                     meta[quiet.field()] = serde_json::json!(true);
                 }
-                if let Some(rule) = &words {
-                    meta["held_by"] = serde_json::json!(rule);
-                }
                 if live.is_some() {
                     meta["live"] = serde_json::json!(true);
                 }
                 // A muted app's card is not kept, so its updates are not
                 // told apart from its first: none is logged.
                 if first && !(muted && live.is_some()) {
-                    crate::events::emit(
-                        "notification",
-                        Some(sender.device_id()),
-                        meta,
-                        serde_json::json!({ "title": title, "text": text }),
-                    );
+                    let mut content = serde_json::json!({ "title": title, "text": text });
+                    held_by_fields(&words, &mut meta, &mut content);
+                    crate::events::emit("notification", Some(sender.device_id()), meta, content);
                 }
                 if !SHOW_PHONES.load(std::sync::atomic::Ordering::Relaxed) {
                     return Ok(());
@@ -1106,6 +1132,14 @@ impl Plugin for NotificationPlugin {
                     _ => None,
                 };
                 if held {
+                    // An update held by its words closes the toast an
+                    // earlier one showed (P4 review: it would stay up with
+                    // the words it no longer has).
+                    if words.is_some()
+                        && let Some(tag) = &tag
+                    {
+                        close_desktop_notification(tag).await;
+                    }
                     // Not shown, so no picture is kept for it (K3 review).
                     if !id.is_empty()
                         && let Ok(dir) = crate::state::state_dir()
@@ -2215,5 +2249,25 @@ mod tests {
             note.text, "Lunch?",
             "the text kept to answer is the phone's own"
         );
+    }
+
+    /// P4 review: the owner's words go in the content, a flag in the meta.
+    #[test]
+    fn held_by_words_names_its_line_only_in_the_content() {
+        let (mut meta, mut content) = (json!({"app": "Shop"}), json!({"title": "t"}));
+        held_by_fields(&None, &mut meta, &mut content);
+        assert_eq!(meta, json!({"app": "Shop"}));
+        held_by_fields(&Some("sale".into()), &mut meta, &mut content);
+        assert_eq!(meta["held_by_words"], json!(true));
+        assert_eq!(meta.get("held_by"), None);
+        assert_eq!(content["held_by"], json!("sale"));
+    }
+
+    /// P4 review: a call's note is never held by its words.
+    #[test]
+    fn a_call_note_is_known_by_its_id() {
+        assert!(is_call(&json!({"id": "pocketdesk:call:3"})));
+        assert!(!is_call(&json!({"id": "0|app|1|null|10"})));
+        assert!(!is_call(&json!({})));
     }
 }

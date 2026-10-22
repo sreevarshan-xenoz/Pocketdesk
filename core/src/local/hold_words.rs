@@ -41,7 +41,7 @@ impl Rule {
 pub fn parse_line(line: &str) -> Option<Rule> {
     // Split before trimming the end: `Signal: ` is an app with no words.
     let line = line.trim_start();
-    let (app, words) = match line.split_once(": ") {
+    let (app, words) = match split_app(line) {
         Some((app, words)) if !app.trim().is_empty() => {
             (Some(app.trim().to_string()), words.trim())
         }
@@ -55,6 +55,28 @@ pub fn parse_line(line: &str) -> Option<Rule> {
         app,
         words: words.to_string(),
     })
+}
+
+/// A line split at its first colon followed by a space or tab.
+fn split_app(line: &str) -> Option<(&str, &str)> {
+    line.char_indices()
+        .find(|&(i, c)| c == ':' && line[i + 1..].starts_with([' ', '\t']))
+        .map(|(i, _)| (&line[..i], &line[i + 1..]))
+}
+
+/// What keeps the lines from holding as written, for Settings (P4
+/// review): lines that make no rule, and lines past [`MAX_RULES`].
+pub fn problem(lines: &[String]) -> Option<String> {
+    let written: Vec<&String> = lines.iter().filter(|l| !l.trim().is_empty()).collect();
+    let empty = written.iter().filter(|l| parse_line(l).is_none()).count();
+    if empty > 0 {
+        return Some(format!(
+            "{empty} line{} end{} with a colon and hold nothing: an app needs words after \": \".",
+            if empty == 1 { "" } else { "s" },
+            if empty == 1 { "s" } else { "" },
+        ));
+    }
+    (written.len() > MAX_RULES).then(|| format!("Only the first {MAX_RULES} lines are read."))
 }
 
 /// The rules the config's lines make, at most [`MAX_RULES`].
@@ -146,6 +168,26 @@ mod tests {
     fn app_names_match_ignoring_case_in_any_script() {
         let rules = rules(&lines(&["ÉCOLE: absence"]));
         assert!(held_by(&rules, "école", "Absence de Léa", "").is_some());
+    }
+
+    #[test]
+    fn a_tab_after_the_colon_names_an_app_too() {
+        assert_eq!(
+            parse_line("Slack:\tstandup").and_then(|r| r.app),
+            Some("Slack".into())
+        );
+    }
+
+    #[test]
+    fn lines_that_hold_nothing_are_said() {
+        assert_eq!(problem(&lines(&["sale", ""])), None);
+        assert!(
+            problem(&lines(&["Note to self:"]))
+                .unwrap()
+                .contains("1 line ends")
+        );
+        let many: Vec<String> = (0..MAX_RULES + 1).map(|i| format!("w{i}")).collect();
+        assert!(problem(&many).unwrap().contains("first 100"));
     }
 
     #[test]
