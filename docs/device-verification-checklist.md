@@ -2498,6 +2498,9 @@ Built 2026-10-22; to be checked on the OPPO against a throwaway server with `pho
 - [ ] A file larger than the phone's free space: refused, said in Explorer.
 - [ ] A Linux file manager (Nautilus, Dolphin) over `dav://`.
 - [ ] Desktop Settings "The phone's folders take files" off: the drive read-only again.
+- [ ] Explorer's rename, delete and "New folder" (MOVE and DELETE are refused): what Explorer says.
+- [ ] A folder that is also where files from computers go: unmarking it leaves downloads there working.
+- [ ] A marked folder on an SD card with too little room: the phone checks only its own storage, so the copy fails part way and says so.
 
 ## Recording results
 
