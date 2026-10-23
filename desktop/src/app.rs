@@ -1235,6 +1235,24 @@ impl PocketdeskApp {
                 .on_hover_text("Hold phones' notifications, texts, links and rings for a while");
             }
         }
+        // P3: quiet hours now, said beside the pause.
+        if let Some(config) = &self.config
+            && let (Some(schedule), Some(at)) = (
+                pocketdesk_core::local::quiet_hours::Schedule::from_config(config),
+                pocketdesk_core::local::quiet_hours::local_now(),
+            )
+            && schedule.holds(at)
+        {
+            // The same time twice is the whole day (P3 review).
+            let until = if schedule.from == schedule.to {
+                "the day ends".to_string()
+            } else {
+                config.quiet_to.trim().to_string()
+            };
+            ui.label(format!(
+                "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause. Change them in Settings."
+            ));
+        }
         if let Some(minutes) = picked {
             self.pause(minutes);
         }

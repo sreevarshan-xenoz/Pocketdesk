@@ -35,7 +35,7 @@ impl Plugin for InUsePlugin {
         // A computer that would not show a phone's notification never says
         // it is in use (N7 review: the others would hold it, and no one
         // would see it).
-        let showing = crate::plugins::notification::shows_phones() && !crate::paused::now();
+        let showing = showing();
         let idle = if telling && showing {
             crate::away_lock::idle_secs()
         } else {
@@ -49,6 +49,14 @@ impl Plugin for InUsePlugin {
 /// The answer, by whether this computer tells (`tell_in_use`), would show a
 /// phone's notification now (not paused, phones' notifications on), and
 /// how long its input has been quiet.
+/// Whether this computer would show a phone's notification now: phones'
+/// notifications on, not paused (K2a), not quiet (P3).
+fn showing() -> bool {
+    crate::plugins::notification::shows_phones()
+        && !crate::paused::now()
+        && crate::quiet_hours::now().is_none()
+}
+
 fn answer_for(telling: bool, showing: bool, idle_secs: Option<u64>) -> Value {
     answer_body(telling && showing, idle_secs)
 }
@@ -60,6 +68,17 @@ mod tests {
 
     /// N7 review: a computer that would not show the notification never
     /// says it is in use.
+    /// P3 review: a quiet computer never says it is in use, or the phone
+    /// would hold the notification everywhere else and no one would see it.
+    #[test]
+    fn a_quiet_computer_does_not_show_them() {
+        let shown = super::showing();
+        let _quiet = crate::quiet_hours::quiet_for_test(crate::quiet_hours::Quiet::Presenting);
+        assert!(!super::showing());
+        drop(_quiet);
+        assert_eq!(super::showing(), shown);
+    }
+
     #[test]
     fn only_a_computer_that_would_show_it_says_it_is_in_use() {
         assert_eq!(in_use(&answer_for(true, true, Some(3))), Some(true));

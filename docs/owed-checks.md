@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-910 open items.
+913 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 545 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 547 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 112 |
+| A Linux desktop (the Azure VM serves for some) | 113 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 87 |
 
@@ -1081,6 +1081,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A card saved by name (`mypc.local`) is left alone.
 
+**195. Quiet hours, and quiet while presenting (P3)**
+
+- Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
+- A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
+
 **194. Open an app on the phone from the computer (P2)**
 
 - An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
@@ -1891,6 +1896,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - GNOME's and KDE's media controls by eye, and the media keys.
 - A press on the cast window's picture (the VM has no pointer). (where: linux)
 - Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
+
+**195. Quiet hours, and quiet while presenting (P3)**
+
+- The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
 
 **193. The computer's announcement follows its network (P1)**
 

@@ -338,13 +338,27 @@ pub fn describe(event: &Event) -> String {
             {
                 // N7: shown where the owner was working instead.
                 line.push_str(" (not shown: another computer was in use)");
+            } else if event.fields.get("quiet_hours").and_then(Value::as_bool) == Some(true) {
+                // P3.
+                line.push_str(" (not shown: quiet hours)");
+            } else if event.fields.get("presenting").and_then(Value::as_bool) == Some(true) {
+                line.push_str(" (not shown: presenting or in full screen)");
             }
             line
         }
-        "text_received" => match text(event, "from") {
-            Some(from) => format!("Text from {from}"),
-            None => "A text".to_string(),
-        },
+        "text_received" => {
+            let mut line = match text(event, "from") {
+                Some(from) => format!("Text from {from}"),
+                None => "A text".to_string(),
+            };
+            // P3: why it did not pop up.
+            if flag("quiet_hours") {
+                line.push_str(" (not shown: quiet hours)");
+            } else if flag("presenting") {
+                line.push_str(" (not shown: presenting or in full screen)");
+            }
+            line
+        }
         "file_received" if flag("folder") => match text(event, "name") {
             Some(name) => format!("Folder arriving: {}", name.trim_end_matches('/')),
             None => "Folder arriving".to_string(),
@@ -589,7 +603,25 @@ mod tests {
             )),
             "Notification from Signal (not shown: another computer was in use)"
         );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Signal", "quiet_hours": true})
+            )),
+            "Notification from Signal (not shown: quiet hours)"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Signal", "presenting": true})
+            )),
+            "Notification from Signal (not shown: presenting or in full screen)"
+        );
         assert_eq!(describe(&event("text_received", json!({}))), "A text");
+        assert_eq!(
+            describe(&event("text_received", json!({"quiet_hours": true}))),
+            "A text (not shown: quiet hours)"
+        );
         assert_eq!(
             describe(&event(
                 "hook_ran",
