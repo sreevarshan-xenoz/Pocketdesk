@@ -394,9 +394,11 @@ fn drawn_here(key: &str) -> bool {
         "quiet_presenting" => cfg!(any(windows, target_os = "linux")),
         // O4: a copy names its program on Windows only (Q2 review).
         "clipboard_never_from" => cfg!(windows),
-        "clipboard_hotkey" | "typing_hotkey" | "away_lock_minutes" | "mic_relay_device" => {
-            cfg!(windows)
-        }
+        // R4: the keys on Linux through the GlobalShortcuts portal.
+        "clipboard_hotkey" | "typing_hotkey" => cfg!(any(windows, target_os = "linux")),
+        // R3: the lock on Linux too.
+        "away_lock_minutes" => cfg!(any(windows, target_os = "linux")),
+        "mic_relay_device" => cfg!(windows),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
@@ -1028,8 +1030,9 @@ impl SettingsForm {
                         "The last texts that crossed between this computer and its phones, either way, kept on this computer for the Clipboard page; 0 keeps none, and emptying it there or here forgets them.",
                     );
                 });
-                // Windows only: elsewhere nothing registers the key (H3 review).
-                if cfg!(windows) {
+                // Windows, and Linux through the portal (R4): elsewhere nothing
+                // registers the key (H3 review).
+                if cfg!(any(windows, target_os = "linux")) {
                     row(ui, "clipboard_hotkey", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut e.clipboard_hotkey)
@@ -1056,12 +1059,12 @@ impl SettingsForm {
                         }
                         note(
                             ui,
-                            "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer.",
+                            "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer. On Linux the desktop asks you once, and its own shortcut settings may give it another key or change it later.",
                         );
                     });
                 }
-                // N9: M4's typing window, from anywhere. Windows only, as H3's.
-                if cfg!(windows) {
+                // N9: M4's typing window, from anywhere, where H3's is.
+                if cfg!(any(windows, target_os = "linux")) {
                     row(ui, "typing_hotkey", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut e.typing_hotkey)
@@ -2244,9 +2247,10 @@ mod tests {
             section_shown("sharing grant", Section::Connection),
             cfg!(target_os = "linux")
         );
+        // R4: the key is drawn on Linux too, through the portal.
         assert_eq!(
             section_shown("clipboard with a key", Section::Phones),
-            cfg!(windows)
+            cfg!(any(windows, target_os = "linux"))
         );
         assert_eq!(
             section_shown("mic plays into", Section::Phones),

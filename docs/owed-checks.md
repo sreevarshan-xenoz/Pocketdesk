@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-947 open items.
+948 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 122 |
+| A Linux desktop (the Azure VM serves for some) | 123 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 32 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 93 |
 
@@ -1894,6 +1894,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **127. How the computer is doing (F2)**
 
 - The same against Linux: `df`'s disks once each (btrfs subvolumes, bind mounts), the battery.
+
+**140. Send the clipboard to the phone with a key (H3)**
+
+- Linux (R4): the key and the typing key through the GlobalShortcuts portal on KDE Plasma 6 and GNOME 48 (the desktop's question once, then a press sending), and Settings saying "no global shortcuts portal" on Sway.
 
 **143. The Logs page (J1)**
 
