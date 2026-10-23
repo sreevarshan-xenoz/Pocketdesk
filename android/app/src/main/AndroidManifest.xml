@@ -57,6 +57,13 @@
         <package android:name="net.dinglisch.android.taskerm" />
         <package android:name="com.llamalab.automate" />
         <package android:name="com.arlosoft.macrodroid" />
+        <!-- P5: the clock apps, whose ringing alarm goes to the computer with its switch on. -->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
         <!-- P2: the apps that open, listed for the computer with its switch on. -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

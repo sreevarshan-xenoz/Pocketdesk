@@ -121,6 +121,17 @@ fun PhoneNotificationsSection() {
             version++
         },
     )
+    // P5: a ringing alarm or finished timer rings on the computer too.
+    val alarms = version.let { Prefs.alarmsOnComputer(context) }
+    SettingSwitch(
+        stringResource(R.string.phone_notifications_alarms),
+        stringResource(R.string.phone_notifications_alarms_summary),
+        alarms,
+        {
+            Prefs.setAlarmsOnComputer(context, it)
+            version++
+        },
+    )
     // N7: a pop-up only on the computer in use.
     val toastWhere = version.let { Prefs.toastWhereWorking(context) }
     SettingSwitch(

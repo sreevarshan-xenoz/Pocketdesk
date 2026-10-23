@@ -416,6 +416,14 @@ object Prefs {
     }
 
     /** M6: no toast on the computer for a notification that came while the phone was in use. Off by default. */
+    /** P5: a ringing alarm or finished timer rings on the computer too. Off. */
+    fun alarmsOnComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("alarms_on_computer", false)
+
+    fun setAlarmsOnComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("alarms_on_computer", enabled) }
+    }
+
     fun quietInHand(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_QUIET_IN_HAND, false)
 

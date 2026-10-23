@@ -220,6 +220,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Hold notifications with these words",
         Section::Notifications,
     ),
+    (
+        "phone_alarms",
+        "Phones' alarms ring here",
+        Section::Notifications,
+    ),
     ("quiet_from", "Quiet hours start", Section::Notifications),
     ("quiet_to", "Quiet hours end", Section::Notifications),
     ("quiet_days", "Quiet hours' days", Section::Notifications),
@@ -488,6 +493,7 @@ pub fn applies_live(key: &str) -> bool {
             | "quiet_days"
             | "quiet_presenting"
             | "hold_words"
+            | "phone_alarms"
             | "away_lock_minutes"
     )
 }
@@ -1305,6 +1311,17 @@ impl SettingsForm {
                     if let Some(problem) = pocketdesk_core::local::hold_words::problem(&lines) {
                         ui.label(RichText::new(problem).small().color(crate::theme::warn(ui)));
                     }
+                });
+                // P5: a phone's ringing alarm, rung here.
+                row(ui, "phone_alarms", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_alarms,
+                        "a phone's ringing alarm or finished timer rings here too",
+                    );
+                    note(
+                        ui,
+                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. On Windows it stays on screen with an alarm's sound until it stops on the phone, its Snooze or Stop is pressed, or ten minutes pass; on Linux it is an urgent notification that stays. Closing it here leaves the phone ringing: its Stop stops both. One that reaches this computer more than two minutes late shows as a plain notification. Off, every alarm does. A pause, quiet hours and a muted app hold it as any other.",
+                    );
                 });
                 row(ui, "quiet_presenting", |ui| {
                     ui.checkbox(

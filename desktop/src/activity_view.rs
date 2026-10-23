@@ -320,10 +320,13 @@ pub fn describe(event: &Event) -> String {
         }
         .to_string(),
         "notification" => {
-            let mut line = format!(
-                "Notification from {}",
-                text(event, "app").unwrap_or("an app")
-            );
+            // P5: a phone's ringing alarm says so.
+            let what = if flag("alarm") {
+                "Alarm"
+            } else {
+                "Notification"
+            };
+            let mut line = format!("{what} from {}", text(event, "app").unwrap_or("an app"));
             if let Some(title) = text(event, "title") {
                 line.push_str(&format!(": {title}"));
             }
@@ -637,6 +640,13 @@ mod tests {
             "Notification from Signal (not shown: presenting or in full screen)"
         );
         assert_eq!(describe(&event("text_received", json!({}))), "A text");
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Clock", "alarm": true})
+            )),
+            "Alarm from Clock"
+        );
         assert_eq!(
             describe(&event("text_received", json!({"quiet_hours": true}))),
             "A text (not shown: quiet hours)"

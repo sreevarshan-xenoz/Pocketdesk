@@ -584,6 +584,8 @@
     <string name="channel_opens">Abiertas desde el equipo</string>
     <string name="phone_notifications_answer">Permitir que el equipo responda notificaciones</string>
     <string name="phone_notifications_answer_summary">El equipo puede pulsar los botones de una notificación y responder chats, en tu nombre: desde su página Notificaciones o desde la notificación que muestra. Solo notificaciones enviadas completas, y solo desde tu propio equipo</string>
+    <string name="phone_notifications_alarms">Alarmas en el ordenador</string>
+    <string name="phone_notifications_alarms_summary">Una alarma que suena o un temporizador terminado suena también en tu ordenador, compartas o no esa app, con Posponer y Detener cuando el ordenador puede responder notificaciones</string>
     <string name="phone_notifications_in_hand">Silencio en el equipo mientras uso el teléfono</string>
     <string name="phone_notifications_in_hand_summary">Una notificación que llega con este teléfono desbloqueado y la pantalla encendida no aparece en el equipo: queda en su página Actividad, y en Notificaciones cuando el equipo puede responderla. No con el Mando de Pocketdesk abierto</string>
     <string name="phone_notifications_toast_where">Avisos solo en el equipo que uso</string>

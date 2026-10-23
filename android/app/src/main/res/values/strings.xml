@@ -587,6 +587,8 @@
     <string name="channel_opens">Opened from the computer</string>
     <string name="phone_notifications_answer">Let the computer answer notifications</string>
     <string name="phone_notifications_answer_summary">The computer can press a notification\'s buttons and reply to chats, as you: from its Notifications page, or from the notification it shows. Only notifications sent in full, and only from your own computer</string>
+    <string name="phone_notifications_alarms">Alarms on the computer</string>
+    <string name="phone_notifications_alarms_summary">A ringing alarm or finished timer rings on your own computer too, whichever apps you share, with its Snooze and Stop when the computer may answer notifications</string>
     <string name="phone_notifications_in_hand">Quiet on the computer while I use the phone</string>
     <string name="phone_notifications_in_hand_summary">A notification that comes while this phone is unlocked and its screen on shows no pop-up on the computer: it is logged on its Activity page, and kept on its Notifications page when the computer may answer it. Not while Pocketdesk\'s Remote is open</string>
     <string name="phone_notifications_toast_where">Toast only on the computer I\'m using</string>

@@ -492,7 +492,11 @@ fn show_toast(
     // Only a tagged (phone) toast is answered or muted: its tag keeps it
     // alive.
     let answers = answers.filter(|_| tag.is_some());
-    let app = app.filter(|_| tag.is_some()).map(str::to_string);
+    // P5 review: an alarm offers no "Not from this app" (muting the clock
+    // would silence every later alarm).
+    let app = app
+        .filter(|_| tag.is_some() && !pictures.alarm)
+        .map(str::to_string);
     doc.LoadXml(&HSTRING::from(crate::toast_answers::toast_xml_pictured(
         summary,
         body,
@@ -507,6 +511,10 @@ fn show_toast(
     if let Some(tag) = tag {
         toast.SetTag(&HSTRING::from(tag))?;
         toast.SetGroup(&HSTRING::from(PHONE_GROUP))?;
+    }
+    // P5 review: an alarm whose stop never came rings no longer than this.
+    if pictures.alarm {
+        toast.SetExpirationTime(&alarm_expiry()?)?;
     }
     let has_buttons = answers.is_some() || app.is_some();
     if has_buttons && tag.is_some() {
@@ -574,6 +582,25 @@ fn show_toast(
         }
     }
     Ok(())
+}
+
+/// How long a phone's alarm may ring here (P5 review): a stop lost on the
+/// way, or an alarm the computer was away for, rings no longer than this.
+const ALARM_MINUTES: i64 = 10;
+
+/// [`ALARM_MINUTES`] from now, as a toast's expiration time.
+fn alarm_expiry()
+-> windows::core::Result<windows::Foundation::IReference<windows::Foundation::DateTime>> {
+    // A DateTime counts 100 ns ticks from 1601.
+    const FROM_1601: i64 = 116_444_736_000_000_000;
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64 / 100)
+        .unwrap_or(0);
+    let at = windows::Foundation::DateTime {
+        UniversalTime: FROM_1601 + unix + ALARM_MINUTES * 60 * 10_000_000,
+    };
+    windows::Foundation::PropertyValue::CreateDateTime(at)?.cast()
 }
 
 /// A live card's values for its bound bar (N4), each later than the last.
