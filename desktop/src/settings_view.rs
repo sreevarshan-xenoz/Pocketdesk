@@ -2247,9 +2247,10 @@ mod tests {
             section_shown("sharing grant", Section::Connection),
             cfg!(target_os = "linux")
         );
+        // R4: the key is drawn on Linux too, through the portal.
         assert_eq!(
             section_shown("clipboard with a key", Section::Phones),
-            cfg!(windows)
+            cfg!(any(windows, target_os = "linux"))
         );
         assert_eq!(
             section_shown("mic plays into", Section::Phones),
