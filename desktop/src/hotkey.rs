@@ -2,7 +2,8 @@
 //! one that opens the window typing on a phone (N9): parsed from desktop
 //! Settings ("ctrl+alt+p"), and which phone each goes to. Kept apart from
 //! Windows so it is tested; `tray_main` registers them with
-//! `RegisterHotKey` and acts on `WM_HOTKEY`.
+//! `RegisterHotKey` and acts on `WM_HOTKEY`, or on Linux binds them through
+//! the GlobalShortcuts portal (R4, `hotkey_portal`).
 
 use std::path::Path;
 
@@ -26,6 +27,9 @@ pub struct Status {
     pub taken: bool,
     /// The last press found no phone the clipboard reaches.
     pub no_phone: bool,
+    /// The desktop has no way to take a key (Linux without the
+    /// GlobalShortcuts portal; R4).
+    pub unsupported: bool,
 }
 
 pub fn write_status(state_dir: &Path, status: &Status) {
@@ -39,6 +43,7 @@ pub fn write_status_to(state_dir: &Path, file: &str, status: &Status) {
         "registered": status.registered,
         "taken": status.taken,
         "no_phone": status.no_phone,
+        "unsupported": status.unsupported,
     });
     let _ = std::fs::write(state_dir.join(file), body.to_string());
 }
@@ -61,6 +66,7 @@ pub fn read_status_from(state_dir: &Path, file: &str) -> Option<Status> {
         registered: flag("registered"),
         taken: flag("taken"),
         no_phone: flag("no_phone"),
+        unsupported: flag("unsupported"),
     })
 }
 
@@ -94,6 +100,9 @@ fn status_words_saying(
         return None;
     }
     match status.filter(|s| s.key == text) {
+        Some(s) if s.unsupported => Some(
+            "This desktop has no global shortcuts portal (KDE Plasma 6, GNOME 48 and later have one), so no key is taken.",
+        ),
         None => {
             Some("Not taken up yet: the tray program (pocketdesk-tray) registers it while it runs.")
         }
@@ -162,6 +171,35 @@ pub fn parse(text: &str) -> Option<Hotkey> {
     })
 }
 
+/// The key as the GlobalShortcuts portal's preferred trigger reads it (R4):
+/// "win+shift+c" is "LOGO+SHIFT+c". None where [`parse`] takes none.
+pub fn portal_trigger(text: &str) -> Option<String> {
+    parse(text)?;
+    let parts: Vec<String> = text
+        .split('+')
+        .map(|p| p.trim().to_ascii_lowercase())
+        .collect();
+    let (last, mods) = parts.split_last()?;
+    let mut out: Vec<String> = mods
+        .iter()
+        .map(|m| {
+            match m.as_str() {
+                "ctrl" | "control" => "CTRL",
+                "alt" => "ALT",
+                "shift" => "SHIFT",
+                _ => "LOGO",
+            }
+            .to_string()
+        })
+        .collect();
+    out.push(if last.len() > 1 {
+        last.to_ascii_uppercase()
+    } else {
+        last.clone()
+    });
+    Some(out.join("+"))
+}
+
 /// The key as people read it: "win+shift+c" is "Win+Shift+C" (H4).
 pub fn display(text: &str) -> String {
     text.split('+')
@@ -206,6 +244,41 @@ pub fn phone<'a>(rows: &'a [PhoneRow<'a>]) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R4: the portal's preferred trigger, from Settings' text.
+    #[test]
+    fn a_key_reads_as_the_portal_s_trigger() {
+        assert_eq!(
+            super::portal_trigger("win+shift+c").as_deref(),
+            Some("LOGO+SHIFT+c")
+        );
+        assert_eq!(
+            super::portal_trigger("Ctrl+Alt+f5").as_deref(),
+            Some("CTRL+ALT+F5")
+        );
+        assert_eq!(super::portal_trigger("super+7").as_deref(), Some("LOGO+7"));
+        assert_eq!(super::portal_trigger("shift+a"), None);
+        assert_eq!(super::portal_trigger(""), None);
+    }
+
+    /// R4: a desktop with no portal says so, and the file keeps it.
+    #[test]
+    fn a_desktop_without_the_portal_says_so() {
+        let status = super::Status {
+            key: "win+shift+c".to_string(),
+            unsupported: true,
+            ..Default::default()
+        };
+        assert!(
+            super::status_words("win+shift+c", Some(&status))
+                .is_some_and(|w| w.contains("no global shortcuts portal"))
+        );
+        let dir = std::env::temp_dir().join(format!("pd-hotkey-portal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        super::write_status(&dir, &status);
+        assert_eq!(super::read_status(&dir), Some(status));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use crate::model::Device;
 
     #[test]

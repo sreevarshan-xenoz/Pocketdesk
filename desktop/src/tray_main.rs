@@ -48,9 +48,23 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let (wake, woken) = std::sync::mpsc::channel::<()>();
+    let (wake, woken) = std::sync::mpsc::channel::<Wake>();
+    // R4: on Linux the keys come through the GlobalShortcuts portal.
+    #[cfg(target_os = "linux")]
+    let portal = {
+        let wake = wake.clone();
+        pocketdesk_desktop::hotkey_portal::PortalKeys::start(move |id| {
+            let _ = wake.send(if id == pocketdesk_desktop::hotkey_portal::CLIPBOARD {
+                Wake::Clipboard
+            } else {
+                Wake::Typing
+            });
+        })
+    };
+    #[cfg(target_os = "linux")]
+    let mut portal_asked: Option<(Option<String>, Option<String>)> = None;
     Tray::wake_on_click(move || {
-        let _ = wake.send(());
+        let _ = wake.send(Wake::Click);
     });
     let mut refreshed: Option<Instant> = None;
     // The session log's tail, read again only when it changes (N6 review).
@@ -89,6 +103,18 @@ fn main() {
             let snapshot = model::snapshot(&state_dir, now);
             key.follow(&state_dir);
             typing_key.follow(&state_dir);
+            // R4: both keys in one portal session, bound again on a change.
+            #[cfg(target_os = "linux")]
+            {
+                let wanted = (key.wanted(), typing_key.wanted());
+                if portal_asked.as_ref() != Some(&wanted) {
+                    portal.bind(wanted.0.clone(), wanted.1.clone());
+                    portal_asked = Some(wanted);
+                }
+                let bound = portal.bound();
+                key.portal_said(&state_dir, bound.clipboard, bound.unsupported);
+                typing_key.portal_said(&state_dir, bound.typing, bound.unsupported);
+            }
             #[cfg(any(windows, target_os = "linux"))]
             {
                 let in_session: Vec<&str> = snapshot
@@ -209,6 +235,26 @@ impl Key {
         }
     }
 
+    /// Its text when it is one to bind (R4).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn wanted(&self) -> Option<String> {
+        self.text
+            .clone()
+            .filter(|t| hotkey::portal_trigger(t).is_some())
+    }
+
+    /// What the portal made of it, kept to Settings when it changes (R4).
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn portal_said(&mut self, state_dir: &Path, bound: bool, unsupported: bool) {
+        let unsupported = unsupported && self.wanted().is_some();
+        if self.status.registered == bound && self.status.unsupported == unsupported {
+            return;
+        }
+        self.status.registered = bound;
+        self.status.unsupported = unsupported;
+        hotkey::write_status_to(state_dir, self.file, &self.status);
+    }
+
     /// Say a press's outcome in the status Settings shows.
     fn said_press(&mut self, state_dir: &Path, reached: bool) {
         self.status.no_phone = !reached;
@@ -272,7 +318,7 @@ impl Key {
 /// this thread's messages, so they are pumped meanwhile (a pick is queued
 /// while its message is handled). Whether the send-the-clipboard key (H3)
 /// and the typing key (N9) were pressed.
-fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> (bool, bool) {
+fn wait(woken: &std::sync::mpsc::Receiver<Wake>, timeout: Duration) -> (bool, bool) {
     #[cfg(windows)]
     {
         let _ = woken;
@@ -307,9 +353,24 @@ fn wait(woken: &std::sync::mpsc::Receiver<()>, timeout: Duration) -> (bool, bool
     }
     #[cfg(not(windows))]
     {
-        let _ = woken.recv_timeout(timeout);
-        (false, false)
+        // R4: a key from the portal wakes it as a click does.
+        match woken.recv_timeout(timeout) {
+            Ok(Wake::Clipboard) => (true, false),
+            Ok(Wake::Typing) => (false, true),
+            _ => (false, false),
+        }
     }
+}
+
+/// What woke the tray program's loop.
+#[cfg_attr(windows, allow(dead_code))]
+enum Wake {
+    /// A pick in the tray's menu.
+    Click,
+    /// The send-the-clipboard key, through the portal (R4).
+    Clipboard,
+    /// The typing key, through the portal (R4).
+    Typing,
 }
 
 /// Do what was picked; whether the tray goes on.

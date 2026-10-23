@@ -2,6 +2,9 @@
 //! icon, the state the pages read, the tray and its menu, and the words.
 
 pub mod hotkey;
+// R4: the keys through the GlobalShortcuts portal.
+#[cfg(target_os = "linux")]
+pub mod hotkey_portal;
 pub mod icon;
 pub mod model;
 pub mod phone_player;

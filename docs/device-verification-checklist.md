@@ -2126,6 +2126,7 @@ Built 2026-10-20 on the owner's night of features; nothing by hand yet. It regis
   - Checked 2026-10-20, with the owner's OK, by script on the A71 against the throwaway server: "Registered. The last press found no phone the clipboard reaches."
 - [ ] A password manager's copy: not sent (the server's notification says why).
 - [ ] The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
+- [ ] Linux (R4): the key and the typing key through the GlobalShortcuts portal on KDE Plasma 6 and GNOME 48 (the desktop's question once, then a press sending), and Settings saying "no global shortcuts portal" on Sway.
 
 ## 141. The home-screen widgets, a design pass (I2)
 
