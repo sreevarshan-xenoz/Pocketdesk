@@ -27,6 +27,10 @@ fun humanizeError(raw: String): Int {
         "permissions changed" in l -> R.string.err_permissions_changed
         // The computer ended the session: it no longer pairs this phone.
         "not paired" in l -> R.string.err_unpaired
+        // The computer ended it: its encoder gave up, or its own reasons;
+        // not a dropped link (S2).
+        "encoder failed" in l -> R.string.err_encoder_failed
+        "session ended" in l -> R.string.err_session_ended
         "declined" in l || "pairing" in l || PIN.containsMatchIn(l) -> R.string.err_pairing_declined
         "not connected" in l || "disconnected" in l || "closed" in l || "reset" in l ->
             R.string.err_link_dropped

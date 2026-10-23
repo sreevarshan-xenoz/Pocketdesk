@@ -758,6 +758,10 @@ impl StreamingServer {
         // software-crop behavior with the same packet).
         let (window_tx, window_rx) = watch::channel(0u64);
         let window_mode = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Set wherever the encoder gives up (each `encode_cancel` below), so
+        // the close says why (S2): the phone had read the plain "session
+        // ended" as a dropped link.
+        let encoder_failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let mut tasks = JoinSet::new();
 
@@ -872,6 +876,7 @@ impl StreamingServer {
 
             // Spawn encoding task — reads frames, produces packets
             let encode_cancel = cancel.clone();
+            let encode_failed = encoder_failed.clone();
             let encode_recorder = telemetry.as_ref().map(|t| t.0.clone());
             let encode_span = tracing::info_span!("video_encode");
             tasks.spawn(async move {
@@ -990,6 +995,7 @@ impl StreamingServer {
                                 }
                                 Err(e) => {
                                     error!(error = %e, "Bitrate rebuild failed; ending session");
+                                    encode_failed.store(true, Ordering::Relaxed);
                                     encode_cancel.cancel();
                                     break;
                                 }
@@ -1030,6 +1036,7 @@ impl StreamingServer {
                             }
                             Err(e) => {
                                 error!(error = %e, "Frame-rate rebuild failed; ending session");
+                                encode_failed.store(true, Ordering::Relaxed);
                                 encode_cancel.cancel();
                                 break;
                             }
@@ -1122,6 +1129,7 @@ impl StreamingServer {
                                 }
                                 Err(e) => {
                                     error!(error = %e, "Failed to rebuild encoder; ending session");
+                                    encode_failed.store(true, Ordering::Relaxed);
                                     encode_cancel.cancel();
                                     break;
                                 }
@@ -1136,6 +1144,7 @@ impl StreamingServer {
                             ($reason:expr) => {{
                                 if used_fallback_rung {
                                     error!(reason = $reason, "Encoder bottom rung exhausted; ending session");
+                                    encode_failed.store(true, Ordering::Relaxed);
                                     encode_cancel.cancel();
                                     break;
                                 }
@@ -1162,6 +1171,7 @@ impl StreamingServer {
                                             error = %e,
                                             "Software-rung rebuild failed; ending session"
                                         );
+                                        encode_failed.store(true, Ordering::Relaxed);
                                         encode_cancel.cancel();
                                         break;
                                     }
@@ -1222,6 +1232,7 @@ impl StreamingServer {
                                 error!(error = %e, errs = encode_errs, "Encoding failure");
                                 if encode_errs >= ERR_END_AT {
                                     error!("Encoder unrecoverable after {ERR_END_AT} failures; ending session");
+                                    encode_failed.store(true, Ordering::Relaxed);
                                     encode_cancel.cancel();
                                     break;
                                 }
@@ -1876,7 +1887,7 @@ impl StreamingServer {
         // over: a clone of the connection held elsewhere kept it open on the
         // phone's own keep-alives, and a remote (T10i) has no frames whose
         // absence would tell it.
-        connection.close(0u32, b"session ended");
+        connection.close(0u32, end_reason(encoder_failed.load(Ordering::Relaxed)));
 
         match result {
             Some(Ok(_)) => Ok(()),
@@ -2235,10 +2246,27 @@ async fn send_audio_packet(
     }
 }
 
+/// What a session's close says once its pipeline is done: why, when it was
+/// the encoder that gave up (S2), for the phone's words.
+fn end_reason(encoder_failed: bool) -> &'static [u8] {
+    if encoder_failed {
+        b"encoder failed"
+    } else {
+        b"session ended"
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
+
+    /// S2: the phone tells a session whose encoder gave up from one ended.
+    #[test]
+    fn a_session_whose_encoder_gave_up_says_so_as_it_closes() {
+        assert_eq!(end_reason(true), b"encoder failed");
+        assert_eq!(end_reason(false), b"session ended");
+    }
 
     #[tokio::test]
     async fn an_audio_task_that_ends_at_once_does_not_end_the_session() {

@@ -788,6 +788,8 @@
     <string name="sound_mic_refused">Este equipo no usa el micrófono de este teléfono. En el equipo, activa \"Use the phone as a microphone\" para este teléfono en la página Devices de Pocketdesk</string>
     <string name="err_permissions_changed">El propietario de este equipo cambió lo que puede hacer este teléfono, y eso terminó la sesión. Puede volver a cambiarlo en la página Devices de Pocketdesk.</string>
     <string name="err_unpaired">Este equipo ya no tiene emparejado este teléfono, y eso terminó la sesión. Vuelve a emparejar para conectar.</string>
+    <string name="err_encoder_failed">El codificador de vídeo del equipo dejó de funcionar, y eso terminó la sesión. La siguiente lo vuelve a iniciar.</string>
+    <string name="err_session_ended">El equipo terminó la sesión.</string>
     <string name="settings_ring_from_computer_summary_17">Tu equipo puede hacer sonar este teléfono para encontrarlo: al volumen de tu alarma (a cero queda en silencio salvo con «Vibrar mientras suena» activado), 30 segundos, incluso en No molestar si las alarmas están permitidas, mientras las notificaciones de Pocketdesk estén activadas. Mantiene un enlace en segundo plano</string>
     <string name="texts_show_summary_17">Los SMS que recibe este teléfono aparecen en Mensajes en el último equipo que usaste. Android retiene tres horas un SMS con un código</string>
     <string name="settings_capture_mouse_summary_17">Durante una sesión, un ratón o un panel táctil conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
