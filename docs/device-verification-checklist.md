@@ -2562,6 +2562,14 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 188. Copies kept on the computer by program or by look (O4)
+
+Built 2026-10-22. Checked on a throwaway server with the clipboard stand-in and the OPPO linked:
+- [x] A copy matching a "Never send copies that look like" pattern held, said once in the log; an ordinary copy not.
+Owed:
+- [ ] A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
+- [ ] A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
+- [ ] The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
 ## 187. Notifications shared by their kind as well as their app (O5)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) with the fixture app's two channels against a throwaway server:
