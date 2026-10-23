@@ -139,25 +139,40 @@ fn system() -> Option<Vec<PathBuf>> {
 
 #[cfg(target_os = "linux")]
 fn system() -> Option<Vec<PathBuf>> {
-    // Only when the copy offers a URI list: wl-paste would otherwise print
+    // Wayland's wl-paste, else X11's xclip (Q4).
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+    let (program, list_types, uri_list): (&str, &[&str], &[&str]) = if wayland {
+        (
+            "wl-paste",
+            &["--list-types"],
+            &["--no-newline", "--type", "text/uri-list"],
+        )
+    } else {
+        (
+            "xclip",
+            &["-selection", "clipboard", "-o", "-t", "TARGETS"],
+            &["-selection", "clipboard", "-o", "-t", "text/uri-list"],
+        )
+    };
+    // Only when the copy offers a URI list: either would otherwise print
     // a text copy as one.
-    let types = wl_paste(&["--list-types"])?;
+    let types = paste(program, list_types)?;
     if !String::from_utf8_lossy(&types)
         .lines()
         .any(|t| t.trim() == "text/uri-list")
     {
         return None;
     }
-    let list = wl_paste(&["--no-newline", "--type", "text/uri-list"])?;
+    let list = paste(program, uri_list)?;
     Some(parse_uri_list(&String::from_utf8_lossy(&list)))
 }
 
-/// `wl-paste` with `args`, given two seconds (P7 review: a hung one held
+/// `program` with `args`, given two seconds (P7 review: a hung one held
 /// the sends behind it).
 #[cfg(target_os = "linux")]
-fn wl_paste(args: &[&str]) -> Option<Vec<u8>> {
+fn paste(program: &str, args: &[&str]) -> Option<Vec<u8>> {
     use std::io::Read;
-    let mut child = std::process::Command::new("wl-paste")
+    let mut child = std::process::Command::new(program)
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
