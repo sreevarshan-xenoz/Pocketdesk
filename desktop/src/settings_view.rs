@@ -391,6 +391,8 @@ fn drawn_here(key: &str) -> bool {
         "remember_screen_grant" => cfg!(target_os = "linux"),
         // P3: Windows says when it is presenting; Linux does not.
         "quiet_presenting" => cfg!(windows),
+        // O4: a copy names its program on Windows only (Q2 review).
+        "clipboard_never_from" => cfg!(windows),
         "clipboard_hotkey" | "typing_hotkey" | "away_lock_minutes" | "mic_relay_device" => {
             cfg!(windows)
         }
@@ -648,6 +650,25 @@ impl SettingsForm {
             if let Some(problem) = problem {
                 problems.push(("clipboard_never_like", problem));
             }
+        }
+        // Q2 review: these were said only in their row, a closed section
+        // hiding them, and saved unread.
+        let bad = pocketdesk_core::local::link_rules::bad_lines(&self.edited.link_rules);
+        if !bad.is_empty() {
+            problems.push((
+                "link_rules",
+                format!(
+                    "Links by site: not read (a site, \"=\", and browser, show or a program): {}",
+                    bad.join(", ")
+                ),
+            ));
+        }
+        if let Some(problem) = pocketdesk_core::local::hold_words::problem(&self.edited.hold_words)
+        {
+            problems.push(("hold_words", format!("Holding by words: {problem}")));
+        }
+        if let Some(problem) = quiet_problem(&self.edited) {
+            problems.push(("quiet_hours", format!("Quiet hours: {problem}")));
         }
         for (name, port) in [
             ("control", self.edited.control_port),
@@ -1159,7 +1180,11 @@ impl SettingsForm {
                         egui::TextEdit::multiline(rules)
                             .desired_rows(3)
                             .desired_width(f32::INFINITY)
-                            .hint_text("youtube.com = show\nzoom.us = C:\\Program Files\\Zoom\\bin\\Zoom.exe"),
+                            .hint_text(if cfg!(windows) {
+                                "youtube.com = show\nzoom.us = C:\\Program Files\\Zoom\\bin\\Zoom.exe"
+                            } else {
+                                "youtube.com = show\nzoom.us = /usr/bin/zoom"
+                            }),
                     );
                     note(
                         ui,
@@ -1329,6 +1354,16 @@ impl SettingsForm {
                         "Held as a pause holds them: logged on the Activity page, and kept on the Notifications page when the phone lets this computer answer them, but no pop-up. Times are this computer's (22:00); a span past midnight belongs to the day it starts on, and the same time twice is that whole day.",
                     );
                 });
+                row(ui, "quiet_presenting", |ui| {
+                    ui.checkbox(
+                        &mut e.quiet_presenting,
+                        "hold phones' notifications and texts while Windows says this computer is presenting or runs something in full screen",
+                    );
+                    note(
+                        ui,
+                        "Held as quiet hours hold them, whatever the time. Windows says so for a slideshow, a game or a video in full screen, and while its own Do Not Disturb is on.",
+                    );
+                });
                 // P4: held by their words, as a muted app's.
                 let words = &mut self.hold_words_text;
                 row(ui, "hold_words", |ui| {
@@ -1359,12 +1394,6 @@ impl SettingsForm {
                     note(
                         ui,
                         "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. On Windows it stays on screen with an alarm's sound until it stops on the phone, its Snooze or Stop is pressed, or ten minutes pass; on Linux it is an urgent notification that stays. Closing it here leaves the phone ringing: its Stop stops both. One that reaches this computer more than two minutes late shows as a plain notification. With this off, every alarm shows as a plain notification. A pause, quiet hours and a muted app hold it as any other.",
-                    );
-                });
-                row(ui, "quiet_presenting", |ui| {
-                    ui.checkbox(
-                        &mut e.quiet_presenting,
-                        "hold them while Windows says this computer is presenting or runs something in full screen",
                     );
                 });
                 row(ui, "toast_answers", |ui| {
@@ -2042,6 +2071,11 @@ fn task_problems(tasks: &[TaskSpec]) -> Vec<String> {
 /// One setting: its name, then its control and any note under it, wrapping
 /// at the page's width (U5: a grid's long labels widened the page).
 fn row(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui)) {
+    // One system's rows are not drawn on another (Q2 review: Linux showed
+    // switches that did nothing there).
+    if !drawn_here(key) {
+        return;
+    }
     let query: String = ui
         .ctx()
         .data(|d| d.get_temp(search_id()))
@@ -2323,6 +2357,33 @@ mod tests {
     }
 
     /// O4: the lists are read one a line, the usual ones added once, and a
+    /// Q2: a link rule, a words line or quiet hours that do not read keep
+    /// Save off, each under its own key so its section opens.
+    #[test]
+    fn unread_lines_and_quiet_hours_keep_save_off() {
+        let keys = |form: &SettingsForm| -> Vec<&'static str> {
+            form.problems_by_key()
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect()
+        };
+        let mut form = SettingsForm::from_config(Config::default());
+        form.link_rules_text = "youtube.com = show\nnot a rule".into();
+        form.apply_text_fields();
+        assert_eq!(keys(&form), vec!["link_rules"]);
+        form.link_rules_text = "youtube.com = show".into();
+        form.hold_words_text = "Slack:".into();
+        form.apply_text_fields();
+        assert_eq!(keys(&form), vec!["hold_words"]);
+        form.hold_words_text = "Sale".into();
+        form.apply_text_fields();
+        form.edited.quiet_hours = true;
+        form.edited.quiet_days.clear();
+        assert_eq!(keys(&form), vec!["quiet_hours"]);
+        form.edited.quiet_hours = false;
+        assert!(keys(&form).is_empty());
+    }
+
     /// pattern that does not read keeps Save off.
     #[test]
     fn the_never_send_lists_are_read_a_line_each_and_checked() {
