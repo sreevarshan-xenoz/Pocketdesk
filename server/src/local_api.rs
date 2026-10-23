@@ -480,13 +480,23 @@ pub fn send_in(
                 format!("{} is not linked now ({})", computer.name, computer.link),
             );
         }
-    } else if !live_mirror(state_dir, now, true).is_some_and(|m| m.files_reach(&device_id)) {
-        return refused(
-            exit::FAILED,
-            format!(
-                "{device_id} is not connected where files can reach it: open Pocketdesk on the phone first"
-            ),
-        );
+    } else {
+        let mirror = live_mirror(state_dir, now, true);
+        if !mirror.as_ref().is_some_and(|m| m.files_reach(&device_id)) {
+            // Linked, but files cannot reach it: by the internet road with
+            // files over it off (S3), not a phone to open.
+            let linked = mirror.is_some_and(|m| m.linked.iter().any(|p| p.device_id == device_id));
+            return refused(
+                exit::FAILED,
+                if linked {
+                    format!("{device_id} is linked by the internet road, and {INTERNET_FILES_OFF}")
+                } else {
+                    format!(
+                        "{device_id} is not connected where files can reach it: open Pocketdesk on the phone first"
+                    )
+                },
+            );
+        }
     }
     let Ok(full) = std::path::absolute(path) else {
         return refused(
@@ -1236,6 +1246,27 @@ pub fn default_phone(state_dir: &Path, now_unix: u64, running: bool) -> Option<S
     })
 }
 
+/// Why files cannot reach a phone linked to this computer: linked, with
+/// files false, is the internet road with files over it off (S3). A v2
+/// connection is linked without a road for files too; nothing opens one
+/// now, so this says the common case.
+const INTERNET_FILES_OFF: &str =
+    "files over the internet are off on this computer (Settings, \"Files over the internet\")";
+
+/// Whether some paired phone is linked where files cannot reach it.
+fn linked_without_files(state_dir: &Path, now_unix: u64, running: bool) -> bool {
+    let Some(mirror) = live_mirror(state_dir, now_unix, running) else {
+        return false;
+    };
+    let Ok(paired) = trust_store(state_dir).map(|t| t.trusted_devices()) else {
+        return false;
+    };
+    mirror
+        .linked
+        .iter()
+        .any(|p| !p.files && paired.contains(&p.device_id))
+}
+
 /// `pocketdesk send-to-phone`: queue each path for the default phone, and
 /// say how it went on stdout and in a desktop notification (a file
 /// manager shows no console). The exit code.
@@ -1280,8 +1311,12 @@ pub fn send_to_phone_in(
     let now = pocketdesk_core::local::pin::now_unix();
     let Some(phone) = default_phone(state_dir, now, true) else {
         return not_sent(
-            "No phone is connected where files can reach it: open Pocketdesk on your phone."
-                .to_string(),
+            if linked_without_files(state_dir, now, true) {
+                format!("The phone is linked by the internet road, and {INTERNET_FILES_OFF}.")
+            } else {
+                "No phone is connected where files can reach it: open Pocketdesk on your phone."
+                    .to_string()
+            },
             exit::FAILED,
         );
     };
@@ -1995,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_to_a_phone_linked_at_home_is_queued_and_away_is_refused() {
+    fn a_send_to_a_phone_linked_at_home_is_queued_and_one_files_cannot_reach_says_why() {
         let (dir, file) = send_setup("send-linked");
         let linked = |files: bool| {
             std::fs::write(
@@ -2015,6 +2050,14 @@ mod tests {
         linked(false);
         let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
         assert_eq!(code, exit::FAILED, "a link files cannot reach: {out}");
+        // S3: linked by the internet road with files over it off; the phone
+        // is open, so "open Pocketdesk" is not the reason.
+        let reason = out["reason"].as_str().unwrap_or_default();
+        assert!(
+            reason.contains("files over the internet are off on this computer"),
+            "says why: {out}"
+        );
+        assert!(!reason.contains("open Pocketdesk"), "{out}");
     }
 
     #[test]
@@ -2125,6 +2168,20 @@ mod tests {
         let (_, body, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| true);
         assert_eq!(code, exit::FAILED);
         assert!(body.contains("No phone is connected"), "{body}");
+        // S3 review: linked by the internet road with files over it off.
+        std::fs::write(
+            dir.join(LIVE_FILE),
+            json!({
+                "updated_unix": pocketdesk_core::local::pin::now_unix(),
+                "sessions": [],
+                "linked": [{ "device_id": "5f1c9b3d-6e70", "files": false }],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let (_, body, code) = send_to_phone_in(&dir, std::slice::from_ref(&file), &|| true);
+        assert_eq!(code, exit::FAILED);
+        assert!(body.contains("files over the internet are off"), "{body}");
         let missing = dir.join("gone.pdf");
         in_screen_session(&dir, &["5f1c9b3d-6e70"]);
         let (summary, body, code) = send_to_phone_in(&dir, &[file, missing], &|| true);
@@ -2140,6 +2197,7 @@ mod tests {
         let (out, code) = send_in(&dir, "5f1c9b", &file, &|| true, None);
         assert_eq!(code, exit::FAILED, "{out}");
         assert!(out["error"].as_str().unwrap().contains("not connected"));
+        assert!(out["error"].as_str().unwrap().contains("open Pocketdesk"));
         assert!(
             pocketdesk_core::local::outbox::take_all(&dir, pocketdesk_core::local::pin::now_unix())
                 .is_empty()
