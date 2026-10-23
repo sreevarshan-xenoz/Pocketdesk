@@ -286,6 +286,9 @@ pub struct PocketdeskApp {
     send_to: Option<String>,
     /// The others a send goes to as well (P6).
     send_also: Vec<String>,
+    /// Files being read from the clipboard (P7).
+    pasting:
+        Option<std::thread::JoinHandle<Option<pocketdesk_core::local::clipboard_files::Copied>>>,
     /// Files dropped while several phones or computers could take them,
     /// waiting for the owner to say which (J5).
     dropped: Vec<PathBuf>,
@@ -376,6 +379,7 @@ impl PocketdeskApp {
             raised_approvals: Vec::new(),
             send_to: None,
             send_also: Vec::new(),
+            pasting: None,
             dropped: Vec::new(),
             send_path: String::new(),
             send_link: String::new(),
@@ -2931,14 +2935,12 @@ impl PocketdeskApp {
             self.send_file(&path);
             self.send_path.clear();
         }
-        if paste {
-            match pocketdesk_core::local::clipboard_files::read() {
-                Some(files) => self.take_dropped(files),
-                None => self.notice = crate::notice::Notice::error(
-                    "The clipboard holds no files: copy them in Explorer or a file manager first."
-                        .to_string(),
-                ),
-            }
+        // Read on a thread (P7 review: the clipboard's retries, or a dead
+        // network drive's files, held the window).
+        if paste && self.pasting.is_none() {
+            self.pasting = Some(std::thread::spawn(
+                pocketdesk_core::local::clipboard_files::read,
+            ));
         }
         let mut link = None;
         ui.horizontal_wrapped(|ui| {
@@ -3210,6 +3212,25 @@ impl PocketdeskApp {
         });
         if !dropped.is_empty() {
             self.take_dropped(dropped);
+        }
+        // P7: files pasted from the clipboard, once read.
+        if self.pasting.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.pasting.take().and_then(|h| h.join().ok()).flatten() {
+                Some(copied) => {
+                    let left_out = copied.left_out;
+                    self.take_dropped(copied.files);
+                    if left_out > 0 {
+                        self.notice = crate::notice::Notice::error(format!(
+                            "Only the first {} copied files were taken; {left_out} more were left out.",
+                            pocketdesk_core::local::clipboard_files::MAX_FILES
+                        ));
+                    }
+                }
+                None => self.notice = crate::notice::Notice::error(
+                    "The clipboard holds no files: copy them in Explorer or a file manager first."
+                        .to_string(),
+                ),
+            }
         }
         if self.picking.as_ref().is_some_and(|h| h.is_finished()) {
             if let Some(Ok(Some(path))) = self.picking.take().map(|h| h.join()) {

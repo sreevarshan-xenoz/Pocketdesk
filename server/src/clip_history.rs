@@ -97,18 +97,34 @@ pub async fn run_sends() {
         .await;
         let now = pocketdesk_core::local::pin::now_unix();
         for request in clip_history::take_sends(&dir, now) {
-            // P7: files copied in Explorer go as files, as Send file… sends.
+            // P7: files copied in Explorer go as files, as Send file… sends;
+            // with Files off it falls back to the text, if any (P7 review).
             if request.current
-                && let Ok(Some(files)) =
-                    tokio::task::spawn_blocking(pocketdesk_core::local::clipboard_files::read).await
-            {
-                let allowed = crate::plugins::pair::permits(
+                && crate::plugins::pair::permits(
                     &request.device_id,
                     "kdeconnect.pocketdesk.file_fetch",
-                );
-                match send_files(&dir, &request.device_id, &files, allowed, now) {
+                )
+                && let Ok(Some(copied)) =
+                    tokio::task::spawn_blocking(pocketdesk_core::local::clipboard_files::read).await
+            {
+                // Said now, not only in the sent list (P7 review: from the
+                // tray nothing seemed to happen).
+                let clients = crate::state::clone_clients().await;
+                let sent = crate::offers::reach(&request.device_id, &clients)
+                    .map_err(str::to_string)
+                    .and_then(|()| send_files(&dir, &request.device_id, &copied.files, true, now));
+                match sent {
                     Ok(count) => {
-                        tracing::info!("Queued {count} copied file(s) for {}", request.device_id)
+                        tracing::info!("Queued {count} copied file(s) for {}", request.device_id);
+                        if copied.left_out > 0 {
+                            tell_not_sent(
+                                &request.device_id,
+                                &format!(
+                                    "only the first {count} copied files were sent; {} more were left out",
+                                    copied.left_out
+                                ),
+                            );
+                        }
                     }
                     Err(reason) => {
                         tracing::info!("{} not sent the copied files: {reason}", request.device_id);
