@@ -2662,7 +2662,7 @@ Owed:
 ## 198. Files to several phones or computers at once (P6)
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, by the CLI:
-- [x] `pocketdesk send d2f44d47,nosuchphone,d2f44d47-d78b file --json`: the OPPO's send queued once (the repeat skipped), the unknown name refused, `"error": "1 of 2 did not go"`, exit 2.
+- [x] `pocketdesk send <phone>,nosuchphone,<the phone's id> file --json`: the OPPO's send queued once (the repeat skipped), the unknown name refused, `"error": "1 of 2 did not go"`, exit 2.
 Owed:
 - [ ] Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 - [ ] The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
