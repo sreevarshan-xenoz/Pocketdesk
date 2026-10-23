@@ -977,7 +977,7 @@ Owed:
 - [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
 - [ ] A device-to-device move (Smart Switch) leaves the app unpaired. (where: other hardware)
-- [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716-1725 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
+- [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 - [ ] A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address. (where: away)
 - [ ] Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
@@ -2832,6 +2832,15 @@ Owed:
 - [ ] On a LAN: Save the chosen landing, a video opening in the player, a HEIC photo's PNG on the computer's clipboard. (where: by hand)
 - [ ] The desktop app's Phone page by hand: More photos, the ticks and their limit of 20, a page of screenshots only. (where: by hand)
 - [ ] "Its videos too" asking for video access; Settings in Spanish and Tamil. (where: by hand)
+
+## 211. Files to a KDE Connect device (T6)
+
+Built 2026-10-24. Unit-tested: the send with real TLS on loopback, each side with its own KDE identity (the file byte for byte, a device with another certificate refused), the CLI finding a device by name or id, the desktop listing it as a target and a drop not going to it. No KDE Connect device was reachable here.
+Owed:
+- [ ] KDE Connect on Android, paired: a file from the Files page and from `pocketdesk send <device>` lands in its Downloads, its name and date kept; two files one after the other. (where: by hand)
+- [ ] KDE Connect on a Linux desktop (or GSConnect), the same. (where: linux)
+- [ ] The device not connected: the send fails in the Sent list with why; a folder refused with why. (where: by hand)
+- [ ] Windows: `pocketdesk install` opening TCP 1739-1764, and a device coming for a file through the firewall. (where: by hand)
 
 ## Recording results
 

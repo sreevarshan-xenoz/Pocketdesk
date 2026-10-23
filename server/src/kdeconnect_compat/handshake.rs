@@ -261,6 +261,82 @@ impl rustls::client::danger::ServerCertVerifier for DeviceCertificate {
     }
 }
 
+/// The TLS server configuration for a paired device that comes for a file
+/// this computer sends it (T6): this computer's compat certificate, TLS 1.2
+/// or 1.3, and the device's certificate required, taken only if its
+/// subject is `device_id` and it is the pinned one.
+pub fn server_config(
+    identity: &CompatIdentity,
+    device_id: &str,
+    pinned: [u8; 32],
+) -> Result<Arc<rustls::ServerConfig>, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let key = rustls::pki_types::PrivateKeyDer::try_from(identity.key_der.clone())
+        .map_err(|_| "the compat key does not read".to_string())?;
+    let config = rustls::ServerConfig::builder_with_protocol_versions(&[
+        &rustls::version::TLS13,
+        &rustls::version::TLS12,
+    ])
+    .with_client_cert_verifier(Arc::new(DeviceClient(DeviceCertificate {
+        id: device_id.to_string(),
+        pinned: Some(pinned),
+    })))
+    .with_single_cert(
+        vec![rustls::pki_types::CertificateDer::from(
+            identity.cert_der.clone(),
+        )],
+        key,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Arc::new(config))
+}
+
+/// [`DeviceCertificate`]'s rules for a device on the client's side (T6).
+#[derive(Debug)]
+struct DeviceClient(DeviceCertificate);
+
+impl rustls::server::danger::ClientCertVerifier for DeviceClient {
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        use rustls::client::danger::ServerCertVerifier;
+        let name = rustls::pki_types::ServerName::try_from("kdeconnect")
+            .map_err(|e| rustls::Error::General(e.to_string()))?;
+        self.0
+            .verify_server_cert(end_entity, intermediates, &name, &[], now)
+            .map(|_| rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
 /// SHA-256 of a certificate, as pins are kept.
 pub fn cert_hash(der: &[u8]) -> [u8; 32] {
     let digest = ring::digest::digest(&ring::digest::SHA256, der);

@@ -64,6 +64,9 @@ pub struct Snapshot {
     /// The other computers this one paired with whose link is up (2h), by
     /// id and name: files can go to them.
     pub linked_computers: Vec<(String, String)>,
+    /// The KDE Connect devices paired with this computer (T6), by id and
+    /// name: a file can go to one connected now.
+    pub kde_devices: Vec<(String, String)>,
     /// Files moving now, as the running server last wrote (C1).
     pub under_way: Vec<pocketdesk_core::local::transfers::Transfer>,
     /// The port the running server bound (T1): its own record, not one an
@@ -187,6 +190,14 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                 .into_iter()
                 .filter(|c| c.link == "linked")
                 .map(|c| (c.device_id, c.name))
+                .collect()
+        } else {
+            Vec::new()
+        },
+        kde_devices: if running {
+            pocketdesk_core::local::kdeconnect_devices::devices(state_dir)
+                .into_iter()
+                .map(|d| (d.device_id, d.name))
                 .collect()
         } else {
             Vec::new()
@@ -994,22 +1005,27 @@ pub fn send_targets(snapshot: &Snapshot) -> Vec<&Device> {
 }
 
 /// Everything a file can be sent to now, by id: the phones files reach,
-/// then the other computers whose link is up (2h).
+/// then the other computers whose link is up (2h), then the paired KDE
+/// Connect devices (T6; the server says when one is not connected).
 pub fn send_target_ids(snapshot: &Snapshot) -> Vec<String> {
     send_targets(snapshot)
         .iter()
         .map(|d| d.id.clone())
         .chain(snapshot.linked_computers.iter().map(|(id, _)| id.clone()))
+        .chain(snapshot.kde_devices.iter().map(|(id, _)| id.clone()))
         .collect()
 }
 
-/// How a send target is named: a computer by its name, a phone by its
-/// name (U3), else by the first characters of its id.
+/// How a send target is named: a computer or a KDE Connect device by its
+/// name, a phone by its name (U3), else by the first characters of its id.
 pub fn target_label(snapshot: &Snapshot, id: &str) -> String {
-    match snapshot.linked_computers.iter().find(|(c, _)| c == id) {
-        Some((_, name)) => format!("{name} (computer)"),
-        None => device_label(&snapshot.devices, id),
+    if let Some((_, name)) = snapshot.linked_computers.iter().find(|(c, _)| c == id) {
+        return format!("{name} (computer)");
     }
+    if let Some((_, name)) = snapshot.kde_devices.iter().find(|(d, _)| d == id) {
+        return format!("{name} (KDE Connect)");
+    }
+    device_label(&snapshot.devices, id)
 }
 
 /// A paired device by its name (U3), else by the first characters of its
@@ -1123,7 +1139,12 @@ pub enum DropTo {
 /// several, and nowhere with none (J5: a drop had gone to the Files page's
 /// last choice without a word).
 pub fn drop_to(snapshot: &Snapshot) -> DropTo {
-    let mut targets = send_target_ids(snapshot);
+    // A KDE Connect device is chosen, never a drop's own target: whether
+    // it is connected now is the server's to say (T6 review).
+    let mut targets: Vec<String> = send_target_ids(snapshot)
+        .into_iter()
+        .filter(|id| !snapshot.kde_devices.iter().any(|(k, _)| k == id))
+        .collect();
     match targets.len() {
         0 => DropTo::Nobody,
         1 => DropTo::Send(targets.remove(0)),
@@ -2392,6 +2413,16 @@ mod tests {
             Ok("desk-b".to_string())
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
+        // T6: a paired KDE Connect device too, after phones and computers.
+        let with_kde = Snapshot {
+            linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
+            kde_devices: vec![("kde_1".to_string(), "Tablet".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(send_target_ids(&with_kde), ["desk-b", "kde_1"]);
+        assert_eq!(target_label(&with_kde, "kde_1"), "Tablet (KDE Connect)");
+        // A drop goes to the computer, not asking about the KDE device.
+        assert_eq!(drop_to(&with_kde), DropTo::Send("desk-b".to_string()));
         assert_eq!(target_label(&with_computer, "phone-a"), "phone-a");
     }
 

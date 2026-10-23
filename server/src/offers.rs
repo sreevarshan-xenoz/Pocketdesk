@@ -803,6 +803,70 @@ fn deliver_folder_to_computer(dir: &Path, request: SendRequest, root: PathBuf) {
     });
 }
 
+/// Send a file to a paired KDE Connect device (T6), as KDE Connect sends
+/// one ([`crate::kdeconnect_compat::share::send`]). Recorded first, then
+/// sent on a task of its own. A folder does not go: KDE Connect has no
+/// folder send to take it.
+fn deliver_to_kde(dir: &Path, request: SendRequest, path: PathBuf) {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| request.path.clone());
+    let size = std::fs::metadata(&path)
+        .ok()
+        .filter(|m| m.is_file())
+        .map(|m| m.len());
+    let checked = if path.is_dir() {
+        Err("a folder does not go to a KDE Connect device: send its files")
+    } else if is_servers_own(&path, &crate::plugins::file_browse::private_dirs()) {
+        Err("the server's own files are not sent")
+    } else if size.is_none() {
+        Err("there is no such file")
+    } else {
+        Ok(())
+    };
+    let file = SentFile {
+        id: request.id.clone(),
+        name,
+        path: request.path.clone(),
+        size: size.unwrap_or(0),
+        device_id: request.device_id.clone(),
+        sent_unix: now_unix(),
+        state: match &checked {
+            Ok(()) => SentState::Offered,
+            Err(reason) => SentState::Failed(reason.to_string()),
+        },
+        note: None,
+    };
+    {
+        let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = sent::record(dir, file) {
+            tracing::warn!("Could not record the sent file: {e}");
+        }
+    }
+    if let Err(reason) = checked {
+        tracing::warn!(
+            "Not sending {} to a KDE Connect device: {reason}",
+            path.display()
+        );
+        return;
+    }
+    let dir = dir.to_path_buf();
+    tokio::spawn(async move {
+        let state = match crate::kdeconnect_compat::share::send(&request.device_id, &path).await {
+            Ok(()) => SentState::Sent,
+            Err(reason) => {
+                tracing::warn!(
+                    "Sending {} to a KDE Connect device failed: {reason}",
+                    path.display()
+                );
+                SentState::Failed(reason)
+            }
+        };
+        update_sent(&dir, &request.id, state);
+    });
+}
+
 /// The live connection that reaches `device_id` (a connection goes by its
 /// device's id, phase B). Only one files can reach carries the download that
 /// follows: an address to dial back, or a link by the internet road (2c).
@@ -868,6 +932,13 @@ async fn deliver(
     let path = PathBuf::from(&request.path);
     if crate::peer_computers::is_paired(&request.device_id) {
         return deliver_to_computer(dir, request, path);
+    }
+    // T6: a paired KDE Connect device, which comes for it as KDE Connect does.
+    if pocketdesk_core::local::kdeconnect_devices::devices(dir)
+        .iter()
+        .any(|d| d.device_id == request.device_id)
+    {
+        return deliver_to_kde(dir, request, path);
     }
     if path.is_dir() {
         return deliver_folder(dir, request, path, clients, store).await;
