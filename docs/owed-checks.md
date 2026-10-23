@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-879 open items.
+876 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 184 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 76 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 88 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 33 |
-| A second computer | 18 |
+| Away from home: another network, or through a router | 35 |
+| A second computer | 29 |
 | A Linux desktop (the Azure VM serves for some) | 158 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 55 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 273 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 345 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -157,7 +157,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **109. The owed checks by where they run (C6)**
 
-- The rest of "here", in later batches: the S cycle (`docs/research/2026-10-23-s-cycle.md`), S1 to S5.
+- The rest of "here": what the S cycle (S1 to S5, 2026-10-23 and 24) did not reach, mostly long transfer and battery runs.
 
 **118. Lock when the phone leaves (D9)**
 
@@ -192,247 +192,25 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Desktop "Clearing here clears it on the phone" off: not cleared.
 
-**161. Commands to the phone's automation apps (L6)**
-
-- With "Only to" set to another installed app: nothing reaches the receiver.
-- With no automation app installed: nothing is sent, and Settings says so.
-
 **162. The phone's state on the computer (L9)**
 
-- The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars.
 - The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
-- Behind Tailscale on the phone: Wi-Fi with its bars, not nothing.
 - The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
 
 **163. Features on both sides (L7)**
 
 - A switch turned off on the phone shows on the computer's Devices page within 15 s in a session, and within 30 s with only a background link.
-- Settings "Phone notifications" off on the computer: the notifications rows name it.
 - A phone unpaired: its report gone from `phone_switches.json` within seconds.
-
-**164. Notifications to every computer of mine (L8)**
-
-- Two throwaway servers, both paired, the second picked: a notification reaches both, and its cancel closes it on both.
-- The own server stopped: the second still gets each notification at once.
-- The second server stopped: the own one still gets every notification on time.
-- The same chat posting, being cleared and posting again: the second is cleared on both.
-- The computer in use swapped (a session with the second): the picks still mean the same computers.
-
-**165. The other computers answer and clear (L8 part 2)**
-
-- Two throwaway servers, both paired, the second picked, answering on: the second's toast offers the buttons, and pressing one runs it on the phone.
-- One computer saved at two addresses and picked: no link to itself, no doubled toasts.
-- The second server stopped: its link is tried again a minute later, and copies fall back to one-offs.
-
-**166. Linked with the screen off (M1)**
-
-- On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
-- A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
-- Renaming the computer changes the notification's words.
 
 **167. Both sides' switches, part 2 (M2)**
 
 - The OPPO paired to a throwaway server: "What this computer allows" matches the server's Devices page, with one permission and one Setting turned off.
-- The sheet for a computer that is not the phone's own: every row "with its own computer only", the notifications too unless picked under "Other computers of mine".
-- A computer from before M2: the sheet says it cannot tell.
-- Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused.
-- Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions.
 - A phone paired as mine, paired again as someone else's: what was off stays off.
 - `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
 **168. Image copies without a session (M3)**
 
 - A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app.
-- A screenshot copied on Windows (Win+Shift+S) with a phone linked: it goes once, even while the Snipping Tool holds the clipboard.
-- A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll.
-
-**169. Photos keep where they were taken (M5)**
-
-- Photo access revoked first, then the switch turned on: Android asks for photo access, and the switch stays on.
-- The same photo fetched through recent photos (C7), and in a folder send: the tags kept.
-- Android 14's "selected photos only": the row says access is needed, and photos go as before.
-- A share from the Files app (`com.android.providers.media.documents`), and one from Google Photos.
-
-**170. No toast while the phone is in hand (M6)**
-
-- With Pocketdesk's Remote open on the phone: a toast.
-- A notification that comes as the screen is off and wakes it: a toast.
-
-**171. Type on the phone from the computer's keyboard (M4)**
-
-- Back, Home and Recents from the window, in turn with text typed before them.
-- A password field: nothing typed, and the notification says so.
-- Stop: nothing typed for 10 minutes.
-- The switch off, or the app's notifications off: nothing typed.
-- Japanese through Windows' input method: the committed text arrives.
-- The phone unlinked while the window is open: the window says why and sends nothing.
-
-**172. The phone's sound without its screen (M7)**
-
-- The OPPO with the throwaway tone app against a throwaway server with the WAV seam (`POCKETDESK_PHONE_AUDIO_FILE`): the tone's frequency and level; no cast window (the relay's log says nothing); the Sessions page says "its sound here".
-- "Play its sound here" off for the phone: refused, the phone saying why; turned off mid-session: it ends.
-- Stop from the phone's notification, and End on the Sessions page.
-- Started while the screen is shown: refused before Android's consent, saying why.
-- An hour with the screen off: the battery.
-
-**173. tel: links and Call back (M8)**
-
-- `pocketdesk tel tel:+1-555-0100` to the OPPO through a throwaway server: the dialer opens with the number (`dumpsys activity activities`); the desktop notification says so. 2026-10-21, against a throwaway server with two paired phones, only the OPPO linked: it was chosen ("Calling +15550100: Press Call on OPPO Reno8 5G.") and the dial reached it, which declined with its "Calls from the computer" off (L4's rule). The dialer opening is owed with that switch on.
-- Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window.
-- Off again: the keys are gone and Windows asks for another app.
-
-**174. Home Assistant buttons for phone commands (M9)**
-
-- A local broker as in 1e: the buttons announced under the phone's device; a press published with `mosquitto_pub` reaches the OPPO's throwaway receiver in logcat.
-- A retained or empty message on the command topic: nothing sent.
-- The phone's "Send commands to its automation apps" off: refused, in the server's log.
-- A command removed in Settings: its button goes from the broker; another command keeps its id.
-
-**175. Copies sent by themselves (M10 part 2)**
-
-- The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types).
-- The keyboard and selection in the app copied from, after the read (focus moves away and back).
-- An hour with the switch on: the battery.
-
-**176. The phone's music without a session, with its cover (N2)**
-
-- Next and Previous from the computer.
-- Media turned off and on for the phone on the Devices page mid-track: the cover comes back at the next track.
-- Two sessions in one app (a browser's two tabs): the cover of the one reported.
-
-**177. Open on the phone (N3)**
-
-- Without Pocketdesk control: "Tap to open" on the phone, its tap opening the app, gone after ten minutes or when the notification goes.
-- The switch off on the phone: "opening is off on the phone".
-- A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits).
-- Android 15 and 16 (`ALLOW_ALWAYS`).
-
-**178. The phone's ongoing updates on the computer (N4)**
-
-- Android 16's Live Updates (`ProgressStyle`) on a phone that has them.
-- Closing the toast mid-download: it stays closed; the card stays on the page.
-- The phone in hand at the first update: the toast comes once it is put down.
-- The battery with a long download.
-
-**179. The computer's music in the phone's media controls (N5)**
-
-- A headset's button and a watch's controls.
-- The link dropped: the session gone within 150 s; back by itself when the link returns.
-- Audio turned off for the phone on the Devices page: nothing more comes, and the session ends.
-
-**180. Files into the phone's folders from the computer's drive (N6)**
-
-- A file's write into the marked folder on the LAN road (or the internet road), its SHA-256 read back through the drive.
-- Unmarking: the write grant given back.
-- File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one).
-- A file larger than the phone's free space: refused, said in Explorer.
-- Desktop Settings "The phone's folders take files" off: the drive read-only again.
-- Explorer's rename, delete and "New folder" (MOVE and DELETE are refused): what Explorer says.
-- A folder that is also where files from computers go: unmarking it leaves downloads there working.
-
-**181. Toasts only on the computer in use (N7)**
-
-- Neither in use: both pop up. One's server stopped: the other pops up within 30 s of its last answer.
-- "Tell phones when this computer is in use" off on one: it always pops up.
-- The battery with the links kept, by N7's background-cost script.
-
-**182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
-
-- "Type on the phone with a key": registered, a press opening the window; another app holding it said in Settings.
-- A share with three links sent to "Open on computer": three open on the computer, and the toast says three.
-- A phone with under a gigabyte free: one notification, none again until it has had room.
-
-**184. Automation apps start the computer's tasks and press its deck (O1)**
-
-- A task that asks first, allowed at the desk.
-- Over the internet road, cold.
-
-**185. A screenshot of the phone and its screen locked from the computer (O2)**
-
-- The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1).
-
-**186. A paired computer found again at a new address (O3)**
-
-- A card saved by name (`mypc.local`) is left alone.
-
-**188. Copies kept on the computer by program or by look (O4)**
-
-- A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
-- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
-
-**189. Find a setting on the phone (O8)**
-
-- Clear by tap; Back again leaves Settings.
-
-**190. Received images onto the clipboard (O7)**
-
-- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
-- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
-- Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
-
-**191. Choose the computer's player (O6)**
-
-- Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
-- The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
-
-**193. The computer's announcement follows its network (P1)**
-
-- A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
-
-**194. Open an app on the phone from the computer (P2)**
-
-- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
-- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
-
-**195. Quiet hours, and quiet while presenting (P3)**
-
-- Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
-- A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
-
-**196. Notifications held by their words (P4)**
-
-- The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
-- An update held by its words closing the toast its first showed.
-
-**197. A phone's ringing alarm on the computer (P5)**
-
-- A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only).
-
-**198. Files to several phones or computers at once (P6)**
-
-- The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
-
-**199. Files copied in Explorer sent with the clipboard key (P7)**
-
-- Files off and text copied too: the text sent instead.
-- The Files page's "Paste copied files", one target and several; more than 100 copied.
-
-**200. Links by site (P8)**
-
-- The Settings box by hand: its warning for a bad line, a .bat refused.
-
-**201. Permission profiles (P9)**
-
-- Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
-
-**202. A ring that vibrates and flashes (P11)**
-
-- Stop and a dismiss ending both at once.
-
-**203. The phone's contacts on the computer (P10)**
-
-- The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
-
-**204. The desktop's O and P pages after their design pass (Q2)**
-
-- Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name.
-- The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours.
-- Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from.
-
-**205. The phone's O and P rows after their design pass (Q3)**
-
-- My contacts on the computer: the permission refused (the line and Android's page), then granted there; without notification access, its warning and link.
-- The Devices page and the phone's "What this computer allows" naming the five new features.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -706,9 +484,48 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With control on: Ctrl+V into a scratch field, read back with `uiautomator dump`; a long paste says it was cut.
 
+**168. Image copies without a session (M3)**
+
+- A screenshot copied on Windows (Win+Shift+S) with a phone linked: it goes once, even while the Snipping Tool holds the clipboard. (where: owner) (keys pressed on this computer.)
+- A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll. (where: owner)
+
+**170. No toast while the phone is in hand (M6)**
+
+- With Pocketdesk's Remote open on the phone: a toast. (where: owner) (a remote needs the Input permission.)
+
+**171. Type on the phone from the computer's keyboard (M4)**
+
+- Japanese through Windows' input method: the committed text arrives. (where: owner)
+
+**173. tel: links and Call back (M8)**
+
+- Settings' switch on Windows: Default apps offers Pocketdesk for TEL; a link clicked in a browser opens the dialer with no console window. (where: owner) (it registers a handler on this computer.)
+- Off again: the keys are gone and Windows asks for another app. (where: owner)
+
+**180. Files into the phone's folders from the computer's drive (N6)**
+
+- A file's write into the marked folder on the LAN road (or the internet road), its SHA-256 read back through the drive. (where: owner) (the LAN road needs the throwaway's port open.)
+
+**182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
+
+- "Type on the phone with a key": registered, a press opening the window; another app holding it said in Settings. (where: owner) (a key pressed on this computer.)
+- A share with three links sent to "Open on computer": three open on the computer, and the toast says three. (where: owner) (it opens links in this computer's browser.)
+
+**185. A screenshot of the phone and its screen locked from the computer (O2)**
+
+- The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1). (where: owner) (the LAN road needs the throwaway's port open.)
+
 **193. The computer's announcement follows its network (P1)**
 
 - A wake from sleep with a new lease. (where: owner)
+
+**195. Quiet hours, and quiet while presenting (P3)**
+
+- Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen. (where: owner)
+
+**199. Files copied in Explorer sent with the clipboard key (P7)**
+
+- Files off and text copied too: the text sent instead. (where: owner) (the clipboard key on this computer.)
 
 ## A phone with a SIM
 
@@ -963,6 +780,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
 
+**162. The phone's state on the computer (L9)**
+
+- Behind Tailscale on the phone: Wi-Fi with its bars, not nothing. (where: away)
+
 **168. Image copies without a session (M3)**
 
 - The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
@@ -970,6 +791,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **186. A paired computer found again at a new address (O3)**
 
 - The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
+
+**193. The computer's announcement follows its network (P1)**
+
+- A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute. (where: away)
 
 ## A second computer
 
@@ -1014,14 +839,31 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A computer asleep (not this box): woken, "It is awake" within a minute. (where: second computer)
 
+**164. Notifications to every computer of mine (L8)**
+
+- Two throwaway servers, both paired, the second picked: a notification reaches both, and its cancel closes it on both. (where: second computer)
+- The own server stopped: the second still gets each notification at once. (where: second computer)
+- The second server stopped: the own one still gets every notification on time. (where: second computer)
+- The same chat posting, being cleared and posting again: the second is cleared on both. (where: second computer)
+- The computer in use swapped (a session with the second): the picks still mean the same computers. (where: second computer)
+
 **165. The other computers answer and clear (L8 part 2)**
 
+- Two throwaway servers, both paired, the second picked, answering on: the second's toast offers the buttons, and pressing one runs it on the phone. (where: second computer)
 - A toast closed on the second computer is cleared on the phone.
 - The second computer's Overview does not show the phone as linked by that link, and its Send file says it cannot reach the phone.
+- One computer saved at two addresses and picked: no link to itself, no doubled toasts. (where: second computer)
+- The second server stopped: its link is tried again a minute later, and copies fall back to one-offs. (where: second computer)
+
+**167. Both sides' switches, part 2 (M2)**
+
+- The sheet for a computer that is not the phone's own: every row "with its own computer only", the notifications too unless picked under "Other computers of mine". (where: second computer)
 
 **181. Toasts only on the computer in use (N7)**
 
 - Two throwaway servers, both picked on the OPPO (L8), the switch on: a notification while one is in use pops up there only, and the other's Notifications page and Activity have it ("not shown: another computer was in use").
+- Neither in use: both pop up. One's server stopped: the other pops up within 30 s of its last answer. (where: second computer)
+- "Tell phones when this computer is in use" off on one: it always pops up. (where: second computer)
 
 **186. A paired computer found again at a new address (O3)**
 
@@ -1624,6 +1466,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Android 10, and a KDE Connect device's share.
 
+**166. Linked with the screen off (M1)**
+
+- A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off. (where: other hardware)
+
+**167. Both sides' switches, part 2 (M2)**
+
+- A computer from before M2: the sheet says it cannot tell. (where: other hardware) (a computer on a release from before M2.)
+
 **172. The phone's sound without its screen (M7)**
 
 - The microphone not granted on Android 13+: its request shows.
@@ -1636,9 +1486,26 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Another maker's Android, and Android 10.
 
+**177. Open on the phone (N3)**
+
+- Android 15 and 16 (`ALLOW_ALWAYS`). (where: other hardware) (Android 15 or 16.)
+
+**178. The phone's ongoing updates on the computer (N4)**
+
+- Android 16's Live Updates (`ProgressStyle`) on a phone that has them. (where: other hardware) (Android 16.)
+
+**179. The computer's music in the phone's media controls (N5)**
+
+- A headset's button and a watch's controls. (where: other hardware)
+
 **180. Files into the phone's folders from the computer's drive (N6)**
 
+- A file larger than the phone's free space: refused, said in Explorer. (where: other hardware) (a full phone.)
 - A marked folder on an SD card with too little room: the phone checks only its own storage, so the copy fails part way and says so.
+
+**182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
+
+- A phone with under a gigabyte free: one notification, none again until it has had room. (where: other hardware) (a full phone.)
 
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
@@ -1647,6 +1514,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **194. Open an app on the phone from the computer (P2)**
 
 - Android 13 and older, and a work profile's apps.
+
+**197. A phone's ringing alarm on the computer (P5)**
+
+- A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only). (where: other hardware) (a Pixel.)
 
 **205. The phone's O and P rows after their design pass (Q3)**
 
@@ -2222,42 +2093,109 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **161. Commands to the phone's automation apps (L6)**
 
 - A throwaway receiver in Tasker's package logs `dev.pocketdesk.android.event.COMMAND` with NAME, TEXT and ADDRESS after `pocketdesk phone-command`.
+- With "Only to" set to another installed app: nothing reaches the receiver. (where: by hand) (a second automation app.)
+- With no automation app installed: nothing is sent, and Settings says so. (where: by hand)
 - Tasker itself.
+
+**162. The phone's state on the computer (L9)**
+
+- The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars. (where: by hand)
 
 **163. Features on both sides (L7)**
 
 - Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
+- Settings "Phone notifications" off on the computer: the notifications rows name it. (where: by hand)
 
 **166. Linked with the screen off (M1)**
 
 - The Health card on screen: "Turn on" with the switch off, and this phone's own setting after a pause with it on; Not now.
+- On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain. (where: by hand)
+- Renaming the computer changes the notification's words. (where: by hand)
+
+**167. Both sides' switches, part 2 (M2)**
+
+- Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused. (where: by hand) (the Pair page.)
+- Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions. (where: by hand) (the Pair page.)
 
 **169. Photos keep where they were taken (M5)**
 
+- Photo access revoked first, then the switch turned on: Android asks for photo access, and the switch stays on. (where: by hand)
 - A JPEG with GPS tags pushed to `DCIM/Camera` by adb, shared from the gallery to a throwaway server with the switch on: the tags arrive (an EXIF reader); with it off, they are gone.
+- The same photo fetched through recent photos (C7), and in a folder send: the tags kept. (where: by hand) (photos with GPS tags.)
+- Android 14's "selected photos only": the row says access is needed, and photos go as before. (where: by hand)
+- A share from the Files app (`com.android.providers.media.documents`), and one from Google Photos. (where: by hand)
+
+**171. Type on the phone from the computer's keyboard (M4)**
+
+- Back, Home and Recents from the window, in turn with text typed before them. (where: by hand) (Pocketdesk control's Accessibility service, turned on by hand.)
+- A password field: nothing typed, and the notification says so. (where: by hand) (Pocketdesk control's Accessibility service.)
+- Stop: nothing typed for 10 minutes. (where: by hand) (Pocketdesk control's Accessibility service.)
+- The switch off, or the app's notifications off: nothing typed. (where: by hand) (Pocketdesk control's Accessibility service.)
+- The phone unlinked while the window is open: the window says why and sends nothing. (where: by hand)
 
 **172. The phone's sound without its screen (M7)**
 
+- The OPPO with the throwaway tone app against a throwaway server with the WAV seam (`POCKETDESK_PHONE_AUDIO_FILE`): the tone's frequency and level; no cast window (the relay's log says nothing); the Sessions page says "its sound here". (where: by hand) (a tone app on the phone.)
+- "Play its sound here" off for the phone: refused, the phone saying why; turned off mid-session: it ends. (where: by hand) (the casting consent.)
+- Stop from the phone's notification, and End on the Sessions page. (where: by hand)
+- Started while the screen is shown: refused before Android's consent, saying why. (where: by hand)
+- An hour with the screen off: the battery. (where: by hand)
 - By ear, and a real music app (the owner).
 
 **174. Home Assistant buttons for phone commands (M9)**
 
+- A local broker as in 1e: the buttons announced under the phone's device; a press published with `mosquitto_pub` reaches the OPPO's throwaway receiver in logcat. (where: by hand) (an MQTT broker.)
+- A retained or empty message on the command topic: nothing sent. (where: by hand) (an MQTT broker.)
+- The phone's "Send commands to its automation apps" off: refused, in the server's log. (where: by hand) (an MQTT broker.)
+- A command removed in Settings: its button goes from the broker; another command keeps its id. (where: by hand) (an MQTT broker.)
 - Home Assistant itself, and Tasker (the owner).
+
+**175. Copies sent by themselves (M10 part 2)**
+
+- The switch off: nothing watched, nothing read (`dumpsys accessibility` shows no event types). (where: by hand) (Pocketdesk control's Accessibility service.)
+- The keyboard and selection in the app copied from, after the read (focus moves away and back). (where: by hand)
+- An hour with the switch on: the battery. (where: by hand)
 
 **176. The phone's music without a session, with its cover (N2)**
 
 - A real player (Spotify, YouTube Music) with the screen off, an hour: its cover, presses, and the battery by N7's script.
 - Windows' media controls with the tray program running: the phone's song and cover in the volume flyout, the media keys (with the owner).
 - The Overview's music line and buttons, and the tray's menu, by hand.
+- Next and Previous from the computer. (where: by hand) (a real player on the phone.)
+- Media turned off and on for the phone on the Devices page mid-track: the cover comes back at the next track. (where: by hand)
+- Two sessions in one app (a browser's two tabs): the cover of the one reported. (where: by hand)
+
+**177. Open on the phone (N3)**
+
+- Without Pocketdesk control: "Tap to open" on the phone, its tap opening the app, gone after ten minutes or when the notification goes. (where: by hand)
+- The switch off on the phone: "opening is off on the phone". (where: by hand)
+- A real chat or mail app's notification, and one whose app blocks a background start (another maker's limits). (where: by hand)
 
 **178. The phone's ongoing updates on the computer (N4)**
 
 - A real download or upload (Chrome, Drive), a timer (Clock) and a delivery or ride app, by eye on the toast: no pop-up after the first, the words changing.
+- Closing the toast mid-download: it stays closed; the card stays on the page. (where: by hand)
+- The phone in hand at the first update: the toast comes once it is put down. (where: by hand)
+- The battery with a long download. (where: by hand)
 
 **179. The computer's music in the phone's media controls (N5)**
 
 - The lock screen and the shade's media controls by eye: title, artist, cover, and Previous, Play/Pause, Next as the computer's player offers them.
 - A real player on this computer (Spotify, a browser), with the owner: a press from the phone plays, pauses and skips it; never Pocketdesk's own entry (the phone's music) sent back.
+- The link dropped: the session gone within 150 s; back by itself when the link returns. (where: by hand)
+- Audio turned off for the phone on the Devices page: nothing more comes, and the session ends. (where: by hand)
+
+**180. Files into the phone's folders from the computer's drive (N6)**
+
+- Unmarking: the write grant given back. (where: by hand)
+- File Explorer with the drive mapped: copy a file and a folder in (Windows' empty file first, then its content), a large file past 45 s (answered 202, then on the phone), a name taken (the next free one). (where: by hand)
+- Desktop Settings "The phone's folders take files" off: the drive read-only again. (where: by hand)
+- Explorer's rename, delete and "New folder" (MOVE and DELETE are refused): what Explorer says. (where: by hand)
+- A folder that is also where files from computers go: unmarking it leaves downloads there working. (where: by hand)
+
+**181. Toasts only on the computer in use (N7)**
+
+- The battery with the links kept, by N7's background-cost script. (where: by hand)
 
 **182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)**
 
@@ -2266,10 +2204,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **184. Automation apps start the computer's tasks and press its deck (O1)**
 
 - Tasker itself: a Send Intent to the receiver, and Intent Received for the events.
+- A task that asks first, allowed at the desk. (where: by hand)
+- Over the internet road, cold. (where: by hand) (Tasker.)
 
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
 - The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
+
+**186. A paired computer found again at a new address (O3)**
+
+- A card saved by name (`mypc.local`) is left alone. (where: by hand)
 
 **187. Notifications shared by their kind as well as their app (O5)**
 
@@ -2279,28 +2223,78 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **188. Copies kept on the computer by program or by look (O4)**
 
 - A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
+- A copy, and an image, from a listed program held the same. (where: by hand)
+- The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens". (where: by hand)
 
 **189. Find a setting on the phone (O8)**
 
 - TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
 
+**190. Received images onto the clipboard (O7)**
+
+- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads. (where: by hand)
+- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync. (where: by hand)
+- Either switch off, or a folder of images, or a GIF: the clipboard unchanged. (where: by hand)
+
+**191. Choose the computer's player (O6)**
+
+- Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen. (where: by hand)
+- The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again. (where: by hand)
+
+**194. Open an app on the phone from the computer (P2)**
+
+- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background. (where: by hand) (Pocketdesk control's Accessibility service.)
+- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list. (where: by hand)
+
+**195. Quiet hours, and quiet while presenting (P3)**
+
+- A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page. (where: by hand)
+
+**196. Notifications held by their words (P4)**
+
+- The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on. (where: by hand)
+- An update held by its words closing the toast its first showed. (where: by hand)
+
 **197. A phone's ringing alarm on the computer (P5)**
 
 - The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
 
+**198. Files to several phones or computers at once (P6)**
+
+- The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left. (where: by hand)
+
 **199. Files copied in Explorer sent with the clipboard key (P7)**
 
 - On the LAN: two files copied in Explorer, the tray's Send the clipboard and the key each sending them, rows in the sent list.
+- The Files page's "Paste copied files", one target and several; more than 100 copied. (where: by hand)
+
+**200. Links by site (P8)**
+
+- The Settings box by hand: its warning for a bad line, a .bat refused. (where: by hand)
 
 **201. Permission profiles (P9)**
 
+- Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once). (where: by hand)
 - Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
 
 **202. A ring that vibrates and flashes (P11)**
 
+- Stop and a dismiss ending both at once. (where: by hand)
 - Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
+
+**203. The phone's contacts on the computer (P10)**
+
+- The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off. (where: by hand)
+
+**204. The desktop's O and P pages after their design pass (Q2)**
+
+- Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name. (where: by hand)
+- The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours. (where: by hand)
+- Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from. (where: by hand)
 
 **205. The phone's O and P rows after their design pass (Q3)**
 
 - Settings' search with "This phone's notifications" off: "alarms" and "timer" find Alarms on the computer greyed, and the camera's "Also onto its clipboard".
+- My contacts on the computer: the permission refused (the line and Android's page), then granted there; without notification access, its warning and link. (where: by hand)
+- The Devices page and the phone's "What this computer allows" naming the five new features. (where: by hand)
 - A kind of notification's row, Spanish and Tamil on screen, font scale 2.0, TalkBack across the moved and changed rows.
