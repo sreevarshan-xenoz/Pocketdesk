@@ -39,6 +39,13 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         // P10: read on the listener's link, with Android's contacts permission.
         "contacts" to s(TextPrefs.contactsToComputer(ctx), access && granted(Manifest.permission.READ_CONTACTS)),
         "clipboard" to s(Prefs.clipboardInBackground(ctx), access),
+        // M10: the control service watches for Android's clipboard
+        // preview, shown on Android 13 and later only (R2).
+        "copies" to s(
+            Prefs.copiesByThemselves(ctx),
+            ControlRunner.serviceEnabled(ctx) &&
+                dev.pocketdesk.android.clip.CopyWatchRule.supported(android.os.Build.VERSION.SDK_INT),
+        ),
         "files" to s(Prefs.filesInBackground(ctx), access && mayPost),
         // O7: a received image put on the clipboard as it lands.
         "images" to s(Prefs.receivedImagesToClipboard(ctx)),
@@ -55,6 +62,9 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "computer_media" to s(Prefs.computerMediaInControls(ctx), access && mayPost),
         "mute" to s(QuietPrefs.letComputerMute(ctx), access),
         "control" to s(Prefs.controlFromComputer(ctx), ControlRunner.serviceEnabled(ctx)),
+        // M4: typed by the control service, waited for on the listener,
+        // with its notification while it types.
+        "typing" to s(Prefs.typingFromComputer(ctx), ControlRunner.serviceEnabled(ctx) && access && mayPost),
         "dial" to s(Prefs.callsFromComputer(ctx), mayPost),
         "commands" to s(Prefs.commandsFromComputer(ctx), access),
         // O1: another app's broadcast, taken whatever runs.

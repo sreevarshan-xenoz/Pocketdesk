@@ -148,6 +148,7 @@ private fun featureName(feature: String): Int = when (feature) {
     "texts" -> R.string.texts_show
     "contacts" -> R.string.texts_contacts
     "clipboard" -> R.string.settings_clipboard_background
+    "copies" -> R.string.settings_copies
     "files" -> R.string.settings_files_background
     "images" -> R.string.settings_received_images_clipboard
     "folders" -> R.string.settings_phone_folders
@@ -161,6 +162,7 @@ private fun featureName(feature: String): Int = when (feature) {
     "computer_media" -> R.string.settings_computer_media_controls
     "mute" -> R.string.settings_let_computer_mute
     "control" -> R.string.settings_control_from_computer
+    "typing" -> R.string.settings_typing_from_computer
     "dial" -> R.string.settings_calls_from_computer
     "commands" -> R.string.settings_commands_from_computer
     "tasks" -> R.string.settings_others_run_tasks
