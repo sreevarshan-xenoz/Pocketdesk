@@ -128,25 +128,40 @@ fn presenting_with(seam: Option<std::ffi::OsString>) -> bool {
 }
 
 /// Q4: the desktop's own Do Not Disturb on Linux, as GNOME and KDE say it.
-/// Each asked with a second's deadline and kept 5 s, so a busy minute of
-/// notifications asks once; a desktop that says nothing is not quiet.
+/// A thread of its own asks every 5 s while "While presenting" is on, each
+/// with a second's deadline, and the handlers only read its last answer
+/// (Q4 review: asked on the runtime's threads under a lock, a hung
+/// `gsettings` held every notification behind it). A desktop that says
+/// nothing is not quiet; the first answer comes within a second of the
+/// first ask.
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
-    static LAST: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    static QUIET: AtomicBool = AtomicBool::new(false);
+    static ASKING: AtomicBool = AtomicBool::new(false);
 
     pub fn do_not_disturb() -> bool {
-        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, quiet)) = *last
-            && at.elapsed() < Duration::from_secs(5)
-        {
-            return quiet;
+        if !ASKING.swap(true, Ordering::AcqRel) {
+            let _ = std::thread::Builder::new()
+                .name("do-not-disturb".into())
+                .spawn(|| {
+                    loop {
+                        let quiet = gnome() == Some(true) || kde() == Some(true);
+                        QUIET.store(quiet, Ordering::Release);
+                        std::thread::sleep(Duration::from_secs(5));
+                        // Ends with the switch; the next ask starts it again.
+                        if !crate::events::current_config().quiet_presenting {
+                            QUIET.store(false, Ordering::Release);
+                            ASKING.store(false, Ordering::Release);
+                            break;
+                        }
+                    }
+                })
+                .inspect_err(|_| ASKING.store(false, Ordering::Release));
         }
-        let quiet = gnome() == Some(true) || kde() == Some(true);
-        *last = Some((Instant::now(), quiet));
-        quiet
+        QUIET.load(Ordering::Acquire)
     }
 
     /// GNOME: banners off is its Do Not Disturb.
