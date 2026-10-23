@@ -46,9 +46,51 @@ pub enum LanEvent {
 pub struct Announcement {
     daemon: ServiceDaemon,
     fullname: String,
+    /// What it was made with, to make it again at new addresses (P1).
+    name: String,
+    device_id: String,
+    port: u16,
+    stream_port: u16,
+    /// The addresses it announces, sorted.
+    addresses: Vec<String>,
 }
 
+/// How long after a goodbye mdns-sd may still send it again (120 ms), with
+/// room to spare.
+const GOODBYE_RESENT_WITHIN: Duration = Duration::from_millis(300);
+
 impl Announcement {
+    /// The addresses it announces, as [`announced_addresses`] has them.
+    pub fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
+
+    /// P1: announce again at `addresses` (as [`announced_addresses`] has
+    /// them). The old record goes first with a goodbye: Android's resolver
+    /// keeps an old address until the service is lost (seen on the OPPO,
+    /// where cache-flushed records alone left it). mdns-sd sends the goodbye
+    /// again 120 ms later, so the new record waits past that (P1 review: it
+    /// had removed the new one too). Blocks about 1.3 s at most.
+    pub fn announce_at(&mut self, addresses: Vec<String>) -> Result<()> {
+        if let Ok(done) = self.daemon.unregister(&self.fullname) {
+            let _ = done.recv_timeout(Duration::from_secs(1));
+        }
+        std::thread::sleep(GOODBYE_RESENT_WITHIN);
+        let info = service_info(
+            &self.name,
+            &self.device_id,
+            self.port,
+            self.stream_port,
+            &addresses,
+        )?;
+        self.fullname = info.get_fullname().to_string();
+        self.daemon
+            .register(info)
+            .map_err(|e| anyhow::anyhow!("mDNS registration failed: {e}"))?;
+        self.addresses = addresses;
+        Ok(())
+    }
+
     /// Send the goodbye and wait (briefly) for it to go out.
     pub fn withdraw(self) {
         match self.daemon.unregister(&self.fullname) {
@@ -93,22 +135,9 @@ impl LanDiscoveryService {
         let span = tracing::info_span!("mdns_register", service = %name, %port);
         let _enter = span.enter();
 
-        let hostname = format!("{}.local.", name);
-        let service_type = SERVICE_TYPE.to_string();
         let instance_name = name.to_string();
-
-        let properties = announcement_properties(name, device_id, stream_port);
-
-        let ips = announceable(ips);
-        let service_info = ServiceInfo::new(
-            &service_type,
-            &instance_name,
-            &hostname,
-            &ips.iter().map(|s| s.as_str()).collect::<Vec<_>>()[..],
-            port,
-            Some(properties),
-        )
-        .context("Failed to create service info")?;
+        let addresses = announced_addresses(ips);
+        let service_info = service_info(name, device_id, port, stream_port, &addresses)?;
         let fullname = service_info.get_fullname().to_string();
 
         self.daemon.register(service_info).map_err(|e| {
@@ -128,6 +157,11 @@ impl LanDiscoveryService {
         Ok(Announcement {
             daemon: self.daemon.clone(),
             fullname,
+            name: name.to_string(),
+            device_id: device_id.to_string(),
+            port,
+            stream_port,
+            addresses,
         })
     }
 
@@ -281,6 +315,103 @@ fn announcement_properties(
         ("id".to_string(), device_id.to_string()),
         ("stream".to_string(), stream_port.to_string()),
     ])
+}
+
+/// The record announcing `name` at `addresses`.
+fn service_info(
+    name: &str,
+    device_id: &str,
+    port: u16,
+    stream_port: u16,
+    addresses: &[String],
+) -> Result<ServiceInfo> {
+    let properties = announcement_properties(name, device_id, stream_port);
+    ServiceInfo::new(
+        SERVICE_TYPE,
+        name,
+        &format!("{name}.local."),
+        &addresses.iter().map(|s| s.as_str()).collect::<Vec<_>>()[..],
+        port,
+        Some(properties),
+    )
+    .context("Failed to create service info")
+}
+
+/// P1: the addresses an announcement holds for `ips`: the tailnet's left
+/// out, each once, sorted, so two readings compare whatever their order.
+pub fn announced_addresses(ips: Vec<String>) -> Vec<String> {
+    let mut addresses = announceable(ips);
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+/// Whether `address` is the tailnet's (100.64.0.0/10, or Tailscale's IPv6).
+fn is_tailnet(address: &str) -> bool {
+    match address.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(v4)) => {
+            let [a, b, ..] = v4.octets();
+            a == 100 && (b & 0xc0) == 64
+        }
+        Ok(std::net::IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0
+        }
+        Err(_) => false,
+    }
+}
+
+/// What a change is judged by: the IPv4 addresses where there are any,
+/// so IPv6's rotating temporary addresses do not move the announcement
+/// each day (P1 review); else all.
+fn judged(addresses: &[String]) -> Vec<&String> {
+    let v4: Vec<&String> = addresses.iter().filter(|a| !a.contains(':')).collect();
+    if v4.is_empty() {
+        addresses.iter().collect()
+    } else {
+        v4
+    }
+}
+
+/// P1: whether `now` (as [`announced_addresses`] has them) differs from
+/// `before`. Not a change: an empty reading (an adapter between networks,
+/// or a failed read must not withdraw the computer); one left with the
+/// tailnet's only while the network's were announced (mDNS goes nowhere
+/// then, P1 review); IPv6 alone moving beside an unchanged IPv4.
+pub fn addresses_changed(before: &[String], now: &[String]) -> bool {
+    if now.is_empty() {
+        return false;
+    }
+    if now.iter().all(|a| is_tailnet(a)) && before.iter().any(|a| !is_tailnet(a)) {
+        return false;
+    }
+    judged(before) != judged(now)
+}
+
+/// P1 review: a new reading is announced once two in a row agree, so
+/// mdns-sd has opened its sockets on a new interface (its own check runs
+/// every 5 s, and a record announced before then goes nowhere), and an
+/// address that comes and goes does not flap phones.
+#[derive(Debug, Default)]
+pub struct Settle {
+    pending: Option<Vec<String>>,
+}
+
+impl Settle {
+    /// The addresses to announce now, given those announced (`current`)
+    /// and a new `reading` (as [`announced_addresses`] has them).
+    pub fn next(&mut self, current: &[String], reading: Vec<String>) -> Option<Vec<String>> {
+        if !addresses_changed(current, &reading) {
+            self.pending = None;
+            return None;
+        }
+        if self.pending.as_ref() == Some(&reading) {
+            self.pending = None;
+            return Some(reading);
+        }
+        self.pending = Some(reading);
+        None
+    }
 }
 
 /// Convert an mDNS `ServiceInfo` to a `PeerInfo`.
@@ -452,6 +583,69 @@ mod tests {
             }
         }
         let _ = browser.shutdown();
+    }
+
+    /// P1: an announcement is made again only for other addresses, never
+    /// for none.
+    #[test]
+    fn the_announcement_follows_its_addresses() {
+        let a = announced_addresses(vec![
+            "192.0.2.7".into(),
+            "198.51.100.3".into(),
+            "192.0.2.7".into(),
+        ]);
+        assert_eq!(a, vec!["192.0.2.7".to_string(), "198.51.100.3".to_string()]);
+        let same = announced_addresses(vec!["198.51.100.3".into(), "192.0.2.7".into()]);
+        assert!(!addresses_changed(&a, &same), "order aside");
+        let moved = announced_addresses(vec!["203.0.113.9".into()]);
+        assert!(addresses_changed(&a, &moved));
+        assert!(!addresses_changed(&a, &[]), "no addresses read: kept");
+        let with_tailnet = announced_addresses(vec![
+            "192.0.2.7".into(),
+            "100.64.1.2".into(),
+            "198.51.100.3".into(),
+        ]);
+        assert!(
+            !addresses_changed(&a, &with_tailnet),
+            "a tailnet address beside the others is not announced"
+        );
+        // P1 review: the network gone, the tailnet left: not announced there.
+        let tailnet_only = announced_addresses(vec!["100.64.1.2".into()]);
+        assert!(!addresses_changed(&a, &tailnet_only));
+        // IPv6 moving beside the same IPv4 is no change; alone it is.
+        let v6 = |s: &str| announced_addresses(vec!["192.0.2.7".into(), s.into()]);
+        assert!(!addresses_changed(&v6("2001:db8::1"), &v6("2001:db8::2")));
+        assert!(addresses_changed(
+            &announced_addresses(vec!["2001:db8::1".into()]),
+            &announced_addresses(vec!["2001:db8::2".into()])
+        ));
+    }
+
+    /// P1 review: a reading is announced once seen twice in a row.
+    #[test]
+    fn a_new_reading_settles_before_it_is_announced() {
+        let current = announced_addresses(vec!["192.0.2.7".into()]);
+        let moved = announced_addresses(vec!["203.0.113.9".into()]);
+        let other = announced_addresses(vec!["198.51.100.3".into()]);
+        let mut settle = Settle::default();
+        assert_eq!(settle.next(&current, moved.clone()), None, "first seen");
+        assert_eq!(
+            settle.next(&current, moved.clone()),
+            Some(moved.clone()),
+            "seen again"
+        );
+        assert_eq!(settle.next(&current, moved.clone()), None, "starts over");
+        assert_eq!(settle.next(&current, other.clone()), None);
+        assert_eq!(
+            settle.next(&current, current.clone()),
+            None,
+            "back before it settled"
+        );
+        assert_eq!(
+            settle.next(&current, other.clone()),
+            None,
+            "pending forgotten"
+        );
     }
 
     #[test]

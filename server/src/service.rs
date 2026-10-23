@@ -244,6 +244,10 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::info!("Not announced on the local network (lan_discovery = false)");
         None
     };
+    // P1: announced again when this computer's addresses change (a new
+    // network, a wake, a VPN), so phones find it at the new one.
+    let announcement = std::sync::Arc::new(std::sync::Mutex::new(announcement));
+    tokio::spawn(follow_addresses(announcement.clone()));
 
     // Also run LAN discovery browser to detect other Pocketdesk servers
     let mut lan_rx = lan_discovery.subscribe();
@@ -736,9 +740,16 @@ pub async fn run(config: Config) -> Result<()> {
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
                 // Tell phones on the network this computer is going away.
-                if let Some(announcement) = announcement {
-                    let _ = tokio::task::spawn_blocking(move || announcement.withdraw()).await;
-                }
+                // Taken off the loop: an announcement under way holds the
+                // lock (P1 review).
+                let held = announcement.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let current = held.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(announcement) = current {
+                        announcement.withdraw();
+                    }
+                })
+                .await;
                 break;
             }
             event = discovery_rx.recv() => {
@@ -2740,5 +2751,81 @@ mod status_tests {
             tailscale_status_line(Ok("100.64.0.1 desk".to_string())),
             "100.64.0.1 desk"
         );
+    }
+}
+
+/// How often the computer's addresses are read for its announcement (P1).
+const ADDRESSES_EVERY: Duration = Duration::from_secs(30);
+
+/// P1: read this computer's addresses every [`ADDRESSES_EVERY`] and
+/// announce again on a change. A test seam: with `POCKETDESK_LOCAL_IPS_FILE`
+/// (absolute) set, the addresses are that file's lines.
+async fn follow_addresses(
+    announcement: std::sync::Arc<
+        std::sync::Mutex<Option<pocketdesk_core::tailscale::lan::Announcement>>,
+    >,
+) {
+    let seam = std::env::var_os("POCKETDESK_LOCAL_IPS_FILE").map(std::path::PathBuf::from);
+    if seam.as_ref().is_some_and(|p| !p.is_absolute()) {
+        tracing::warn!("POCKETDESK_LOCAL_IPS_FILE is not absolute: not used");
+    }
+    let seam = seam.filter(|p| p.is_absolute());
+    let mut settle = pocketdesk_core::tailscale::lan::Settle::default();
+    if let Some(file) = &seam {
+        tracing::warn!(
+            "POCKETDESK_LOCAL_IPS_FILE is set: {} stands in (a test seam)",
+            file.display()
+        );
+    }
+    loop {
+        tokio::time::sleep(ADDRESSES_EVERY).await;
+        let ips = match &seam {
+            Some(file) => std::fs::read_to_string(file)
+                .map(|s| {
+                    s.lines()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => pocketdesk_core::tailscale::lan::get_local_ips().await,
+        };
+        let reading = pocketdesk_core::tailscale::lan::announced_addresses(ips);
+        let current = announcement
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|a| a.addresses().to_vec());
+        let Some(current) = current else {
+            continue;
+        };
+        let Some(addresses) = settle.next(&current, reading) else {
+            continue;
+        };
+        let count = addresses.len();
+        let held = announcement.clone();
+        let announced = tokio::task::spawn_blocking(move || {
+            let mut slot = held.lock().unwrap_or_else(|e| e.into_inner());
+            match slot.as_mut() {
+                Some(current) => current
+                    .announce_at(addresses.clone())
+                    .map(|()| Some(addresses)),
+                None => Ok(None),
+            }
+        })
+        .await;
+        match announced {
+            // The addresses themselves at debug only: the Logs page's Copy
+            // goes into reports (P1 review).
+            Ok(Ok(Some(addresses))) => {
+                tracing::info!(
+                    "This computer's addresses changed: announced again at {count} address(es)"
+                );
+                tracing::debug!("Announced at {}", addresses.join(", "));
+            }
+            Ok(Ok(None)) => {}
+            Ok(Err(e)) => tracing::warn!("Could not announce again at the new addresses: {e}"),
+            Err(_) => {}
+        }
     }
 }
