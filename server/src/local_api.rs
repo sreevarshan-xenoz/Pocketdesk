@@ -342,6 +342,92 @@ pub mod exit {
     pub const STILL_WAITING: i32 = 4;
 }
 
+/// [`send_in`] to each of several phones or computers, `queries` named
+/// with commas between (P6): one result as [`send_in`]'s for one, else each
+/// under `sends` with the name it was given, and the worst exit code of
+/// them; `wait` is waited for each in turn.
+pub fn send_many_in(
+    state_dir: &Path,
+    queries: &str,
+    path: &Path,
+    running: &dyn Fn() -> bool,
+    wait: Option<std::time::Duration>,
+) -> (Value, i32) {
+    // A name that resolves whole is one, commas and all (P6 review: a
+    // computer may be called "Home, office").
+    let ids = trust_store(state_dir)
+        .map(|store| store.trusted_devices())
+        .unwrap_or_default();
+    let computers = pocketdesk_core::local::computers::read(state_dir).computers;
+    let device_of = |name: &str| {
+        resolve_phone(&ids, name)
+            .ok()
+            .or_else(|| match resolve_computer(&computers, name) {
+                Some(Ok(id)) => Some(id),
+                _ => None,
+            })
+    };
+    if device_of(queries).is_some() {
+        return send_in(state_dir, queries, path, running, wait);
+    }
+    // Each device once (P6 review: "a,a", or a name and its id's start).
+    let mut seen = Vec::new();
+    let names: Vec<&str> = queries
+        .split(',')
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .filter(|q| match device_of(q) {
+            Some(id) if seen.contains(&id) => false,
+            Some(id) => {
+                seen.push(id);
+                true
+            }
+            None => true,
+        })
+        .collect();
+    if names.len() < 2 {
+        return send_in(
+            state_dir,
+            names.first().copied().unwrap_or(queries),
+            path,
+            running,
+            wait,
+        );
+    }
+    // The worst first: arguments or no server, then a failure, then a wait.
+    let rank = |code: i32| match code {
+        exit::BAD_ARGUMENTS | exit::NO_SERVER => 3,
+        exit::FAILED => 2,
+        exit::STILL_WAITING => 1,
+        _ => 0,
+    };
+    let mut worst = exit::DONE;
+    let mut sends = Vec::new();
+    for name in names {
+        let (mut out, code) = send_in(state_dir, name, path, running, wait);
+        if rank(code) > rank(worst) {
+            worst = code;
+        }
+        if let Some(object) = out.as_object_mut() {
+            object.remove("api");
+            object.insert("to".to_string(), json!(name));
+        }
+        sends.push(out);
+    }
+    // A failure says so at the top, as every command's does (P6 review: a
+    // script tests `error`).
+    let failed = sends
+        .iter()
+        .filter(|s| s.get("error").is_some_and(|e| !e.is_null()))
+        .count();
+    let total = sends.len();
+    let mut out = json!({ "sends": sends });
+    if !matches!(worst, exit::DONE | exit::STILL_WAITING) {
+        out["error"] = json!(format!("{failed} of {total} did not go"));
+    }
+    (versioned(out), worst)
+}
+
 /// Ask the server in `state_dir` to send `path` to the phone `query`
 /// names, or the paired computer (2h), as the desktop app's Files tab does
 /// (an outbox request), and,
@@ -1263,7 +1349,7 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
         }
     };
     let running = || pocketdesk_core::local::server::is_running(&dir);
-    let (out, code) = send_in(
+    let (out, code) = send_many_in(
         &dir,
         query,
         path,
@@ -1272,26 +1358,46 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
     );
     if as_json {
         print(&out);
+    } else if let Some(sends) = out["sends"].as_array() {
+        // P6: one line for each.
+        for each in sends {
+            let line = format!(
+                "{}: {}",
+                each["to"].as_str().unwrap_or(""),
+                send_words(each)
+            );
+            if each["state"].as_str() == Some("refused") || each["state"].as_str() == Some("failed")
+            {
+                eprintln!("{line}");
+            } else {
+                println!("{line}");
+            }
+        }
     } else {
-        let how = match out["state"].as_str() {
-            Some("queued") => "queued for the phone".to_string(),
-            Some("offered") => "offered, the phone has not taken it yet".to_string(),
-            Some("sent") => "saved on the phone".to_string(),
-            Some(state) => format!("{state}: {}", out["reason"].as_str().unwrap_or("")),
-            None => "unknown".to_string(),
-        };
-        let note = out["note"]
-            .as_str()
-            .map(|n| format!(" ({n})"))
-            .unwrap_or_default();
         // A send that did not go is an error: on stderr, as errors are.
         if matches!(code, exit::DONE | exit::STILL_WAITING) {
-            println!("{how}{note}");
+            println!("{}", send_words(&out));
         } else {
-            eprintln!("{how}{note}");
+            eprintln!("{}", send_words(&out));
         }
     }
     code
+}
+
+/// How a send went, in words: its state and any note.
+fn send_words(out: &Value) -> String {
+    let how = match out["state"].as_str() {
+        Some("queued") => "queued for the phone".to_string(),
+        Some("offered") => "offered, the phone has not taken it yet".to_string(),
+        Some("sent") => "saved on the phone".to_string(),
+        Some(state) => format!("{state}: {}", out["reason"].as_str().unwrap_or("")),
+        None => "unknown".to_string(),
+    };
+    let note = out["note"]
+        .as_str()
+        .map(|n| format!(" ({n})"))
+        .unwrap_or_default();
+    format!("{how}{note}")
 }
 
 /// The paired phone `query` names: its id, or a unique prefix of at least
@@ -1815,6 +1921,36 @@ mod tests {
             command_in(&dir, "5f1c9b", "lights", "", true).1,
             exit::FAILED
         );
+    }
+
+    /// P6: several named with commas, each its own send, the worst code.
+    #[test]
+    fn a_send_to_several_is_one_for_each() {
+        let (dir, file) = send_setup("send-many");
+        let (out, code) = send_many_in(&dir, "5f1c9b, ffffff", &file, &|| true, None);
+        assert_eq!(code, exit::BAD_ARGUMENTS, "{out}");
+        let sends = out["sends"].as_array().unwrap();
+        assert_eq!(sends.len(), 2);
+        assert_eq!(sends[0]["to"], "5f1c9b");
+        assert_eq!(sends[0]["state"], "queued", "{out}");
+        assert_eq!(sends[1]["state"], "refused");
+        assert_eq!(out["api"], 1);
+        assert_eq!(
+            out["error"], "1 of 2 did not go",
+            "a failure says so at the top"
+        );
+        // The same phone twice is one send.
+        let (twice, code) = send_many_in(&dir, "5f1c9b,5f1c9b3d-6e70", &file, &|| true, None);
+        assert_eq!(code, exit::DONE);
+        assert!(twice.get("sends").is_none(), "{twice}");
+        // One alone is as before: no "sends".
+        let (one, code) = send_many_in(&dir, "5f1c9b", &file, &|| true, None);
+        assert_eq!(code, exit::DONE);
+        assert!(
+            one.get("sends").is_none() && one["state"] == "queued",
+            "{one}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn send_setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {

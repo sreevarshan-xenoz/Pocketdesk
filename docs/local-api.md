@@ -149,6 +149,8 @@ Without `--wait` it ends once the request is written for the server to take (`qu
 pocketdesk send 0d7c3a backup.tar --wait 600 --json || notify-send "backup did not reach the phone"
 ```
 
+Several phones or computers, with commas between (`pocketdesk send 0d7c3a,Desk report.pdf`), each get it as its own send (P6): `{"api": 1, "sends": [{"to": "0d7c3a", "state": "queued", …}, {"to": "Desk", …}]}`, each as one send's object without `api`, with `to` the name given. `--wait` waits for each in turn. The exit code is the worst of them: bad arguments or no server first, then a failure, then a wait that ran out; when one did not go, the object also says so in `error` ("1 of 2 did not go"). A device named twice (`0d7c3a,0d7c3a52-…`) gets it once, and a name that is one whole (a computer called "Home, office") is never split.
+
 ### `pocketdesk link <phone> <url> --json`
 
 Hands a web link to a phone in a session; it waits there as a notification that opens it (T8a). Only `http` and `https` links of at most 2048 bytes, with no user name or password, and not to the phone's own `localhost`. `{"api": 1, "id": "…", "device_id": "…", "url": "…", "state": "queued"}`. Exit 2 for a link that may not be opened, 1 for a phone not in a session or with its Links permission off, 3 when no server runs.
