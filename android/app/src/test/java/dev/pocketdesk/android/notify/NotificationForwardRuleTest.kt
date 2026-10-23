@@ -173,4 +173,18 @@ class NotificationForwardRuleTest {
         org.junit.Assert.assertNull("the same bar", rule.decide(download, true, shared, offer = "|live:10", live = true))
         org.junit.Assert.assertNotNull("a new bar", rule.decide(download, true, shared, offer = "|live:50", live = true))
     }
+
+    /** O5: a kind kept on the phone is not sent; the app's others are. */
+    @Test
+    fun aKindKeptOnThePhoneIsNotSent() {
+        val rule = NotificationForwardRule(own)
+        val shared = setOf("com.chat")
+        val sync = note(key = "s").copy(channel = "sync")
+        val message = note(key = "m").copy(channel = "messages")
+        val none = note(key = "n")
+        val kept = setOf("sync")
+        org.junit.Assert.assertNull(rule.decide(sync, true, shared, keptKinds = kept))
+        org.junit.Assert.assertNotNull(rule.decide(message, true, shared, keptKinds = kept))
+        org.junit.Assert.assertNotNull("no channel: by its app only", rule.decide(none, true, shared, keptKinds = kept))
+    }
 }

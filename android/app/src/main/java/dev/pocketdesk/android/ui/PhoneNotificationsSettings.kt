@@ -24,6 +24,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.notify.NotificationKinds
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 
 /**
@@ -194,6 +195,26 @@ fun PhoneNotificationsSection() {
             },
             indent = true,
         )
+        // O5: a shared app's kinds, each one that can stay on the phone.
+        if (pkg in shared) {
+            val kept = version.let { PhoneNotificationPrefs.keptKinds(context, pkg) }
+            val kinds = version.let { NotificationKinds.listed(PhoneNotificationPrefs.kinds(context, pkg), kept) }
+            if (kinds.size > 1 || kept.isNotEmpty()) {
+                kinds.forEach { kind ->
+                    // Its app named beside its kind, for TalkBack too (O5 review).
+                    SettingSwitch(
+                        kind.example.ifBlank { stringResource(R.string.phone_notifications_kind_untitled) },
+                        stringResource(R.string.phone_notifications_kind, label, kind.id),
+                        kind.id !in kept,
+                        {
+                            PhoneNotificationPrefs.setKindKept(context, pkg, kind.id, !it)
+                            version++
+                        },
+                        nested = true,
+                    )
+                }
+            }
+        }
     }
     // L8: other computers of mine get a copy, and while linked may answer it (part 2);
     // after the app list, so its switches keep their heading (L8 review).

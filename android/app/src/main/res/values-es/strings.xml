@@ -360,6 +360,8 @@
     <string name="phone_notifications_share">Notificaciones de este teléfono en mi ordenador</string>
     <string name="phone_notifications_share_summary">Las notificaciones de este teléfono aparecen en el último ordenador que usaste</string>
     <string name="phone_notifications_no_access">Necesita acceso a las notificaciones: permítelo abajo</string>
+    <string name="phone_notifications_kind">%1$s, tipo %2$s</string>
+    <string name="phone_notifications_kind_untitled">Sin título</string>
     <string name="phone_notifications_apps_empty">Las apps aparecen aquí cuando envían una notificación. Ninguna se comparte hasta que la actives.</string>
     <string name="texts_show">Mostrar mensajes en mi ordenador</string>
     <string name="texts_show_summary">Los SMS que recibe este teléfono aparecen en Mensajes en el último ordenador que usaste</string>
