@@ -635,6 +635,12 @@
     <string name="screenshots_needs_photos">Necesita acceso a todas las fotos: permítelo en los ajustes de Android para Pocketdesk</string>
     <string name="screenshots_clipboard">Ponerlas en el portapapeles del equipo</string>
     <string name="screenshots_save">Guardarlas en el equipo, con lo que recibe</string>
+    <string name="camera_uploads_on">Enviar fotos nuevas de la cámara</string>
+    <string name="camera_uploads_on_summary">Una foto hecha con la cámara llega a los archivos recibidos de su equipo, también si el equipo no estaba: espera a que vuelva. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
+    <string name="camera_uploads_videos">También los vídeos</string>
+    <string name="camera_uploads_videos_summary">Pide acceso a los vídeos</string>
+    <string name="camera_uploads_wifi">Solo con Wi-Fi</string>
+    <string name="camera_uploads_wifi_summary">Sin Wi-Fi, esperan a tenerlo</string>
     <string name="remote_button">Mando</string>
     <string name="remote_title">Mando · %1$s</string>
     <string name="remote_keyboard">Teclado</string>
@@ -830,6 +836,7 @@
     <string name="health_control_blocked">El equipo no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de equipos ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="health_screenshots_stopped">Las capturas nuevas dejaron de ir al equipo cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
+    <string name="health_camera_stopped">Las fotos nuevas de la cámara dejaron de ir al equipo cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
     <string name="health_settings">Abrir Ajustes</string>
     <string name="settings_health">Avisarme cuando algo deje de funcionar</string>
     <string name="settings_health_summary">En Inicio, y en una notificación tras una actualización</string>

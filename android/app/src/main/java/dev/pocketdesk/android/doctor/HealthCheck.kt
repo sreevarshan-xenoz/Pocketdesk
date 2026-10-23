@@ -60,6 +60,7 @@ object HealthCheck {
             Prefs.appsFromComputer(ctx) ||
             dev.pocketdesk.android.notify.TextPrefs.contactsToComputer(ctx) ||
             ScreenshotPrefs.on(ctx) ||
+            dev.pocketdesk.android.files.CameraPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
             PhoneFolders.all(ctx).isNotEmpty() ||
             // N2: the phone's music without a session.
@@ -114,9 +115,11 @@ object HealthCheck {
             // P10: the contacts to the computer need the permission too.
             contactNames = TextPrefs.names(ctx) || TextPrefs.contactsToComputer(ctx),
             readContacts = granted(Manifest.permission.READ_CONTACTS),
-            photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx),
+            photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx) ||
+                dev.pocketdesk.android.files.CameraPrefs.on(ctx),
             photoAccess = ScreenshotPrefs.granted(ctx),
             screenshotsStopped = ScreenshotPrefs.stopped(ctx),
+            cameraStopped = dev.pocketdesk.android.files.CameraPrefs.stopped(ctx),
             // Turned on by the owner, both off by default (D1 review): links
             // from the computer are on by default and post only in a session,
             // so they would flag every phone that said no to notifications.
@@ -165,6 +168,7 @@ object HealthCheck {
             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
         HealthProblem.CONTROL_SERVICE -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         HealthProblem.CONTROL_BLOCKED, HealthProblem.DOWNLOAD_FOLDER, HealthProblem.SCREENSHOTS_STOPPED,
+        HealthProblem.CAMERA_STOPPED,
         HealthProblem.PAUSED_STAY_LINKED_OFF -> null
         // M1: the maker's own settings hold it; its guide says where, else the app's page.
         HealthProblem.PAUSED_ANYWAY -> BackgroundRunning.makerGuide(Build.MANUFACTURER)

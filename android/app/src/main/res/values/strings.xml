@@ -638,6 +638,12 @@
     <string name="screenshots_needs_photos">Needs access to all photos: allow it in Android\'s settings for Pocketdesk</string>
     <string name="screenshots_clipboard">Put on the computer\'s clipboard</string>
     <string name="screenshots_save">Save on the computer, with its received files</string>
+    <string name="camera_uploads_on">Send new camera photos</string>
+    <string name="camera_uploads_on_summary">A photo taken with the camera goes to its computer\'s received files, also one taken while the computer was away: it waits until the computer is back. Asks for access to photos, and uses notification access to run in the background</string>
+    <string name="camera_uploads_videos">Videos too</string>
+    <string name="camera_uploads_videos_summary">Asks for access to videos</string>
+    <string name="camera_uploads_wifi">Only on Wi-Fi</string>
+    <string name="camera_uploads_wifi_summary">Off Wi-Fi they wait for it</string>
     <string name="remote_button">Remote</string>
     <string name="remote_title">Remote · %1$s</string>
     <string name="remote_keyboard">Keyboard</string>
@@ -833,6 +839,7 @@
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
+    <string name="health_camera_stopped">New camera photos stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
     <string name="health_settings">Open Settings</string>
     <string name="settings_health">Tell me when something stops working</string>
     <string name="settings_health_summary">On Home, and in a notification after an update</string>
