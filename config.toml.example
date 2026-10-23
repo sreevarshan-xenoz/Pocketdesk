@@ -76,6 +76,11 @@ video_quality = "balanced"
 # Off: the window only shows.
 # cast_control = true
 
+# On Linux, the phone's gamepad is a game controller (an Xbox 360 pad's
+# layout, through uinput) that games see. Off, or without uinput rights, it
+# types keys and moves the mouse instead.
+# gamepad_controller = true
+
 # Texts a phone forwards (Messages in the desktop app): a notification for
 # each, and how many the history keeps.
 # sms_notify = true

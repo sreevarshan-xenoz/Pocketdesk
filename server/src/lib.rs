@@ -17,6 +17,7 @@ pub mod crash_report;
 pub(crate) mod drive;
 pub mod driving;
 pub mod events;
+pub mod gamepad_pad;
 pub mod home_assistant;
 pub mod hypr_events;
 pub mod hyprland;

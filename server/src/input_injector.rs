@@ -274,11 +274,35 @@ pub struct InputInjector {
     gamepad_buttons: u16,
     /// The phone's pen (E3).
     pen: PenState,
+    /// The phone's gamepad as a game controller (T7), made at its first
+    /// packet.
+    #[cfg(target_os = "linux")]
+    pad: PadSlot,
     /// The compositor's virtual keyboard for text (roadmap F4): not tried
     /// yet (`None`), not offered (`Some(None)`), or ready.
     #[cfg(target_os = "linux")]
     vkeyboard: VkState,
 }
+
+/// The game controller the phone's gamepad drives (T7): not made yet;
+/// made, with the state it last reported and how many packets it has had
+/// (its first ones are sent whole: a game opens it a moment after it
+/// appears); or not to be had here (no uinput rights) since then, when the
+/// gamepad types keys as before and it is tried again a while later.
+#[cfg(target_os = "linux")]
+enum PadSlot {
+    Untried,
+    Ready(VirtualDevice, Option<crate::gamepad_pad::PadState>, u8),
+    Unavailable(std::time::Instant),
+}
+
+/// How long after a failed try the game controller is tried again (T7).
+#[cfg(target_os = "linux")]
+const PAD_RETRY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Packets after the controller appears that are sent whole (T7).
+#[cfg(target_os = "linux")]
+const PAD_WHOLE: u8 = 5;
 
 /// The phone's pen (E3): where it was, for the mouse it becomes where
 /// there is no pen device, and Windows' synthetic pen, made at its first
@@ -440,6 +464,8 @@ impl InputInjector {
             Ok(Self {
                 backend: InputBackend::SendInput(crate::input_sendinput::SendInputBackend::new()),
                 gamepad_buttons: 0,
+                #[cfg(target_os = "linux")]
+                pad: PadSlot::Untried,
                 pen: PenState::default(),
             })
         }
@@ -465,6 +491,8 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Wlr(wlr),
                                 gamepad_buttons: 0,
+                                #[cfg(target_os = "linux")]
+                                pad: PadSlot::Untried,
                                 pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
                             });
@@ -479,6 +507,8 @@ impl InputInjector {
                             return Ok(Self {
                                 backend: InputBackend::Portal,
                                 gamepad_buttons: 0,
+                                #[cfg(target_os = "linux")]
+                                pad: PadSlot::Untried,
                                 pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
                             });
@@ -498,6 +528,8 @@ impl InputInjector {
                 return Ok(Self {
                     backend: InputBackend::Enigo(Box::new(Mutex::new(enigo))),
                     gamepad_buttons: 0,
+                    #[cfg(target_os = "linux")]
+                    pad: PadSlot::Untried,
                     pen: PenState::default(),
                     #[cfg(target_os = "linux")]
                     vkeyboard: VkState::Untried,
@@ -550,6 +582,8 @@ impl InputInjector {
                     .ok(),
             })),
             gamepad_buttons: 0,
+            #[cfg(target_os = "linux")]
+            pad: PadSlot::Untried,
             pen: PenState::default(),
             vkeyboard: VkState::Untried,
         })
@@ -1007,6 +1041,12 @@ impl InputInjector {
             // session record; never injected.
             InputPacket::LinkFeedback { .. } | InputPacket::ClientSamples { .. } => Ok(()),
             InputPacket::Gamepad { axes, buttons } => {
+                // T7: a game controller where Linux can make one, with the
+                // setting on; otherwise keys and the mouse, as before.
+                #[cfg(target_os = "linux")]
+                if self.pad_event(axes, *buttons) {
+                    return Ok(());
+                }
                 // Map gamepad axes/buttons to keyboard/mouse for broad compatibility.
                 // Left stick -> mouse movement
                 let mx = axes[0] as i32 / 256; // Scale from [-32768,32767] to [-128,127]
@@ -1289,6 +1329,169 @@ fn build_pen_device() -> Result<VirtualDevice> {
         .name(b"Pocketdesk Virtual Pen")
         .build()
         .context("Failed to build the uinput pen")?;
+    Ok(device)
+}
+
+impl InputInjector {
+    /// Drive the game controller with one gamepad packet (T7): false when
+    /// it is not to be (the setting off, or no uinput here), so the packet
+    /// types keys as before. Turned off while a session runs, the
+    /// controller goes (a game sees it unplugged, nothing held).
+    #[cfg(target_os = "linux")]
+    fn pad_event(&mut self, axes: &[i16; 6], buttons: u16) -> bool {
+        if !crate::events::current_config().gamepad_controller {
+            // Off while it drives: let go of it, and try afresh when on.
+            self.release_pad();
+            self.pad = PadSlot::Untried;
+            return false;
+        }
+        if let PadSlot::Unavailable(at) = self.pad
+            && at.elapsed() >= PAD_RETRY
+        {
+            self.pad = PadSlot::Untried;
+        }
+        if matches!(self.pad, PadSlot::Untried) {
+            self.pad = match build_pad() {
+                Ok(device) => {
+                    info!("The phone's gamepad is a game controller here");
+                    PadSlot::Ready(device, None, 0)
+                }
+                Err(e) => {
+                    warn!(
+                        "No game controller for the phone's gamepad ({e:#}): it types keys instead"
+                    );
+                    PadSlot::Unavailable(std::time::Instant::now())
+                }
+            };
+        }
+        if !matches!(self.pad, PadSlot::Ready(..)) {
+            return false;
+        }
+        // Keys the gamepad held before the controller took it are let go.
+        if self.gamepad_buttons != 0 {
+            let _ = self.release_gamepad_keys();
+        }
+        let PadSlot::Ready(device, last, packets) = &mut self.pad else {
+            return false;
+        };
+        let state = crate::gamepad_pad::PadState::of(axes, buttons);
+        let since = if *packets < PAD_WHOLE {
+            *packets += 1;
+            None
+        } else {
+            last.as_ref()
+        };
+        let mut events: Vec<InputEvent> = state
+            .events(since)
+            .iter()
+            .map(|e| InputEvent::new(e.kind, e.code, e.value))
+            .collect();
+        if events.is_empty() {
+            return true;
+        }
+        events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+        if let Err(e) = device.emit(&events) {
+            // Made again at the next packet; this one types keys.
+            warn!("The game controller did not take the phone's gamepad ({e}); making it again");
+            self.pad = PadSlot::Untried;
+            return false;
+        }
+        *last = Some(state);
+        true
+    }
+
+    /// Let go of every key the gamepad's buttons hold (T7: the controller
+    /// takes over from the keys).
+    #[cfg(target_os = "linux")]
+    fn release_gamepad_keys(&mut self) -> Result<()> {
+        let previous = std::mem::replace(&mut self.gamepad_buttons, 0);
+        for (action, _) in gamepad_edges(previous, 0) {
+            match action {
+                GamepadAction::Key(key) => self.key(key, false)?,
+                GamepadAction::LeftClick => self.mouse_button(MouseKey::Left, false)?,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl InputInjector {
+    /// Bring the game controller to rest (T7 review): every button up and
+    /// both sticks centred, as a session ends, so nothing stays held in a
+    /// game; nothing without one.
+    pub fn release_pad(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let PadSlot::Ready(device, last, _) = &mut self.pad {
+            let rest = crate::gamepad_pad::PadState::rest();
+            let mut events: Vec<InputEvent> = rest
+                .events(last.as_ref())
+                .iter()
+                .map(|e| InputEvent::new(e.kind, e.code, e.value))
+                .collect();
+            if events.is_empty() {
+                return;
+            }
+            events.push(InputEvent::new(EV_SYN, SYN_REPORT, 0));
+            if device.emit(&events).is_ok() {
+                *last = Some(rest);
+            }
+        }
+    }
+}
+
+/// The game controller (T7): an Xbox 360 pad's layout (`xpad`'s ids,
+/// buttons and ranges), which games and SDL map without asking.
+#[cfg(target_os = "linux")]
+fn build_pad() -> Result<VirtualDevice> {
+    use crate::gamepad_pad as pad;
+    let mut keys = AttributeSet::<KeyCode>::new();
+    for (_, code) in pad::BUTTONS {
+        keys.insert(KeyCode::new(code));
+    }
+    let stick = |code: u16| {
+        UinputAbsSetup::new(
+            AbsoluteAxisCode(code),
+            AbsInfo::new(0, -32_768, 32_767, 16, 128, 0),
+        )
+    };
+    let trigger = |code: u16| {
+        UinputAbsSetup::new(
+            AbsoluteAxisCode(code),
+            AbsInfo::new(0, 0, pad::TRIGGER_MAX, 0, 0, 0),
+        )
+    };
+    let hat =
+        |code: u16| UinputAbsSetup::new(AbsoluteAxisCode(code), AbsInfo::new(0, -1, 1, 0, 0, 0));
+    #[allow(deprecated)]
+    let device = VirtualDeviceBuilder::new()
+        .context("Failed to create the game controller's builder")?
+        .name(b"Pocketdesk Gamepad")
+        .input_id(evdev::InputId::new(
+            evdev::BusType::BUS_USB,
+            0x045e,
+            0x028e,
+            0x0110,
+        ))
+        .with_keys(&keys)
+        .context("Failed to set up the game controller's buttons")?
+        .with_absolute_axis(&stick(pad::ABS_X))
+        .context("Failed to set up ABS_X")?
+        .with_absolute_axis(&stick(pad::ABS_Y))
+        .context("Failed to set up ABS_Y")?
+        .with_absolute_axis(&stick(pad::ABS_RX))
+        .context("Failed to set up ABS_RX")?
+        .with_absolute_axis(&stick(pad::ABS_RY))
+        .context("Failed to set up ABS_RY")?
+        .with_absolute_axis(&trigger(pad::ABS_Z))
+        .context("Failed to set up ABS_Z")?
+        .with_absolute_axis(&trigger(pad::ABS_RZ))
+        .context("Failed to set up ABS_RZ")?
+        .with_absolute_axis(&hat(pad::ABS_HAT0X))
+        .context("Failed to set up ABS_HAT0X")?
+        .with_absolute_axis(&hat(pad::ABS_HAT0Y))
+        .context("Failed to set up ABS_HAT0Y")?
+        .build()
+        .context("Failed to build the uinput game controller")?;
     Ok(device)
 }
 

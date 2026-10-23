@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-895 open items.
+899 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 35 |
 | A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 164 |
+| A Linux desktop (the Azure VM serves for some) | 168 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 358 |
 
@@ -1325,6 +1325,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **211. Files to a KDE Connect device (T6)**
 
 - KDE Connect on a Linux desktop (or GSConnect), the same. (where: linux)
+
+**212. The phone's gamepad as a game controller on Linux (T7)**
+
+- Linux with `/dev/uinput` access: `evtest` lists "Pocketdesk Gamepad" (045e:028e) while the phone's gamepad is up; each button, both sticks and the D-pad show as named. (where: linux)
+- A game or Steam's controller test seeing an Xbox 360 pad, A/B/X/Y in their places. (where: linux)
+- The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
+- Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

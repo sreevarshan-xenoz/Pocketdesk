@@ -206,6 +206,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     (
+        "gamepad_controller",
+        "The phone's gamepad as a game controller",
+        Section::Phones,
+    ),
+    (
         "phone_notifications",
         "Phone notifications",
         Section::Notifications,
@@ -479,6 +484,7 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_live_updates"
             | "notification_pictures"
             | "cast_control"
+            | "gamepad_controller"
             | "downloads_folder"
             | "remember_screen_grant"
             | "clipboard_history"
@@ -1291,6 +1297,19 @@ impl SettingsForm {
                         "Only once the phone allows it: \"Let the computer control this phone\" in Pocketdesk's Settings on the phone.",
                     );
                 });
+                // T7: Linux makes the controller; Windows has the keys only.
+                if !cfg!(windows) {
+                    row(ui, "gamepad_controller", |ui| {
+                        ui.checkbox(
+                            &mut e.gamepad_controller,
+                            "games see the phone's gamepad as a controller",
+                        );
+                        note(
+                            ui,
+                            "An Xbox 360 pad's layout through uinput (needs access to /dev/uinput, as the mouse and keys do). Off, or without it, the gamepad types keys and moves the mouse.",
+                        );
+                    });
+                }
                 if cfg!(windows) {
                     let mic = &mut self.mic_device_text;
                     row(ui, "mic_relay_device", |ui| {
