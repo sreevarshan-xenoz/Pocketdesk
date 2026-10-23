@@ -964,6 +964,53 @@ pub fn target_for_send(snapshot: &Snapshot, chosen: Option<&str>) -> Result<Stri
     }
 }
 
+/// Where a send goes when several are chosen (P6): those of `chosen` that
+/// can take files now, in the page's order, and those that cannot any more,
+/// to be said; none chosen is the first that can. An error when none of the
+/// chosen can.
+pub fn targets_for_send(
+    snapshot: &Snapshot,
+    chosen: &[String],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let targets = send_target_ids(snapshot);
+    if chosen.is_empty() {
+        return targets
+            .first()
+            .map(|first| (vec![first.clone()], Vec::new()))
+            .ok_or_else(|| {
+                "No phone or computer is connected where files can reach it.".to_string()
+            });
+    }
+    let go: Vec<String> = targets
+        .iter()
+        .filter(|t| chosen.contains(t))
+        .cloned()
+        .collect();
+    let mut gone: Vec<String> = Vec::new();
+    for id in chosen {
+        if !targets.contains(id) && !gone.contains(id) {
+            gone.push(id.clone());
+        }
+    }
+    if go.is_empty() {
+        return Err(
+            "The phones or computers you chose are no longer connected. Choose again, then send."
+                .to_string(),
+        );
+    }
+    Ok((go, gone))
+}
+
+/// "Ann's phone", "Ann's phone and Desk (computer)", "A, B and C".
+pub fn targets_words(snapshot: &Snapshot, ids: &[String]) -> String {
+    let labels: Vec<String> = ids.iter().map(|id| target_label(snapshot, id)).collect();
+    match labels.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// Where files dropped on the window go (J5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DropTo {
@@ -2178,6 +2225,47 @@ mod tests {
     }
 
     /// J5: a drop goes straight to the only target, asks with several.
+    #[test]
+    fn a_send_to_several_goes_to_those_still_there() {
+        let phone = |id: &str, files: bool| Device {
+            id: id.to_string(),
+            takes_files: files,
+            ..Default::default()
+        };
+        let snap = Snapshot {
+            devices: vec![
+                phone("phone-a", true),
+                phone("phone-b", true),
+                phone("phone-c", false),
+            ],
+            linked_computers: vec![("desk-d".to_string(), "Desk".to_string())],
+            ..Snapshot::default()
+        };
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            targets_for_send(&snap, &[]),
+            Ok((ids(&["phone-a"]), vec![])),
+            "none chosen: the first"
+        );
+        assert_eq!(
+            targets_for_send(&snap, &ids(&["desk-d", "phone-a"])),
+            Ok((ids(&["phone-a", "desk-d"]), vec![])),
+            "in the page's order"
+        );
+        assert_eq!(
+            targets_for_send(&snap, &ids(&["phone-b", "phone-c"])),
+            Ok((ids(&["phone-b"]), ids(&["phone-c"]))),
+            "one that left is said, the rest go"
+        );
+        assert!(targets_for_send(&snap, &ids(&["phone-c"])).is_err());
+        assert!(targets_for_send(&Snapshot::default(), &[]).is_err());
+        assert_eq!(targets_words(&snap, &ids(&["desk-d"])), "Desk (computer)");
+        assert!(
+            targets_words(&snap, &ids(&["phone-a", "phone-b", "desk-d"]))
+                .ends_with(" and Desk (computer)")
+        );
+    }
+
     #[test]
     fn a_drop_asks_only_with_several_targets() {
         assert_eq!(drop_to(&Snapshot::default()), DropTo::Nobody);

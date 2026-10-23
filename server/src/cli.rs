@@ -62,7 +62,8 @@ pub enum Commands {
     /// running, 4 still waiting when --wait ran out
     Send {
         /// The phone: its device id, or 6 or more of its first characters; or a
-        /// paired computer, also by its name
+        /// paired computer, also by its name. Several, with commas between,
+        /// each get it (--wait waits for each in turn)
         phone: String,
         /// The file or folder to send
         path: std::path::PathBuf,

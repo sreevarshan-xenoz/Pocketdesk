@@ -284,6 +284,8 @@ pub struct PocketdeskApp {
     raised_approvals: Vec<String>,
     /// The phone the Files tab sends to (F7b).
     send_to: Option<String>,
+    /// The others a send goes to as well (P6).
+    send_also: Vec<String>,
     /// Files dropped while several phones or computers could take them,
     /// waiting for the owner to say which (J5).
     dropped: Vec<PathBuf>,
@@ -373,6 +375,7 @@ impl PocketdeskApp {
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
+            send_also: Vec::new(),
             dropped: Vec::new(),
             send_path: String::new(),
             send_link: String::new(),
@@ -2605,6 +2608,7 @@ impl PocketdeskApp {
             }
         };
         let mut chosen = None;
+        let mut all = false;
         let mut cancel = false;
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -2615,6 +2619,10 @@ impl PocketdeskApp {
                         chosen = Some(id.clone());
                     }
                 }
+                // P6: every one of them at once.
+                if targets.len() > 1 && ui.button("All of them").clicked() {
+                    all = true;
+                }
                 // Esc in a text box only leaves the box (J5 review).
                 let typing = ui.memory(|m| m.focused().is_some());
                 cancel = ui.button("Cancel").clicked() || (!typing && crate::keys::escaped(ui));
@@ -2623,6 +2631,12 @@ impl PocketdeskApp {
         ui.add_space(12.0);
         if let Some(id) = chosen {
             self.send_to = Some(id);
+            self.send_also.clear();
+            let dropped = std::mem::take(&mut self.dropped);
+            self.send_files(dropped);
+        } else if all {
+            self.send_to = targets.first().cloned();
+            self.send_also = targets.iter().skip(1).cloned().collect();
             let dropped = std::mem::take(&mut self.dropped);
             self.send_files(dropped);
         } else if cancel {
@@ -2703,68 +2717,89 @@ impl PocketdeskApp {
             .or_else(|| targets.first().cloned())
     }
 
-    /// Queue `path` for the chosen phone and say what happened. A chosen
-    /// phone that has left is reported, never swapped for another.
-    fn send_file(&mut self, path: &std::path::Path) {
-        let device = match model::target_for_send(&self.snapshot, self.send_to.as_deref()) {
-            Ok(device) => device,
-            Err(e) => {
-                self.send_to = None;
-                self.notice = crate::notice::Notice::error(e);
-                return;
+    /// The phones and computers a send goes to, as chosen (P6): the "To"
+    /// box's, then the others ticked.
+    fn send_chosen(&self) -> Vec<String> {
+        let mut chosen: Vec<String> = self.send_to.iter().cloned().collect();
+        for id in &self.send_also {
+            if !chosen.contains(id) {
+                chosen.push(id.clone());
             }
-        };
-        self.notice = crate::notice::Notice::outcome(
-            match model::queue_send(&self.state_dir, &device, path, now_unix()) {
-                Ok(name) => Ok(format!(
-                    "Queued {name} for {}: the Sent list says when it has gone.",
-                    model::target_label(&self.snapshot, &device)
-                )),
-                Err(e) => Err(e),
-            },
-        );
-        self.refreshed = None;
+        }
+        chosen
     }
 
-    /// Queue several paths for the chosen phone with one notice for them
-    /// all (J5 review: each file's notice replaced the last, an early
+    /// Queue `path` for the chosen phones and computers, and say what
+    /// happened. A chosen one that has left is reported, never swapped for
+    /// another.
+    fn send_file(&mut self, path: &std::path::Path) {
+        self.send_files(vec![path.to_path_buf()]);
+    }
+
+    /// Queue `paths` for each chosen phone or computer with one notice for
+    /// them all (J5 review: each file's notice replaced the last, an early
     /// failure hidden behind a later success).
     fn send_files(&mut self, paths: Vec<PathBuf>) {
-        if paths.len() < 2 {
-            for path in &paths {
-                self.send_file(path);
-            }
+        if paths.is_empty() {
             return;
         }
-        let device = match model::target_for_send(&self.snapshot, self.send_to.as_deref()) {
-            Ok(device) => device,
+        let (devices, gone) = match model::targets_for_send(&self.snapshot, &self.send_chosen()) {
+            Ok(targets) => targets,
             Err(e) => {
                 self.send_to = None;
+                self.send_also.clear();
                 self.notice = crate::notice::Notice::error(e);
                 return;
             }
         };
-        let what = dropped_words(&paths);
-        let to = model::target_label(&self.snapshot, &device);
+        let to = model::targets_words(&self.snapshot, &devices);
+        let left = if gone.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " Not to {}: no longer connected.",
+                model::targets_words(&self.snapshot, &gone)
+            )
+        };
+        let mut what = dropped_words(&paths);
         let mut failed = Vec::new();
-        for path in &paths {
-            if let Err(e) = model::queue_send(&self.state_dir, &device, path, now_unix()) {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string());
-                failed.push(format!("{name} ({e})"));
+        for device in &devices {
+            for path in &paths {
+                match model::queue_send(&self.state_dir, device, path, now_unix()) {
+                    Ok(name) if paths.len() == 1 => what = name,
+                    Ok(_) => {}
+                    Err(e) if devices.len() == 1 && paths.len() == 1 => {
+                        self.notice = crate::notice::Notice::error(e);
+                        self.refreshed = None;
+                        return;
+                    }
+                    Err(e) => {
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.display().to_string());
+                        let whom = if devices.len() > 1 {
+                            format!(" to {}", model::target_label(&self.snapshot, device))
+                        } else {
+                            String::new()
+                        };
+                        failed.push(format!("{name}{whom} ({e})"));
+                    }
+                }
             }
         }
-        self.notice = if failed.is_empty() {
+        let total = devices.len() * paths.len();
+        let them = if total == 1 { "it has" } else { "they have" };
+        self.notice = if failed.is_empty() && gone.is_empty() {
             crate::notice::Notice::done(format!(
-                "Queued {what} for {to}: the Sent list says when they have gone."
+                "Queued {what} for {to}: the Sent list says when {them} gone."
             ))
+        } else if failed.is_empty() {
+            crate::notice::Notice::error(format!("Queued {what} for {to}.{left}"))
         } else {
             crate::notice::Notice::error(format!(
-                "Queued {} of {} for {to}. Not queued: {}.",
-                paths.len() - failed.len(),
-                paths.len(),
+                "Queued {} of {total} for {to}. Not queued: {}.{left}",
+                total - failed.len(),
                 failed.join(", ")
             ))
         };
@@ -2803,7 +2838,44 @@ impl PocketdeskApp {
                     }
                 });
         });
+        // P6: the others it goes to as well.
+        let others: Vec<(String, String)> = targets
+            .iter()
+            .filter(|id| **id != chosen)
+            .map(|id| (id.clone(), label(id)))
+            .collect();
         self.send_to = Some(chosen);
+        self.send_also
+            .retain(|id| others.iter().any(|(o, _)| o == id));
+        if !others.is_empty() {
+            let also = &mut self.send_also;
+            ui.horizontal(|ui| {
+                let title = match also.len() {
+                    0 => "Also to…".to_string(),
+                    n => format!("And {n} more…"),
+                };
+                ui.menu_button(title, |ui| {
+                    let mut every = others.iter().all(|(id, _)| also.contains(id));
+                    if ui.checkbox(&mut every, "Every one").changed() {
+                        *also = if every {
+                            others.iter().map(|(id, _)| id.clone()).collect()
+                        } else {
+                            Vec::new()
+                        };
+                    }
+                    for (id, name) in &others {
+                        let mut on = also.contains(id);
+                        if ui.checkbox(&mut on, name).changed() {
+                            if on {
+                                also.push(id.clone());
+                            } else {
+                                also.retain(|x| x != id);
+                            }
+                        }
+                    }
+                });
+            });
+        }
         let mut send = None;
         // Wrapped: the box and three buttons are wider than a narrow page.
         ui.horizontal_wrapped(|ui| {
