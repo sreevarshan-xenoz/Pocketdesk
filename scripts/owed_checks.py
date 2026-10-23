@@ -33,13 +33,13 @@ PLACES = [
     ('away', 'Away from home: another network, or through a router', r'\b(outside|away from home|from away|another network|router|port forward\w*|public (ip|network)|relayed path|from the internet|real distance|hotspot)\b'),
     ('second computer', 'A second computer', r'\b(two (real )?computers|second computer|another computer|computer b|other computer)\b'),
     ('linux', 'A Linux desktop (the Azure VM serves for some)',
-     r'\b(linux|sway|gnome|kde plasma|plasma|wayland|x11|xwayland|hyprland|wlroots|d-bus|dbus|pipewire|vaapi|nvenc|orca|fc-list|systemd|wev|the vm|azure|waybar|swaybar|libnotify|notify-send|playerctl|ydotool|uinput|mako|dunst)\b'),
+     r'\b(linux|sway|gnome|kde plasma|plasma|wayland|x11|xwayland|hyprland|wlroots|d-bus|dbus|pipewire|vaapi|nvenc|orca|fc-list|systemd|wev|the vm|azure|waybar|swaybar|libnotify|notify-send|playerctl|ydotool|uinput|mako|dunst|wpctl|upower|pactl|pavucontrol|pw-play|pw-record|pw-loopback|pw-cat|paplay|wl-paste|wl-copy|xdg-open|screencopy|wl_output|xcap|hyprctl|evdev|eviocgrab|input group|ashpd|portal)\b'),
     ('other hardware', 'Other hardware: a foldable, tablet, mouse, game pad, older or newer Android',
      r'\b(foldable|tablet|gamepad|game ?pad|(usb|bluetooth) mouse|connected mouse|mouse connected|hardware keyboard|bluetooth|sd card|android (8|9|1[0-3]|17)|api 3[0-3]|android tv|wear ?os|smart ?watch|projector|hdr|4k|third monitor)\b'),
     ('by hand', 'By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app',
      r'\b(by ear|ears?|listen\w*|hear\w*|by eye|look(s|ing)?|tray|drag(ging)?|drag and drop|drag-and-drop|drop(ped)? (a|the) (file|folder)|dropped on the window|narrator|talkback|screen reader|camera|scan(s|ning)?|real (app|chat app|player|panel)|tasker|browser extension|extension loaded|home assistant itself|stopwatch|feel|smooth\w*|on screen|clicks?|the window by hand)\b'),
 ]
-HERE = ('here', 'Here: this Windows box and the A71, without touching the owner\'s power, lock or input')
+HERE = ('here', 'Here: this Windows box and the test phone (the OPPO), without touching the owner\'s power, lock or input')
 
 
 def items(text):
@@ -151,6 +151,10 @@ CASES = [
     ('"Privacy: on" → the desktop\'s keyboard stops responding.', '', 'owner'),
     ('Swipe typing a word, and voice dictation.', '', 'owner'),
     ('A file dropped on the window is offered.', '', 'by hand'),
+    # S1: the Linux host's own tools name their place.
+    ('Audio sheet opens with volume %, mute state, sink list (matches `wpctl status`).', '', 'linux'),
+    ('Battery chip shows desktop percentage + charging state; matches `upower`.', '', 'linux'),
+    ('Monitor picker lists monitors via xcap; selecting index N streams that monitor.', '', 'linux'),
 ]
 
 

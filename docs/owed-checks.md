@@ -6,18 +6,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 562 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 552 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 30 |
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 123 |
+| A Linux desktop (the Azure VM serves for some) | 133 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 32 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 93 |
 
-## Here: this Windows box and the A71, without touching the owner's power, lock or input
+## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
 **0. Prerequisites**
 
@@ -42,7 +42,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
 - Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
 - R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
-- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
 - R4 C1 codec negotiation, default off: connect normally → server log shows "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone (allow_hevc defaults false); video unaffected.
 - R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at window size keeps HEVC and the phone reconfigures on size change without codec change.
 - R4 C2 mid-session stall, same-codec: force the supervisor on an H.264 session (kill its sidecar child) → video recovers on software x264 with NO phone toast (identical bitstream — the server log line is the only signal; that is expected).
@@ -86,14 +85,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Moving the window mid-session: crop follows only after re-pick (known limitation — crop is static rect).
 - "Whole desktop" clears the crop.
 - R4 B2: close the streamed window mid-session → stream keeps running on full-output frames with software crop (warn log "did not stage"; no session drop).
-- Monitor picker lists monitors via xcap; selecting index N streams that monitor's region; reconnect persists the choice per host.
 - Mid-session monitor switch tears down + rebuilds cleanly (no zombie session — bridge "already active" path).
 
 **6. Workspace HUD + battery (R3#8, Tier-2 #11a)**
 
 - Workspace chips appear under StatsHud; open/close/focus a window on desktop → HUD updates within ~4 s.
 - R4 E1: re-tap the highlighted window chip → crop clears back to whole-desktop (monitor) view; a *different* window chip tap switches the crop directly.
-- Battery chip shows desktop percentage + charging state; matches `upower`.
 
 **7. Clipboard + files (Tier 1 #4)**
 
@@ -105,7 +102,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
 
 - Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears.
-- "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio).
 - Desktop pushes findmydevice ring → phone alarm loops at max volume 30 s (phone in alarm-volume >0; check DoNotDisturb doesn't block USAGE_ALARM).
 
 **8a. Control-channel versioning (R4 D4)**
@@ -116,17 +112,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Without `input` group: clean error, no crash.
 
-**10. Audio control (Tier-3 #16)**
-
-- Audio sheet opens with volume %, mute state, sink list (matches `wpctl status`).
-- Slider → desktop volume changes on release; mute switch works; selecting a sink routes default output (verify with `wpctl inspect` + real playback).
-
 **10a. Phone mic share (R4 E2)**
 
 - "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
-- Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording).
-- Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back).
-- "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling).
 - Exit the session while mic is on → source disappears (release-on-dispose); force-killing the phone app → source gone within the QUIC idle timeout (~45 s).
 - Screen off / PiP while mic is on (Android 14+): audio keeps flowing — the FGS carries the microphone type (logcat: no SecurityException, no silent AudioRecord).
 - WAN (relayed or direct) session: the same checks pass over the iroh path.
@@ -595,7 +583,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **100. GNOME and KDE hosts that work unattended (N8)**
 
 - "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
-- No RemoteDesktop portal (or refused): the screen alone.
 
 **101. KDE Connect, next steps (N9)**
 
@@ -1625,6 +1612,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - R4 B1 screencopy backend (desktop-observable): starting a stream on Hyprland must NOT raise the portal screen-share grant dialog; server log shows "Capture started via backend Screencopy". If instead it shows "Capture backend Screencopy unavailable (…); trying next" followed by "Capture started via backend Portal", the reason is in the line — that's the fallback working, but note it as a finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
 - R4 B3 capture_backend config override: set `capture_backend = "portal"` in config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error.
+- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
 - R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken (e.g. force `hardware_encoder = "nvenc"` here — this box's NVIDIA driver predates FFmpeg 9 NVENC, so the sidecar dies), start a session → server log shows "Hardware encoder unavailable (…); falling back to software (C2)" and video still appears within ~2 s on x264.
 - R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session, `pkill -f 'ffmpeg .*vaapi'` (or kill the encoder child seen in `pstree` of the server) → log shows "Rebuilt encoder on software rung (C2)", video resuming within ~2 s and the phone toasts "Desktop switched encoder — now H.264" (MediaCodec swap re-sniffed from the first software IDR).
 - R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued.
@@ -1639,19 +1627,33 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Window picker lists Hyprland windows with title/class/workspace/size + "focused" marker.
 - R4 B2 (Hyprland): pick a window → server log shows "Streaming compositor-cropped window frames"; partly-occluded window streams correctly (occluder NOT in the video), and only the window's pixels are encoded.
 - R4 B2 (non-Hyprland wlroots, no export global): window pick still works via software crop exactly as pre-B2.
+- Monitor picker lists monitors via xcap; selecting index N streams that monitor's region; reconnect persists the choice per host.
 
 **6. Workspace HUD + battery (R3#8, Tier-2 #11a)**
 
 - R4 E1: a row of window chips (title/class) shows under the workspace chips on a Hyprland session; tap one → video re-encodes cropped to that window (same as the picker), the tapped chip goes solid/highlighted.
 - Roadmap 2066 (needs a second output or a hotplug-capable desktop): with the HUD open, unplug/replug a monitor → server log shows `Hyprland output changed, refreshing compositor state` within a second of the event (not up to 4 s) → HUD chips and window-crop geometry re-layout immediately. Never observed here: this box has one built-in output and Hyprland's socket1 write dispatchers are broken upstream, so no fake hotplug exists.
+- Battery chip shows desktop percentage + charging state; matches `upower`.
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
 
 - `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications").
+- "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio).
 
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
 - Non-wlroots desktop (GNOME/KDE/X11, or `POCKETDESK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line.
+
+**10. Audio control (Tier-3 #16)**
+
+- Audio sheet opens with volume %, mute state, sink list (matches `wpctl status`).
+- Slider → desktop volume changes on release; mute switch works; selecting a sink routes default output (verify with `wpctl inspect` + real playback).
+
+**10a. Phone mic share (R4 E2)**
+
+- Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording).
+- Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back).
+- "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling).
 
 **18. Login autostart + tailnet access (server-side)**
 
@@ -1840,6 +1842,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
+- No RemoteDesktop portal (or refused): the screen alone.
 - The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
 
 **101. KDE Connect, next steps (N9)**
