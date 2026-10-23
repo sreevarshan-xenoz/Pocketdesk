@@ -176,6 +176,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     ("open_links", "Links from phones", Section::Phones),
+    ("link_rules", "Links by site", Section::Phones),
     ("share_state", "This computer's state", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
     (
@@ -494,6 +495,7 @@ pub fn applies_live(key: &str) -> bool {
             | "quiet_presenting"
             | "hold_words"
             | "phone_alarms"
+            | "link_rules"
             | "away_lock_minutes"
     )
 }
@@ -523,6 +525,8 @@ pub struct SettingsForm {
     pub relay_urls_text: String,
     /// The text box behind `[hooks]`: `kind = command`, one per line.
     pub hooks_text: String,
+    /// The text box behind `link_rules`: one rule a line (P8).
+    pub link_rules_text: String,
     /// The text boxes behind `clipboard_never_from` and `clipboard_never_like` (O4), one a line.
     pub never_from_text: String,
     pub never_like_text: String,
@@ -563,6 +567,7 @@ impl SettingsForm {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
             hooks_text: hooks_text(&config.hooks),
+            link_rules_text: config.link_rules.join("\n"),
             never_from_text: config.clipboard_never_from.join("\n"),
             never_like_text: config.clipboard_never_like.join("\n"),
             pattern_checks: Default::default(),
@@ -589,6 +594,13 @@ impl SettingsForm {
             .map(str::to_string)
             .collect();
         self.edited.hooks = parse_hooks(&self.hooks_text).0;
+        self.edited.link_rules = self
+            .link_rules_text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect();
         self.edited.clipboard_never_from = lines(&self.never_from_text);
         self.edited.clipboard_never_like = lines(&self.never_like_text);
         self.edited.hold_words = lines(&self.hold_words_text);
@@ -1139,6 +1151,32 @@ impl SettingsForm {
                         &mut e.open_links,
                         "open in the browser (off: show as a notification)",
                     );
+                });
+                // P8: a site's links in the browser, shown, or to a program.
+                let rules = &mut self.link_rules_text;
+                row(ui, "link_rules", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(rules)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("youtube.com = show\nzoom.us = C:\\Program Files\\Zoom\\bin\\Zoom.exe"),
+                    );
+                    note(
+                        ui,
+                        "One a line: a site, \"=\", and browser, show, or a program's path. A link to the site or any name under it (youtube.com covers m.youtube.com) opens in the browser, is shown in a notification, or is handed to the program as its one argument, never through a shell. The longest site that matches wins (an address only whole); a link no rule names goes as above, and with \"open in the browser\" off every link is only shown. A program is named by its whole path, never a .bat or .cmd file; at most 8 run at once. A link that cannot be opened is said.",
+                    );
+                    let lines: Vec<String> = rules.lines().map(str::to_string).collect();
+                    let bad = pocketdesk_core::local::link_rules::bad_lines(&lines);
+                    if !bad.is_empty() {
+                        ui.label(
+                            RichText::new(format!(
+                                "Not read (a site, \"=\", and browser, show or a program): {}",
+                                bad.join(", ")
+                            ))
+                            .small()
+                            .color(crate::theme::warn(ui)),
+                        );
+                    }
                 });
                 row(ui, "share_state", |ui| {
                     ui.checkbox(

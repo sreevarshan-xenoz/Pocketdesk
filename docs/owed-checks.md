@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-925 open items.
+927 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 553 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 554 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 29 |
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 115 |
+| A Linux desktop (the Azure VM serves for some) | 116 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 89 |
 
@@ -1130,6 +1130,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Files off and text copied too: the text sent instead.
 - The Files page's "Paste copied files", one target and several; more than 100 copied.
 
+**200. Links by site (P8)**
+
+- The Settings box by hand: its warning for a bad line, a .bat refused.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1950,6 +1954,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **199. Files copied in Explorer sent with the clipboard key (P7)**
 
 - Linux: files copied in Nautilus or Dolphin (`text/uri-list`).
+
+**200. Links by site (P8)**
+
+- A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

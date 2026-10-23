@@ -133,6 +133,9 @@ pub struct Config {
     /// off, it is shown as a notification instead.
     #[serde(default = "default_true")]
     pub open_links: bool,
+    /// Links by site (P8): `site = browser | show | <program>`, one a line.
+    #[serde(default)]
+    pub link_rules: Vec<String>,
     /// Answer a paired phone's ask for this computer's state: CPU, memory,
     /// disks, battery, uptime (F2).
     #[serde(default = "default_true")]
@@ -426,6 +429,7 @@ impl Default for Config {
             sms_keep: default_sms_keep(),
             sms_names: true,
             open_links: true,
+            link_rules: Vec::new(),
             share_state: true,
             virtual_screens: true,
             clipboard_push: true,
@@ -663,6 +667,7 @@ impl Config {
         "notifications_per_minute",
         "sms_notify",
         "open_links",
+        "link_rules",
         "share_state",
         "virtual_screens",
         "clipboard_push",

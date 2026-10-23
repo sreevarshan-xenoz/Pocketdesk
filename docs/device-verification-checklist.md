@@ -2676,6 +2676,12 @@ Owed:
 - [ ] The Files page's "Paste copied files", one target and several; more than 100 copied.
 - [ ] Linux: files copied in Nautilus or Dolphin (`text/uri-list`).
 
+## 200. Links by site (P8)
+
+Built 2026-10-23. Unit-tested: the rules' reading and matching (the longest site, a name under it, an address whole, a backslash), and the links plugin with a stand-in opener and runner (a site shown, one handed to a program, one opened, a program that fails said).
+Owed:
+- [ ] A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
+- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
