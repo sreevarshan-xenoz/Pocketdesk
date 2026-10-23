@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-885 open items.
+879 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 312 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 184 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 68 |
-| A phone with a SIM | 32 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 88 |
+| A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 32 |
-| A second computer | 17 |
+| Away from home: another network, or through a router | 33 |
+| A second computer | 18 |
 | A Linux desktop (the Azure VM serves for some) | 158 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 50 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 185 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 55 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 273 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -159,280 +159,38 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The rest of "here", in later batches: the S cycle (`docs/research/2026-10-23-s-cycle.md`), S1 to S5.
 
-**111. Health after updates (D1)**
-
-- Advanced Protection on, with control on (needs the owner's Google account).
-
-**112. Quiet hours kept in step (D2)**
-
-- The Overview's Mute and Unmute by hand, and the refusal's words.
-- Android 14 and older (one filter for all, no app mode).
-- A Do Not Disturb that silences but still lists notifications.
-- A phone with a bedtime mode switching on during a mute.
-
-**113. Clipboard history and Resend (D3)**
-
-- The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed.
-
-**114. Continue reading on phone (D6)**
-
-- Chrome (Windows): "Continue reading on phone" on a long article mid-way; the phone's notification opens it in Chrome scrolled to that paragraph.
-- A page with a `#section` link: the fragment replaced, the page still scrolled there.
-- The browser's own page (`chrome://extensions`): sent at its top, no error.
-
-**116. The tray you act from (D5)**
-
-- Windows, the A71 linked: its submenu titled with its battery, which changes in the menu when the battery does.
-- Send clipboard: the computer's copy on the phone; a password manager's private copy not sent.
-- Send file…: the window opens on Files with the phone chosen.
-- The A71 away: its items greyed out.
-- Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent.
-
-**117. The phone's folders as a drive (D8)**
-
-- File Explorer at the Windows address: browse, open a photo, copy one out.
-- A file over 50 MB in Explorer (refused by Windows' limit).
-- A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait.
-
 **118. Lock when the phone leaves (D9)**
 
 - The phone back, and gone again: a second line; staying gone: no more.
 - The switch on the Devices page, and the time in Settings, applied without a restart.
 - A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 
-**119. Memory at rest (D7)**
-
-- The app with a phone linked and a session running, then at rest again: back to its number.
-
 **120. Answers that say how they went (E1)**
 
 - A desktop notification for such a failure.
-- A phone from before E1: "sent, but no word from the phone" after a minute. Seen in passing 2026-10-19: an answer sent into a link the phone had just dropped (the app force-stopped) stays "sent", which the page shows as no word back.
-- From a toast (N3), the window hidden: a failure's desktop notification.
-
-**121. The tray on its own (E2)**
-
-- With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen.
-
-**122. The phone as a pen (E3)**
-
-- Windows: a pen session from the A71 into that window: pressure following the touch, Down and Up once per stroke.
-- A drawing app with pressure (Krita or Paint) on Windows: strokes thin and thick with the touch.
-- Pen pressure Soft, Even and Firm change the ink for one touch.
-- A pinch while in Pen lifts the pen and zooms the view, and the stroke does not go on after it.
-- Pen is not offered on a computer from before E3, and a session that meets one again goes back to Direct touch.
-
-**123. A gamepad on the phone (E4)**
-
-- Closing it (× or Back) with a button held lets the button go.
-- A game (one that takes Enter, the arrows and Space) by hand.
-- A real controller connected to the phone (none here): buttons, D-pad or hat, both sticks; Settings off leaves it to Android.
-- Two buttons at once, and a stick held while pressing a button.
-
-**124. The desktop app's design pass (E5)**
-
-- Each page at the 640 px minimum width, in both themes: no row runs off the page (Devices, KDE Connect, Activity, Notifications, Phone files, Sessions).
-- The Phone page with a long folder: the photos below are in reach, and every photo row shows.
-- The cast window's bar in the light theme: its buttons readable.
-- KDE Connect's Unpair… asks by name; Cancel keeps it.
-- Devices: a paired computer has no Ring, Mute, cast or lock switches; the lock's note shows while it is on.
-- Notices: "Asked the phone…" on the Phone page goes in seconds; an error shows in red.
 
 **125. The phone app's design pass (E6)**
 
-- The session menu with Pen offered: three segments at 1.0; at 2.0 crowded.
 - The history sheet's entries 48 dp, and no Clear when empty.
 - The Health card's Choose opens the folder picker.
-- Spanish and Tamil on the changed screens.
-
-**126. The deck (F1)**
-
-- A button of each kind set up in the desktop app's Settings, listed on the A71's Deck from Home and from the session menu, with its icon.
-
-**127. How the computer is doing (F2)**
-
-- "How it is doing" on the A71 against this box: the CPU moving under load, memory, each fixed drive (no removable or network drive), the battery when there is one, uptime.
-- "This computer's state" off in desktop Settings: the sheet says so, without a restart.
-- The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0.
 
 **128. Take a photo with the phone (F3)**
 
 - "Also onto its clipboard" off: the file only; "Photos the computer asks for" off (the default): no notification, and the Phone page's button disabled while the phone is not linked.
 - Spanish and Tamil.
 
-**129. An air mouse (F4)**
-
-- "Air mouse speed" at 0.5 and 3; a slow link (moves add up, no replay).
-- A phone without a gyroscope keeps the trackpad.
-
-**130. Ringing calls on the computer (F5)**
-
-- A call ringing on the phone: "Call from <name> (<number>)" on the computer within a second or two, in the toast and on the Notifications page; gone when it stops ringing (answered on the phone, declined, missed).
-- Silence from the toast: the ring stops (or the refusal, said); the ringer's volume back after the call.
-- Decline (with "Let the computer decline calls"): the call ends; with a call waiting, which one ends.
-- The permission granted while notification access was already on: the next call shows (no restart).
-- Two calls one after another; a call ending while its note is on its way.
-
-**134. The deck on the home screen (G3)**
-
-- The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
-
 **136. The computer's music on the home screen (G5)**
 
-- Place "Pocketdesk: playing" with music playing on the computer: its title and artist, Previous, Pause and Next as the player offers them, "Read at <time>".
-- Pause from the widget: the music stops, and the button turns to Play; Next: the next track shown.
 - Nothing playing: "Nothing is playing", no buttons; Audio off for the phone on the computer: the refusal, no old track.
-- The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…".
-
-**137. The computer's music from Quick Settings (G6)**
-
-- Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on.
-- On the lock screen: a tap asks to unlock first.
-- Opened after an hour: "Tap to play or pause", not the old track.
-
-**138. Wake the computer from Quick Settings (G7)**
-
-- Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake".
-- A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored.
-- On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app.
-- A computer asleep (not this box): woken, "It is awake" within a minute.
-
-**139. A talk timer in Remote (H2)**
-
-- The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service).
-- Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none.
-
-**140. Send the clipboard to the phone with a key (H3)**
-
-- Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone.
-- A combination another app holds: "Another app holds this combination"; freed, registered within 30 s.
-- A password manager's copy: not sent (the server's notification says why).
-
-**141. The home-screen widgets, a design pass (I2)**
-
-- The music widget with a track: title, artist, the buttons at 56 dp and "Read at <time>" in its header; nothing playing.
-- The state widget made one cell tall: the line, no "%" left alone; on its side at two cells: the line where bars do not fit.
-- Spanish and Tamil (the bar labels at 68 dp); font scale 2.0.
-
-**142. The desktop app, upgrades and UI tweaks (I3)**
-
-- Messages: half-type a reply to one conversation, open another, then New text: each its own draft; Enter sends, Shift+Enter a new line.
-- The notice at the foot of the window, the page not moving; a long one readable; Restart's spinner.
-- The page list: a count on Sessions in a session, on Files while a file moves, a warning dot on Settings while it has changes; readable selected and hovered, light and dark.
-- Files: Send again on a failed send (and disabled with the phone away); Open on a received picture and PDF, none on a program; the rows wrapping at the minimum width.
-- Overview: a phone's battery bar, in the warning colour at 15 % or under not charging; with pairing off, the warning and Open Settings.
-- Diagnostics: the checks running as it opens, the chips in both themes.
-- Pair: "For 15 minutes" makes a new code; a phone paired with it shows its time left on Devices and goes when it runs out.
-- Phone files: the spinner while a folder is asked for.
-
-**143. The Logs page (J1)**
-
-- A debug-level log of several megabytes open on the page: no hitch while it grows, the newest lines at the foot.
-- The filter and "Warnings and errors only", each alone and together, and the count beside them.
-- Just after midnight, today's log still empty: the page shows the controls and "0 of the last 0 lines".
-
-**144. Find a setting on the desktop (J2)**
-
-- Searches for "browser", "file manager", "computers" and "kde": each extra shown alone in its section.
-- A setting with a problem, then a search that does not find it: its section still there, whole.
-- The page at the minimum width, light and dark.
-
-**145. The Sessions page in blocks, with the recent ones (J3)**
-
-- A live screen session: its block with the phone, "on this network" and "screen" chips (the address on hover), how long, End.
-- The page at the minimum width: the chips wrap whole, not as tall slivers.
-- After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line.
-
-**146. Search on Activity and Clipboard (J4)**
-
-- Activity with a few hundred events: Search by a phone's name, a file's name and a link's host; with a kind chip; nothing found, then Clear search.
-- Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question.
-
-**147. Dropped files ask where they go (J5)**
-
-- One phone linked: a dropped file goes to it at once, one notice.
-- A second drop while it asks joins the files; a folder reads as a folder.
-- Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left.
-
-**148. A sound session notices a computer gone quiet (J6)**
-
-- Nothing playing, the screen off, an hour: never ends on its own.
-- Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects.
 
 **149. Files keep their dates (K1)**
 
 - A file downloaded from the remote file browser, and a folder each way.
-- A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so.
-- "Keep files' dates" off on each side: dated as it arrives.
-
-**150. Not from this app (K2b)**
-
-- A phone notification's toast on Windows: "Not from this app" last among its buttons; pressed, a notification says the app is muted, and the app's next notification shows no toast but is on Activity, "muted here".
-- An answerable notification from a muted app: still on the Notifications page.
-
-**151. The phone's volume keys for the computer (K4)**
-
-- Remote open: the volume keys and the panel's slider move the computer's volume, one step a press; a held key stops when let go.
-- The Sound sheet moves the volume, then a key press: one step from there, no jump.
-- The screen off: the keys still the computer's. A call: the keys are the call's.
-- A sound session: the keys stay the phone's. The setting off: the keys stay the phone's.
-- `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71.
-
-**152. Pause the phones on the computer (K2a)**
-
-- While paused: a phone's notification shows no toast (and an answerable one is on the Notifications page), a text is on Messages without a toast, a link is not opened, a phone's ring for the computer stays silent, a received file arrives with no toast.
-- A session and a file send still work while paused.
-
-**153. Notifications with their app's icon, and pictures (K3)**
-
-- With "Pictures in notifications" on in the phone's Settings: a notification with a picture (BigPicture, or a contact's photo) shows it in the toast; one the lock screen hides shows none.
-- The Notifications page shows each answerable notification's app icon.
-- Closing the notification on the phone removes its picture from `notification_icons/pictures/`.
-- Desktop Settings "Apps' icons and pictures" off: plain toasts.
-
-**154. The phone's music in the computer's media controls (K7)**
-
-- Settings "The phone's music in this computer's media controls" on; a phone in a session plays music: the volume flyout shows its song as Pocketdesk, with its buttons.
-- Play/Pause, Next and Previous from the flyout reach the phone; the flyout shows the new state at once.
-- The keyboard's media keys (input on this box: with the owner).
-- The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves.
-- The setting off: it leaves at once.
-
-**155. The phone's sound with its screen (K5)**
-
-- Phone Settings "The phone's sound with its screen" asks for the microphone permission; desktop Devices "Play its sound here" on.
-- "Show screen" with a throwaway app playing a 1 kHz tone: a throwaway server with `POCKETDESK_PHONE_AUDIO_FILE` writes it; its pitch and level match.
-- With another app in front on the phone (the use case): the sound still comes.
-- "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture.
+- "Keep files' dates" off on the phone: a share to the computer dated as it arrives.
 
 **156. Cleared on the computer, cleared on the phone (L1)**
 
-- The throwaway chat app posts a notification; Clear on the Notifications page: `adb shell dumpsys notification --noredact` no longer lists it.
-- The toast's ✕ on its banner, and inside the Action Center: cleared on the phone (by hand).
-- An ongoing or unclearable notification, and a ringing call: not cleared.
-- Phone Settings "Let the computer clear my notifications" off, or desktop "Clearing here clears it on the phone" off: not cleared.
-
-**157. Drop files and paste into the phone's window (L2)**
-
-- With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why.
-
-**158. A phone charged to a level (L3)**
-
-- Desktop Settings "Tell me when a phone has charged to" 80 %; with Share battery on, `adb shell dumpsys battery set ac 1`, `set level 79`, then `set level 80`: one notification, "charged to 80 %"; `set level 81`: none.
-- `dumpsys battery unplug`, then `set ac 1` again at 80: one more.
-- `adb shell dumpsys battery reset` after.
-
-**159. Call a number from the computer (L4)**
-
-- Phone Settings "Calls from the computer" on; in a session, Call on the Messages page (or `pocketdesk call`): the dialer opens with the number (`adb shell dumpsys activity activities`); nothing is called.
-- A number with `*` or `#`: refused on the computer.
-
-**160. Screenshot and record the phone's window (L5)**
-
-- Screenshot: a PNG in Pictures\Pocketdesk at the cast's size, and on the clipboard.
-- Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays.
-- Recording while the phone turns: the file so far kept, the bar says why it stopped.
-- The cast ends during a recording: the bar names the file and stops counting.
+- Desktop "Clearing here clears it on the phone" off: not cleared.
 
 **161. Commands to the phone's automation apps (L6)**
 
@@ -871,13 +629,28 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Over the home network (not the relay): latency again. (where: owner)
 - Rotation: taps land right after the phone turns.
 
+**111. Health after updates (D1)**
+
+- Advanced Protection on, with control on (needs the owner's Google account). (where: owner)
+
 **122. The phone as a pen (E3)**
 
+- Windows: a pen session from the A71 into that window: pressure following the touch, Down and Up once per stroke. (where: owner) (pen input on this computer.)
+- A drawing app with pressure (Krita or Paint) on Windows: strokes thin and thick with the touch. (where: owner) (pen input on this computer.)
 - A stylus (the A71 has none): hover moves the cursor without drawing, tilt and the side button reach the app.
+- Pen pressure Soft, Even and Firm change the ink for one touch. (where: owner) (pen input on this computer.)
+- A pinch while in Pen lifts the pen and zooms the view, and the stroke does not go on after it. (where: owner) (pen input on this computer.)
 
 **123. A gamepad on the phone (E4)**
 
 - The on-screen gamepad from the A71 into a scratch window that logs keys: each button's key down and up once, the D-pad's arrows, the left stick moving the pointer, the right stick scrolling.
+- Closing it (× or Back) with a button held lets the button go. (where: owner) (game pad input on this computer.)
+- A game (one that takes Enter, the arrows and Space) by hand. (where: owner)
+- Two buttons at once, and a stick held while pressing a button. (where: owner) (game pad input on this computer.)
+
+**125. The phone app's design pass (E6)**
+
+- The session menu with Pen offered: three segments at 1.0; at 2.0 crowded. (where: owner) (Pen is offered only where the computer takes pen input.)
 
 **126. The deck (F1)**
 
@@ -887,11 +660,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Remote's "Air mouse" on the A71: held flat, turning moves the pointer across and tilting moves it up and down, a still hand moving nothing; the last choice kept.
 - A tap clicks without moving the pointer; a press and turn moves without clicking; nothing moves after letting go.
+- "Air mouse speed" at 0.5 and 3; a slow link (moves add up, no replay). (where: owner) (pointer input on this computer.)
 
 **135. A laser pointer for the air mouse (G4)**
 
 - Remote on the A71 with the air mouse on: "Laser pointer" under the pad; on, a press shows a red dot in the middle of the pointer's screen, turning moves it, the pointer stays put.
 - A slide show (PowerPoint or a browser's): a tap with the laser on still advances or clicks at the pointer.
+
+**140. Send the clipboard to the phone with a key (H3)**
+
+- Settings "Send the clipboard with a key" = `win+shift+c`, Save: "Registered." under it; with the A71 linked, copy a text on the computer and press it: the text on the phone. (where: owner) (a key pressed on this computer.)
+- A combination another app holds: "Another app holds this combination"; freed, registered within 30 s. (where: owner)
+- A password manager's copy: not sent (the server's notification says why). (where: owner) (a key pressed on this computer.)
 
 **142. The desktop app, upgrades and UI tweaks (I3)**
 
@@ -905,6 +685,22 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **146. Search on Activity and Clipboard (J4)**
 
 - Ctrl+F on each page, scrolled down; both boxes at the minimum width, light and dark.
+
+**151. The phone's volume keys for the computer (K4)**
+
+- Remote open: the volume keys and the panel's slider move the computer's volume, one step a press; a held key stops when let go. (where: owner) (it sets this computer's volume.)
+- The Sound sheet moves the volume, then a key press: one step from there, no jump. (where: owner) (it sets this computer's volume.)
+- The screen off: the keys still the computer's. A call: the keys are the call's. (where: owner) (it sets this computer's volume.)
+- A sound session: the keys stay the phone's. The setting off: the keys stay the phone's. (where: owner)
+- `dumpsys media_session`: the session remote, and which session takes the keys on the OPPO and the A71. (where: owner) (a remote needs the Input permission.)
+
+**152. Pause the phones on the computer (K2a)**
+
+- While paused: a link not opened, and a phone ringing this computer silent. (where: owner)
+
+**154. The phone's music in the computer's media controls (K7)**
+
+- The keyboard's media keys (input on this box: with the owner). (where: owner)
 
 **157. Drop files and paste into the phone's window (L2)**
 
@@ -978,6 +774,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Settings shows the Android 17 notes beside "Ring from the computer" and "Show texts on my computer".
 - A text with a code: does it reach the computer at all after the three hours, and with its own time? (where: sim)
 
+**130. Ringing calls on the computer (F5)**
+
+- A call ringing on the phone: "Call from <name> (<number>)" on the computer within a second or two, in the toast and on the Notifications page; gone when it stops ringing (answered on the phone, declined, missed). (where: sim)
+- Silence from the toast: the ring stops (or the refusal, said); the ringer's volume back after the call. (where: sim)
+- Decline (with "Let the computer decline calls"): the call ends; with a call waiting, which one ends. (where: sim)
+- The permission granted while notification access was already on: the next call shows (no restart). (where: sim)
+- Two calls one after another; a call ending while its note is on its way. (where: sim)
+
 **132. The computer's state on the home screen (G1)**
 
 - "State widget refreshes by itself" off: no ask in the logcat at the next period; on mobile data with it on: none either.
@@ -985,6 +789,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **150. Not from this app (K2b)**
 
 - Settings → Notifications and texts → Muted apps: Unmute, and the app's toasts again.
+
+**152. Pause the phones on the computer (K2a)**
+
+- While paused: a text on Messages without a toast. (where: sim)
+
+**156. Cleared on the computer, cleared on the phone (L1)**
+
+- A ringing call not cleared. (where: sim)
 
 **159. Call a number from the computer (L4)**
 
@@ -1143,6 +955,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - 2b on a relayed path: A71 → the VM with direct UDP from home dropped, session and control link both up 10 minutes ("WAN · relayed").
 
+**148. A sound session notices a computer gone quiet (J6)**
+
+- Over a relayed internet path: the same 14 s; a Wi-Fi roam over 12 s reconnects. (where: away)
+
 **159. Call a number from the computer (L4)**
 
 - With the app behind another, or outside a session with a background link: the notification, its tap opening the dialer.
@@ -1193,6 +1009,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **134. The deck on the home screen (G3)**
 
 - Connect to another computer, then press a button still drawn for the first: nothing is sent, the widget redrawn for the new one.
+
+**138. Wake the computer from Quick Settings (G7)**
+
+- A computer asleep (not this box): woken, "It is awake" within a minute. (where: second computer)
 
 **165. The other computers answer and clear (L8 part 2)**
 
@@ -1767,10 +1587,30 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A low-RAM phone on Android 10 or older: no "stopped" card.
 
+**117. The phone's folders as a drive (D8)**
+
+- A phone from before D8: the file lands in Downloads, the drive answers 504 after the wait. (where: other hardware) (a phone on a release from before D8.)
+
+**120. Answers that say how they went (E1)**
+
+- A phone from before E1: "sent, but no word from the phone" after a minute. Seen in passing 2026-10-19: an answer sent into a link the phone had just dropped (the app force-stopped) stays "sent", which the page shows as no word back. (where: other hardware) (a phone on a release from before E1.)
+
+**122. The phone as a pen (E3)**
+
+- Pen is not offered on a computer from before E3, and a session that meets one again goes back to Direct touch. (where: other hardware) (a computer on a release from before E3.)
+
+**123. A gamepad on the phone (E4)**
+
+- A real controller connected to the phone (none here): buttons, D-pad or hat, both sticks; Settings off leaves it to Android. (where: other hardware) (a game controller.)
+
 **125. The phone app's design pass (E6)**
 
 - The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
 - TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
+
+**129. An air mouse (F4)**
+
+- A phone without a gyroscope keeps the trackpad. (where: other hardware) (a phone without a gyroscope.)
 
 **135. A laser pointer for the air mouse (G4)**
 
@@ -2144,9 +1984,22 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A real system update (the fingerprint path), and a listener that stays unbound after one.
 - The card in Spanish and Tamil, and with TalkBack.
 
+**112. Quiet hours kept in step (D2)**
+
+- The Overview's Mute and Unmute by hand, and the refusal's words. (where: by hand)
+- A Do Not Disturb that silences but still lists notifications. (where: by hand)
+- A phone with a bedtime mode switching on during a mute. (where: by hand)
+
+**113. Clipboard history and Resend (D3)**
+
+- The Clipboard page by hand: Copy, Send to…, Clear and its confirm, a cut entry's Send greyed. (where: by hand)
+
 **114. Continue reading on phone (D6)**
 
+- Chrome (Windows): "Continue reading on phone" on a long article mid-way; the phone's notification opens it in Chrome scrolled to that paragraph. (where: by hand)
 - Firefox: the same, the extension loaded from `about:debugging`.
+- A page with a `#section` link: the fragment replaced, the page still scrolled there. (where: by hand)
+- The browser's own page (`chrome://extensions`): sent at its top, no error. (where: by hand)
 
 **115. Conversations (D4)**
 
@@ -2154,33 +2007,61 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **116. The tray you act from (D5)**
 
+- Windows, the A71 linked: its submenu titled with its battery, which changes in the menu when the battery does. (where: by hand)
 - Ring, Mute for an hour and then Unmute, from the tray with the window hidden: the phone answers, the window stays hidden.
+- Send clipboard: the computer's copy on the phone; a password manager's private copy not sent. (where: by hand) (the tray.)
+- Send file…: the window opens on Files with the phone chosen. (where: by hand)
+- The A71 away: its items greyed out. (where: by hand)
+- Send clipboard with an empty clipboard, and with over 256 KiB of text: a notification says it was not sent. (where: by hand) (the tray.)
 - A tray pick with the server stopped, and with a server from before D5: nothing sent, and the notice says only that it asked.
 
 **117. The phone's folders as a drive (D8)**
 
+- File Explorer at the Windows address: browse, open a photo, copy one out. (where: by hand)
+- A file over 50 MB in Explorer (refused by Windows' limit). (where: by hand)
 - Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
 - The setting off: the address gone from the Phone page (by eye).
+
+**119. Memory at rest (D7)**
+
+- The app with a phone linked and a session running, then at rest again: back to its number. (where: by hand)
 
 **120. Answers that say how they went (E1)**
 
 - The phone away for more than a minute, its notification still kept: "the phone did not connect within a minute". (Run 2026-10-19 with the listener off: the phone never sent the notification, so the answer was refused at once as no longer offered, before any wait.)
+- From a toast (N3), the window hidden: a failure's desktop notification. (where: by hand)
 
 **121. The tray on its own (E2)**
 
 - Windows: starting `pocketdesk-app` starts `pocketdesk-tray` once (a second window launch starts no second tray); closing the window leaves the tray.
 - Each item from the tray program: Ring, Mute and Unmute, Send clipboard; Open, Pair a phone… and Send file… with the window closed (it starts on that page, Files with the phone chosen) and with it open (it comes to the front on that page).
+- With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen. (where: by hand)
 - Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
 - An install without `pocketdesk-tray`: the app's own tray, as before.
 
 **124. The desktop app's design pass (E5)**
 
+- Each page at the 640 px minimum width, in both themes: no row runs off the page (Devices, KDE Connect, Activity, Notifications, Phone files, Sessions). (where: by hand)
+- The Phone page with a long folder: the photos below are in reach, and every photo row shows. (where: by hand)
+- The cast window's bar in the light theme: its buttons readable. (where: by hand)
+- KDE Connect's Unpair… asks by name; Cancel keeps it. (where: by hand)
+- Devices: a paired computer has no Ring, Mute, cast or lock switches; the lock's note shows while it is on. (where: by hand)
+- Notices: "Asked the phone…" on the Phone page goes in seconds; an error shows in red. (where: by hand)
 - A screen reader (Narrator) names each photo's Save, Open and Copy, the pairing code and the phone's screen.
 - The tray: a phone's title says Do Not Disturb or the mute's minutes left; Send the clipboard and Pair a phone.
 
+**125. The phone app's design pass (E6)**
+
+- Spanish and Tamil on the changed screens. (where: by hand)
+
 **126. The deck (F1)**
 
+- A task button, the deck set up in the desktop app's Settings, and the icons by eye. (where: by hand)
 - 2, 3 and 4 a row; a long label; Spanish and Tamil; TalkBack reads each button's label.
+
+**127. How the computer is doing (F2)**
+
+- The sheet's asking stops when it closes; Spanish and Tamil; font scale 2.0. (where: by hand)
 
 **128. Take a photo with the phone (F3)**
 
@@ -2199,9 +2080,95 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the A71 linked and "Photos the computer asks for" on: the tray's Take a photo under it, then the phone's notification, the camera, and the photo in the received files; the same from the Overview's button, with its notice.
 - The phone away, or Files off for it: Take a photo greyed in the tray and on the Overview, its hover saying why.
 
+**134. The deck on the home screen (G3)**
+
+- The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…". (where: by hand) (a widget on the home screen.)
+
+**136. The computer's music on the home screen (G5)**
+
+- Place "Pocketdesk: playing" with music playing on the computer: its title and artist, Previous, Pause and Next as the player offers them, "Read at <time>". (where: by hand)
+- Pause from the widget: the music stops, and the button turns to Play; Next: the next track shown. (where: by hand)
+- The server stopped: "No answer from the computer yet" after 8 s, never a stuck "Asking…". (where: by hand) (a widget on the home screen.)
+
+**137. The computer's music from Quick Settings (G6)**
+
+- Add "Computer's music" to the A71's Quick Settings; with music on the computer, a tap pauses it, the shade still open showing "Asking the computer…", then the track, the tile off; a tap again plays, the tile on. (where: by hand)
+- On the lock screen: a tap asks to unlock first. (where: by hand)
+- Opened after an hour: "Tap to play or pause", not the old track. (where: by hand)
+
+**138. Wake the computer from Quick Settings (G7)**
+
+- Add "Wake computer" to the A71's Quick Settings: its subtitle names the last computer; with its MAC not known yet, "Connect once while it is awake". (where: by hand)
+- A tap with the computer awake: "Sending the wake…", "Sent, waiting for it to answer…", then "It is awake"; a tap again at once is ignored. (where: by hand)
+- On the lock screen: a tap asks to unlock first. With no computer saved: a tap opens the app. (where: by hand)
+
+**139. A talk timer in Remote (H2)**
+
+- The screen off, the phone in a pocket: the buzzes still come on time (the session's foreground service). (where: by hand)
+- Do Not Disturb on: the buzzes still come; Settings "Talk timer buzzes" off: none. (where: by hand)
+
 **140. Send the clipboard to the phone with a key (H3)**
 
 - The tray's menu (H4): the phone it sends to shows "Send the clipboard (Win+Shift+C)"; with the key cleared, the plain label again.
+
+**141. The home-screen widgets, a design pass (I2)**
+
+- The music widget with a track: title, artist, the buttons at 56 dp and "Read at <time>" in its header; nothing playing. (where: by hand)
+- The state widget made one cell tall: the line, no "%" left alone; on its side at two cells: the line where bars do not fit. (where: by hand)
+- Spanish and Tamil (the bar labels at 68 dp); font scale 2.0. (where: by hand)
+
+**142. The desktop app, upgrades and UI tweaks (I3)**
+
+- Messages: half-type a reply to one conversation, open another, then New text: each its own draft; Enter sends, Shift+Enter a new line. (where: by hand)
+- The notice at the foot of the window, the page not moving; a long one readable; Restart's spinner. (where: by hand)
+- The page list: a count on Sessions in a session, on Files while a file moves, a warning dot on Settings while it has changes; readable selected and hovered, light and dark. (where: by hand)
+- Files: Send again on a failed send (and disabled with the phone away); Open on a received picture and PDF, none on a program; the rows wrapping at the minimum width. (where: by hand)
+- Overview: a phone's battery bar, in the warning colour at 15 % or under not charging; with pairing off, the warning and Open Settings. (where: by hand)
+- Diagnostics: the checks running as it opens, the chips in both themes. (where: by hand)
+- Pair: "For 15 minutes" makes a new code; a phone paired with it shows its time left on Devices and goes when it runs out. (where: by hand)
+- Phone files: the spinner while a folder is asked for. (where: by hand)
+
+**143. The Logs page (J1)**
+
+- A debug-level log of several megabytes open on the page: no hitch while it grows, the newest lines at the foot. (where: by hand)
+- The filter and "Warnings and errors only", each alone and together, and the count beside them. (where: by hand)
+- Just after midnight, today's log still empty: the page shows the controls and "0 of the last 0 lines". (where: by hand)
+
+**144. Find a setting on the desktop (J2)**
+
+- Searches for "browser", "file manager", "computers" and "kde": each extra shown alone in its section. (where: by hand)
+- A setting with a problem, then a search that does not find it: its section still there, whole. (where: by hand)
+- The page at the minimum width, light and dark. (where: by hand)
+
+**145. The Sessions page in blocks, with the recent ones (J3)**
+
+- A live screen session: its block with the phone, "on this network" and "screen" chips (the address on hover), how long, End. (where: by hand)
+- The page at the minimum width: the chips wrap whole, not as tall slivers. (where: by hand)
+- After a session ends: it heads "Recent sessions" with its length, its road and "capture to arrival"; a refused phone reads "A device claiming to be …", its retries one line. (where: by hand)
+
+**146. Search on Activity and Clipboard (J4)**
+
+- Activity with a few hundred events: Search by a phone's name, a file's name and a link's host; with a kind chip; nothing found, then Clear search. (where: by hand)
+- Clipboard: Search by a text and by "From …"; with Clear's question open, Esc in the box empties it and leaves the question. (where: by hand)
+
+**147. Dropped files ask where they go (J5)**
+
+- One phone linked: a dropped file goes to it at once, one notice. (where: by hand)
+- A second drop while it asks joins the files; a folder reads as a folder. (where: by hand)
+- Leaving Files, or hiding the window, while it asks: "Not sent". The phone leaving while it asks: one button, or "Not sent" with none left. (where: by hand)
+
+**148. A sound session notices a computer gone quiet (J6)**
+
+- Nothing playing, the screen off, an hour: never ends on its own. (where: by hand)
+
+**149. Files keep their dates (K1)**
+
+- A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so. (where: by hand) (the phone's folder picker.)
+
+**150. Not from this app (K2b)**
+
+- A phone notification's toast on Windows: "Not from this app" last among its buttons; pressed, a notification says the app is muted, and the app's next notification shows no toast but is on Activity, "muted here". (where: by hand)
+- An answerable notification from a muted app: still on the Notifications page. (where: by hand)
 
 **152. Pause the phones on the computer (K2a)**
 
@@ -2211,10 +2178,46 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **153. Notifications with their app's icon, and pictures (K3)**
 
 - A phone notification's toast on Windows shows the app's icon as its logo (on screen, not only in the XML).
+- With "Pictures in notifications" on in the phone's Settings: a notification with a picture (BigPicture, or a contact's photo) shows it in the toast; one the lock screen hides shows none. (where: by hand)
+- The Notifications page shows each answerable notification's app icon. (where: by hand)
+- Closing the notification on the phone removes its picture from `notification_icons/pictures/`. (where: by hand) (a notification with a picture.)
+- Desktop Settings "Apps' icons and pictures" off: plain toasts. (where: by hand)
+
+**154. The phone's music in the computer's media controls (K7)**
+
+- Settings "The phone's music in this computer's media controls" on; a phone in a session plays music: the volume flyout shows its song as Pocketdesk, with its buttons. (where: by hand)
+- Play/Pause, Next and Previous from the flyout reach the phone; the flyout shows the new state at once. (where: by hand)
+- The session ends: the song leaves the flyout within a few seconds. Paused five minutes: it leaves. (where: by hand)
+- The setting off: it leaves at once. (where: by hand)
 
 **155. The phone's sound with its screen (K5)**
 
+- Phone Settings "The phone's sound with its screen" asks for the microphone permission; desktop Devices "Play its sound here" on. (where: by hand)
+- "Show screen" with a throwaway app playing a 1 kHz tone: a throwaway server with `POCKETDESK_PHONE_AUDIO_FILE` writes it; its pitch and level match. (where: by hand) (a tone app on the phone.)
 - By ear: a video on the phone plays on the computer's speakers, behind the picture by how much.
+- With another app in front on the phone (the use case): the sound still comes. (where: by hand) (by ear.)
+- "Play its sound here" off mid-cast: the cast ends. Without it: the phone does not capture. (where: by hand)
+
+**156. Cleared on the computer, cleared on the phone (L1)**
+
+- The toast's ✕ on its banner, and inside the Action Center: cleared on the phone (by hand). (where: by hand)
+
+**157. Drop files and paste into the phone's window (L2)**
+
+- With "Files from the computer in the background" on: a 3 MB file dropped on the phone's window; its MD5 on the phone matches. Without it: the window says why. (where: by hand)
+
+**158. A phone charged to a level (L3)**
+
+- Desktop Settings "Tell me when a phone has charged to" 80 %; with Share battery on, `adb shell dumpsys battery set ac 1`, `set level 79`, then `set level 80`: one notification, "charged to 80 %"; `set level 81`: none. (where: by hand) (the phone reads its battery from the hardware, which `dumpsys battery set` does not move.)
+- `dumpsys battery unplug`, then `set ac 1` again at 80: one more. (where: by hand) (a real charge.)
+- `adb shell dumpsys battery reset` after. (where: by hand)
+
+**160. Screenshot and record the phone's window (L5)**
+
+- Screenshot: a PNG in Pictures\Pocketdesk at the cast's size, and on the clipboard. (where: by hand)
+- Record for about 30 s, then Stop: an MKV in Videos\Pocketdesk; `ffprobe` gives h264 at the cast's size and a duration within 10 % of the wall clock; it plays. (where: by hand)
+- Recording while the phone turns: the file so far kept, the bar says why it stopped. (where: by hand)
+- The cast ends during a recording: the bar names the file and stops counting. (where: by hand)
 
 **161. Commands to the phone's automation apps (L6)**
 
