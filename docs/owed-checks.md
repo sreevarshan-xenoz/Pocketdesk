@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-916 open items.
+919 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 549 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 550 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 29 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 113 |
+| A Linux desktop (the Azure VM serves for some) | 114 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 87 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 88 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1119,6 +1119,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
 - An update held by its words closing the toast its first showed.
+- A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only).
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1428,7 +1429,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **196. Notifications held by their words (P4)**
 
-- A call's note with words in it (a SIM): still shown.
+- A call's note with words in it (a SIM): still shown.## 197. A phone's ringing alarm on the computer (P5)
 
 ## A second phone
 
@@ -1929,6 +1930,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
 
+**196. Notifications held by their words (P4)**
+
+- Linux's urgent notification.
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -2317,3 +2322,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **189. Find a setting on the phone (O8)**
 
 - TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
+
+**196. Notifications held by their words (P4)**
+
+- The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.

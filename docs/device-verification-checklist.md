@@ -2650,7 +2650,16 @@ Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server throu
 Owed:
 - [ ] The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
 - [ ] An update held by its words closing the toast its first showed.
-- [ ] A call's note with words in it (a SIM): still shown.
+- [ ] A call's note with words in it (a SIM): still shown.## 197. A phone's ringing alarm on the computer (P5)
+
+Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, paused so nothing rang here, the alarm set with `SET_ALARM`:
+- [x] With "Alarms on the computer" on and Clock not shared, the ringing alarm (ColorOS: no category, no-clear, a foreground service) reached the computer logged with `alarm`.
+- [x] Seen first: with the switch off it never left the phone (dropped as ongoing).
+Owed:
+- [ ] The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
+- [ ] Linux's urgent notification.
+- [ ] A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only).
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
