@@ -2666,12 +2666,6 @@ Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server throu
 Owed:
 - [ ] Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 - [ ] The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
-## 200. Links by site (P8)
-
-Built 2026-10-23. Unit-tested: the rules' reading and matching (the longest site, a name under it, an address whole, a backslash), and the links plugin with a stand-in opener and runner (a site shown, one handed to a program, one opened, a program that fails said).
-Owed:
-- [ ] A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
-- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.
 ## 199. Files copied in Explorer sent with the clipboard key (P7)
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, both clipboard seams set (`POCKETDESK_CLIPBOARD_FILE`, `POCKETDESK_CLIPBOARD_FILES_FILE`), the request written as the tray writes it:
@@ -2682,6 +2676,12 @@ Owed:
 - [ ] The Files page's "Paste copied files", one target and several; more than 100 copied.
 - [ ] Linux: files copied in Nautilus or Dolphin (`text/uri-list`).
 
+## 200. Links by site (P8)
+
+Built 2026-10-23. Unit-tested: the rules' reading and matching (the longest site, a name under it, an address whole, a backslash), and the links plugin with a stand-in opener and runner (a site shown, one handed to a program, one opened, a program that fails said).
+Owed:
+- [ ] A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
+- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
