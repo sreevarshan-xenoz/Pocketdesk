@@ -2,35 +2,32 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-911 open items.
+892 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 483 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 392 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 50 |
-| A phone with a SIM | 29 |
-| A second phone | 11 |
-| Away from home: another network, or through a router | 21 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 61 |
+| A phone with a SIM | 30 |
+| A second phone | 15 |
+| Away from home: another network, or through a router | 32 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 159 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 32 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 99 |
+| A Linux desktop (the Azure VM serves for some) | 158 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 37 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 140 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
 
 - Enter desktop IP + streaming port + control port → "Connect" opens a session.
-- Wrong/expired PIN → clear error, retry works.
 - QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames).
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
 - R4 C1 codec negotiation, default off: connect normally → server log shows "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone (allow_hevc defaults false); video unaffected.
 - R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at window size keeps HEVC and the phone reconfigures on size change without codec change.
-- R4 C2 mid-session stall, same-codec: force the supervisor on an H.264 session (kill its sidecar child) → video recovers on software x264 with NO phone toast (identical bitstream — the server log line is the only signal; that is expected).
-- R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the log shows "Encoder bottom rung exhausted; ending session" → stream goes Down cleanly (status chip + Retry works), never a silent infinite stall.
 - R4 C2 crop stability: during a software-fallback session, pick/clear a window crop → encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a rebuild must not re-probe the dead hardware).
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -95,147 +92,23 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The no-session fallback still works: a query issued with **no** live control session must take the `oneshot_request` branch (`android/bridge/src/api.rs`, reached from `control_request` when `CONTROL_WRITER` is `None`) and still get an answer — that is the path that runs before you connect, and it is the one the rewrite could plausibly have broken. Same for `push_packet`'s dedicated socket.
 
-**23. Windows host (W1: core remote desktop)**
-
-- `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a "Pocketdesk" task an older version left, starts the server with no console window, and the log file appears under `%LOCALAPPDATA%\pocketdesk\logs`.
-- A toast "Pocketdesk pairing PIN: …" appears for `pair` (the `a_toast_is_shown` test only proves Windows accepted it).
-- Window crop: picking a window streams just that window; closing it returns to the monitor.
-
-**24. Desktop app and QR pairing**
-
-- Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart.
-- Open a `pocketdesk://pair` link, finish or dismiss it, then switch dark mode or reopen the app from Recents: the pairing is not offered again. Switching theme while the confirmation is showing keeps it.
-
-**25. Desktop sound on the phone**
-
-- Quick Settings → "Desktop sound on this phone" off: silent at once; on again: sound returns within a second. The setting survives an app restart.
-- Pause the desktop's audio for 10 s, then resume: it comes back cleanly, without a crackle burst.
-- Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over. "Silent" means no app holds an audio stream open: Windows loopback sends packets of silence while any app has one (seen on the A71 with a browser open: focus was taken 1.3 s after connect), and focus follows packets, not loudness.
-- A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back.
-- In PiP the sound continues; Exit stops it.
-
-**26. In-session keyboard**
-
-- Landscape: the stream stays visible above the keyboard, and zoom survives opening and closing it.
-
-**27. Trackpad gestures**
-
-- Two-finger scroll is natural (content follows the fingers, like the phone itself) at about one wheel notch per 24 dp, in both axes. Unverified: adb cannot make two-finger touches.
-
-**28. Permissions and session approval**
-
-- No answer: the phone shows the refusal about 30 s after connecting.
-- Running commands: denied by default; allowed after the switch is turned on.
-- Control off: the session is view-only and the phone cannot lift it. Sound off: no desktop sound. Microphone off: the mic does not reach the desktop.
-- Turning control or the microphone off during a session ends that session. Removing a connected phone ends its session.
-- LAN session: the prompt shows the phone's address.
-
-**29. Computers on this network**
-
-- Pair from a found computer: after the PIN it appears under Saved.
-- "Visible on this network" in the desktop app, then a server restart: the computer no longer appears.
-
-**30. Sending files to the desktop**
-
-- Share several photos at once from the gallery (`SEND_MULTIPLE`): "Sending 2 of 3" with a moving progress bar.
-- The desktop shows a notification per file; the app's Files tab lists them, and Show in folder selects each in Explorer.
-- A file from a provider without a size (e.g. some cloud apps) still arrives (copied first).
-- A share with the desktop off or unreachable ends in "Not sent: 1 of 1" with the reason.
-- A non-English file name arrives with its name.
-
 **31. Files both ways and the remote browser**
 
 - A download refused by the desktop (an offer used twice) fails at once with its reason, not after 30 s.
 - Send a file while a large share from the phone is running; the offer still arrives.
-- A phone that has no room declines an offer; the desktop's Sent list says "the phone declined it: …".
-- Tap "Saved … to Downloads"; the file opens.
-- Download into a phone without enough space: "Not enough space for …", nothing left in Downloads.
 - A file over 1 GB both ways, and a download stopped halfway (Wi-Fi off): no partial file is published.
-
-**32. Switching screens**
-
-- Unplug the monitor being streamed; the session falls back to the primary screen.
-- Three or more monitors: a chip each, in the desktop's order.
-
-**33. Shortcuts outside the app (F11)**
-
-- Place the widget on the home screen: it names the last computer and connects on a tap; with none saved it opens the app.
-- A Wake shortcut appears for a computer the phone can wake (§42), and sends the packet.
-- Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed.
-
-**34. Desktop diagnostics (F10)**
-
-- A network Windows files as Public, with only `install`'s rules: the firewall check says no rule lets phones in.
-- A Block rule for pocketdesk: the firewall check reports it.
-
-**35. Reaching the desktop from outside (N1)**
-
-- A network with public IPv6: the IPv6 line is ok.
-
-**36. Your own relay (N2)**
-
-- HTTPS mode on a cloud VM with a real name: the certificate is issued, and a session connects with `--allow` ids from `relay-ids`.
-- A phone that is not paired (or an id not listed) is refused by the relay.
-
-**37. Found by id on the Mainline DHT (N3)**
-
-- `dht_publish = "addresses"` on a network with public IPv6: the record holds the IPv6 address, and a phone with relays unreachable connects directly.
-- A network that blocks outgoing UDP: "Found by id" warns that it was not read back.
 
 **38. Image clipboard (N4)**
 
-- Desktop → phone: paste it into a chat app on the phone. (The A71 has no app that pastes images.)
-- Phone → desktop: copy a photo on the phone and paste it into Paint. (The A71 has no app that copies an image: no browser.)
 - With the phone's Clipboard permission off, neither direction moves.
-
-**39. The phone's notifications on the computer (N5a)**
-
-- A messaging app that hides its content on the lock screen shows only "New notification".
-- With no computer reachable, the phone's battery and the queue stay calm over an hour.
-
-**40. Closed on the phone, closed on the computer (N5c, part 1)**
-
-- A chat app that clears its notification when read on the phone.
-
-**42. Wake from the phone (N6)**
-
-- A computer saved by its tailnet address counts as awake once its server answers.
-- Turn "Wake from the phone" off on the desktop: after the next connection the phone forgets the MAC, and Wake disappears.
-
-**43. Several phones at once (N7)**
-
-- After 10 s without input from the driver (or its session ending), the other phone can take control.
-- Sessions tab: the driver is marked "Driving"; Give control hands it over within a second.
-- Settings "Several phones": every phone drives; the hand-back time.
-- Two quick Ends in the Sessions tab both end their sessions.
-
-**45. Phase R3 and R4: hostile connections, and idle cost**
-
-- The phone's battery over an hour with the app in the background, and while a session is open.
-- Network traffic while idle (both ends).
 
 **46. Phase R2: long sessions and recovery**
 
 - An hour with one session from start to end, to confirm the memory levels off.
 - A file transfer cut by a drop (today it fails and is sent again whole).
 
-**47. Check connection (T1)**
-
-- A VPN that captures home traffic, and Tailscale off for a tailnet address.
-- Guest Wi-Fi with AP isolation, and another subnet.
-- A UDP-only block (the computer's firewall dropping the stream port).
-- Copy report on a device: no address or id in the text.
-
-**48. Staying connected in the background (T2)**
-
-- After allowing it in the battery settings, the card is gone on return.
-- Battery use set to Restricted: the card says so, and "Allow" opens the app's page.
-- Other makers (Xiaomi, OPPO): the guide link and their own battery managers.
-
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
-- Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing, and a device-to-device move (Smart Switch) leaves the app unpaired on the new phone.
-- A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address.
 - Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
 **50. Resumable transfers (T6a)**
@@ -244,61 +117,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
 - "Unfinished files: not kept" on the desktop: a retry starts over.
 - A file that changes between attempts starts over (the prefix hash).
-- The app killed mid-download, then the offer fetched again within its 10 minutes.
-
-**51. Folders (T6b)**
-
-- A folder from the phone shows one "folder arriving" toast, not one per file.
-- The phone shows "Not all of … was sent" when it leaves names out, and "Stopped sending …" when the computer goes away mid-folder.
-- A folder broken by Wi-Fi mid-way, continued.
-- A folder over the limits (10 000 files, 32 levels) says what was left out.
-- The desktop app's "Choose folder…" and dropping a folder on the window.
-- Names Windows refuses on the phone (`a:b`) left out and counted.
 
 **52. Download a folder from the remote browser**
 
-- Closing the sheet before the answer, and the toast still showing.
 - A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
-
-**54. Automation apps on the phone (T7b)**
-
-- A share naming one of two saved computers goes to that one (the A71 has one saved).
-- From the background, with and without "Display over other apps".
-
-**55. A slow or lossy link (fix/slow-link-watchdog)**
-
-- A healthy LAN: frame rate and e2e unchanged (the in-flight bound must not throttle it).
-- WAN, direct and relayed: frame rate at a 150-300 ms round trip.
-- The picture's delay on the lossy link (how stale it runs), and a keyframe after a long stall.
-
-**56. Links both ways (T8a)**
-
-- Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share).
-- The desktop app's Send link, and its refusal for a phone with Links off.
-
-**57. The phone's battery on the computer (T8b)**
-
-- The Devices tab's text, and its age after the session ends.
-- Catching up after a Wi-Fi drop.
-- The desktop's "Phones' batteries" off: no notification.
-- A real discharge to 15 %, and Android's own low flag.
-
-**58. The computer's media from the phone (T8c)**
-
-- Nothing playing: "Nothing is playing" (2026-10-19: something was playing on this box, so not reached).
-- The card cleared to the error alone with Audio off (fixed after the run).
-
-**59. The phone's media from the computer (T8d)**
-
-- The Sessions tab itself, and its buttons.
-- The phone's setting turned off clearing the song; a press sent while the app was in the background not acting later.
-- Turning the setting on opening the notification access page.
-
-**60. Pinch-zoom in trackpad mode (T9a)**
-
-- In trackpad mode, two fingers spreading zoom the view, pinching zooms out, back to 1x.
-- Two fingers moving together still scroll the desktop, and a scroll that drifts apart does not start a zoom.
-- While pinching, moving the fingers pans the view; one finger lifting and landing again does not jump the zoom.
 
 **61. Portrait sessions (T9b)**
 
@@ -1119,10 +941,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **23. Windows host (W1: core remote desktop)**
 
+- `install` registers the "Pocketdesk" task (Task Scheduler → Task Scheduler Library), removes a "Pocketdesk" task an older version left, starts the server with no console window, and the log file appears under `%LOCALAPPDATA%\pocketdesk\logs`. (where: owner) (it registers a logon task and firewall rules on this computer.)
 - Video is live and correct-sized on a 100 % and on a scaled (125/150 %) display; a still desktop keeps the HUD alive (the 1 s heartbeat) instead of tripping the 10 s dead-link card. *Run 1: live, correct-sized and kept alive on a still desktop at 100 %; no scaled display tried.*
 - Taps land on the pixel tapped, on a single monitor and on a secondary monitor left of/above the primary (negative origin); drag selects text. *Run 1: taps on the primary land within 5 px with a second screen present, after the monitor → layout remap fix. Not tried: streaming the secondary, a monitor left of the primary, drag.*
 - Phone keyboard: letters, digits, shifted capitals, arrows, F11/F12, Esc, Super (Start menu), right Alt, the app key; pasted text with capitals, accents and an emoji arrives intact. *Run 1: not testable — the app has no in-session keyboard (only the shortcut bar); Android Share sends text to the PC clipboard, not as typing.*
 - Focusing an elevated window (e.g. an admin terminal) makes input stop with one `Windows refused injected input` log line, and input resumes on returning to a normal window.
+- Window crop: picking a window streams just that window; closing it returns to the monitor. (where: owner) (closing a window on this computer's desktop.)
 
 **24. Desktop app and QR pairing**
 
@@ -1140,9 +964,39 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Speed 0.5× and 3× feel right; slow movements still move the cursor.
 
+**28. Permissions and session approval**
+
+- LAN session: the prompt shows the phone's address. (where: owner) (a throwaway server's LAN port needs a firewall rule.)
+
+**29. Computers on this network**
+
+- Pair from a found computer: after the PIN it appears under Saved. (where: owner) (a throwaway server's LAN port needs a firewall rule.)
+- "Visible on this network" in the desktop app, then a server restart: the computer no longer appears. (where: owner) (a throwaway server's LAN port needs a firewall rule.)
+
+**32. Switching screens**
+
+- Unplug the monitor being streamed; the session falls back to the primary screen. (where: owner)
+
+**34. Desktop diagnostics (F10)**
+
+- A network Windows files as Public, with only `install`'s rules: the firewall check says no rule lets phones in. (where: owner)
+- A Block rule for pocketdesk: the firewall check reports it. (where: owner)
+
 **45. Phase R3 and R4: hostile connections, and idle cost**
 
 - Turning off a phone's Power permission while it holds privacy mode (limit 6 in SECURITY.md): the grab ends at its 10 minute expiry.
+
+**47. Check connection (T1)**
+
+- A UDP-only block (the computer's firewall dropping the stream port). (where: owner)
+
+**54. Automation apps on the phone (T7b)**
+
+- A share naming one of two saved computers goes to that one (the A71 has one saved). (where: owner) (the other saved computer is the owner's own.)
+
+**55. A slow or lossy link (fix/slow-link-watchdog)**
+
+- A healthy LAN: frame rate and e2e unchanged (the in-flight bound must not throttle it). (where: owner) (a throwaway server's LAN port needs a firewall rule.)
 
 **60. Pinch-zoom in trackpad mode (T9a)**
 
@@ -1222,6 +1076,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **11. WAN over iroh (R1)**
 
 - Phone on LTE (Wi-Fi off): dial from cached identity succeeds → badge shows "WAN · punching…" then settles to "WAN · direct" or "WAN · relayed — trying direct…", video + input + keyframe-on-gap all work through relays (R4 A1). (where: sim)
+
+**25. Desktop sound on the phone**
+
+- A phone call silences it, and it resumes after the call. Another app starting music takes over for good: switching "Desktop sound on this phone" off and on brings it back. (where: sim)
 
 **35. Reaching the desktop from outside (N1)**
 
@@ -1321,6 +1179,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **43. Several phones at once (N7)**
 
 - Two phones in sessions: the first to send input drives, and the other's taps do nothing while its session says "Another phone is driving".
+- After 10 s without input from the driver (or its session ending), the other phone can take control. (where: second phone)
+- Sessions tab: the driver is marked "Driving"; Give control hands it over within a second. (where: second phone)
+- Settings "Several phones": every phone drives; the hand-back time. (where: second phone)
+- Two quick Ends in the Sessions tab both end their sessions. (where: second phone)
 
 **80. Named tasks (ecosystem 1c)**
 
@@ -1377,10 +1239,36 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **35. Reaching the desktop from outside (N1)**
 
 - A strict-NAT network (or a hotspot behind carrier NAT): "From outside" warns, and the session rides the relay.
+- A network with public IPv6: the IPv6 line is ok. (where: away)
+
+**36. Your own relay (N2)**
+
+- HTTPS mode on a cloud VM with a real name: the certificate is issued, and a session connects with `--allow` ids from `relay-ids`. (where: away)
+- A phone that is not paired (or an id not listed) is refused by the relay. (where: away)
+
+**37. Found by id on the Mainline DHT (N3)**
+
+- `dht_publish = "addresses"` on a network with public IPv6: the record holds the IPv6 address, and a phone with relays unreachable connects directly. (where: away)
+- A network that blocks outgoing UDP: "Found by id" warns that it was not read back. (where: away)
 
 **42. Wake from the phone (N6)**
 
 - Away from home (another Wi-Fi): no broadcast is sent, only the outside packet; with no outside port, Wake says the phone is away and nothing is set up.
+- A computer saved by its tailnet address counts as awake once its server answers. (where: away)
+
+**47. Check connection (T1)**
+
+- A VPN that captures home traffic, and Tailscale off for a tailnet address. (where: away)
+- Guest Wi-Fi with AP isolation, and another subnet. (where: away)
+
+**49. Protocol audit (what Pocketdesk sends, and to whom)**
+
+- A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address. (where: away)
+
+**55. A slow or lossy link (fix/slow-link-watchdog)**
+
+- WAN, direct and relayed: frame rate at a 150-300 ms round trip. (where: away)
+- The picture's delay on the lossy link (how stale it runs), and a keyframe after a long stall. (where: away)
 
 **65. The clipboard outside a session (T10b)**
 
@@ -1463,10 +1351,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Another computer announcing the first one's id at a new address (its own certificate): no move.
 
 ## A Linux desktop (the Azure VM serves for some)
-
-**1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
-
-- "Show PIN on desktop" → desktop pops a notify-send PIN → phone confirms "Paired ✓", button flips to "Paired ✓".
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
@@ -1934,7 +1818,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **31. Files both ways and the remote browser**
 
+- A phone that has no room declines an offer; the desktop's Sent list says "the phone declined it: …". (where: other hardware) (a full phone.)
+- Download into a phone without enough space: "Not enough space for …", nothing left in Downloads. (where: other hardware) (a full phone.)
 - Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
+
+**32. Switching screens**
+
+- Three or more monitors: a chip each, in the desktop's order. (where: other hardware)
 
 **33. Shortcuts outside the app (F11)**
 
@@ -1947,6 +1837,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **47. Check connection (T1)**
 
 - Android 17's local network permission denied.
+
+**48. Staying connected in the background (T2)**
+
+- Other makers (Xiaomi, OPPO): the guide link and their own battery managers. (where: other hardware)
+
+**49. Protocol audit (what Pocketdesk sends, and to whom)**
+
+- A device-to-device move (Smart Switch) leaves the app unpaired. (where: other hardware)
 
 **59. The phone's media from the computer (T8d)**
 
@@ -2054,16 +1952,26 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Scan the desktop app's code with the phone camera (the USB-tethered phone could not see the screen).
 - Tray: Open, Pair a phone… and Quit from the tray menu itself.
+- Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart. (where: by hand)
 
 **25. Desktop sound on the phone**
 
 - Play a video on the desktop during a session: the phone plays its sound, and the lag behind the picture is small (≤ ~150 ms by ear).
+- Quick Settings → "Desktop sound on this phone" off: silent at once; on again: sound returns within a second. The setting survives an app restart. (where: by hand)
+- Pause the desktop's audio for 10 s, then resume: it comes back cleanly, without a crackle burst. (where: by hand)
+- Connecting to a silent desktop does not pause music already playing on the phone; the first desktop sound takes over. "Silent" means no app holds an audio stream open: Windows loopback sends packets of silence while any app has one (seen on the A71 with a browser open: focus was taken 1.3 s after connect), and focus follows packets, not loudness. (where: by hand)
+- In PiP the sound continues; Exit stops it. (where: by hand)
 - With sound on, the HUD's fps and delay match a session with it off, and taps on a still desktop feel immediate (the bridge lock fixes).
+
+**26. In-session keyboard**
+
+- Landscape: the stream stays visible above the keyboard, and zoom survives opening and closing it. (where: by hand)
 
 **27. Trackpad gestures**
 
 - Two-finger tap opens a context menu; three-finger tap middle-clicks (e.g. opens a link in a new tab). adb cannot make multi-finger touches.
 - Two fingers resting without moving do not right-click, and a two-finger tap does not scroll the page first.
+- Two-finger scroll is natural (content follows the fingers, like the phone itself) at about one wheel notch per 24 dp, in both axes. Unverified: adb cannot make two-finger touches. (where: by hand)
 - Tap, then drag a window by its title bar: it moves without maximising (no double click), and a tap left alone clicks about 0.3 s later.
 - A drag survives a second finger landing mid-drag and releases on lift.
 
@@ -2071,32 +1979,99 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The desktop app's prompt: it comes to the front (also from the tray) and its three buttons work; Always allow turns the switch off.
 
+**30. Sending files to the desktop**
+
+- Share several photos at once from the gallery (`SEND_MULTIPLE`): "Sending 2 of 3" with a moving progress bar. (where: by hand) (`am` takes no list of URIs, so only the gallery sends one.)
+- The desktop shows a notification per file; the app's Files tab lists them, and Show in folder selects each in Explorer. (where: by hand)
+- A file from a provider without a size (e.g. some cloud apps) still arrives (copied first). (where: by hand)
+
+**31. Files both ways and the remote browser**
+
+- Tap "Saved … to Downloads"; the file opens. (where: by hand) (ColorOS's shade shows uiautomator no notification of the app.)
+
+**33. Shortcuts outside the app (F11)**
+
+- Place the widget on the home screen: it names the last computer and connects on a tap; with none saved it opens the app. (where: by hand)
+- Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed. (where: by hand)
+
 **34. Desktop diagnostics (F10)**
 
 - Open the Diagnostics tab in the app and click Run checks; Copy debug report pastes the same text.
 
+**38. Image clipboard (N4)**
+
+- Desktop → phone: paste it into a chat app on the phone. (The A71 has no app that pastes images.) (where: by hand)
+- Phone → desktop: copy a photo on the phone and paste it into Paint. (The A71 has no app that copies an image: no browser.) (where: by hand)
+
 **39. The phone's notifications on the computer (N5a)**
 
 - A real app's public notification (a chat message) shows its title and text.
+- A messaging app that hides its content on the lock screen shows only "New notification". (where: by hand)
+- With no computer reachable, the phone's battery and the queue stay calm over an hour. (where: by hand)
+
+**40. Closed on the phone, closed on the computer (N5c, part 1)**
+
+- A chat app that clears its notification when read on the phone. (where: by hand)
+
+**45. Phase R3 and R4: hostile connections, and idle cost**
+
+- The phone's battery over an hour with the app in the background, and while a session is open. (where: by hand)
+- Network traffic while idle (both ends). (where: by hand)
 
 **47. Check connection (T1)**
 
 - A changed security key (pin a wrong one), and "Scan code again" from the finding: the computer and its key removed, the scanner opened, and the new code trusted.
 
+**48. Staying connected in the background (T2)**
+
+- Battery use set to Restricted: the card says so, and "Allow" opens the app's page. (where: by hand) (ColorOS keeps no restriction set from the shell.)
+
+**51. Folders (T6b)**
+
+- A folder from the phone shows one "folder arriving" toast, not one per file. (where: by hand) (the phone's folder picker.)
+- The phone shows "Not all of … was sent" when it leaves names out, and "Stopped sending …" when the computer goes away mid-folder. (where: by hand) (the phone's folder picker.)
+- A folder broken by Wi-Fi mid-way, continued. (where: by hand) (the phone's folder picker.)
+- A folder over the limits (10 000 files, 32 levels) says what was left out. (where: by hand) (the phone's folder picker.)
+- The desktop app's "Choose folder…" and dropping a folder on the window. (where: by hand)
+- Names Windows refuses on the phone (`a:b`) left out and counted. (where: by hand) (the phone's folder picker.)
+
 **52. Download a folder from the remote browser**
 
 - The toast "Asked the computer for …" (the folder arrived, the toast was not caught on screen), and a third folder while two are on the way.
+- Closing the sheet before the answer, and the toast still showing. (where: by hand) (a toast uiautomator cannot read.)
 
 **54. Automation apps on the phone (T7b)**
 
 - Tasker itself: the clipboard recipe, a file with "Grant read permission", Connect and Wake from a task.
+- From the background, with and without "Display over other apps". (where: by hand) (Tasker.)
+
+**56. Links both ways (T8a)**
+
+- Chrome's and Firefox's share sheets ("Open on computer" listed, the title and link they share). (where: by hand)
+- The desktop app's Send link, and its refusal for a phone with Links off. (where: by hand)
+
+**57. The phone's battery on the computer (T8b)**
+
+- The Devices tab's text, and its age after the session ends. (where: by hand)
+- Catching up after a Wi-Fi drop. (where: by hand) (the phone's battery reads the hardware, so a report changes only with a real one.)
+- The desktop's "Phones' batteries" off: no notification. (where: by hand) (the phone reads its battery from BatteryManager, which `dumpsys battery set` does not move.)
+- A real discharge to 15 %, and Android's own low flag. (where: by hand)
 
 **58. The computer's media from the phone (T8c)**
 
 - A real player with a title: a browser video, Spotify; Next and Previous.
 
+**59. The phone's media from the computer (T8d)**
+
+- The Sessions tab itself, and its buttons. (where: by hand)
+- The phone's setting turned off clearing the song; a press sent while the app was in the background not acting later. (where: by hand) (a real player on the phone.)
+- Turning the setting on opening the notification access page. (where: by hand) (notification access already granted here.)
+
 **60. Pinch-zoom in trackpad mode (T9a)**
 
+- In trackpad mode, two fingers spreading zoom the view, pinching zooms out, back to 1x. (where: by hand) (adb cannot pinch.)
+- Two fingers moving together still scroll the desktop, and a scroll that drifts apart does not start a zoom. (where: by hand) (adb cannot pinch.)
+- While pinching, moving the fingers pans the view; one finger lifting and landing again does not jump the zoom. (where: by hand) (adb cannot pinch.)
 - A two-finger tap is still a right click, a three-finger tap a middle click.
 
 **64. The control channel over the internet (T10a)**
