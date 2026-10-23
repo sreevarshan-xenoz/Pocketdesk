@@ -367,6 +367,13 @@ fun HomeScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // The cards and the computers found on the network arrive once
+                // their checks finish, after the list is drawn, and a list keeps
+                // its first item where it was: they had landed above the top
+                // edge (S2, on the OPPO). This empty first item is that anchor
+                // while the list is at its start, so they show below it; a list
+                // scrolled down keeps its place.
+                item(key = "#top") {}
                 // Only here, not on the empty Home: the background features
                 // need a paired computer to send to.
                 if (showHealth) {
@@ -924,6 +931,7 @@ private const val WAKE_WAIT_HOME_S = 90
 private const val WAKE_WAIT_AWAY_S = 30
 
 /** D1: what is on in Pocketdesk but cannot work, each with its fix. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HealthCard(
     problems: List<HealthProblem>,
@@ -947,16 +955,16 @@ private fun HealthCard(
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             for (problem in problems) {
-                Row(
+                // The sentence takes the card's width and its button goes
+                // under it: beside it, a long button left the sentence a
+                // column a word wide (S2, on the OPPO).
+                Text(
+                    stringResource(healthText(problem)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        stringResource(healthText(problem)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.weight(1f),
-                    )
+                )
+                FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     when (problem) {
                         HealthProblem.CONTROL_BLOCKED ->
                             TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }
@@ -972,7 +980,7 @@ private fun HealthCard(
                     }
                 }
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onNotNow) { Text(stringResource(R.string.health_not_now)) }
             }
         }
@@ -996,6 +1004,7 @@ private fun healthText(problem: HealthProblem): Int = when (problem) {
 }
 
 /** T2: Android may stop the features that work in the background. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -1013,7 +1022,9 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            // Three buttons wrap onto a second line rather than push Allow,
+            // the one that fixes it, off the card (S2, on the OPPO).
+            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 if (guide != null) {
                     TextButton(onClick = {
                         if (!BackgroundRunning.openGuide(context, guide)) {
