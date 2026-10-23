@@ -20,6 +20,7 @@ import android.util.Log
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
+import dev.pocketdesk.android.ui.ComputerPlayers
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.notify.PhoneLink
 import org.json.JSONObject
@@ -79,6 +80,9 @@ class ComputerMedia(private val app: Context) {
     private var badCover: String? = null
     private var showingFor: String? = null
 
+    /** The player the last watch named (O6). */
+    private var watchedPlayer: String? = null
+
     /** Closed with the listener: nothing is drawn after (N5 review). */
     @Volatile
     private var closed = false
@@ -125,7 +129,12 @@ class ComputerMedia(private val app: Context) {
         RustCore.controlPeer()?.takeIf { it == own.address to own.controlPort }
 
     private fun send(own: HostStore.Host, on: Boolean): Boolean =
-        RustCore.sendPhonePacketOnLink(own.address, own.controlPort, WATCH, JSONObject().put("on", on).toString())
+        RustCore.sendPhonePacketOnLink(
+            own.address,
+            own.controlPort,
+            WATCH,
+            JSONObject().put("on", on).apply { HostStore.player(app, own.address)?.let { put("player", it) } }.toString(),
+        )
             .onFailure { Log.d(TAG, "The watch was not sent: ${it.message}") }
             .isSuccess
 
@@ -144,13 +153,24 @@ class ComputerMedia(private val app: Context) {
         RustCore.takeComputerMedia()?.let { push ->
             val host = push.optString("host")
             val port = push.optInt("port", -1)
-            if (wanted && ComputerMediaRule.fromOwn(host, port, own?.address, own?.controlPort)) heard(push, nowMs)
+            // O6: one read for a player chosen before is not shown (O6 review).
+            val pushed = if (push.isNull("player")) null else push.optString("player")
+            val forChosen = ComputerPlayers.pushFor(push.has("player"), pushed, own?.let { HostStore.player(app, it.address) })
+            if (wanted && forChosen && ComputerMediaRule.fromOwn(host, port, own?.address, own?.controlPort)) heard(push, nowMs)
         }
         val current = shown.current(nowMs)
         val link = own?.let { live(it) }
+        val player = own?.let { HostStore.player(app, it.address) }
+        if (link == null) watchedPlayer = null
         val coverMissing = current?.artId != null && cover?.first != current.artId && badCover != current.artId
-        watch.due(link, wanted, nowMs, heardMs, coverMissing)?.let { on ->
-            if (own != null && link != null && send(own, on)) watch.sent(link, on, nowMs)
+        // O6: a new choice asks again with it, the link's rule unchanged.
+        val due = watch.due(link, wanted, nowMs, heardMs, coverMissing)
+            ?: true.takeIf { wanted && link != null && player != watchedPlayer }
+        due?.let { on ->
+            if (own != null && link != null && send(own, on)) {
+                watch.sent(link, on, nowMs)
+                watchedPlayer = if (on) player else null
+            }
         }
         val art = cover?.takeIf { it.first == current?.artId }?.second
         val computer = own?.let { HostStore.shownName(app, it.address) }.orEmpty()
@@ -208,6 +228,7 @@ class ComputerMedia(private val app: Context) {
                 if (!wanted()) return@execute
                 val own = PhoneLink.target(app) ?: return@execute
                 val body = JSONObject().put("action", "mediaControl").put("command", command)
+                HostStore.player(app, own.address)?.let { body.put("player", it) }
                 RustCore.audioControl(own.address, own.controlPort, body.toString())
                     .onFailure { Log.i(TAG, "A press did not reach the computer: ${it.message}") }
                 // The computer pushes its new state within 2 s.

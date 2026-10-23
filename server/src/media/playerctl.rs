@@ -4,12 +4,26 @@
 use std::process::{Command as Process, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{Command, DEADLINE, NowPlaying, PLAYERCTL_FORMAT, parse_playerctl};
+use super::{
+    Command, DEADLINE, NowPlaying, PLAYERCTL_FORMAT, PLAYERCTL_LIST_FORMAT, Player,
+    parse_playerctl, parse_playerctl_list,
+};
+
+/// `args` for `player` first, else whichever `playerctl` picks (O6).
+fn for_player(player: Option<&str>, args: &[&str]) -> Vec<String> {
+    let mut all = Vec::new();
+    if let Some(p) = player {
+        all.push("-p".to_string());
+        all.push(format!("{p},%any"));
+    }
+    all.extend(args.iter().map(|a| a.to_string()));
+    all
+}
 
 /// Run `playerctl` with `args`, waiting at most [`DEADLINE`]: a player that
 /// hangs on D-Bus must not hold the phone's control connection. One still
 /// running then is killed.
-fn playerctl(args: &[&str]) -> Result<std::process::Output, String> {
+fn playerctl<S: AsRef<std::ffi::OsStr>>(args: &[S]) -> Result<std::process::Output, String> {
     let mut child = Process::new("playerctl")
         .args(args)
         .stdin(Stdio::null())
@@ -38,9 +52,24 @@ fn playerctl(args: &[&str]) -> Result<std::process::Output, String> {
         .map_err(|e| format!("playerctl: {e}"))
 }
 
+/// The running players (O6).
+pub fn players() -> Result<Vec<Player>, String> {
+    let output = playerctl(&["-a", "metadata", "--format", PLAYERCTL_LIST_FORMAT])?;
+    // With no player it fails, saying "No players found".
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(parse_playerctl_list(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
 /// What is playing now, or `None` when no player is running.
-pub fn now_playing() -> Result<Option<NowPlaying>, String> {
-    let output = playerctl(&["metadata", "--format", PLAYERCTL_FORMAT])?;
+pub fn now_playing(player: Option<&str>) -> Result<Option<NowPlaying>, String> {
+    let output = playerctl(&for_player(
+        player,
+        &["metadata", "--format", PLAYERCTL_FORMAT],
+    ))?;
     // With no player it fails, saying "No players found".
     if !output.status.success() {
         return Ok(None);
@@ -49,8 +78,8 @@ pub fn now_playing() -> Result<Option<NowPlaying>, String> {
 }
 
 /// The track's cover, where the player names a local file (`mpris:artUrl`).
-pub fn cover() -> Option<Vec<u8>> {
-    let output = playerctl(&["metadata", "mpris:artUrl"]).ok()?;
+pub fn cover(player: Option<&str>) -> Option<Vec<u8>> {
+    let output = playerctl(&for_player(player, &["metadata", "mpris:artUrl"])).ok()?;
     let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let path = url.strip_prefix("file://")?;
     // Its percent-escapes, as a file URI has them.
@@ -86,14 +115,14 @@ pub fn cover() -> Option<Vec<u8>> {
     (bytes.len() <= super::MAX_COVER).then_some(bytes)
 }
 
-/// Ask the current player to play or pause, or skip.
-pub fn command(command: Command) -> Result<(), String> {
+/// Ask `player` (else the current one) to play or pause, or skip.
+pub fn command(command: Command, player: Option<&str>) -> Result<(), String> {
     let verb = match command {
         Command::PlayPause => "play-pause",
         Command::Next => "next",
         Command::Previous => "previous",
     };
-    let output = playerctl(&[verb])?;
+    let output = playerctl(&for_player(player, &[verb]))?;
     if output.status.success() {
         Ok(())
     } else {

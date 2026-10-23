@@ -99,6 +99,8 @@ object HostStore {
             KEY_PAIRED_PREFIX,
             KEY_NAME_PREFIX,
             KEY_CHOSEN_NAME_PREFIX,
+            // O6: the player chosen for the computer.
+            KEY_PLAYER_PREFIX,
         )
     }
 
@@ -137,6 +139,21 @@ object HostStore {
 
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
+    private const val KEY_PLAYER_PREFIX = "computer_player:"
+
+    /** O6: the player chosen for the computer at [address], or null for the computer's own choice. */
+    fun player(ctx: Context, address: String): String? =
+        dev.pocketdesk.android.ui.ComputerPlayers.named(stored(ctx, "$KEY_PLAYER_PREFIX$address"))
+
+    /** O6: choose [id] as the computer's player at [address]; null goes back to the computer's choice. */
+    fun setPlayer(ctx: Context, address: String, id: String?) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            when (val named = dev.pocketdesk.android.ui.ComputerPlayers.named(id)) {
+                null -> remove("$KEY_PLAYER_PREFIX$address")
+                else -> putString("$KEY_PLAYER_PREFIX$address", named)
+            }
+        }
+    }
 
     private fun stored(ctx: Context, key: String): String? =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(key, null)?.takeIf { it.isNotBlank() }
