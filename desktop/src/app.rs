@@ -939,9 +939,8 @@ impl PocketdeskApp {
         }
     }
 
-    /// Give `id` the profile's permissions (P9): switch by switch through
-    /// [`Self::set_permission`], so a narrowed one ends a session as a
-    /// switch does, and one notice for them all.
+    /// Give `id` the profile's permissions (P9), in one write, its session
+    /// ended once if a permission it started with was turned off.
     fn apply_profile(
         &mut self,
         id: &str,
@@ -950,30 +949,29 @@ impl PocketdeskApp {
         let Some(device) = self.snapshot.devices.iter().find(|d| d.id == id).cloned() else {
             return;
         };
-        let changes: Vec<(Capability, bool)> = Capability::ALL
-            .into_iter()
-            .filter(|c| shown_for(*c, device.computer))
-            .map(|c| (c, profile.permissions.allows(c)))
-            .filter(|(c, allowed)| device.permissions.allows(*c) != *allowed)
-            .collect();
-        for (capability, allowed) in &changes {
-            self.set_permission(id, *capability, *allowed);
-        }
-        if device.permissions.ask_first != profile.permissions.ask_first {
-            self.set_ask_first(id, profile.permissions.ask_first);
-        }
+        let away_lock = away_lock_unavailable().is_none();
+        let shown = |c: Capability| {
+            shown_for(c, device.computer) && (c != Capability::AwayLock || away_lock)
+        };
         let label = model::device_label(&self.snapshot.devices, id);
-        // The last switch's notice says one thing; this says all of it.
-        if !self
-            .notice
-            .as_ref()
-            .is_some_and(|n| matches!(n.kind, crate::notice::Kind::Error))
-        {
-            self.notice = crate::notice::Notice::done(format!(
-                "{label} has the {} profile's permissions now.",
-                profile.name
-            ));
+        match model::apply_profile(&self.state_dir, id, &profile.permissions, shown) {
+            Ok(narrowed) => {
+                if narrowed {
+                    self.end_sessions_of(id);
+                }
+                self.notice = crate::notice::Notice::done(format!(
+                    "{label} has the {} profile's permissions now.",
+                    profile.name
+                ));
+            }
+            Err(e) => {
+                self.notice = crate::notice::Notice::error(format!(
+                    "Could not give {label} the {} profile: {e}",
+                    profile.name
+                ))
+            }
         }
+        self.refresh();
     }
 
     fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
@@ -1959,7 +1957,16 @@ impl PocketdeskApp {
                             )
                             .clicked()
                         {
-                            save_profile = Some((device.permissions.clone(), name.clone()));
+                            // What a computer's page hides stays the default,
+                            // so its profile turns nothing off on a phone
+                            // (P9 review).
+                            let mut kept = device.permissions.clone();
+                            for capability in Capability::ALL {
+                                if !shown_for(capability, device.computer) {
+                                    kept.set(capability, capability.default_allowed());
+                                }
+                            }
+                            save_profile = Some((kept, name.clone()));
                         }
                         if !profiles.is_empty() {
                             ui.menu_button("Apply a profile", |ui| {
@@ -2035,9 +2042,12 @@ impl PocketdeskApp {
                     &name,
                     &permissions,
                 )
-                .map(|name| {
+                .map(|saved| {
+                    // A profile of that name is replaced, and says so (P9 review).
+                    let verb = if saved.replaced { "Replaced" } else { "Saved" };
                     format!(
-                        "Saved the {name} profile: apply it to a phone below, or pair one with it."
+                        "{verb} the {} profile: apply it to a phone below, or pair one with it.",
+                        saved.name
                     )
                 })
                 .map_err(|e| format!("Could not save the profile: {e}")),

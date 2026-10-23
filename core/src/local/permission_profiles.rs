@@ -39,9 +39,11 @@ fn key(name: &str) -> String {
 /// [`MAX_NAME_CHARS`]; trimmed.
 pub fn valid_name(name: &str) -> Option<String> {
     let name = name.trim();
+    // Nor a direction mark that would show it as another name (P9 review).
+    let bidi = |c: char| matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
     (!name.is_empty()
         && name.chars().count() <= MAX_NAME_CHARS
-        && !name.chars().any(|c| c.is_control()))
+        && !name.chars().any(|c| c.is_control() || bidi(c)))
     .then(|| name.to_string())
 }
 
@@ -96,8 +98,28 @@ fn change(
     write(state_dir, profiles)
 }
 
+/// What a save did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Saved {
+    pub name: String,
+    /// A profile of that name was there and is replaced.
+    pub replaced: bool,
+}
+
+/// Every switch said: a default left as "the default" would follow a
+/// later version's default (P9 review: a new default-on permission would
+/// come on for phones paired with an old profile).
+fn explicit(permissions: &DevicePermissions) -> DevicePermissions {
+    let mut out = permissions.clone();
+    for capability in crate::protocol::permissions::Capability::ALL {
+        out.set(capability, permissions.allows(capability));
+    }
+    out
+}
+
 /// Save `permissions` as `name`, replacing a profile of that name.
-pub fn save(state_dir: &Path, name: &str, permissions: &DevicePermissions) -> io::Result<String> {
+pub fn save(state_dir: &Path, name: &str, permissions: &DevicePermissions) -> io::Result<Saved> {
+    let permissions = &explicit(permissions);
     let name = valid_name(name).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -105,10 +127,12 @@ pub fn save(state_dir: &Path, name: &str, permissions: &DevicePermissions) -> io
         )
     })?;
     let saved = name.clone();
+    let mut replaced = false;
     change(state_dir, |profiles| {
         let wanted = key(&name);
         if let Some(profile) = profiles.iter_mut().find(|p| key(&p.name) == wanted) {
             profile.permissions = permissions.clone();
+            replaced = true;
             return Ok(());
         }
         if profiles.len() >= MAX_PROFILES {
@@ -122,7 +146,10 @@ pub fn save(state_dir: &Path, name: &str, permissions: &DevicePermissions) -> io
         });
         Ok(())
     })?;
-    Ok(saved)
+    Ok(Saved {
+        name: saved,
+        replaced,
+    })
 }
 
 /// Remove the profile called `name`; one not there changes nothing.
@@ -152,13 +179,24 @@ mod tests {
         assert!(read(&dir).is_empty());
         let mut kids = DevicePermissions::someone_else();
         kids.set(Capability::Audio, true);
-        assert_eq!(save(&dir, "  Kids ", &kids).unwrap(), "Kids");
-        assert_eq!(get(&dir, "kids").map(|p| p.permissions), Some(kids.clone()));
+        let first = save(&dir, "  Kids ", &kids).unwrap();
+        assert_eq!((first.name.as_str(), first.replaced), ("Kids", false));
+        assert_eq!(
+            get(&dir, "kids").map(|p| p.permissions),
+            Some(explicit(&kids))
+        );
         let mut less = kids.clone();
         less.set(Capability::Audio, false);
-        save(&dir, "KIDS", &less).unwrap();
+        assert!(save(&dir, "KIDS", &less).unwrap().replaced);
         assert_eq!(read(&dir).len(), 1, "one name, replaced");
-        assert_eq!(get(&dir, "Kids").unwrap().permissions, less);
+        assert_eq!(get(&dir, "Kids").unwrap().permissions, explicit(&less));
+        // Every switch said, none left to a later default.
+        let saved = get(&dir, "Kids").unwrap().permissions;
+        assert!(
+            Capability::ALL
+                .into_iter()
+                .all(|c| saved.allows(c) == less.allows(c))
+        );
         remove(&dir, "kids").unwrap();
         assert!(get(&dir, "Kids").is_none());
         let _ = std::fs::remove_dir_all(&dir);
@@ -170,6 +208,7 @@ mod tests {
         assert_eq!(valid_name(""), None);
         assert_eq!(valid_name("a\nb"), None);
         assert_eq!(valid_name(&"x".repeat(MAX_NAME_CHARS + 1)), None);
+        assert_eq!(valid_name("Kids\u{202E}evil"), None, "no direction marks");
     }
 
     #[test]

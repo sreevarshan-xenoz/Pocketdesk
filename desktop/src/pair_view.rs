@@ -241,6 +241,27 @@ pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) 
     }
 }
 
+/// What a profile lets a phone do, in words: its permissions that are on.
+pub fn profile_allows(
+    permissions: &pocketdesk_core::protocol::permissions::DevicePermissions,
+) -> String {
+    use pocketdesk_core::protocol::permissions::Capability;
+    let on: Vec<String> = Capability::ALL
+        .into_iter()
+        .filter(|c| permissions.allows(*c))
+        .map(|c| format!("{c:?}").to_lowercase())
+        .collect();
+    let mut words = if on.is_empty() {
+        "nothing".to_string()
+    } else {
+        on.join(", ")
+    };
+    if permissions.ask_first {
+        words.push_str("; each session asked first");
+    }
+    words
+}
+
 /// The choices of whose phone a code pairs (M2b), a guest's for a while (I3).
 const WHOSE: [(Whose, &str); 5] = [
     (Whose::MINE, "Mine"),
@@ -414,10 +435,21 @@ impl PairView {
                         });
                 });
                 if let Some(name) = &chosen.profile {
+                    // What it may do, said (P9 review: a profile saved from
+                    // the owner's phone may run commands).
+                    let allows = profiles
+                        .iter()
+                        .find(|p| p.name == *name)
+                        .map(|p| profile_allows(&p.permissions));
                     ui.label(
-                        RichText::new(format!(
-                            "It pairs with the {name} profile's permissions, as the Devices page saved them. A phone paired already keeps only what both allow."
-                        ))
+                        RichText::new(match allows {
+                            Some(allows) => format!(
+                                "It pairs with the {name} profile's permissions: {allows}. A phone paired already keeps only what both allow."
+                            ),
+                            None => format!(
+                                "The {name} profile is gone: it pairs as someone else's, with files and links only."
+                            ),
+                        })
                         .small(),
                     );
                 } else if chosen.someone_else {

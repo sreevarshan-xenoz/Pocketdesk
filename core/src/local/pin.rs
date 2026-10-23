@@ -83,8 +83,11 @@ pub fn write_preset(
     }
     std::fs::create_dir_all(state_dir)?;
     let grant_line = grant_secs.map(|s| format!("{s}\n")).unwrap_or_default();
+    // A profile asked for makes it someone else's even when its name is
+    // dropped (P9 review: never an owner's code by a bad name).
+    let someone_else = someone_else || profile.is_some();
     let profile = profile.and_then(super::permission_profiles::valid_name);
-    let preset_line = if someone_else || profile.is_some() {
+    let preset_line = if someone_else {
         format!("{SOMEONE_ELSE}\n")
     } else {
         String::new()
@@ -115,7 +118,8 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
     let grant_secs = rest.iter().find_map(|s| s.parse::<u64>().ok());
     let profile = rest
         .iter()
-        .find_map(|s| s.strip_prefix(PROFILE.trim_end()))
+        // With its space (P9 review: "profiles x" or "profileKids" is none).
+        .find_map(|s| s.strip_prefix(PROFILE))
         .and_then(super::permission_profiles::valid_name);
     let someone_else = rest.contains(&SOMEONE_ELSE) || profile.is_some();
     if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
@@ -278,11 +282,21 @@ mod tests {
     fn a_profile_rides_the_pin_file() {
         let dir = temp_dir("profile");
         write_preset(&dir, "123456", 1_000, None, false, Some(" Kids ")).unwrap();
-        let read = read(&dir, 1_000).unwrap();
-        assert_eq!(read.profile.as_deref(), Some("Kids"));
-        assert!(read.someone_else);
+        let first = read(&dir, 1_000).unwrap();
+        assert_eq!(first.profile.as_deref(), Some("Kids"));
+        assert!(first.someone_else);
         write_preset(&dir, "123456", 1_000, None, false, Some("bad\nname")).unwrap();
         assert_eq!(read_profile(&dir), None, "a name that is no name is none");
+        assert!(
+            read(&dir, 1_000).unwrap().someone_else,
+            "and still someone else's"
+        );
+        for line in ["profiles Kids", "profileKids", "profile"] {
+            std::fs::write(dir.join(PIN_FILE), format!("123456\r\n1000\r\n{line}\r\n")).unwrap();
+            assert_eq!(read_profile(&dir), None, "{line:?}");
+        }
+        std::fs::write(dir.join(PIN_FILE), "123456\r\n1000\r\nprofile Kids\r\n").unwrap();
+        assert_eq!(read_profile(&dir).as_deref(), Some("Kids"), "CRLF");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
