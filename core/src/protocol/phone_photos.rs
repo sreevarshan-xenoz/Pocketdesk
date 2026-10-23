@@ -1,27 +1,31 @@
 //! The phone's recent photos on the computer (C7): the computer asks, the
 //! phone answers with its newest camera photos and a small thumbnail of
 //! each, and one is fetched by the phone sharing it. Both ends hold the
-//! fields to the rules here.
+//! fields to the rules here. T4: older pages (`before` the last one shown),
+//! the camera's videos with them, and a photo put on the computer's
+//! clipboard by the phone (a HEIC one the computer cannot decode).
 
 use serde::{Deserialize, Serialize};
 
 use super::kdeconnect::is_invisible_format;
 use super::phone_files::valid_name;
 
-/// Computer → phone: `{}`, list the newest camera photos.
+/// Computer → phone: `{}`, list the newest camera photos; `{before: id}`,
+/// the page of those older than photo `id` (T4).
 pub const LIST: &str = "kdeconnect.pocketdesk.phone_photos.list";
 
 /// Phone → computer: the photos, or why there are none.
 pub const PHOTOS: &str = "kdeconnect.pocketdesk.phone_photos";
 
-/// Computer → phone: `{id}`, send that photo to the computer.
+/// Computer → phone: `{id}`, send that photo to the computer; `{id,
+/// clipboard: true}`, put it on the computer's clipboard as a PNG (T4).
 pub const FETCH: &str = "kdeconnect.pocketdesk.phone_photos.fetch";
 
 /// Computer → phone: `{}`, offer its owner the camera; the photo taken is
 /// sent to the computer as a file (F3).
 pub const TAKE: &str = "kdeconnect.pocketdesk.phone_photos.take";
 
-/// Photos one answer carries, at most.
+/// Photos one answer (a page) carries, at most.
 pub const MAX_PHOTOS: usize = 24;
 
 /// A thumbnail's bytes, at most (a JPEG of at most 256 px a side).
@@ -48,6 +52,9 @@ pub struct Photo {
     /// Its thumbnail, a JPEG in standard base64.
     #[serde(default)]
     pub thumb: String,
+    /// A video, not a photo (T4).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub video: bool,
 }
 
 /// What the phone answers.
@@ -58,6 +65,18 @@ pub struct Photos {
     /// Why there are none (the switch off, no photo access), for the owner.
     #[serde(default)]
     pub error: Option<String>,
+    /// The page this answers: those older than this photo; `None` for the
+    /// newest (T4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<u64>,
+    /// Whether older ones wait for another page (T4).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub more: bool,
+    /// Where the next page starts (its `before`), when it is not this
+    /// page's last photo: the phone looked past rows it does not list (T4
+    /// review: a page of none would ask for itself again).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<u64>,
 }
 
 /// Whether `thumb` could be a thumbnail: standard base64 within
@@ -92,9 +111,22 @@ impl Photos {
     }
 }
 
-/// A fetch's body, `{id}`.
-pub fn fetch_body(id: u64) -> serde_json::Value {
-    serde_json::json!({ "id": id })
+/// A list's body: `{}` for the newest, `{before}` for an older page (T4).
+pub fn list_body(before: Option<u64>) -> serde_json::Value {
+    match before {
+        Some(id) => serde_json::json!({ "before": id }),
+        None => serde_json::json!({}),
+    }
+}
+
+/// A fetch's body, `{id}`; `{id, clipboard: true}` for the computer's
+/// clipboard (T4).
+pub fn fetch_body(id: u64, clipboard: bool) -> serde_json::Value {
+    if clipboard {
+        serde_json::json!({ "id": id, "clipboard": true })
+    } else {
+        serde_json::json!({ "id": id })
+    }
 }
 
 #[cfg(test)]
@@ -145,6 +177,27 @@ mod tests {
 
     #[test]
     fn a_fetch_names_its_photo() {
-        assert_eq!(fetch_body(42), json!({"id": 42}));
+        assert_eq!(fetch_body(42, false), json!({"id": 42}));
+        assert_eq!(fetch_body(42, true), json!({"id": 42, "clipboard": true}));
+    }
+
+    /// T4: a page names the photo it is older than, an answer says which
+    /// page it is and whether more wait, and a video says so.
+    #[test]
+    fn pages_and_videos() {
+        assert_eq!(list_body(None), json!({}));
+        assert_eq!(list_body(Some(7)), json!({"before": 7}));
+        let answer = Photos::from_body(&json!({
+            "photos": [{"id": 5, "name": "VID_5.mp4", "video": true}, {"id": 4, "name": "IMG_4.jpg"}],
+            "before": 7,
+            "more": true,
+        }))
+        .unwrap();
+        assert_eq!(answer.before, Some(7));
+        assert!(answer.more);
+        assert!(answer.photos[0].video && !answer.photos[1].video);
+        // An answer from before T4 is the newest page, with no more.
+        let old = Photos::from_body(&json!({"photos": []})).unwrap();
+        assert_eq!((old.before, old.more), (None, false));
     }
 }

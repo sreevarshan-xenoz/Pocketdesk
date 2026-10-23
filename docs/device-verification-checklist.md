@@ -2824,6 +2824,15 @@ Owed:
 - [ ] Photo access taken back: the switch off and Home's notice; video access taken back: "Videos too" off. (where: by hand)
 - [ ] The computer's Devices page listing "Its new camera photos here"; Settings in Spanish and Tamil. (where: by hand)
 
+## 210. The whole photo gallery (T4)
+
+Built 2026-10-24. Unit-tested: pages and `next`, the kept pages joined and bounded, the ids a fetch may name, the bridge's `before` and `clipboard`, the Phone page's video, HEIC Copy, More and Save the chosen (headless). Checked on the OPPO against a throwaway server with 30 photos and a video pushed into `DCIM/Camera`: the newest page of 24 with more waiting, newest first, the video marked, every thumbnail kept, the next page joined with no repeats, and a Copy taken by the phone.
+- [x] Pages, the video among them, thumbnails, a Copy asked (OPPO, 2026-10-24).
+Owed:
+- [ ] On a LAN: Save the chosen landing, a video opening in the player, a HEIC photo's PNG on the computer's clipboard. (where: by hand)
+- [ ] The desktop app's Phone page by hand: More photos, the ticks and their limit of 20, a page of screenshots only. (where: by hand)
+- [ ] "Its videos too" asking for video access; Settings in Spanish and Tamil. (where: by hand)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

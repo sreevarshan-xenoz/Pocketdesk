@@ -28,6 +28,9 @@ pub struct KeptPhoto {
     pub size: u64,
     /// Whether its thumbnail was kept ([`thumb_path`]).
     pub thumb: bool,
+    /// A video, not a photo (T4).
+    #[serde(default)]
+    pub video: bool,
 }
 
 /// A phone's last answer, and when it came.
@@ -37,7 +40,27 @@ pub struct Kept {
     #[serde(default)]
     pub error: Option<String>,
     pub at_unix: u64,
+    /// Whether older ones wait for another page (T4).
+    #[serde(default)]
+    pub more: bool,
+    /// Where the next page starts, when the phone said (T4).
+    #[serde(default)]
+    pub next: Option<u64>,
 }
+
+impl Kept {
+    /// The `before` of the next page: where the phone said, else the last
+    /// photo kept; `None` when there is none to ask for.
+    pub fn next_before(&self) -> Option<u64> {
+        if !self.more {
+            return None;
+        }
+        self.next.or_else(|| self.photos.last().map(|p| p.id))
+    }
+}
+
+/// Photos kept for one phone, at most, its pages together (T4): ten pages.
+pub const MAX_KEPT: usize = 10 * crate::protocol::phone_photos::MAX_PHOTOS;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct PhotosFile {
@@ -131,7 +154,9 @@ static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Keep `photos` as `device_id`'s last answer: its thumbnails written, the
 /// ones it no longer lists removed, and phones `paired` no longer names
-/// (unpaired or removed since) dropped with theirs.
+/// (unpaired or removed since) dropped with theirs. An older page (T4)
+/// joins the pages kept, up to [`MAX_KEPT`], when it follows the last one
+/// kept; otherwise it is dropped (the newest page was asked for since).
 pub fn keep(
     state_dir: &Path,
     device_id: &str,
@@ -160,10 +185,33 @@ pub fn keep(
         }
     }
     let folder = root.join(device_id);
-    let _ = std::fs::remove_dir_all(&folder);
+    // T4: an older page joins the kept ones when it follows the last of
+    // them. One that does not (the newest was asked for since, or a page
+    // asked twice) adds nothing, but is still an answer: the app stops
+    // waiting (T4 review: it said the phone did not answer).
+    let (mut kept, adds, more_before, next_before) = match photos.before {
+        None => {
+            let _ = std::fs::remove_dir_all(&folder);
+            (Vec::with_capacity(photos.photos.len()), true, false, None)
+        }
+        Some(before) => match phones.get(device_id) {
+            Some(last) if last.next_before() == Some(before) => {
+                (last.photos.clone(), true, last.more, last.next)
+            }
+            Some(last) => (last.photos.clone(), false, last.more, last.next),
+            None => return Ok(()),
+        },
+    };
     crate::secure_fs::create_private_dir(&folder)?;
-    let mut kept = Vec::with_capacity(photos.photos.len());
-    for photo in photos.photos {
+    let room = if adds {
+        MAX_KEPT.saturating_sub(kept.len())
+    } else {
+        0
+    };
+    for photo in photos.photos.into_iter().take(room) {
+        if kept.iter().any(|k| k.id == photo.id) {
+            continue;
+        }
         let thumb = match thumb_bytes(&photo.thumb) {
             Some(bytes) => {
                 crate::secure_fs::write_private(&folder.join(format!("{}.jpg", photo.id)), &bytes)?;
@@ -177,14 +225,23 @@ pub fn keep(
             taken: photo.taken,
             size: photo.size,
             thumb,
+            video: photo.video,
         });
     }
+    // Past MAX_KEPT no more pages are offered.
+    let (more, next) = if adds {
+        (photos.more && kept.len() < MAX_KEPT, photos.next)
+    } else {
+        (more_before, next_before)
+    };
     phones.insert(
         device_id.to_string(),
         Kept {
             photos: kept,
             error: photos.error,
             at_unix: now_unix,
+            more,
+            next,
         },
     );
     let json = serde_json::to_string(&PhotosFile { phones }).map_err(io::Error::other)?;
@@ -211,8 +268,13 @@ pub fn clear(state_dir: &Path) -> io::Result<()> {
 pub enum Ask {
     /// Its newest camera photos.
     List,
+    /// Those older than that photo: the next page (T4).
+    ListBefore(u64),
     /// That photo, sent to the computer.
     Fetch(u64),
+    /// That photo, put on the computer's clipboard by the phone (T4: a HEIC
+    /// one, which the app cannot decode).
+    Copy(u64),
     /// A new photo, the phone's owner taking it with the camera (F3).
     Take,
 }
@@ -330,7 +392,84 @@ mod tests {
             taken: 1_000 + id,
             size: 10,
             thumb,
+            video: false,
         }
+    }
+
+    fn page(ids: std::ops::RangeInclusive<u64>, before: Option<u64>, more: bool) -> Photos {
+        Photos {
+            photos: ids.rev().map(|id| photo(id, jpeg())).collect(),
+            error: None,
+            before,
+            more,
+            next: None,
+        }
+    }
+
+    /// T4: an older page joins the kept ones when it follows the last of
+    /// them, thumbnails kept; one that does not is dropped; a newest page
+    /// starts over; and no more than MAX_KEPT are kept.
+    #[test]
+    fn older_pages_join_the_kept_ones() {
+        let dir = temp_dir("pages");
+        keep(&dir, "phone-a", page(31..=40, None, true), 5, &|_| true).unwrap();
+        keep(&dir, "phone-a", page(21..=30, Some(31), true), 6, &|_| true).unwrap();
+        let kept = &read(&dir)["phone-a"];
+        assert_eq!(kept.photos.len(), 20);
+        assert_eq!(kept.photos.last().unwrap().id, 21);
+        assert!(kept.more);
+        assert!(
+            thumb_path(&dir, "phone-a", 40).unwrap().exists(),
+            "the first page's thumbnails stay"
+        );
+        // A page that does not follow the last one kept adds nothing, but
+        // is an answer (its time moves on).
+        keep(&dir, "phone-a", page(1..=10, Some(11), false), 7, &|_| true).unwrap();
+        let kept = &read(&dir)["phone-a"];
+        assert_eq!(kept.photos.len(), 20);
+        assert!(kept.more, "still more after the stale page");
+        assert_eq!(kept.at_unix, 7);
+        // The phone says where the next page starts when it looked past
+        // rows it does not list.
+        let mut skipping = page(15..=20, Some(21), true);
+        skipping.next = Some(3);
+        keep(&dir, "phone-a", skipping, 8, &|_| true).unwrap();
+        let kept = &read(&dir)["phone-a"];
+        assert_eq!(kept.next_before(), Some(3));
+        keep(&dir, "phone-a", page(1..=2, Some(3), false), 9, &|_| true).unwrap();
+        assert_eq!(read(&dir)["phone-a"].photos.last().unwrap().id, 1);
+        assert_eq!(read(&dir)["phone-a"].next_before(), None);
+        // The newest page starts over.
+        keep(&dir, "phone-a", page(41..=42, None, false), 10, &|_| true).unwrap();
+        let kept = &read(&dir)["phone-a"];
+        assert_eq!(kept.photos.len(), 2);
+        assert!(!kept.more);
+        assert!(!thumb_path(&dir, "phone-a", 40).unwrap().exists());
+        // Bounded: past MAX_KEPT, no more pages are offered.
+        let mut last = 1_000_000;
+        keep(
+            &dir,
+            "phone-b",
+            page(last - 23..=last, None, true),
+            9,
+            &|_| true,
+        )
+        .unwrap();
+        for _ in 0..12 {
+            let next = last - 24;
+            keep(
+                &dir,
+                "phone-b",
+                page(next - 23..=next, Some(last - 23), true),
+                10,
+                &|_| true,
+            )
+            .unwrap();
+            last = next;
+        }
+        let kept = &read(&dir)["phone-b"];
+        assert_eq!(kept.photos.len(), MAX_KEPT);
+        assert!(!kept.more);
     }
 
     #[test]
@@ -339,6 +478,7 @@ mod tests {
         let answer = Photos {
             photos: vec![photo(1, jpeg()), photo(2, "PHN2Zz4=".into())],
             error: None,
+            ..Default::default()
         };
         keep(&dir, "phone-a", answer, 5, &|_| true).unwrap();
         let kept = &read(&dir)["phone-a"];
@@ -357,6 +497,7 @@ mod tests {
         let newer = Photos {
             photos: vec![photo(3, jpeg())],
             error: None,
+            ..Default::default()
         };
         keep(&dir, "phone-a", newer, 6, &|_| true).unwrap();
         assert_eq!(read(&dir)["phone-a"].photos[0].id, 3);
@@ -372,6 +513,7 @@ mod tests {
             Photos {
                 photos: vec![photo(1, jpeg())],
                 error: None,
+                ..Default::default()
             },
             5,
             &|_| true,

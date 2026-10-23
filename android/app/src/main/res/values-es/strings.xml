@@ -625,6 +625,7 @@
     <string name="screenshots_on_summary">Una captura de pantalla hecha en este teléfono llega a su equipo un momento después. Pide acceso a las fotos y usa el acceso a las notificaciones para funcionar en segundo plano</string>
     <string name="recent_photos_on">Fotos recientes en el equipo</string>
     <string name="recent_photos_on_summary">La página Teléfono del equipo muestra tus fotos de cámara más nuevas (DCIM) en pequeño, y trae una cuando la pides</string>
+    <string name="recent_photos_videos">También sus vídeos</string>
     <string name="photo_place">Las fotos conservan dónde se hicieron</string>
     <string name="photo_place_off_summary">Desactivado: Android quita el lugar de las fotos que envía Pocketdesk.</string>
     <string name="photo_place_on_summary">Una foto enviada desde este teléfono conserva su ubicación, si la foto está en este teléfono. Pide acceso a las fotos.</string>

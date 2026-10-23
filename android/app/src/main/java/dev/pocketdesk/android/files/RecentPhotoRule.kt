@@ -26,6 +26,8 @@ object RecentPhotoRule {
         val addedSecs: Long,
         val size: Long,
         val pending: Boolean,
+        /** A video, not a photo (T4). */
+        val video: Boolean = false,
     ) {
         /** Its time: when taken, else when added. */
         val timeMs: Long get() = if (takenMs > 0) takenMs else addedSecs * 1000
@@ -44,11 +46,46 @@ object RecentPhotoRule {
             parts.getOrNull(1)?.equals("Screenshots", ignoreCase = true) != true
     }
 
-    /** The photos to list from [rows]: camera photos, newest first, at most [MAX_PHOTOS]. */
-    fun listed(rows: List<Row>): List<Row> =
-        rows.filter(::camera).sortedByDescending { it.timeMs }.take(MAX_PHOTOS)
+    /**
+     * One answer: the photos it lists, whether older ones wait for another
+     * page, and where that page starts when it is not the last one listed
+     * (rows looked past but not listed; T4 review), else null.
+     */
+    data class Page(val listed: List<Row>, val more: Boolean, val next: Long? = null)
 
-    /** Whether the computer may fetch photo [id]: only one the last answer listed. */
+    /**
+     * The page to answer from [rows] (the newest, or those older than the
+     * last page's last photo, newest first by id, as the query reads them):
+     * camera photos and videos, at most [MAX_PHOTOS]. More wait when camera
+     * ones were left over, or the query stopped at its limit ([lookedAll]
+     * false) before the phone's oldest. By id, so the next page starts
+     * right after this one's last (T4).
+     */
+    fun page(rows: List<Row>, lookedAll: Boolean): Page {
+        val camera = rows.filter(::camera).sortedByDescending { it.id }
+        val listed = camera.take(MAX_PHOTOS)
+        return when {
+            camera.size > MAX_PHOTOS -> Page(listed, true)
+            !lookedAll -> Page(listed, true, rows.minOfOrNull { it.id }?.takeIf { it != listed.lastOrNull()?.id })
+            else -> Page(listed, false)
+        }
+    }
+
+    /** The photos to list from [rows]: [page]'s, as the first page lists them. */
+    fun listed(rows: List<Row>): List<Row> = page(rows, lookedAll = true).listed
+
+    /** Ids remembered as listed, at most: ten pages and some (T4). */
+    const val MAX_REMEMBERED = 400
+
+    /**
+     * The ids a fetch may name after an answer listing [listed]: a newest
+     * page starts over, an older one adds to [remembered] (T4: a photo of
+     * any page shown may be saved), at most [MAX_REMEMBERED].
+     */
+    fun remember(remembered: Set<Long>, listed: List<Long>, olderPage: Boolean): Set<Long> =
+        ((if (olderPage) remembered.toList() else emptyList()) + listed).takeLast(MAX_REMEMBERED).toSet()
+
+    /** Whether the computer may fetch photo [id]: only one a page shown listed. */
     fun mayFetch(id: Long, lastListed: Set<Long>): Boolean = id in lastListed
 
     /** The sample size that brings a [width] by [height] image near [side] without going under it. */

@@ -10,7 +10,9 @@ use std::time::Duration;
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::phone_photos::{self as store, Ask};
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
-use pocketdesk_core::protocol::phone_photos::{FETCH, LIST, PHOTOS, Photos, TAKE, fetch_body};
+use pocketdesk_core::protocol::phone_photos::{
+    FETCH, LIST, PHOTOS, Photos, TAKE, fetch_body, list_body,
+};
 
 pub struct PhonePhotosPlugin;
 
@@ -76,8 +78,10 @@ impl Plugin for PhonePhotosPlugin {
 /// The packet a request sends.
 pub(crate) fn request_packet(request: &store::Request) -> NetworkPacket {
     match request.ask {
-        Ask::List => NetworkPacket::new(LIST).with_body(serde_json::json!({})),
-        Ask::Fetch(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id)),
+        Ask::List => NetworkPacket::new(LIST).with_body(list_body(None)),
+        Ask::ListBefore(id) => NetworkPacket::new(LIST).with_body(list_body(Some(id))),
+        Ask::Fetch(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id, false)),
+        Ask::Copy(id) => NetworkPacket::new(FETCH).with_body(fetch_body(id, true)),
         Ask::Take => NetworkPacket::new(TAKE).with_body(serde_json::json!({})),
     }
 }
@@ -114,7 +118,7 @@ pub async fn run_watcher() {
                 continue;
             };
             // The photo that answers is not one sent unasked (O7 review).
-            if matches!(request.ask, Ask::Fetch(_) | Ask::Take) {
+            if matches!(request.ask, Ask::Fetch(_) | Ask::Copy(_) | Ask::Take) {
                 crate::plugins::share::asked()
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -144,6 +148,16 @@ mod tests {
         let fetch = request_packet(&request(Ask::Fetch(7)));
         assert_eq!(fetch.packet_type, FETCH);
         assert_eq!(fetch.body["id"], 7);
+        assert!(fetch.body.get("clipboard").is_none());
+        // T4: an older page, and a copy the phone puts on the clipboard.
+        let older = request_packet(&request(Ask::ListBefore(9)));
+        assert_eq!(
+            (older.packet_type.as_str(), &older.body["before"]),
+            (LIST, &serde_json::json!(9))
+        );
+        let copy = request_packet(&request(Ask::Copy(7)));
+        assert_eq!(copy.packet_type, FETCH);
+        assert_eq!(copy.body["clipboard"], true);
         // F3: the camera, offered to the phone's owner.
         assert_eq!(request_packet(&request(Ask::Take)).packet_type, TAKE);
     }

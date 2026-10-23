@@ -2,7 +2,9 @@
 //! photos as thumbnails, with Save, Open and Copy. Refresh and each action
 //! are requests the server hands to the phone; a photo is fetched only when
 //! asked, through the usual transfer, into the received files, where Open
-//! and Copy find it.
+//! and Copy find it. T4: older pages ("More photos"), the camera's videos
+//! among them, several saved at once, and a HEIC photo copied by the phone
+//! (it puts a PNG on this computer's clipboard).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +25,10 @@ const FETCH_SECS: u64 = 120;
 
 /// A thumbnail's side on the page, in points.
 const TILE: f32 = 120.0;
+
+/// Photos chosen to save together, at most: the phone keeps 20 requests
+/// waiting at once (T4 review: more were dropped).
+const MAX_CHOSEN: usize = 20;
 
 /// What to do with a photo once it is here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,8 +52,8 @@ struct Pending {
 pub struct PhotosView {
     kept: std::collections::BTreeMap<String, Kept>,
     read_at: Option<Instant>,
-    /// Thumbnails drawn, by phone, photo and the answer's time.
-    textures: HashMap<(String, u64, u64), Option<egui::TextureHandle>>,
+    /// Thumbnails drawn, by phone and photo (T4: kept across pages).
+    textures: HashMap<(String, u64), Option<egui::TextureHandle>>,
     /// The phone and the time of the list request still waiting.
     waiting: Option<(String, u64)>,
     pending: Vec<Pending>,
@@ -55,6 +61,8 @@ pub struct PhotosView {
     copying: Option<mpsc::Receiver<Result<egui::ColorImage, String>>>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// The photos chosen to save together (T4), by phone and id.
+    chosen: std::collections::BTreeSet<(String, u64)>,
     /// The phones files reach now (a control link files can ride), read
     /// with the photos: only those can be asked for a photo (F3 review).
     reach: Option<pocketdesk_core::local::sessions::LiveMirror>,
@@ -103,15 +111,25 @@ pub fn arrived(
         .map(|r| PathBuf::from(&r.path))
 }
 
-/// Whether a file named `name` may be opened with the system's viewer: a
-/// picture only. The name is the phone's; nothing else is opened from it.
+/// Whether a file named `name` may be opened with the system's viewer or
+/// player: a picture or a video only (T4). The name is the phone's; nothing
+/// else is opened from it.
 pub fn openable(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     [
-        ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp",
+        ".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".gif", ".bmp", ".mp4", ".mov", ".3gp",
+        ".mkv", ".webm",
     ]
     .iter()
     .any(|ext| lower.ends_with(ext))
+}
+
+/// Whether a photo named `name` is copied by the phone instead (T4): a HEIC
+/// one, which this app cannot decode; the phone puts it on this computer's
+/// clipboard as a PNG.
+pub fn copied_by_phone(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".heic") || lower.ends_with(".heif")
 }
 
 /// How long ago a photo taken at `taken_ms` (0 unknown) was, in words.
@@ -223,6 +241,7 @@ impl PhotosView {
             };
             if ui.button(label).clicked() && self.ask(state_dir, phone, Ask::List, now_unix) {
                 self.waiting = Some((phone.to_string(), now_unix));
+                self.chosen.retain(|(p, _)| p != phone);
                 self.notice = crate::notice::Notice::done("Asked the phone for its recent photos…");
             }
             if self.waiting.as_ref().is_some_and(|(p, _)| p == phone) {
@@ -253,12 +272,47 @@ impl PhotosView {
             );
             return;
         }
+        // T4: several saved at once.
+        let chosen: Vec<_> = kept
+            .photos
+            .iter()
+            .filter(|p| self.chosen.contains(&(phone.to_string(), p.id)))
+            .map(|p| (p.id, p.name.clone(), p.size))
+            .collect();
+        if !chosen.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button(format!("Save the {} chosen", chosen.len()))
+                    .clicked()
+                {
+                    for (id, name, size) in &chosen {
+                        self.act(
+                            state_dir,
+                            phone,
+                            *id,
+                            name.clone(),
+                            *size,
+                            Then::Save,
+                            now_unix,
+                        );
+                    }
+                    self.notice = crate::notice::Notice::done(format!(
+                        "Asked the phone for {} photos…",
+                        chosen.len()
+                    ));
+                    self.chosen.retain(|(p, _)| p != phone);
+                }
+                if ui.button("Choose none").clicked() {
+                    self.chosen.retain(|(p, _)| p != phone);
+                }
+            });
+        }
         let mut action = None;
         ui.horizontal_wrapped(|ui| {
             for photo in &kept.photos {
                 ui.vertical(|ui| {
                     ui.set_width(TILE);
-                    let key = (phone.to_string(), photo.id, kept.at_unix);
+                    let key = (phone.to_string(), photo.id);
                     let texture = self
                         .textures
                         .entry(key)
@@ -285,12 +339,37 @@ impl PhotosView {
                             );
                         }
                     }
-                    ui.label(
-                        RichText::new(taken_text(photo.taken, now_unix))
-                            .small()
-                            .color(crate::theme::muted(ui)),
-                    )
-                    .on_hover_text(&photo.name);
+                    ui.horizontal(|ui| {
+                        // T4: chosen to save with others.
+                        let mark = (phone.to_string(), photo.id);
+                        let mut on = self.chosen.contains(&mark);
+                        let room =
+                            self.chosen.iter().filter(|(p, _)| p == phone).count() < MAX_CHOSEN;
+                        let choose = ui
+                            .add_enabled(on || room, egui::Checkbox::new(&mut on, ""))
+                            .on_disabled_hover_text(format!(
+                                "At most {MAX_CHOSEN} at once: save these first."
+                            ));
+                        let label = format!("Choose {}", photo.name);
+                        choose.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, &label)
+                        });
+                        if choose.changed() {
+                            if on {
+                                self.chosen.insert(mark);
+                            } else {
+                                self.chosen.remove(&mark);
+                            }
+                        }
+                        let when = taken_text(photo.taken, now_unix);
+                        let text = if photo.video {
+                            format!("Video · {when}")
+                        } else {
+                            when
+                        };
+                        ui.label(RichText::new(text).small().color(crate::theme::muted(ui)))
+                            .on_hover_text(&photo.name);
+                    });
                     ui.horizontal(|ui| {
                         // Each says which photo to a screen reader (E5):
                         // a page of "Save" said nothing of which.
@@ -308,7 +387,9 @@ impl PhotosView {
                         {
                             action = Some((photo.id, photo.name.clone(), photo.size, Then::Open));
                         }
-                        if copyable(&photo.name) && named(ui.small_button("Copy"), "Copy").clicked()
+                        if (copyable(&photo.name) || copied_by_phone(&photo.name))
+                            && !photo.video
+                            && named(ui.small_button("Copy"), "Copy").clicked()
                         {
                             action = Some((photo.id, photo.name.clone(), photo.size, Then::Copy));
                         }
@@ -316,13 +397,27 @@ impl PhotosView {
                 });
             }
         });
+        // T4: the next page, older than the last one shown.
+        if let Some(before) = kept.next_before() {
+            ui.horizontal(|ui| {
+                if ui.button("More photos").clicked()
+                    && self.ask(state_dir, phone, Ask::ListBefore(before), now_unix)
+                {
+                    self.waiting = Some((phone.to_string(), now_unix));
+                }
+                if self.waiting.as_ref().is_some_and(|(p, _)| p == phone) {
+                    ui.spinner();
+                }
+            });
+        }
         if let Some((id, name, size, then)) = action {
             self.act(state_dir, phone, id, name, size, then, now_unix);
         }
-        // Thumbnails of older answers are not drawn again.
-        let at = kept.at_unix;
+        // Thumbnails of photos no longer kept are not drawn again.
+        let ids: std::collections::HashSet<u64> = kept.photos.iter().map(|p| p.id).collect();
         self.textures
-            .retain(|(p, _, when), _| p != phone || *when == at);
+            .retain(|(p, id), _| p != phone || ids.contains(id));
+        self.chosen.retain(|(p, id)| p != phone || ids.contains(id));
     }
 
     /// Ask for a photo, unless it is already here for Open or Copy.
@@ -337,6 +432,15 @@ impl PhotosView {
         then: Then,
         now_unix: u64,
     ) {
+        // T4: a HEIC photo is copied by the phone, onto this computer's clipboard.
+        if then == Then::Copy && copied_by_phone(&name) {
+            if self.ask(state_dir, phone, Ask::Copy(id), now_unix) {
+                self.notice = crate::notice::Notice::done(format!(
+                    "Asked the phone to put {name} on this computer's clipboard: it is there in a few seconds, with \"Send files\" and the clipboard allowed for the phone."
+                ));
+            }
+            return;
+        }
         let rows = received::read(state_dir);
         // A photo saved earlier in this run (since the answer came) is used as it is.
         let since = self.kept.get(phone).map_or(now_unix, |k| k.at_unix);
@@ -521,9 +625,22 @@ mod tests {
         for name in ["IMG_1.jpg", "a.JPEG", "b.png", "c.heic", "d.webp"] {
             assert!(openable(name), "{name}");
         }
-        for name in ["setup.exe", "photo.jpg.exe", "x.lnk", "README", "a.svg"] {
+        for name in [
+            "setup.exe",
+            "photo.jpg.exe",
+            "x.lnk",
+            "README",
+            "a.svg",
+            "v.mp4.exe",
+        ] {
             assert!(!openable(name), "{name}");
         }
+        // T4: the camera's videos open in the player.
+        for name in ["VID_1.mp4", "b.MOV", "c.3gp"] {
+            assert!(openable(name), "{name}");
+        }
+        assert!(copied_by_phone("IMG_1.HEIC") && copied_by_phone("a.heif"));
+        assert!(!copied_by_phone("IMG_1.jpg"));
     }
 
     /// The grid from a phone's answer, driven headless (C4's harness): each
@@ -551,10 +668,22 @@ mod tests {
             taken: 0,
             size: 10,
             thumb: thumb.clone(),
+            video: false,
         };
         let answer = Photos {
-            photos: vec![photo(1, "IMG_1.jpg"), photo(2, "clip.mp4.exe")],
+            photos: vec![
+                photo(4, "IMG_4.heic"),
+                Photo {
+                    video: true,
+                    ..photo(3, "VID_3.mp4")
+                },
+                photo(1, "IMG_1.jpg"),
+                photo(2, "clip.mp4.exe"),
+            ],
             error: None,
+            before: None,
+            more: true,
+            next: None,
         };
         store::keep(&dir, "phone-a", answer, 100, &|_| true).unwrap();
 
@@ -573,6 +702,41 @@ mod tests {
         assert!(harness.query_by_label("Open IMG_1.jpg").is_some());
         assert!(harness.query_by_label("Open clip.mp4.exe").is_none());
         assert!(harness.query_by_label("Copy clip.mp4.exe").is_none());
+        // T4: a video opens and is never copied; a HEIC photo is copied by
+        // the phone; more pages; several chosen are saved together.
+        assert!(harness.query_by_label("Open VID_3.mp4").is_some());
+        assert!(harness.query_by_label("Copy VID_3.mp4").is_none());
+        assert!(harness.query_by_label("Copy IMG_4.heic").is_some());
+        assert!(harness.query_by_label("More photos").is_some());
+        // One at a time: the row of the chosen appears above the grid.
+        harness.get_by_label("Choose IMG_1.jpg").click();
+        harness.run_steps(2);
+        harness.get_by_label("Choose IMG_4.heic").click();
+        harness.run_steps(2);
+        harness.get_by_label("Save the 2 chosen").click();
+        harness.run_steps(2);
+        let asked = store::take_all(&dir, 100);
+        let mut fetched: Vec<_> = asked
+            .iter()
+            .filter_map(|r| match r.ask {
+                Ask::Fetch(id) => Some(id),
+                _ => None,
+            })
+            .collect();
+        fetched.sort();
+        assert_eq!(fetched, [1, 4]);
+        harness.get_by_label("Copy IMG_4.heic").click();
+        harness.get_by_label("More photos").click();
+        harness.run_steps(2);
+        let asked: Vec<_> = store::take_all(&dir, 100)
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        assert!(asked.contains(&Ask::Copy(4)), "{asked:?}");
+        assert!(
+            asked.contains(&Ask::ListBefore(2)),
+            "older than the last shown: {asked:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

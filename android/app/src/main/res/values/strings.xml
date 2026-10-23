@@ -628,6 +628,7 @@
     <string name="screenshots_on_summary">A screenshot taken on this phone goes to its computer a moment later. Asks for access to photos, and uses notification access to run in the background</string>
     <string name="recent_photos_on">Recent photos on the computer</string>
     <string name="recent_photos_on_summary">Your computer\'s Phone page shows your newest camera photos (DCIM) as small pictures, and fetches one when you ask</string>
+    <string name="recent_photos_videos">Its videos too</string>
     <string name="photo_place">Photos keep where they were taken</string>
     <string name="photo_place_off_summary">Off: Android takes the place out of a photo Pocketdesk sends.</string>
     <string name="photo_place_on_summary">A photo sent from this phone keeps its location, when the photo is on this phone. Asks for access to photos.</string>
