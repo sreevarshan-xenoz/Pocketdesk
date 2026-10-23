@@ -44,6 +44,9 @@ class BackgroundFiles(private val ctx: Context) {
         for (i in 0 until offers.length()) {
             val offer = offers.optJSONObject(i) ?: continue
             val id = offer.optString("id").ifEmpty { continue }
+            // Offered again while in hand, or waiting for a tap (S2 review):
+            // not started or offered for a tap twice.
+            if (!OfferHand.shared.claim(id, now)) continue
             val refused = offer.optString("folderRefused")
             if (refused.isNotEmpty()) {
                 RustCore.declineOffer(own.address, own.controlPort, id, refused)

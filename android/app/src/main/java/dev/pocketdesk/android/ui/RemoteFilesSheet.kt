@@ -292,6 +292,8 @@ fun FileOffersEffect(address: String, controlPort: Int) {
                 for (i in 0 until list.length()) {
                     val offer = list.optJSONObject(i) ?: continue
                     val id = offer.optString("id").ifEmpty { continue }
+                    // Offered again while in hand (S2): already taken.
+                    if (!dev.pocketdesk.android.service.OfferHand.shared.claim(id, android.os.SystemClock.elapsedRealtime())) continue
                     // A file of a folder whose place the phone may not make
                     // is declined with the reason, never saved elsewhere.
                     val refused = offer.optString("folderRefused")

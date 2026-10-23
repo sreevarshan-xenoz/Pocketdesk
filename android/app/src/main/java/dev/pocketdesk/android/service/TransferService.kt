@@ -178,7 +178,12 @@ class TransferService : Service() {
             // when it has nothing to do; keep what is showing if a job runs.
             enterForeground(current ?: progressNotification(getString(R.string.channel_transfers), "", 0))
             lastStartId = startId
-            if (job == null) {
+            // An offer fetched here already is not fetched twice: the
+            // computer offers it again when the link comes back (S2).
+            val twice = job is Job.Receive && job.isOffer &&
+                !OfferHand.shared.run(job.value, android.os.SystemClock.elapsedRealtime())
+            if (job == null || twice) {
+                if (job != null) Log.i(TAG, "an offer already in hand, not fetched again")
                 if (queued == 0) stopSelf(startId)
                 return START_NOT_STICKY
             }
@@ -257,6 +262,7 @@ class TransferService : Service() {
                     mapOf("count" to sent, "failed" to failed),
                 )
             }
+            if (job is Job.Receive && job.isOffer) OfferHand.shared.release(job.value)
             finishJob(startId)
         }
     }

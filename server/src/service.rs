@@ -1013,6 +1013,8 @@ async fn seed_desktop_state(
     if let Some(endpoint) = wan_endpoint {
         iroh_endpoint::push_endpoint_to(sender, endpoint).await;
     }
+    // Files offered while its app was gone, offered again (S2).
+    crate::offers::offer_again(&**sender).await;
     // How to wake this computer, for the adapter the phone reached (N6). A
     // connection over the internet reached none: the phone keeps the one it
     // learned at home.
