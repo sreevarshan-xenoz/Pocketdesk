@@ -952,7 +952,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         // O2: the computer's screenshots and locks wait on this link too.
         val actionsOn = (Prefs.phoneActionsFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null) ||
             // P2: a list of apps needs no service; an open checks for it.
-            Prefs.appsFromComputer(this)
+            Prefs.appsFromComputer(this) ||
+            // P10: nor does a list of contacts.
+            TextPrefs.contactsToComputer(this)
         // N2: the phone's music, while what it reports is current.
         media.tick()
         val mediaWanted = media.linkWanted()

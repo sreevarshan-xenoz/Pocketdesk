@@ -235,13 +235,21 @@ pub async fn run_phone_actions() {
             let Some(action) = ask.action() else {
                 continue;
             };
-            // Paired now, not only allowed by default, as a call is.
-            if !crate::plugins::pair::allows(
-                &ask.device_id,
-                pocketdesk_core::protocol::permissions::Capability::PhoneActions,
-            ) {
+            // Paired now, not only allowed by default, as a call is. The
+            // contacts go with the texts (P10).
+            let (capability, word) = match action {
+                pocketdesk_core::protocol::phone_action::PhoneAction::Contacts => (
+                    pocketdesk_core::protocol::permissions::Capability::Texts,
+                    "Texts",
+                ),
+                _ => (
+                    pocketdesk_core::protocol::permissions::Capability::PhoneActions,
+                    "Phone actions",
+                ),
+            };
+            if !crate::plugins::pair::allows(&ask.device_id, capability) {
                 tracing::info!(
-                    "A {} was not asked: the phone's Phone actions permission is off",
+                    "A {} was not asked: the phone's {word} permission is off",
                     action.as_str()
                 );
                 continue;

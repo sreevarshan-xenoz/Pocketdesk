@@ -554,6 +554,8 @@
     <string name="channel_computer_media">The computer\'s music</string>
     <string name="texts_names">Names from my contacts</string>
     <string name="texts_names_summary">A text shows on the computer with the sender\'s name from this phone\'s contacts, not only the number</string>
+    <string name="texts_contacts">My contacts on the computer</string>
+    <string name="texts_contacts_summary">Your own computer can ask for your contacts, names and numbers only, to search them on its Messages page and text or call them through this phone. Asks for contacts access</string>
     <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
     <string name="settings_capture_mouse_summary">During a session, a mouse plugged into this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="send_clipboard_label">Send clipboard</string>

@@ -15,6 +15,76 @@ pub const PHONE_APPS: &str = "kdeconnect.pocketdesk.phone_apps";
 /// The most apps a list holds.
 pub const MAX_APPS: usize = 500;
 
+/// Phone → computer (P10): `{contacts: [{name, numbers}]}`, the phone's
+/// contacts, names and numbers only, answering `contacts`. Under the Texts
+/// permission, as the texts they go with are.
+pub const PHONE_CONTACTS: &str = "kdeconnect.pocketdesk.phone_contacts";
+
+/// The most contacts a list holds.
+pub const MAX_CONTACTS: usize = 5_000;
+
+/// The most numbers one contact keeps.
+pub const MAX_NUMBERS: usize = 5;
+
+/// One of the phone's contacts (P10): a name and its numbers.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PhoneContact {
+    pub name: String,
+    pub numbers: Vec<String>,
+}
+
+/// The contacts in a [`PHONE_CONTACTS`] body: each with a name and a
+/// number a call takes (L4's rule), names cleaned to one line, numbers kept
+/// as the phone wrote them but each once, at most [`MAX_NUMBERS`] each and
+/// [`MAX_CONTACTS`] in all.
+pub fn parse_contacts(body: &serde_json::Value) -> Vec<PhoneContact> {
+    let mut contacts = Vec::new();
+    for contact in body
+        .get("contacts")
+        .and_then(|c| c.as_array())
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+    {
+        let name = crate::protocol::phone_media::clean_line(
+            contact.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+        );
+        if name.is_empty() {
+            continue;
+        }
+        let mut numbers: Vec<String> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        for number in contact
+            .get("numbers")
+            .and_then(|n| n.as_array())
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|n| n.as_str())
+        {
+            let number = number.trim();
+            let Some(clean) = crate::protocol::dial::clean_number(number) else {
+                continue;
+            };
+            if seen.contains(&clean) {
+                continue;
+            }
+            seen.push(clean);
+            numbers.push(number.to_string());
+            if numbers.len() == MAX_NUMBERS {
+                break;
+            }
+        }
+        if numbers.is_empty() {
+            continue;
+        }
+        contacts.push(PhoneContact { name, numbers });
+        if contacts.len() == MAX_CONTACTS {
+            break;
+        }
+    }
+    contacts
+}
+
 /// The longest app id (an Android package name) taken.
 pub const MAX_APP_ID: usize = 255;
 
@@ -85,14 +155,17 @@ pub enum PhoneAction {
     Apps,
     /// Open one app, its id beside the action (P2).
     Open,
+    /// List the contacts, names and numbers only (P10).
+    Contacts,
 }
 
 impl PhoneAction {
-    pub const ALL: [PhoneAction; 4] = [
+    pub const ALL: [PhoneAction; 5] = [
         PhoneAction::Screenshot,
         PhoneAction::Lock,
         PhoneAction::Apps,
         PhoneAction::Open,
+        PhoneAction::Contacts,
     ];
 
     /// The word the packet and the request files carry.
@@ -102,6 +175,7 @@ impl PhoneAction {
             PhoneAction::Lock => "lock",
             PhoneAction::Apps => "apps",
             PhoneAction::Open => "open",
+            PhoneAction::Contacts => "contacts",
         }
     }
 
@@ -172,5 +246,20 @@ mod tests {
             .collect();
         assert_eq!(parse_apps(&json!({ "apps": many })).len(), MAX_APPS);
         assert!(parse_apps(&json!({})).is_empty());
+    }
+
+    /// P10: contacts with a name and a callable number, each number once.
+    #[test]
+    fn a_contact_list_keeps_names_with_numbers() {
+        let contacts = parse_contacts(&json!({"contacts": [
+            {"name": "Ann\nLee", "numbers": ["+1 555 0100", "+15550100", "*21#", "555-0101"]},
+            {"name": "No number", "numbers": ["**"]},
+            {"name": "  ", "numbers": ["5550102"]},
+            {"name": "Bo", "numbers": ["5550103", "5550104", "5550105", "5550106", "5550107", "5550108"]},
+        ]}));
+        assert_eq!(contacts.len(), 2);
+        assert_eq!(contacts[0].name, "Ann Lee");
+        assert_eq!(contacts[0].numbers, vec!["+1 555 0100", "555-0101"], "each once, no codes");
+        assert_eq!(contacts[1].numbers.len(), MAX_NUMBERS);
     }
 }

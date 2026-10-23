@@ -51,6 +51,22 @@ fun TextsSection() {
             TextPrefs.setNames(context, granted)
             version++
         }
+    // P10: the contacts themselves to the computer, asking for them too.
+    val contactsOn = (version + resumes).let { TextPrefs.contactsToComputer(context) }
+    val askContactsList =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            TextPrefs.setContactsToComputer(context, granted)
+            version++
+        }
+
+    fun setContactsOn(on: Boolean) {
+        if (on && !canReadContacts) {
+            askContactsList.launch(Manifest.permission.READ_CONTACTS)
+        } else {
+            TextPrefs.setContactsToComputer(context, on)
+            version++
+        }
+    }
 
     fun setNames(on: Boolean) {
         if (on && !canReadContacts) {
@@ -106,5 +122,11 @@ fun TextsSection() {
         stringResource(R.string.texts_names_summary),
         names && canReadContacts,
         ::setNames,
+    )
+    SettingSwitch(
+        stringResource(R.string.texts_contacts),
+        stringResource(R.string.texts_contacts_summary),
+        contactsOn && canReadContacts,
+        ::setContactsOn,
     )
 }

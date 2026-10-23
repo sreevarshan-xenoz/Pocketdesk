@@ -67,4 +67,28 @@ class PhoneActionRuleTest {
         assertEquals(Decision.LOCKED, decide(action = Action.OPEN, locked = true))
         assertEquals(Decision.ASLEEP, decide(action = Action.OPEN, awake = false))
     }
+
+    /** P10: the contacts go with their switch and Android's leave, to the own computer, never locked or not. */
+    @org.junit.Test
+    fun contactsGoWithTheirSwitchAndLeave() {
+        fun contacts(on: Boolean = true, own: Boolean = true, permitted: Boolean = true, budget: Boolean = true) =
+            PhoneActionRule.decide(
+                Action.CONTACTS,
+                on = false,
+                own = own,
+                service = false,
+                sdk = 21,
+                locked = true,
+                awake = false,
+                screenshots = false,
+                withinBudget = budget,
+                contactsOn = on,
+                contactsPermitted = permitted,
+            )
+        assertEquals(Decision.DO, contacts())
+        assertEquals(Decision.OFF, contacts(on = false))
+        assertEquals(Decision.NOT_OWN, contacts(own = false))
+        assertEquals(Decision.NO_PERMISSION, contacts(permitted = false))
+        assertEquals(Decision.TOO_MANY, contacts(budget = false))
+    }
 }

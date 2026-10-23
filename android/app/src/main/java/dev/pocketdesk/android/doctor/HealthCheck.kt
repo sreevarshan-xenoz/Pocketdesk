@@ -56,8 +56,9 @@ object HealthCheck {
             Prefs.typingFromComputer(ctx) ||
             // O2: the computer's screenshots and locks wait on the listener (O2 review).
             Prefs.phoneActionsFromComputer(ctx) ||
-            // P2: so do its asks for the apps.
+            // P2: so do its asks for the apps, and P10's for the contacts.
             Prefs.appsFromComputer(ctx) ||
+            dev.pocketdesk.android.notify.TextPrefs.contactsToComputer(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
             PhoneFolders.all(ctx).isNotEmpty() ||

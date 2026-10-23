@@ -24,6 +24,9 @@ object PhoneActionRule {
 
         /** P2: open one. */
         OPEN("open"),
+
+        /** P10: list the contacts, names and numbers only. */
+        CONTACTS("contacts"),
         ;
 
         companion object {
@@ -67,6 +70,9 @@ object PhoneActionRule {
 
         /** P2: an app the phone did not list for the computer. */
         NOT_LISTED,
+
+        /** P10: Android has not let this app read the contacts. */
+        NO_PERMISSION,
     }
 
     /**
@@ -90,7 +96,18 @@ object PhoneActionRule {
         withinBudget: Boolean,
         appsOn: Boolean = false,
         listed: Boolean = false,
+        contactsOn: Boolean = false,
+        contactsPermitted: Boolean = false,
     ): Decision = when {
+        // P10: the contacts, with their own switch and Android's leave; no
+        // service, and shown on nothing.
+        action == Action.CONTACTS -> when {
+            !contactsOn -> Decision.OFF
+            !own -> Decision.NOT_OWN
+            !contactsPermitted -> Decision.NO_PERMISSION
+            !withinBudget -> Decision.TOO_MANY
+            else -> Decision.DO
+        }
         // P2: a list needs no service and shows nothing on the phone; an
         // open needs the service (Android lets a bound one start an app
         // from the background), an unlocked phone, awake.

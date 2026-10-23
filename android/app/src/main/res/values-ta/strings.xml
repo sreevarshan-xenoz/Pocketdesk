@@ -545,6 +545,8 @@
     <string name="channel_computer_media">கணினியின் இசை</string>
     <string name="texts_names">என் தொடர்புகளிலிருந்து பெயர்கள்</string>
     <string name="texts_names_summary">செய்தி கணினியில் எண்ணுடன், இந்தத் தொலைபேசியின் தொடர்புகளில் உள்ள அனுப்புநரின் பெயருடன் காட்டப்படும்</string>
+    <string name="texts_contacts">என் தொடர்புகள் கணினியில்</string>
+    <string name="texts_contacts_summary">உங்கள் கணினி உங்கள் தொடர்புகளை, பெயர்களும் எண்களும் மட்டும், கேட்கலாம்: அதன் செய்திகள் பக்கத்தில் தேடி, இந்தத் தொலைபேசி வழியாக அவர்களுக்குச் செய்தி அனுப்பவோ அழைக்கவோ. தொடர்புகள் அணுகலைக் கேட்கும்</string>
     <string name="settings_capture_mouse">இணைக்கப்பட்ட சுட்டியைக் கணினியில் பயன்படுத்து</string>
     <string name="settings_capture_mouse_summary">அமர்வின்போது இந்தத் தொலைபேசியில் இணைத்த சுட்டி (USB அல்லது Bluetooth) கணினியின் சுட்டுக்குறியை நகர்த்திச் சொடுக்கும்</string>
     <string name="send_clipboard_label">கிளிப்போர்டை அனுப்பு</string>

@@ -53,6 +53,53 @@ object PhoneActions {
     /** A list being made, off the answers tick (P2 review: hundreds of labels read). */
     private val listing = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** A list of contacts being made, off the answers tick (P10). */
+    private val listingContacts = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The packet the contacts go in (P10). */
+    private const val PHONE_CONTACTS = "kdeconnect.pocketdesk.phone_contacts"
+
+    /** The most contacts sent, as the computer keeps at most. */
+    private const val MAX_CONTACTS = 5_000
+
+    /**
+     * This phone's contacts with a number (P10): the name each shows by,
+     * and its numbers, each once, five at most; nothing else of them.
+     */
+    private fun contacts(context: Context): JSONObject {
+        val byName = LinkedHashMap<String, MutableList<String>>()
+        val phone = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        val projection = arrayOf(
+            android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+            android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+        )
+        runCatching {
+            context.contentResolver.query(
+                phone,
+                projection,
+                null,
+                null,
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE NOCASE",
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(0)?.trim().orEmpty()
+                    val number = cursor.getString(1)?.trim().orEmpty()
+                    if (name.isEmpty() || number.isEmpty()) continue
+                    if (name !in byName && byName.size >= MAX_CONTACTS) continue
+                    val numbers = byName.getOrPut(name) { mutableListOf() }
+                    if (numbers.size < 5 && numbers.none { it.filter(Char::isDigit) == number.filter(Char::isDigit) }) {
+                        numbers.add(number)
+                    }
+                }
+            }
+        }.onFailure { Log.w(TAG, "could not read the contacts", it) }
+        val list = JSONArray()
+        for ((name, numbers) in byName) {
+            list.put(JSONObject().put("name", name).put("numbers", JSONArray(numbers)))
+        }
+        return JSONObject().put("contacts", list)
+    }
+
     /** The channel of "Tap to open", as N3's. */
     private const val OPEN_CHANNEL = "opens"
 
@@ -133,6 +180,9 @@ object PhoneActions {
                     (ScreenshotPrefs.clipboard(context) || ScreenshotPrefs.save(context)),
                 withinBudget = true,
                 appsOn = Prefs.appsFromComputer(context),
+                contactsOn = dev.pocketdesk.android.notify.TextPrefs.contactsToComputer(context),
+                contactsPermitted = context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED,
                 listed = ask.app in listed,
             )
             if (decision == PhoneActionRule.Decision.DO && !budget.take(SystemClock.elapsedRealtime())) {
@@ -143,6 +193,25 @@ object PhoneActions {
                 continue
             }
             // P2: the apps listed for the computer, off this tick, or one opened.
+            // P10: the contacts, off this tick, names and numbers only.
+            if (action == PhoneActionRule.Action.CONTACTS) {
+                if (own == null || !listingContacts.compareAndSet(false, true)) continue
+                val app = context.applicationContext
+                Thread {
+                    try {
+                        val sent = RustCore.sendPhonePacketOnLink(
+                            own.address,
+                            own.controlPort,
+                            PHONE_CONTACTS,
+                            contacts(app).toString(),
+                        ).isSuccess
+                        Log.i(TAG, if (sent) "the contacts were listed for the computer" else "the contacts could not be sent")
+                    } finally {
+                        listingContacts.set(false)
+                    }
+                }.start()
+                continue
+            }
             if (action == PhoneActionRule.Action.APPS) {
                 if (own == null || !listing.compareAndSet(false, true)) continue
                 val app = context.applicationContext

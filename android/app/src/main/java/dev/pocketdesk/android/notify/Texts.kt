@@ -54,6 +54,11 @@ object TextPrefs {
 
     fun setReply(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_REPLY, on) }
 
+    /** Whether the own computer may ask for this phone's contacts, names and numbers only (P10). Off. */
+    fun contactsToComputer(ctx: Context): Boolean = prefs(ctx).getBoolean("contacts_to_computer", false)
+
+    fun setContactsToComputer(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean("contacts_to_computer", on) }
+
     /** Whether texts carry the sender's name from this phone's contacts (T8e). Off by default. */
     fun names(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_NAMES, false)
 
