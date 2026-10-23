@@ -51,6 +51,23 @@ class PlainErrorTest {
         assertEquals(R.string.err_permissions_changed, humanizeError("permissions changed"))
     }
 
+    /** S2: the computer unpaired the phone mid-session; not a dropped link. */
+    @Test
+    fun aSessionEndedForWantOfPairingSaysSoAndOffersPairing() {
+        val raw = "stream closed by the desktop: not paired"
+        assertEquals(R.string.err_unpaired, humanizeError(raw))
+        assertTrue(errorSuggestsRepair(raw))
+        // The remote and the sound session pass the bare reason.
+        assertEquals(R.string.err_unpaired, humanizeError("not paired"))
+        // The gate's refusal names pairing too, and keeps its own words.
+        assertEquals(
+            R.string.err_session_refused,
+            humanizeError("session refused: the device is not paired, or the owner did not approve it"),
+        )
+        // A plain end is still a dropped link.
+        assertEquals(R.string.err_link_dropped, humanizeError("stream closed by the desktop: closed"))
+    }
+
     @Test
     fun aSentenceForAPersonIsKept() {
         for (said in listOf(

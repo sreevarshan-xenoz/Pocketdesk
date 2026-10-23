@@ -25,6 +25,8 @@ fun humanizeError(raw: String): Int {
         "input not allowed" in l -> R.string.err_input_not_allowed
         "sound not allowed" in l -> R.string.err_sound_not_allowed
         "permissions changed" in l -> R.string.err_permissions_changed
+        // The computer ended the session: it no longer pairs this phone.
+        "not paired" in l -> R.string.err_unpaired
         "declined" in l || "pairing" in l || PIN.containsMatchIn(l) -> R.string.err_pairing_declined
         "not connected" in l || "disconnected" in l || "closed" in l || "reset" in l ->
             R.string.err_link_dropped
@@ -37,7 +39,7 @@ fun errorSuggestsRepair(raw: String): Boolean {
     val l = raw.lowercase()
     if (HANDSHAKE_CLOSED in l) return false
     return "certificate" in l || "untrusted" in l || "handshake" in l ||
-        "declined" in l || PIN.containsMatchIn(l) || "session refused" in l
+        "declined" in l || PIN.containsMatchIn(l) || "session refused" in l || "not paired" in l
 }
 
 /**
