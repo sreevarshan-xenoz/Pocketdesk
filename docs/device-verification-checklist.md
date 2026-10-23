@@ -2562,6 +2562,13 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 192. Diagnostics' firewall row on Linux (O9)
+
+Built 2026-10-22. Owed (where: linux):
+- [ ] No ufw: "no firewall found". (where: linux)
+- [ ] ufw on with the default deny: the row is red, naming 1716/tcp and 4716/udp with `sudo ufw allow …`; after allowing them, green. (where: linux)
+- [ ] The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
+- [ ] firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
 ## 191. Choose the computer's player (O6)
 
 Built 2026-10-22. Checked on the OPPO against a throwaway server with the media seam holding two players:
