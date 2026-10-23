@@ -6,6 +6,12 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **Q4, Linux catch-up for P (branch `feat/linux-catchup-p`).**
+  - **Presenting (P3):** "While presenting or in full screen" on Linux holds phones' notifications and texts while GNOME's Do Not Disturb (`show-banners` off) or KDE's (its notification server's `Inhibited`) is on. A thread of its own asks every 5 s while the switch is on, with a second's deadline each; the answers' readers are tested. Settings draws the row on Linux with its own words.
+  - **Alarms (P5):** a phone's alarm on Linux carries the theme's `alarm-clock-elapsed` sound.
+  - **Copied files (P7):** files copied on X11 are read with `xclip`.
+
+  Each falls back to what it did where the desktop says nothing. The Linux code was type-checked for `x86_64-unknown-linux-gnu` here; CI builds it. Fresh review (0 Critical, 1 Important), fixed: the desktop asked on the runtime's threads under a lock, so a hung `gsettings` held every handler. The Azure VM's Sway has neither GNOME nor KDE, so it was not run there. Owed: GNOME, KDE and X11 by hand (checklist §206).
 - 2026-10-23: **Q3, the phone's design pass on what O and P added (branch `feat/phone-design-op`).** An audit of the O and P rows against the U2, U4, U6, C5 and E6 rules (18 findings: 6 Important, 12 Minor), fixed in six groups:
   - **The switches report:** the phone now tells its computer of P5's alarms, P10's contacts, P2's apps, O1's tasks and O7's images, with what Android must allow. They map to their permissions in core's one table, and the mirror's labels are exhaustive.
   - **The ring:** the vibrate and torch rows are never greyed (a ring in a session reads them) and show only where the phone has them. The Android 17 summary no longer promises a vibration at zero.
