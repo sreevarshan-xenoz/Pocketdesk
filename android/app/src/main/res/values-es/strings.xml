@@ -87,6 +87,7 @@
     <string name="connect">Conectar</string>
     <string name="send_wol">Enviar Wake-on-LAN</string>
     <string name="home_computer_moved">%1$s está ahora en %2$s; su tarjeta lo sigue allí.</string>
+    <string name="home_computer_port">%1$s responde ahora en el puerto %2$d; su tarjeta lo sigue allí.</string>
     <string name="wake_sent">Encendido enviado a %1$s.</string>
     <string name="wake_failed">Error al despertar: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>

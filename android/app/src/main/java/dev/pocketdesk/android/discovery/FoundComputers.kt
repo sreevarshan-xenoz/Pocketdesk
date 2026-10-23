@@ -128,6 +128,33 @@ object FoundComputers {
             .flatMap { it.take(MAX_TRIES_PER_CARD) }
     }
 
+    /**
+     * T1: the saved computers announced at their own address on another
+     * control port (the server moves off 1716 when KDE Connect or GSConnect
+     * holds it): the record names the id [pairedIdOf] gives that address, at
+     * most [MAX_TRIES_PER_CARD] for a card. Only a candidate, as [moved]'s:
+     * the card's control port changes once the computer on the new one
+     * proves the key the address is pinned to. The stream port is not taken
+     * from the record (T1 review: nothing proves it).
+     */
+    fun portMoved(
+        found: List<FoundComputer>,
+        saved: List<HostStore.Host>,
+        pairedIdOf: (String) -> String?,
+    ): List<Moved> {
+        val byAddress = saved.associateBy { it.address }
+        return found
+            .mapNotNull { computer ->
+                val host = byAddress[computer.address] ?: return@mapNotNull null
+                val paired = computer.id.isNotBlank() && pairedIdOf(host.address) == computer.id
+                if (host.controlPort == computer.controlPort || !paired) null else Moved(computer, host)
+            }
+            .distinctBy { it.saved.address to it.found.controlPort }
+            .groupBy { it.saved.address }
+            .values
+            .flatMap { it.take(MAX_TRIES_PER_CARD) }
+    }
+
     private fun isIpv4(address: String): Boolean {
         val parts = address.split('.')
         return parts.size == 4 && parts.all { p -> p.toIntOrNull()?.let { it in 0..255 } == true }

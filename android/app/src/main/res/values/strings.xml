@@ -96,6 +96,7 @@
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
     <string name="home_computer_moved">%1$s is now at %2$s; its card follows it there.</string>
+    <string name="home_computer_port">%1$s now answers on port %2$d; its card follows it there.</string>
     <string name="wake_sent">Wake sent to %1$s.</string>
     <string name="wake_failed">Wake failed: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>

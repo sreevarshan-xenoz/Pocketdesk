@@ -87,6 +87,7 @@
     <string name="connect">இணை</string>
     <string name="send_wol">Wake-on-LAN அனுப்பு</string>
     <string name="home_computer_moved">%1$s இப்போது %2$s-இல் உள்ளது; அதன் அட்டை அங்கே பின்தொடர்கிறது.</string>
+    <string name="home_computer_port">%1$s இப்போது போர்ட் %2$d-இல் பதிலளிக்கிறது; அதன் அட்டை அங்கே பின்தொடர்கிறது.</string>
     <string name="wake_sent">%1$s க்கு எழுப்புதல் அனுப்பப்பட்டது.</string>
     <string name="wake_failed">விழிக்க முடியவில்லை: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>

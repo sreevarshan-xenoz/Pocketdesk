@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-876 open items.
+880 open items.
 
 | Where | Items |
 |---|---|
@@ -13,9 +13,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 35 |
 | A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 158 |
+| A Linux desktop (the Azure VM serves for some) | 159 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 345 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 348 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -247,7 +247,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
 - The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
-- Windows: after `pocketdesk install`, the firewall has TCP 1716 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
+- Windows: after `pocketdesk install`, the firewall has TCP 1716-1725 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 
 **89. The phone's navigation and feedback (U2)**
 
@@ -1311,6 +1311,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A phone's alarm on KDE: the urgent notification with the alarm sound; on GNOME, silent but urgent.
 - X11 (no `WAYLAND_DISPLAY`): files copied in Nautilus or Dolphin sent with the clipboard key or "Paste copied files", through `xclip`; with `xclip` missing, nothing read and nothing hung.
 
+**207. Start beside KDE Connect (T1)**
+
+- Linux with KDE Connect (or GSConnect) running: the server starts on 1717, the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -2298,3 +2302,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - My contacts on the computer: the permission refused (the line and Android's page), then granted there; without notification access, its warning and link. (where: by hand)
 - The Devices page and the phone's "What this computer allows" naming the five new features. (where: by hand)
 - A kind of notification's row, Spanish and Tamil on screen, font scale 2.0, TalkBack across the moved and changed rows.
+
+**207. Start beside KDE Connect (T1)**
+
+- A phone with a card saved at the computer's LAN address finding it on the moved port by itself (the toast), and its tailnet card following. (where: by hand)
+- Windows: `pocketdesk install` opening TCP 1716-1725, and a phone reaching a server moved to 1717 through the firewall. (where: by hand)
+- The desktop app's Overview label and Diagnostics with the port moved. (where: by hand)

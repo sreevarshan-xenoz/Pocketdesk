@@ -433,6 +433,24 @@ pub fn check_server(state: ServerState) -> Finding {
 }
 
 /// Does the control port answer on this computer?
+/// T1: the server listens on another port than its config's, because
+/// another program (KDE Connect, GSConnect) holds that one. `None` when it
+/// did not move.
+pub fn check_port_moved(moved: Option<super::listening::Listening>) -> Option<Finding> {
+    let moved = moved.filter(|m| m.moved())?;
+    Some(with_hint(
+        finding(
+            "Control port moved",
+            Status::Warn,
+            format!(
+                "TCP {} is held by another program (KDE Connect or GSConnect?), so phones reach this computer on {}",
+                moved.configured_port, moved.control_port
+            ),
+        ),
+        "A phone finds it on this network by itself; one saved elsewhere may need the new port. KDE Connect devices are left to that program, so Pocketdesk's KDE Connect bridge is off while it holds the port. On Windows, an install from before 0.7 opened TCP 1716 only: run `pocketdesk install` again to open 1716-1725.",
+    ))
+}
+
 pub fn check_control_port(port: u16, state: ServerState) -> Finding {
     let check = "Control port";
     match state {
@@ -1022,6 +1040,31 @@ pub fn human_ago(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T1: a moved control port is said, with why; an unmoved one is not.
+    #[test]
+    fn a_moved_control_port_is_said_with_why() {
+        use crate::local::listening::Listening;
+        let moved = Listening {
+            pid: 1,
+            control_port: 1717,
+            configured_port: 1716,
+        };
+        let f = check_port_moved(Some(moved)).expect("said");
+        assert_eq!(f.status, Status::Warn);
+        assert!(
+            f.detail.contains("1716") && f.detail.contains("1717"),
+            "{}",
+            f.detail
+        );
+        let still = Listening {
+            pid: 1,
+            control_port: 1716,
+            configured_port: 1716,
+        };
+        assert!(check_port_moved(Some(still)).is_none());
+        assert!(check_port_moved(None).is_none());
+    }
 
     const UP: ServerState = ServerState::Running;
 

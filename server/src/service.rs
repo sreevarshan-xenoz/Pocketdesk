@@ -44,6 +44,15 @@ pub async fn run(config: Config) -> Result<()> {
             state_dir.display()
         ),
     }
+    // T1 review: a second server once stopped at the control port's bind;
+    // now that the bind moves past a held port, it is stopped here, before
+    // it takes the pid file, `listening.json` or the announcement.
+    if let Some(pid) = pocketdesk_core::local::server::server_pid(&state_dir)
+        .filter(|&pid| pid != std::process::id())
+        .filter(|_| pocketdesk_core::local::server::is_running(&state_dir))
+    {
+        anyhow::bail!("a Pocketdesk server already runs for this state folder (pid {pid})");
+    }
     let pid_file = state::pid_file_path()?;
     state::write_pid_file(&pid_file)?;
     let _pid_guard = PidFileGuard { path: pid_file };
@@ -172,12 +181,32 @@ pub async fn run(config: Config) -> Result<()> {
         capabilities: registry.plugin_names(),
     };
 
-    let bind_addr = format!("0.0.0.0:{}", config.control_port);
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
+    let (listener, control_port) = bind_control("0.0.0.0", config.control_port)
         .await
-        .with_context(|| format!("failed to bind {bind_addr}"))?;
-
+        .with_context(|| format!("failed to bind 0.0.0.0:{}", config.control_port))?;
+    let bind_addr = format!("0.0.0.0:{control_port}");
     tracing::info!("Control listener ready on {}", bind_addr);
+    // T1: what phones reach, for the desktop app's pairing code and pages.
+    // KDE Connect's own program (or GSConnect) on the configured port is
+    // said where the owner sees it, and the bridge stays off: the KDE
+    // devices talk to that program.
+    let moved = control_port != config.control_port;
+    if moved {
+        tracing::warn!(
+            "TCP {} is held by another program (KDE Connect or GSConnect?); phones reach this computer on {control_port}, and KDE Connect devices are left to that program",
+            config.control_port
+        );
+    }
+    if let Ok(dir) = crate::state::state_dir() {
+        let listening = pocketdesk_core::local::listening::Listening {
+            pid: std::process::id(),
+            control_port,
+            configured_port: config.control_port,
+        };
+        if let Err(e) = pocketdesk_core::local::listening::write(&dir, &listening) {
+            tracing::warn!("Could not record the control port: {e}");
+        }
+    }
 
     // Announced only now that the control port answers: a phone checks it
     // before listing this computer.
@@ -224,10 +253,11 @@ pub async fn run(config: Config) -> Result<()> {
     let _ = state::screen_grant();
     // KDE Connect devices (3a): told where this computer is while the app
     // looks for them.
-    crate::kdeconnect_compat::configure(config.kdeconnect_compat);
-    if config.kdeconnect_compat {
+    let kdeconnect = config.kdeconnect_compat && !moved;
+    crate::kdeconnect_compat::configure(kdeconnect);
+    if kdeconnect {
         tokio::spawn(crate::kdeconnect_compat::discovery::run(
-            config.control_port,
+            control_port,
             config.lan_discovery,
         ));
         tokio::spawn(crate::kdeconnect_compat::run_requests());
@@ -240,7 +270,7 @@ pub async fn run(config: Config) -> Result<()> {
         Some(lan_discovery.register_service(
             &host_name,
             &host_id,
-            config.control_port,
+            control_port,
             config.streaming_port,
             local_ips,
         )?)
@@ -991,6 +1021,28 @@ fn note_claimed_name(device_id: &str, claimed: Option<&str>) {
     };
     let id = device_id.to_string();
     tokio::task::spawn_blocking(move || crate::plugins::pair::note_claimed_name(&id, &name));
+}
+
+/// Bind the control port, or the next free one when another program holds
+/// it (T1: KDE Connect and GSConnect take 1716). Only a port in use (or, on
+/// Windows, one it keeps for Hyper-V or WinNAT, which refuses with access
+/// denied) moves it on; any other error is the server's to report.
+async fn bind_control(
+    host: &str,
+    configured: u16,
+) -> std::io::Result<(tokio::net::TcpListener, u16)> {
+    let mut last = None;
+    for port in pocketdesk_core::local::listening::ports_to_try(configured) {
+        match tokio::net::TcpListener::bind((host, port)).await {
+            Ok(listener) => return Ok((listener, port)),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => last = Some(e),
+            Err(e) if cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                last = Some(e)
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("no port to try")))
 }
 
 /// Send a peer the desktop state it should not have to wait for: the Workspace
@@ -1894,6 +1946,21 @@ impl Drop for PidFileGuard {
 mod control_tls_tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    /// T1: another program on the control port moves the server to the
+    /// next free one; a free port is taken as configured.
+    #[tokio::test]
+    async fn the_control_port_moves_on_when_another_program_holds_it() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = held.local_addr().unwrap().port();
+        let (_listener, bound) = bind_control("127.0.0.1", port).await.unwrap();
+        assert_ne!(bound, port, "held: moved on");
+        let last = port.saturating_add(pocketdesk_core::local::listening::TRIES - 1);
+        assert!(bound > port && bound <= last, "{bound} past {port}");
+        drop(held);
+        let (_again, bound) = bind_control("127.0.0.1", port).await.unwrap();
+        assert_eq!(bound, port, "free again: taken as configured");
+    }
 
     /// A control port on loopback, served by the real connection handler.
     async fn control_port() -> std::net::SocketAddr {

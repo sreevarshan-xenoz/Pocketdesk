@@ -1159,7 +1159,16 @@ impl PocketdeskApp {
                 ui.end_row();
                 if let Some(config) = &self.config {
                     ui.label("Control port");
-                    ui.label(format!("TCP {}", config.control_port));
+                    let port = self.snapshot.control_port(config.control_port);
+                    if port == config.control_port {
+                        ui.label(format!("TCP {port}"));
+                    } else {
+                        // T1: another program holds the configured one.
+                        ui.label(format!(
+                            "TCP {port} (TCP {} is held by another program)",
+                            config.control_port
+                        ));
+                    }
                     ui.end_row();
                     ui.label("Streaming port");
                     ui.label(format!("UDP {}", config.streaming_port));

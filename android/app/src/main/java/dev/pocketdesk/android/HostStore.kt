@@ -137,6 +137,18 @@ object HostStore {
         return true
     }
 
+    /**
+     * T1: the saved computer at [address] answers on another control port
+     * now (it proved its pinned key there): its card takes it, in its place.
+     * Nothing happens when it is not saved.
+     */
+    fun setControlPort(ctx: Context, address: String, controlPort: Int): Boolean {
+        val list = hosts(ctx)
+        if (list.none { it.address == address }) return false
+        writeHosts(ctx, list.map { if (it.address == address) it.copy(controlPort = controlPort) else it })
+        return true
+    }
+
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
     private const val KEY_PLAYER_PREFIX = "computer_player:"
