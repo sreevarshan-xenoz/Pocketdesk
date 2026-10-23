@@ -62,6 +62,11 @@ Both apps had a design pass over what is new. It updates 0.5.0 in place (same si
 - **`tel:` links** on the computer open the call on the phone, and a call's notification has Call back.
 - **Links by site:** a site's links open in the browser, are only shown, or go to a program you name.
 
+**On Linux**
+- **Lock when the phone leaves** works on Linux too, with the keyboard's and mouse's idle time from GNOME, KDE on X11, or `xprintidle` on X11.
+- **The clipboard key and the typing key** work on Linux through the desktop's GlobalShortcuts portal (KDE Plasma 6, GNOME 48 and later, Hyprland), which asks once.
+- **The Overview** says when presenting, a full-screen app or Do Not Disturb is holding the phones' notifications, with Change it.
+
 **The desktop app**
 - **Permission profiles:** save a phone's permissions under a name, apply one to a phone (it asks first), or pair a phone with one.
 - **A design pass** over the O and P pages: words, questions before what cannot be undone, empty and waiting states, screen-reader names.
@@ -69,12 +74,19 @@ Both apps had a design pass over what is new. It updates 0.5.0 in place (same si
 **The phone app**
 - **Find a setting** with search.
 - **A design pass** over the new rows, with their permissions asked for and refusals said.
-- **Its switches** for alarms, contacts, apps, tasks and images are told to the computer, so the Devices page can say why an ask got no answer.
+- **Its switches** for alarms, contacts, apps, tasks, images, typing and copies are told to the computer, so the Devices page can say why an ask got no answer.
+- **Spanish** says "equipo" for the computer everywhere, as Windows does.
+
+**Fixed after checking on a phone**
+- **The alarm volume:** after a ring, the phone could set its alarm volume every two seconds, forever, when the volume it had saved was lower than Android lets an app set. It now puts the volume back once, never lower than allowed, and leaves one you changed since.
+- **A file the app lost:** a file sent from the computer while the phone's app was closed mid-download is offered again when the phone comes back, and continues where it stopped.
+- **Saying why:** a session the computer ended (unpaired, or its video encoder gave up) no longer reads as a dropped connection, and a send refused because files over the internet are off says so.
+- **Home:** the battery card's Allow button no longer runs off the card, and Home opens at its top with its cards in view.
 
 ### Not yet checked on a device
 
 These work in tests, and many were checked on an OPPO phone against Windows, but not yet:
-- **Linux:** GNOME's and KDE's Do Not Disturb, an alarm's sound, files copied on X11, and most of this release's features by hand.
+- **Linux:** GNOME's and KDE's Do Not Disturb, an alarm's sound, files copied on X11, the away lock and the portal's keys on a real desktop, and most of this release's features by hand.
 - **By hand at the computer:** the new desktop pages and questions, the typing window, the Overview's buttons.
 - **A phone with a SIM:** calls, Call back and `tel:` links reaching a call.
 - **Other apps and systems:** Tasker itself, Home Assistant, a password manager's copies, Android 17.
