@@ -2687,6 +2687,12 @@ Built 2026-10-23. Unit-tested: the store (saved, replaced, removed, a broken fil
 Owed:
 - [ ] Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
 - [ ] Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
+## 202. A ring that vibrates and flashes (P11)
+
+Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern.
+Owed:
+- [ ] On the OPPO: a ring from the computer shakes and blinks the torch, both stopping with Stop, a dismiss and the 30 seconds.
+- [ ] Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
 
 ## Recording results
 

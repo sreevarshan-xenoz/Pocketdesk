@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-929 open items.
+931 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 555 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 556 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 29 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 11 |
 | A Linux desktop (the Azure VM serves for some) | 116 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 90 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 91 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1134,6 +1134,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings box by hand: its warning for a bad line, a .bat refused.## 201. Permission profiles (P9)
 - Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
+
+**202. A ring that vibrates and flashes (P11)**
+
+- On the OPPO: a ring from the computer shakes and blinks the torch, both stopping with Stop, a dismiss and the 30 seconds.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2360,3 +2364,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **200. Links by site (P8)**
 
 - Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
+
+**202. A ring that vibrates and flashes (P11)**
+
+- Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
