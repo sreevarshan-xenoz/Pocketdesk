@@ -6,6 +6,16 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **Q2, the desktop's design pass on what O and P added (branch `feat/desktop-design-op`).** An audit of the O and P pages against the U1, U5 and E5 rules (31 findings: 7 Important, 24 Minor), fixed in seven groups:
+  - **Words:** a profile's permissions by their Devices labels; Phone actions names opening apps; Texts says it covers the contacts and forgets them when off; switches quoted as they read; Open names the app.
+  - **Profiles:** Apply asks first, saying what it turns off and whether the session ends (`model::profile_turns_off`, tested; a harness test applies one); "Remove a profile…" (none could be removed); an unreadable file said; Save needs a name.
+  - **The phone's own switch:** a line under the Overview's buttons when its last report says screenshots and lock are off.
+  - **Files:** a link's notice names its phone; "And 2 more…" says who; Paste copied files shows that it is reading.
+  - **Settings:** unread link rules, words and quiet hours keep Save off (tested); one system's rows not drawn on the other; the presenting switch under Quiet hours.
+  - **Contacts and apps:** "Asking…", the empty list said, Copied., screen-reader names per row, Ask again, the box brought into view.
+  - **The Overview:** quiet hours in a group with Change quiet hours.
+
+  Fresh review (0 Critical, 1 Important, 4 Minor), fixed: the paste's spinner outliving the read; plus the question naming AwayLock where Apply leaves it, an hours-old "No answer", the Android line's words, doc comments. Left for Q3: the phone reporting its apps, contacts and alarms switches. Owed: the pages by hand, the snapshots redrawn by CI.
 - 2026-10-23: **Q1, the P cycle's device checks by script (branch `feat/device-checks-op`).** `scripts/device_checks.py` gains nine checks against its throwaway server:
   - `p2-apps`: the apps listed, Settings opened or offered, by the phone's own word;
   - `p3-presenting` and `p3-hours`: through the presenting seam and the config changed while it runs, then put back;
