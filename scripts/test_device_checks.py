@@ -103,6 +103,53 @@ class PureParts(unittest.TestCase):
         self.assertEqual(dc.control_port("control_port = 1726\nstreaming_port = 4726\n"), 1726)
         self.assertEqual(dc.control_port(""), 1716)
 
+    def test_config_keys_set_at_the_top(self):
+        toml = (
+            'control_port = 1726\nhold_words = [\n  "a",\n  "b",\n]\nquiet_hours = false\n'
+            "[hooks]\nquiet_hours = 1\n"
+        )
+        got = dc.with_config(toml, {"quiet_hours": "true", "hold_words": '["p4"]'})
+        self.assertTrue(got.startswith('quiet_hours = true\nhold_words = ["p4"]\ncontrol_port = 1726\n'), got)
+        self.assertNotIn('"a"', got)
+        # A key under a table is another key.
+        self.assertIn("[hooks]\nquiet_hours = 1\n", got)
+        self.assertEqual(dc.control_port(got), 1726)
+
+    def test_config_arrays_end_at_their_own_line(self):
+        # A `]` in a string ends nothing; a kept array's lines are not tables.
+        toml = (
+            'hold_words = [\n  "Signal: [promo]",\n  "x",\n]\n'
+            'deck = [\n  [1, 2],\n]\nquiet_hours = false\n'
+        )
+        got = dc.with_config(toml, {"hold_words": '["p4"]', "quiet_hours": "true"})
+        self.assertEqual(got, 'hold_words = ["p4"]\nquiet_hours = true\ndeck = [\n  [1, 2],\n]\n')
+        # One on a line, or begun on its key's line.
+        got = dc.with_config('hold_words = ["a"]\nquiet_days = ["mon",\n "tue",\n]\nx = 1\n', {"quiet_days": "[]"})
+        self.assertEqual(got, 'quiet_days = []\nhold_words = ["a"]\nx = 1\n')
+
+    def test_pocketdesk_s_alarm_vibrations(self):
+        dump = (
+            "  Previous vibrations for usage ALARM:\n"
+            "    createTime: 10-22 22:22:00.475, startTime: 10-22 22:22:00.477, durationMs: 77050, "
+            "status: cancelled_by_user, callerInfo: CallerInfo{ attrs=VibrationAttributes: Usage=ALARM "
+            "uid=1, opPkg=com.coloros.alarmclock, reason=null}\n"
+            "    createTime: 10-23 14:39:06.370, startTime: 10-23 14:39:06.376, durationMs: 30009, "
+            "status: cancelled_by_user, callerInfo: CallerInfo{ attrs=VibrationAttributes: Usage=ALARM "
+            "uid=2, opPkg=dev.pocketdesk.android, reason=null}\n"
+        )
+        self.assertEqual(dc.alarm_vibrations(dump, "dev.pocketdesk.android"), [("10-23 14:39:06", 30009)])
+
+    def test_torch_turns_since_a_time(self):
+        dump = (
+            "  10-23 14:39:36 : Torch for camera id 0 turned off for client PID 1\n"
+            "  10-23 14:39:35 : Torch for camera id 0 turned on for client PID 1\n"
+            "  10-23 14:39:05 : Torch for camera id 0 turned on for client PID 1\n"
+        )
+        self.assertEqual(
+            dc.torch_turns(dump, "10-23 14:39:06"),
+            [("10-23 14:39:35", "on"), ("10-23 14:39:36", "off")],
+        )
+
     def test_every_check_names_a_checklist_section(self):
         for cid, (section, _) in dc.CHECKS.items():
             self.assertRegex(section, r"^§\d+$", cid)

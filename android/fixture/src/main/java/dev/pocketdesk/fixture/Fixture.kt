@@ -84,7 +84,7 @@ class CopyActivity : Activity() {
 /**
  * Posts or cancels a notification on an adb broadcast:
  * `am broadcast -n dev.pocketdesk.fixture/.NotifyReceiver -a dev.pocketdesk.fixture.NOTIFY
- *  --ei id N --es title … --es text … [--es style chat|progress] [--ei progress P]`,
+ *  --ei id N --es title … --es text … [--es style chat|progress|alarm] [--ei progress P]`,
  * and `-a dev.pocketdesk.fixture.CANCEL --ei id N`.
  */
 class NotifyReceiver : BroadcastReceiver() {
@@ -132,6 +132,8 @@ class NotifyReceiver : BroadcastReceiver() {
                 builder.addAction(Notification.Action.Builder(null, "Mark as read", answer(context, id, "read")).build())
             }
             "progress" -> builder.setOngoing(true).setProgress(100, intent.getIntExtra("progress", 0), false)
+            // P5: a ringing alarm, as a clock app marks one.
+            "alarm" -> builder.setCategory(Notification.CATEGORY_ALARM).setOngoing(true)
         }
         manager.notify(id, builder.build())
         Log.i(TAG, "posted $id")
