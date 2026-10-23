@@ -1873,7 +1873,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **118. Lock when the phone leaves (D9)**
 
-- A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.
+- A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
 
 **119. Memory at rest (D7)**
 
