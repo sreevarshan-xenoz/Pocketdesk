@@ -116,7 +116,8 @@ pub struct MessagesView {
     notice: Option<crate::notice::Notice>,
     /// P10: the contacts' search, and the lists as last read.
     contacts_query: String,
-    contacts: std::collections::BTreeMap<String, pocketdesk_core::local::phone_contacts::ContactList>,
+    contacts:
+        std::collections::BTreeMap<String, pocketdesk_core::local::phone_contacts::ContactList>,
     /// When the phone was asked for its contacts, to say when no list came.
     contacts_asked: Option<(String, u64)>,
 }
@@ -344,7 +345,12 @@ pub fn contacts_shown<'a>(
         .iter()
         .filter(|c| {
             let text = format!("{} {}", c.name, c.numbers.join(" ")).to_lowercase();
-            let digits: String = c.numbers.join(" ").chars().filter(|ch| ch.is_ascii_digit()).collect();
+            let digits: String = c
+                .numbers
+                .join(" ")
+                .chars()
+                .filter(|ch| ch.is_ascii_digit())
+                .collect();
             words.iter().all(|w| {
                 text.contains(w.as_str())
                     || (w.chars().all(|ch| ch.is_ascii_digit()) && digits.contains(w.as_str()))
@@ -362,7 +368,11 @@ impl MessagesView {
         let list = self.contacts.get(phone);
         pane.horizontal_wrapped(|ui| {
             if ui
-                .button(if list.is_some() { "Ask again" } else { "Ask the phone for its contacts" })
+                .button(if list.is_some() {
+                    "Ask again"
+                } else {
+                    "Ask the phone for its contacts"
+                })
                 .on_hover_text("Names and numbers only, kept on this computer")
                 .clicked()
             {
@@ -386,7 +396,7 @@ impl MessagesView {
                     RichText::new(format!(
                         "{} contacts, {}",
                         list.contacts.len(),
-                        crate::words::ago(now_unix.saturating_sub(list.at))
+                        crate::words::ago(now_unix, list.at)
                     ))
                     .color(muted),
                 );
@@ -472,13 +482,23 @@ mod tests {
     fn contacts_are_found_by_name_or_number() {
         use pocketdesk_core::protocol::phone_action::PhoneContact;
         let contacts = vec![
-            PhoneContact { name: "Ann Lee".into(), numbers: vec!["+1 555-0100".into()] },
-            PhoneContact { name: "Bo".into(), numbers: vec!["5550199".into()] },
+            PhoneContact {
+                name: "Ann Lee".into(),
+                numbers: vec!["+1 555-0100".into()],
+            },
+            PhoneContact {
+                name: "Bo".into(),
+                numbers: vec!["5550199".into()],
+            },
         ];
         assert_eq!(contacts_shown(&contacts, "").len(), 2);
         assert_eq!(contacts_shown(&contacts, "ann")[0].name, "Ann Lee");
         assert_eq!(contacts_shown(&contacts, "lee ann").len(), 1);
-        assert_eq!(contacts_shown(&contacts, "5550100")[0].name, "Ann Lee", "digits across spaces and dashes");
+        assert_eq!(
+            contacts_shown(&contacts, "5550100")[0].name,
+            "Ann Lee",
+            "digits across spaces and dashes"
+        );
         assert!(contacts_shown(&contacts, "zed").is_empty());
     }
 

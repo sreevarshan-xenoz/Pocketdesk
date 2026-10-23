@@ -55,6 +55,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.pair` | yes | yes | none (any phone: pairing) | pair |
 | `kdeconnect.pocketdesk.phone_action` |  | yes |  | links |
 | `kdeconnect.pocketdesk.phone_apps` | yes |  | PhoneActions | phone_apps |
+| `kdeconnect.pocketdesk.phone_contacts` | yes |  | Texts | phone_contacts |
 | `kdeconnect.pocketdesk.phone_files.fetch` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.list` |  | yes |  | phone_files |
 | `kdeconnect.pocketdesk.phone_files.listing` | yes |  | Files | phone_files |

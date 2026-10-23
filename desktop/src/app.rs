@@ -1385,6 +1385,7 @@ impl PocketdeskApp {
                     PhoneAction::Lock => format!("Asked {who} to lock its screen."),
                     PhoneAction::Apps => format!("Asked {who} for its apps."),
                     PhoneAction::Open => format!("Asked {who} to open an app."),
+                    PhoneAction::Contacts => format!("Asked {who} for its contacts."),
                 }),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
