@@ -1137,7 +1137,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **202. A ring that vibrates and flashes (P11)**
 
-- On the OPPO: a ring from the computer shakes and blinks the torch, both stopping with Stop, a dismiss and the 30 seconds.
+- Stop and a dismiss ending both at once.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
