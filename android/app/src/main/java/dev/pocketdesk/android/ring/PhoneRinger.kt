@@ -36,7 +36,13 @@ import dev.pocketdesk.android.notify.PhoneLink
  */
 object PhoneRinger {
     private const val TAG = "PhoneRinger"
-    private const val CHANNEL = "ring_from_computer"
+    /**
+     * The ring's channel. A channel's vibration cannot change once made, so
+     * P11's has none, the switch driving it ([vibrate]); the first one,
+     * which vibrated, is retired (P11 review).
+     */
+    private const val CHANNEL = "ring_from_computer_2"
+    private const val OLD_CHANNEL = "ring_from_computer"
     private const val NOTIFICATION_ID = 7301
     const val RING_MS = 30_000L
 
@@ -101,9 +107,14 @@ object PhoneRinger {
             playTone(app)
         }
         main.removeCallbacksAndMessages(null)
-        // P11: it shakes and flashes while it sounds, each as Settings say.
-        if (Prefs.ringVibrates(app)) vibrate(app)
-        if (Prefs.ringFlashes(app)) flash(app, SystemClock.elapsedRealtime())
+        // P11: it shakes and flashes while it sounds, each as Settings say;
+        // a ring before it with a switch on since turned off stops shaking
+        // or flashing (P11 review).
+        if (Prefs.ringVibrates(app)) vibrate(app) else runCatching { vibrator(app)?.cancel() }
+        val startedAt = SystemClock.elapsedRealtime()
+        // On the main thread, as its stop is (P11 review: a tick's thread
+        // could set the torch between a stop's two steps).
+        main.post { if (Prefs.ringFlashes(app)) flash(app, startedAt) else torchOff(app) }
         main.postDelayed({ stopSound(app) }, RING_MS)
     }
 
@@ -164,7 +175,12 @@ object PhoneRinger {
         val ok = runCatching { camera.setTorchMode(id, RingPattern.torchOn(elapsed)) }
             .onFailure { Log.w(TAG, "could not flash the torch", it) }
             .isSuccess
-        if (!ok) return
+        if (!ok) {
+            // A camera holds it now: tried again in a second, while it
+            // rings (P11 review: it never came back).
+            main.postDelayed({ flash(ctx, startedAt) }, TORCH_RETRY_MS)
+            return
+        }
         torchId = id
         main.postDelayed({ flash(ctx, startedAt) }, RingPattern.nextTorchChangeMs(elapsed))
     }
@@ -220,7 +236,12 @@ object PhoneRinger {
         restoreVolume(ctx)
     }
 
+    private const val TORCH_RETRY_MS = 1_000L
+
     private fun ensureChannel(ctx: Context, manager: NotificationManager) {
+        if (manager.getNotificationChannel(OLD_CHANNEL) != null) {
+            runCatching { manager.deleteNotificationChannel(OLD_CHANNEL) }
+        }
         if (manager.getNotificationChannel(CHANNEL) != null) return
         val sound = alarmSound(ctx)
         val channel = NotificationChannel(
@@ -236,7 +257,8 @@ object PhoneRinger {
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
-            enableVibration(true)
+            // Shaken by the switch, not the channel (P11 review).
+            enableVibration(false)
             // Heard through Do Not Disturb where the owner lets the app do so.
             setBypassDnd(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC

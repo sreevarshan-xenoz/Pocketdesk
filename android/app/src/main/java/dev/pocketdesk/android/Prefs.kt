@@ -450,6 +450,7 @@ object Prefs {
 
     fun setRingVibrates(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean("ring_vibrates", enabled) }
+        bump()
     }
 
     /** P11: a ring from the computer blinks the torch too. On. */
@@ -457,6 +458,7 @@ object Prefs {
 
     fun setRingFlashes(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean("ring_flashes", enabled) }
+        bump()
     }
 
     /** Whether the computer may ring this phone to find it (N1); keeps the background link. Off by default. */
