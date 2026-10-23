@@ -911,6 +911,8 @@ impl PocketdeskApp {
         // Its keys go too, so the phone can pair again (perhaps reinstalled,
         // with new keys) and bind them.
         let _ = pocketdesk_core::local::device_keys::clear(&self.state_dir, id);
+        // Its contacts go with it (P10).
+        let _ = pocketdesk_core::local::phone_contacts::forget(&self.state_dir, id);
         self.notice = crate::notice::Notice::outcome(match result {
             Ok(()) => Ok(format!("Unpaired {who}: it must pair again to connect.")),
             Err(e) => Err(format!("Could not unpair {who}: {e}")),
@@ -975,6 +977,10 @@ impl PocketdeskApp {
     }
 
     fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
+        // P10: a phone's contacts go with its texts.
+        if capability == Capability::Texts && !allowed {
+            let _ = pocketdesk_core::local::phone_contacts::forget(&self.state_dir, id);
+        }
         match model::set_permission(&self.state_dir, id, capability, allowed) {
             Ok(()) if !allowed && model::fixed_at_session_start(capability) => {
                 self.end_sessions_of(id);

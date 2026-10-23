@@ -66,14 +66,14 @@ object PhoneActions {
      * This phone's contacts with a number (P10): the name each shows by,
      * and its numbers, each once, five at most; nothing else of them.
      */
-    private fun contacts(context: Context): JSONObject {
+    private fun contacts(context: Context): JSONObject? {
         val byName = LinkedHashMap<String, MutableList<String>>()
         val phone = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
         val projection = arrayOf(
             android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
         )
-        runCatching {
+        val read = runCatching {
             context.contentResolver.query(
                 phone,
                 projection,
@@ -93,6 +93,9 @@ object PhoneActions {
                 }
             }
         }.onFailure { Log.w(TAG, "could not read the contacts", it) }
+        // None sent when they could not be read (P10 review: an empty list
+        // would replace the computer's good one).
+        if (read.isFailure) return null
         val list = JSONArray()
         for ((name, numbers) in byName) {
             list.put(JSONObject().put("name", name).put("numbers", JSONArray(numbers)))
@@ -199,11 +202,12 @@ object PhoneActions {
                 val app = context.applicationContext
                 Thread {
                     try {
+                        val body = contacts(app) ?: return@Thread
                         val sent = RustCore.sendPhonePacketOnLink(
                             own.address,
                             own.controlPort,
                             PHONE_CONTACTS,
-                            contacts(app).toString(),
+                            body.toString(),
                         ).isSuccess
                         Log.i(TAG, if (sent) "the contacts were listed for the computer" else "the contacts could not be sent")
                     } finally {

@@ -111,7 +111,8 @@ object HealthCheck {
             receiveSms = granted(Manifest.permission.RECEIVE_SMS),
             textsReply = TextPrefs.reply(ctx),
             sendSms = granted(Manifest.permission.SEND_SMS),
-            contactNames = TextPrefs.names(ctx),
+            // P10: the contacts to the computer need the permission too.
+            contactNames = TextPrefs.names(ctx) || TextPrefs.contactsToComputer(ctx),
             readContacts = granted(Manifest.permission.READ_CONTACTS),
             photoFeatures = ScreenshotPrefs.on(ctx) || RecentPhotoPrefs.on(ctx),
             photoAccess = ScreenshotPrefs.granted(ctx),

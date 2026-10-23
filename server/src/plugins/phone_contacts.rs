@@ -12,6 +12,22 @@ use pocketdesk_core::protocol::phone_action::{PHONE_CONTACTS, parse_contacts};
 #[derive(Debug, Default)]
 pub struct PhoneContactsPlugin;
 
+/// Forget the lists of phones no longer paired or with Texts off (P10
+/// review: they outlived both). Run at the server's start.
+pub fn prune() {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let lists = pocketdesk_core::local::phone_contacts::read(&dir);
+    for id in lists.keys() {
+        if !crate::plugins::pair::allows(id, Capability::Texts)
+            && let Err(e) = pocketdesk_core::local::phone_contacts::forget(&dir, id)
+        {
+            tracing::warn!("A phone's contacts could not be forgotten: {e}");
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for PhoneContactsPlugin {
     fn name(&self) -> &'static str {

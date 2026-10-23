@@ -1256,8 +1256,11 @@ pub async fn send_phone_packet_on_link(
     body: String,
 ) -> Result<(), String> {
     let packet = phone_packet(packet_type, &body)?;
+    // A few seconds, and one more for each 50 kB (P10 review: a long list
+    // of contacts cut mid-write would leave half a line on the link).
+    let secs = 3 + (body.len() as u64 / 50_000).min(57);
     tokio::time::timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(secs),
         send_on_live(&address, port, &packet),
     )
     .await
