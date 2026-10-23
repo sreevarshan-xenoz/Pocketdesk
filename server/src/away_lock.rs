@@ -3,8 +3,10 @@
 //! a control link. Once every such phone that was present has been gone
 //! for `away_lock_minutes`, and nobody has touched the keyboard or mouse
 //! for that long, the computer locks: once per departure. Where the
-//! computer cannot say how long it has been idle (Linux, for now), it never
-//! locks: a phone whose network sleeps must not lock the owner out mid-work.
+//! computer cannot say how long it has been idle (a wlroots desktop, a
+//! session without GNOME, KDE on X11 or `xprintidle`), it never locks: a phone
+//! whose network sleeps must not lock the owner out mid-work. On Linux the
+//! idle time comes from GNOME, KDE or X11 (R3).
 //! With `POCKETDESK_LOCK_FILE` set to an absolute path, the lock is a line
 //! in that file instead (tests, and checks on a computer that must not
 //! lock).
@@ -35,6 +37,29 @@ pub struct AwayLock {
 }
 
 impl AwayLock {
+    /// Whether [`tick`](Self::tick) at `now` could lock, so the idle time
+    /// is worth asking (R3 review: on Linux that is other programs, and
+    /// every 5 s with nobody using the switch undid R6's idle cuts).
+    pub fn wants_idle(
+        &self,
+        now: u64,
+        switched: &[String],
+        present: &[String],
+        after_secs: u64,
+    ) -> bool {
+        if !self.armed || present.iter().any(|p| switched.contains(p)) {
+            return false;
+        }
+        let last = self
+            .seen
+            .iter()
+            .filter(|(phone, _)| switched.contains(phone))
+            .map(|(_, at)| *at)
+            .max();
+        last.is_some_and(|last| now.saturating_sub(last) >= after_secs)
+            && self.retry_at.is_none_or(|at| now >= at)
+    }
+
     /// One look at `now` (seconds): `switched` phones have the switch on,
     /// `present` those with a link now; `idle_secs` how long the keyboard
     /// and mouse were quiet (`None` when unknown, which never locks). The
@@ -110,7 +135,109 @@ fn quiet_ms(now: u32, last_input: u32) -> u64 {
     u64::try_from((now.wrapping_sub(last_input) as i32).max(0)).unwrap_or(0)
 }
 
-#[cfg(not(windows))]
+/// R3: on Linux, from GNOME's idle monitor, KDE's screen saver or X11's
+/// `xprintidle`, each given a second; none of them, none.
+#[cfg(target_os = "linux")]
+pub(crate) fn idle_secs() -> Option<u64> {
+    const ASKS: [(&str, &[&str]); 2] = [
+        (
+            "gdbus",
+            &[
+                "call",
+                "--session",
+                "--dest",
+                "org.gnome.Mutter.IdleMonitor",
+                "--object-path",
+                "/org/gnome/Mutter/IdleMonitor/Core",
+                "--method",
+                "org.gnome.Mutter.IdleMonitor.GetIdletime",
+            ],
+        ),
+        (
+            "gdbus",
+            &[
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.ScreenSaver",
+                "--object-path",
+                "/org/freedesktop/ScreenSaver",
+                "--method",
+                "org.freedesktop.ScreenSaver.GetSessionIdleTime",
+            ],
+        ),
+    ];
+    for (program, args) in ASKS {
+        if let Some(ms) = output_within(program, args).and_then(|out| first_number(&out)) {
+            return Some(ms / 1000);
+        }
+    }
+    // Never under Wayland, where XWayland sees only X clients' input (R3
+    // review: a service that kept DISPLAY alone would read the owner idle).
+    let x11 = std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
+        && std::env::var_os("WAYLAND_DISPLAY").is_none_or(|d| d.is_empty())
+        && std::env::var("XDG_SESSION_TYPE").map_or(true, |t| t != "wayland");
+    if x11 {
+        return output_within("xprintidle", &[])
+            .and_then(|out| first_number(&out))
+            .map(|ms| ms / 1000);
+    }
+    None
+}
+
+/// The first whole number in a tool's answer: GNOME's `(uint64 12345,)`,
+/// KDE's `(uint32 12345,)`, `xprintidle`'s `12345`. All are read as
+/// milliseconds; where a screen saver answers in seconds, the idle time
+/// reads a thousand times shorter, so it never locks rather than too soon.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn first_number(out: &str) -> Option<u64> {
+    let start = out.find(|c: char| c.is_ascii_digit())?;
+    let digits: String = out[start..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    // Past the type's own digits: `uint64 12345` reads 12345, not 64.
+    let rest = out[start + digits.len()..].trim_start();
+    if out[..start].ends_with("int") && rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        return first_number(rest);
+    }
+    digits.parse().ok()
+}
+
+/// A command's output, or none when it fails or takes over a second.
+#[cfg(target_os = "linux")]
+fn output_within(program: &str, args: &[&str]) -> Option<String> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = String::new();
+        let _ = stdout.read_to_string(&mut out);
+        out
+    });
+    let end = Instant::now() + Duration::from_secs(1);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return reader.join().ok(),
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if Instant::now() >= end => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn idle_secs() -> Option<u64> {
     None
 }
@@ -203,11 +330,18 @@ pub async fn run() {
             .iter()
             .map(|c| c.device_id().to_string())
             .collect();
+        // Off the runtime, and only when a lock could follow: on Linux it
+        // asks other programs (R3, R3 review).
+        let idle = if away.wants_idle(now, &last_switched, &present, u64::from(last_minutes) * 60) {
+            tokio::task::spawn_blocking(idle_secs).await.ok().flatten()
+        } else {
+            None
+        };
         let Some(phone) = away.tick(
             now,
             &last_switched,
             &present,
-            idle_secs(),
+            idle,
             u64::from(last_minutes) * 60,
         ) else {
             continue;
@@ -244,6 +378,38 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R3 review: the idle time is asked only once a lock could follow.
+    #[test]
+    fn the_idle_time_is_asked_only_when_a_lock_could_follow() {
+        let phones = vec!["p".to_string()];
+        let mut away = AwayLock::default();
+        assert!(
+            !away.wants_idle(0, &phones, &[], 300),
+            "never seen: nothing to lock for"
+        );
+        away.tick(0, &phones, &phones, None, 300);
+        assert!(!away.wants_idle(10, &phones, &phones, 300), "present");
+        assert!(
+            !away.wants_idle(100, &phones, &[], 300),
+            "not gone long enough"
+        );
+        assert!(away.wants_idle(300, &phones, &[], 300), "gone its time");
+        assert!(!away.wants_idle(300, &[], &[], 300), "its switch off");
+    }
+
+    /// R3: GNOME's, KDE's and xprintidle's answers read as milliseconds.
+    #[test]
+    fn the_idle_answers_are_read() {
+        assert_eq!(first_number("(uint64 12345,)\n"), Some(12345));
+        assert_eq!(first_number("(uint32 900,)"), Some(900));
+        assert_eq!(first_number("(int32 5,)"), Some(5));
+        assert_eq!(first_number("67890\n"), Some(67890));
+        assert_eq!(
+            first_number("Error: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown"),
+            None
+        );
+    }
 
     fn ids(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| n.to_string()).collect()

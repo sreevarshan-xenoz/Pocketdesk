@@ -195,7 +195,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::AwayLock,
         "Lock this computer when this phone leaves",
-        "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
+        "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. On Linux it reads the keyboard's idle time from GNOME, KDE on X11 or X11 (xprintidle), and never locks on a desktop that does not say it (Sway, Hyprland, Plasma on Wayland).",
     ),
 ];
 
@@ -228,8 +228,9 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
 /// here, if it cannot: this computer cannot tell yet whether someone is at
 /// it (E5).
 fn away_lock_unavailable() -> Option<&'static str> {
-    (!cfg!(windows))
-        .then_some("Linux cannot tell yet whether someone is at the keyboard, so it never locks.")
+    // R3: Linux reads the keyboard's idle time from GNOME, KDE or X11.
+    (!cfg!(any(windows, target_os = "linux")))
+        .then_some("This system cannot tell whether someone is at the keyboard, so it never locks.")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3959,7 +3960,10 @@ mod tests {
 
     #[test]
     fn the_away_lock_says_why_it_is_off_where_it_never_locks() {
-        assert_eq!(away_lock_unavailable().is_none(), cfg!(windows));
+        assert_eq!(
+            away_lock_unavailable().is_none(),
+            cfg!(any(windows, target_os = "linux"))
+        );
     }
 
     /// N6 review: Wayland lets no app hide its own window.

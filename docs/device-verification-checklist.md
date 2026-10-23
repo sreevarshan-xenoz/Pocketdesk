@@ -1893,7 +1893,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - Once per departure: still to see with the computer untouched throughout.
 - [ ] The phone back, and gone again: a second line; staying gone: no more.
 - [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
-- [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux, that it never locks.
+- [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
 - [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 
 ## 119. Memory at rest (D7)
