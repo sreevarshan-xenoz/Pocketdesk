@@ -157,7 +157,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **109. The owed checks by where they run (C6)**
 
-- The rest of "here", in later batches: the S cycle (`docs/research/2026-10-23-s-cycle.md`), S1 to S5.
+- The rest of "here": what the S cycle (S1 to S5, 2026-10-23 and 24) did not reach, mostly long transfer and battery runs.
 
 **118. Lock when the phone leaves (D9)**
 
