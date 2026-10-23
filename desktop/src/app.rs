@@ -1313,9 +1313,20 @@ impl PocketdeskApp {
             } else {
                 config.quiet_to.trim().to_string()
             };
-            ui.label(format!(
-                "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause. Change them in Settings."
-            ));
+            // In a group with its way out, as the pause is (Q2 review).
+            let mut open = false;
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!(
+                        "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause."
+                    ));
+                    open = ui.button("Change quiet hours").clicked();
+                });
+            });
+            if open {
+                self.switch_to(Tab::Settings);
+                self.chosen = Tab::Settings;
+            }
         }
         if let Some(minutes) = picked {
             self.pause(minutes);
