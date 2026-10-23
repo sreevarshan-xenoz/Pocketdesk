@@ -90,8 +90,16 @@ fn record_reply(id: &str, reply: &str) -> Result<()> {
 }
 
 /// Put the reply text on the desktop clipboard via wl-copy (Wayland) or
-/// xclip (X11). Best-effort: no clipboard tool, no clipboard.
+/// xclip (X11). Best-effort: no clipboard tool, no clipboard. With a
+/// clipboard stand-in set, the stand-ins take it, never this computer's own
+/// clipboard (S1 review).
 async fn copy_to_clipboard(text: &str) {
+    if crate::plugins::clipboard::stand_ins_set() {
+        if let Err(e) = crate::plugins::clipboard::set_clipboard(text).await {
+            tracing::debug!("Could not put the notification reply on the stand-in: {e}");
+        }
+        return;
+    }
     #[cfg(windows)]
     {
         let text = text.to_string();

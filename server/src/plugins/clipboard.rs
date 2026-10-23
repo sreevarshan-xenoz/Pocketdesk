@@ -367,7 +367,10 @@ fn other(e: impl std::fmt::Display) -> pocketdesk_core::error::PocketdeskError {
 
 /// A file that stands in for the clipboard (`POCKETDESK_CLIPBOARD_FILE`, an
 /// absolute path): for tests that run two servers on one machine, which
-/// share its real one (2g). The server warns at start when it is set.
+/// share its real one (2g), and throwaway servers beside the owner's. With
+/// it or [`image_stand_in`] set, the stand-ins are the whole clipboard and
+/// this computer's own is never read or written (S1). The server warns at
+/// start when it is set.
 pub(crate) fn stand_in() -> Option<std::path::PathBuf> {
     std::env::var_os("POCKETDESK_CLIPBOARD_FILE")
         .map(std::path::PathBuf::from)
@@ -384,17 +387,31 @@ pub(crate) fn image_stand_in() -> Option<std::path::PathBuf> {
         .filter(|path| path.is_absolute())
 }
 
+/// What the clipboard holds when a stand-in is set: the stand-ins are the
+/// whole clipboard then, and this computer's own is never read (S1: the
+/// text's alone had let a phone's ask read it). `None` with neither set.
+fn stand_ins_clip(text: Option<&std::path::Path>, image: Option<&std::path::Path>) -> Option<Clip> {
+    if text.is_none() && image.is_none() {
+        return None;
+    }
+    Some(stand_in_clip(text, image))
+}
+
 /// What the stand-ins hold: the text stand-in's text first, as a real
 /// clipboard's text wins (M3 review), else the image stand-in's PNG within
 /// N4's limit, kept for a phone's fetch, or nothing.
-fn stand_in_clip(path: &std::path::Path) -> Clip {
-    if let Some(text) = stand_in()
+fn stand_in_clip(text: Option<&std::path::Path>, image: Option<&std::path::Path>) -> Clip {
+    if let Some(text) = text
         .and_then(|text| std::fs::read_to_string(text).ok())
         .filter(|text| !text.is_empty())
     {
         forget_image();
         return Clip::Text(text);
     }
+    let Some(path) = image else {
+        forget_image();
+        return Clip::Empty;
+    };
     match std::fs::read(path) {
         Ok(png)
             if png.len() as u64 <= MAX_CLIPBOARD_IMAGE
@@ -561,17 +578,40 @@ async fn read_clipboard() -> Result<Clip> {
 
 /// Set the clipboard's text.
 pub(crate) async fn set_clipboard(content: &str) -> Result<()> {
-    // Text replaces an image, as on a real clipboard (M3 review).
-    if let Some(image) = image_stand_in() {
-        let _ = std::fs::remove_file(image);
-        forget_image();
-    }
-    if let Some(path) = stand_in() {
-        // Clipboard text: owner-only, as the real one is.
-        return pocketdesk_core::secure_fs::write_private(&path, content.as_bytes())
-            .map_err(|e| share::io_error("clipboard", e));
+    if let Some(done) =
+        set_stand_ins_text(stand_in().as_deref(), image_stand_in().as_deref(), content)
+    {
+        return done;
     }
     set_system_clipboard(content).await
+}
+
+/// Whether a stand-in is set, so the stand-ins are the whole clipboard.
+pub(crate) fn stand_ins_set() -> bool {
+    stand_in().is_some() || image_stand_in().is_some()
+}
+
+/// Put `content` on the stand-ins when either is set (`None` with neither):
+/// the text stand-in takes it, owner-only as the real clipboard is, and it
+/// replaces the image, as on a real clipboard (M3 review). With the image's
+/// alone the text goes nowhere: never onto this computer's own clipboard (S1).
+fn set_stand_ins_text(
+    text: Option<&std::path::Path>,
+    image: Option<&std::path::Path>,
+    content: &str,
+) -> Option<Result<()>> {
+    if text.is_none() && image.is_none() {
+        return None;
+    }
+    if let Some(image) = image {
+        let _ = std::fs::remove_file(image);
+    }
+    forget_image();
+    Some(match text {
+        Some(path) => pocketdesk_core::secure_fs::write_private(path, content.as_bytes())
+            .map_err(|e| share::io_error("clipboard", e)),
+        None => Ok(()),
+    })
 }
 
 /// [`read_text`] from the system's clipboard.
@@ -621,8 +661,8 @@ async fn set_system_clipboard(content: &str) -> Result<()> {
 #[cfg(windows)]
 async fn read_clipboard_unfiltered() -> Result<Clip> {
     use crate::platform::clipboard_windows as win;
-    if let Some(path) = image_stand_in() {
-        return Ok(stand_in_clip(&path));
+    if let Some(clip) = stand_ins_clip(stand_in().as_deref(), image_stand_in().as_deref()) {
+        return Ok(clip);
     }
     tokio::task::spawn_blocking(|| -> Result<Clip> {
         // A copy a password manager marked private goes to no phone that
@@ -672,11 +712,14 @@ async fn read_clipboard_unfiltered() -> Result<Clip> {
 
 /// Put `image` on the Win32 clipboard, and remember it at the sequence
 /// number that write made.
+/// With a stand-in set, the stand-ins take it instead ([`set_stand_ins_image`]).
 #[cfg(windows)]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     use crate::platform::clipboard_windows as win;
-    if let Some(path) = image_stand_in() {
-        return set_stand_in_image(&path, image);
+    if let Some(done) =
+        set_stand_ins_image(stand_in().as_deref(), image_stand_in().as_deref(), image)
+    {
+        return done;
     }
     let image = image.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
@@ -688,12 +731,35 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     .map_err(other)?
 }
 
-/// Write `image` to the image stand-in (M3), owner-only as the clipboard is.
-fn set_stand_in_image(path: &std::path::Path, image: &Arc<Image>) -> Result<()> {
-    pocketdesk_core::secure_fs::write_private(path, &image.png)
-        .map_err(|e| share::io_error("clipboard image", e))?;
-    remember(None, Some(image.clone()));
-    Ok(())
+/// Put `image` on the stand-ins when either is set (`None` with neither):
+/// the image stand-in takes it, owner-only as the clipboard is (M3), and it
+/// replaces the text stand-in's text, as on a real clipboard. With the
+/// text's alone the text is emptied and the image goes nowhere: never onto
+/// this computer's own clipboard (S1).
+fn set_stand_ins_image(
+    text: Option<&std::path::Path>,
+    image_path: Option<&std::path::Path>,
+    image: &Arc<Image>,
+) -> Option<Result<()>> {
+    if text.is_none() && image_path.is_none() {
+        return None;
+    }
+    Some((|| {
+        if let Some(path) = image_path {
+            pocketdesk_core::secure_fs::write_private(path, &image.png)
+                .map_err(|e| share::io_error("clipboard image", e))?;
+        }
+        if let Some(path) = text {
+            pocketdesk_core::secure_fs::write_private(path, b"")
+                .map_err(|e| share::io_error("clipboard", e))?;
+        }
+        if image_path.is_some() {
+            remember(None, Some(image.clone()));
+        } else {
+            forget_image();
+        }
+        Ok(())
+    })())
 }
 
 /// Set system clipboard using `wl-copy`.
@@ -753,8 +819,8 @@ async fn wl_paste(args: &[&str]) -> Result<Vec<u8>> {
 /// What the clipboard holds: text when it offers any, else a PNG.
 #[cfg(not(windows))]
 async fn read_clipboard_unfiltered() -> Result<Clip> {
-    if let Some(path) = image_stand_in() {
-        return Ok(stand_in_clip(&path));
+    if let Some(clip) = stand_ins_clip(stand_in().as_deref(), image_stand_in().as_deref()) {
+        return Ok(clip);
     }
     let Ok(types) = wl_paste(&["--list-types"]).await else {
         // An empty clipboard makes wl-paste fail.
@@ -786,10 +852,13 @@ async fn read_clipboard_unfiltered() -> Result<Clip> {
 }
 
 /// Put `image` on the clipboard with `wl-copy --type image/png`.
+/// With a stand-in set, the stand-ins take it instead ([`set_stand_ins_image`]).
 #[cfg(not(windows))]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
-    if let Some(path) = image_stand_in() {
-        return set_stand_in_image(&path, image);
+    if let Some(done) =
+        set_stand_ins_image(stand_in().as_deref(), image_stand_in().as_deref(), image)
+    {
+        return done;
     }
     wl_copy(Some("image/png"), &image.png).await?;
     remember(None, Some(image.clone()));
@@ -799,6 +868,9 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The image cache is one per process; the tests that read it take turns.
+    static CACHE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn a_pairing_link_is_told_from_other_text() {
@@ -858,13 +930,14 @@ mod tests {
     /// a fetch; anything else in it is no image.
     #[test]
     fn the_image_stand_in_is_the_clipboards_image() {
+        let _turn = CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("pd-clip-image-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("clip.png");
         let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
         png.extend_from_slice(b"rest of a picture");
         std::fs::write(&path, &png).unwrap();
-        let Clip::Image(image) = stand_in_clip(&path) else {
+        let Clip::Image(image) = stand_in_clip(None, Some(&path)) else {
             panic!("a PNG is the clipboard's image");
         };
         assert_eq!(image.id, Image::new(png.clone()).id);
@@ -875,7 +948,83 @@ mod tests {
         );
         drop(kept);
         std::fs::write(&path, b"not a picture").unwrap();
-        assert_eq!(stand_in_clip(&path), Clip::Empty);
+        assert_eq!(stand_in_clip(None, Some(&path)), Clip::Empty);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// S1: with either stand-in set, the stand-ins are the whole clipboard.
+    /// A throwaway server with the text's alone had answered a phone's ask
+    /// with this computer's real clipboard, and put a phone's image on it.
+    #[test]
+    fn either_stand_in_keeps_the_system_clipboard_out() {
+        let _turn = CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("pd-clip-stand-ins-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = dir.join("clip.txt");
+        let image = dir.join("clip.png");
+        assert_eq!(stand_ins_clip(None, None), None, "neither: the system's");
+
+        std::fs::write(&text, "from the stand-in").unwrap();
+        assert_eq!(
+            stand_ins_clip(Some(&text), None),
+            Some(Clip::Text("from the stand-in".into())),
+            "the text's alone is read"
+        );
+        std::fs::write(&text, "").unwrap();
+        assert_eq!(
+            stand_ins_clip(Some(&text), None),
+            Some(Clip::Empty),
+            "an empty text stand-in is an empty clipboard, not the system's"
+        );
+
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(b"a picture");
+        let picture = Arc::new(Image::new(png.clone()));
+        std::fs::write(&text, "older text").unwrap();
+        assert!(
+            set_stand_ins_image(Some(&text), Some(&image), &picture)
+                .expect("a stand-in is set")
+                .is_ok()
+        );
+        assert_eq!(std::fs::read(&image).unwrap(), png);
+        assert_eq!(
+            stand_ins_clip(Some(&text), Some(&image)),
+            Some(Clip::Image(picture.clone())),
+            "an image replaces the text, as on a real clipboard"
+        );
+
+        std::fs::write(&text, "text again").unwrap();
+        assert!(
+            set_stand_ins_image(Some(&text), None, &picture)
+                .expect("a stand-in is set")
+                .is_ok(),
+            "the text's alone takes an image without this computer's clipboard"
+        );
+        assert_eq!(stand_ins_clip(Some(&text), None), Some(Clip::Empty));
+        assert!(set_stand_ins_image(None, None, &picture).is_none());
+
+        // Text: onto the text's stand-in, replacing the image; with the
+        // image's alone, nowhere; with neither, the system's.
+        std::fs::write(&image, &png).unwrap();
+        assert!(
+            set_stand_ins_text(Some(&text), Some(&image), "new text")
+                .expect("a stand-in is set")
+                .is_ok()
+        );
+        assert!(!image.exists(), "text replaces the image");
+        assert_eq!(
+            stand_ins_clip(Some(&text), Some(&image)),
+            Some(Clip::Text("new text".into()))
+        );
+        std::fs::write(&image, &png).unwrap();
+        assert!(
+            set_stand_ins_text(None, Some(&image), "goes nowhere")
+                .expect("a stand-in is set")
+                .is_ok(),
+            "the image's alone takes text without this computer's clipboard"
+        );
+        assert_eq!(stand_ins_clip(None, Some(&image)), Some(Clip::Empty));
+        assert!(set_stand_ins_text(None, None, "x").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
