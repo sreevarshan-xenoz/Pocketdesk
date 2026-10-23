@@ -233,7 +233,7 @@ object PhoneRinger {
         // P11: the shaking and the torch with it.
         runCatching { vibrator(ctx)?.cancel() }
         torchOff(ctx)
-        restoreVolume(ctx)
+        restoreVolume(ctx, afterDeath = false)
     }
 
     private const val TORCH_RETRY_MS = 1_000L
@@ -270,6 +270,7 @@ object PhoneRinger {
     private fun saved(ctx: Context) = ctx.getSharedPreferences("pocketdesk-ring", Context.MODE_PRIVATE)
 
     private const val KEY_VOLUME_BEFORE = "alarm_volume_before"
+    private const val KEY_RESTORE_TRIES = "alarm_restore_tries"
 
     /** Whether a ring sounds now (in this process). */
     val ringing: Boolean
@@ -284,38 +285,66 @@ object PhoneRinger {
             if (volumeBefore == null) {
                 val before = audio.getStreamVolume(AudioManager.STREAM_ALARM)
                 volumeBefore = before
-                // A volume saved by a ring cut short stays the one to restore.
-                if (!saved(ctx).contains(KEY_VOLUME_BEFORE)) {
+                // A volume saved by a ring cut short stays the one to restore
+                // while that ring's raise stands; one the owner set since is
+                // the one now (S2 review).
+                val max = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                if (!saved(ctx).contains(KEY_VOLUME_BEFORE) || !AlarmRestore.keepsSaved(before, max)) {
                     // On disk before the volume goes up.
-                    saved(ctx).edit(commit = true) { putInt(KEY_VOLUME_BEFORE, before) }
+                    saved(ctx).edit(commit = true) {
+                        putInt(KEY_VOLUME_BEFORE, before)
+                        remove(KEY_RESTORE_TRIES)
+                    }
                 }
             }
             audio.setStreamVolume(AudioManager.STREAM_ALARM, audio.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         }
     }
 
-    private fun restoreVolume(ctx: Context) {
+    private fun restoreVolume(ctx: Context, afterDeath: Boolean) {
         val kept = saved(ctx).getInt(KEY_VOLUME_BEFORE, -1).takeIf { it >= 0 }
         val before = kept ?: volumeBefore ?: return
         volumeBefore = null
         val back = runCatching {
             val audio = ctx.getSystemService(AudioManager::class.java)
-            audio.setStreamVolume(AudioManager.STREAM_ALARM, before, 0)
-            audio.getStreamVolume(AudioManager.STREAM_ALARM) == before
+            val min = if (android.os.Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(AudioManager.STREAM_ALARM) else 0
+            val target = AlarmRestore.target(
+                before = before,
+                now = audio.getStreamVolume(AudioManager.STREAM_ALARM),
+                max = audio.getStreamMaxVolume(AudioManager.STREAM_ALARM),
+                min = min,
+                afterDeath = afterDeath,
+            )
+            // Changed since the ring: nothing of ours to put back.
+            target == null || run {
+                audio.setStreamVolume(AudioManager.STREAM_ALARM, target, 0)
+                audio.getStreamVolume(AudioManager.STREAM_ALARM) == target
+            }
         }.getOrDefault(false)
-        // Android 17 ignores a volume set from the background (N4 review): a
-        // volume a ring left raised (before an upgrade to 17, say) stays
-        // saved until it is really put back, at the latest when the app is
-        // next opened.
-        if (back) saved(ctx).edit { remove(KEY_VOLUME_BEFORE) }
+        // A put-back Android keeps ignoring is dropped after a few tries, not
+        // retried on every tick for good (S2 review). Android 17 ignores one
+        // from the background, so there it is tried only with the app open.
+        val tries = if (back) 0 else saved(ctx).getInt(KEY_RESTORE_TRIES, 0) + 1
+        saved(ctx).edit {
+            if (back || AlarmRestore.giveUp(tries)) {
+                remove(KEY_VOLUME_BEFORE)
+                remove(KEY_RESTORE_TRIES)
+            } else {
+                putInt(KEY_RESTORE_TRIES, tries)
+            }
+        }
     }
 
     /**
      * Put back an alarm volume a ring left raised when its process died
      * mid-ring (N1 review); nothing while one rings here.
      */
-    fun restoreAfterDeath(ctx: Context) {
-        if (!ringing && saved(ctx).contains(KEY_VOLUME_BEFORE)) restoreVolume(ctx.applicationContext)
+    fun restoreAfterDeath(ctx: Context, inBackground: Boolean = false) {
+        // Android 17 ignores a volume set from the background (N4 review): a
+        // volume a ring left raised (before an upgrade to 17, say) is put
+        // back when the app is next opened, its tries not spent meanwhile.
+        if (inBackground && !Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) return
+        if (!ringing && saved(ctx).contains(KEY_VOLUME_BEFORE)) restoreVolume(ctx.applicationContext, afterDeath = true)
     }
 }
 
@@ -360,7 +389,7 @@ class BackgroundRing(private val ctx: Context) {
     private var lastConnectMs = 0L
 
     fun tick() {
-        PhoneRinger.restoreAfterDeath(ctx)
+        PhoneRinger.restoreAfterDeath(ctx, inBackground = true)
         val on = Prefs.ringFromComputer(ctx)
         val now = SystemClock.elapsedRealtime()
         if (on) {
