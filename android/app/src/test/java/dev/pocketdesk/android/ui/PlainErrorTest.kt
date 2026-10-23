@@ -68,6 +68,22 @@ class PlainErrorTest {
         assertEquals(R.string.err_link_dropped, humanizeError("stream closed by the desktop: closed"))
     }
 
+    /**
+     * S2: a session the computer ended is not a dropped link: its encoder
+     * gave up, or it ended it for its own reasons; and neither offers Pair again.
+     */
+    @Test
+    fun aSessionTheComputerEndedSaysSo() {
+        val failed = "stream closed by the desktop: encoder failed"
+        assertEquals(R.string.err_encoder_failed, humanizeError(failed))
+        assertFalse(errorSuggestsRepair(failed))
+        val ended = "stream closed by the desktop: session ended"
+        assertEquals(R.string.err_session_ended, humanizeError(ended))
+        assertFalse(errorSuggestsRepair(ended))
+        // The phone's own words for a stall stay a dropped link.
+        assertEquals(R.string.err_link_dropped, humanizeError("video feed stalled — connection closed"))
+    }
+
     @Test
     fun aSentenceForAPersonIsKept() {
         for (said in listOf(

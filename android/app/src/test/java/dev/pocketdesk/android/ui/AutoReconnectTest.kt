@@ -51,6 +51,17 @@ class AutoReconnectTest {
         assertFalse(AutoReconnect.retryable("stream closed by the desktop: session end"))
     }
 
+    /**
+     * S2: a computer whose encoder gave up is tried again, as a stalled
+     * picture is (a GPU that hung may come back; the next session builds a
+     * new encoder); the plain end it chose still waits for the person.
+     */
+    @Test
+    fun `an encoder that gave up is retried, a plain end is not`() {
+        assertTrue(AutoReconnect.retryable("stream closed by the desktop: encoder failed"))
+        assertFalse(AutoReconnect.retryable("stream closed by the desktop: session ended"))
+    }
+
     @Test
     fun `a transport error the bridge reports as a close is retried`() {
         assertTrue(AutoReconnect.retryable("stream closed by the desktop: timed out"))
