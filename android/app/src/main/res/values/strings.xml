@@ -95,7 +95,7 @@
     <string name="auto_connect">Connect to it when the app opens</string>
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
-    <string name="home_computer_moved">Found %1$s at its new address, %2$s, and moved it there.</string>
+    <string name="home_computer_moved">%1$s is now at %2$s; its card follows it there.</string>
     <string name="wake_sent">Wake sent to %1$s.</string>
     <string name="wake_failed">Wake failed: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>
@@ -367,7 +367,7 @@
     <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
     <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last</string>
     <string name="phone_notifications_no_access">Needs notification access: allow it below</string>
-    <string name="phone_notifications_kind">%1$s, kind %2$s</string>
+    <string name="phone_notifications_kind">A kind of %1$s\'s notifications</string>
     <string name="phone_notifications_kind_untitled">Untitled</string>
     <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
     <string name="texts_show">Show texts on my computer</string>

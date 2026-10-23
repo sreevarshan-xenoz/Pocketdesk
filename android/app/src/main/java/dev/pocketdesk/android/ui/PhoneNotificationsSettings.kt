@@ -222,7 +222,7 @@ fun PhoneNotificationsSection() {
                     // Its app named beside its kind, for TalkBack too (O5 review).
                     SettingSwitch(
                         kind.example.ifBlank { stringResource(R.string.phone_notifications_kind_untitled) },
-                        stringResource(R.string.phone_notifications_kind, label, kind.id),
+                        stringResource(R.string.phone_notifications_kind, label),
                         kind.id !in kept,
                         {
                             PhoneNotificationPrefs.setKindKept(context, pkg, kind.id, !it)

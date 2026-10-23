@@ -301,6 +301,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                 // L6: the computer's commands to the automation apps.
                 CommandsSetting()
                 DownloadFolderSetting()
+                // O7: an image the computer sends, in a session or not,
+                // onto the clipboard as well, beside where files land
+                // (Q3 review: it sat among the background rows).
+                SettingSwitch(
+                    stringResource(R.string.settings_received_images_clipboard),
+                    stringResource(R.string.settings_received_images_clipboard_summary),
+                    Prefs.receivedImagesToClipboard(context),
+                    { Prefs.setReceivedImagesToClipboard(context, it) },
+                )
                 PhoneFoldersSection()
             }
 
@@ -322,13 +331,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                     { Prefs.setClipboardImagesInBackground(context, it) },
                     enabled = Prefs.clipboardInBackground(context),
                     indent = true,
-                )
-                // O7: an image the computer sends, onto the clipboard as well.
-                SettingSwitch(
-                    stringResource(R.string.settings_received_images_clipboard),
-                    stringResource(R.string.settings_received_images_clipboard_summary),
-                    Prefs.receivedImagesToClipboard(context),
-                    { Prefs.setReceivedImagesToClipboard(context, it) },
                 )
                 SettingSwitch(
                     stringResource(R.string.settings_files_background),
