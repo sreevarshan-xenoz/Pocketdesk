@@ -18,9 +18,17 @@ class AlarmRuleTest {
         assertFalse("the upcoming one", AlarmRule.isAlarm(null, "com.coloros.alarmclock", clocks, noClear = false))
         assertFalse("another app's no-clear one", AlarmRule.isAlarm(null, "com.chat", clocks, noClear = true))
         assertFalse(AlarmRule.isAlarm("msg", "com.chat", clocks, noClear = false))
+        assertFalse("a running timer", AlarmRule.isAlarm(null, "com.coloros.alarmclock", clocks, noClear = true, counting = true))
     }
 
-    private fun note(pkg: String, alarm: Boolean, ongoing: Boolean = true, localOnly: Boolean = false) =
+    private fun note(
+        pkg: String,
+        alarm: Boolean,
+        ongoing: Boolean = true,
+        localOnly: Boolean = false,
+        clockApp: Boolean = pkg == "com.coloros.alarmclock",
+        text: String = "Alarm ringing",
+    ) =
         PostedNote(
             key = "k-$pkg",
             pkg = pkg,
@@ -28,7 +36,7 @@ class AlarmRuleTest {
             ongoing = ongoing,
             groupSummary = false,
             title = "07:00",
-            text = "Alarm ringing",
+            text = text,
             visibility = 1,
             publicTitle = null,
             publicText = null,
@@ -36,6 +44,7 @@ class AlarmRuleTest {
             otherProfile = false,
             clearable = false,
             alarm = alarm,
+            clockApp = clockApp,
         )
 
     @Test
@@ -49,6 +58,25 @@ class AlarmRuleTest {
         assertEquals("07:00", out.title)
         // Not an alarm: the switch changes nothing.
         assertNull(rule.decide(note("com.player", alarm = false), enabled = true, shared = setOf("com.player"), alarmsOn = true))
+    }
+
+    @Test
+    fun anUnsharedAppsAlarmCategoryIsNotEnough() {
+        val rule = NotificationForwardRule("dev.pocketdesk.android")
+        val pills = note("com.pills", alarm = true, ongoing = false)
+        assertNull(rule.decide(pills, enabled = true, shared = emptySet(), alarmsOn = true))
+        assertNotNull("shared: it goes, as an alarm", rule.decide(pills, enabled = true, shared = setOf("com.pills"), alarmsOn = true))
+    }
+
+    @Test
+    fun anAlarmIsSentOnceARing() {
+        val rule = NotificationForwardRule("dev.pocketdesk.android")
+        val first = note("com.coloros.alarmclock", alarm = true)
+        assertNotNull(rule.decide(first, enabled = true, shared = emptySet(), alarmsOn = true))
+        val again = note("com.coloros.alarmclock", alarm = true, text = "Alarm ringing (1 min)")
+        assertNull("an update rings nothing again", rule.decide(again, enabled = true, shared = emptySet(), alarmsOn = true))
+        rule.removed(first.key)
+        assertNotNull("the next ring goes", rule.decide(first, enabled = true, shared = emptySet(), alarmsOn = true))
     }
 
     @Test

@@ -1316,11 +1316,11 @@ impl SettingsForm {
                 row(ui, "phone_alarms", |ui| {
                     ui.checkbox(
                         &mut e.phone_alarms,
-                        "a phone's ringing alarm or finished timer rings here until you answer it",
+                        "a phone's ringing alarm or finished timer rings here too",
                     );
                     note(
                         ui,
-                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. It stays on screen with an alarm's sound until Snooze, Stop or its ✕, or until it stops on the phone; off, it shows as a plain notification. A pause, quiet hours and a muted app hold it as any other.",
+                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. On Windows it stays on screen with an alarm's sound until it stops on the phone, its Snooze or Stop is pressed, or ten minutes pass; on Linux it is an urgent notification that stays. Closing it here leaves the phone ringing: its Stop stops both. One that reaches this computer more than two minutes late shows as a plain notification. Off, every alarm does. A pause, quiet hours and a muted app hold it as any other.",
                     );
                 });
                 row(ui, "quiet_presenting", |ui| {

@@ -827,6 +827,22 @@ fn held_by_fields(
     }
 }
 
+/// The phone-in-hand (M6) and elsewhere (N7) marks as they apply: never to
+/// a ringing alarm, which, as a call, is not held by them (P5).
+fn alarm_marks(alarm: bool, in_hand: bool, elsewhere: bool) -> (bool, bool) {
+    (in_hand && !alarm, elsewhere && !alarm)
+}
+
+/// How long an alarm may have waited on the phone and still ring here (P5
+/// review: one sent an hour late must not start ringing now).
+const ALARM_LATE_SECS: u64 = 120;
+
+/// Whether a notification rings here as an alarm (P5): the phone's alarm,
+/// with desktop Settings "Phones' alarms ring here" on, come in time.
+fn rings(alarm: bool, setting: bool, waited_secs: u64) -> bool {
+    alarm && setting && waited_secs < ALARM_LATE_SECS
+}
+
 /// Whether the phone sent it as a ringing alarm or finished timer (P5).
 fn is_alarm(body: &serde_json::Value) -> bool {
     body.get("alarm").and_then(|v| v.as_bool()) == Some(true)
@@ -979,9 +995,12 @@ impl Plugin for NotificationPlugin {
                 };
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
-                let in_hand = phone_in_use(&packet.body) && !alarm;
+                let (in_hand, elsewhere) = alarm_marks(
+                    alarm,
+                    phone_in_use(&packet.body),
+                    marked_elsewhere(&packet.body),
+                );
                 // N7: another computer of the owner's is in use, not this one.
-                let elsewhere = marked_elsewhere(&packet.body) && !alarm;
                 // P3: quiet hours, or presenting, hold it as a pause does.
                 let quiet = crate::quiet_hours::now();
                 let held = held_here(
@@ -1182,15 +1201,17 @@ impl Plugin for NotificationPlugin {
                 };
                 let is_live = live_show.is_some();
                 pictures.live = live_show;
-                // Rung as an alarm unless Settings say otherwise (P5).
-                pictures.alarm = alarm && crate::events::current_config().phone_alarms;
+                // Rung as an alarm unless Settings say otherwise, or it
+                // came late (P5).
+                pictures.alarm = rings(alarm, crate::events::current_config().phone_alarms, waited);
                 match show_desktop_notification(
                     tag.as_deref(),
                     &app,
                     &title,
                     &text,
                     answers,
-                    named,
+                    // P5 review: an alarm offers no "Not from this app".
+                    named && !pictures.alarm,
                     pictures,
                 )
                 .await
@@ -2288,5 +2309,18 @@ mod tests {
         assert!(is_call(&json!({"id": "pocketdesk:call:3"})));
         assert!(!is_call(&json!({"id": "0|app|1|null|10"})));
         assert!(!is_call(&json!({})));
+    }
+
+    /// P5: an alarm is never held by the phone in hand or another computer
+    /// in use; it rings only in time and with its setting on.
+    #[test]
+    fn an_alarm_ignores_the_marks_and_rings_only_in_time() {
+        assert_eq!(alarm_marks(false, true, true), (true, true));
+        assert_eq!(alarm_marks(true, true, true), (false, false));
+        assert!(rings(true, true, 0));
+        assert!(!rings(true, false, 0), "setting off: a plain notification");
+        assert!(!rings(true, true, ALARM_LATE_SECS), "late: not rung");
+        assert!(!rings(false, true, 0));
+        assert!(is_alarm(&json!({"alarm": true})) && !is_alarm(&json!({"alarm": "yes"})));
     }
 }

@@ -1141,7 +1141,15 @@ class PhoneNotificationListener : NotificationListenerService() {
             otherProfile = sbn.user != Process.myUserHandle(),
             clearable = sbn.isClearable,
             channel = n.channelId.orEmpty(),
-            alarm = AlarmRule.isAlarm(n.category, sbn.packageName, clockPackages(), n.flags and Notification.FLAG_NO_CLEAR != 0),
+            alarm = AlarmRule.isAlarm(
+                n.category,
+                sbn.packageName,
+                clockPackages(),
+                n.flags and Notification.FLAG_NO_CLEAR != 0,
+                counting = extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) ||
+                    extras.getInt(Notification.EXTRA_PROGRESS_MAX) > 0,
+            ),
+            clockApp = sbn.packageName in clockPackages(),
         )
     }
 

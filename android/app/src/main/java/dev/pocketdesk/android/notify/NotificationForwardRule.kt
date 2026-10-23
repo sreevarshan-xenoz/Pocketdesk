@@ -22,6 +22,8 @@ data class PostedNote(
     val channel: String = "",
     /** A ringing alarm or a finished timer ([AlarmRule], P5). */
     val alarm: Boolean = false,
+    /** Posted by a clock app, one that sets alarms (P5). */
+    val clockApp: Boolean = false,
 )
 
 /**
@@ -74,7 +76,9 @@ class NotificationForwardRule(private val ownPackage: String) {
         // P5: an alarm goes with its own switch, whichever apps are shared,
         // though its clock keeps it on the phone's watch (local only) and
         // rings it as a foreground service (ongoing).
-        val alarm = alarmsOn && note.alarm
+        // Only a clock app's goes unshared (P5 review: any app may mark one
+        // CATEGORY_ALARM, a medication reminder among them).
+        val alarm = alarmsOn && note.alarm && (note.clockApp || note.pkg in shared)
         if (!alarm && note.pkg !in shared) return null
         // O5: a kind the user keeps on the phone.
         if (note.channel.isNotBlank() && note.channel in keptKinds) return null
@@ -83,6 +87,9 @@ class NotificationForwardRule(private val ownPackage: String) {
         if (note.groupSummary || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
         val (title, text, full) = shown(note) ?: return null
+        // An alarm is sent once a ring (P5 review): an update would ring the
+        // computer again.
+        if (alarm && note.key in sent) return null
         if (sent[note.key] == Triple(title, text, offer)) return null
         sent.remove(note.key)
         sent[note.key] = Triple(title, text, offer)

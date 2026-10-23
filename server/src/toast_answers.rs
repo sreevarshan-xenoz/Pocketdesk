@@ -179,9 +179,12 @@ pub fn toast_xml_pictured(
     }
     xml.push_str("</binding></visual>");
     let answers = answers.filter(|a| a.reply || a.open || !a.actions.is_empty());
+    // An alarm offers no "Not from this app" (P5 review: muting the clock
+    // silences every later alarm).
+    let mute = mute && !pictures.alarm;
     // Windows shows an alarm as one only with a button: Dismiss when it
     // has none of its own.
-    let dismiss = pictures.alarm && answers.is_none() && !mute;
+    let dismiss = pictures.alarm && answers.is_none();
     if answers.is_some() || mute || dismiss {
         xml.push_str("<actions>");
     }
@@ -698,6 +701,12 @@ mod tests {
         assert!(xml.starts_with("<toast scenario=\"alarm\">"), "{xml}");
         assert!(xml.contains("Looping.Alarm"));
         assert!(xml.contains("activationType=\"system\" arguments=\"dismiss\""));
+        // Never "Not from this app" on an alarm.
+        let muted = toast_xml_pictured("Clock: 07:00", "Alarm ringing", None, true, &alarm);
+        assert!(
+            !muted.contains(MUTE) && muted.contains("arguments=\"dismiss\""),
+            "{muted}"
+        );
         let answers = Answerable {
             device_id: "phone-a".into(),
             key: "0|clock|1|null|10".into(),
