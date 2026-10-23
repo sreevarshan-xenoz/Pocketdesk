@@ -101,7 +101,7 @@ fn status_words_saying(
     }
     match status.filter(|s| s.key == text) {
         Some(s) if s.unsupported => Some(
-            "This desktop has no global shortcuts portal (KDE Plasma 6, GNOME 48 and later have one), so no key is taken.",
+            "This desktop's global shortcuts portal is missing or stopped answering (KDE Plasma 6, GNOME 48 and later have one), so no key is taken.",
         ),
         None => {
             Some("Not taken up yet: the tray program (pocketdesk-tray) registers it while it runs.")
@@ -271,7 +271,7 @@ mod tests {
         };
         assert!(
             super::status_words("win+shift+c", Some(&status))
-                .is_some_and(|w| w.contains("no global shortcuts portal"))
+                .is_some_and(|w| w.contains("global shortcuts portal is missing"))
         );
         let dir = std::env::temp_dir().join(format!("pd-hotkey-portal-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

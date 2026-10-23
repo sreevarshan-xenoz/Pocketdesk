@@ -1059,7 +1059,7 @@ impl SettingsForm {
                         }
                         note(
                             ui,
-                            "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer.",
+                            "Pressed anywhere, sends what this computer has copied to the phone the clipboard reaches (the one in the newest session when several do). It needs the tray program (pocketdesk-tray) beside the app; the window's own tray does not take it. Empty is off. Ctrl+Alt with a letter is AltGr on many keyboards, which types characters such as @: Win+Shift is safer. On Linux the desktop asks you once, and its own shortcut settings may give it another key or change it later.",
                         );
                     });
                 }

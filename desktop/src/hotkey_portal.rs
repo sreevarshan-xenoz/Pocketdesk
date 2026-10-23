@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
@@ -16,16 +17,24 @@ use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 pub const CLIPBOARD: &str = "send-clipboard";
 pub const TYPING: &str = "type-on-phone";
 
+/// The app id the portal knows this program by, and its desktop file's name.
+const APP_ID: &str = "dev.pocketdesk.Pocketdesk";
+
 const DESTINATION: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
 const INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
+
+/// How long the owner has to answer the desktop's question (R4 review: an
+/// unanswered one had held every later bind).
+const ANSWER_WITHIN: Duration = Duration::from_secs(120);
 
 /// What the portal took.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Bound {
     pub clipboard: bool,
     pub typing: bool,
-    /// The desktop has no GlobalShortcuts portal.
+    /// The desktop has no GlobalShortcuts portal, or it stopped passing
+    /// presses on.
     pub unsupported: bool,
 }
 
@@ -48,7 +57,15 @@ impl PortalKeys {
     }
 
     /// Bind these keys' texts (empty or unread: none), in place of the last.
+    /// Until the portal answers, neither reads as taken (R4 review).
     pub fn bind(&self, clipboard: Option<String>, typing: Option<String>) {
+        {
+            let mut bound = self.bound.lock().unwrap_or_else(|e| e.into_inner());
+            *bound = Bound {
+                unsupported: bound.unsupported,
+                ..Bound::default()
+            };
+        }
         let _ = self.asks.send((clipboard, typing));
     }
 
@@ -80,39 +97,23 @@ fn run(
         set(unsupported);
         return;
     }
+    // Named, so the desktop knows whose keys these are (R4 review).
+    register_host(&conn);
     let session: Arc<Mutex<Option<OwnedObjectPath>>> = Arc::new(Mutex::new(None));
     // Presses, for whichever session is current.
     {
         let conn = conn.clone();
         let session = session.clone();
+        let bound = bound.clone();
         let _ = std::thread::Builder::new()
             .name("portal-keys-presses".into())
             .spawn(move || {
-                let Ok(portal) = Proxy::new(&conn, DESTINATION, PATH, INTERFACE) else {
-                    return;
+                presses(&conn, &session, &*pressed);
+                // Gone: no key fires any more, and Settings says so (R4 review).
+                *bound.lock().unwrap_or_else(|e| e.into_inner()) = Bound {
+                    unsupported: true,
+                    ..Bound::default()
                 };
-                let Ok(signals) = portal.receive_signal("Activated") else {
-                    return;
-                };
-                for message in signals {
-                    let Ok((handle, id, _, _)) = message.body().deserialize::<(
-                        OwnedObjectPath,
-                        String,
-                        u64,
-                        HashMap<String, OwnedValue>,
-                    )>() else {
-                        continue;
-                    };
-                    let current = session.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                    if current.as_ref() != Some(&handle) {
-                        continue;
-                    }
-                    match id.as_str() {
-                        CLIPBOARD => pressed(CLIPBOARD),
-                        TYPING => pressed(TYPING),
-                        _ => {}
-                    }
-                }
             });
     }
     let mut token = 0u32;
@@ -143,11 +144,11 @@ fn run(
         }
         token += 1;
         match bind(&conn, &portal, &shortcuts, token) {
-            Ok(handle) => {
+            Ok((handle, taken)) => {
                 *session.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
                 set(Bound {
-                    clipboard: shortcuts.iter().any(|(id, _, _)| *id == CLIPBOARD),
-                    typing: shortcuts.iter().any(|(id, _, _)| *id == TYPING),
+                    clipboard: taken.iter().any(|id| id == CLIPBOARD),
+                    typing: taken.iter().any(|id| id == TYPING),
                     unsupported: false,
                 });
             }
@@ -156,13 +157,79 @@ fn run(
     }
 }
 
-/// A session with `shortcuts` bound; its handle.
+/// The portal's presses for the current session, until its signals end.
+fn presses(
+    conn: &Connection,
+    session: &Arc<Mutex<Option<OwnedObjectPath>>>,
+    pressed: &(dyn Fn(&'static str) + Send + Sync),
+) {
+    let Ok(portal) = Proxy::new(conn, DESTINATION, PATH, INTERFACE) else {
+        return;
+    };
+    let Ok(signals) = portal.receive_signal("Activated") else {
+        return;
+    };
+    for message in signals {
+        let Ok((handle, id, _, _)) =
+            message
+                .body()
+                .deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>()
+        else {
+            continue;
+        };
+        let current = session.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if current.as_ref() != Some(&handle) {
+            continue;
+        }
+        match id.as_str() {
+            CLIPBOARD => pressed(CLIPBOARD),
+            TYPING => pressed(TYPING),
+            _ => {}
+        }
+    }
+}
+
+/// Name this program to the portal, with a desktop file of its id (hidden
+/// from menus), as a sandboxed app is named by its package. Portals older
+/// than the registry have none, which is no loss: they name it themselves.
+fn register_host(conn: &Connection) {
+    let dir = std::env::var_os("XDG_DATA_HOME")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".local/share")))
+        .map(|d| d.join("applications"));
+    if let Some(dir) = dir {
+        let exe = std::env::current_exe()
+            .ok()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "pocketdesk-tray".to_string());
+        let entry = format!(
+            "[Desktop Entry]\nType=Application\nName=Pocketdesk\nExec={exe}\nNoDisplay=true\n"
+        );
+        let file = dir.join(format!("{APP_ID}.desktop"));
+        if std::fs::read_to_string(&file).ok().as_deref() != Some(entry.as_str()) {
+            let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, entry));
+        }
+    }
+    if let Ok(registry) = Proxy::new(
+        conn,
+        DESTINATION,
+        PATH,
+        "org.freedesktop.host.portal.Registry",
+    ) {
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        let _ = registry.call_method("Register", &(APP_ID, options));
+    }
+}
+
+/// A session with `shortcuts` bound; its handle and the ids the desktop
+/// took, which may be fewer than asked (R4 review).
 fn bind(
     conn: &Connection,
     portal: &Proxy<'_>,
     shortcuts: &[(&'static str, String, &'static str)],
     token: u32,
-) -> zbus::Result<OwnedObjectPath> {
+) -> zbus::Result<(OwnedObjectPath, Vec<String>)> {
     let handle_token = format!("pocketdesk_keys_{}_{token}", std::process::id());
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert("handle_token", Value::from(handle_token.as_str()));
@@ -195,18 +262,42 @@ fn bind(
     let mut options: HashMap<&str, Value<'_>> = HashMap::new();
     options.insert("handle_token", Value::from(bind_token.as_str()));
     let path = ObjectPath::try_from(handle.as_str())?;
-    let (code, _) = request(conn, &bind_token, || {
+    let answer = request(conn, &bind_token, || {
         portal.call_method("BindShortcuts", &(path, list, "", options))
-    })?;
+    });
+    let (code, results) = match answer {
+        Ok(answer) => answer,
+        Err(e) => {
+            close(conn, &handle);
+            return Err(e);
+        }
+    };
     if code != 0 {
         close(conn, &handle);
         return Err(zbus::Error::Failure("the keys were refused".into()));
     }
-    Ok(handle)
+    Ok((handle, taken_ids(&results)))
 }
 
-/// Make `call`, then wait for its Request's Response: subscribed before
-/// the call, at the path the portal will use, so none is missed.
+/// The ids in a BindShortcuts answer's `shortcuts`, `a(sa{sv})`.
+fn taken_ids(results: &HashMap<String, OwnedValue>) -> Vec<String> {
+    let Some(Value::Array(list)) = results.get("shortcuts").map(|v| &**v) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|item| match item {
+            Value::Structure(fields) => match fields.fields().first() {
+                Some(Value::Str(id)) => Some(id.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Make `call`, then wait for its Request's Response, at most
+/// [`ANSWER_WITHIN`]: subscribed before the call, at the path the portal
+/// will use, so none is missed; unanswered, the request is closed.
 fn request(
     conn: &Connection,
     token: &str,
@@ -220,17 +311,27 @@ fn request(
     let request = Proxy::new(
         conn,
         DESTINATION,
-        path.as_str(),
+        path.clone(),
         "org.freedesktop.portal.Request",
     )?;
     let mut responses = request.receive_signal("Response")?;
     call()?;
-    let response = responses
-        .next()
-        .ok_or_else(|| zbus::Error::Failure("no response".into()))?;
-    response
-        .body()
-        .deserialize::<(u32, HashMap<String, OwnedValue>)>()
+    let (answered, answer) = mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("portal-keys-answer".into())
+        .spawn(move || {
+            let _ = answered.send(responses.next());
+        });
+    match answer.recv_timeout(ANSWER_WITHIN) {
+        Ok(Some(response)) => response
+            .body()
+            .deserialize::<(u32, HashMap<String, OwnedValue>)>(),
+        Ok(None) => Err(zbus::Error::Failure("no response".into())),
+        Err(_) => {
+            let _ = request.call_method("Close", &());
+            Err(zbus::Error::Failure("the question was not answered".into()))
+        }
+    }
 }
 
 fn close(conn: &Connection, session: &OwnedObjectPath) {
