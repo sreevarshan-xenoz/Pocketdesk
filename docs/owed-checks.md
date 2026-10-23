@@ -2,14 +2,14 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-931 open items.
+933 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 556 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 557 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
-| A phone with a SIM | 29 |
+| A phone with a SIM | 30 |
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
@@ -1139,6 +1139,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Stop and a dismiss ending both at once.
 
+**203. The phone's contacts on the computer (P10)**
+
+- The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1448,6 +1452,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **196. Notifications held by their words (P4)**
 
 - A call's note with words in it (a SIM): still shown.## 197. A phone's ringing alarm on the computer (P5)
+
+**203. The phone's contacts on the computer (P10)**
+
+- Texts turned off on Devices and the phone unpaired: the list forgotten.
 
 ## A second phone
 

@@ -2694,6 +2694,13 @@ Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern. Che
 Owed:
 - [ ] Stop and a dismiss ending both at once.
 - [ ] Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
+## 203. The phone's contacts on the computer (P10)
+
+Built 2026-10-23. Unit-tested: the list's reading (names cleaned, numbers a call takes, each once, five a contact), the store, the phone's rule (its switch, its own computer, Android's permission, the minute), the desktop's search. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the ask written as the desktop app writes it:
+- [x] With the switch on and contacts allowed, the phone's list reached the computer (counts only were looked at; the file was deleted after).
+Owed:
+- [ ] The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
+- [ ] Texts turned off on Devices and the phone unpaired: the list forgotten.
 
 ## Recording results
 

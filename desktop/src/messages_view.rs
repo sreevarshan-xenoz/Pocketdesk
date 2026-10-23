@@ -114,6 +114,29 @@ pub struct MessagesView {
     read_at: Option<Instant>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// P10: the contacts' search, and the lists as last read.
+    contacts_query: String,
+    contacts:
+        std::collections::BTreeMap<String, pocketdesk_core::local::phone_contacts::ContactList>,
+    /// When the phone was asked for its contacts, to say when no list came.
+    contacts_asked: Option<(String, u64)>,
+    /// The search's last answer: phone, list's time, words, and the found
+    /// contacts' places (P10 review: not filtered again each frame).
+    contacts_found: Option<(String, u64, String, Vec<usize>)>,
+}
+
+/// Whether `phone` may do `capability` by the trust store, yes when it
+/// cannot be read (the server holds it to it anyway).
+fn phone_allows(
+    state_dir: &Path,
+    phone: &str,
+    capability: pocketdesk_core::protocol::permissions::Capability,
+) -> bool {
+    pocketdesk_core::protocol::kdeconnect::TrustStore::read(
+        state_dir.join(pocketdesk_core::local::paths::TRUST_FILE),
+    )
+    .map(|store| store.permissions(phone).allows(capability))
+    .unwrap_or(true)
 }
 
 impl MessagesView {
@@ -128,6 +151,7 @@ impl MessagesView {
         }
         self.messages = sms::read(state_dir);
         self.pending = sms::pending(state_dir);
+        self.contacts = pocketdesk_core::local::phone_contacts::read(state_dir);
         self.read_at = Some(Instant::now());
     }
 
@@ -308,10 +332,12 @@ impl MessagesView {
                         if pane.add_enabled(ready, egui::Button::new("Send")).clicked() {
                             let number = self.new_number.trim().to_string();
                             if self.send(state_dir, &None, &chosen, &number, now_unix) {
-                                self.selected = Some((chosen, number));
+                                self.selected = Some((chosen.clone(), number));
                                 self.new_number.clear();
                             }
                         }
+                        pane.add_space(10.0);
+                        self.contacts_pane(pane, state_dir, &chosen, now_unix);
                     }
                 }
             }
@@ -319,9 +345,225 @@ impl MessagesView {
     }
 }
 
+/// How long the phone has to answer an ask for its contacts: the ask waits
+/// a minute for it to connect (P10 review), and a few seconds more.
+const CONTACTS_ANSWER_SECS: u64 = pocketdesk_core::local::phone_actions::ACTION_TTL_SECS + 10;
+
+/// The most contacts shown at once: the search finds the rest.
+const CONTACTS_SHOWN: usize = 50;
+
+/// The contacts `query` finds: each word in the name or a number, case
+/// aside; all with no words.
+pub fn contacts_shown<'a>(
+    contacts: &'a [pocketdesk_core::protocol::phone_action::PhoneContact],
+    query: &str,
+) -> Vec<&'a pocketdesk_core::protocol::phone_action::PhoneContact> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    contacts
+        .iter()
+        .filter(|c| {
+            let text = format!("{} {}", c.name, c.numbers.join(" ")).to_lowercase();
+            let digits: String = c
+                .numbers
+                .join(" ")
+                .chars()
+                .filter(|ch| ch.is_ascii_digit())
+                .collect();
+            words.iter().all(|w| {
+                text.contains(w.as_str())
+                    || (w.chars().all(|ch| ch.is_ascii_digit()) && digits.contains(w.as_str()))
+            })
+        })
+        .collect()
+}
+
+impl MessagesView {
+    /// P10: the phone's contacts, searched, each number with Text, Copy and
+    /// Call; asked of the phone with a button.
+    fn contacts_pane(&mut self, pane: &mut egui::Ui, state_dir: &Path, phone: &str, now_unix: u64) {
+        let muted = crate::theme::muted(pane);
+        pane.strong("Contacts");
+        let list = self.contacts.get(phone);
+        pane.horizontal_wrapped(|ui| {
+            if ui
+                .button(if list.is_some() {
+                    "Ask again"
+                } else {
+                    "Ask the phone for its contacts"
+                })
+                .on_hover_text("Names and numbers only, kept on this computer")
+                .clicked()
+            {
+                // Said at once with Texts off (P10 review).
+                self.notice = crate::notice::Notice::outcome(
+                    if !phone_allows(
+                        state_dir,
+                        phone,
+                        pocketdesk_core::protocol::permissions::Capability::Texts,
+                    ) {
+                        Err("Not asked: Texts is off for this phone (Devices).".to_string())
+                    } else {
+                        pocketdesk_core::local::phone_actions::request(
+                            state_dir,
+                            phone,
+                            pocketdesk_core::protocol::phone_action::PhoneAction::Contacts,
+                            now_unix,
+                        )
+                        .map(|_| {
+                            self.contacts_asked = Some((phone.to_string(), now_unix));
+                            self.read_at = None;
+                            "Asked the phone for its contacts.".to_string()
+                        })
+                        .map_err(|e| format!("Not asked: {e}"))
+                    },
+                );
+            }
+            if let Some(list) = list {
+                ui.label(
+                    RichText::new(format!(
+                        "{} contacts, {}",
+                        list.contacts.len(),
+                        crate::words::ago(now_unix, list.at)
+                    ))
+                    .color(muted),
+                );
+            }
+        });
+        // Said when no list came (as P2's box does).
+        if let Some((asked_phone, at)) = &self.contacts_asked
+            && asked_phone == phone
+            && list.is_none_or(|l| l.at < *at)
+            && now_unix.saturating_sub(*at) >= CONTACTS_ANSWER_SECS
+        {
+            pane.label(
+                RichText::new(
+                    "No answer from the phone. It answers with \"My contacts on the computer\" on in Pocketdesk's Settings on the phone (Texts), and Texts allowed on Devices here.",
+                )
+                .color(muted),
+            );
+        }
+        let Some(list) = self.contacts.get(phone).cloned() else {
+            return;
+        };
+        pane.add(
+            egui::TextEdit::singleline(&mut self.contacts_query)
+                .hint_text("Search contacts")
+                .desired_width(240.0),
+        );
+        // Found again only when the words or the list changed.
+        let fresh = self
+            .contacts_found
+            .as_ref()
+            .is_some_and(|(p, at, q, _)| p == phone && *at == list.at && *q == self.contacts_query);
+        if !fresh {
+            let found = contacts_shown(&list.contacts, &self.contacts_query)
+                .into_iter()
+                .filter_map(|c| list.contacts.iter().position(|x| std::ptr::eq(x, c)))
+                .collect();
+            self.contacts_found = Some((
+                phone.to_string(),
+                list.at,
+                self.contacts_query.clone(),
+                found,
+            ));
+        }
+        let places = self
+            .contacts_found
+            .as_ref()
+            .map(|(_, _, _, found)| found.clone())
+            .unwrap_or_default();
+        let shown: Vec<&pocketdesk_core::protocol::phone_action::PhoneContact> = places
+            .iter()
+            .filter_map(|i| list.contacts.get(*i))
+            .collect();
+        if shown.is_empty() {
+            pane.label(RichText::new("No contact matches.").color(muted));
+        }
+        let mut text_to = None;
+        let mut call = None;
+        egui::ScrollArea::vertical()
+            .id_salt("contacts")
+            .max_height(260.0)
+            .show(pane, |ui| {
+                for contact in shown.iter().take(CONTACTS_SHOWN) {
+                    for number in &contact.numbers {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&contact.name).strong());
+                            ui.label(number);
+                            if ui.small_button("Text").clicked() {
+                                text_to = Some(number.clone());
+                            }
+                            if ui.small_button("Copy").clicked() {
+                                ui.ctx().copy_text(number.clone());
+                            }
+                            if ui.small_button("Call").clicked() {
+                                call = Some(number.clone());
+                            }
+                        });
+                    }
+                }
+            });
+        if shown.len() > CONTACTS_SHOWN {
+            pane.label(
+                RichText::new(format!(
+                    "{} more: search to find them.",
+                    shown.len() - CONTACTS_SHOWN
+                ))
+                .color(muted),
+            );
+        }
+        if let Some(number) = text_to {
+            self.new_number = number;
+        }
+        if let Some(number) = call {
+            // Held to Dial as the conversation's Call is (P10 review).
+            if !phone_allows(
+                state_dir,
+                phone,
+                pocketdesk_core::protocol::permissions::Capability::Dial,
+            ) {
+                self.notice = crate::notice::Notice::error(
+                    "Not asked: Call numbers from here is off for this phone (Devices).",
+                );
+                return;
+            }
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::dials::request(state_dir, phone, &number, now_unix)
+                    .map(|_| "Asked the phone to open its dialer with the number; it does with \u{201c}Calls from the computer\u{201d} on.".to_string())
+                    .map_err(|e| format!("Not asked: {e}")),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P10: a contact is found by its name's words or its number's digits.
+    #[test]
+    fn contacts_are_found_by_name_or_number() {
+        use pocketdesk_core::protocol::phone_action::PhoneContact;
+        let contacts = vec![
+            PhoneContact {
+                name: "Ann Lee".into(),
+                numbers: vec!["+1 555-0100".into()],
+            },
+            PhoneContact {
+                name: "Bo".into(),
+                numbers: vec!["5550199".into()],
+            },
+        ];
+        assert_eq!(contacts_shown(&contacts, "").len(), 2);
+        assert_eq!(contacts_shown(&contacts, "ann")[0].name, "Ann Lee");
+        assert_eq!(contacts_shown(&contacts, "lee ann").len(), 1);
+        assert_eq!(
+            contacts_shown(&contacts, "5550100")[0].name,
+            "Ann Lee",
+            "digits across spaces and dashes"
+        );
+        assert!(contacts_shown(&contacts, "zed").is_empty());
+    }
 
     /// I3: a reply typed for one conversation never goes to another.
     #[test]

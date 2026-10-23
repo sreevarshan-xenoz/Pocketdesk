@@ -18,7 +18,7 @@ enum class HealthProblem {
     /** "Reply to texts" without SEND_SMS. */
     TEXTS_SEND,
 
-    /** "Names from my contacts" without READ_CONTACTS. */
+    /** "Names from my contacts" or "My contacts on the computer" (P10) without READ_CONTACTS. */
     CONTACTS,
 
     /** Screenshots or recent photos to the computer without photo access. */

@@ -192,6 +192,8 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::warn!("Could not forget the contact names kept with texts: {e}");
     }
     crate::plugins::links::configure(config.open_links);
+    // P10: contacts of phones gone or with Texts off are not kept.
+    crate::plugins::phone_contacts::prune();
     crate::virtual_screen::configure(config.virtual_screens);
     // The deck's injector now, not at its first press (F1 review).
     crate::plugins::deck::warm_up(config.deck_enabled && !config.deck.is_empty());

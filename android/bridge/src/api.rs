@@ -1212,9 +1212,10 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
 /// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 12] = [
-    // P2: its apps that open, answering the computer's ask.
+const PHONE_PACKETS: [&str; 13] = [
+    // P2: its apps that open, answering the computer's ask; P10: its contacts.
     pocketdesk_core::protocol::phone_action::PHONE_APPS,
+    pocketdesk_core::protocol::phone_action::PHONE_CONTACTS,
     // N7: is the computer in use?
     pocketdesk_core::protocol::in_use::ASK,
     // N5: tell me the computer's music, or stop.
@@ -1255,8 +1256,11 @@ pub async fn send_phone_packet_on_link(
     body: String,
 ) -> Result<(), String> {
     let packet = phone_packet(packet_type, &body)?;
+    // A few seconds, and one more for each 50 kB (P10 review: a long list
+    // of contacts cut mid-write would leave half a line on the link).
+    let secs = 3 + (body.len() as u64 / 50_000).min(57);
     tokio::time::timeout(
-        Duration::from_secs(3),
+        Duration::from_secs(secs),
         send_on_live(&address, port, &packet),
     )
     .await

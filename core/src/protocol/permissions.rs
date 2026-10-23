@@ -173,6 +173,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::phone_action::PHONE_ACTION => Capability::PhoneActions,
         // The phone's apps for the computer to open (P2), answering the ask.
         crate::protocol::phone_action::PHONE_APPS => Capability::PhoneActions,
+        // P10: the contacts go with the texts.
+        crate::protocol::phone_action::PHONE_CONTACTS => Capability::Texts,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         _ => return None,

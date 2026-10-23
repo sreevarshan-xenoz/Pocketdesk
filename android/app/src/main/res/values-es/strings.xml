@@ -551,6 +551,8 @@
     <string name="channel_computer_media">La música del equipo</string>
     <string name="texts_names">Nombres de mis contactos</string>
     <string name="texts_names_summary">Un mensaje aparece en el equipo con el nombre del remitente según los contactos de este teléfono, no solo el número</string>
+    <string name="texts_contacts">Mis contactos en el ordenador</string>
+    <string name="texts_contacts_summary">Tu ordenador puede pedir tus contactos, solo nombres y números, para buscarlos en su página Mensajes y escribirles o llamarlos con este teléfono. Pide acceso a los contactos</string>
     <string name="settings_capture_mouse">Usar un ratón conectado en el equipo</string>
     <string name="settings_capture_mouse_summary">Durante una sesión, un ratón conectado a este teléfono (USB o Bluetooth) mueve el cursor del equipo y hace clic allí</string>
     <string name="send_clipboard_label">Enviar portapapeles</string>
