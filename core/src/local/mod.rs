@@ -28,6 +28,7 @@ pub mod kdeconnect;
 pub mod kdeconnect_devices;
 pub mod link_rules;
 pub mod links;
+pub mod listening;
 pub mod muted_apps;
 pub mod network;
 pub mod note_clears;

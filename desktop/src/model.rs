@@ -66,6 +66,19 @@ pub struct Snapshot {
     pub linked_computers: Vec<(String, String)>,
     /// Files moving now, as the running server last wrote (C1).
     pub under_way: Vec<pocketdesk_core::local::transfers::Transfer>,
+    /// The port the running server bound (T1): its own record, not one an
+    /// earlier run left.
+    pub listening: Option<pocketdesk_core::local::listening::Listening>,
+}
+
+impl Snapshot {
+    /// The control port phones reach: the running server's, when it is for
+    /// `configured` (T1), else `configured`.
+    pub fn control_port(&self, configured: u16) -> u16 {
+        self.listening
+            .filter(|l| l.configured_port == configured)
+            .map_or(configured, |l| l.control_port)
+    }
 }
 
 /// A received file, and whether it is still where it was saved (checked
@@ -146,7 +159,13 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         .collect();
     let mut sent = sent::read(state_dir);
     sent.reverse();
+    let listening = server::server_pid(state_dir)
+        .filter(|_| running)
+        .and_then(|pid| {
+            pocketdesk_core::local::listening::read(state_dir).filter(|l| l.pid == pid)
+        });
     Snapshot {
+        listening,
         running,
         now_unix,
         devices,

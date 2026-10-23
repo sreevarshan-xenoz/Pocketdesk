@@ -177,19 +177,29 @@ fn status_chip(ui: &egui::Ui, status: Status) -> (egui::Color32, &'static str) {
 fn run(state_dir: &Path, config: Option<Config>) -> Report {
     let config = config.unwrap_or_default();
     let state = diagnostics::server_state(state_dir);
+    // T1: the port the running server bound, when another program holds
+    // the configured one.
+    let control_port =
+        pocketdesk_core::local::listening::control_port(state_dir, config.control_port);
     let mut findings = vec![
         diagnostics::check_server(state),
-        diagnostics::check_control_port(config.control_port, state),
+        diagnostics::check_control_port(control_port, state),
         diagnostics::check_stream_port(config.streaming_port, state),
     ];
+    if let Some(moved) = diagnostics::check_port_moved(pocketdesk_core::local::listening::moved(
+        state_dir,
+        config.control_port,
+    )) {
+        findings.push(moved);
+    }
     if let Some(firewall) = diagnostics::check_firewall(firewall_state(state_dir)) {
         findings.push(firewall);
     }
     // O9: ufw's or firewalld's rules for the two ports.
     #[cfg(target_os = "linux")]
     findings.push(diagnostics::check_linux_firewall(
-        &linux_firewall(config.control_port, config.streaming_port),
-        config.control_port,
+        &linux_firewall(control_port, config.streaming_port),
+        control_port,
         config.streaming_port,
     ));
     findings.push(diagnostics::check_addresses(
@@ -221,7 +231,7 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
     Report {
         findings,
         last_session: diagnostics::last_session(state_dir),
-        control_port: config.control_port,
+        control_port,
         streaming_port: config.streaming_port,
         pairing_required: config.pairing_required,
     }

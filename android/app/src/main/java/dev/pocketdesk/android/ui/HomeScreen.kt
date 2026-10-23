@@ -107,6 +107,43 @@ private fun tryMove(context: android.content.Context, move: FoundComputers.Moved
 }
 
 /**
+ * T1: whether the computer at [address] now answers as itself on [port] and
+ * no longer on [old] (its pinned key is proved; neither port is trusted from
+ * the announcement). Blocking.
+ */
+private fun portMovedAt(address: String, old: Int, port: Int): MoveOutcome {
+    when (RustCore.checkIdentity(address, port).getOrNull()) {
+        "matches" -> {}
+        "failed", "closed", null -> return MoveOutcome.UNREACHED
+        else -> return MoveOutcome.REFUSED
+    }
+    if (RustCore.checkIdentity(address, old).getOrNull() == "matches") return MoveOutcome.REFUSED
+    return MoveOutcome.MOVED
+}
+
+/**
+ * T1: give [change]'s card the control port its computer announces now,
+ * once [portMovedAt] says so; then the computer's other cards (saved by a
+ * tailnet or Ethernet address mDNS does not announce; T1 review) on the old
+ * port, each proved at its own address. Blocking.
+ */
+private fun tryPorts(change: FoundComputers.Moved, context: android.content.Context): MoveOutcome {
+    val old = change.saved.controlPort
+    val port = change.found.controlPort
+    val outcome = portMovedAt(change.saved.address, old, port)
+    if (outcome != MoveOutcome.MOVED) return outcome
+    if (!HostStore.setControlPort(context, change.saved.address, port)) return MoveOutcome.REFUSED
+    for (other in HostStore.hosts(context)) {
+        if (other.address == change.saved.address || other.controlPort != old) continue
+        if (HostStore.pairedDesktopId(context, other.address) != change.found.id) continue
+        if (portMovedAt(other.address, old, port) == MoveOutcome.MOVED) {
+            HostStore.setControlPort(context, other.address, port)
+        }
+    }
+    return MoveOutcome.MOVED
+}
+
+/**
  * Landing screen: the saved-desktop card list. Tapping a card connects;
  * each card carries its own wake (when it can be woken), wake settings and
  * remove actions, and "Add computer" opens the ConnectScreen form.
@@ -185,6 +222,29 @@ fun HomeScreen(
                     R.string.home_computer_moved,
                     HostStore.shownName(context, move.found.address),
                     move.found.address,
+                )
+            }
+        }
+    }
+    // T1: a saved computer announcing itself at its address on another port
+    // (another program holds 1716 there) takes its card to that port once it
+    // proves its pinned key on it; each candidate is tried once while Home is up.
+    val portChanges = FoundComputers.portMoved(found, hosts) { HostStore.pairedDesktopId(context, it) }
+    val triedPorts = remember { mutableSetOf<Pair<String, Int>>() }
+    LaunchedEffect(portChanges) {
+        val changedCards = mutableSetOf<String>()
+        for (change in portChanges) {
+            val key = change.saved.address to change.found.controlPort
+            if (change.saved.address in changedCards || key in triedPorts) continue
+            val outcome = withContext(NonCancellable + Dispatchers.IO) { tryPorts(change, context) }
+            if (outcome != MoveOutcome.UNREACHED) triedPorts.add(key)
+            if (outcome == MoveOutcome.MOVED) {
+                changedCards += change.saved.address
+                hosts = HostStore.hosts(context)
+                wakeSaid = resources.getString(
+                    R.string.home_computer_port,
+                    HostStore.shownName(context, change.saved.address),
+                    change.found.controlPort,
                 )
             }
         }

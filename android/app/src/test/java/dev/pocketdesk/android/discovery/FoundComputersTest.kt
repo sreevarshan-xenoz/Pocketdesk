@@ -127,6 +127,39 @@ class FoundComputersTest {
         assertEquals(listOf("10.0.0.1", "10.0.0.2", "10.0.0.3"), moved.map { it.found.address })
     }
 
-    private fun computer(service: String, address: String, id: String = "") =
-        FoundComputer(service, service, id, address, 1716, 4716)
+    /**
+     * T1: a saved computer announced at its own address on another port
+     * (another program holds 1716 there) is a candidate for the card's new
+     * port, matched by the id it was paired with; a few tries a card.
+     */
+    @Test
+    fun aSavedComputerOnAnotherPortIsACandidateForItsCard() {
+        val saved = listOf(
+            HostStore.Host("192.0.2.20", 4716),
+            HostStore.Host("192.0.2.30", 4716),
+            HostStore.Host("192.0.2.40", 4716, 1717),
+        )
+        val ids = mapOf("192.0.2.20" to "desk", "192.0.2.30" to "other", "192.0.2.40" to "moved")
+        val found = listOf(
+            computer("Desk", "192.0.2.20", id = "desk", control = 1717),
+            // Its own ports: nothing to change.
+            computer("Moved", "192.0.2.40", id = "moved", control = 1717),
+            // Another id at a saved address, or none: not this card's computer.
+            computer("Spoof", "192.0.2.30", id = "desk", control = 1718),
+            computer("Bare", "192.0.2.30", control = 1719),
+            // At an address no card holds: O3's, not this.
+            computer("Desk", "192.0.2.21", id = "desk", control = 1717),
+        )
+        val changed = FoundComputers.portMoved(found, saved) { ids[it] }
+        assertEquals(listOf("192.0.2.20" to 1717), changed.map { it.saved.address to it.found.controlPort })
+
+        val many = (1717..1722).map { computer("Desk", "192.0.2.20", id = "desk", control = it) }
+        assertEquals(
+            listOf(1717, 1718, 1719),
+            FoundComputers.portMoved(many, saved) { ids[it] }.map { it.found.controlPort },
+        )
+    }
+
+    private fun computer(service: String, address: String, id: String = "", control: Int = 1716) =
+        FoundComputer(service, service, id, address, control, 4716)
 }

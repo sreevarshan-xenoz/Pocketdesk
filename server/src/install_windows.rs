@@ -57,8 +57,27 @@ const LEGACY_NAME: &str = "Linux Link";
 /// The adapter Tailscale installs.
 const TAILSCALE_ADAPTER: &str = "Tailscale";
 
-/// Ports the phone reaches, with the protocol and what each carries.
-const PORTS: [(&str, u16, &str); 2] = [("TCP", 1716, "control"), ("UDP", 4716, "media")];
+/// Ports the phone reaches, with the protocol, the last port of the range,
+/// and what each carries. Control is a range (T1): the server moves past
+/// 1716 when KDE Connect for Windows or another program holds it.
+const PORTS: [(&str, u16, u16, &str); 2] = [
+    (
+        "TCP",
+        1716,
+        1716 + pocketdesk_core::local::listening::TRIES - 1,
+        "control",
+    ),
+    ("UDP", 4716, 4716, "media"),
+];
+
+/// A port or range as `New-NetFirewallRule -LocalPort` takes it.
+fn port_range(first: u16, last: u16) -> String {
+    if first == last {
+        first.to_string()
+    } else {
+        format!("{first}-{last}")
+    }
+}
 
 /// Tailscale's address ranges (IPv4 CGNAT block and its IPv6 ULA prefix).
 const TAILNET: &str = "100.64.0.0/10,fd7a:115c:a1e0::/48";
@@ -150,7 +169,8 @@ pub fn firewall_add_script(exe: &Path) -> String {
         "$ErrorActionPreference = 'Stop'\n{}",
         firewall_remove_script()
     );
-    for (protocol, port, what) in PORTS {
+    for (protocol, first, last, what) in PORTS {
+        let port = port_range(first, last);
         let name = ps_quote(&format!("Pocketdesk {what} ({protocol} {port})"));
         script.push_str(&format!(
             "New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
@@ -162,7 +182,8 @@ pub fn firewall_add_script(exe: &Path) -> String {
     script.push_str(&format!(
         "if (Get-NetAdapter -Name {adapter} -ErrorAction SilentlyContinue) {{\n"
     ));
-    for (protocol, port, what) in PORTS {
+    for (protocol, first, last, what) in PORTS {
+        let port = port_range(first, last);
         let name = ps_quote(&format!("Pocketdesk {what} ({protocol} {port}) (tailnet)"));
         script.push_str(&format!(
             "  New-NetFirewallRule -Group {group} -DisplayName {name} -Direction Inbound -Action Allow \
@@ -322,7 +343,9 @@ pub fn install(elevated: bool) -> Result<()> {
     }
 
     match run_elevated("firewall-add") {
-        Ok(0) => println!("Opened TCP 1716 and UDP 4716 to this program (local subnet + tailnet)"),
+        Ok(0) => {
+            println!("Opened TCP 1716-1725 and UDP 4716 to this program (local subnet + tailnet)")
+        }
         Ok(code) => println!(
             "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `pocketdesk firewall-add`"
         ),
@@ -432,10 +455,20 @@ mod tests {
 
     #[test]
     fn only_the_ports_the_server_listens_on_are_opened() {
-        // TCP 1716 control, UDP 4716 QUIC. Discovery is mDNS; nothing
-        // listens on UDP 1716, so an open rule there is only exposure.
-        let opened: Vec<(&str, u16)> = PORTS.iter().map(|(p, port, _)| (*p, *port)).collect();
-        assert_eq!(opened, [("TCP", 1716), ("UDP", 4716)]);
+        // TCP 1716 control (to 1725, where the server moves when another
+        // program holds 1716: T1), UDP 4716 QUIC. Discovery is mDNS;
+        // nothing listens on UDP 1716, so an open rule there is only exposure.
+        let opened: Vec<(&str, String)> = PORTS
+            .iter()
+            .map(|(p, first, last, _)| (*p, port_range(*first, *last)))
+            .collect();
+        assert_eq!(
+            opened,
+            [
+                ("TCP", "1716-1725".to_string()),
+                ("UDP", "4716".to_string())
+            ]
+        );
     }
 
     #[test]

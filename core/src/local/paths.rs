@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 pub const CONFIG_FILE: &str = "config.toml";
 pub const PID_FILE: &str = "server.pid";
+/// The control port the running server bound (T1), when another program held the configured one.
+pub const LISTENING_FILE: &str = "listening.json";
 pub const PIN_FILE: &str = "pairing.pin";
 pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";

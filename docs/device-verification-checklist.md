@@ -977,7 +977,7 @@ Owed:
 - [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
 - [ ] A device-to-device move (Smart Switch) leaves the app unpaired. (where: other hardware)
-- [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
+- [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716-1725 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 - [ ] A Wi-Fi with Tailscale up: a phone browsing mDNS sees the LAN address and no 100.x or fd7a: address. (where: away)
 - [ ] Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
@@ -2795,6 +2795,15 @@ Owed:
 - [ ] KDE Plasma: its Do Not Disturb, and while it presents, the same.
 - [ ] A phone's alarm on KDE: the urgent notification with the alarm sound; on GNOME, silent but urgent.
 - [ ] X11 (no `WAYLAND_DISPLAY`): files copied in Nautilus or Dolphin sent with the clipboard key or "Paste copied files", through `xclip`; with `xclip` missing, nothing read and nothing hung.
+
+## 207. Start beside KDE Connect (T1)
+
+Built 2026-10-24. Unit-tested: the ports tried, `listening.json` believed only for the running server, the bind moving past a held port, the Diagnostics finding, the phone's candidates for a card's new port. Checked on the OPPO against a throwaway server (control port 1726 held by another listener): the server took 1727, said why and recorded it, a second start for the same folder stopped at once, and the phone connected on 1727; with 1726 free again it took 1726.
+Owed:
+- [ ] Linux with KDE Connect (or GSConnect) running: the server starts on 1717, the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
+- [ ] A phone with a card saved at the computer's LAN address finding it on the moved port by itself (the toast), and its tailnet card following. (where: by hand)
+- [ ] Windows: `pocketdesk install` opening TCP 1716-1725, and a phone reaching a server moved to 1717 through the firewall. (where: by hand)
+- [ ] The desktop app's Overview label and Diagnostics with the port moved. (where: by hand)
 
 ## Recording results
 

@@ -100,7 +100,11 @@ pub fn link_for(
         name: host_name(),
         device_id: identity::device_id(state_dir).unwrap_or_default(),
         addresses,
-        control_port: config.control_port,
+        // T1: the running server's, when another program holds the configured one.
+        control_port: pocketdesk_core::local::listening::control_port(
+            state_dir,
+            config.control_port,
+        ),
         stream_port: config.streaming_port,
         pin,
         fingerprint: identity::cert_fingerprint(state_dir)
@@ -229,6 +233,8 @@ pub struct PairView {
     whose: Whose,
     /// The owner chose again since the code on screen was made.
     whose_chosen: bool,
+    /// When the code's control port was last compared with the server's (T1).
+    port_checked: Option<std::time::Instant>,
 }
 
 /// Whose phone the next code pairs: the owner's choice just made, else a
@@ -337,6 +343,26 @@ impl PairView {
                 self.reset(state_dir);
             }
             return;
+        }
+
+        // T1 review: a code drawn while the server was starting, or before it
+        // moved off a held port, names a port phones cannot reach; it is
+        // drawn again with the bound one (the same PIN), checked every 2 s.
+        if self.lookup.is_none()
+            && !self.stopped
+            && self
+                .port_checked
+                .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(2))
+        {
+            self.port_checked = Some(std::time::Instant::now());
+            let configured = config.map_or(Config::default().control_port, |c| c.control_port);
+            if let Some(link) = &self.link
+                && link.control_port
+                    != pocketdesk_core::local::listening::control_port(state_dir, configured)
+            {
+                let addresses = link.addresses.clone();
+                self.make_code(ui, state_dir, config, now_unix, addresses);
+            }
         }
 
         let on_file = pin::read(state_dir, now_unix);
