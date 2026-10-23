@@ -670,11 +670,26 @@ fn turn(device_id: &str) -> Arc<tokio::sync::Semaphore> {
         .clone()
 }
 
+/// A file's place in a folder send (T5), as a phone's share request says
+/// it (T6b): the send's id, the top folder's name, and the file's names
+/// under it, its own last.
+pub(crate) struct FolderPart<'a> {
+    pub id: &'a str,
+    pub folder: &'a str,
+    pub path: &'a [String],
+}
+
 /// Send the file at `path` to the computer `device_id` on the link (2h), as
 /// a phone shares one: it opens a stream for it and keeps it in its
-/// Downloads. A file that breaks off is sent again (continuing) up to 3
-/// times.
-pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String> {
+/// Downloads, or with `folder` (T5) in that send's new folder there. A
+/// file that breaks off is sent again (continuing) up to 3 times. It shows
+/// under way in the desktop app, whose Cancel stops it (T5 review: only the
+/// receiving computer could).
+pub(crate) async fn send_file(
+    device_id: &str,
+    path: &Path,
+    folder: Option<&FolderPart<'_>>,
+) -> Result<(), String> {
     // The link is the internet road, at home too: this computer's switch
     // applies, as the other's does.
     if !crate::events::current_config().internet_files {
@@ -685,39 +700,77 @@ pub(crate) async fn send_file(device_id: &str, path: &Path) -> Result<(), String
         .filter(|m| m.is_file())
         .map(|m| m.len())
         .ok_or("not a file")?;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or("no file name")?;
+    let name = match folder.and_then(|f| f.path.last()) {
+        Some(name) => name.clone(),
+        None => path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .ok_or("no file name")?,
+    };
     let source = crate::offers::source_of(path, size);
+    let key = format!("computer:{device_id}:{source}");
+    let tracker = crate::transfers::track(crate::transfers::Shown {
+        key: key.clone(),
+        direction: pocketdesk_core::local::transfers::Direction::ToPhone,
+        device_id: device_id.to_string(),
+        name: name.clone(),
+        folder: folder.map(|f| f.folder.to_string()),
+        size,
+    });
     let mut attempt = 0;
     loop {
+        if crate::transfers::take_cancelled(&key) {
+            return Err(crate::transfers::OFFER_CANCELLED.to_string());
+        }
         let turn = turn(device_id);
         let _turn = turn.acquire().await.map_err(|e| e.to_string())?;
         let outgoing = live(device_id).ok_or("the computer is not linked now")?;
         let mut waiter = Waiter::new();
+        let mut body = serde_json::json!({
+            "filename": name,
+            "sourceId": source,
+            "payloadTransferInfo": {"key": waiter.key},
+        });
+        if let Some(part) = folder {
+            body["folderId"] = part.id.into();
+            body["folder"] = part.folder.into();
+            body["path"] = part.path.into();
+        }
         let ask = NetworkPacket::new("kdeconnect.share.request")
-            .with_body(crate::offers::with_date(
-                serde_json::json!({
-                    "filename": name,
-                    "sourceId": source,
-                    "payloadTransferInfo": {"key": waiter.key},
-                }),
-                path,
-            ))
+            .with_body(crate::offers::with_date(body, path))
             .with_payload_size(size);
         if outgoing.send(ask).await.is_err() {
             return Err("the link closed".to_string());
         }
         let outcome = match waiter.arrived().await {
-            Ok(stream) => crate::plugins::share::send_file_to(
-                crate::plugins::share::Route::arrived(stream),
-                &waiter.key,
-                path,
-            )
-            .await
-            .map(|_| ())
-            .map_err(|e| e.to_string()),
+            // Run where the app's Cancel can stop it (C1's registry).
+            Ok(stream) => {
+                let (done, result) = tokio::sync::oneshot::channel();
+                let (key_sent, path_owned) = (waiter.key.clone(), path.to_path_buf());
+                let progress = tracker.progress();
+                crate::plugins::share::running()
+                    .spawn(key.clone(), async move {
+                        let sent = crate::plugins::share::send_file_counted(
+                            crate::plugins::share::Route::arrived(stream),
+                            &key_sent,
+                            &path_owned,
+                            progress,
+                        )
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string());
+                        let _ = done.send(sent);
+                    })
+                    .await;
+                match result.await {
+                    Ok(sent) => sent,
+                    // Stopped by the app's Cancel.
+                    Err(_) => {
+                        crate::transfers::take_cancelled(&key);
+                        return Err(crate::transfers::OFFER_CANCELLED.to_string());
+                    }
+                }
+            }
             Err(reason) => Err(reason),
         };
         match outcome {
