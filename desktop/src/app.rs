@@ -608,6 +608,7 @@ impl PocketdeskApp {
                 }
                 TrayAction::SendFile(id) => {
                     self.send_to = Some(id);
+                    self.send_also.clear();
                     self.switch_to(Tab::Files);
                     true
                 }
@@ -683,6 +684,7 @@ impl PocketdeskApp {
         } else if let Some(tab) = Tab::from_key(&open.page) {
             if tab == Tab::Files && open.phone.is_some() {
                 self.send_to = open.phone;
+                self.send_also.clear();
             }
             self.switch_to(tab);
         }
@@ -1664,6 +1666,7 @@ impl PocketdeskApp {
         }
         if let Some(id) = send_file {
             self.send_to = Some(id);
+            self.send_also.clear();
             self.switch_to(Tab::Files);
         }
         match link_state {
@@ -2639,6 +2642,8 @@ impl PocketdeskApp {
             self.send_also = targets.iter().skip(1).cloned().collect();
             let dropped = std::mem::take(&mut self.dropped);
             self.send_files(dropped);
+            // For this drop only (P6 review): the next send goes as chosen.
+            self.send_also.clear();
         } else if cancel {
             let what = dropped_words(&std::mem::take(&mut self.dropped));
             self.notice = crate::notice::Notice::done(format!("Not sent: {what}."));
@@ -2769,7 +2774,7 @@ impl PocketdeskApp {
                     Ok(name) if paths.len() == 1 => what = name,
                     Ok(_) => {}
                     Err(e) if devices.len() == 1 && paths.len() == 1 => {
-                        self.notice = crate::notice::Notice::error(e);
+                        self.notice = crate::notice::Notice::error(format!("{e}{left}"));
                         self.refreshed = None;
                         return;
                     }
@@ -2796,6 +2801,8 @@ impl PocketdeskApp {
             ))
         } else if failed.is_empty() {
             crate::notice::Notice::error(format!("Queued {what} for {to}.{left}"))
+        } else if failed.len() == total {
+            crate::notice::Notice::error(format!("Not queued: {}.{left}", failed.join(", ")))
         } else {
             crate::notice::Notice::error(format!(
                 "Queued {} of {total} for {to}. Not queued: {}.{left}",
@@ -2844,13 +2851,18 @@ impl PocketdeskApp {
             .filter(|id| **id != chosen)
             .map(|id| (id.clone(), label(id)))
             .collect();
+        // A tick outlives a link's moment away (P6 review): one gone at the
+        // send is said then. Only the main one is never also.
+        self.send_also.retain(|id| *id != chosen);
         self.send_to = Some(chosen);
-        self.send_also
-            .retain(|id| others.iter().any(|(o, _)| o == id));
         if !others.is_empty() {
             let also = &mut self.send_also;
             ui.horizontal(|ui| {
-                let title = match also.len() {
+                let ticked = also
+                    .iter()
+                    .filter(|id| others.iter().any(|(o, _)| o == *id))
+                    .count();
+                let title = match ticked {
                     0 => "Also to…".to_string(),
                     n => format!("And {n} more…"),
                 };
@@ -3167,6 +3179,7 @@ impl PocketdeskApp {
                 to => {
                     if let model::DropTo::Send(id) = to {
                         self.send_to = Some(id);
+                        self.send_also.clear();
                     }
                     self.send_files(dropped);
                 }
