@@ -199,6 +199,14 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     ),
 ];
 
+/// The switches a profile sets on a device: those its page shows, and
+/// AwayLock only where it works (Q2 review: the question named one Apply
+/// then left alone).
+fn profile_touches(capability: Capability, computer: bool) -> bool {
+    shown_for(capability, computer)
+        && (capability != Capability::AwayLock || away_lock_unavailable().is_none())
+}
+
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.
 fn shown_for(capability: Capability, computer: bool) -> bool {
@@ -957,10 +965,7 @@ impl PocketdeskApp {
         let Some(device) = self.snapshot.devices.iter().find(|d| d.id == id).cloned() else {
             return;
         };
-        let away_lock = away_lock_unavailable().is_none();
-        let shown = |c: Capability| {
-            shown_for(c, device.computer) && (c != Capability::AwayLock || away_lock)
-        };
+        let shown = |c: Capability| profile_touches(c, device.computer);
         let label = model::device_label(&self.snapshot.devices, id);
         match model::apply_profile(&self.state_dir, id, &profile.permissions, shown) {
             Ok(narrowed) => {
@@ -2068,8 +2073,9 @@ impl PocketdeskApp {
                         let off = model::profile_turns_off(
                             &device.permissions,
                             &profile.permissions,
-                            |c| shown_for(c, device.computer),
+                            |c| profile_touches(c, device.computer),
                         );
+                        let ends = off.iter().any(|c| model::fixed_at_session_start(*c));
                         let turns_off = if off.is_empty() {
                             "It turns nothing off.".to_string()
                         } else {
@@ -2085,7 +2091,15 @@ impl PocketdeskApp {
                             )
                         };
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(format!("Give {label} the {} profile? {turns_off}", profile.name));
+                            ui.label(format!(
+                                "Give {label} the {} profile? {turns_off}{}",
+                                profile.name,
+                                if ends {
+                                    " Its running session ends, to reconnect with them."
+                                } else {
+                                    ""
+                                }
+                            ));
                             if ui.button("Apply").clicked() {
                                 profile_answer = Some(true);
                             }
@@ -2190,10 +2204,20 @@ impl PocketdeskApp {
             self.confirm_remove_profile = Some(chosen);
         }
         if let Some(yes) = profile_answer
-            && let Some((id, profile)) = self.confirm_profile.take()
+            && let Some((id, asked)) = self.confirm_profile.take()
             && yes
         {
-            self.apply_profile(&id, &profile);
+            // Read again: one replaced or removed since it was asked is
+            // not applied as it was (Q2 review).
+            match pocketdesk_core::local::permission_profiles::get(&self.state_dir, &asked.name) {
+                Some(profile) => self.apply_profile(&id, &profile),
+                None => {
+                    self.notice = crate::notice::Notice::error(format!(
+                        "The {} profile is gone: nothing was changed.",
+                        asked.name
+                    ))
+                }
+            }
         }
         if let Some(yes) = remove_answer
             && let Some((_, name)) = self.confirm_remove_profile.take()
@@ -3491,6 +3515,9 @@ impl PocketdeskApp {
         }
         // P7: files pasted from the clipboard, once read.
         if self.pasting.as_ref().is_some_and(|h| h.is_finished()) {
+            // Its "Reading…" ends with the read (Q2 review: a question for
+            // several phones left it spinning for five minutes).
+            self.notice = None;
             match self.pasting.take().and_then(|h| h.join().ok()).flatten() {
                 Some(copied) => {
                     let left_out = copied.left_out;

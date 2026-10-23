@@ -972,11 +972,7 @@ impl SettingsForm {
                     }
                     note(
                         ui,
-                        if cfg!(windows) {
-                            "A copy one of these programs makes never leaves this computer: not to phones, not to computers, not into the history. On top of the private marks a password manager sets, which not every one does. Windows does not always say which program copied (one that has closed, or one run as another user), and a browser extension's copy is the browser's: the patterns below catch those."
-                        } else {
-                            "Windows only: a copy names the program that made it there. Here, use the patterns below."
-                        },
+                        "A copy one of these programs makes never leaves this computer: not to phones, not to computers, not into the history. On top of the private marks a password manager sets, which not every one does. Windows does not always say which program copied (one that has closed, or one run as another user), and a browser extension's copy is the browser's: the patterns below catch those.",
                     );
                 });
                 let never_like = &mut self.never_like_text;
@@ -2356,7 +2352,6 @@ mod tests {
         }
     }
 
-    /// O4: the lists are read one a line, the usual ones added once, and a
     /// Q2: a link rule, a words line or quiet hours that do not read keep
     /// Save off, each under its own key so its section opens.
     #[test]
@@ -2384,6 +2379,7 @@ mod tests {
         assert!(keys(&form).is_empty());
     }
 
+    /// O4: the lists are read one a line, the usual ones added once, and a
     /// pattern that does not read keeps Save off.
     #[test]
     fn the_never_send_lists_are_read_a_line_each_and_checked() {

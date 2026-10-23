@@ -732,7 +732,9 @@ pub fn phone_actions_refused(
             "Its \"Let the computer take screenshots and lock this phone\" is off, so it refuses a screenshot or a lock.",
         )
     } else if said.android == Some(false) {
-        Some("Pocketdesk control is off on it, so it refuses a screenshot or a lock.")
+        Some(
+            "Android is not letting Pocketdesk's control service or notification access work on it, so it refuses a screenshot or a lock.",
+        )
     } else {
         None
     }

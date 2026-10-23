@@ -433,6 +433,15 @@ impl MessagesView {
                 );
             }
         });
+        // An ask over ten minutes old is forgotten (Q2 review: its "No
+        // answer" greeted the page hours later).
+        if self
+            .contacts_asked
+            .as_ref()
+            .is_some_and(|(_, at)| now_unix.saturating_sub(*at) > 600)
+        {
+            self.contacts_asked = None;
+        }
         // Said while it waits, and when no list came (as P2's box does).
         if let Some((asked_phone, at)) = &self.contacts_asked
             && asked_phone == phone
