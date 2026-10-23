@@ -591,6 +591,26 @@ fn target_for(device_id: &str, clients: &[Arc<dyn DeviceSender>]) -> Option<Arc<
         .cloned()
 }
 
+/// Whether files can reach `device_id` now, or why not, in the sent list's
+/// words (P7 review: said before queuing from the tray, not only there).
+pub(crate) fn reach(
+    device_id: &str,
+    clients: &[Arc<dyn DeviceSender>],
+) -> Result<(), &'static str> {
+    if target_for(device_id, clients).is_some() {
+        return Ok(());
+    }
+    if clients
+        .iter()
+        .any(|c| c.device_id() == device_id && c.link_streams().is_some())
+    {
+        return Err(
+            "files over the internet are off on this computer (Settings), and the phone is away",
+        );
+    }
+    Err("phone not connected")
+}
+
 /// Daemon task: offer every file the desktop app asks to send.
 pub async fn run_watcher() {
     let Ok(dir) = crate::state::state_dir() else {

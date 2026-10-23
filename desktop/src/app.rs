@@ -286,6 +286,9 @@ pub struct PocketdeskApp {
     send_to: Option<String>,
     /// The others a send goes to as well (P6).
     send_also: Vec<String>,
+    /// Files being read from the clipboard (P7).
+    pasting:
+        Option<std::thread::JoinHandle<Option<pocketdesk_core::local::clipboard_files::Copied>>>,
     /// Files dropped while several phones or computers could take them,
     /// waiting for the owner to say which (J5).
     dropped: Vec<PathBuf>,
@@ -376,6 +379,7 @@ impl PocketdeskApp {
             raised_approvals: Vec::new(),
             send_to: None,
             send_also: Vec::new(),
+            pasting: None,
             dropped: Vec::new(),
             send_path: String::new(),
             send_link: String::new(),
@@ -2889,6 +2893,7 @@ impl PocketdeskApp {
             });
         }
         let mut send = None;
+        let mut paste = false;
         // Wrapped: the box and three buttons are wider than a narrow page.
         ui.horizontal_wrapped(|ui| {
             let path_box = ui.add(
@@ -2900,6 +2905,16 @@ impl PocketdeskApp {
             let entered = crate::keys::entered(ui, &path_box);
             if (ui.button("Send").clicked() || entered) && !self.send_path.trim().is_empty() {
                 send = Some(PathBuf::from(self.send_path.trim()));
+            }
+            // P7: files copied in Explorer or a file manager. Not Ctrl+V:
+            // egui takes that key for text only, and with files copied
+            // there is none.
+            if ui
+                .button("Paste copied files")
+                .on_hover_text("Send the files copied in Explorer or a file manager")
+                .clicked()
+            {
+                paste = true;
             }
             if crate::pick_file::AVAILABLE {
                 if ui
@@ -2919,6 +2934,13 @@ impl PocketdeskApp {
         if let Some(path) = send {
             self.send_file(&path);
             self.send_path.clear();
+        }
+        // Read on a thread (P7 review: the clipboard's retries, or a dead
+        // network drive's files, held the window).
+        if paste && self.pasting.is_none() {
+            self.pasting = Some(std::thread::spawn(
+                pocketdesk_core::local::clipboard_files::read,
+            ));
         }
         let mut link = None;
         ui.horizontal_wrapped(|ui| {
@@ -3154,6 +3176,29 @@ impl PocketdeskApp {
         }
     }
 
+    /// Files dropped on the window, or pasted from the clipboard (P7): to
+    /// the only phone or computer that takes them, or asked which.
+    fn take_dropped(&mut self, dropped: Vec<PathBuf>) {
+        self.switch_to(Tab::Files);
+        // Judged on what can take files now, not up to a second ago: a
+        // phone that just linked must be asked about (J5 review).
+        self.refresh();
+        match model::drop_to(&self.snapshot) {
+            // Several could take them, or a question is open already:
+            // they wait with it, never going around it (J5 review).
+            _ if !self.dropped.is_empty() => model::join_drops(&mut self.dropped, dropped),
+            model::DropTo::Ask(_) => model::join_drops(&mut self.dropped, dropped),
+            // The only one, or none (send_file says so).
+            to => {
+                if let model::DropTo::Send(id) = to {
+                    self.send_to = Some(id);
+                    self.send_also.clear();
+                }
+                self.send_files(dropped);
+            }
+        }
+    }
+
     /// Files dropped on the window, and a finished "Choose file…", go to
     /// the chosen phone (F7b).
     fn take_files_to_send(&mut self, ctx: &egui::Context) {
@@ -3166,23 +3211,25 @@ impl PocketdeskApp {
                 .collect()
         });
         if !dropped.is_empty() {
-            self.switch_to(Tab::Files);
-            // Judged on what can take files now, not up to a second ago: a
-            // phone that just linked must be asked about (J5 review).
-            self.refresh();
-            match model::drop_to(&self.snapshot) {
-                // Several could take them, or a question is open already:
-                // they wait with it, never going around it (J5 review).
-                _ if !self.dropped.is_empty() => model::join_drops(&mut self.dropped, dropped),
-                model::DropTo::Ask(_) => model::join_drops(&mut self.dropped, dropped),
-                // The only one, or none (send_file says so).
-                to => {
-                    if let model::DropTo::Send(id) = to {
-                        self.send_to = Some(id);
-                        self.send_also.clear();
+            self.take_dropped(dropped);
+        }
+        // P7: files pasted from the clipboard, once read.
+        if self.pasting.as_ref().is_some_and(|h| h.is_finished()) {
+            match self.pasting.take().and_then(|h| h.join().ok()).flatten() {
+                Some(copied) => {
+                    let left_out = copied.left_out;
+                    self.take_dropped(copied.files);
+                    if left_out > 0 {
+                        self.notice = crate::notice::Notice::error(format!(
+                            "Only the first {} copied files were taken; {left_out} more were left out.",
+                            pocketdesk_core::local::clipboard_files::MAX_FILES
+                        ));
                     }
-                    self.send_files(dropped);
                 }
+                None => self.notice = crate::notice::Notice::error(
+                    "The clipboard holds no files: copy them in Explorer or a file manager first."
+                        .to_string(),
+                ),
             }
         }
         if self.picking.as_ref().is_some_and(|h| h.is_finished()) {

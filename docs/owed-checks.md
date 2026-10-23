@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-921 open items.
+925 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 551 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 553 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 29 |
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 114 |
+| A Linux desktop (the Azure VM serves for some) | 115 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 88 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 89 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
 
@@ -1125,6 +1125,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
 
+**199. Files copied in Explorer sent with the clipboard key (P7)**
+
+- Files off and text copied too: the text sent instead.
+- The Files page's "Paste copied files", one target and several; more than 100 copied.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1942,6 +1947,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Linux's urgent notification.
 
+**199. Files copied in Explorer sent with the clipboard key (P7)**
+
+- Linux: files copied in Nautilus or Dolphin (`text/uri-list`).
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **15. Language / i18n (Tier-3 #17 remainder)**
@@ -2334,3 +2343,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **196. Notifications held by their words (P4)**
 
 - The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
+
+**199. Files copied in Explorer sent with the clipboard key (P7)**
+
+- On the LAN: two files copied in Explorer, the tray's Send the clipboard and the key each sending them, rows in the sent list.
