@@ -107,7 +107,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `phone_quiet` | `quiet` | — |
 | `away_locked` | `failed: true` when the lock failed and will be tried again in a minute (the phone with "Lock this computer when it leaves" on that left last; D9) | — |
 | `phone_battery_low` | `charge` | — |
-| `notification` | `app`, and `late_secs` (seconds) for one that waited on the phone a minute or more (C3) | `title`, `text` |
+| `notification` | `app`, and `late_secs` (seconds) for one that waited on the phone a minute or more (C3); `true` flags for why it was held or what it is: `alarm` (an alarm, P5), `phone_in_use` (the phone was in hand, M6), `in_use_elsewhere` (another computer was in use, N7), `quiet_hours` or `presenting` (held here, P3), `live` (an ongoing update, N4) | `title`, `text` |
 | `text_received` | — | `from`, `body` |
 | `file_received` | `size`; or `folder: true`, once, as a folder starts arriving; `key`, the first 16 hex digits of the SHA-256 of where it was saved (its `path` in `received --json`) | `name` (`folder/` for a folder) |
 | `link_received` | `host` | `url` |

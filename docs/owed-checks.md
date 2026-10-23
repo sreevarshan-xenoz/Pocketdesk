@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-892 open items.
+885 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 392 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 312 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 61 |
-| A phone with a SIM | 30 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 68 |
+| A phone with a SIM | 32 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 32 |
-| A second computer | 11 |
+| A second computer | 17 |
 | A Linux desktop (the Azure VM serves for some) | 158 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 37 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 140 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 50 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 185 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -122,89 +122,22 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 
-**61. Portrait sessions (T9b)**
-
-- A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
-- Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch).
-
-**62. A mouse on the phone (T9c)**
-
-- Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel.
-- Opening and closing the in-session keyboard: the mouse keeps working.
-- The mouse's Back button goes to the desktop and does not end the session.
-
-**64. The control channel over the internet (T10a)**
-
-- A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home.
-- A file offer to a phone on the internet link fails as "not reachable", not stuck.
-
-**65. The clipboard outside a session (T10b)**
-
-- With it off, a session still gets the clipboard on request.
-
 **66. Answering the phone's notifications from the computer (T10c)**
 
-- "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing.
 - The switch off: nothing offered, an answer not run.
-- An action that opens an activity on Android 14+ (background launches may be blocked).
-
-**67. Files from the computer without a session (T10d)**
-
-- A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it.
-- The desktop app's Files tab listing a linked phone with no session.
-
-**69. "Send to phone" in the file manager (T10e)**
-
-- Send To in Explorer itself, with several files and a folder.
-- The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry.
-- No phone connected: the notification says so.
 
 **70. The phone's folders on the computer (T10g)**
 
-- The desktop app's Phone tab itself (roots, folders, Up, Download).
 - A folder of more than 2000 entries; a file renamed between list and fetch.
-
-**72. New phone screenshots on the computer (T10h)**
-
-- A screenshot with the side keys, and a JPEG screenshot (One UI's other format).
-
-**73. The phone as a remote (T10i)**
-
-- The owner's approval prompt ("Ask before each session") before ready.
-- Over the internet road, and a phone driving while another has a picture session (driving rules).
-- I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone.
 
 **74. The phone's battery without a session**
 
 - With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
-- Over the internet road.
-
-**76. Hotspot and tethering in Check connection**
-
-- The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it.
-
-**77. This phone's screen on the computer (T10k)**
-
-- The notification's Stop (the A71 showed only the redacted notification in the shade while locked), and Sessions' "Show screen" after the window was closed.
-- "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery.
 
 **78. Events and hooks (ecosystem 1a)**
 
-- `notification`, `text_received`, `file_received` and `link_received` from a phone, at both detail levels.
-- The desktop Settings hooks box saving a hook the server then runs; "Event log" off writing nothing.
-- A hook killed at 30 s, and the 33rd waiting hook skipped, on a real server.
-
-**79. The Activity Center (ecosystem 1b)**
-
-- Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving.
-
-**80. Named tasks (ecosystem 1c)**
-
-- The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor.
-
-**81. Send from the browser (ecosystem 1d)**
-
-- The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications.
+- `file_received` at both detail levels.
+- The 33rd waiting hook skipped, on a real server: 37 events of a kind within 30 s (a phone sends at most 20 notifications a minute, so another source).
 
 **84. The reliability pass before ecosystem phase 2 (R6)**
 
@@ -213,130 +146,18 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)**
 
 - The remote file browser's download and a folder fetch over the internet road.
-- 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image).
-- The too-old message against a computer from before 2c.
-- Both Settings switches off: a send refused at once, with the reason.
-
-**86. Two computers: pairing, the link, the clipboard and files (2f–2h)**
-
-- Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
-- The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute).
-- The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays.
-- A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`.
-- A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
-- Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works.
-
-**87. KDE Connect devices (3a–3c)**
-
-- Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new.
-- A device that broadcasts first (this computer dialing it): not built (the receive half waits).
-
-**88. The desktop app's shell (U1)**
-
-- A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs.
-- A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
-
-**89. The phone's navigation and feedback (U2)**
-
-- Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
-
-**90. Names on both sides (U3)**
-
-- A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?".
-
-**91. Ring the phone from the computer (N1)**
-
-- Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted.
-
-**92. Phone → computer text in one tap (N2)**
-
-- A copy marked sensitive (a password manager's) asking first through the tile.
-
-**93. The phone's Home card, Add form, Settings and session menu (U4)**
-
-- A row's "Allow notification access" with a feature on and access off.
-- Landscape: the bottom chrome with 48 dp chips.
-
-**94. The desktop's Settings and words (U5)**
-
-- Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it.
-- A narrow window wrapping every row; a section with a problem held open.
-- Unpair's question for a computer.
-
-**95. The phone app in Spanish and Tamil (U6)**
-
-- The keyboard bar's keys and the remote's presenter keys in Spanish.
-- Every screen in Spanish and Tamil for text that runs out of its box.
-
-**96. Answer a phone notification in the toast itself (N3)**
-
-- Typing a reply in the toast and pressing Send: the phone's app gets it (its RemoteInput), at most 10 a minute.
-- Pressing "Mark as read" in the toast, and from the Action Center after the banner has gone.
-- Settings "Answer in the notification" off: the toast is plain.
 
 **97. The phone as the computer's speaker and mic (N5)**
 
 - Ten minutes without the computer: it stops trying and releases the service.
-- An hour with the screen off: the session holds, and what it costs the phone's battery.
-
-**98. An Android 17 pass (N4)**
-
-- The app starts, asks for local network access, and a session works once it is granted.
-- Ring from the computer with the app in the background and `adb shell cmd audio set-enable-hardening enable`: the notification sounds at the alarm volume, the volume is not raised, and no `AudioHardening` entry names the app.
-- On Android 16 and older (the A71): the ring still raises the alarm volume and puts it back.
-- A text with a code: does it reach the computer at all after the three hours, and with its own time?
-- A ring that raised the volume on Android 16, cut short, then the phone on 17: the volume is put back when the app is opened.
-- A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use).
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
 - "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
 
-**101. KDE Connect, next steps (N9)**
-
-- A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
-
-**102. The phone's background cost (N7)**
-
-- The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps.
-- Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives.
-- A release build (R8): the CPU again.
-
-**103. Transfers you can watch and stop (C1)**
-
-- A folder cancelled on the phone: the app's notifications sit folded under "Silent" in the shade, so its Cancel was not reached by script (a single 1.5 GB file's was, in C1).
-- A share from the phone cancelled on the computer, then shared again.
-
-**104. Control the phone from the computer (C8)**
-
-- The phone locked with a PIN: taps and typing refused, Back and Home taken.
-- A password field.
-- Over the home network (not the relay): latency again.
-
-**105. Choose where received files land (C2)**
-
-- The phone's grant taken back in Android's settings, then a file.
-- A download broken and continued in a picked folder.
-
-**106. Notifications that wait and go later (C3)**
-
-- Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
-- A computer from before C3: notifications arrive once each, as before.
-
-**108. The phone with large fonts, landscape and TalkBack (C5)**
-
-- Split screen: Home and a session in half a screen.
-- Landscape with the keyboard open (§26).
-- Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0).
-
 **109. The owed checks by where they run (C6)**
 
-- The rest of "here", in later batches.
-
-**110. Recent photos on the computer (C7)**
-
-- The Phone page by hand: Refresh, Save, Open and Copy.
-- HEIC photos: thumbnails shown, Copy saying it cannot.
+- The rest of "here", in later batches: the S cycle (`docs/research/2026-10-23-s-cycle.md`), S1 to S5.
 
 **111. Health after updates (D1)**
 
@@ -1015,10 +836,31 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A text from a contact shows "Ann (number)" in the notification and in Messages; a stranger shows the number only; a sender ID with letters gets no name.
 
+**64. The control channel over the internet (T10a)**
+
+- A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home. (where: owner) (a session at home needs the throwaway's LAN port open.)
+
+**69. "Send to phone" in the file manager (T10e)**
+
+- The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry. (where: owner) (`install` changes this computer.)
+
 **71. Input on wlroots without uinput (T10f)**
 
 - Super+N, and the text fallback typed as keys.
 - Privacy mode where `/dev/input` is root-only too: the local keyboard is likely not blocked.
+
+**73. The phone as a remote (T10i)**
+
+- Over the internet road, and a phone driving while another has a picture session (driving rules). (where: owner) (a remote needs the Input permission.)
+- I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone. (where: owner) (a remote needs the Input permission.)
+
+**89. The phone's navigation and feedback (U2)**
+
+- Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link. (where: owner) (it sounds a siren on this computer.)
+
+**95. The phone app in Spanish and Tamil (U6)**
+
+- The remote's presenter keys in Spanish. (where: owner) (A remote needs the Input permission.)
 
 **98. An Android 17 pass (N4)**
 
@@ -1026,6 +868,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **104. Control the phone from the computer (C8)**
 
+- Over the home network (not the relay): latency again. (where: owner)
 - Rotation: taps land right after the phone turns.
 
 **122. The phone as a pen (E3)**
@@ -1126,9 +969,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - From outside the home network (mobile data, or another Wi-Fi), with Tailscale off: notifications, texts, battery and the phone's media reach the computer with the app in the background, and Send link reaches the phone.
 
+**78. Events and hooks (ecosystem 1a)**
+
+- `text_received` at both detail levels. (where: sim)
+
 **98. An Android 17 pass (N4)**
 
 - Settings shows the Android 17 notes beside "Ring from the computer" and "Show texts on my computer".
+- A text with a code: does it reach the computer at all after the three hours, and with its own time? (where: sim)
 
 **132. The computer's state on the home screen (G1)**
 
@@ -1320,6 +1168,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **70. The phone's folders on the computer (T10g)**
 
 - A second computer asking: nothing answered.
+
+**86. Two computers: pairing, the link, the clipboard and files (2f–2h)**
+
+- Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first. (where: second computer)
+- The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute). (where: second computer)
+- The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
+- A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
+- A folder from B to A lands under one new folder; a folder from A to B is refused with its reason. (where: second computer)
+- Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 
 **105. Choose where received files land (C2)**
 
@@ -1850,6 +1707,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real player (Spotify, a podcast app): its title, and the app's name (Android 11+ package visibility may give the package name).
 
+**62. A mouse on the phone (T9c)**
+
+- Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel. (where: other hardware) (a mouse.)
+- Opening and closing the in-session keyboard: the mouse keeps working. (where: other hardware) (a mouse.)
+- The mouse's Back button goes to the desktop and does not end the session. (where: other hardware) (a mouse.)
+
 **65. The clipboard outside a session (T10b)**
 
 - Android 10–12: the tile's window reads the clipboard.
@@ -1858,9 +1721,29 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Android 14+'s "selected photos only" answer, and Android 12 and older.
 
+**76. Hotspot and tethering in Check connection**
+
+- The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it. (where: other hardware) (the phone's hotspot.)
+
+**85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)**
+
+- The too-old message against a computer from before 2c. (where: other hardware) (a computer running a release from before 2c.)
+
+**87. KDE Connect devices (3a–3c)**
+
+- Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new. (where: other hardware) (KDE Connect's app.)
+- A device that broadcasts first (this computer dialing it): not built (the receive half waits). (where: other hardware) (KDE Connect's app.)
+
 **98. An Android 17 pass (N4)**
 
+- The app starts, asks for local network access, and a session works once it is granted. (where: other hardware) (Android 17.)
+- Ring from the computer with the app in the background and `adb shell cmd audio set-enable-hardening enable`: the notification sounds at the alarm volume, the volume is not raised, and no `AudioHardening` entry names the app. (where: other hardware) (Android 17.)
+- A ring that raised the volume on Android 16, cut short, then the phone on 17: the volume is put back when the app is opened. (where: other hardware) (Android 17.)
 - A tablet-size window: the session lays out, rotates and resizes (orientation limits are ignored there).
+
+**101. KDE Connect, next steps (N9)**
+
+- A chat app's notification, an update to one (replacing the toast), and a flood held to the limit. (where: other hardware) (KDE Connect's app.)
 
 **104. Control the phone from the computer (C8)**
 
@@ -1871,8 +1754,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A picked folder on an SD card or a cloud provider.
 
+**106. Notifications that wait and go later (C3)**
+
+- A computer from before C3: notifications arrive once each, as before. (where: other hardware) (a computer running a release from before C3.)
+
 **110. Recent photos on the computer (C7)**
 
+- HEIC photos: thumbnails shown, Copy saying it cannot. (where: other hardware) (a phone that saves HEIC.)
 - Android 8 or 9: the legacy thumbnail path.
 
 **111. Health after updates (D1)**
@@ -2074,25 +1962,68 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - While pinching, moving the fingers pans the view; one finger lifting and landing again does not jump the zoom. (where: by hand) (adb cannot pinch.)
 - A two-finger tap is still a right click, a three-finger tap a middle click.
 
+**61. Portrait sessions (T9b)**
+
+- A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual. (where: by hand)
+- Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch). (where: by hand) (adb cannot pinch.)
+
 **64. The control channel over the internet (T10a)**
 
 - The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
 
 **66. Answering the phone's notifications from the computer (T10c)**
 
+- "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing. (where: by hand)
 - The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
+- An action that opens an activity on Android 14+ (background launches may be blocked). (where: by hand)
+
+**67. Files from the computer without a session (T10d)**
+
+- A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it. (where: by hand)
+- The desktop app's Files tab listing a linked phone with no session. (where: by hand)
+
+**69. "Send to phone" in the file manager (T10e)**
+
+- Send To in Explorer itself, with several files and a folder. (where: by hand)
+
+**70. The phone's folders on the computer (T10g)**
+
+- The desktop app's Phone tab itself (roots, folders, Up, Download). (where: by hand)
 
 **71. Input on wlroots without uinput (T10f)**
 
 - Direct touch (absolute moves), scrolling, right and middle clicks, and a two-output layout.
 
+**72. New phone screenshots on the computer (T10h)**
+
+- A screenshot with the side keys, and a JPEG screenshot (One UI's other format). (where: by hand)
+
+**73. The phone as a remote (T10i)**
+
+- The desktop app's prompt for a remote, clicked. (where: by hand)
+
 **77. This phone's screen on the computer (T10k)**
 
 - The latency against a stopwatch, and over the internet road (WAN, relayed and direct).
+- The notification's Stop (the A71 showed only the redacted notification in the shade while locked), and Sessions' "Show screen" after the window was closed. (where: by hand)
+- "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery. (where: by hand)
+
+**78. Events and hooks (ecosystem 1a)**
+
+- The desktop Settings hooks box saving a hook the server then runs. (where: by hand)
 
 **79. The Activity Center (ecosystem 1b)**
 
 - The Activity tab itself on screen (its rows, filters, Show in folder): a click posted to the window did not reach egui, and real input into this box's desktop is not used for tests.
+- Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving. (where: by hand)
+
+**80. Named tasks (ecosystem 1c)**
+
+- The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor. (where: by hand)
+
+**81. Send from the browser (ecosystem 1d)**
+
+- The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications. (where: by hand)
 
 **82. Home Assistant over MQTT (ecosystem 1e)**
 
@@ -2102,10 +2033,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Tasker or MacroDroid receiving them (no automation app on the A71), a remote's events, a send's `FILES_SENT`, a task's `TASK_FINISHED`, a link lost (`REASON=lost`), and the Settings row on screen.
 
+**85. iroh 1.3, one endpoint per computer, files over the internet road (2a–2d)**
+
+- 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image). (where: by hand)
+
 **87. KDE Connect devices (3a–3c)**
 
 - The desktop app's Find button, list, Allow/Deny and Pair on screen.
 - 3c, a text or link share refused with its notice, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
+
+**88. The desktop app's shell (U1)**
+
+- A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs. (where: by hand)
+- A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it. (where: by hand)
 
 **89. The phone's navigation and feedback (U2)**
 
@@ -2114,30 +2054,73 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **90. Names on both sides (U3)**
 
 - Rename on the desktop's Devices page, and the approval prompt's "(calls itself)" (they need clicks).
+- A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?". (where: by hand)
 
 **91. Ring the phone from the computer (N1)**
 
 - The desktop's Ring button on screen (it needs a click), Ring off in Devices refusing it, and once a minute from the button.
+- Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted. (where: by hand)
 
 **92. Phone → computer text in one tap (N2)**
 
 - "To computer" in a real app's selection menu, on screen; the Sharesheet's Direct Share row showing the computers (adb opens only the app chooser).
+- A copy marked sensitive (a password manager's) asking first through the tile. (where: by hand)
 
 **93. The phone's Home card, Add form, Settings and session menu (U4)**
 
 - TalkBack on a card ("Connect"), a Settings row (one stop) and a heading.
+- Landscape: the bottom chrome with 48 dp chips. (where: by hand)
+
+**94. The desktop's Settings and words (U5)**
+
+- Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it. (where: by hand)
+- A narrow window wrapping every row; a section with a problem held open. (where: by hand)
+- Unpair's question for a computer. (where: by hand)
+
+**95. The phone app in Spanish and Tamil (U6)**
+
+- Every screen in Spanish and Tamil for text that runs out of its box. (where: by hand)
+
+**96. Answer a phone notification in the toast itself (N3)**
+
+- Typing a reply in the toast and pressing Send: the phone's app gets it (its RemoteInput), at most 10 a minute. (where: by hand)
+- Pressing "Mark as read" in the toast, and from the Action Center after the banner has gone. (where: by hand)
+- Settings "Answer in the notification" off: the toast is plain. (where: by hand)
 
 **97. The phone as the computer's speaker and mic (N5)**
 
 - By ear: the computer's sound on the phone (lag, quality, across the room).
 - Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
+- An hour with the screen off: the session holds, and what it costs the phone's battery. (where: by hand)
+
+**98. An Android 17 pass (N4)**
+
+- A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use). (where: by hand) (by ear.)
+
+**102. The phone's background cost (N7)**
+
+- The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps. (where: by hand)
+- Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives. (where: by hand)
+- A release build (R8): the CPU again. (where: by hand)
+
+**103. Transfers you can watch and stop (C1)**
+
+- A folder cancelled on the phone: the app's notifications sit folded under "Silent" in the shade, so its Cancel was not reached by script (a single 1.5 GB file's was, in C1). (where: by hand)
 
 **104. Control the phone from the computer (C8)**
 
 - The window by hand: a click, a drag, the wheel, the right and middle buttons, typing, the bar's buttons, Watch only, and a drag that leaves the window.
+- The phone locked with a PIN: taps and typing refused, Back and Home taken. (where: by hand)
+- A password field. (where: by hand)
+
+**105. Choose where received files land (C2)**
+
+- The phone's grant taken back in Android's settings, then a file. (where: by hand)
+- A download broken and continued in a picked folder. (where: by hand)
 
 **106. Notifications that wait and go later (C3)**
 
+- Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late. (where: by hand)
 - "Wait up to 10 minutes" on screen, and one posted more than 10 minutes before the computer comes back.
 
 **107. The desktop app's headless harness (C4)**
@@ -2147,9 +2130,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **108. The phone with large fonts, landscape and TalkBack (C5)**
 
 - A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
+- Split screen: Home and a session in half a screen. (where: by hand)
+- Landscape with the keyboard open (§26). (where: by hand)
+- Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0). (where: by hand)
 
 **110. Recent photos on the computer (C7)**
 
+- The Phone page by hand: Refresh, Save, Open and Copy. (where: by hand)
 - Photo access denied: the same with its reason; and the page showing either (by eye).
 
 **111. Health after updates (D1)**
