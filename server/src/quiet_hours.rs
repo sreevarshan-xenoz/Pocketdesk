@@ -40,6 +40,26 @@ pub fn decide(
     (config.quiet_presenting && presenting()).then_some(Quiet::Presenting)
 }
 
+/// Keeps Linux's Do Not Disturb answer current while "While presenting"
+/// is on (R2 review): its thread stops a minute after the last ask, and a
+/// notification after a quiet minute would read a stale "not quiet". Asked
+/// every 30 s on a thread of its own; nothing elsewhere.
+pub fn keep_warm() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let _ = std::thread::Builder::new()
+        .name("presenting-warm".into())
+        .spawn(|| {
+            loop {
+                if crate::events::current_config().quiet_presenting {
+                    let _ = pocketdesk_core::local::quiet_hours::presenting();
+                }
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+        });
+}
+
 /// Why this computer is quiet now, if it is.
 #[cfg(not(test))]
 pub fn now() -> Option<Quiet> {

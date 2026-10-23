@@ -95,6 +95,8 @@ pub async fn run(config: Config) -> Result<()> {
 
     // The inbox folders the app's requests land in, watched (R6c).
     crate::inbox::start(&state_dir);
+    // Q4/R2: Linux's Do Not Disturb, read before a notification needs it.
+    crate::quiet_hours::keep_warm();
     // Test seams (2g, 2h, D9): said, so one left set by mistake is noticed.
     for seam in [
         "POCKETDESK_CLIPBOARD_FILE",

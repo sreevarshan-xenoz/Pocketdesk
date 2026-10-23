@@ -161,6 +161,8 @@ pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
     }
     if !config.cast_control {
         off.push(("control", "Control phones from their screen window"));
+        // M4's typing is held by it too (R2 review).
+        off.push(("typing", "Control phones from their screen window"));
     }
     off
 }
@@ -286,6 +288,7 @@ mod tests {
                 ("alarms", "Phone notifications"),
                 ("clipboard", "Clipboard to phones"),
                 ("control", "Control phones from their screen window"),
+                ("typing", "Control phones from their screen window"),
             ]
         );
         // Q3: alarms rung here or not, said by their own setting.
