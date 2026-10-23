@@ -27,7 +27,9 @@ pub fn link_problem(url: &str) -> Option<String> {
     } else {
         return Some("not a web link (http or https)".to_string());
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // A backslash ends it too, as browsers read one (P8 review: a rule for a
+    // site was passed by a backslash after its name).
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or_default();
     if authority.contains('@') {
         return Some("a link with a user name or password".to_string());
     }
@@ -58,7 +60,9 @@ pub fn link_host(url: &str) -> Option<String> {
     let rest = lower
         .strip_prefix("https://")
         .or_else(|| lower.strip_prefix("http://"))?;
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    // A backslash ends it too, as browsers read one (P8 review: a rule for a
+    // site was passed by a backslash after its name).
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or_default();
     let host = match authority.rsplit_once(':') {
         Some((host, port))
             if port.chars().all(|c| c.is_ascii_digit())
@@ -198,5 +202,10 @@ mod tests {
             Some("[2001:db8::1]")
         );
         assert_eq!(link_host("ftp://example.org"), None);
+        // As a browser reads it (P8 review).
+        assert_eq!(
+            link_host("https://example.org\\.x/").as_deref(),
+            Some("example.org")
+        );
     }
 }

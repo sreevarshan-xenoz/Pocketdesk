@@ -1163,7 +1163,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "One a line: a site, \"=\", and browser, show, or a program's path. A link to the site or any name under it (youtube.com covers m.youtube.com) opens in the browser, is shown in a notification, or is handed to the program as its one argument, never through a shell. The longest site that matches wins; a link no rule names goes as above. A link that cannot be opened is said.",
+                        "One a line: a site, \"=\", and browser, show, or a program's path. A link to the site or any name under it (youtube.com covers m.youtube.com) opens in the browser, is shown in a notification, or is handed to the program as its one argument, never through a shell. The longest site that matches wins (an address only whole); a link no rule names goes as above, and with \"open in the browser\" off every link is only shown. A program is named by its whole path, never a .bat or .cmd file; at most 8 run at once. A link that cannot be opened is said.",
                     );
                     let lines: Vec<String> = rules.lines().map(str::to_string).collect();
                     let bad = pocketdesk_core::local::link_rules::bad_lines(&lines);

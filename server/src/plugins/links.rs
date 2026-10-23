@@ -434,8 +434,16 @@ fn open_detached(url: &str) -> std::result::Result<(), String> {
 /// its own: as its one argument, never through a shell. A program that is
 /// not there is said at once; one that fails to start, once it has.
 fn run_detached(program: &std::path::Path, url: &str) -> std::result::Result<(), String> {
+    // At most this many at once, each waited for on its thread (P8 review:
+    // a browser or a call runs for hours, a thread each).
+    const MAX_RUNNING: usize = 8;
+    static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     if !program.is_file() {
         return Err(format!("{} is not there", program.display()));
+    }
+    if RUNNING.fetch_add(1, Ordering::SeqCst) >= MAX_RUNNING {
+        RUNNING.fetch_sub(1, Ordering::SeqCst);
+        return Err(format!("{MAX_RUNNING} links are open in programs already"));
     }
     let (program, url) = (program.to_path_buf(), url.to_string());
     std::thread::Builder::new()
@@ -451,8 +459,10 @@ fn run_detached(program: &std::path::Path, url: &str) -> std::result::Result<(),
                 // Waited for, so it leaves no zombie on Linux.
                 Ok(mut child) => {
                     let _ = child.wait();
+                    RUNNING.fetch_sub(1, Ordering::SeqCst);
                 }
                 Err(e) => {
+                    RUNNING.fetch_sub(1, Ordering::SeqCst);
                     tracing::warn!("Could not open a link with {}: {e}", program.display());
                     show_link(
                         &format!(
@@ -465,7 +475,10 @@ fn run_detached(program: &std::path::Path, url: &str) -> std::result::Result<(),
             }
         })
         .map(|_| ())
-        .map_err(|e| format!("no thread to open it on: {e}"))
+        .map_err(|e| {
+            RUNNING.fetch_sub(1, Ordering::SeqCst);
+            format!("no thread to open it on: {e}")
+        })
 }
 
 /// Open `url` (already checked) with the system's handler for web links:
@@ -571,11 +584,13 @@ mod tests {
         assert!(shown.lock().unwrap().is_empty());
     }
 
-    /// K2a: paused, a link is neither opened nor shown.
     /// P8: a site's rule shows, hands to a program, or opens; the rest as
     /// before; a program that fails is said.
     #[test]
     fn a_links_site_decides_how_it_opens() {
+        // The setting is the process's: held, and on (P8 review).
+        let _setting = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+        configure(true);
         let (opened, shown) = (Seen::default(), Seen::default());
         let ran: Seen = Seen::default();
         let mut plugin = LinksPlugin::with(
@@ -593,11 +608,19 @@ mod tests {
                 })
             },
         );
+        // A whole path on either system.
+        fn program(name: &str) -> String {
+            if cfg!(windows) {
+                format!("C:\\opt\\{name}")
+            } else {
+                format!("/opt/{name}")
+            }
+        }
         plugin.rules = Arc::new(|| {
             vec![
                 "video.example.org = show".to_string(),
-                "meet.example.org = /opt/meet".to_string(),
-                "bad.example.org = /opt/missing".to_string(),
+                format!("meet.example.org = {}", program("meet")),
+                format!("bad.example.org = {}", program("missing")),
             ]
         });
         plugin.run = {
@@ -623,7 +646,10 @@ mod tests {
         );
         assert_eq!(
             *ran.lock().unwrap(),
-            vec!["/opt/meet|https://a.meet.example.org/j/1".to_string()]
+            vec![format!(
+                "{}|https://a.meet.example.org/j/1",
+                program("meet")
+            )]
         );
         let shown = shown.lock().unwrap();
         assert_eq!(shown.len(), 2);
@@ -634,6 +660,7 @@ mod tests {
         );
     }
 
+    /// K2a: paused, a link is neither opened nor shown.
     #[test]
     fn a_pause_holds_a_link() {
         let _setting = SETTING.lock().unwrap_or_else(|e| e.into_inner());

@@ -53,7 +53,19 @@ pub fn parse_line(line: &str) -> Option<Rule> {
         "" => return None,
         a if a.eq_ignore_ascii_case("browser") => Action::Browser,
         a if a.eq_ignore_ascii_case("show") => Action::Show,
-        program => Action::Program(PathBuf::from(program.trim_matches('"'))),
+        program => {
+            let program = PathBuf::from(program.trim_matches('"'));
+            // A whole path to a program (P8 review: a bare name or one with
+            // arguments was "not there" only once a link came), and never a
+            // batch file, whose interpreter reads `%` in a link.
+            let batch = program
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"));
+            if !program.is_absolute() || batch {
+                return None;
+            }
+            Action::Program(program)
+        }
     };
     Some(Rule { site, action })
 }
@@ -69,21 +81,31 @@ pub fn rules(lines: &[String]) -> Vec<Rule> {
 
 /// The lines that make no rule, for Settings to say.
 pub fn bad_lines(lines: &[String]) -> Vec<String> {
-    lines
+    let mut bad: Vec<String> = lines
         .iter()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty() && !l.starts_with('#') && parse_line(l).is_none())
         .map(str::to_string)
-        .collect()
+        .collect();
+    // Those past the limit are not read either (P8 review).
+    let good: Vec<&String> = lines.iter().filter(|l| parse_line(l).is_some()).collect();
+    bad.extend(good.iter().skip(MAX_RULES).map(|l| l.trim().to_string()));
+    bad
 }
 
 /// The rule for a link to `host`: the longest site it is, or ends with as
 /// `.site`.
 pub fn pick<'a>(rules: &'a [Rule], host: &str) -> Option<&'a Rule> {
     let host = host.trim_end_matches('.').to_ascii_lowercase();
+    // An address matches whole only (P8 review: "1.5" is no site of
+    // 192.0.2.1.5's).
+    let address = host
+        .trim_matches(['[', ']'])
+        .parse::<std::net::IpAddr>()
+        .is_ok();
     rules
         .iter()
-        .filter(|r| host == r.site || host.ends_with(&format!(".{}", r.site)))
+        .filter(|r| host == r.site || (!address && host.ends_with(&format!(".{}", r.site))))
         .max_by_key(|r| r.site.len())
 }
 
@@ -93,6 +115,10 @@ mod tests {
 
     fn lines(l: &[&str]) -> Vec<String> {
         l.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn rules_of(l: &[&str]) -> Vec<Rule> {
+        rules(&lines(l))
     }
 
     #[test]
@@ -115,6 +141,14 @@ mod tests {
             parse_line("docs.example.org = Browser").map(|r| r.action),
             Some(Action::Browser)
         );
+        // A program by its whole path only, and never a batch file.
+        for bad in [
+            "a.com = firefox",
+            "a.com = C:\\x\\run.cmd",
+            "a.com = /opt/go.BAT",
+        ] {
+            assert_eq!(parse_line(bad), None, "{bad:?}");
+        }
         for bad in [
             "",
             "# a note",
@@ -157,6 +191,9 @@ mod tests {
             "a site's end only at a dot"
         );
         assert_eq!(pick(&rules, "example.org"), None);
+        let ips = rules_of(&["2.15 = show"]);
+        assert_eq!(pick(&ips, "192.0.2.15"), None, "an address only whole");
+        assert!(pick(&rules_of(&["192.0.2.15 = show"]), "192.0.2.15").is_some());
     }
 
     #[test]
