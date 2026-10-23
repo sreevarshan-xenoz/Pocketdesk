@@ -101,7 +101,80 @@ object PhoneRinger {
             playTone(app)
         }
         main.removeCallbacksAndMessages(null)
+        // P11: it shakes and flashes while it sounds, each as Settings say.
+        if (Prefs.ringVibrates(app)) vibrate(app)
+        if (Prefs.ringFlashes(app)) flash(app, SystemClock.elapsedRealtime())
         main.postDelayed({ stopSound(app) }, RING_MS)
+    }
+
+    /** The vibrator, as each Android names it. */
+    private fun vibrator(ctx: Context): android.os.Vibrator? =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            ctx.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            ctx.getSystemService(android.os.Vibrator::class.java)
+        }
+
+    /** P11: the ring's pattern, repeated until it stops, as an alarm's. */
+    private fun vibrate(ctx: Context) {
+        runCatching {
+            val vibrator = vibrator(ctx)?.takeIf { it.hasVibrator() } ?: return
+            val effect = android.os.VibrationEffect.createWaveform(RingPattern.VIBRATION, 0)
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                vibrator.vibrate(
+                    effect,
+                    android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_ALARM),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(
+                    effect,
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build(),
+                )
+            }
+        }.onFailure { Log.w(TAG, "could not vibrate the ring", it) }
+    }
+
+    /** The camera with a torch, if any. */
+    private fun torchCamera(camera: android.hardware.camera2.CameraManager): String? =
+        runCatching {
+            camera.cameraIdList.firstOrNull { id ->
+                camera.getCameraCharacteristics(id)
+                    .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
+        }.getOrNull()
+
+    /** Whether this ring turned the torch on, to turn it off after. */
+    @Volatile
+    private var torchId: String? = null
+
+    /**
+     * P11: the torch blinks while it rings, from [startedAt]; never one a
+     * camera holds (setTorchMode throws then, and the ring goes on).
+     */
+    private fun flash(ctx: Context, startedAt: Long) {
+        val camera = ctx.getSystemService(android.hardware.camera2.CameraManager::class.java) ?: return
+        val id = torchId ?: torchCamera(camera) ?: return
+        val elapsed = SystemClock.elapsedRealtime() - startedAt
+        if (elapsed >= RING_MS) {
+            torchOff(ctx)
+            return
+        }
+        val ok = runCatching { camera.setTorchMode(id, RingPattern.torchOn(elapsed)) }
+            .onFailure { Log.w(TAG, "could not flash the torch", it) }
+            .isSuccess
+        if (!ok) return
+        torchId = id
+        main.postDelayed({ flash(ctx, startedAt) }, RingPattern.nextTorchChangeMs(elapsed))
+    }
+
+    private fun torchOff(ctx: Context) {
+        val id = torchId ?: return
+        torchId = null
+        runCatching {
+            ctx.getSystemService(android.hardware.camera2.CameraManager::class.java)?.setTorchMode(id, false)
+        }
     }
 
     fun stop(ctx: Context) {
@@ -141,6 +214,9 @@ object PhoneRinger {
     private fun stopSound(ctx: Context) {
         runCatching { tone?.stop() }
         tone = null
+        // P11: the shaking and the torch with it.
+        runCatching { vibrator(ctx)?.cancel() }
+        torchOff(ctx)
         restoreVolume(ctx)
     }
 

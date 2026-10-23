@@ -722,6 +722,10 @@
     <string name="ring_channel">கணினியிலிருந்து ஒலித்தல்</string>
     <string name="ring_channel_description">தொலைபேசியைக் கண்டுபிடிக்க உங்கள் கணினி அதை ஒலிக்கச் செய்யும்போது</string>
     <string name="settings_ring_from_computer">கணினியிலிருந்து ஒலித்தல்</string>
+    <string name="settings_ring_vibrates">ஒலிக்கும்போது அதிரும்</string>
+    <string name="settings_ring_vibrates_summary">ஒலிக்கும்போது தொலைபேசி ஒரு முறையில் அதிரும், பையிலோ தலையணைக்கடியிலோ கண்டுபிடிக்க</string>
+    <string name="settings_ring_flashes">ஒலிக்கும்போது டார்ச் மினுக்கும்</string>
+    <string name="settings_ring_flashes_summary">ஒலிக்கும்போது டார்ச் மினுக்கும், இருட்டில் கண்டுபிடிக்க; ஒரு செயலி கேமராவைப் பயன்படுத்தும்போது அல்ல</string>
     <string name="settings_ring_from_computer_summary">உங்கள் கணினி இந்தத் தொலைபேசியைக் கண்டுபிடிக்க ஒலிக்கச் செய்யலாம்: சத்தமாக, 30 விநாடிகள், அலாரங்கள் அனுமதிக்கப்பட்டால் தொந்தரவு செய்ய வேண்டாம் நிலையிலும். பின்னணியில் ஓர் இணைப்பை வைத்திருக்கும்</string>
     <string name="hud_fps">fps</string>
     <string name="hud_kbps">kbps</string>

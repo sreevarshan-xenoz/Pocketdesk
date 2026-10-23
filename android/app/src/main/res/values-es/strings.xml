@@ -728,6 +728,10 @@
     <string name="ring_channel">Sonar desde el ordenador</string>
     <string name="ring_channel_description">Cuando tu ordenador hace sonar este teléfono para encontrarlo</string>
     <string name="settings_ring_from_computer">Sonar desde el ordenador</string>
+    <string name="settings_ring_vibrates">Vibrar mientras suena</string>
+    <string name="settings_ring_vibrates_summary">El teléfono vibra con un patrón mientras suena, para encontrarlo en un bolsillo o bajo un cojín</string>
+    <string name="settings_ring_flashes">Parpadear la linterna mientras suena</string>
+    <string name="settings_ring_flashes_summary">La linterna parpadea mientras suena, para encontrarlo a oscuras; no mientras una app usa la cámara</string>
     <string name="settings_ring_from_computer_summary">Tu ordenador puede hacer sonar este teléfono para encontrarlo: fuerte, 30 segundos, incluso en No molestar si las alarmas están permitidas. Mantiene un enlace en segundo plano</string>
     <string name="hud_fps">fps</string>
     <string name="hud_kbps">kbps</string>
