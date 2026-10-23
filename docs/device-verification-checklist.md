@@ -2687,6 +2687,13 @@ Built 2026-10-23. Unit-tested: the store (saved, replaced, removed, a broken fil
 Owed:
 - [ ] Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
 - [ ] Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
+## 202. A ring that vibrates and flashes (P11)
+
+Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern. Checked on the OPPO (CPH2359) with `pocketdesk ring` from a throwaway server through `adb reverse`:
+- [x] The ring vibrates (an alarm vibration of 30,009 ms) and blinks the torch every 0.4 s, both ending with the ring's 30 seconds.
+Owed:
+- [ ] Stop and a dismiss ending both at once.
+- [ ] Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
 
 ## Recording results
 

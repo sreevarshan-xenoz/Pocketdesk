@@ -356,6 +356,23 @@ fun SettingsScreen(onBack: () -> Unit) {
                         askForListener(it)
                     },
                 )
+                // P11: it shakes and flashes the torch while it sounds.
+                SettingSwitch(
+                    stringResource(R.string.settings_ring_vibrates),
+                    stringResource(R.string.settings_ring_vibrates_summary),
+                    Prefs.ringVibrates(context),
+                    { Prefs.setRingVibrates(context, it) },
+                    enabled = Prefs.ringFromComputer(context),
+                    indent = true,
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_ring_flashes),
+                    stringResource(R.string.settings_ring_flashes_summary),
+                    Prefs.ringFlashes(context),
+                    { Prefs.setRingFlashes(context, it) },
+                    enabled = Prefs.ringFromComputer(context),
+                    indent = true,
+                )
                 SettingSwitch(
                     stringResource(R.string.settings_share_battery),
                     stringResource(R.string.settings_share_battery_summary),
