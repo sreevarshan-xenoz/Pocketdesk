@@ -357,22 +357,27 @@ fun SettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 // P11: it shakes and flashes the torch while it sounds.
-                SettingSwitch(
-                    stringResource(R.string.settings_ring_vibrates),
-                    stringResource(R.string.settings_ring_vibrates_summary),
-                    Prefs.ringVibrates(context),
-                    { Prefs.setRingVibrates(context, it) },
-                    enabled = Prefs.ringFromComputer(context),
-                    indent = true,
-                )
-                SettingSwitch(
-                    stringResource(R.string.settings_ring_flashes),
-                    stringResource(R.string.settings_ring_flashes_summary),
-                    Prefs.ringFlashes(context),
-                    { Prefs.setRingFlashes(context, it) },
-                    enabled = Prefs.ringFromComputer(context),
-                    indent = true,
-                )
+                // Never greyed (Q3 review): a ring in a session reads them
+                // too, whatever the switch above. Shown only where the
+                // phone has the vibrator or the torch.
+                if (hasVibrator(context)) {
+                    SettingSwitch(
+                        stringResource(R.string.settings_ring_vibrates),
+                        stringResource(R.string.settings_ring_vibrates_summary),
+                        Prefs.ringVibrates(context),
+                        { Prefs.setRingVibrates(context, it) },
+                        indent = true,
+                    )
+                }
+                if (context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)) {
+                    SettingSwitch(
+                        stringResource(R.string.settings_ring_flashes),
+                        stringResource(R.string.settings_ring_flashes_summary),
+                        Prefs.ringFlashes(context),
+                        { Prefs.setRingFlashes(context, it) },
+                        indent = true,
+                    )
+                }
                 SettingSwitch(
                     stringResource(R.string.settings_share_battery),
                     stringResource(R.string.settings_share_battery_summary),
@@ -741,3 +746,12 @@ fun AllowNotificationAccess() {
         runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
     }
 }
+
+/** Whether the phone can shake (P11's row is drawn only where it can). */
+private fun hasVibrator(context: android.content.Context): Boolean =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        context.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator?.hasVibrator() == true
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(android.os.Vibrator::class.java)?.hasVibrator() == true
+    }

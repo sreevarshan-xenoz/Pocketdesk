@@ -734,9 +734,9 @@
     <string name="ring_channel_description">When your computer rings this phone to find it</string>
     <string name="settings_ring_from_computer">Ring from the computer</string>
     <string name="settings_ring_vibrates">Vibrate while it rings</string>
-    <string name="settings_ring_vibrates_summary">The phone shakes in a pattern as it rings, so you find it in a pocket or under a cushion</string>
+    <string name="settings_ring_vibrates_summary">The phone shakes in a pattern as it rings, in a session too, so you find it in a pocket or under a cushion</string>
     <string name="settings_ring_flashes">Flash the torch while it rings</string>
-    <string name="settings_ring_flashes_summary">The torch blinks as it rings, so you find it in the dark; not while an app uses the camera</string>
+    <string name="settings_ring_flashes_summary">The torch blinks as it rings, in a session too, so you find it in the dark; not while an app uses the camera</string>
     <string name="settings_ring_from_computer_summary">Your computer can ring this phone to find it: loud, for 30 seconds, through Do Not Disturb when alarms are allowed. Keeps a link to it in the background</string>
     <string name="hud_fps">fps</string>
     <string name="hud_kbps">kbps</string>
@@ -788,7 +788,7 @@
     <string name="sound_here_refused">This computer does not send this phone its sound. On the computer, turn on \"Hear and change this computer\'s sound\" for this phone in Pocketdesk\'s Devices page</string>
     <string name="sound_mic_refused">This computer does not take this phone\'s microphone. On the computer, turn on \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page</string>
     <string name="err_permissions_changed">This computer\'s owner changed what this phone may do, which ended the session. They can change it back on Pocketdesk\'s Devices page.</string>
-    <string name="settings_ring_from_computer_summary_17">Your computer can ring this phone to find it: at your alarm volume (at zero it only vibrates), for 30 seconds, through Do Not Disturb when alarms are allowed, while Pocketdesk\'s notifications are on. Keeps a link in the background</string>
+    <string name="settings_ring_from_computer_summary_17">Your computer can ring this phone to find it: at your alarm volume (at zero it is silent unless \"Vibrate while it rings\" is on), for 30 seconds, through Do Not Disturb when alarms are allowed, while Pocketdesk\'s notifications are on. Keeps a link in the background</string>
     <string name="texts_show_summary_17">Texts this phone receives appear in Messages on the computer you used last. Android holds a text with a code for three hours first</string>
     <string name="settings_capture_mouse_summary_17">During a session, a mouse or touchpad connected to this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="control_service_label">Pocketdesk control</string>
