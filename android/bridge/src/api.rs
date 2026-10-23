@@ -1212,7 +1212,9 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
 /// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 11] = [
+const PHONE_PACKETS: [&str; 12] = [
+    // P2: its apps that open, answering the computer's ask.
+    pocketdesk_core::protocol::phone_action::PHONE_APPS,
     // N7: is the computer in use?
     pocketdesk_core::protocol::in_use::ASK,
     // N5: tell me the computer's music, or stop.

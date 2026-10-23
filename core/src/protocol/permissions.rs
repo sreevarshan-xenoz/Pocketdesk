@@ -171,6 +171,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::command::COMMAND => Capability::Command,
         // A screenshot or a lock for the phone (O2), the computer's own.
         crate::protocol::phone_action::PHONE_ACTION => Capability::PhoneActions,
+        // The phone's apps for the computer to open (P2), answering the ask.
+        crate::protocol::phone_action::PHONE_APPS => Capability::PhoneActions,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         _ => return None,

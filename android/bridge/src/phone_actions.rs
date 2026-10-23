@@ -29,11 +29,23 @@ pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
         tracing::warn!("An ask from the computer was dropped: not an action");
         return;
     };
+    // P2: an open names its app, a valid package name; nothing else names one.
+    let app = body.get("app").and_then(|v| v.as_str());
+    let mut ask = serde_json::json!({ "host": host, "port": port, "action": action.as_str() });
+    match (action, app) {
+        (PhoneAction::Open, Some(app))
+            if pocketdesk_core::protocol::phone_action::valid_app_id(app) =>
+        {
+            ask["app"] = serde_json::Value::from(app);
+        }
+        (PhoneAction::Open, _) => {
+            tracing::warn!("An ask to open an app was dropped: no app named");
+            return;
+        }
+        _ => {}
+    }
     let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
-    waiting.push_back((
-        Instant::now(),
-        serde_json::json!({ "host": host, "port": port, "action": action.as_str() }),
-    ));
+    waiting.push_back((Instant::now(), ask));
     while waiting.len() > MAX_WAITING {
         waiting.pop_front();
     }

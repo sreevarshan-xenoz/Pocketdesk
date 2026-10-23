@@ -2,8 +2,8 @@ package dev.pocketdesk.android.control
 
 /**
  * O2: whether this phone does what its computer asks of it, a screenshot
- * or a lock, through C8's control service. Pure, for JVM tests;
- * [PhoneActions] does it.
+ * or a lock, through C8's control service; P2: its apps listed, one
+ * opened. Pure, for JVM tests; [PhoneActions] does it.
  */
 object PhoneActionRule {
     /** How many asks a minute are done. */
@@ -12,9 +12,18 @@ object PhoneActionRule {
     /** The Android version the service's screenshot and lock need (P). */
     const val MIN_SDK = 28
 
+    /** The most apps listed for the computer (P2), as it keeps at most. */
+    const val MAX_APPS = 500
+
     enum class Action(val word: String) {
         SCREENSHOT("screenshot"),
         LOCK("lock"),
+
+        /** P2: list the apps that open. */
+        APPS("apps"),
+
+        /** P2: open one. */
+        OPEN("open"),
         ;
 
         companion object {
@@ -25,7 +34,11 @@ object PhoneActionRule {
     enum class Decision {
         DO,
 
-        /** "Let the computer take screenshots and lock this phone" is off. */
+        /**
+         * "Let the computer take screenshots and lock this phone" is off,
+         * or for [Action.APPS] and [Action.OPEN], "Let the computer open my
+         * apps".
+         */
         OFF,
 
         /** Not this phone's own computer. */
@@ -37,7 +50,7 @@ object PhoneActionRule {
         /** Android before 9 has neither action. */
         TOO_OLD,
 
-        /** A screenshot of the lock screen is never taken. */
+        /** A screenshot of the lock screen is never taken, nor an app opened behind it. */
         LOCKED,
 
         /**
@@ -51,6 +64,9 @@ object PhoneActionRule {
 
         /** More than [PER_MINUTE] in a minute. */
         TOO_MANY,
+
+        /** P2: an app the phone did not list for the computer. */
+        NOT_LISTED,
     }
 
     /**
@@ -58,8 +74,9 @@ object PhoneActionRule {
      * [own] whether it is the phone's own computer, [service] whether the
      * control service runs, [sdk] Android's version, [locked] whether the
      * phone is locked, [awake] whether its screen is on, [screenshots]
-     * whether T10h sends new screenshots, and
-     * [withinBudget] whether the minute allows another.
+     * whether T10h sends new screenshots, [appsOn] whether the computer
+     * may list and open apps (P2), and [withinBudget] whether the minute
+     * allows another.
      */
     fun decide(
         action: Action,
@@ -71,7 +88,30 @@ object PhoneActionRule {
         awake: Boolean,
         screenshots: Boolean,
         withinBudget: Boolean,
+        appsOn: Boolean = false,
+        listed: Boolean = false,
     ): Decision = when {
+        // P2: a list needs no service and shows nothing on the phone; an
+        // open needs the service (Android lets a bound one start an app
+        // from the background), an unlocked phone, awake.
+        // The list, only for an unlocked phone (P2 review: it names every app).
+        action == Action.APPS -> when {
+            !appsOn -> Decision.OFF
+            !own -> Decision.NOT_OWN
+            locked -> Decision.LOCKED
+            !withinBudget -> Decision.TOO_MANY
+            else -> Decision.DO
+        }
+        // An open needs no service: without it, "Tap to open" (P2 review).
+        action == Action.OPEN -> when {
+            !appsOn -> Decision.OFF
+            !own -> Decision.NOT_OWN
+            !listed -> Decision.NOT_LISTED
+            locked -> Decision.LOCKED
+            !awake -> Decision.ASLEEP
+            !withinBudget -> Decision.TOO_MANY
+            else -> Decision.DO
+        }
         !on -> Decision.OFF
         !own -> Decision.NOT_OWN
         sdk < MIN_SDK -> Decision.TOO_OLD

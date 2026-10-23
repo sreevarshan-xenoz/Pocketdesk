@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-907 open items.
+910 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 543 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 545 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 28 |
@@ -14,7 +14,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
 | A Linux desktop (the Azure VM serves for some) | 112 |
-| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
+| Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 87 |
 
 ## Here: this Windows box and the A71, without touching the owner's power, lock or input
@@ -1081,6 +1081,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A card saved by name (`mypc.local`) is left alone.
 
+**194. Open an app on the phone from the computer (P2)**
+
+- An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
+- The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
+
 **193. The computer's announcement follows its network (P1)**
 
 - A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
@@ -2015,6 +2020,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **185. A screenshot of the phone and its screen locked from the computer (O2)**
 
 - Android 9 to 12, and a phone with a PIN.
+
+**194. Open an app on the phone from the computer (P2)**
+
+- Android 13 and older, and a work profile's apps.
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 

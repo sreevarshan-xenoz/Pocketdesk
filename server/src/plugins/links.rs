@@ -213,7 +213,8 @@ pub async fn run_phone_actions() {
                 }
                 continue;
             };
-            let packet = NetworkPacket::new(PHONE_ACTION).with_body(body(action));
+            let packet =
+                NetworkPacket::new(PHONE_ACTION).with_body(body(action, ask.app.as_deref()));
             match phone.send_packet(&packet).await {
                 Ok(()) => tracing::info!("Asked the phone for a {}", action.as_str()),
                 Err(e) => tracing::warn!("A {} was not asked of the phone: {e}", action.as_str()),

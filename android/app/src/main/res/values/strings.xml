@@ -980,6 +980,9 @@
     <string name="typing_password">Not typed: the field in front is a password field</string>
     <string name="typing_stop">Stop</string>
     <string name="typing_stopped">No typing from the computer for 10 minutes</string>
+    <string name="settings_phone_apps">Let the computer open my apps</string>
+    <string name="settings_phone_apps_summary_off">Off. With it on, the computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_on">The computer can list this phone\'s apps (their names only) and open one, while the phone is unlocked and awake</string>
     <string name="settings_phone_actions">Let the computer take screenshots and lock this phone</string>
     <string name="settings_phone_actions_summary_off">The computer\'s Screenshot of the phone and Lock the phone do them here: a screenshot comes to the computer as \"Send new screenshots\" sends it (turn that on too), never of the lock screen. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_phone_actions_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer asks</string>

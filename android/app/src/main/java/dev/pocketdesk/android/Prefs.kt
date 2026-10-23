@@ -493,6 +493,15 @@ object Prefs {
         bump()
     }
 
+    /** P2: the phone's own computer may list its apps and open one (off by default). */
+    fun appsFromComputer(ctx: Context): Boolean =
+        prefs(ctx).getBoolean("apps_from_computer", false)
+
+    fun setAppsFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("apps_from_computer", enabled) }
+        bump()
+    }
+
     /** C8: the computer this phone casts to may control it (off by default). */
     fun controlFromComputer(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_CONTROL_FROM_COMPUTER, false)

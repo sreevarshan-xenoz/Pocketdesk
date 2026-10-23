@@ -56,6 +56,8 @@ object HealthCheck {
             Prefs.typingFromComputer(ctx) ||
             // O2: the computer's screenshots and locks wait on the listener (O2 review).
             Prefs.phoneActionsFromComputer(ctx) ||
+            // P2: so do its asks for the apps.
+            Prefs.appsFromComputer(ctx) ||
             ScreenshotPrefs.on(ctx) ||
             RecentPhotoPrefs.on(ctx) ||
             PhoneFolders.all(ctx).isNotEmpty() ||
@@ -92,7 +94,7 @@ object HealthCheck {
         }
         // M4: typing needs the same Accessibility service.
         val control = Prefs.controlFromComputer(ctx) || Prefs.typingFromComputer(ctx) ||
-            Prefs.phoneActionsFromComputer(ctx) ||
+            Prefs.phoneActionsFromComputer(ctx) || Prefs.appsFromComputer(ctx) ||
             (Prefs.copiesByThemselves(ctx) && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT))
         return HealthSnapshot(
             listenerFeatures = listenerFeatures(ctx),
