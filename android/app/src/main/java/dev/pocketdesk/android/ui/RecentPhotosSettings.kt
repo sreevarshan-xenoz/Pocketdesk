@@ -27,6 +27,14 @@ fun RecentPhotosSection() {
     val on = (version + resumes).let { RecentPhotoPrefs.on(context) }
     val granted = (version + resumes).let { RecentPhotoPrefs.granted(context) }
     val listening = (version + resumes).let { PhoneNotificationPrefs.accessGranted(context) }
+    val videos = (version + resumes).let { RecentPhotoPrefs.videos(context) }
+
+    // T4: the camera's videos listed too, asking for video access.
+    val askVideos =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            RecentPhotoPrefs.setVideos(context, ok)
+            version++
+        }
 
     val ask =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -59,4 +67,20 @@ fun RecentPhotosSection() {
         warning = needsAccess || (on && !granted),
     )
     if (needsAccess) AllowNotificationAccess()
+    if (active) {
+        SettingSwitch(
+            stringResource(R.string.recent_photos_videos),
+            stringResource(R.string.camera_uploads_videos_summary),
+            videos,
+            {
+                if (it && !dev.pocketdesk.android.files.CameraPrefs.videosGranted(context)) {
+                    askVideos.launch(dev.pocketdesk.android.files.CameraPrefs.videoPermission)
+                } else {
+                    RecentPhotoPrefs.setVideos(context, it)
+                    version++
+                }
+            },
+            indent = true,
+        )
+    }
 }

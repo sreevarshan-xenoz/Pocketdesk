@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-888 open items.
+891 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 29 |
 | A Linux desktop (the Azure VM serves for some) | 163 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 352 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 355 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -2322,3 +2322,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone's own camera: a burst of 20, a 4K video, and photos taken while the computer was off going when it is back. (where: by hand)
 - Photo access taken back: the switch off and Home's notice; video access taken back: "Videos too" off. (where: by hand)
 - The computer's Devices page listing "Its new camera photos here"; Settings in Spanish and Tamil. (where: by hand)
+
+**210. The whole photo gallery (T4)**
+
+- On a LAN: Save the chosen landing, a video opening in the player, a HEIC photo's PNG on the computer's clipboard. (where: by hand)
+- The desktop app's Phone page by hand: More photos, the ticks and their limit of 20, a page of screenshots only. (where: by hand)
+- "Its videos too" asking for video access; Settings in Spanish and Tamil. (where: by hand)

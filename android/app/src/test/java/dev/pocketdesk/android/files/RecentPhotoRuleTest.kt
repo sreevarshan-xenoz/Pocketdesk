@@ -22,7 +22,33 @@ class RecentPhotoRuleTest {
                 row(7, null, taken = 9_500),
                 row(8, "dcim/OpenCamera/", taken = 4_000),
             )
-        assertEquals(listOf(8L, 3L, 5L, 1L), RecentPhotoRule.listed(rows).map { it.id })
+        // T4: newest by id, so pages follow on from each other.
+        assertEquals(listOf(8L, 5L, 3L, 1L), RecentPhotoRule.listed(rows).map { it.id })
+    }
+
+    /** T4: a page says when more wait, and a photo of any page shown may be fetched. */
+    @Test
+    fun pagesSayWhenMoreWaitAndRememberWhatWasShown() {
+        val rows = (1L..30L).map { row(it, "DCIM/Camera/") }
+        val first = RecentPhotoRule.page(rows, lookedAll = true)
+        assertEquals(30L, first.listed.first().id)
+        assertEquals(7L, first.listed.last().id)
+        assertTrue("six left over", first.more)
+        val last = RecentPhotoRule.page(rows.filter { it.id < 7 }, lookedAll = true)
+        assertEquals(6, last.listed.size)
+        assertFalse(last.more)
+        assertTrue("the query stopped short", RecentPhotoRule.page(rows.take(3), lookedAll = false).more)
+        // A window of none it lists: the next page starts past them.
+        val shots = (50L..60L).map { row(it, "DCIM/Screenshots/") }
+        val none = RecentPhotoRule.page(shots, lookedAll = false)
+        assertTrue(none.listed.isEmpty() && none.more)
+        assertEquals(50L, none.next)
+        val shown = RecentPhotoRule.remember(emptySet(), first.listed.map { it.id }, olderPage = false)
+        val both = RecentPhotoRule.remember(shown, last.listed.map { it.id }, olderPage = true)
+        assertTrue(RecentPhotoRule.mayFetch(30, both) && RecentPhotoRule.mayFetch(1, both))
+        assertFalse("a newest page starts over", RecentPhotoRule.mayFetch(30, RecentPhotoRule.remember(both, listOf(31), olderPage = false)))
+        val many = RecentPhotoRule.remember(emptySet(), (1L..1000L).toList(), olderPage = false)
+        assertEquals(RecentPhotoRule.MAX_REMEMBERED, many.size)
     }
 
     @Test

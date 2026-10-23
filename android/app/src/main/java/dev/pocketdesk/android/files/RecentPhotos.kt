@@ -15,6 +15,9 @@ import androidx.core.content.edit
 import androidx.core.graphics.scale
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
+import dev.pocketdesk.android.clip.ClipboardShared
+import dev.pocketdesk.android.ui.ClipboardImages
+import dev.pocketdesk.android.ui.ImageClipRule
 import dev.pocketdesk.android.notify.PhoneLink
 import dev.pocketdesk.android.service.TransferService
 import org.json.JSONArray
@@ -26,12 +29,18 @@ import java.io.File
 object RecentPhotoPrefs {
     private const val PREFS = "pocketdesk-recent-photos"
     private const val KEY_ON = "on"
+    private const val KEY_VIDEOS = "videos"
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun on(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ON, false)
 
     fun setOn(ctx: Context, value: Boolean) = prefs(ctx).edit { putBoolean(KEY_ON, value) }
+
+    /** T4: the camera's videos listed too, off by default; with video access. */
+    fun videos(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_VIDEOS, false) && CameraPrefs.videosGranted(ctx)
+
+    fun setVideos(ctx: Context, value: Boolean) = prefs(ctx).edit { putBoolean(KEY_VIDEOS, value) }
 
     /** The same photo access new screenshots to the computer asks for. */
     val permission: String get() = ScreenshotPrefs.permission
@@ -48,8 +57,16 @@ object RecentPhotoPrefs {
  * answer listed.
  */
 class RecentPhotos(private val ctx: Context) {
-    /** A request as the bridge kept it. */
-    private data class Request(val host: String, val port: Int, val fetch: Boolean, val id: Long, val take: Boolean = false)
+    /** A request as the bridge kept it: T4's older page ([before], -1 for the newest) and copy onto the clipboard. */
+    private data class Request(
+        val host: String,
+        val port: Int,
+        val fetch: Boolean,
+        val id: Long,
+        val take: Boolean = false,
+        val before: Long = -1,
+        val clipboard: Boolean = false,
+    )
 
     /** The ids the last answer listed: the only ones a fetch may name. */
     @Volatile
@@ -92,7 +109,15 @@ class RecentPhotos(private val ctx: Context) {
             val array = JSONArray(RustCore.takePhotoRequests())
             (0 until array.length()).map { i ->
                 val o = array.getJSONObject(i)
-                Request(o.getString("host"), o.getInt("port"), o.getBoolean("fetch"), o.optLong("id", -1), o.optBoolean("take", false))
+                Request(
+                    o.getString("host"),
+                    o.getInt("port"),
+                    o.getBoolean("fetch"),
+                    o.optLong("id", -1),
+                    o.optBoolean("take", false),
+                    o.optLong("before", -1),
+                    o.optBoolean("clipboard", false),
+                )
             }
         }.getOrDefault(emptyList())
 
@@ -111,25 +136,31 @@ class RecentPhotos(private val ctx: Context) {
 
     private fun list(request: Request) {
         val why = refusal()
+        val older = request.before >= 0
         if (why != null) {
             lastListed = emptySet()
-            answer(request, JSONObject().put("photos", JSONArray()).put("error", why))
+            answer(request, JSONObject().put("photos", JSONArray()).put("error", why).also { if (older) it.put("before", request.before) })
             return
         }
-        val listed = RecentPhotoRule.listed(rows())
+        val rows = rows(before = request.before.takeIf { older })
+        val page = RecentPhotoRule.page(rows, lookedAll = rows.size < LOOK)
         val photos = JSONArray()
-        listed.forEach { row ->
+        page.listed.forEach { row ->
             val photo =
                 JSONObject()
                     .put("id", row.id)
                     .put("name", row.name)
                     .put("taken", row.timeMs)
                     .put("size", row.size)
-            thumbnail(uri(row.id))?.let { photo.put("thumb", it) }
+            if (row.video) photo.put("video", true)
+            thumbnail(uri(row.id, row.video))?.let { photo.put("thumb", it) }
             photos.put(photo)
         }
-        lastListed = listed.map { it.id }.toSet()
-        answer(request, JSONObject().put("photos", photos))
+        lastListed = RecentPhotoRule.remember(lastListed, page.listed.map { it.id }, older)
+        val body = JSONObject().put("photos", photos).put("more", page.more)
+        page.next?.let { body.put("next", it) }
+        if (older) body.put("before", request.before)
+        answer(request, body)
     }
 
     private fun fetch(request: Request) {
@@ -146,40 +177,70 @@ class RecentPhotos(private val ctx: Context) {
             list(request.copy(fetch = false))
             return
         }
-        TransferService.start(ctx, request.host, request.port, listOf(uri(request.id)))
+        val uri = uri(request.id, still.video)
+        if (request.clipboard) {
+            // T4: onto the computer's clipboard as a PNG (a HEIC photo the
+            // computer cannot decode), as a new screenshot goes.
+            if (still.video) return
+            val png = ClipboardImages.pngOf(ctx, uri)
+            png?.let { ClipboardShared.sentImageId = ImageClipRule.idOf(it) }
+            val result = png?.let { ClipboardImages.withStaged(ctx, it) { file -> RustCore.sendClipboardImage(request.host, request.port, file.absolutePath) } }
+            if (result == null || result.isFailure) Log.w(TAG, "a photo did not reach the computer's clipboard: ${result?.exceptionOrNull()}")
+            return
+        }
+        TransferService.start(ctx, request.host, request.port, listOf(uri))
     }
 
-    private fun uri(id: Long): Uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+    private fun uri(id: Long, video: Boolean): Uri =
+        ContentUris.withAppendedId(
+            if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            id,
+        )
 
-    /** The newest image rows (or the one [only] names), as the rule sees them. */
-    private fun rows(only: Long? = null): List<RecentPhotoRule.Row> {
+    /**
+     * The newest camera rows (or the one [only] names; or T4's page of those
+     * older than [before]), as the rule sees them: photos, and videos too
+     * with video access, from the one media table, newest first by id.
+     */
+    private fun rows(only: Long? = null, before: Long? = null): List<RecentPhotoRule.Row> {
         val modern = Build.VERSION.SDK_INT >= 29
-        val folderColumn = if (modern) MediaStore.Images.Media.RELATIVE_PATH else DATA
+        val folderColumn = if (modern) MediaStore.MediaColumns.RELATIVE_PATH else DATA
         val columns =
             buildList {
-                add(MediaStore.Images.Media._ID)
-                add(MediaStore.Images.Media.DISPLAY_NAME)
+                add(MediaStore.MediaColumns._ID)
+                add(MediaStore.MediaColumns.DISPLAY_NAME)
                 add(folderColumn)
-                add(MediaStore.Images.Media.DATE_TAKEN)
-                add(MediaStore.Images.Media.DATE_ADDED)
-                add(MediaStore.Images.Media.SIZE)
-                if (modern) add(MediaStore.Images.Media.IS_PENDING)
+                add(DATE_TAKEN)
+                add(MediaStore.MediaColumns.DATE_ADDED)
+                add(MediaStore.MediaColumns.SIZE)
+                add(MediaStore.Files.FileColumns.MEDIA_TYPE)
+                if (modern) add(MediaStore.MediaColumns.IS_PENDING)
             }.toTypedArray()
-        val (selection, args) =
-            if (only != null) {
-                "${MediaStore.Images.Media._ID} = ?" to arrayOf(only.toString())
-            } else if (modern) {
-                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?" to arrayOf("DCIM/%")
-            } else {
-                "$DATA LIKE ?" to arrayOf("%/DCIM/%")
+        val types =
+            buildList {
+                add(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE)
+                if (RecentPhotoPrefs.videos(ctx)) add(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
+            }.joinToString(",")
+        val clauses = mutableListOf("${MediaStore.Files.FileColumns.MEDIA_TYPE} IN ($types)")
+        val args = mutableListOf<String>()
+        if (only != null) {
+            clauses += "${MediaStore.MediaColumns._ID} = ?"
+            args += only.toString()
+        } else {
+            clauses += if (modern) "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?" else "$DATA LIKE ?"
+            args += if (modern) "DCIM/%" else "%/DCIM/%"
+            if (before != null) {
+                clauses += "${MediaStore.MediaColumns._ID} < ?"
+                args += before.toString()
             }
+        }
         val found = mutableListOf<RecentPhotoRule.Row>()
         ctx.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            MediaStore.Files.getContentUri("external"),
             columns,
-            selection,
-            args,
-            "${MediaStore.Images.Media.DATE_ADDED} DESC",
+            clauses.joinToString(" AND "),
+            args.toTypedArray(),
+            "${MediaStore.MediaColumns._ID} DESC",
         )?.use { c ->
             while (c.moveToNext() && found.size < LOOK) {
                 val folder = c.getString(2)?.let { if (modern) it else File(it).parent?.let(::relativeOf) }
@@ -191,7 +252,8 @@ class RecentPhotos(private val ctx: Context) {
                         takenMs = c.getLong(3),
                         addedSecs = c.getLong(4),
                         size = c.getLong(5),
-                        pending = modern && c.getInt(6) != 0,
+                        pending = modern && c.getInt(7) != 0,
+                        video = c.getInt(6) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO,
                     )
             }
         }
@@ -253,5 +315,9 @@ class RecentPhotos(private val ctx: Context) {
 
         @Suppress("DEPRECATION")
         val DATA: String = MediaStore.Images.Media.DATA
+
+        /** When it was taken: the media table's own column on every version (T4). */
+        @Suppress("InlinedApi")
+        val DATE_TAKEN: String = MediaStore.MediaColumns.DATE_TAKEN
     }
 }

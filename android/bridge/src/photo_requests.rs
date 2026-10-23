@@ -18,11 +18,24 @@ static WAITING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new())
 /// is one: a list, or a fetch naming a photo by its id.
 pub(crate) fn receive(packet_type: &str, body: &serde_json::Value, host: &str, port: u16) {
     let request = match packet_type {
-        LIST => serde_json::json!({ "host": host, "port": port, "fetch": false }),
+        // T4: an older page names the photo it is older than.
+        LIST => match body.get("before").and_then(|v| v.as_u64()) {
+            Some(before) => {
+                serde_json::json!({ "host": host, "port": port, "fetch": false, "before": before })
+            }
+            None => serde_json::json!({ "host": host, "port": port, "fetch": false }),
+        },
         // F3: the camera, offered to the phone's owner.
         TAKE => serde_json::json!({ "host": host, "port": port, "fetch": false, "take": true }),
         FETCH => match body.get("id").and_then(|v| v.as_u64()) {
-            Some(id) => serde_json::json!({ "host": host, "port": port, "fetch": true, "id": id }),
+            // T4: or onto the computer's clipboard.
+            Some(id) => serde_json::json!({
+                "host": host,
+                "port": port,
+                "fetch": true,
+                "id": id,
+                "clipboard": body.get("clipboard").and_then(|v| v.as_bool()).unwrap_or(false),
+            }),
             None => return,
         },
         _ => return,
@@ -69,7 +82,19 @@ mod tests {
         assert_eq!(taken[0]["fetch"], false);
         assert_eq!(taken[1]["id"], 42);
         assert_eq!(taken[1]["host"], host);
+        assert_eq!(taken[1]["clipboard"], false);
         assert_eq!(take_json(), "[]");
+        // T4: an older page, and a copy onto the computer's clipboard.
+        receive(LIST, &serde_json::json!({ "before": 9 }), host, 1716);
+        receive(
+            FETCH,
+            &serde_json::json!({ "id": 3, "clipboard": true }),
+            host,
+            1716,
+        );
+        let taken: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(taken[0]["before"], 9);
+        assert_eq!(taken[1]["clipboard"], true);
     }
 
     #[tokio::test]
