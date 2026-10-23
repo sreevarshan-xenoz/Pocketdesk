@@ -338,6 +338,11 @@ pub fn describe(event: &Event) -> String {
             {
                 // N7: shown where the owner was working instead.
                 line.push_str(" (not shown: another computer was in use)");
+            } else if let Some(rule) = text(event, "held_by") {
+                // P4: held by its words, named with details on.
+                line.push_str(&format!(" (not shown: held by \"{rule}\")"));
+            } else if flag("held_by_words") {
+                line.push_str(" (not shown: held by its words)");
             } else if event.fields.get("quiet_hours").and_then(Value::as_bool) == Some(true) {
                 // P3.
                 line.push_str(" (not shown: quiet hours)");
@@ -609,6 +614,20 @@ mod tests {
                 json!({"app": "Signal", "quiet_hours": true})
             )),
             "Notification from Signal (not shown: quiet hours)"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Shop", "held_by": "sale"})
+            )),
+            "Notification from Shop (not shown: held by \"sale\")"
+        );
+        assert_eq!(
+            describe(&event(
+                "notification",
+                json!({"app": "Shop", "held_by_words": true})
+            )),
+            "Notification from Shop (not shown: held by its words)"
         );
         assert_eq!(
             describe(&event(

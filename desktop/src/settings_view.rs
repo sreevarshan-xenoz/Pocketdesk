@@ -215,6 +215,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Notifications,
     ),
     ("quiet_hours", "Quiet hours", Section::Notifications),
+    (
+        "hold_words",
+        "Hold notifications with these words",
+        Section::Notifications,
+    ),
     ("quiet_from", "Quiet hours start", Section::Notifications),
     ("quiet_to", "Quiet hours end", Section::Notifications),
     ("quiet_days", "Quiet hours' days", Section::Notifications),
@@ -482,6 +487,7 @@ pub fn applies_live(key: &str) -> bool {
             | "quiet_to"
             | "quiet_days"
             | "quiet_presenting"
+            | "hold_words"
             | "away_lock_minutes"
     )
 }
@@ -517,6 +523,8 @@ pub struct SettingsForm {
     /// Each pattern's problem as last checked (O4 review: compiled once a
     /// text, not on every frame the page is drawn).
     pattern_checks: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
+    /// The text box behind `hold_words`: one rule a line (P4).
+    pub hold_words_text: String,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -552,6 +560,7 @@ impl SettingsForm {
             never_from_text: config.clipboard_never_from.join("\n"),
             never_like_text: config.clipboard_never_like.join("\n"),
             pattern_checks: Default::default(),
+            hold_words_text: config.hold_words.join("\n"),
             saved: config.clone(),
             running: config.clone(),
             edited: config,
@@ -576,6 +585,7 @@ impl SettingsForm {
         self.edited.hooks = parse_hooks(&self.hooks_text).0;
         self.edited.clipboard_never_from = lines(&self.never_from_text);
         self.edited.clipboard_never_like = lines(&self.never_like_text);
+        self.edited.hold_words = lines(&self.hold_words_text);
     }
 
     pub fn dirty(&self) -> bool {
@@ -1274,6 +1284,27 @@ impl SettingsForm {
                         ui,
                         "Held as a pause holds them: logged on the Activity page, and kept on the Notifications page when the phone lets this computer answer them, but no pop-up. Times are this computer's (22:00); a span past midnight belongs to the day it starts on, and the same time twice is that whole day.",
                     );
+                });
+                // P4: held by their words, as a muted app's.
+                let words = &mut self.hold_words_text;
+                row(ui, "hold_words", |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(words)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("Sale\nSlack: standup"),
+                    );
+                    note(
+                        ui,
+                        format!(
+                            "One a line: words a phone notification's title or text holds (case aside), or an app's name, \": \" and the words, for that app only (start a line with \": \" for words that have one). A match is held as a pause holds it: logged on the Activity page (with the line that held it when \"Details in events\" is on), kept on the Notifications page when the phone lets this computer answer it, never shown. A call is never held. At most {} lines.",
+                            pocketdesk_core::local::hold_words::MAX_RULES
+                        ),
+                    );
+                    let lines: Vec<String> = words.lines().map(str::to_string).collect();
+                    if let Some(problem) = pocketdesk_core::local::hold_words::problem(&lines) {
+                        ui.label(RichText::new(problem).small().color(crate::theme::warn(ui)));
+                    }
                 });
                 row(ui, "quiet_presenting", |ui| {
                     ui.checkbox(

@@ -235,6 +235,10 @@ pub struct Config {
     /// runs something in full screen (P3; Windows). Off.
     #[serde(default)]
     pub quiet_presenting: bool,
+    /// Phones' notifications held by their words (P4): one rule a line,
+    /// `words` or `App: words`. None.
+    #[serde(default)]
+    pub hold_words: Vec<String>,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -443,6 +447,7 @@ impl Default for Config {
             quiet_to: default_quiet_to(),
             quiet_days: default_quiet_days(),
             quiet_presenting: false,
+            hold_words: Vec::new(),
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -678,6 +683,7 @@ impl Config {
         "quiet_to",
         "quiet_days",
         "quiet_presenting",
+        "hold_words",
         "sms_keep",
         "sms_names",
         "wake_announce",
