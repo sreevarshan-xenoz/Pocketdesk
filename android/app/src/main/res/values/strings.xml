@@ -556,6 +556,8 @@
     <string name="texts_names_summary">A text shows on the computer with the sender\'s name from this phone\'s contacts, not only the number</string>
     <string name="texts_contacts">My contacts on the computer</string>
     <string name="texts_contacts_summary">Your own computer can ask for your contacts, names and numbers only, to search them on its Messages page and text or call them through this phone. Asks for contacts access</string>
+    <string name="texts_contacts_refused">Needs contacts access: Android said no. Allow Contacts in Android\'s settings for Pocketdesk</string>
+    <string name="texts_contacts_open_app_settings">Open Android\'s settings for Pocketdesk</string>
     <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
     <string name="settings_capture_mouse_summary">During a session, a mouse plugged into this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="send_clipboard_label">Send clipboard</string>
@@ -820,7 +822,7 @@
     <string name="health_listener_stopped">Android stopped the part of Pocketdesk that runs in the background. Turning its notification access off and on again starts it.</string>
     <string name="health_texts_receive">Texts can\'t reach the computer: Pocketdesk isn\'t allowed to receive them.</string>
     <string name="health_texts_send">Replies from the computer can\'t be sent: Pocketdesk isn\'t allowed to send texts.</string>
-    <string name="health_contacts">Texts show numbers, not names: Pocketdesk isn\'t allowed to read contacts.</string>
+    <string name="health_contacts">Pocketdesk isn\'t allowed to read contacts: texts show numbers, not names, and the computer can\'t get your contacts.</string>
     <string name="health_photos">Screenshots and photos can\'t reach the computer: Pocketdesk isn\'t allowed to see photos.</string>
     <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
     <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone, type on it, take screenshots of it or lock it, and copies are not sent by themselves.</string>

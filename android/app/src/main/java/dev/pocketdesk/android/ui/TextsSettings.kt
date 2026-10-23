@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -53,9 +54,16 @@ fun TextsSection() {
         }
     // P10: the contacts themselves to the computer, asking for them too.
     val contactsOn = (version + resumes).let { TextPrefs.contactsToComputer(context) }
+    // A refusal is said, with Android's page for Pocketdesk (Q3 review:
+    // the switch stayed off without a word, also when denied for good).
+    var contactsRefused by remember { mutableStateOf(false) }
     val askContactsList =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             TextPrefs.setContactsToComputer(context, granted)
+            contactsRefused = !granted
+            if (granted && !PhoneNotificationPrefs.accessGranted(context)) {
+                runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+            }
             version++
         }
 
@@ -64,6 +72,11 @@ fun TextsSection() {
             askContactsList.launch(Manifest.permission.READ_CONTACTS)
         } else {
             TextPrefs.setContactsToComputer(context, on)
+            contactsRefused = false
+            // The asks come on the notification listener's link (Q3 review).
+            if (on && !PhoneNotificationPrefs.accessGranted(context)) {
+                runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+            }
             version++
         }
     }
@@ -123,10 +136,32 @@ fun TextsSection() {
         names && canReadContacts,
         ::setNames,
     )
+    val contactsNeedAccess = contactsOn && canReadContacts && !listening
     SettingSwitch(
         stringResource(R.string.texts_contacts),
-        stringResource(R.string.texts_contacts_summary),
+        stringResource(
+            when {
+                contactsRefused && !canReadContacts -> R.string.texts_contacts_refused
+                contactsNeedAccess -> R.string.texts_reply_needs_access
+                else -> R.string.texts_contacts_summary
+            },
+        ),
         contactsOn && canReadContacts,
         ::setContactsOn,
+        warning = contactsNeedAccess || (contactsRefused && !canReadContacts),
     )
+    if (contactsNeedAccess) {
+        AllowNotificationAccess()
+    } else if (contactsRefused && !canReadContacts) {
+        SettingLink(stringResource(R.string.texts_contacts_open_app_settings), null) {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.fromParts("package", context.packageName, null),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
 }
