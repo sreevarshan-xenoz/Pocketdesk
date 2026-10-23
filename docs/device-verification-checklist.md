@@ -2722,7 +2722,7 @@ Owed:
 - [ ] The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours.
 - [ ] Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from.
 - [ ] Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
-- [ ] Settings on Linux: no presenting or "Never send copies from these programs" rows; a bad link rule, words line or quiet hours keeping Save off.
+- [ ] Settings on Linux: the presenting row naming Do Not Disturb (Q4), no "Never send copies from these programs" row; a bad link rule, words line or quiet hours keeping Save off.
 
 ## 205. The phone's O and P rows after their design pass (Q3)
 
@@ -2736,6 +2736,15 @@ Owed:
 - [ ] My contacts on the computer: the permission refused (the line and Android's page), then granted there; without notification access, its warning and link.
 - [ ] The Devices page and the phone's "What this computer allows" naming the five new features.
 - [ ] A kind of notification's row, Spanish and Tamil on screen, font scale 2.0, TalkBack across the moved and changed rows.
+
+## 206. Linux catch-up for the P cycle (Q4)
+
+Built 2026-10-23. Unit-tested: GNOME's `show-banners` and KDE's `Inhibited` answers read. The Linux code type-checked for `x86_64-unknown-linux-gnu`; CI builds it.
+Owed:
+- [ ] GNOME: Do Not Disturb on, "While presenting or in full screen" on: a phone's notification logged with `presenting`, no pop-up; off again, shown (within 5 s).
+- [ ] KDE Plasma: its Do Not Disturb, and while it presents, the same.
+- [ ] A phone's alarm on KDE: the urgent notification with the alarm sound; on GNOME, silent but urgent.
+- [ ] X11 (no `WAYLAND_DISPLAY`): files copied in Nautilus or Dolphin sent with the clipboard key or "Paste copied files", through `xclip`; with `xclip` missing, nothing read and nothing hung.
 
 ## Recording results
 

@@ -1612,6 +1612,12 @@ async fn send_notification_dbus(
     // P5: an alarm is urgent and stays until closed or stopped on the phone.
     if pictures.alarm {
         hints.insert("urgency".to_string(), zbus::zvariant::Value::from(2u8));
+        // Q4: the theme's alarm sound, where the notification server
+        // plays sounds (KDE's does).
+        hints.insert(
+            "sound-name".to_string(),
+            zbus::zvariant::Value::from("alarm-clock-elapsed"),
+        );
     }
     let timeout: i32 = if pictures.alarm {
         0

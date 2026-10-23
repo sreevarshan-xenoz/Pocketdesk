@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-943 open items.
+947 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 118 |
+| A Linux desktop (the Azure VM serves for some) | 122 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 32 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 93 |
 
@@ -1992,7 +1992,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **204. The desktop's O and P pages after their design pass (Q2)**
 
 - Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
-- Settings on Linux: no presenting or "Never send copies from these programs" rows; a bad link rule, words line or quiet hours keeping Save off.
+- Settings on Linux: the presenting row naming Do Not Disturb (Q4), no "Never send copies from these programs" row; a bad link rule, words line or quiet hours keeping Save off.
+
+**206. Linux catch-up for the P cycle (Q4)**
+
+- GNOME: Do Not Disturb on, "While presenting or in full screen" on: a phone's notification logged with `presenting`, no pop-up; off again, shown (within 5 s).
+- KDE Plasma: its Do Not Disturb, and while it presents, the same.
+- A phone's alarm on KDE: the urgent notification with the alarm sound; on GNOME, silent but urgent.
+- X11 (no `WAYLAND_DISPLAY`): files copied in Nautilus or Dolphin sent with the clipboard key or "Paste copied files", through `xclip`; with `xclip` missing, nothing read and nothing hung.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

@@ -390,7 +390,8 @@ fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
         // P3: Windows says when it is presenting; Linux does not.
-        "quiet_presenting" => cfg!(windows),
+        // Q4: GNOME's and KDE's Do Not Disturb on Linux.
+        "quiet_presenting" => cfg!(any(windows, target_os = "linux")),
         // O4: a copy names its program on Windows only (Q2 review).
         "clipboard_never_from" => cfg!(windows),
         "clipboard_hotkey" | "typing_hotkey" | "away_lock_minutes" | "mic_relay_device" => {
@@ -1353,11 +1354,19 @@ impl SettingsForm {
                 row(ui, "quiet_presenting", |ui| {
                     ui.checkbox(
                         &mut e.quiet_presenting,
-                        "hold phones' notifications and texts while Windows says this computer is presenting or runs something in full screen",
+                        if cfg!(windows) {
+                            "hold phones' notifications and texts while Windows says this computer is presenting or runs something in full screen"
+                        } else {
+                            "hold phones' notifications and texts while this computer's Do Not Disturb is on"
+                        },
                     );
                     note(
                         ui,
-                        "Held as quiet hours hold them, whatever the time. Windows says so for a slideshow, a game or a video in full screen, and while its own Do Not Disturb is on.",
+                        if cfg!(windows) {
+                            "Held as quiet hours hold them, whatever the time. Windows says so for a slideshow, a game or a video in full screen, and while its own Do Not Disturb is on."
+                        } else {
+                            "Held as quiet hours hold them, whatever the time: GNOME's Do Not Disturb, or KDE's (also while it presents). Elsewhere nothing is held."
+                        },
                     );
                 });
                 // P4: held by their words, as a muted app's.

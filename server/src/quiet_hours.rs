@@ -10,7 +10,8 @@ use pocketdesk_core::local::quiet_hours::{LocalTime, Schedule};
 pub enum Quiet {
     /// Within the schedule.
     Hours,
-    /// Presenting, or something in full screen (Windows).
+    /// Presenting, or something in full screen (Windows); the desktop's
+    /// own Do Not Disturb (GNOME, KDE; Q4).
     Presenting,
 }
 
@@ -116,15 +117,150 @@ fn presenting_with(seam: Option<std::ffi::OsString>) -> bool {
             .contains(&state)
         })
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::do_not_disturb()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         false
+    }
+}
+
+/// Q4: the desktop's own Do Not Disturb on Linux, as GNOME and KDE say it.
+/// A thread of its own asks every 5 s while "While presenting" is on, each
+/// with a second's deadline, and the handlers only read its last answer
+/// (Q4 review: asked on the runtime's threads under a lock, a hung
+/// `gsettings` held every notification behind it). A desktop that says
+/// nothing is not quiet; the first answer comes within a second of the
+/// first ask.
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    static QUIET: AtomicBool = AtomicBool::new(false);
+    static ASKING: AtomicBool = AtomicBool::new(false);
+
+    pub fn do_not_disturb() -> bool {
+        if !ASKING.swap(true, Ordering::AcqRel) {
+            let _ = std::thread::Builder::new()
+                .name("do-not-disturb".into())
+                .spawn(|| {
+                    loop {
+                        let quiet = gnome() == Some(true) || kde() == Some(true);
+                        QUIET.store(quiet, Ordering::Release);
+                        std::thread::sleep(Duration::from_secs(5));
+                        // Ends with the switch; the next ask starts it again.
+                        if !crate::events::current_config().quiet_presenting {
+                            QUIET.store(false, Ordering::Release);
+                            ASKING.store(false, Ordering::Release);
+                            break;
+                        }
+                    }
+                })
+                .inspect_err(|_| ASKING.store(false, Ordering::Release));
+        }
+        QUIET.load(Ordering::Acquire)
+    }
+
+    /// GNOME: banners off is its Do Not Disturb.
+    fn gnome() -> Option<bool> {
+        let out = output_within(
+            "gsettings",
+            &["get", "org.gnome.desktop.notifications", "show-banners"],
+        )?;
+        super::gnome_quiet(&out)
+    }
+
+    /// KDE: its notification server says it is inhibited.
+    fn kde() -> Option<bool> {
+        let out = output_within(
+            "gdbus",
+            &[
+                "call",
+                "--session",
+                "--dest",
+                "org.freedesktop.Notifications",
+                "--object-path",
+                "/org/freedesktop/Notifications",
+                "--method",
+                "org.freedesktop.DBus.Properties.Get",
+                "org.freedesktop.Notifications",
+                "Inhibited",
+            ],
+        )?;
+        super::inhibited(&out)
+    }
+
+    /// A command's output, or none when it fails or takes over a second.
+    fn output_within(program: &str, args: &[&str]) -> Option<String> {
+        use std::io::Read;
+        let mut child = std::process::Command::new(program)
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()?;
+        let mut stdout = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            let mut out = String::new();
+            let _ = stdout.read_to_string(&mut out);
+            out
+        });
+        let end = Instant::now() + Duration::from_secs(1);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return reader.join().ok(),
+                Ok(Some(_)) | Err(_) => return None,
+                Ok(None) if Instant::now() >= end => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+    }
+}
+
+/// Q4: GNOME's `show-banners` answer read: `false` is Do Not Disturb.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn gnome_quiet(out: &str) -> Option<bool> {
+    match out.trim() {
+        "false" => Some(true),
+        "true" => Some(false),
+        _ => None,
+    }
+}
+
+/// Q4: `gdbus`'s answer for KDE's `Inhibited`, such as `(<true>,)`.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn inhibited(out: &str) -> Option<bool> {
+    let out = out.trim();
+    if out.contains("<true>") {
+        Some(true)
+    } else if out.contains("<false>") {
+        Some(false)
+    } else {
+        None
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Q4: GNOME's and KDE's answers read; anything else says nothing.
+    #[test]
+    fn the_desktops_do_not_disturb_is_read() {
+        assert_eq!(gnome_quiet("false\n"), Some(true));
+        assert_eq!(gnome_quiet("true\n"), Some(false));
+        assert_eq!(gnome_quiet("No such schema"), None);
+        assert_eq!(inhibited("(<true>,)\n"), Some(true));
+        assert_eq!(inhibited("(<false>,)"), Some(false));
+        assert_eq!(inhibited("Error: GDBus.Error"), None);
+    }
 
     fn at(weekday: u8, minute: u16) -> Option<LocalTime> {
         Some(LocalTime { weekday, minute })
