@@ -170,7 +170,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::PhoneActions,
         "Take screenshots of it, lock it and open its apps from here",
-        "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone opens apps with \u{201c}Let the computer open my apps\u{201d} on. The phone takes them with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service; a screenshot arrives as its new screenshots do.",
+        "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
         Capability::PhoneSound,
@@ -1706,6 +1706,16 @@ impl PocketdeskApp {
                         ));
                     }
                 });
+                // Q2 review: the phone's own switch, as it last said it.
+                if model::phone_action_reach(
+                    device.linked,
+                    device.permissions.allows(Capability::PhoneActions),
+                )
+                .is_ok()
+                    && let Some(refused) = model::phone_actions_refused(device.switches.as_ref())
+                {
+                    ui.colored_label(crate::theme::warn(ui), refused);
+                }
             });
         }
         // Whether the link box's phone can take a link now (N6 review): a

@@ -720,6 +720,24 @@ pub fn mute_refused(
         .is_some_and(|at| at <= now_unix && now_unix - at <= REFUSAL_SHOWN_SECS)
 }
 
+/// What the phone's last switches report says against Screenshot of the
+/// phone and Lock the phone (Q2 review: the Overview said "Asked" while
+/// the phone's own switch was off, and nothing came).
+pub fn phone_actions_refused(
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> Option<&'static str> {
+    let said = switches?.switches.get("phone_actions")?;
+    if !said.on {
+        Some(
+            "Its \"Let the computer take screenshots and lock this phone\" is off, so it refuses a screenshot or a lock.",
+        )
+    } else if said.android == Some(false) {
+        Some("Pocketdesk control is off on it, so it refuses a screenshot or a lock.")
+    } else {
+        None
+    }
+}
+
 /// Whether the phone is in its owner's own Do Not Disturb (D2 review): the
 /// computer does not mute it then, so Mute for an hour is not offered.
 pub fn quiet_by_owner(quiet: Option<&pocketdesk_core::local::phone_quiet::PhoneQuiet>) -> bool {
@@ -1325,6 +1343,36 @@ mod tests {
                 .unwrap_err()
                 .contains("not linked")
         );
+    }
+
+    /// Q2: the phone's own switch against Screenshot and Lock, said.
+    #[test]
+    fn a_phone_s_switch_off_says_it_refuses_screenshots() {
+        use pocketdesk_core::local::phone_switches::{PhoneSwitches, from_body};
+        let said = |body: serde_json::Value| PhoneSwitches {
+            switches: from_body(&serde_json::json!({ "switches": body })).unwrap(),
+            updated_unix: 1,
+        };
+        let off = said(serde_json::json!({"phone_actions": {"on": false}}));
+        assert!(
+            super::phone_actions_refused(Some(&off))
+                .unwrap()
+                .contains("is off")
+        );
+        let no_control = said(serde_json::json!({"phone_actions": {"on": true, "android": false}}));
+        assert!(
+            super::phone_actions_refused(Some(&no_control))
+                .unwrap()
+                .contains("control")
+        );
+        let ready = said(serde_json::json!({"phone_actions": {"on": true, "android": true}}));
+        assert_eq!(super::phone_actions_refused(Some(&ready)), None);
+        // An older phone that never said: nothing claimed.
+        assert_eq!(
+            super::phone_actions_refused(Some(&said(serde_json::json!({})))),
+            None
+        );
+        assert_eq!(super::phone_actions_refused(None), None);
     }
 
     #[test]
