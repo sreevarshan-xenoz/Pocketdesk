@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-880 open items.
+884 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 35 |
 | A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 159 |
+| A Linux desktop (the Azure VM serves for some) | 163 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 348 |
 
@@ -1314,6 +1314,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **207. Start beside KDE Connect (T1)**
 
 - Linux with KDE Connect (or GSConnect) running: the server starts on 1717, the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
+
+**208. The clipboard on X11 (T2)**
+
+- X11 (Mint, or Xfce): text copied on the computer reaches a phone in a session and in the background, with `xclip` running once per copy (no read every 2 s while nothing changes), and a phone's text and image land on the computer's clipboard. (where: linux)
+- X11 with KeePassXC: a password it copies stays on the computer. (where: linux)
+- X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
+- Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

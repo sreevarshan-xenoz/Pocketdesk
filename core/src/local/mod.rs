@@ -11,6 +11,7 @@ pub mod approval;
 pub mod cast;
 pub mod clip_filter;
 pub mod clip_history;
+pub mod clip_tool;
 pub mod clipboard_files;
 pub mod commands;
 pub mod computers;

@@ -2805,6 +2805,15 @@ Owed:
 - [ ] Windows: `pocketdesk install` opening TCP 1716-1725, and a phone reaching a server moved to 1717 through the firewall. (where: by hand)
 - [ ] The desktop app's Overview label and Diagnostics with the port moved. (where: by hand)
 
+## 208. The clipboard on X11 (T2)
+
+Built 2026-10-24. Unit-tested: Wayland or X11 from `WAYLAND_DISPLAY` and `DISPLAY` (neither: Wayland, as before), `xclip`'s command lines and the best text target. The X11 watcher and the reads were type-checked and linted for `x86_64-unknown-linux-gnu` here; CI builds the server.
+Owed:
+- [ ] X11 (Mint, or Xfce): text copied on the computer reaches a phone in a session and in the background, with `xclip` running once per copy (no read every 2 s while nothing changes), and a phone's text and image land on the computer's clipboard. (where: linux)
+- [ ] X11 with KeePassXC: a password it copies stays on the computer. (where: linux)
+- [ ] X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
+- [ ] Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
