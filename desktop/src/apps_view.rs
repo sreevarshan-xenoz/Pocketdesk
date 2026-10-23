@@ -32,7 +32,8 @@ pub struct AppsBox {
 
 /// What the box asks of the app this frame.
 pub enum Action {
-    Open(String),
+    /// The app's id and its name.
+    Open(String, String),
     Close,
 }
 
@@ -107,7 +108,7 @@ impl AppsBox {
                             .on_hover_text(format!("Open {} on the phone", app.name))
                             .clicked()
                         {
-                            action = Some(Action::Open(app.id.clone()));
+                            action = Some(Action::Open(app.id.clone(), app.name.clone()));
                         }
                         ui.label(&app.name);
                     });

@@ -616,7 +616,7 @@ pub const FEATURES: &[Feature] = &[
         key: "phone_actions",
         what: "Screenshots of it and locking it from here",
         phone_switch: "Let the computer take screenshots and lock this phone",
-        permission_name: "Take screenshots of it and lock it from here",
+        permission_name: "Take screenshots of it, lock it and open its apps from here",
         android: "the Pocketdesk control Accessibility service and notification access",
     },
 ];
@@ -626,7 +626,9 @@ pub const FEATURES: &[Feature] = &[
 /// not, as the Overview and the tray say it.
 pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static str> {
     if !allowed {
-        Err("This phone's \"Take screenshots of it and lock it from here\" is off in Devices.")
+        Err(
+            "This phone's \"Take screenshots of it, lock it and open its apps from here\" is off in Devices.",
+        )
     } else if !linked {
         Err("The phone is not linked now: a session, or one of its background features, links it.")
     } else {

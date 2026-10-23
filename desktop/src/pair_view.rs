@@ -241,7 +241,8 @@ pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) 
     }
 }
 
-/// What a profile lets a phone do, in words: its permissions that are on.
+/// What a profile lets a phone do, in words: its permissions that are on,
+/// by their Devices labels (Q2 review: not the code's names).
 pub fn profile_allows(
     permissions: &pocketdesk_core::protocol::permissions::DevicePermissions,
 ) -> String {
@@ -249,12 +250,18 @@ pub fn profile_allows(
     let on: Vec<String> = Capability::ALL
         .into_iter()
         .filter(|c| permissions.allows(*c))
-        .map(|c| format!("{c:?}").to_lowercase())
+        .map(|c| {
+            crate::app::PERMISSIONS
+                .iter()
+                .find(|(p, _, _)| *p == c)
+                .map(|(_, label, _)| label.to_string())
+                .unwrap_or_else(|| format!("{c:?}"))
+        })
         .collect();
     let mut words = if on.is_empty() {
         "nothing".to_string()
     } else {
-        on.join(", ")
+        on.join("; ")
     };
     if permissions.ask_first {
         words.push_str("; each session asked first");

@@ -137,7 +137,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
         "clipboard_never_from",
-        "Never send copies from",
+        "Never send copies from these programs",
         Section::Phones,
     ),
     (
@@ -1358,7 +1358,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. On Windows it stays on screen with an alarm's sound until it stops on the phone, its Snooze or Stop is pressed, or ten minutes pass; on Linux it is an urgent notification that stays. Closing it here leaves the phone ringing: its Stop stops both. One that reaches this computer more than two minutes late shows as a plain notification. Off, every alarm does. A pause, quiet hours and a muted app hold it as any other.",
+                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. On Windows it stays on screen with an alarm's sound until it stops on the phone, its Snooze or Stop is pressed, or ten minutes pass; on Linux it is an urgent notification that stays. Closing it here leaves the phone ringing: its Stop stops both. One that reaches this computer more than two minutes late shows as a plain notification. With this off, every alarm shows as a plain notification. A pause, quiet hours and a muted app hold it as any other.",
                     );
                 });
                 row(ui, "quiet_presenting", |ui| {

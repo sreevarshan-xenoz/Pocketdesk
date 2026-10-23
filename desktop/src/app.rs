@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 21] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -140,7 +140,7 @@ const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::Texts,
         "Show its texts and send replies",
-        "Texts the phone receives appear in Messages here, and replies go out through the phone.",
+        "Texts the phone receives appear in Messages here, and replies go out through the phone. Messages can also ask for the phone's contacts; turning this off forgets the contacts kept here.",
     ),
     (
         Capability::Links,
@@ -169,8 +169,8 @@ const PERMISSIONS: [(Capability, &str, &str); 21] = [
     ),
     (
         Capability::PhoneActions,
-        "Take screenshots of it and lock it from here",
-        "Screenshot of the phone and Lock the phone, on the Overview and in the tray. The phone takes them with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service; a screenshot arrives as its new screenshots do.",
+        "Take screenshots of it, lock it and open its apps from here",
+        "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone opens apps with \u{201c}Let the computer open my apps\u{201d} on. The phone takes them with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service; a screenshot arrives as its new screenshots do.",
     ),
     (
         Capability::PhoneSound,
@@ -1386,7 +1386,7 @@ impl PocketdeskApp {
             ) {
                 Ok(_) => Ok(match action {
                     PhoneAction::Screenshot => format!(
-                        "Asked {who} for a screenshot: it arrives as its new screenshots do, with \"Send new screenshots\" on in its Settings and Files allowed for it here."
+                        "Asked {who} for a screenshot. It arrives with \"Send new screenshots\" on in its Settings and \"Send files\" allowed here."
                     ),
                     PhoneAction::Lock => format!("Asked {who} to lock its screen."),
                     PhoneAction::Apps => format!("Asked {who} for its apps."),
@@ -1399,7 +1399,7 @@ impl PocketdeskApp {
     }
 
     /// P2: ask the phone `id` to open the app `app`, and say how that went.
-    fn open_phone_app(&mut self, id: &str, app: &str) {
+    fn open_phone_app(&mut self, id: &str, app: &str, name: &str) {
         let who = self.label(id);
         self.notice = crate::notice::Notice::outcome(
             match pocketdesk_core::local::phone_actions::request_open(
@@ -1409,7 +1409,7 @@ impl PocketdeskApp {
                 now_unix(),
             ) {
                 Ok(_) => Ok(format!(
-                    "Asked {who} to open it. It opens while the phone is unlocked and awake, with the Pocketdesk control service on."
+                    "Asked {who} to open {name}. With the phone unlocked it opens at once while Pocketdesk control is on, else the phone offers \"Tap to open\"."
                 )),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
@@ -1754,7 +1754,9 @@ impl PocketdeskApp {
                     .as_mut()
                     .and_then(|b| b.ui(ui, &state_dir, &who));
                 match action {
-                    Some(crate::apps_view::Action::Open(app)) => self.open_phone_app(&id, &app),
+                    Some(crate::apps_view::Action::Open(app, name)) => {
+                        self.open_phone_app(&id, &app, &name)
+                    }
                     Some(crate::apps_view::Action::Close) => self.apps_box = None,
                     None => {}
                 }
@@ -2980,7 +2982,7 @@ impl PocketdeskApp {
                 };
                 ui.menu_button(title, |ui| {
                     let mut every = others.iter().all(|(id, _)| also.contains(id));
-                    if ui.checkbox(&mut every, "Every one").changed() {
+                    if ui.checkbox(&mut every, "All of them").changed() {
                         *also = if every {
                             others.iter().map(|(id, _)| id.clone()).collect()
                         } else {

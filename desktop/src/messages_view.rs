@@ -401,7 +401,7 @@ impl MessagesView {
                         phone,
                         pocketdesk_core::protocol::permissions::Capability::Texts,
                     ) {
-                        Err("Not asked: Texts is off for this phone (Devices).".to_string())
+                        Err("Not asked: \"Show its texts and send replies\" is off for this phone on Devices.".to_string())
                     } else {
                         pocketdesk_core::local::phone_actions::request(
                             state_dir,
@@ -437,7 +437,7 @@ impl MessagesView {
         {
             pane.label(
                 RichText::new(
-                    "No answer from the phone. It answers with \"My contacts on the computer\" on in Pocketdesk's Settings on the phone (Texts), and Texts allowed on Devices here.",
+                    "No answer from the phone. It answers with \"My contacts on the computer\" on in Pocketdesk's Settings on the phone, and \"Show its texts and send replies\" allowed on Devices here.",
                 )
                 .color(muted),
             );
