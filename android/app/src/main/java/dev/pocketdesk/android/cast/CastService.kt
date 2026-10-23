@@ -318,6 +318,9 @@ class CastService : Service() {
             closed.contains("phone sound not played here") -> getString(R.string.phone_sound_not_played)
             closed.contains("phone screen not allowed") -> getString(R.string.cast_not_allowed)
             closed.contains("phone screen not shown here") -> getString(R.string.cast_not_shown_here)
+            // The computer's own ends, as the session's card says them (S2 review).
+            closed.contains("not paired") || closed.contains("permissions changed") ->
+                getString(dev.pocketdesk.android.ui.humanizeError(closed))
             else -> closed
         }
 
