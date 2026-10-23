@@ -2,60 +2,36 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-948 open items.
+911 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 562 |
-| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
-| A phone with a SIM | 30 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 483 |
+| Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 50 |
+| A phone with a SIM | 29 |
 | A second phone | 11 |
-| Away from home: another network, or through a router | 12 |
+| Away from home: another network, or through a router | 21 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 123 |
+| A Linux desktop (the Azure VM serves for some) | 159 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 32 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 93 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 99 |
 
-## Here: this Windows box and the A71, without touching the owner's power, lock or input
-
-**0. Prerequisites**
-
-- Phone: `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` (build it first: `cargo ndk` for the bridge `.so`, then `assembleDebug`).
-- Both on the same Wi-Fi LAN; phone can reach desktop port 1716 (TCP) and the QUIC streaming port (default 50000-range per config).
-- Grant the app POST_NOTIFICATIONS when prompted (connect screen).
+## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
 
 - Enter desktop IP + streaming port + control port → "Connect" opens a session.
-- First connection: Pairing sheet auto-opens (pairing_required default true).
-- Second connect to same host: no pairing prompt (persisted both sides).
-- Manual flow: `pocketdesk pair` on desktop → type 6-digit PIN on phone → paired.
 - Wrong/expired PIN → clear error, retry works.
-- QUIC gate (v2 + video): before pairing completes, video must not flow — desktop log shows "Streaming session rejected: device not paired" (or "Unpaired device … on v2 QUIC") and the phone's status chip goes Down; after pairing, video works with no app restart beyond Retry.
 - QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames).
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- Video appears within ~1 s; with "Show connection details" on, the HUD shows fps/kbps/rtt/delay/lost, plus the caption naming what the rates and the link figure were measured over (§2d).
-- FGS notification is present ("Streaming to <ip>"), survives home/swipe-away attempts; its Disconnect action ends the session.
-- Screen-off for 1 min, wake → stream still live (wake lock + keepalive; plan #13).
-- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
-- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
-- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (x,y)" shows that monitor's wl_output origin and frames are its size.
 - R4 C1 codec negotiation, default off: connect normally → server log shows "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone (allow_hevc defaults false); video unaffected.
 - R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at window size keeps HEVC and the phone reconfigures on size change without codec change.
 - R4 C2 mid-session stall, same-codec: force the supervisor on an H.264 session (kill its sidecar child) → video recovers on software x264 with NO phone toast (identical bitstream — the server log line is the only signal; that is expected).
 - R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the log shows "Encoder bottom rung exhausted; ending session" → stream goes Down cleanly (status chip + Retry works), never a silent infinite stall.
 - R4 C2 crop stability: during a software-fallback session, pick/clear a window crop → encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a rebuild must not re-probe the dead hardware).
-
-**2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
-
-- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` → `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
-
-**2a. Desktop-side session visibility + kick (R4 D2)**
-
-- Consent notice: first phone connect → desktop shows a "Pocketdesk: a device is streaming this desktop" notification with device id + LAN/WAN + peer (headless: the same line appears in the server log instead).
 
 **2b. Compositor-true latency read (R4 E3)**
 
@@ -70,133 +46,35 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it must not wrap into a single-character column the way the six metric chips did before they became a `FlowRow`, and must not be clipped by the HUD panel's padding.
 - Optional cross-check: while the caption reads `rates over 3.0 s`, `pocketdesk sessions` for the same session should report a mean kbps within the same order of magnitude — the session record averages over the whole session, the HUD does not, and a large disagreement is a measurement bug in one of them.
 
-**3. Input paths (R2#4, Tier 1 #2)**
-
-- Mode toggle switches behavior live, no session restart.
-- holdKey/repeat (e.g. hold an arrow key) behaves.
-- R4 D1 view-only: tap "View-only: off" on the session bar → label flips ("View-only: on", amber), desktop log shows "View-only mode changed" (enabled=true), and EVERY remote input goes dead on the desktop (taps, shortcuts, workspace chips) while video, StatsHud, clipboard sync and monitor/window pickers keep working. Toggle back → input restored without reconnect. Re-arm check: while view-only is ON, trigger a stream Retry / monitor switch (fresh server pipeline starts interactive) — the phone must re-send the latch once the stream is Up again; verify input stays blocked across that rebuild.
-
-**4. Zoom + display mapping (Tier 1 #6, R3#7)**
-
-- Pinch-zoom in direct-touch mode pans/clamps correctly; taps still land on the visible desktop point while zoomed.
-- Trackpad mode: two-finger still scrolls remotely (no zoom capture).
-
-**5. Window + monitor streaming (R3#7, Tier-2 #10)**
-
-- Moving the window mid-session: crop follows only after re-pick (known limitation — crop is static rect).
-- "Whole desktop" clears the crop.
-- R4 B2: close the streamed window mid-session → stream keeps running on full-output frames with software crop (warn log "did not stage"; no session drop).
-- Monitor picker lists monitors via xcap; selecting index N streams that monitor's region; reconnect persists the choice per host.
-- Mid-session monitor switch tears down + rebuilds cleanly (no zombie session — bridge "already active" path).
-
-**6. Workspace HUD + battery (R3#8, Tier-2 #11a)**
-
-- Workspace chips appear under StatsHud; open/close/focus a window on desktop → HUD updates within ~4 s.
-- R4 E1: re-tap the highlighted window chip → crop clears back to whole-desktop (monitor) view; a *different* window chip tap switches the crop directly.
-- Battery chip shows desktop percentage + charging state; matches `upower`.
-
 **7. Clipboard + files (Tier 1 #4)**
 
-- Copy on phone → desktop clipboard updated within ~4 s; copy on desktop → phone receives.
 - No echo loop (toggle sync off/on, paste both ways repeatedly).
-- History sheet: 20 entries survive app restart; pick restores local + pushes.
-- Share text to the app from any Android app → lands in desktop clipboard, toast "Sent to clipboard."
-
-**8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
-
-- Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears.
-- "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio).
-- Desktop pushes findmydevice ring → phone alarm loops at max volume 30 s (phone in alarm-volume >0; check DoNotDisturb doesn't block USAGE_ALARM).
-
-**8a. Control-channel versioning (R4 D4)**
-
-- Reply still works end-to-end after the `kdeconnect.notification-reply` → `kdeconnect.pocketdesk.notification_reply` rename (desktop-side check): reply from the phone shade → `replies.log` records it + confirmation popup (the server only matches the new type now, so an old client build's reply would silently no-op — both ends must be from this build).
-
-**9. Privacy mode + lock (Tier-3 #15, R4 E4)**
-
-- Without `input` group: clean error, no crash.
-
-**10. Audio control (Tier-3 #16)**
-
-- Audio sheet opens with volume %, mute state, sink list (matches `wpctl status`).
-- Slider → desktop volume changes on release; mute switch works; selecting a sink routes default output (verify with `wpctl inspect` + real playback).
 
 **10a. Phone mic share (R4 E2)**
 
 - "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
-- Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording).
-- Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back).
-- "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling).
-- Exit the session while mic is on → source disappears (release-on-dispose); force-killing the phone app → source gone within the QUIC idle timeout (~45 s).
-- Screen off / PiP while mic is on (Android 14+): audio keeps flowing — the FGS carries the microphone type (logcat: no SecurityException, no silent AudioRecord).
-- WAN (relayed or direct) session: the same checks pass over the iroh path.
 
 **11. WAN over iroh (R1)**
 
-- On same LAN: identity cached (logcat), status shows LAN.
-- Phone on LTE (Wi-Fi off): dial from cached identity succeeds → badge shows "WAN · punching…" then settles to "WAN · direct" or "WAN · relayed — trying direct…", video + input + keyframe-on-gap all work through relays (R4 A1).
-- Hole punching through a real NAT (relay-free if possible): check `directAddrs` paths get used.
-- After both a LAN and a WAN session: `pocketdesk sessions` shows one line per session with distinct `outcome=` (`lan_direct` vs `wan_punched`/`wan_relayed`), plausible `rtt_ms`/`kbps`, and `dev=` = the paired deviceId.
-- Tail latency (roadmap 2141-2146): the same lines carry `enc_n`/`enc_p50`/`enc_p90`/`enc_p95`/`enc_p99`/`enc_max` and the matching `rtt_*` set. `enc_n` counts frames the encoder actually produced a packet for, so it must be non-zero and of the same order as fps × session duration — a large shortfall is its own finding (frames dropped upstream, or a path that never samples). `enc_p50` must sit near the typical frame time for the encoder rung in use (the log line names the backend at session start), and a deliberate stall — crop to a window, or unplug/replug Wi-Fi mid-session — has to move `enc_max` or `rtt_max` above `enc_p50`/`rtt_p50`. **A line with no `enc_*` at all means the sampling was never wired to the live pipeline: that is a bug, not a healthy session.**
-- Relayed → direct upgrade while streaming: badge flips to "WAN · direct" on its own (iroh keeps punching) and the bridge logs "upgraded from relay to direct path" (logcat). Relayed session must stay usable the whole time, not stall on the transition.
-- Relayed session (R4 A3): within ~2 s of the badge reading "relayed", the desktop log shows "Encoder bitrate target changed" (relay_cap engaged) at effective ≤ 2 Mbit/s followed by "Encoder rebuilt for new bitrate", and picture is visibly softer than LAN/direct.
-- Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`pocketdesk sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms).
-- Clamp release on punch-through: start relayed (override off), wait for the direct upgrade → within ~2 s the log shows "Encoder bitrate target changed" back to configured without touching anything.
-- LAN session (R4 A3): the relay clamp never engages (`stats().relayed` is always false on quinn → relay_cap is unbounded); the arbiter task still runs but emits no bitrate-change line until a preset is chosen below or the link starts losing packets.
-- Loss response (roadmap 2053): degrade the link — `tc qdisc add dev <iface> root netem loss 5%` on the desktop, or walk the phone toward the far edge of the Wi-Fi mid-session — and within a few 2 s ticks the desktop log shows "Encoder bitrate target changed" carrying a `loss_cap=` field with effective below configured, then "Encoder rebuilt for new bitrate" and a visibly softer picture. The cut is 20 % per congested tick down to a 1 Mbit/s floor (a configured rate below the floor is never raised to it). Restore the link → the same line reappears **without** `loss_cap=` as the rate climbs back ~10 % per tick to configured, then stops being a term at all.
+- A deliberate stall (crop to a window, or Wi-Fi off and on mid-session) moves `enc_max` or `rtt_max` above their p50.
+- `dec_*` grows when the desktop is cropped to a bigger window, and `rnd_p50` jumps when the bitrate clamp or a preset slows the link.
 - Loss response must not fire on a quiet desktop: hold the screen still (no window movement, no video) for a minute and the log must show no bitrate-change line. Below 100 datagrams in a tick the controller treats the sample as no information, which is the only thing distinguishing "the link is lossy" from "there was nothing to lose" — a bitrate cut on an idle LAN session is a bug, not a measurement.
 
 **11b. HUD link-profile presets (R4 E5)**
 
-- Session bar shows "Quality: auto" by default. Tap it once → "Quality: max" (blue), then "balanced", "economy", back to "auto" — the button cycles all four.
-- On LAN, pick "economy": desktop log shows "Link-profile preset changed" then "Encoder bitrate target changed" with effective ≤ 1.5 Mbit/s and "Encoder rebuilt for new bitrate"; the HUD bitrate/`pocketdesk sessions` kbps drop and the picture softens. Native resolution is NOT reduced (only bitrate) — verify the HUD reports the same width×height.
-- Pick "balanced": effective ≤ 5 Mbit/s. A configured rate below a band (low-res monitor) is never raised above it (the band is a ceiling, not a floor).
-- Preset survives a stream retry / monitor switch: choose "economy", trigger Retry — the new pipeline re-arms the preset (stays ≤ 1.5 Mbit/s without re-tapping). Server latches are per-session, so a full reconnect to a fresh `StreamingServer` resets to Auto (phone must re-pick) — expected.
 - A preset change mid-action is seamless: no freeze longer than one keyframe; the post-rebuild IDR reseeds the decoder cleanly (no green/garbled persist).
-- Auto is a no-op on (re)connect: with "Quality: auto" and a LAN session, tapping Retry sends no preset packet and logs no "Encoder bitrate target changed" (only the relay floor would fire, and not on quinn).
-
-**12. Roaming (Tier-3 #13 remainder)**
-
-- Mid-stream, toggle Wi-Fi off → phone falls to LTE → within a few seconds status chip shows connecting and a fresh WAN/LAN session comes up (reconnect-on-new-radio, not live migration).
-- Wi-Fi↔LTE ping-pong with 3 s cooldown: flapping radio must not thrash a healthy stream.
-- In PiP: network change must NOT tear the float session (pip guard).
-
-**13. PiP + multitask (Tier-3 #14, DeX)**
-
-- "PiP" button → chrome hidden, video-only float with correct aspect (matches decoded frame size after first SPS); input goes to system.
-- Expand back → chrome returns, session uninterrupted.
-
-**14. Blackout / pocket mode (Tier-3 #15 remainder)**
-
-- "Blackout" → black screen, "double-tap to unlock" hint, screen dimmed; stream continues (watch desktop from another device or check fps in logcat).
-- Recents thumbnail blank during blackout.
-- Double-tap unlocks.
-- Entering PiP while blacked-out auto-clears the overlay.
-- Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay).
-
-**15. Language / i18n (Tier-3 #17 remainder)**
-
-- Switch system per-app language to Español / தமிழ் → all screens, sheets, FGS notification text localize (telemetry units, key labels, window titles stay as-is by policy).
-- Mid-session language change (if the OS applies live) → no crash; format strings (`%1$s`) render correctly in both locales.
 
 **16. Long-run / hygiene**
 
 - 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills.
-- Airplane-mode mid-session then back: clean Down chip + retry, no ANR.
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
 - Rotate to a horizontal hinge → split flips to top/bottom (stream top, dock bottom) and vice-versa.
 - Toggling panes mid-session does NOT drop the stream (the decode session survives the fold — check fps continuity / no re-Keyframe gap).
-- Direct-touch taps on the video pane still hit the right desktop point (letterbox/aspect-fit recompute for the half-width pane).
 - Shortcut bar appears once — in the dock while dual, under the stream while single.
 - Blackout still covers BOTH panes (whole window), not just the stream.
 - es/ta: "Pane:" and trackpad hint localize.
-
-**18. Login autostart + tailnet access (server-side)**
-
-- Phone reconnects to the auto-started server WITHOUT re-pairing (QUIC identity persisted in `~/.local/state/pocketdesk/certs/`; a regenerated cert would trip the TOFU pin).
-- Log out / session end → service stops with the session (PartOf), never orphaned.
 
 **20. Saved-computers home screen (multi-host store + add-computer form)**
 
@@ -215,10 +93,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **22. Owed verification register**
 
-- **PASS condition:** zero `Incoming v1 TCP connection from` lines (`server/src/service.rs:330`) after the single session-establishing connection, while every sheet and picker above is used.
-- **PASS condition:** zero `Broken pipe (os error 32)` WARN lines from any plugin.
-- **PASS condition:** zero `Kicked 1 stale session(s) due to reconnect storm` from the server.
-- Battery/clipboard/monitors/window rows still show *current* values — the shared connection must not trade churn for staleness.
 - The no-session fallback still works: a query issued with **no** live control session must take the `oneshot_request` branch (`android/bridge/src/api.rs`, reached from `control_request` when `CONTROL_WRITER` is `None`) and still get an answer — that is the path that runs before you connect, and it is the one the rewrite could plausibly have broken. Same for `push_packet`'s dedicated socket.
 
 **23. Windows host (W1: core remote desktop)**
@@ -595,7 +469,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **100. GNOME and KDE hosts that work unattended (N8)**
 
 - "Remember the screen-sharing grant" on: a session from the phone asks once at the desk; a second session and a reconnect start with no dialog.
-- No RemoteDesktop portal (or refused): the screen alone.
 
 **101. KDE Connect, next steps (N9)**
 
@@ -1166,14 +1039,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - R4 C1 forced HEVC round-trip: `allow_hevc = true` in config.toml, restart server, reconnect → log shows `codec=H.265 (HEVC)`; phone decodes (sniffed `video/hevc`) with video within ~1 s and input still mapped. A pre-C1 phone build (no caps stream) must still get H.264.
 
-**2d. Rate and link basis (roadmap 2056)**
-
-- The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the server) → HUD `fps` and `kbps` must reach 0 within ~3 s and stay there, with the caption still naming a real span. Under the old lifetime average this was the bug: a dead link read healthy for minutes. Resume → the rates recover within ~3 s, not within a session's worth of averaging.
-
-**7. Clipboard + files (Tier 1 #4)**
-
-- Reboot phone → history + saved hosts survive.
-
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
 - "Lock PC" / session-notification "Lock desktop" → screen locks (loginctl path).
@@ -1181,10 +1046,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **11. WAN over iroh (R1)**
 
 - Desktop reconnects (restart server) → identity re-announced within 30 s, phone re-dials.
-
-**18. Login autostart + tailnet access (server-side)**
-
-- Reboot the desktop → after reaching the Hyprland session, `systemctl --user status pocketdesk` is active without any manual start (WantedBy=graphical-session.target).
 
 **23. Windows host (W1: core remote desktop)**
 
@@ -1219,65 +1080,42 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## Needs the owner's OK on this box: input reaching Windows, or its display settings
 
-**0. Prerequisites**
+**2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- Desktop: user in `input` group (uinput + `/dev/input/event*` read for privacy mode) — `groups $USER` should show `input`.
+- Video appears within ~1 s of Connect on a LAN session. (where: owner) A throwaway server's LAN port needs a firewall rule on this box; through `adb reverse` the phone waits out the LAN dial first, and its first picture came 11–14 s after Connect by the internet road.
 
 **3. Input paths (R2#4, Tier 1 #2)**
 
-- ...and a tap is actually a **click** (roadmap 2061, re-verify 2026-09-24). The 2026-09-22 note above claimed "click (BTN_LEFT) lands", but the code that ran sent absolute motion plus a left *release* and never a press — so that half was either an inference or a window reacting to something else. A tap must now put `BTN_LEFT` down (value 1) and up (value 0) at the touched point: check with `evtest` on the abs-pointer device rather than by whether a window happened to react.
-- Drag (roadmap 2061, shipped 2026-09-24, device-unverified): start a slow drag-select across desktop text — `evtest` should show the pointer warp to the touched point, `BTN_LEFT 1`, moving `ABS_X/ABS_Y` while held, `BTN_LEFT 0` on lift, and the selection must follow the finger (before this change a drag was motion-with-button-up: nothing began, and the release landed on a button that was never pressed). Then the leak check: begin a one-finger drag and add a second finger mid-drag (pinch) — the button must still come up, and the desktop must not be left dragging. Note there is no server-side safety net for a lost release packet yet (roadmap 2272): a session that dies mid-drag leaves `BTN_LEFT` held on the uinput device until the next release.
-- Trackpad mode: pointer moves without jumping to touch point; tap = click; two-finger = scroll.
-- Keyboard: type letters/digits/modifiers via on-screen shortcuts + remote input — check against `evtest`: Super, Alt+Tab, Ctrl+Alt+Del, PrtSc, Esc, Super+1..9 work (ShortcutBar). (Esc tap verified 2026-09-22; this box binds workspace cycling to Super+Tab, so the bar's Alt+Tab is config-dependent, not a pipeline failure.)
-- The same keyboard list **run twice, once per injection backend** (roadmap 2057-2060). Under Wayland the server prefers uinput and emits the evdev code the phone sent, so nothing is translated; the enigo/X11 rung is the one that has to name every key, and it is the rung a machine without `/dev/uinput` access lands on. Read which one is live from the server log ("using uinput" vs "using enigo"), then re-run the list with the other by starting the server as a user who cannot open `/dev/uinput`. Symbols matter most here: `- = [ ] ; ' \` , . /` and the dialpad `*`/`+` were refused outright on that rung before the table was completed.
+- Trackpad mode: pointer moves without jumping to touch point; tap = click; two-finger = scroll. (where: owner)
+- Mode toggle switches behavior live, no session restart. (where: owner)
+- holdKey/repeat (e.g. hold an arrow key) behaves. (where: owner)
+- R4 D1 view-only: with the "View-only" switch on in the session menu, EVERY remote input goes dead on the desktop (taps, shortcuts, workspace chips) while video, the HUD, clipboard sync and the screen and window pickers keep working; switched off, input is restored without a reconnect; on across a screen switch, input stays blocked through the rebuild. (where: owner)
 
 **4. Zoom + display mapping (Tier 1 #6, R3#7)**
 
-- Letterbox: on a phone/desktop aspect mismatch, taps map through the letterbox offset (no systematic tap drift).
-
-**5. Window + monitor streaming (R3#7, Tier-2 #10)**
-
-- Picking a window: video re-encodes at window size (encoder rebuild), crop tracks the window, taps map to desktop coords via the screen box.
-
-**6. Workspace HUD + battery (R3#8, Tier-2 #11a)**
-
-- Tap a chip ≤9 → Super+N injected → workspace switches.
+- Pinch-zoom in direct-touch mode pans/clamps correctly; taps still land on the visible desktop point while zoomed. (where: owner)
+- Trackpad mode: two-finger still scrolls remotely (no zoom capture). (where: owner)
+- Letterbox: on a phone/desktop aspect mismatch, taps map through the letterbox offset (no systematic tap drift). (where: owner)
 
 **8a. Control-channel versioning (R4 D4)**
 
 - `llVersion` tag is present on our extension packets only: capture the control-channel line (e.g. `journalctl`/strace the JSON, or a debug log of `to_wire` output) — a `kdeconnect.pocketdesk.privacy`/`.audio`/`.state` packet carries `"llVersion":1`; a native `kdeconnect.identity`/`kdeconnect.pair`/`kdeconnect.clipboard` packet does NOT.
 - Forward-compat: hand-inject a `kdeconnect.pocketdesk.privacy` line with an extra unknown top-level field and an unknown body key → server still parses and acts (unknown fields ignored).
 
-**9. Privacy mode + lock (Tier-3 #15, R4 E4)**
-
-- "Privacy: on" → physical keyboard/mouse on desktop stop responding (`evtest`: grabs held), while phone input still flows.
-- Compositor shield (R4 E4, Hyprland/wlroots): the same "Privacy: on" also paints a full-perimeter red frame on every monitor within ~1 s; the desktop centre stays visible and interactive from the phone (the ring is `KeyboardInteractivity::None`, click-through). Desktop log shows "privacy: layer-shell privacy shield engaged".
-- Leave session with privacy on → release happens (phone app exit); also verify 10-min TTL auto-release by force-killing the phone app mid-grab.
-- Shield tears down with the grab: "Privacy: off" → the red frame disappears immediately; force-killing the phone app mid-grab → frame gone after the TTL auto-release.
-
-**10a. Phone mic share (R4 E2)**
-
-- View-only latched → mic keeps flowing (it is session media, not injected input); input is still dropped.
-
 **11. WAN over iroh (R1)**
 
-- Device-reported tails (roadmap 2143-2146, the phone's half of the chain): the same lines must carry `dec_*`, `rnd_*` and `e2e_*` plus `phone_rtt`/`phone_lost`. `dec_n` counts frames the decoder actually rendered, so it has to track `enc_n` within the loss the link imposed (a `dec_n` far below `enc_n` is dropped-or-stalled frames, not a telemetry bug), `dec_p50` must be single-digit ms on a hardware rung and grow when the desktop is cropped to a bigger window, and `e2e_p50` must sit near the HUD's e2e figure for the same session. `rnd_p50` is the rendered-frame interval, so it should be near 1000/fps ms and must jump when the bitrate clamp or a preset slows the link. On a session that never delivered video (rejected, or killed before the first frame) `dec_*`/`rnd_*` are legitimately absent — that is the "nobody measured" case, and `key=0` in their place would be a bug. **The server side of this path is already proven without a phone: `cargo test -p pocketdesk-server --test session_record -- --ignored --nocapture` drives a real capture→encode→send→receive session over loopback and asserts the record carries all of these tails; what remains device-only is that `H264Decoder.kt` feeds `dec_*`/`rnd_*` with real MediaCodec timings rather than the numbers the test injects.**
+- On same LAN: identity cached (logcat), status shows LAN. (where: owner)
+- After both a LAN and a WAN session: `pocketdesk sessions` shows one line per session with distinct `outcome=` (`lan_direct` vs `wan_punched`/`wan_relayed`), plausible `rtt_ms`/`kbps`, and `dev=` = the paired deviceId. (where: owner)
+- LAN session (R4 A3): the relay clamp never engages (`stats().relayed` is always false on quinn → relay_cap is unbounded); the arbiter task still runs but emits no bitrate-change line until a preset is chosen below or the link starts losing packets. (where: owner)
 
 **11b. HUD link-profile presets (R4 E5)**
 
 - View-only interaction: while a preset is active, toggling View-only still drops injected input but the bitrate preset keeps applying (both are control-plane).
 
-**13. PiP + multitask (Tier-3 #14, DeX)**
-
-- DeX/docked or split-screen: session is resizeable, letterboxing recomputes, taps still map correctly.
-
-**16. Long-run / hygiene**
-
-- Force-stop app mid-stream: desktop auto-releases privacy within TTL, encoder sessions stop (no server-side zombie capture), siren/WoL relays unaffected.
-
 **17. Foldable / tablet dual-pane (R4 E6)**
 
 - On a foldable folded to half-open (vertical hinge): session auto-splits — desktop video on one pane, trackpad + shortcut dock on the other; tapping/dragging the dock moves the desktop cursor and the finger never covers the video.
+- Direct-touch taps on the video pane still hit the right desktop point (letterbox/aspect-fit recompute for the half-width pane). (where: owner)
 
 **23. Windows host (W1: core remote desktop)**
 
@@ -1383,11 +1221,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **11. WAN over iroh (R1)**
 
-- Transport exposure (roadmap 2151-2158): every line from a session that lasted longer than the 5 s sampler must carry `lost_pk`/`lost_b`/`dgrams`/`tx_b`/`path_chg`/`relayed_s`, and `cong_ev`/`cwnd_pk`/`mtu`/`black` **on either transport**: quinn exposes them on the connection, and the iroh arm reads them off the *selected* path (`Connection::paths()`), so a WAN session riding a punched direct path reports the same set. A WAN line missing them is no longer the expected shape — the earlier "iroh drops the per-path values" claim was read off its connection-level aggregate, which really does discard them — and the only legitimate reason for a gap now is a snapshot taken with no selected path, which is why the field is `Option` and never a `0` pretending to be a measurement. `mtu` must be ≥ 1200 (quinn's `INITIAL_MTU`) and may climb as PLPMTUD probes pay off; `cwnd_pk` must be non-zero on any session that sent video. Walk between Wi-Fi bands, or kick the phone onto cellular mid-session, and `path_chg` has to count it; start a relayed WAN session and `relayed_s` must be non-zero with `outcome=wan_punched` if punching eventually won.
-
-**18. Login autostart + tailnet access (server-side)**
-
-- Phone on cellular (Wi-Fi off): same connect via tailnet IP works (Tailscale traverses NAT). Then iroh WAN fallback (`## 11`) with the two machines on genuinely different networks — still pending (phone cellular was OUT_OF_SERVICE at test time).
+- Phone on LTE (Wi-Fi off): dial from cached identity succeeds → badge shows "WAN · punching…" then settles to "WAN · direct" or "WAN · relayed — trying direct…", video + input + keyframe-on-gap all work through relays (R4 A1). (where: sim)
 
 **35. Reaching the desktop from outside (N1)**
 
@@ -1522,6 +1356,24 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## Away from home: another network, or through a router
 
+**11. WAN over iroh (R1)**
+
+- Hole punching through a real NAT (relay-free if possible): check `directAddrs` paths get used. (where: away)
+- Relayed → direct upgrade while streaming: badge flips to "WAN · direct" on its own (iroh keeps punching) and the bridge logs "upgraded from relay to direct path" (logcat). Relayed session must stay usable the whole time, not stall on the transition. (where: away)
+- Relayed session (R4 A3): within ~2 s of the badge reading "relayed", the desktop log shows "Encoder bitrate target changed" (relay_cap engaged) at effective ≤ 2 Mbit/s followed by "Encoder rebuilt for new bitrate", and picture is visibly softer than LAN/direct. (where: away)
+- Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`pocketdesk sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms). (where: away)
+- Clamp release on punch-through: start relayed (override off), wait for the direct upgrade → within ~2 s the log shows "Encoder bitrate target changed" back to configured without touching anything. (where: away)
+
+**12. Roaming (Tier-3 #13 remainder)**
+
+- Mid-stream, toggle Wi-Fi off → phone falls to LTE → within a few seconds status chip shows connecting and a fresh WAN/LAN session comes up (reconnect-on-new-radio, not live migration). (where: away)
+- Wi-Fi↔LTE ping-pong with 3 s cooldown: flapping radio must not thrash a healthy stream. (where: away)
+- In PiP: network change must NOT tear the float session (pip guard). (where: away)
+
+**18. Login autostart + tailnet access (server-side)**
+
+- Phone on cellular (Wi-Fi off): same connect via tailnet IP works (Tailscale traverses NAT). Then iroh WAN fallback (`## 11`) with the two machines on genuinely different networks — still pending (phone cellular was OUT_OF_SERVICE at test time). (where: away)
+
 **35. Reaching the desktop from outside (N1)**
 
 - A strict-NAT network (or a hotspot behind carrier NAT): "From outside" warns, and the session rides the relay.
@@ -1612,50 +1464,100 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## A Linux desktop (the Azure VM serves for some)
 
-**0. Prerequisites**
-
-- Desktop: `cargo run -p pocketdesk-server` (or installed server) on the Hyprland machine; FFmpeg + PipeWire + xdg-desktop-portal present.
-- Note which items are Hyprland-specific (window picker, workspace HUD, monitor geometry) — retest on a plain session if that's a target.
-
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
 
 - "Show PIN on desktop" → desktop pops a notify-send PIN → phone confirms "Paired ✓", button flips to "Paired ✓".
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- R4 B1 screencopy backend (desktop-observable): starting a stream on Hyprland must NOT raise the portal screen-share grant dialog; server log shows "Capture started via backend Screencopy". If instead it shows "Capture backend Screencopy unavailable (…); trying next" followed by "Capture started via backend Portal", the reason is in the line — that's the fallback working, but note it as a finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
-- R4 B3 capture_backend config override: set `capture_backend = "portal"` in config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error.
+- R4 B1 screencopy backend (desktop-observable): starting a stream on (where: linux) Hyprland must NOT raise the portal screen-share grant dialog; server log shows "Capture started via backend Screencopy". If instead it shows "Capture backend Screencopy unavailable (…); trying next" followed by "Capture started via backend Portal", the reason is in the line — that's the fallback working, but note it as a finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
+- R4 B3 capture_backend config override: set `capture_backend = "portal"` in (where: linux) config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error.
+- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (where: linux) (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
+- R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (where: linux) (x,y)" shows that monitor's wl_output origin and frames are its size.
 - R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken (e.g. force `hardware_encoder = "nvenc"` here — this box's NVIDIA driver predates FFmpeg 9 NVENC, so the sidecar dies), start a session → server log shows "Hardware encoder unavailable (…); falling back to software (C2)" and video still appears within ~2 s on x264.
 - R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session, `pkill -f 'ffmpeg .*vaapi'` (or kill the encoder child seen in `pstree` of the server) → log shows "Rebuilt encoder on software rung (C2)", video resuming within ~2 s and the phone toasts "Desktop switched encoder — now H.264" (MediaCodec swap re-sniffed from the first software IDR).
-- R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued.
+- R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued. (where: linux)
 
 **2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
 
-- R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129` starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129" and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2), never hangs.
-- R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
+- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` →  (where: linux) `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
+- R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the (where: linux) VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129` starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129" and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2), never hangs.
+- R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma (where: linux) shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
+
+**2d. Rate and link basis (roadmap 2056)**
+
+- The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the (where: linux) server) → HUD `fps` and `kbps` must reach 0 within ~3 s and stay there, with the caption still naming a real span. Under the old lifetime average this was the bug: a dead link read healthy for minutes. Resume → the rates recover within ~3 s, not within a session's worth of averaging.
+
+**3. Input paths (R2#4, Tier 1 #2)**
+
+- ...and a tap is actually a **click** (roadmap 2061, re-verify 2026-09-24). The 2026-09-22 note above (where: linux) claimed "click (BTN_LEFT) lands", but the code that ran sent absolute motion plus a left *release* and never a press — so that half was either an inference or a window reacting to something else. A tap must now put `BTN_LEFT` down (value 1) and up (value 0) at the touched point: check with `evtest` on the abs-pointer device rather than by whether a window happened to react.
+- Drag (roadmap 2061, shipped 2026-09-24, device-unverified): start a slow drag-select across desktop text — `evtest` should show the pointer warp to the touched point, `BTN_LEFT 1`, moving `ABS_X/ABS_Y` while held, `BTN_LEFT 0` on lift, and the selection must follow the finger (before this change a drag was motion-with-button-up: nothing began, and the release landed on a button that was never pressed). Then the leak check: begin a one-finger drag and add a second finger mid-drag (pinch) — the button must still come up, and the desktop must not be left dragging. Note there is no server-side safety net for a lost release packet yet (roadmap 2272): a session that dies mid-drag leaves `BTN_LEFT` held on the uinput device until the next release. (where: linux)
+- Keyboard: type letters/digits/modifiers via on-screen shortcuts + remote input — check against `evtest`: Super, Alt+Tab, Ctrl+Alt+Del, PrtSc, Esc, Super+1..9 work (ShortcutBar). (Esc tap verified 2026-09-22; this box binds workspace cycling to Super+Tab, so the bar's Alt+Tab is config-dependent, not a pipeline failure.) (where: linux)
+- The same keyboard list **run twice, once per injection backend** (roadmap 2057-2060). Under (where: linux) Wayland the server prefers uinput and emits the evdev code the phone sent, so nothing is translated; the enigo/X11 rung is the one that has to name every key, and it is the rung a machine without `/dev/uinput` access lands on. Read which one is live from the server log ("using uinput" vs "using enigo"), then re-run the list with the other by starting the server as a user who cannot open `/dev/uinput`. Symbols matter most here: `- = [ ] ; ' \` , . /` and the dialpad `*`/`+` were refused outright on that rung before the table was completed.
 
 **5. Window + monitor streaming (R3#7, Tier-2 #10)**
 
-- Window picker lists Hyprland windows with title/class/workspace/size + "focused" marker.
-- R4 B2 (Hyprland): pick a window → server log shows "Streaming compositor-cropped window frames"; partly-occluded window streams correctly (occluder NOT in the video), and only the window's pixels are encoded.
-- R4 B2 (non-Hyprland wlroots, no export global): window pick still works via software crop exactly as pre-B2.
+- Window picker lists Hyprland windows with title/class/workspace/size + "focused" marker. (where: linux)
+- Picking a window: video re-encodes at window size (encoder rebuild), crop tracks the window, taps map to desktop coords via the screen box. (where: linux)
+- Moving the window mid-session: crop follows only after re-pick (known limitation — crop is static rect). (where: linux)
+- "Whole desktop" clears the crop. (where: linux)
+- R4 B2 (Hyprland): pick a window → server log shows "Streaming compositor-cropped window frames"; partly-occluded window streams correctly (occluder NOT in the video), and only the window's pixels are encoded. (where: linux)
+- R4 B2: close the streamed window mid-session → stream keeps running on full-output frames with software crop (warn log "did not stage"; no session drop). (where: linux)
+- R4 B2 (non-Hyprland wlroots, no export global): window pick still works via software crop exactly as pre-B2. (where: linux)
+- Monitor picker lists monitors via xcap; selecting index N streams that monitor's region; reconnect persists the choice per host.
 
 **6. Workspace HUD + battery (R3#8, Tier-2 #11a)**
 
-- R4 E1: a row of window chips (title/class) shows under the workspace chips on a Hyprland session; tap one → video re-encodes cropped to that window (same as the picker), the tapped chip goes solid/highlighted.
-- Roadmap 2066 (needs a second output or a hotplug-capable desktop): with the HUD open, unplug/replug a monitor → server log shows `Hyprland output changed, refreshing compositor state` within a second of the event (not up to 4 s) → HUD chips and window-crop geometry re-layout immediately. Never observed here: this box has one built-in output and Hyprland's socket1 write dispatchers are broken upstream, so no fake hotplug exists.
+- Workspace chips appear under StatsHud; open/close/focus a window on desktop → HUD updates within ~4 s. (where: linux)
+- Tap a chip ≤9 → Super+N injected → workspace switches. (where: linux)
+- R4 E1: a row of window chips (title/class) shows under the workspace chips on a Hyprland session; tap one → video re-encodes cropped to that window (same as the picker), the tapped chip goes solid/highlighted. (where: linux)
+- R4 E1: re-tap the highlighted window chip → crop clears back to whole-desktop (monitor) view; a *different* window chip tap switches the crop directly. (where: linux)
+- Roadmap 2066 (needs a second output or a hotplug-capable desktop): with the HUD open, unplug/replug a monitor → server log shows `Hyprland output changed, refreshing compositor state` within a second of the event (not up to 4 s) → HUD chips and window-crop geometry re-layout immediately. Never observed here: this box has one built-in output and Hyprland's socket1 write dispatchers are broken upstream, so no fake hotplug exists. (where: linux)
+- Battery chip shows desktop percentage + charging state; matches `upower`.
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
 
 - `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications").
+- Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears. (where: linux)
+
+**8a. Control-channel versioning (R4 D4)**
+
+- Reply still works end-to-end after the `kdeconnect.notification-reply` → (where: linux) `kdeconnect.pocketdesk.notification_reply` rename (desktop-side check): reply from the phone shade → `replies.log` records it + confirmation popup (the server only matches the new type now, so an old client build's reply would silently no-op — both ends must be from this build).
 
 **9. Privacy mode + lock (Tier-3 #15, R4 E4)**
 
-- Non-wlroots desktop (GNOME/KDE/X11, or `POCKETDESK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line.
+- "Privacy: on" → physical keyboard/mouse on desktop stop responding (`evtest`: grabs held), while phone input still flows. (where: linux)
+- Compositor shield (R4 E4, Hyprland/wlroots): the same "Privacy: on" also paints a full-perimeter red frame on every monitor within ~1 s; the desktop centre stays visible and interactive from the phone (the ring is `KeyboardInteractivity::None`, click-through). Desktop log shows "privacy: layer-shell privacy shield engaged". (where: linux)
+- Leave session with privacy on → release happens (phone app exit); also verify 10-min TTL auto-release by force-killing the phone app mid-grab. (where: linux)
+- Shield tears down with the grab: "Privacy: off" → the red frame disappears immediately; force-killing the phone app mid-grab → frame gone after the TTL auto-release. (where: linux)
+- Non-wlroots desktop (GNOME/KDE/X11, or `POCKETDESK_SCREENCOPY=0` headless): no shield is attempted — grab still works, no crash, no "shield engaged" log line. (where: linux)
+- Without `input` group: clean error, no crash. (where: linux)
+
+**10. Audio control (Tier-3 #16)**
+
+- Audio sheet opens with volume %, mute state, sink list (matches `wpctl status`).
+- Slider → desktop volume changes on release; mute switch works; selecting a sink routes default output (verify with `wpctl inspect` + real playback).
+
+**10a. Phone mic share (R4 E2)**
+
+- Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording). (where: linux)
+- Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back). (where: linux)
+- "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling). (where: linux)
+- View-only latched → mic keeps flowing (it is session media, not injected input); input is still dropped. (where: linux)
+- Exit the session while mic is on → source disappears (release-on-dispose); force-killing the phone app → source gone within the QUIC idle timeout (~45 s). (where: linux)
+- Screen off / PiP while mic is on (Android 14+): audio keeps flowing — the FGS carries the microphone type (logcat: no SecurityException, no silent AudioRecord). (where: linux)
+- WAN (relayed or direct) session: the same checks pass over the iroh path. (where: linux)
+
+**11. WAN over iroh (R1)**
+
+- Loss response (roadmap 2053): degrade the link — `tc qdisc add dev <iface> root netem loss 5%` on the desktop, or walk the phone toward the far edge of the Wi-Fi mid-session — and within a few 2 s ticks the desktop log shows "Encoder bitrate target changed" carrying a `loss_cap=` field with effective below configured, then "Encoder rebuilt for new bitrate" and a visibly softer picture. The cut is 20 % per congested tick down to a 1 Mbit/s floor (a configured rate below the floor is never raised to it). Restore the link → the same line reappears **without** `loss_cap=` as the rate climbs back ~10 % per tick to configured, then stops being a term at all. (where: linux)
 
 **18. Login autostart + tailnet access (server-side)**
 
-- `install.sh` run → unit lands in `~/.config/systemd/user/`, ExecStart points at the real prefix path, prompt enables it; `--status` reports the user unit; `--uninstall` removes it and any legacy `/etc/systemd/system` unit.
+- Reboot the desktop → after reaching the Hyprland session, `systemctl --user status pocketdesk` is active without any manual start (WantedBy=graphical-session.target). (where: linux)
+- Phone reconnects to the auto-started server WITHOUT re-pairing (QUIC identity persisted in `~/.local/state/pocketdesk/certs/`; a regenerated cert would trip the TOFU pin). (where: linux)
+- Log out / session end → service stops with the session (PartOf), never orphaned. (where: linux)
+- `install.sh` run → unit lands in `~/.config/systemd/user/`, ExecStart points at the real prefix path, prompt enables it; `--status` reports the user unit; `--uninstall` removes it and any legacy `/etc/systemd/system` unit. (where: linux)
 
 **23. Windows host (W1: core remote desktop)**
 
@@ -1840,6 +1742,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Without uinput access: the phone's taps, typing (accents, emoji), keys and the wheel (its direction) reach GNOME through the RemoteDesktop portal; a remote without the screen is told it gets no input there.
 - Revoking in GNOME's settings brings the dialog back; Forget the grant and turning the setting off make the next session ask.
+- No RemoteDesktop portal (or refused): the screen alone.
 - The server started as a systemd user service: does the portal keep its restore data with no desktop app id?
 
 **101. KDE Connect, next steps (N9)**
@@ -2007,9 +1910,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
-**15. Language / i18n (Tier-3 #17 remainder)**
+**13. PiP + multitask (Tier-3 #14, DeX)**
 
-- Connect screen shows "Language" button on Android 13+ (absent on 12).
+- DeX/docked or split-screen: session is resizeable, letterboxing recomputes, taps still map correctly. (where: other hardware)
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
@@ -2125,9 +2028,27 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app
 
+**2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
+
+- The session's notification (titled "Pocketdesk", with Disconnect) survives Home and a swipe; its Disconnect action ends the session. (2026-10-23, S1: posted with its Disconnect action; ColorOS's shade does not show it to uiautomator and screenshots are blocked during a session, so the tap is by hand.) (where: by hand)
+- Drop phone far from AP / saturate link → frames stall, then recover; the HUD's `lost` rises but no permanent freeze (gap-driven keyframe request, R2#5). (where: by hand) "Drops" means **frames the phone never received** — the holes in the server's per-frame sequence numbers, counted where only the client can count them. So a saturated link must move it (the desktop's transport task trims its backlog before a stall clears), while a frame that arrives late and intact must not: the number can come back down when an out-of-order frame lands, and that is correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the desktop's `src` rate, not here.
+
 **2b. Compositor-true latency read (R4 E3)**
 
 - Cross-check (eyes, optional): point the phone camera at the desktop with an on-screen clock/stopwatch — the phone's rendered image lags the physical panel by roughly the HUD `delay` figure (± the phone's own present latency, which the probe can't see).
+
+**8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
+
+- "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio). (where: by hand)
+
+**11. WAN over iroh (R1)**
+
+- `path_chg` counts a walk between Wi-Fi bands or a switch to cellular, and `relayed_s` a relayed session. (where: by hand)
+
+**14. Blackout / pocket mode (Tier-3 #15 remainder)**
+
+- Recents thumbnail blank during blackout. (where: by hand)
+- Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay). (where: by hand)
 
 **24. Desktop app and QR pairing**
 
