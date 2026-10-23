@@ -1086,6 +1086,7 @@ pub fn join_drops(waiting: &mut Vec<std::path::PathBuf>, dropped: Vec<std::path:
 pub fn queue_link(
     state_dir: &Path,
     device_id: &str,
+    who: &str,
     url: &str,
     now_unix: u64,
 ) -> Result<String, String> {
@@ -1095,10 +1096,12 @@ pub fn queue_link(
         .map(|store| store.permissions(device_id).allows(Capability::Links))
         .unwrap_or(true);
     if !allowed {
-        return Err("Not sent: Links is off for this phone (Devices tab).".to_string());
+        return Err(format!(
+            "Not sent: \"Open its links here\" is off for {who} on Devices."
+        ));
     }
     pocketdesk_core::local::links::request(state_dir, device_id, url, now_unix)
-        .map(|_| "Link sent: it waits on the phone as a notification.".to_string())
+        .map(|_| format!("Link sent to {who}: it waits there as a notification."))
         .map_err(|e| format!("Not sent: {e}."))
 }
 
@@ -2228,20 +2231,23 @@ mod tests {
     #[test]
     fn a_link_is_queued_for_the_server_and_one_that_may_not_open_is_refused() {
         let dir = temp_dir("link");
-        assert!(queue_link(&dir, "a", " https://example.org/page ", 100).is_ok());
+        assert!(queue_link(&dir, "a", "A", " https://example.org/page ", 100).is_ok());
         let queued = pocketdesk_core::local::links::take_all(&dir, 101);
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].url, "https://example.org/page", "trimmed");
-        assert!(queue_link(&dir, "a", "javascript:alert(1)", 100).is_err());
-        assert!(queue_link(&dir, "a", "", 100).is_err());
+        assert!(queue_link(&dir, "a", "A", "javascript:alert(1)", 100).is_err());
+        assert!(queue_link(&dir, "a", "A", "", 100).is_err());
 
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("a").unwrap();
         let mut permissions = store.permissions("a");
         permissions.links = Some(false);
         store.set_permissions("a", permissions).unwrap();
-        let refused = queue_link(&dir, "a", "https://example.org/", 100).unwrap_err();
-        assert!(refused.contains("Links"), "{refused}");
+        let refused = queue_link(&dir, "a", "A", "https://example.org/", 100).unwrap_err();
+        assert!(
+            refused.contains("Open its links here") && refused.contains(" A "),
+            "{refused}"
+        );
         assert!(pocketdesk_core::local::links::take_all(&dir, 101).is_empty());
     }
 

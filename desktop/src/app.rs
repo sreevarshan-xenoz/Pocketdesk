@@ -1825,7 +1825,8 @@ impl PocketdeskApp {
         if cancel {
             self.overview_link = None;
         } else if send && let Some((id, url)) = self.overview_link.take() {
-            match model::queue_link(&self.state_dir, &id, &url, now_unix()) {
+            let who = model::device_label(&self.snapshot.devices, &id);
+            match model::queue_link(&self.state_dir, &id, &who, &url, now_unix()) {
                 Ok(said) => self.notice = crate::notice::Notice::outcome(Ok(said)),
                 Err(e) => {
                     // Keep the box, so the link can be fixed.
@@ -3101,7 +3102,12 @@ impl PocketdeskApp {
                     0 => "Also to…".to_string(),
                     n => format!("And {n} more…"),
                 };
-                ui.menu_button(title, |ui| {
+                let names: Vec<&str> = others
+                    .iter()
+                    .filter(|(id, _)| also.contains(id))
+                    .map(|(_, name)| name.as_str())
+                    .collect();
+                let menu = ui.menu_button(title, |ui| {
                     let mut every = others.iter().all(|(id, _)| also.contains(id));
                     if ui.checkbox(&mut every, "All of them").changed() {
                         *also = if every {
@@ -3121,6 +3127,11 @@ impl PocketdeskApp {
                         }
                     }
                 });
+                // Q2 review: "And 2 more…" says who.
+                if !names.is_empty() {
+                    menu.response
+                        .on_hover_text(format!("Also to {}", names.join(", ")));
+                }
             });
         }
         let mut send = None;
@@ -3141,8 +3152,12 @@ impl PocketdeskApp {
             // egui takes that key for text only, and with files copied
             // there is none.
             if ui
-                .button("Paste copied files")
+                .add_enabled(
+                    self.pasting.is_none(),
+                    egui::Button::new("Paste copied files"),
+                )
                 .on_hover_text("Send the files copied in Explorer or a file manager")
+                .on_disabled_hover_text("Reading the copied files\u{2026}")
                 .clicked()
             {
                 paste = true;
@@ -3169,6 +3184,7 @@ impl PocketdeskApp {
         // Read on a thread (P7 review: the clipboard's retries, or a dead
         // network drive's files, held the window).
         if paste && self.pasting.is_none() {
+            self.notice = crate::notice::Notice::working("Reading the copied files\u{2026}");
             self.pasting = Some(std::thread::spawn(
                 pocketdesk_core::local::clipboard_files::read,
             ));
@@ -3199,10 +3215,21 @@ impl PocketdeskApp {
                 return;
             }
             self.notice = crate::notice::Notice::outcome(
-                match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
+                match model::queue_link(
+                    &self.state_dir,
+                    &device,
+                    &model::device_label(&self.snapshot.devices, &device),
+                    &url,
+                    now_unix(),
+                ) {
                     Ok(said) => {
                         self.send_link.clear();
-                        Ok(said)
+                        // Q2 review: the ticks under "Also to" are for files.
+                        Ok(if self.send_also.is_empty() {
+                            said
+                        } else {
+                            format!("{said} A link goes to the phone under To only.")
+                        })
                     }
                     Err(e) => Err(e),
                 },
