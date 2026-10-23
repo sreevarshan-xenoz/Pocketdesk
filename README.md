@@ -82,7 +82,7 @@ The desktop end runs on Linux and Windows; the phone end is the Android app. The
 | Screen capture | wlroots screencopy (Hyprland, Sway), the portal (GNOME, KDE; it asks at each session, or with Settings "Remember the screen-sharing grant" on, off by default, once until you revoke it, so sessions start with no one at the desk), X11 | Windows.Graphics.Capture, DXGI duplication |
 | Hardware encoding | VAAPI (in process), NVENC (through `ffmpeg`) | NVENC, AMF, Quick Sync, Media Foundation (every encoder, software too, through `ffmpeg.exe` on `PATH`) |
 | Remote input | uinput (Wayland), else the compositor's virtual pointer and keyboard on wlroots (Sway, Hyprland) when uinput is root-only, or GNOME's and KDE's RemoteDesktop portal through the session's screen sharing (one grant for both; a remote without the screen gets no input there), XTEST (X11); text typed from the phone goes through the compositor's virtual keyboard on wlroots (Sway, Hyprland), so any character arrives on any layout, else as US-layout keys with Shift | `SendInput`: elevated windows need `install --elevated`; the UAC prompt and the lock screen are never reachable |
-| Clipboard: text and images, anywhere | `wl-clipboard` (Wayland only) | Win32 clipboard |
+| Clipboard: text and images, anywhere | `wl-clipboard` on Wayland, `xclip` on X11 | Win32 clipboard |
 | Files both ways, remote browsing (anywhere) | yes | yes |
 | Desktop sound on the phone | PipeWire | WASAPI loopback |
 | The phone's mic on the desktop | a PipeWire source, "Pocketdesk Mic" | needs a virtual audio cable (VB-CABLE) |
@@ -126,7 +126,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Single-window streaming** (Hyprland) — pick any window on the phone and the server crops + re-encodes to just that window
 
 ### KDE Connect Integration
-- **Clipboard sync** — the Win32 clipboard on Windows, `wl-clipboard` on Linux:
+- **Clipboard sync** — the Win32 clipboard on Windows, `wl-clipboard` on Linux under Wayland and `xclip` under X11 (its changes heard through XFixes):
   - **In a session:** text and images, both ways.
   - **Without a session,** text, and images too: what you copy on the computer reaches the phone in the background (phone Settings "Computer's clipboard in the background", which uses notification access to stay connected; desktop Settings "Clipboard to phones"). An image copied on the computer comes too with desktop Settings "Images to phones' clipboards" and the phone's "Computer's copied images in the background" (both off by default), fetched on Wi-Fi only, never a copy marked private. An image sent as a file can go onto the clipboard as it arrives: desktop Settings "Images sent here onto the clipboard" and the phone's "Images from the computer onto my clipboard" (both off) do it for a PNG or a JPEG of at most 32 MB sent on its own, which is still saved as a file. The phone's Quick Settings tile "Send clipboard" sends the phone's clipboard, text or an image, to the computer, from home or away, and on Windows a key you choose sends the computer's to the phone (see [Desktop App](#desktop-app)).
   - **Images** go as PNG, up to 32 MB, through the same TLS-pinned transfer as files, and need only the phone's clipboard permission. A copied screenshot pastes on the phone, and a copied photo pastes into Paint. Text wins when both are on the clipboard.

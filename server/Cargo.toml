@@ -80,6 +80,8 @@ xcap.workspace = true
 zbus.workspace = true
 # Input injection via uinput (universal fallback)
 evdev.workspace = true
+# X11's clipboard changes (T2): XFixes selection events.
+x11rb = { version = "0.13", features = ["xfixes"] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

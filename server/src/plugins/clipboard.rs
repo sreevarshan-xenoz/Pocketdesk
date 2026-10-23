@@ -628,19 +628,24 @@ async fn read_system_text() -> std::io::Result<Option<String>> {
     .map_err(|e| std::io::Error::other(e.to_string()))?
 }
 
-/// The clipboard's text, if it holds any (T10b's watcher): `wl-paste`
-/// asked for a text type only, so an image is never read, and nothing a
-/// password manager marked private.
-/// `wl-paste` fails on an empty clipboard, so a failure reads as no text.
+/// The clipboard's text, if it holds any (T10b's watcher): asked for a
+/// text type only (`wl-paste`, or X11's `xclip`: T2), so an image is never
+/// read, and nothing a password manager marked private.
+/// Either fails on an empty clipboard, so a failure reads as no text.
 #[cfg(not(windows))]
 async fn read_system_text() -> std::io::Result<Option<String>> {
-    let Ok(types) = wl_paste(&["--list-types"]).await else {
+    let tool = ClipTool::current();
+    let Ok(types) = paste(tool.list_types()).await else {
         return Ok(None);
     };
-    if crate::clipboard_push::private_types(&String::from_utf8_lossy(&types)) {
+    let types = String::from_utf8_lossy(&types);
+    if crate::clipboard_push::private_types(&types) {
         return Ok(None);
     }
-    let Ok(bytes) = wl_paste(&["--no-newline", "--type", "text"]).await else {
+    let Some(read) = tool.read_text(&types) else {
+        return Ok(None);
+    };
+    let Ok(bytes) = paste(read).await else {
         return Ok(None);
     };
     Ok(String::from_utf8(bytes).ok())
@@ -762,23 +767,25 @@ fn set_stand_ins_image(
     })())
 }
 
-/// Set system clipboard using `wl-copy`.
+/// Set system clipboard using `wl-copy`, or X11's `xclip` (T2).
 #[cfg(not(windows))]
 async fn set_system_clipboard(content: &str) -> Result<()> {
-    wl_copy(None, content.as_bytes()).await
+    clip_copy(None, content.as_bytes()).await
 }
 
-/// Run `wl-copy` (with `--type mime` when given) on `bytes`.
 #[cfg(not(windows))]
-async fn wl_copy(mime: Option<&str>, bytes: &[u8]) -> Result<()> {
+use pocketdesk_core::local::clip_tool::Tool as ClipTool;
+
+/// Run `wl-copy` or `xclip` (as `mime` when given) on `bytes`.
+#[cfg(not(windows))]
+async fn clip_copy(mime: Option<&str>, bytes: &[u8]) -> Result<()> {
     use tokio::io::AsyncWriteExt;
-    let mut command = tokio::process::Command::new("wl-copy");
-    if let Some(mime) = mime {
-        command.args(["--type", mime]);
-    }
-    // wl-copy forks into the background to retain clipboard ownership, so it
-    // must not inherit our stdio — a daemon holding the parent's stdout pipe
-    // makes test harnesses (and log capture) wait on EOF forever.
+    let (program, args) = ClipTool::current().write(mime);
+    let mut command = tokio::process::Command::new(program);
+    command.args(&args);
+    // wl-copy and xclip fork into the background to keep the clipboard, so
+    // they must not inherit our stdio — a daemon holding the parent's stdout
+    // pipe makes test harnesses (and log capture) wait on EOF forever.
     let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -786,8 +793,8 @@ async fn wl_copy(mime: Option<&str>, bytes: &[u8]) -> Result<()> {
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| pocketdesk_core::error::PocketdeskError::Io {
-            operation: "spawn wl-copy",
-            detail: e.to_string(),
+            operation: "spawn the clipboard's copy program",
+            detail: format!("{program}: {e}"),
         })?;
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -795,23 +802,43 @@ async fn wl_copy(mime: Option<&str>, bytes: &[u8]) -> Result<()> {
         stdin.flush().await?;
     }
 
-    child.wait().await?;
+    // Its exit says whether the copy took (T2 review: an image was
+    // remembered as on the clipboard when xclip found no display).
+    let status = child.wait().await?;
+    if !status.success() {
+        return Err(pocketdesk_core::error::PocketdeskError::Io {
+            operation: "set the clipboard",
+            detail: format!("{program} exited with {status}"),
+        });
+    }
     Ok(())
 }
 
-/// `wl-paste` with `args`, its output on success.
+/// How long a read of the clipboard is given: `xclip` waits on the copy's
+/// program, which may hang (T2 review, as P7's for copied files).
 #[cfg(not(windows))]
-async fn wl_paste(args: &[&str]) -> Result<Vec<u8>> {
-    let output = tokio::process::Command::new("wl-paste")
-        .args(args)
-        .output()
-        .await?;
+const PASTE_TIME: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// `wl-paste` or `xclip` as [`ClipTool`] says, its output on success.
+#[cfg(not(windows))]
+async fn paste((program, args): pocketdesk_core::local::clip_tool::Command) -> Result<Vec<u8>> {
+    let read = tokio::process::Command::new(program)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let output = tokio::time::timeout(PASTE_TIME, read).await.map_err(|_| {
+        pocketdesk_core::error::PocketdeskError::Io {
+            operation: "read the clipboard",
+            detail: format!("{program} did not answer within {PASTE_TIME:?}"),
+        }
+    })??;
     if output.status.success() {
         Ok(output.stdout)
     } else {
         Err(pocketdesk_core::error::PocketdeskError::Io {
-            operation: "wl-paste",
-            detail: String::from_utf8_lossy(&output.stderr).to_string(),
+            operation: "read the clipboard",
+            detail: format!("{program}: {}", String::from_utf8_lossy(&output.stderr)),
         })
     }
 }
@@ -822,8 +849,9 @@ async fn read_clipboard_unfiltered() -> Result<Clip> {
     if let Some(clip) = stand_ins_clip(stand_in().as_deref(), image_stand_in().as_deref()) {
         return Ok(clip);
     }
-    let Ok(types) = wl_paste(&["--list-types"]).await else {
-        // An empty clipboard makes wl-paste fail.
+    let tool = ClipTool::current();
+    let Ok(types) = paste(tool.list_types()).await else {
+        // An empty clipboard makes wl-paste (and xclip) fail.
         return Ok(Clip::Empty);
     };
     let types = String::from_utf8_lossy(&types);
@@ -833,16 +861,15 @@ async fn read_clipboard_unfiltered() -> Result<Clip> {
         forget_image();
         return Ok(Clip::Empty);
     }
-    let has = |prefix: &str| types.lines().any(|t| t.trim().starts_with(prefix));
-    if has("text/plain") || has("UTF8_STRING") || has("TEXT") || has("STRING") {
+    if let Some(read) = tool.read_text(&types) {
         forget_image();
-        let text = String::from_utf8_lossy(&wl_paste(&["--no-newline"]).await?).to_string();
+        let text = String::from_utf8_lossy(&paste(read).await?).to_string();
         return Ok(Clip::Text(text));
     }
-    if !has("image/png") {
+    if !types.lines().any(|t| t.trim().starts_with("image/png")) {
         return Ok(Clip::Empty);
     }
-    let png = wl_paste(&["--type", "image/png"]).await?;
+    let png = paste(tool.read("image/png")).await?;
     if png.len() as u64 > MAX_CLIPBOARD_IMAGE || !crate::platform::clip_image::is_png(&png) {
         return Ok(Clip::Empty);
     }
@@ -851,7 +878,7 @@ async fn read_clipboard_unfiltered() -> Result<Clip> {
     Ok(Clip::Image(image))
 }
 
-/// Put `image` on the clipboard with `wl-copy --type image/png`.
+/// Put `image` on the clipboard as `image/png` (`wl-copy`, or `xclip`).
 /// With a stand-in set, the stand-ins take it instead ([`set_stand_ins_image`]).
 #[cfg(not(windows))]
 async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
@@ -860,7 +887,7 @@ async fn set_clipboard_image(image: &Arc<Image>) -> Result<()> {
     {
         return done;
     }
-    wl_copy(Some("image/png"), &image.png).await?;
+    clip_copy(Some("image/png"), &image.png).await?;
     remember(None, Some(image.clone()));
     Ok(())
 }

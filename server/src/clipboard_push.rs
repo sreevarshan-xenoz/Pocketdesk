@@ -247,11 +247,32 @@ pub(crate) fn packet(text: &str) -> NetworkPacket {
 /// One `wl-paste --watch` while a phone could receive the clipboard (R6d):
 /// it runs `echo` at each change, so a line on its output says the
 /// clipboard changed, and the loop reads it only then, instead of spawning
-/// `wl-paste` every tick.
+/// `wl-paste` every tick. On X11, XFixes says when the clipboard changes
+/// owner (T2), on a thread of its own.
 #[cfg(not(windows))]
 struct ChangeWatch {
-    child: tokio::process::Child,
+    source: WatchSource,
     changed: Arc<AtomicBool>,
+}
+
+#[cfg(not(windows))]
+enum WatchSource {
+    Process(tokio::process::Child),
+    /// The X11 thread: whether it still runs, and the word to stop.
+    #[cfg(target_os = "linux")]
+    X11 {
+        alive: Arc<AtomicBool>,
+        stop: Arc<AtomicBool>,
+    },
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ChangeWatch {
+    fn drop(&mut self) {
+        if let WatchSource::X11 { stop, .. } = &self.source {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// After a watcher could not start or ended, how long the loop reads every
@@ -260,10 +281,105 @@ struct ChangeWatch {
 #[cfg(not(windows))]
 const WATCH_RETRY: Duration = Duration::from_secs(60);
 
+/// How long the X11 watcher's connection is waited for (T2).
+#[cfg(target_os = "linux")]
+const X11_SETUP: Duration = Duration::from_secs(2);
+
+/// A connection to the X server that hears the clipboard change owner (T2).
+#[cfg(target_os = "linux")]
+fn x11_watch() -> std::io::Result<x11rb::rust_connection::RustConnection> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let (conn, screen) = x11rb::connect(None).map_err(std::io::Error::other)?;
+    let root = conn.setup().roots[screen].root;
+    conn.xfixes_query_version(5, 0)
+        .map_err(std::io::Error::other)?
+        .reply()
+        .map_err(std::io::Error::other)?;
+    let clipboard = conn
+        .intern_atom(false, b"CLIPBOARD")
+        .map_err(std::io::Error::other)?
+        .reply()
+        .map_err(std::io::Error::other)?
+        .atom;
+    conn.xfixes_select_selection_input(
+        root,
+        clipboard,
+        SelectionEventMask::SET_SELECTION_OWNER
+            | SelectionEventMask::SELECTION_WINDOW_DESTROY
+            | SelectionEventMask::SELECTION_CLIENT_CLOSE,
+    )
+    .map_err(std::io::Error::other)?;
+    conn.flush().map_err(std::io::Error::other)?;
+    Ok(conn)
+}
+
 #[cfg(not(windows))]
 impl ChangeWatch {
     fn start() -> std::io::Result<Self> {
-        Self::start_with("wl-paste", &["--watch", "echo"])
+        match pocketdesk_core::local::clip_tool::Tool::current() {
+            pocketdesk_core::local::clip_tool::Tool::Wayland => {
+                Self::start_with("wl-paste", &["--watch", "echo"])
+            }
+            #[cfg(target_os = "linux")]
+            pocketdesk_core::local::clip_tool::Tool::X11 => Self::start_x11(),
+            #[cfg(not(target_os = "linux"))]
+            pocketdesk_core::local::clip_tool::Tool::X11 => {
+                Err(std::io::Error::other("no clipboard watcher here"))
+            }
+        }
+    }
+
+    /// X11 (T2): XFixes' selection events on the clipboard, polled on a
+    /// thread that ends at the [`Drop`]'s word or a lost connection. The
+    /// connection is made on that thread, waited for [`X11_SETUP`] at most
+    /// (T2 review: a stalled X server held the async loop).
+    #[cfg(target_os = "linux")]
+    fn start_x11() -> std::io::Result<Self> {
+        // What is there when it starts is read once.
+        let changed = Arc::new(AtomicBool::new(true));
+        let alive = Arc::new(AtomicBool::new(true));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (flag, running, stopping) = (changed.clone(), alive.clone(), stop.clone());
+        let (ready, started) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("clipboard-x11".into())
+            .spawn(move || {
+                let conn = match x11_watch() {
+                    Ok(conn) => {
+                        let _ = ready.send(Ok(()));
+                        conn
+                    }
+                    Err(e) => {
+                        let _ = ready.send(Err(e));
+                        running.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                use x11rb::connection::Connection;
+                while !stopping.load(Ordering::Relaxed) {
+                    match conn.poll_for_event() {
+                        Ok(Some(x11rb::protocol::Event::XfixesSelectionNotify(_))) => {
+                            flag.store(true, Ordering::Relaxed)
+                        }
+                        Ok(Some(_)) => {}
+                        Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+                        Err(_) => break,
+                    }
+                }
+                running.store(false, Ordering::Relaxed);
+            })?;
+        let watch = Self {
+            source: WatchSource::X11 { alive, stop },
+            changed,
+        };
+        match started.recv_timeout(X11_SETUP) {
+            Ok(Ok(())) => Ok(watch),
+            Ok(Err(e)) => Err(e),
+            // Dropped here: its thread stops once the setup ends.
+            Err(_) => Err(std::io::Error::other("the X server did not answer in time")),
+        }
     }
 
     fn start_with(program: &str, args: &[&str]) -> std::io::Result<Self> {
@@ -288,16 +404,21 @@ impl ChangeWatch {
                 flag.store(true, Ordering::Relaxed);
             }
         });
-        Ok(Self { child, changed })
+        Ok(Self {
+            source: WatchSource::Process(child),
+            changed,
+        })
     }
 
     /// Whether the clipboard changed since the last look; `None` once the
     /// watcher has ended.
     fn take_change(&mut self) -> Option<bool> {
-        match self.child.try_wait() {
-            Ok(None) => Some(self.changed.swap(false, Ordering::Relaxed)),
-            _ => None,
-        }
+        let running = match &mut self.source {
+            WatchSource::Process(child) => matches!(child.try_wait(), Ok(None)),
+            #[cfg(target_os = "linux")]
+            WatchSource::X11 { alive, .. } => alive.load(Ordering::Relaxed),
+        };
+        running.then(|| self.changed.swap(false, Ordering::Relaxed))
     }
 }
 
@@ -378,7 +499,7 @@ pub(crate) async fn run() {
                     Err(e) => {
                         if !std::mem::replace(&mut said, true) {
                             tracing::info!(
-                                "No wl-paste --watch ({e}): the clipboard is read every 2 s"
+                                "No clipboard watcher ({e}): the clipboard is read every 2 s"
                             );
                         }
                         watch_again_at = Some(tokio::time::Instant::now() + WATCH_RETRY);
@@ -392,7 +513,7 @@ pub(crate) async fn run() {
                     None => {
                         if !std::mem::replace(&mut said, true) {
                             tracing::info!(
-                                "wl-paste --watch ended: the clipboard is read every 2 s for a while"
+                                "The clipboard watcher ended: the clipboard is read every 2 s for a while"
                             );
                         }
                         change_watch = None;

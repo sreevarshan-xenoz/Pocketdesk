@@ -90,7 +90,9 @@ fn record_reply(id: &str, reply: &str) -> Result<()> {
 }
 
 /// Put the reply text on the desktop clipboard via wl-copy (Wayland) or
-/// xclip (X11). Best-effort: no clipboard tool, no clipboard. With a
+/// xclip (X11), as the clipboard's own writes choose (T2 review: an X11
+/// box with wl-clipboard installed lost the text to wl-copy). Best-effort:
+/// no clipboard tool, no clipboard. With a
 /// clipboard stand-in set, the stand-ins take it, never this computer's own
 /// clipboard (S1 review).
 async fn copy_to_clipboard(text: &str) {
@@ -110,29 +112,11 @@ async fn copy_to_clipboard(text: &str) {
         if !matches!(set, Ok(Ok(()))) {
             tracing::debug!("Could not put the notification reply on the clipboard");
         }
-        return;
     }
-    #[cfg_attr(windows, allow(unreachable_code))]
-    for (cmd, args) in [
-        ("wl-copy", vec!["--foreground"]),
-        ("xclip", vec!["-selection", "clipboard"]),
-    ] {
-        let spawned = tokio::process::Command::new(cmd)
-            .args(&args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        let Ok(mut child) = spawned else { continue };
-        if let Some(mut stdin) = child.stdin.take() {
-            use tokio::io::AsyncWriteExt;
-            let _ = stdin.write_all(text.as_bytes()).await;
-            let _ = stdin.shutdown().await;
-        }
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await;
-        return;
+    #[cfg(not(windows))]
+    if let Err(e) = crate::plugins::clipboard::set_clipboard(text).await {
+        tracing::debug!("Could not put the notification reply on the clipboard: {e}");
     }
-    tracing::debug!("No clipboard tool (wl-copy/xclip) available for notification reply");
 }
 
 /// Confirmation desktop notification (best effort).

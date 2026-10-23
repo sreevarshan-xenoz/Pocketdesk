@@ -139,8 +139,9 @@ fn system() -> Option<Vec<PathBuf>> {
 
 #[cfg(target_os = "linux")]
 fn system() -> Option<Vec<PathBuf>> {
-    // Wayland's wl-paste, else X11's xclip (Q4).
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+    // Wayland's wl-paste, else X11's xclip (Q4), chosen as the clipboard's
+    // own reads choose (T2).
+    let wayland = super::clip_tool::Tool::current() == super::clip_tool::Tool::Wayland;
     let (program, list_types, uri_list): (&str, &[&str], &[&str]) = if wayland {
         (
             "wl-paste",
