@@ -239,6 +239,10 @@ pub struct Config {
     /// `words` or `App: words`. None.
     #[serde(default)]
     pub hold_words: Vec<String>,
+    /// A phone's ringing alarm or finished timer rings here as an alarm
+    /// (P5): it stays, with a looping sound, until answered or stopped. On.
+    #[serde(default = "default_true")]
+    pub phone_alarms: bool,
     /// Tell paired phones how to wake this computer: its adapter's MAC and
     /// broadcast address (roadmap N6).
     #[serde(default = "default_true")]
@@ -448,6 +452,7 @@ impl Default for Config {
             quiet_days: default_quiet_days(),
             quiet_presenting: false,
             hold_words: Vec::new(),
+            phone_alarms: true,
             wake_announce: true,
             wake_port: 0,
             input_control: InputControlMode::One,
@@ -684,6 +689,7 @@ impl Config {
         "quiet_days",
         "quiet_presenting",
         "hold_words",
+        "phone_alarms",
         "sms_keep",
         "sms_names",
         "wake_announce",

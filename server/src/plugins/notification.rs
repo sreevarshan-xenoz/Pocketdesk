@@ -827,6 +827,11 @@ fn held_by_fields(
     }
 }
 
+/// Whether the phone sent it as a ringing alarm or finished timer (P5).
+fn is_alarm(body: &serde_json::Value) -> bool {
+    body.get("alarm").and_then(|v| v.as_bool()) == Some(true)
+}
+
 /// Whether it is the phone's note of a ringing call (F5).
 fn is_call(body: &serde_json::Value) -> bool {
     body.get("id")
@@ -964,16 +969,19 @@ impl Plugin for NotificationPlugin {
                 let muted = muted_here(&app);
                 // P4: held by its words, as a pause holds it, still counted
                 // (P4 review); never a call's note, which M6 and N7 never hold.
-                let words = if is_call(&packet.body) {
+                // P5: a ringing alarm, never held but by a pause, quiet
+                // hours or its app muted, as a call is.
+                let alarm = is_alarm(&packet.body);
+                let words = if is_call(&packet.body) || alarm {
                     None
                 } else {
                     held_by_words(&app, &packet.body)
                 };
                 // M6: one that came while the phone was in hand is held as a
                 // pause holds it: kept, logged, counted, not shown.
-                let in_hand = phone_in_use(&packet.body);
+                let in_hand = phone_in_use(&packet.body) && !alarm;
                 // N7: another computer of the owner's is in use, not this one.
-                let elsewhere = marked_elsewhere(&packet.body);
+                let elsewhere = marked_elsewhere(&packet.body) && !alarm;
                 // P3: quiet hours, or presenting, hold it as a pause does.
                 let quiet = crate::quiet_hours::now();
                 let held = held_here(
@@ -1060,6 +1068,9 @@ impl Plugin for NotificationPlugin {
                 } else {
                     serde_json::json!({ "app": app })
                 };
+                if alarm {
+                    meta["alarm"] = serde_json::json!(true);
+                }
                 if in_hand {
                     meta["phone_in_use"] = serde_json::json!(true);
                 }
@@ -1171,6 +1182,8 @@ impl Plugin for NotificationPlugin {
                 };
                 let is_live = live_show.is_some();
                 pictures.live = live_show;
+                // Rung as an alarm unless Settings say otherwise (P5).
+                pictures.alarm = alarm && crate::events::current_config().phone_alarms;
                 match show_desktop_notification(
                     tag.as_deref(),
                     &app,
@@ -1575,7 +1588,13 @@ async fn send_notification_dbus(
     }
     // One to answer stays longer; "Not from this app" alone does not; a
     // live card as the server keeps any (N4).
-    let timeout: i32 = if pictures.live.is_some() {
+    // P5: an alarm is urgent and stays until closed or stopped on the phone.
+    if pictures.alarm {
+        hints.insert("urgency".to_string(), zbus::zvariant::Value::from(2u8));
+    }
+    let timeout: i32 = if pictures.alarm {
+        0
+    } else if pictures.live.is_some() {
         // The server's own: never-expiring sits on screen on Plasma (N4 review).
         -1
     } else if answers.is_some() && !actions.is_empty() {

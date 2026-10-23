@@ -90,6 +90,9 @@ pub struct Pictures {
     pub icon: Option<std::path::PathBuf>,
     pub picture: Option<std::path::PathBuf>,
     pub live: Option<LiveShow>,
+    /// A ringing alarm or finished timer from the phone (P5): it rings
+    /// here until answered or closed, or the phone stops it.
+    pub alarm: bool,
 }
 
 /// An ongoing update as a card shows it (N4).
@@ -147,8 +150,14 @@ pub fn toast_xml_pictured(
     } else {
         (summary, body)
     };
+    // P5: an alarm's scenario keeps it on screen, ringing, until answered.
+    let open = if pictures.alarm {
+        "<toast scenario=\"alarm\">"
+    } else {
+        "<toast>"
+    };
     let mut xml = format!(
-        "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text>",
+        "{open}<visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text>",
         xml_escape(summary),
         xml_escape(body)
     );
@@ -170,8 +179,14 @@ pub fn toast_xml_pictured(
     }
     xml.push_str("</binding></visual>");
     let answers = answers.filter(|a| a.reply || a.open || !a.actions.is_empty());
-    if answers.is_some() || mute {
+    // Windows shows an alarm as one only with a button: Dismiss when it
+    // has none of its own.
+    let dismiss = pictures.alarm && answers.is_none() && !mute;
+    if answers.is_some() || mute || dismiss {
         xml.push_str("<actions>");
+    }
+    if dismiss {
+        xml.push_str("<action activationType=\"system\" arguments=\"dismiss\" content=\"\"/>");
     }
     if let Some(answers) = answers {
         if answers.reply {
@@ -197,8 +212,11 @@ pub fn toast_xml_pictured(
             "<action content=\"{MUTE_LABEL}\" arguments=\"{MUTE}\"/>"
         ));
     }
-    if answers.is_some() || mute {
+    if answers.is_some() || mute || dismiss {
         xml.push_str("</actions>");
+    }
+    if pictures.alarm {
+        xml.push_str("<audio src=\"ms-winsoundevent:Notification.Looping.Alarm\" loop=\"true\"/>");
     }
     xml.push_str("</toast>");
     xml
@@ -666,5 +684,39 @@ mod tests {
             Some(Answer::Reply("ok".into()))
         );
         assert_eq!(dbus_reply_answer("ok", &answerable(&[], false)), None);
+    }
+
+    /// P5: an alarm rings until answered, with Dismiss when it has no
+    /// button of its own (Windows shows it as an alarm only with one).
+    #[test]
+    fn an_alarm_toast_rings_and_always_has_a_button() {
+        let alarm = Pictures {
+            alarm: true,
+            ..Default::default()
+        };
+        let xml = toast_xml_pictured("Clock: 07:00", "Alarm ringing", None, false, &alarm);
+        assert!(xml.starts_with("<toast scenario=\"alarm\">"), "{xml}");
+        assert!(xml.contains("Looping.Alarm"));
+        assert!(xml.contains("activationType=\"system\" arguments=\"dismiss\""));
+        let answers = Answerable {
+            device_id: "phone-a".into(),
+            key: "0|clock|1|null|10".into(),
+            actions: vec!["Snooze".into(), "Stop".into()],
+            reply: false,
+            open: false,
+        };
+        let xml = toast_xml_pictured(
+            "Clock: 07:00",
+            "Alarm ringing",
+            Some(&answers),
+            false,
+            &alarm,
+        );
+        assert!(
+            xml.contains("Snooze") && !xml.contains("arguments=\"dismiss\""),
+            "{xml}"
+        );
+        let plain = toast_xml_pictured("Chat: Ann", "hi", None, false, &Pictures::default());
+        assert!(plain.starts_with("<toast>") && !plain.contains("Looping"));
     }
 }

@@ -220,6 +220,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Hold notifications with these words",
         Section::Notifications,
     ),
+    (
+        "phone_alarms",
+        "Phones' alarms ring here",
+        Section::Notifications,
+    ),
     ("quiet_from", "Quiet hours start", Section::Notifications),
     ("quiet_to", "Quiet hours end", Section::Notifications),
     ("quiet_days", "Quiet hours' days", Section::Notifications),
@@ -488,6 +493,7 @@ pub fn applies_live(key: &str) -> bool {
             | "quiet_days"
             | "quiet_presenting"
             | "hold_words"
+            | "phone_alarms"
             | "away_lock_minutes"
     )
 }
@@ -1305,6 +1311,17 @@ impl SettingsForm {
                     if let Some(problem) = pocketdesk_core::local::hold_words::problem(&lines) {
                         ui.label(RichText::new(problem).small().color(crate::theme::warn(ui)));
                     }
+                });
+                // P5: a phone's ringing alarm, rung here.
+                row(ui, "phone_alarms", |ui| {
+                    ui.checkbox(
+                        &mut e.phone_alarms,
+                        "a phone's ringing alarm or finished timer rings here until you answer it",
+                    );
+                    note(
+                        ui,
+                        "With \"Alarms on the computer\" on in Pocketdesk's Settings on the phone. It stays on screen with an alarm's sound until Snooze, Stop or its ✕, or until it stops on the phone; off, it shows as a plain notification. A pause, quiet hours and a muted app hold it as any other.",
+                    );
                 });
                 row(ui, "quiet_presenting", |ui| {
                     ui.checkbox(

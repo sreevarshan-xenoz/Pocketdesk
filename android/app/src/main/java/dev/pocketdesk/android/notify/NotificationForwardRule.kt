@@ -20,6 +20,8 @@ data class PostedNote(
     val clearable: Boolean,
     /** O5: its Android notification channel's id, blank when it has none. */
     val channel: String = "",
+    /** A ringing alarm or a finished timer ([AlarmRule], P5). */
+    val alarm: Boolean = false,
 )
 
 /**
@@ -34,6 +36,8 @@ data class Outgoing(
     val text: String,
     val clearable: Boolean,
     val full: Boolean = true,
+    /** Sent as an alarm (P5): the computer rings it. */
+    val alarm: Boolean = false,
 )
 
 /**
@@ -64,19 +68,26 @@ class NotificationForwardRule(private val ownPackage: String) {
         offer: String = "",
         live: Boolean = false,
         keptKinds: Set<String> = emptySet(),
+        alarmsOn: Boolean = false,
     ): Outgoing? {
-        if (!enabled || note.pkg == ownPackage || note.pkg !in shared) return null
+        if (!enabled || note.pkg == ownPackage) return null
+        // P5: an alarm goes with its own switch, whichever apps are shared,
+        // though its clock keeps it on the phone's watch (local only) and
+        // rings it as a foreground service (ongoing).
+        val alarm = alarmsOn && note.alarm
+        if (!alarm && note.pkg !in shared) return null
         // O5: a kind the user keeps on the phone.
         if (note.channel.isNotBlank() && note.channel in keptKinds) return null
         // N4: an ongoing one goes only as a live update ([LiveRule]).
-        if ((note.ongoing && !live) || note.groupSummary || note.localOnly || note.otherProfile) return null
+        if (!alarm && ((note.ongoing && !live) || note.localOnly)) return null
+        if (note.groupSummary || note.otherProfile) return null
         if (note.visibility == VISIBILITY_SECRET) return null
         val (title, text, full) = shown(note) ?: return null
         if (sent[note.key] == Triple(title, text, offer)) return null
         sent.remove(note.key)
         sent[note.key] = Triple(title, text, offer)
         while (sent.size > REMEMBERED) sent.remove(sent.keys.first())
-        return Outgoing(note.key, note.appLabel, title, text, note.clearable, full)
+        return Outgoing(note.key, note.appLabel, title, text, note.clearable, full, alarm)
     }
 
     /**

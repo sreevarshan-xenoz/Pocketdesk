@@ -562,6 +562,7 @@ class PhoneNotificationListener : NotificationListenerService() {
             offer = offer + liveMark,
             live = live != null,
             keptKinds = PhoneNotificationPrefs.keptKinds(this, note.pkg),
+            alarmsOn = Prefs.alarmsOnComputer(this),
         )
         if (out == null) {
             // Nothing new to send; an app that posts again often replaces
@@ -579,6 +580,8 @@ class PhoneNotificationListener : NotificationListenerService() {
                 .put("text", out.text)
                 .put("time", System.currentTimeMillis().toString())
                 .put("isClearable", out.clearable)
+        // P5: the computer rings it.
+        if (out.alarm) body.put("alarm", true)
         if (out.full) offerAnswers(sbn.key, body, offered, actions, reply) else synchronized(answerable) { answerable.remove(sbn.key) }
         // A redacted one's bar goes nowhere (N4 review): its hidden words
         // would only make it look new.
@@ -1138,8 +1141,21 @@ class PhoneNotificationListener : NotificationListenerService() {
             otherProfile = sbn.user != Process.myUserHandle(),
             clearable = sbn.isClearable,
             channel = n.channelId.orEmpty(),
+            alarm = AlarmRule.isAlarm(n.category, sbn.packageName, clockPackages(), n.flags and Notification.FLAG_NO_CLEAR != 0),
         )
     }
+
+    /** The clock apps (P5), read once a run: those that set alarms. */
+    private val clocks by lazy {
+        listOf(android.provider.AlarmClock.ACTION_SET_ALARM, android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+            .flatMap { action ->
+                runCatching { packageManager.queryIntentActivities(android.content.Intent(action), 0) }.getOrDefault(emptyList())
+            }
+            .map { it.activityInfo.packageName }
+            .toSet()
+    }
+
+    private fun clockPackages(): Set<String> = clocks
 
     /**
      * A chat notification's recent messages (D4), as [ConversationRule]
