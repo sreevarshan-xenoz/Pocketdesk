@@ -3,10 +3,11 @@
 //! a control link. Once every such phone that was present has been gone
 //! for `away_lock_minutes`, and nobody has touched the keyboard or mouse
 //! for that long, the computer locks: once per departure. Where the
-//! computer cannot say how long it has been idle (a wlroots desktop, a
-//! session without GNOME, KDE on X11 or `xprintidle`), it never locks: a phone
+//! computer cannot say how long it has been idle (a compositor without
+//! `ext-idle-notify-v1`, X11 without `xprintidle`), it never locks: a phone
 //! whose network sleeps must not lock the owner out mid-work. On Linux the
-//! idle time comes from GNOME, KDE or X11 (R3).
+//! idle time comes from GNOME, KDE, the compositor (Sway, Hyprland; T8) or
+//! X11 (R3).
 //! With `POCKETDESK_LOCK_FILE` set to an absolute path, the lock is a line
 //! in that file instead (tests, and checks on a computer that must not
 //! lock).
@@ -135,8 +136,9 @@ fn quiet_ms(now: u32, last_input: u32) -> u64 {
     u64::try_from((now.wrapping_sub(last_input) as i32).max(0)).unwrap_or(0)
 }
 
-/// R3: on Linux, from GNOME's idle monitor, KDE's screen saver or X11's
-/// `xprintidle`, each given a second; none of them, none.
+/// R3: on Linux, from GNOME's idle monitor, KDE's screen saver, the
+/// compositor's `ext-idle-notify-v1` (T8: Sway, Hyprland and others), or
+/// X11's `xprintidle`, each given a second; none of them, none.
 #[cfg(target_os = "linux")]
 pub(crate) fn idle_secs() -> Option<u64> {
     const ASKS: [(&str, &[&str]); 2] = [
@@ -171,6 +173,10 @@ pub(crate) fn idle_secs() -> Option<u64> {
         if let Some(ms) = output_within(program, args).and_then(|out| first_number(&out)) {
             return Some(ms / 1000);
         }
+    }
+    // T8: Sway, Hyprland and other compositors say it themselves.
+    if let Some(secs) = pocketdesk_core::input::idle_notify::idle_secs() {
+        return Some(secs);
     }
     // Never under Wayland, where XWayland sees only X clients' input (R3
     // review: a service that kept DISPLAY alone would read the owner idle).
@@ -324,6 +330,12 @@ pub async fn run() {
             if let Some(minutes) = minutes {
                 last_minutes = minutes;
             }
+        }
+        // T8 review: the compositor counts idle from when it is asked, so
+        // its watch starts as soon as a phone has the switch on.
+        #[cfg(target_os = "linux")]
+        if !last_switched.is_empty() {
+            let _ = tokio::task::spawn_blocking(pocketdesk_core::input::idle_notify::watch).await;
         }
         let present: Vec<String> = crate::state::clone_clients()
             .await

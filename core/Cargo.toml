@@ -122,7 +122,8 @@ wayland-protocols-wlr = { version = "0.3", default-features = false, features = 
 ], optional = true }
 # N10: xdg_output, for the laser dot's screens as the compositor lays them
 # out (already in the tree through wayland-protocols-wlr).
-wayland-protocols = { version = "0.32", features = ["client", "unstable"], optional = true }
+# T8: ext-idle-notify-v1 (staging), for the away lock on wlroots desktops.
+wayland-protocols = { version = "0.32", features = ["client", "unstable", "staging"], optional = true }
 # R4 B2: in-crate code generation for hyprland-toplevel-export-v1
 # (core/protocols/*.xml, BSD-3 vendored). Generated bindings reference
 # `wayland_backend` and `bitflags` directly, so they must be in scope.
