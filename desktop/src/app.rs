@@ -260,6 +260,10 @@ pub struct PocketdeskApp {
     )>,
     /// A device the user asked to revoke, awaiting confirmation.
     confirm_revoke: Option<String>,
+    /// A profile to apply to a phone, asked first (Q2 review).
+    confirm_profile: Option<(String, pocketdesk_core::local::permission_profiles::Profile)>,
+    /// A profile to remove, asked first under the phone it was chosen on.
+    confirm_remove_profile: Option<(String, String)>,
     /// The Name boxes on the Devices page, by device id (U3).
     renaming: std::collections::HashMap<String, String>,
     /// The last action's outcome, shown under the tabs.
@@ -368,6 +372,8 @@ impl PocketdeskApp {
             refreshed: None,
             pause_read: None,
             confirm_revoke: None,
+            confirm_profile: None,
+            confirm_remove_profile: None,
             renaming: std::collections::HashMap::new(),
             notice: None,
             quitting: false,
@@ -962,8 +968,13 @@ impl PocketdeskApp {
                     self.end_sessions_of(id);
                 }
                 self.notice = crate::notice::Notice::done(format!(
-                    "{label} has the {} profile's permissions now.",
-                    profile.name
+                    "{label} has the {} profile's permissions now{}.",
+                    profile.name,
+                    if narrowed {
+                        "; its session was ended, to reconnect with them"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Err(e) => {
@@ -1913,8 +1924,22 @@ impl PocketdeskApp {
         let mut rename = None;
         let mut save_profile = None;
         let mut apply_profile = None;
-        // P9: the saved profiles, to apply.
-        let profiles = pocketdesk_core::local::permission_profiles::read(&self.state_dir);
+        // P9: the saved profiles, to apply; a file that cannot be read is
+        // said, not taken for none (Q2 review).
+        let (profiles, profiles_error) =
+            match pocketdesk_core::local::permission_profiles::load(&self.state_dir) {
+                Ok(profiles) => (profiles, None),
+                Err(e) => (Vec::new(), Some(e.to_string())),
+            };
+        if let Some(e) = &profiles_error {
+            ui.colored_label(
+                crate::theme::warn(ui),
+                format!("The saved profiles cannot be read: {e}"),
+            );
+        }
+        let mut remove_profile = None;
+        let mut profile_answer = None;
+        let mut remove_answer = None;
         // L7 review: Settings that turn a feature off for every phone.
         let settings_off = self
             .config
@@ -1959,11 +1984,13 @@ impl PocketdeskApp {
                                 .hint_text("a name, such as Kids")
                                 .desired_width(140.0),
                         );
+                        let named = !name.trim().is_empty();
                         if ui
-                            .button("Save as profile")
+                            .add_enabled(named, egui::Button::new("Save as profile"))
                             .on_hover_text(
                                 "Keep what it may do under this name, to apply to another phone or to pair one with.",
                             )
+                            .on_disabled_hover_text("Type a name for it first.")
                             .clicked()
                         {
                             // What a computer's page hides stays the default,
@@ -1980,14 +2007,79 @@ impl PocketdeskApp {
                         if !profiles.is_empty() {
                             ui.menu_button("Apply a profile", |ui| {
                                 for profile in &profiles {
-                                    if ui.button(&profile.name).clicked() {
+                                    if ui
+                                        .button(&profile.name)
+                                        .on_hover_text(format!(
+                                            "Allows: {}.",
+                                            crate::pair_view::profile_allows(&profile.permissions)
+                                        ))
+                                        .clicked()
+                                    {
                                         apply_profile = Some((device.id.clone(), profile.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            ui.menu_button("Remove a profile\u{2026}", |ui| {
+                                for profile in &profiles {
+                                    if ui.button(&profile.name).clicked() {
+                                        remove_profile =
+                                            Some((device.id.clone(), profile.name.clone()));
                                         ui.close();
                                     }
                                 }
                             });
                         }
                     });
+                    // Q2 review: Apply turns switches off and may end a
+                    // session, so it asks, saying what goes; Remove asks too.
+                    if let Some((id, profile)) = &self.confirm_profile
+                        && *id == device.id
+                    {
+                        let off = model::profile_turns_off(
+                            &device.permissions,
+                            &profile.permissions,
+                            |c| shown_for(c, device.computer),
+                        );
+                        let turns_off = if off.is_empty() {
+                            "It turns nothing off.".to_string()
+                        } else {
+                            format!(
+                                "It turns off: {}.",
+                                off.iter()
+                                    .map(|c| PERMISSIONS
+                                        .iter()
+                                        .find(|(p, _, _)| p == c)
+                                        .map_or_else(|| format!("{c:?}"), |(_, l, _)| l.to_string()))
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
+                            )
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!("Give {label} the {} profile? {turns_off}", profile.name));
+                            if ui.button("Apply").clicked() {
+                                profile_answer = Some(true);
+                            }
+                            if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
+                                profile_answer = Some(false);
+                            }
+                        });
+                    }
+                    if let Some((id, name)) = &self.confirm_remove_profile
+                        && *id == device.id
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!(
+                                "Remove the {name} profile? Phones given it keep their permissions."
+                            ));
+                            if ui.button("Remove").clicked() {
+                                remove_answer = Some(true);
+                            }
+                            if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
+                                remove_answer = Some(false);
+                            }
+                        });
+                    }
                     let mut ask_first = device.permissions.ask_first;
                     if ui
                         .checkbox(&mut ask_first, "Ask before each session")
@@ -2062,8 +2154,27 @@ impl PocketdeskApp {
                 .map_err(|e| format!("Could not save the profile: {e}")),
             );
         }
-        if let Some((id, profile)) = apply_profile {
+        if let Some(chosen) = apply_profile {
+            self.confirm_profile = Some(chosen);
+        }
+        if let Some(chosen) = remove_profile {
+            self.confirm_remove_profile = Some(chosen);
+        }
+        if let Some(yes) = profile_answer
+            && let Some((id, profile)) = self.confirm_profile.take()
+            && yes
+        {
             self.apply_profile(&id, &profile);
+        }
+        if let Some(yes) = remove_answer
+            && let Some((_, name)) = self.confirm_remove_profile.take()
+            && yes
+        {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::permission_profiles::remove(&self.state_dir, &name)
+                    .map(|()| format!("Removed the {name} profile."))
+                    .map_err(|e| format!("Could not remove the {name} profile: {e}")),
+            );
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;

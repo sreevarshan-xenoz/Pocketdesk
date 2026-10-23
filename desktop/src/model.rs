@@ -1170,6 +1170,20 @@ pub fn apply_profile(
     Ok(narrowed)
 }
 
+/// What applying `profile` would turn off on a phone that has `current`:
+/// each permission shown for it that is on now and off in the profile, in
+/// the order of [`Capability::ALL`] (Q2 review: Apply asks first, saying so).
+pub fn profile_turns_off(
+    current: &DevicePermissions,
+    profile: &DevicePermissions,
+    shown: impl Fn(Capability) -> bool,
+) -> Vec<Capability> {
+    Capability::ALL
+        .into_iter()
+        .filter(|c| shown(*c) && current.allows(*c) && !profile.allows(*c))
+        .collect()
+}
+
 /// Whether a running session keeps its own copy of this permission, taken at
 /// its start; the control channel re-reads the others for every packet.
 pub fn fixed_at_session_start(capability: Capability) -> bool {
@@ -1268,6 +1282,23 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Q2: what a profile would turn off, only among the switches shown.
+    #[test]
+    fn a_profile_says_what_it_turns_off() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        let mut current = DevicePermissions::default();
+        current.set(Capability::Input, true);
+        current.set(Capability::Exec, true);
+        current.set(Capability::Ring, true);
+        let mut profile = current.clone();
+        profile.set(Capability::Input, false);
+        profile.set(Capability::Exec, false);
+        profile.set(Capability::Ring, false);
+        let off = super::profile_turns_off(&current, &profile, |c| c != Capability::Ring);
+        assert_eq!(off, vec![Capability::Input, Capability::Exec]);
+        assert!(super::profile_turns_off(&current, &current, |_| true).is_empty());
+    }
+
     #[test]
     fn the_pages_features_are_the_phones() {
         let ours: Vec<&str> = super::FEATURES.iter().map(|f| f.key).collect();

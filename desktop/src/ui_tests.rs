@@ -265,6 +265,54 @@ fn escape_cancels_the_unpair_question() {
     assert!(store.is_trusted(PHONE), "and kept the phone");
 }
 
+/// Q2: Apply a profile asks first, saying what it turns off; Cancel
+/// changes nothing, and Apply gives the phone the profile's permissions.
+#[test]
+fn applying_a_profile_asks_first() {
+    use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let mut kids = DevicePermissions::default();
+    kids.set(Capability::Input, false);
+    pocketdesk_core::local::permission_profiles::save(fixture.state(), "Kids", &kids)
+        .expect("saved");
+    let input = |state: &Path| {
+        TrustStore::read(state.join(TRUST_FILE))
+            .expect("the trust store")
+            .permissions(PHONE)
+            .allows(Capability::Input)
+    };
+    assert!(input(fixture.state()), "a paired phone has input");
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.get_by_label("What Test Phone may do").click();
+    app.run_steps(3);
+    let asked = "Give Test Phone the Kids profile?";
+
+    app.get_by_label("Apply a profile").click();
+    app.run_steps(3);
+    app.get_by_label("Kids").click();
+    app.run_steps(3);
+    assert!(app.query_by_label_contains(asked).is_some(), "asked first");
+    assert!(
+        app.query_by_label_contains("It turns off: Control the mouse and keyboard")
+            .is_some(),
+        "says what it turns off"
+    );
+    app.get_by_label("Cancel").click();
+    app.run_steps(3);
+    assert!(app.query_by_label_contains(asked).is_none());
+    assert!(input(fixture.state()), "Cancel changes nothing");
+
+    app.get_by_label("Apply a profile").click();
+    app.run_steps(3);
+    app.get_by_label("Kids").click();
+    app.run_steps(3);
+    app.get_by_label("Apply").click();
+    app.run_steps(3);
+    assert!(!input(fixture.state()), "Apply turns input off");
+    pocketdesk_core::local::permission_profiles::remove(fixture.state(), "Kids").expect("removed");
+}
+
 /// I3: Ctrl+Page Down opens the next page down the left.
 #[test]
 fn control_page_down_opens_the_next_page() {

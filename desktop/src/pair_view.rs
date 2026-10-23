@@ -419,7 +419,12 @@ impl PairView {
                 // Devices counts it down), pairs with files and links only.
                 let mut chosen = self.whose.clone();
                 // P9: each saved profile is a choice too.
-                let profiles = pocketdesk_core::local::permission_profiles::read(state_dir);
+                // One that cannot be read is said (Q2 review: it read as none).
+                let (profiles, profiles_error) =
+                    match pocketdesk_core::local::permission_profiles::load(state_dir) {
+                        Ok(profiles) => (profiles, None),
+                        Err(e) => (Vec::new(), Some(e.to_string())),
+                    };
                 let mut choices: Vec<(Whose, String)> = WHOSE
                     .iter()
                     .map(|(whose, label)| (whose.clone(), label.to_string()))
@@ -427,7 +432,8 @@ impl PairView {
                 choices.extend(profiles.iter().map(|p| {
                     (Whose::with_profile(&p.name), format!("With the {} profile", p.name))
                 }));
-                ui.horizontal(|ui| {
+                // Wrapped: a long profile name stays in the window (Q2 review).
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Whose phone is it?");
                     let shown = choices
                         .iter()
@@ -453,9 +459,14 @@ impl PairView {
                             Some(allows) => format!(
                                 "It pairs with the {name} profile's permissions: {allows}. A phone paired already keeps only what both allow."
                             ),
-                            None => format!(
-                                "The {name} profile is gone: it pairs as someone else's, with files and links only."
-                            ),
+                            None => match &profiles_error {
+                                Some(e) => format!(
+                                    "The saved profiles cannot be read ({e}): it pairs as someone else's, with files and links only."
+                                ),
+                                None => format!(
+                                    "The {name} profile is gone: it pairs as someone else's, with files and links only."
+                                ),
+                            },
                         })
                         .small(),
                     );
