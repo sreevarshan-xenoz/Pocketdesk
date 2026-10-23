@@ -188,11 +188,16 @@ types into it and posts notifications on it.
    Quiet on the computer while I use the phone. The P cycle's checks also use Let
    the computer open my apps, Alarms on the computer, Ring from the computer and My
    contacts on the computer (the contacts check looks only at the count and deletes
-   the list). A check whose switch is off is SKIPped with what to turn on.
+   the list). The O cycle's use Let other apps run the computer's tasks, and for
+   `o5-kinds` a fixture kind on the channel `r1-kept` switched off under the fixture
+   in This phone's notifications. A check whose switch is off is SKIPped with what to
+   turn on.
 
    The P cycle's checks change the throwaway's `config.toml` while it runs (quiet
    hours, words, putting it back after) and pause it for the alarm, so nothing rings
-   here; P11's ring sounds, shakes and flashes the phone for 30 s.
+   here; P11's ring sounds, shakes and flashes the phone for 30 s. O1's add a task
+   that runs `echo` on this computer and a deck button for it, never one that types,
+   plays or opens a link here.
 5. Run `python scripts/device_checks.py --server-root <root> --server-exe <pocketdesk>`
    (`--only ID…` for some, `--serial` with more than one phone). On Git Bash, give
    Windows paths (`C:/…`): with `MSYS_NO_PATHCONV=1`, `/c/…` reaches Python as is.

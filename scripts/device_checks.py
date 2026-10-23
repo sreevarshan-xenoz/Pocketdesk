@@ -423,6 +423,24 @@ class Server:
         os.replace(tmp, path)
         return before
 
+    def append_config(self, text: str) -> str:
+        """Tables added at the config's end while it runs (R1); the file
+        as it was, to put back."""
+        path = self.root / "config" / "config.toml"
+        before = path.read_text(encoding="utf-8") if path.exists() else ""
+        tmp = path.with_suffix(".toml.tmp")
+        tmp.write_text(before.rstrip("\n") + "\n" + text, encoding="utf-8")
+        os.replace(tmp, path)
+        return before
+
+    def events_of(self, count: int, kind: str, device: str) -> list[dict]:
+        """`device`'s events of `kind` after the log's first `count` lines."""
+        path = self.root / "state" / "events.jsonl"
+        if not path.exists():
+            return []
+        lines = path.read_text(encoding="utf-8").splitlines()[count:]
+        return [e for e in events_after(lines, 0, kind) if e.get("device_id") == device]
+
     def restore_config(self, before: str) -> None:
         path = self.root / "config" / "config.toml"
         tmp = path.with_suffix(".toml.tmp")
@@ -1247,6 +1265,115 @@ def p11_ring(ctx: Ctx) -> tuple[str, str]:
     if not flashes and turns:
         return "FAIL", "the torch blinked with Flash off"
     return "PASS", ", ".join(said)
+
+
+# ---- the O cycle (R1) ----
+
+# A task that only echoes, and a deck button that runs it: a key, text,
+# media or link button would act on this computer, so none is used.
+R1_TASK = "R1 echo"
+R1_DECK = "R1 deck"
+R1_CONFIG = f"""
+[[tasks]]
+name = "{R1_TASK}"
+command = "echo r1"
+ask = false
+
+[[deck]]
+label = "{R1_DECK}"
+task = "{R1_TASK}"
+"""
+
+
+def automation(action: str, name: str) -> None:
+    """O1's broadcast, as an automation app sends it, for the throwaway
+    saved at 127.0.0.1."""
+    adb("logcat", "-c")
+    am("broadcast", "-n", f"{APP}/.automation.AutomationReceiver", "-a", f"{APP}.action.{action}",
+       "--es", f"{APP}.extra.ADDRESS", "127.0.0.1", "--es", f"{APP}.extra.NAME", name)
+
+
+@check("o1-task", "§184")
+def o1_task(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("others_run_tasks"):
+        return "SKIP", "turn on Let other apps run the computer's tasks in the phone's Settings"
+    before = ctx.server.append_config(R1_CONFIG)
+    try:
+        count = ctx.server.event_count()
+        # The control first: a name the computer has none of runs nothing.
+        automation("RUN_TASK", "R1 no such task")
+        unknown = wait_for(lambda: "no task by that name" in ctx.phone.logcat("Automation"), 30)
+        automation("RUN_TASK", R1_TASK)
+        done = wait_for(lambda: [e for e in ctx.server.events_of(count, "task_finished", ctx.device)
+                                 if e.get("task") == R1_TASK], 45)
+    finally:
+        ctx.server.restore_config(before)
+    if not unknown:
+        return "TIMEOUT", "no answer for a task the computer does not have"
+    if not done:
+        return "TIMEOUT", "the task did not finish on the computer"
+    code = done[-1].get("code")
+    return ("PASS", "ran on the computer, code 0; an unknown name refused") if code == 0 else (
+        "FAIL", f"the task ended with code {code}")
+
+
+@check("o1-deck", "§184")
+def o1_deck(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("others_run_tasks"):
+        return "SKIP", "turn on Let other apps run the computer's tasks in the phone's Settings"
+    before = ctx.server.append_config(R1_CONFIG)
+    try:
+        count = ctx.server.event_count()
+        automation("PRESS_DECK", R1_DECK)
+        pressed = wait_for(lambda: ctx.server.events_of(count, "deck_pressed", ctx.device), 45)
+        ran = wait_for(lambda: [e for e in ctx.server.events_of(count, "task_finished", ctx.device)
+                                if e.get("task") == R1_TASK], 30)
+    finally:
+        ctx.server.restore_config(before)
+    if not pressed:
+        return "TIMEOUT", "no press reached the computer"
+    press = pressed[-1]
+    if press.get("kind") != "task" or not press.get("ok"):
+        return "FAIL", f"pressed as {press.get('kind')}, ok {press.get('ok')}"
+    return ("PASS", "the task button pressed, its task ran") if ran else (
+        "TIMEOUT", "pressed, but its task did not finish")
+
+
+R1_KEPT = "r1-kept"
+
+
+@check("o5-kinds", "§187")
+def o5_kinds(ctx: Ctx) -> tuple[str, str]:
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    kept = ctx.phone.prefs("pocketdesk-phone-notifications").get(f"kinds_kept:{FIXTURE}") or []
+    if R1_KEPT not in kept:
+        return "SKIP", f"post a fixture notification on the channel {R1_KEPT!r} once, then switch that kind off under the fixture in This phone's notifications"
+    # One at a time, so each event is known (R1 review: two of one app read
+    # the same, and a leaked kept one could stand in for a lost shared one).
+    count = ctx.server.event_count()
+    ctx.phone.sleep()
+    adb("logcat", "-c")
+    am("broadcast", "-n", f"{FIXTURE}/.NotifyReceiver", "-a", "dev.pocketdesk.fixture.NOTIFY",
+       "--ei", "id", "709", "--es", "title", "Kept kind", "--es", "text", "R1 " + secrets.token_hex(2),
+       "--es", "channel", R1_KEPT)
+    posted = wait_for(lambda: "posted 709" in ctx.phone.logcat("Fixture"), 10)
+    time.sleep(8)
+    leaked = ctx.server.events_since(count, "notification", ctx.device, "Pocketdesk fixture")
+    ctx.phone.cancel(709)
+    # The control: a shared kind after it arrives, alone.
+    after = ctx.server.event_count()
+    ctx.phone.notify(710, "Ann", "R1 shared " + secrets.token_hex(2))
+    shared = wait_for(lambda: ctx.server.events_since(after, "notification", ctx.device, "Pocketdesk fixture"), 30)
+    ctx.phone.cancel(710)
+    ctx.phone.wake()
+    if not posted:
+        return "FAIL", "the kept kind's notification was never posted on the phone"
+    if leaked:
+        return "FAIL", "the kept kind reached the computer"
+    if not shared:
+        return "TIMEOUT", "the shared kind did not reach the computer either"
+    return "PASS", "the kept kind stayed on the phone; the other kind arrived"
 
 
 # ---- main ----

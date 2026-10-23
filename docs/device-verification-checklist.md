@@ -1647,6 +1647,7 @@ Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled 
 - [ ] The tray in a real panel: KDE Plasma, waybar or swaybar, GNOME with the AppIndicator extension. Closing hides the window to it, Open brings it back, Pair opens Pair, Quit quits.
 - [ ] A panel restarted while the window is hidden: the item comes back, and starting the app again raises the window.
 - [ ] Wayland (Sway, Hyprland, KDE's Wayland session): closing the window quits; the tray's entries work while it runs.
+
 ## 100. GNOME and KDE hosts that work unattended (N8)
 
 Owed, on a GNOME VM (Ubuntu 24.04, a GNOME session) and KDE where one allows; none of this has run:
@@ -1879,6 +1880,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [x] The setting off: `drive.json` gone and the port closed within seconds, without a restart (2026-10-19, curl).
 - [ ] The setting off: the address gone from the Phone page (by eye).
 - [ ] Linux: Files or Dolphin at the `dav://` address.
+
 ## 118. Lock when the phone leaves (D9)
 
 - [x] The A71 with the switch on, a throwaway server with `POCKETDESK_LOCK_FILE` set on this box: Wi-Fi off on the phone, a line in the file after the set time, and the `away_locked` event.
@@ -2364,6 +2366,7 @@ Built 2026-10-21. Checked on the OPPO by adb: the service started from the backg
 - [ ] On battery without USB, on Wi-Fi, for an hour (N7's script): a ring from a throwaway server arriving with the screen off, CPU use and battery drain.
 - [ ] A Samsung, a Xiaomi and a Pixel: the service keeps the app linked with the screen off.
 - [ ] Renaming the computer changes the notification's words.
+
 ## 167. Both sides' switches, part 2 (M2)
 
 Built 2026-10-21; tested through units and the desktop harness, nothing on a device yet.
@@ -2384,6 +2387,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll.
 - [ ] The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.
 - [ ] GNOME (no `wl-paste --watch`): an image on the clipboard is read at most every 30 s.
+
 ## 169. Photos keep where they were taken (M5)
 
 Built 2026-10-21; tested through units, nothing on a device yet.
@@ -2400,6 +2404,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [x] The same with the screen off, the phone locked, or the switch off: a toast. 2026-10-21: with the phone asleep and locked, the next one came without `phone_in_use` (shown), 12 s after it was posted, the screen off.
 - [ ] With Pocketdesk's Remote open on the phone: a toast.
 - [ ] A notification that comes as the screen is off and wakes it: a toast.
+
 ## 171. Type on the phone from the computer's keyboard (M4)
 
 Built 2026-10-21; tested through units, nothing on a device yet.
@@ -2411,6 +2416,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The switch off, or the app's notifications off: nothing typed.
 - [ ] Japanese through Windows' input method: the committed text arrives.
 - [ ] The phone unlinked while the window is open: the window says why and sends nothing.
+
 ## 172. The phone's sound without its screen (M7)
 
 Built 2026-10-21; tested through units and a loopback session, nothing on a device yet.
@@ -2421,6 +2427,7 @@ Built 2026-10-21; tested through units and a loopback session, nothing on a devi
 - [ ] Started while the screen is shown: refused before Android's consent, saying why.
 - [ ] An hour with the screen off: the battery.
 - [ ] By ear, and a real music app (the owner).
+
 ## 173. tel: links and Call back (M8)
 
 Built 2026-10-21; tested through units, the harness and the registry read back here, nothing on a device yet.
@@ -2439,6 +2446,7 @@ Built 2026-10-21; tested through units, nothing against a broker or a device yet
 - [ ] The phone's "Send commands to its automation apps" off: refused, in the server's log.
 - [ ] A command removed in Settings: its button goes from the broker; another command keeps its id.
 - [ ] Home Assistant itself, and Tasker (the owner).
+
 ## 175. Copies sent by themselves (M10 part 2)
 
 Built 2026-10-21; checked on the OPPO by adb: a copy noticed, the reading window started from the background, the clipboard read, two copies 6 s apart both read. Owed:
@@ -2510,6 +2518,7 @@ Built 2026-10-22. Owed:
 - [ ] "Tell phones when this computer is in use" off on one: it always pops up.
 - [ ] The battery with the links kept, by N7's background-cost script.
 - [ ] A Linux computer: it does not say, and always pops up.
+
 ## 182. Leftovers: typing from the tray and a key, several links, the phone nearly full (N9)
 
 Built 2026-10-22. Owed:
@@ -2541,10 +2550,12 @@ Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server throu
 - [x] `PRESS_DECK` ran a task-kind button; `DECK_PRESSED` told done.
 - [x] Refusals told: no such task or button (`unknown`), an unsaved address (`not_saved`), an empty name (`bad_name`), the 11th in a minute (`too_many`), another computer than the phone's own with no link (`not_linked`).
 - [x] With the switch off, nothing ran and nothing was told.
+- [x] 2026-10-23, by `scripts/device_checks.py` (R1) on the OPPO, `o1-task` and `o1-deck`: RUN_TASK ran an `echo` task on the computer (code 0) and an unknown name started nothing; PRESS_DECK pressed a task button, its task ran.
 Owed:
 - [ ] Tasker itself: a Send Intent to the receiver, and Intent Received for the events.
 - [ ] A task that asks first, allowed at the desk.
 - [ ] Over the internet road, cold.
+
 ## 185. A screenshot of the phone and its screen locked from the computer (O2)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the requests written as the desktop app writes them:
@@ -2555,17 +2566,20 @@ Owed:
 - [ ] The screenshot's arrival on the LAN road (over `adb reverse` the computer will not dial back to 127.0.0.1).
 - [ ] The Overview's and the tray's buttons by hand, and their words when the phone is away or the permission off.
 - [ ] Android 9 to 12, and a phone with a PIN.
+
 ## 186. A paired computer found again at a new address (O3)
 
 Built 2026-10-22. Owed (it moves this computer to a second address, so with the owner):
 - [ ] The computer on the phone's hotspot (or a new DHCP lease): its card moves to the new address with a snackbar, connects, and keeps its name, wake settings and pairing.
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
+
 ## 187. Notifications shared by their kind as well as their app (O5)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) with the fixture app's two channels against a throwaway server:
 - [x] Both kinds listed under the app by their titles ("Message A", "Updating messages"), and both sent while on.
 - [x] "Updating messages" switched off in Settings: the next one in that kind stayed on the phone, the next message went.
+- [x] 2026-10-23, by `scripts/device_checks.py` (R1) on the OPPO, `o5-kinds`: a fixture kind kept on the phone stayed there (posted, never on the computer), another kind arrived.
 Owed:
 - [ ] A real chat app's kinds listed under it, by their titles, and one kept on the phone while its messages go.
 - [ ] TalkBack reads each kind's switch with its kind.
@@ -2578,6 +2592,7 @@ Owed:
 - [ ] A copy made in KeePassXC (or another listed program) on Windows: not on the phone, not in the history, not sent by the tray.
 - [ ] A phone asking in a session for a held copy gets nothing; an image copied by a listed program the same.
 - [ ] The two Settings rows by hand, "Add the usual password managers" and "Add keys and tokens".
+
 ## 189. Find a setting on the phone (O8)
 
 Built 2026-10-22. Checked on the OPPO:
@@ -2588,6 +2603,7 @@ Built 2026-10-22. Checked on the OPPO:
 Owed:
 - [ ] Clear by tap; Back again leaves Settings.
 - [ ] TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
+
 ## 190. Received images onto the clipboard (O7)
 
 Built 2026-10-22. Owed:
@@ -2595,6 +2611,7 @@ Built 2026-10-22. Owed:
 - [ ] A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
 - [ ] Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
 - [ ] Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
+
 ## 191. Choose the computer's player (O6)
 
 Built 2026-10-22. Checked on the OPPO against a throwaway server with the media seam holding two players:
@@ -2605,6 +2622,7 @@ Owed:
 - [ ] Two real players on Windows (a browser tab and Spotify): the one chosen takes Play, Next and Previous from the Sound sheet, the widget and the lock screen.
 - [ ] The chosen player closed: the card reads "The computer's choice", and the choice comes back when the player opens again.
 - [ ] Linux: two MPRIS players under `playerctl`. (where: linux)
+
 ## 192. Diagnostics' firewall row on Linux (O9)
 
 Built 2026-10-22. Owed (where: linux):
@@ -2612,6 +2630,7 @@ Built 2026-10-22. Owed (where: linux):
 - [ ] ufw on with the default deny: the row is red, naming 1716/tcp and 4716/udp with `sudo ufw allow …`; after allowing them, green. (where: linux)
 - [ ] The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
 - [ ] firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
+
 ## 193. The computer's announcement follows its network (P1)
 
 Built 2026-10-22. Checked on the OPPO against a throwaway server (named apart from this computer's own, so its goodbye touched no other record), its addresses moved by the seam:
@@ -2623,6 +2642,7 @@ Owed:
 - [ ] A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute.
 - [ ] A wake from sleep with a new lease. (where: owner)
 - [ ] Linux. (where: linux)
+
 ## 194. Open an app on the phone from the computer (P2)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the requests written as the desktop app writes them:
@@ -2645,6 +2665,7 @@ Owed:
 - [ ] Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
 - [ ] A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
 - [ ] The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
+
 ## 196. Notifications held by their words (P4)
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the fixture app's notifications, the config changed while it ran:
@@ -2665,6 +2686,7 @@ Owed:
 - [ ] The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
 - [ ] Linux's urgent notification.
 - [ ] A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only).
+
 ## 198. Files to several phones or computers at once (P6)
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, by the CLI:
@@ -2673,6 +2695,7 @@ Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server throu
 Owed:
 - [ ] Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 - [ ] The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
+
 ## 199. Files copied in Explorer sent with the clipboard key (P7)
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, both clipboard seams set (`POCKETDESK_CLIPBOARD_FILE`, `POCKETDESK_CLIPBOARD_FILES_FILE`), the request written as the tray writes it:
@@ -2697,6 +2720,7 @@ Built 2026-10-23. Unit-tested: the store (saved, replaced, removed, a broken fil
 Owed:
 - [ ] Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
 - [ ] Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
+
 ## 202. A ring that vibrates and flashes (P11)
 
 Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern. Checked on the OPPO (CPH2359) with `pocketdesk ring` from a throwaway server through `adb reverse`:
@@ -2705,6 +2729,7 @@ Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern. Che
 Owed:
 - [ ] Stop and a dismiss ending both at once.
 - [ ] Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
+
 ## 203. The phone's contacts on the computer (P10)
 
 Built 2026-10-23. Unit-tested: the list's reading (names cleaned, numbers a call takes, each once, five a contact), the store, the phone's rule (its switch, its own computer, Android's permission, the minute), the desktop's search. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the ask written as the desktop app writes it:
