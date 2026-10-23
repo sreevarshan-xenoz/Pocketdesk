@@ -14,6 +14,12 @@ pub fn ago(now: u64, at: u64) -> String {
     }
 }
 
+/// `n` things, one or many: "1 contact", "3 contacts" (Q2 review: "1
+/// contacts").
+pub fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 /// A device id short enough for a table: the first 12 characters.
 pub fn short(id: &str) -> String {
     if id.chars().count() > 12 {
@@ -55,6 +61,13 @@ pub fn holds_all(query: &str, texts: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_count_says_one_or_many() {
+        assert_eq!(super::count(1, "contact", "contacts"), "1 contact");
+        assert_eq!(super::count(0, "contact", "contacts"), "0 contacts");
+        assert_eq!(super::count(3, "app", "apps"), "3 apps");
+    }
+
     use super::{ago, holds_all};
 
     /// J4: a search's words, each anywhere in any of the texts.

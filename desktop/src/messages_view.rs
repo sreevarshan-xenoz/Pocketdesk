@@ -187,7 +187,11 @@ impl MessagesView {
         let muted = crate::theme::muted(ui);
         ui.columns(2, |columns| {
             let list = &mut columns[0];
-            if list.button("New text").clicked() {
+            if list
+                .button("New text")
+                .on_hover_text("Write a new text, or find a number in the phone's contacts")
+                .clicked()
+            {
                 self.selected = None;
             }
             list.add_space(6.0);
@@ -421,15 +425,22 @@ impl MessagesView {
             if let Some(list) = list {
                 ui.label(
                     RichText::new(format!(
-                        "{} contacts, {}",
-                        list.contacts.len(),
+                        "{}, {}",
+                        crate::words::count(list.contacts.len(), "contact", "contacts"),
                         crate::words::ago(now_unix, list.at)
                     ))
                     .color(muted),
                 );
             }
         });
-        // Said when no list came (as P2's box does).
+        // Said while it waits, and when no list came (as P2's box does).
+        if let Some((asked_phone, at)) = &self.contacts_asked
+            && asked_phone == phone
+            && list.is_none_or(|l| l.at < *at)
+            && now_unix.saturating_sub(*at) < CONTACTS_ANSWER_SECS
+        {
+            pane.label(RichText::new("Asking the phone for its contacts\u{2026}").color(muted));
+        }
         if let Some((asked_phone, at)) = &self.contacts_asked
             && asked_phone == phone
             && list.is_none_or(|l| l.at < *at)
@@ -476,11 +487,14 @@ impl MessagesView {
             .iter()
             .filter_map(|i| list.contacts.get(*i))
             .collect();
-        if shown.is_empty() {
+        if list.contacts.is_empty() {
+            pane.label(RichText::new("The phone sent no contacts.").color(muted));
+        } else if shown.is_empty() {
             pane.label(RichText::new("No contact matches.").color(muted));
         }
         let mut text_to = None;
         let mut call = None;
+        let mut copied = false;
         egui::ScrollArea::vertical()
             .id_salt("contacts")
             .max_height(260.0)
@@ -490,13 +504,27 @@ impl MessagesView {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(RichText::new(&contact.name).strong());
                             ui.label(number);
-                            if ui.small_button("Text").clicked() {
+                            // Each says whose to a screen reader (Q2 review,
+                            // as E5's photos do).
+                            let named = |response: egui::Response, what: &str| {
+                                let label = format!("{what} {} {number}", contact.name);
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        &label,
+                                    )
+                                });
+                                response
+                            };
+                            if named(ui.small_button("Text"), "Text").clicked() {
                                 text_to = Some(number.clone());
                             }
-                            if ui.small_button("Copy").clicked() {
+                            if named(ui.small_button("Copy"), "Copy").clicked() {
                                 ui.ctx().copy_text(number.clone());
+                                copied = true;
                             }
-                            if ui.small_button("Call").clicked() {
+                            if named(ui.small_button("Call"), "Call").clicked() {
                                 call = Some(number.clone());
                             }
                         });
@@ -511,6 +539,9 @@ impl MessagesView {
                 ))
                 .color(muted),
             );
+        }
+        if copied {
+            self.notice = crate::notice::Notice::done("Copied.");
         }
         if let Some(number) = text_to {
             self.new_number = number;

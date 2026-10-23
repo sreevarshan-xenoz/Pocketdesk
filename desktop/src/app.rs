@@ -1779,6 +1779,13 @@ impl PocketdeskApp {
                         self.open_phone_app(&id, &app, &name)
                     }
                     Some(crate::apps_view::Action::Close) => self.apps_box = None,
+                    Some(crate::apps_view::Action::AskAgain) => {
+                        self.phone_action(
+                            &id,
+                            pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
+                        );
+                        self.apps_box = Some(crate::apps_view::AppsBox::new(id.clone(), now));
+                    }
                     None => {}
                 }
             } else {
