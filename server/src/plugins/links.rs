@@ -27,12 +27,18 @@ pub fn configure(open_links: bool) {
 type Opener = Arc<dyn Fn(&str) -> std::result::Result<(), String> + Send + Sync>;
 type Shower = Arc<dyn Fn(&str, &str) + Send + Sync>;
 type Paused = Arc<dyn Fn() -> bool + Send + Sync>;
+/// The lines of Settings' links by site (P8).
+type Rules = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
+/// Hands a link to a program a rule names (P8).
+type Runner = Arc<dyn Fn(&std::path::Path, &str) -> std::result::Result<(), String> + Send + Sync>;
 
 pub struct LinksPlugin {
     open: Opener,
     show: Shower,
     /// Whether this computer is paused (K2a): a link is then only listed.
     paused: Paused,
+    rules: Rules,
+    run: Runner,
     recent: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
@@ -40,6 +46,8 @@ impl Default for LinksPlugin {
     fn default() -> Self {
         Self {
             paused: Arc::new(crate::paused::now),
+            rules: Arc::new(|| crate::events::current_config().link_rules),
+            run: Arc::new(run_detached),
             ..Self::with(Arc::new(open_detached), Arc::new(show_link))
         }
     }
@@ -51,6 +59,8 @@ impl LinksPlugin {
             open,
             show,
             paused: Arc::new(|| false),
+            rules: Arc::new(Vec::new),
+            run: Arc::new(|_, _| Ok(())),
             recent: Mutex::default(),
         }
     }
@@ -93,12 +103,46 @@ impl LinksPlugin {
             return;
         }
         if OPEN_LINKS.load(Ordering::Relaxed) {
-            match (self.open)(url) {
-                Ok(()) => {
-                    tracing::info!("Opening a link from {device}");
-                    return;
-                }
-                Err(e) => tracing::warn!("Could not open a link from {device}: {e}"),
+            // P8: what Settings say for this link's site, if anything.
+            let rules = pocketdesk_core::local::link_rules::rules(&(self.rules)());
+            let action = pocketdesk_core::protocol::link::link_host(url)
+                .and_then(|host| pocketdesk_core::local::link_rules::pick(&rules, &host).cloned())
+                .map(|rule| rule.action);
+            use pocketdesk_core::local::link_rules::Action;
+            match action {
+                Some(Action::Show) => {}
+                Some(Action::Program(program)) => match (self.run)(&program, url) {
+                    Ok(()) => {
+                        tracing::info!("Opening a link from {device} with {}", program.display());
+                        return;
+                    }
+                    // Said, never silent (P8).
+                    Err(e) => {
+                        tracing::warn!(
+                            "Could not open a link from {device} with {}: {e}",
+                            program.display()
+                        );
+                        (self.show)(
+                            &format!(
+                                "Pocketdesk: could not open a link with {}",
+                                program.display()
+                            ),
+                            url,
+                        );
+                        return;
+                    }
+                },
+                Some(Action::Browser) | None => match (self.open)(url) {
+                    Ok(()) => {
+                        tracing::info!("Opening a link from {device}");
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Could not open a link from {device}: {e}");
+                        (self.show)("Pocketdesk: could not open a link from your phone", url);
+                        return;
+                    }
+                },
             }
         }
         (self.show)("Pocketdesk: a link from your phone", url);
@@ -378,7 +422,46 @@ fn open_detached(url: &str) -> std::result::Result<(), String> {
         .spawn(move || {
             if let Err(e) = open_in_browser(&url) {
                 tracing::warn!("Could not open a link: {e}");
-                show_link("Pocketdesk: a link from your phone", &url);
+                // Said as a failure, not as a link to look at (P8).
+                show_link("Pocketdesk: could not open a link from your phone", &url);
+            }
+        })
+        .map(|_| ())
+        .map_err(|e| format!("no thread to open it on: {e}"))
+}
+
+/// Hand `url` (already checked) to `program`, a rule's (P8), on a thread of
+/// its own: as its one argument, never through a shell. A program that is
+/// not there is said at once; one that fails to start, once it has.
+fn run_detached(program: &std::path::Path, url: &str) -> std::result::Result<(), String> {
+    if !program.is_file() {
+        return Err(format!("{} is not there", program.display()));
+    }
+    let (program, url) = (program.to_path_buf(), url.to_string());
+    std::thread::Builder::new()
+        .name("open-link-with".to_string())
+        .spawn(move || {
+            let started = std::process::Command::new(&program)
+                .arg(&url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            match started {
+                // Waited for, so it leaves no zombie on Linux.
+                Ok(mut child) => {
+                    let _ = child.wait();
+                }
+                Err(e) => {
+                    tracing::warn!("Could not open a link with {}: {e}", program.display());
+                    show_link(
+                        &format!(
+                            "Pocketdesk: could not open a link with {}",
+                            program.display()
+                        ),
+                        &url,
+                    );
+                }
             }
         })
         .map(|_| ())
@@ -489,6 +572,68 @@ mod tests {
     }
 
     /// K2a: paused, a link is neither opened nor shown.
+    /// P8: a site's rule shows, hands to a program, or opens; the rest as
+    /// before; a program that fails is said.
+    #[test]
+    fn a_links_site_decides_how_it_opens() {
+        let (opened, shown) = (Seen::default(), Seen::default());
+        let ran: Seen = Seen::default();
+        let mut plugin = LinksPlugin::with(
+            {
+                let opened = opened.clone();
+                Arc::new(move |url: &str| {
+                    opened.lock().unwrap().push(url.to_string());
+                    Ok(())
+                })
+            },
+            {
+                let shown = shown.clone();
+                Arc::new(move |title: &str, url: &str| {
+                    shown.lock().unwrap().push(format!("{title}|{url}"))
+                })
+            },
+        );
+        plugin.rules = Arc::new(|| {
+            vec![
+                "video.example.org = show".to_string(),
+                "meet.example.org = /opt/meet".to_string(),
+                "bad.example.org = /opt/missing".to_string(),
+            ]
+        });
+        plugin.run = {
+            let ran = ran.clone();
+            Arc::new(move |program: &std::path::Path, url: &str| {
+                if program.ends_with("missing") {
+                    return Err("not there".to_string());
+                }
+                ran.lock()
+                    .unwrap()
+                    .push(format!("{}|{url}", program.display()));
+                Ok(())
+            })
+        };
+        let now = Instant::now();
+        plugin.take("https://video.example.org/watch", "phone-a", now);
+        plugin.take("https://a.meet.example.org/j/1", "phone-b", now);
+        plugin.take("https://example.org/", "phone-c", now);
+        plugin.take("https://bad.example.org/x", "phone-d", now);
+        assert_eq!(
+            *opened.lock().unwrap(),
+            vec!["https://example.org/".to_string()]
+        );
+        assert_eq!(
+            *ran.lock().unwrap(),
+            vec!["/opt/meet|https://a.meet.example.org/j/1".to_string()]
+        );
+        let shown = shown.lock().unwrap();
+        assert_eq!(shown.len(), 2);
+        assert!(shown[0].ends_with("|https://video.example.org/watch"));
+        assert!(
+            shown[1].starts_with("Pocketdesk: could not open a link with"),
+            "{shown:?}"
+        );
+    }
+
     #[test]
     fn a_pause_holds_a_link() {
         let _setting = SETTING.lock().unwrap_or_else(|e| e.into_inner());

@@ -26,6 +26,7 @@ pub mod home_assistant;
 pub mod identity;
 pub mod kdeconnect;
 pub mod kdeconnect_devices;
+pub mod link_rules;
 pub mod links;
 pub mod muted_apps;
 pub mod network;
