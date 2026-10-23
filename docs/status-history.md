@@ -6,6 +6,7 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **R5, one word for "computer" in Spanish (branch `feat/spanish-equipo`).** The phone app's Spanish said "ordenador" in 171 places and "equipo" in 178; it says "equipo" (Windows' own word) everywhere now. Both are masculine, so no article or adjective changed. The Tamil was read for the same split and says "கணினி" throughout.
 - 2026-10-23: **R2, what the computer could not see (branch `feat/quiet-seen`).**
   - **The Overview:** says when presenting or full screen (Windows), or GNOME's or KDE's Do Not Disturb (Linux), holds phones' notifications and texts, with Change it, as quiet hours' line does. The check moved into `core::local::quiet_hours::presenting`, which the server and the Overview both ask; on Linux its thread ends a minute after the last ask, and the server keeps it asked every 30 s while the switch is on.
   - **The switches report:** gains M4's typing and M10's copies by themselves, with what Android must allow. They are mapped to the screen window's and the clipboard's permissions, and "Control phones from their screen window" off holds typing back.
