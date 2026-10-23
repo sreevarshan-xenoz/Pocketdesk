@@ -428,6 +428,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/device_id` | The desktop's device id | Default | `server/src/kde.rs` |
 | `<state>/pairing.pin` | The PIN, minting time, grant length, `someone-else`, `profile <name>` | Owner-only | `core/src/local/pin.rs` |
 | `<state>/permission_profiles.json` | Permissions saved under a name on the Devices page (P9) | Owner-only | `core/src/local/permission_profiles.rs` |
+| `<state>/phone_contacts.json` | Each phone's contacts as it last listed them (P10): names and numbers only, under Texts; forgotten with Texts off or the phone unpaired | Owner-only | `core/src/local/phone_contacts.rs` |
 | `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions, and each one's name: what it calls itself and the owner's rename (U3) | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
 | `<state>/device_keys.json` | Per device: TLS key hash and iroh id | Default; atomic and synced | `core/src/local/device_keys.rs` |
 | `<state>/endpoint.json` | The WAN endpoint body: id, relay URLs, direct addresses, `dht` | Default | `core/src/local/identity.rs`, `iroh_endpoint.rs` |
