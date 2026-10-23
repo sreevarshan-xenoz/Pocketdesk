@@ -485,7 +485,7 @@ fn clipboard_owner() -> Option<String> {
     None
 }
 
-/// The rules of desktop Settings "Never send copies from" and "… that look
+/// The rules of desktop Settings "Never send copies from these programs" and "… that look
 /// like" (O4), built again only when the settings change.
 /// The settings a filter was built for, and the filter.
 type BuiltFilter = (

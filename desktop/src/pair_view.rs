@@ -241,7 +241,8 @@ pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) 
     }
 }
 
-/// What a profile lets a phone do, in words: its permissions that are on.
+/// What a profile lets a phone do, in words: its permissions that are on,
+/// by their Devices labels (Q2 review: not the code's names).
 pub fn profile_allows(
     permissions: &pocketdesk_core::protocol::permissions::DevicePermissions,
 ) -> String {
@@ -249,12 +250,18 @@ pub fn profile_allows(
     let on: Vec<String> = Capability::ALL
         .into_iter()
         .filter(|c| permissions.allows(*c))
-        .map(|c| format!("{c:?}").to_lowercase())
+        .map(|c| {
+            crate::app::PERMISSIONS
+                .iter()
+                .find(|(p, _, _)| *p == c)
+                .map(|(_, label, _)| label.to_string())
+                .unwrap_or_else(|| format!("{c:?}"))
+        })
         .collect();
     let mut words = if on.is_empty() {
         "nothing".to_string()
     } else {
-        on.join(", ")
+        on.join("; ")
     };
     if permissions.ask_first {
         words.push_str("; each session asked first");
@@ -412,7 +419,12 @@ impl PairView {
                 // Devices counts it down), pairs with files and links only.
                 let mut chosen = self.whose.clone();
                 // P9: each saved profile is a choice too.
-                let profiles = pocketdesk_core::local::permission_profiles::read(state_dir);
+                // One that cannot be read is said (Q2 review: it read as none).
+                let (profiles, profiles_error) =
+                    match pocketdesk_core::local::permission_profiles::load(state_dir) {
+                        Ok(profiles) => (profiles, None),
+                        Err(e) => (Vec::new(), Some(e.to_string())),
+                    };
                 let mut choices: Vec<(Whose, String)> = WHOSE
                     .iter()
                     .map(|(whose, label)| (whose.clone(), label.to_string()))
@@ -420,7 +432,8 @@ impl PairView {
                 choices.extend(profiles.iter().map(|p| {
                     (Whose::with_profile(&p.name), format!("With the {} profile", p.name))
                 }));
-                ui.horizontal(|ui| {
+                // Wrapped: a long profile name stays in the window (Q2 review).
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Whose phone is it?");
                     let shown = choices
                         .iter()
@@ -446,9 +459,14 @@ impl PairView {
                             Some(allows) => format!(
                                 "It pairs with the {name} profile's permissions: {allows}. A phone paired already keeps only what both allow."
                             ),
-                            None => format!(
-                                "The {name} profile is gone: it pairs as someone else's, with files and links only."
-                            ),
+                            None => match &profiles_error {
+                                Some(e) => format!(
+                                    "The saved profiles cannot be read ({e}): it pairs as someone else's, with files and links only."
+                                ),
+                                None => format!(
+                                    "The {name} profile is gone: it pairs as someone else's, with files and links only."
+                                ),
+                            },
                         })
                         .small(),
                     );

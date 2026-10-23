@@ -28,11 +28,15 @@ pub struct AppsBox {
     asked_at: u64,
     read_at: Option<Instant>,
     focus: bool,
+    scroll: bool,
 }
 
 /// What the box asks of the app this frame.
 pub enum Action {
-    Open(String),
+    /// The app's id and its name.
+    Open(String, String),
+    /// Ask the phone for its list again (Q2 review).
+    AskAgain,
     Close,
 }
 
@@ -47,6 +51,7 @@ impl AppsBox {
             asked_at,
             read_at: None,
             focus: true,
+            scroll: true,
         }
     }
 
@@ -67,7 +72,7 @@ impl AppsBox {
     pub fn ui(&mut self, ui: &mut egui::Ui, state_dir: &Path, who: &str) -> Option<Action> {
         self.refresh(state_dir);
         let mut action = None;
-        ui.group(|ui| {
+        let drawn = ui.group(|ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(format!("Open an app on {who}")).strong());
                 if ui.button("Close").clicked() {
@@ -78,11 +83,16 @@ impl AppsBox {
             let fresh = list_fresh(self.listed_at, self.asked_at);
             if !fresh {
                 let waited = now_unix().saturating_sub(self.asked_at);
-                ui.label(if waited < ANSWER_WITHIN_SECS {
-                    "Asking the phone for its apps…"
+                if waited < ANSWER_WITHIN_SECS {
+                    ui.label("Asking the phone for its apps…");
                 } else {
-                    "No answer from the phone. It answers while unlocked, with \"Let the computer open my apps\" on in Pocketdesk's Settings there."
-                });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("No answer from the phone. It answers while unlocked, with \"Let the computer open my apps\" on in Pocketdesk's Settings there.");
+                        if ui.button("Ask again").clicked() {
+                            action = Some(Action::AskAgain);
+                        }
+                    });
+                }
                 if self.apps.is_empty() {
                     return;
                 }
@@ -96,18 +106,28 @@ impl AppsBox {
                 search.request_focus();
             }
             let found = shown(&self.apps, &self.query);
-            if found.is_empty() {
+            if self.apps.is_empty() {
+                ui.label("The phone sent no apps.");
+            } else if found.is_empty() {
                 ui.label("No app matches.");
             }
             egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                 for app in found.iter().take(MAX_SHOWN) {
-                    ui.horizontal(|ui| {
-                        if ui
+                    ui.horizontal_wrapped(|ui| {
+                        let open = ui
                             .add_enabled(fresh, egui::Button::new("Open"))
                             .on_hover_text(format!("Open {} on the phone", app.name))
-                            .clicked()
+                            .on_disabled_hover_text(
+                                "An older list: waiting for the phone's answer.",
+                            );
+                        // Which app, to a screen reader (Q2 review).
+                        let label = format!("Open {}", app.name);
+                        open.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, fresh, &label)
+                        });
+                        if open.clicked()
                         {
-                            action = Some(Action::Open(app.id.clone()));
+                            action = Some(Action::Open(app.id.clone(), app.name.clone()));
                         }
                         ui.label(&app.name);
                     });
@@ -117,6 +137,11 @@ impl AppsBox {
                 ui.label(format!("{} more: type to narrow them.", found.len() - MAX_SHOWN));
             }
         });
+        // Brought into view as it opens (Q2 review: it is drawn under
+        // every phone, perhaps out of sight of its button).
+        if std::mem::take(&mut self.scroll) {
+            drawn.response.scroll_to_me(Some(egui::Align::Center));
+        }
         action
     }
 }

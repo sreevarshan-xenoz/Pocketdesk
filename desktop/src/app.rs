@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-const PERMISSIONS: [(Capability, &str, &str); 21] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -140,7 +140,7 @@ const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::Texts,
         "Show its texts and send replies",
-        "Texts the phone receives appear in Messages here, and replies go out through the phone.",
+        "Texts the phone receives appear in Messages here, and replies go out through the phone. Messages can also ask for the phone's contacts; turning this off forgets the contacts kept here.",
     ),
     (
         Capability::Links,
@@ -169,8 +169,8 @@ const PERMISSIONS: [(Capability, &str, &str); 21] = [
     ),
     (
         Capability::PhoneActions,
-        "Take screenshots of it and lock it from here",
-        "Screenshot of the phone and Lock the phone, on the Overview and in the tray. The phone takes them with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service; a screenshot arrives as its new screenshots do.",
+        "Take screenshots of it, lock it and open its apps from here",
+        "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
         Capability::PhoneSound,
@@ -198,6 +198,14 @@ const PERMISSIONS: [(Capability, &str, &str); 21] = [
         "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. Windows only for now: on Linux it never locks.",
     ),
 ];
+
+/// The switches a profile sets on a device: those its page shows, and
+/// AwayLock only where it works (Q2 review: the question named one Apply
+/// then left alone).
+fn profile_touches(capability: Capability, computer: bool) -> bool {
+    shown_for(capability, computer)
+        && (capability != Capability::AwayLock || away_lock_unavailable().is_none())
+}
 
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.
@@ -260,6 +268,10 @@ pub struct PocketdeskApp {
     )>,
     /// A device the user asked to revoke, awaiting confirmation.
     confirm_revoke: Option<String>,
+    /// A profile to apply to a phone, asked first (Q2 review).
+    confirm_profile: Option<(String, pocketdesk_core::local::permission_profiles::Profile)>,
+    /// A profile to remove, asked first under the phone it was chosen on.
+    confirm_remove_profile: Option<(String, String)>,
     /// The Name boxes on the Devices page, by device id (U3).
     renaming: std::collections::HashMap<String, String>,
     /// The last action's outcome, shown under the tabs.
@@ -368,6 +380,8 @@ impl PocketdeskApp {
             refreshed: None,
             pause_read: None,
             confirm_revoke: None,
+            confirm_profile: None,
+            confirm_remove_profile: None,
             renaming: std::collections::HashMap::new(),
             notice: None,
             quitting: false,
@@ -951,10 +965,7 @@ impl PocketdeskApp {
         let Some(device) = self.snapshot.devices.iter().find(|d| d.id == id).cloned() else {
             return;
         };
-        let away_lock = away_lock_unavailable().is_none();
-        let shown = |c: Capability| {
-            shown_for(c, device.computer) && (c != Capability::AwayLock || away_lock)
-        };
+        let shown = |c: Capability| profile_touches(c, device.computer);
         let label = model::device_label(&self.snapshot.devices, id);
         match model::apply_profile(&self.state_dir, id, &profile.permissions, shown) {
             Ok(narrowed) => {
@@ -962,8 +973,13 @@ impl PocketdeskApp {
                     self.end_sessions_of(id);
                 }
                 self.notice = crate::notice::Notice::done(format!(
-                    "{label} has the {} profile's permissions now.",
-                    profile.name
+                    "{label} has the {} profile's permissions now{}.",
+                    profile.name,
+                    if narrowed {
+                        "; its session was ended, to reconnect with them"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Err(e) => {
@@ -1302,9 +1318,20 @@ impl PocketdeskApp {
             } else {
                 config.quiet_to.trim().to_string()
             };
-            ui.label(format!(
-                "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause. Change them in Settings."
-            ));
+            // In a group with its way out, as the pause is (Q2 review).
+            let mut open = false;
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!(
+                        "Quiet hours until {until}: phones' notifications and texts are not shown here, as in a pause."
+                    ));
+                    open = ui.button("Change quiet hours").clicked();
+                });
+            });
+            if open {
+                self.switch_to(Tab::Settings);
+                self.chosen = Tab::Settings;
+            }
         }
         if let Some(minutes) = picked {
             self.pause(minutes);
@@ -1386,7 +1413,7 @@ impl PocketdeskApp {
             ) {
                 Ok(_) => Ok(match action {
                     PhoneAction::Screenshot => format!(
-                        "Asked {who} for a screenshot: it arrives as its new screenshots do, with \"Send new screenshots\" on in its Settings and Files allowed for it here."
+                        "Asked {who} for a screenshot. It arrives with \"Send new screenshots\" on in its Settings and \"Send files\" allowed here."
                     ),
                     PhoneAction::Lock => format!("Asked {who} to lock its screen."),
                     PhoneAction::Apps => format!("Asked {who} for its apps."),
@@ -1399,7 +1426,7 @@ impl PocketdeskApp {
     }
 
     /// P2: ask the phone `id` to open the app `app`, and say how that went.
-    fn open_phone_app(&mut self, id: &str, app: &str) {
+    fn open_phone_app(&mut self, id: &str, app: &str, name: &str) {
         let who = self.label(id);
         self.notice = crate::notice::Notice::outcome(
             match pocketdesk_core::local::phone_actions::request_open(
@@ -1409,7 +1436,7 @@ impl PocketdeskApp {
                 now_unix(),
             ) {
                 Ok(_) => Ok(format!(
-                    "Asked {who} to open it. It opens while the phone is unlocked and awake, with the Pocketdesk control service on."
+                    "Asked {who} to open {name}. With the phone unlocked it opens at once while Pocketdesk control is on, else the phone offers \"Tap to open\"."
                 )),
                 Err(e) => Err(format!("Could not ask {who}: {e}")),
             },
@@ -1695,6 +1722,16 @@ impl PocketdeskApp {
                         ));
                     }
                 });
+                // Q2 review: the phone's own switch, as it last said it.
+                if model::phone_action_reach(
+                    device.linked,
+                    device.permissions.allows(Capability::PhoneActions),
+                )
+                .is_ok()
+                    && let Some(refused) = model::phone_actions_refused(device.switches.as_ref())
+                {
+                    ui.colored_label(crate::theme::warn(ui), refused);
+                }
             });
         }
         // Whether the link box's phone can take a link now (N6 review): a
@@ -1754,8 +1791,17 @@ impl PocketdeskApp {
                     .as_mut()
                     .and_then(|b| b.ui(ui, &state_dir, &who));
                 match action {
-                    Some(crate::apps_view::Action::Open(app)) => self.open_phone_app(&id, &app),
+                    Some(crate::apps_view::Action::Open(app, name)) => {
+                        self.open_phone_app(&id, &app, &name)
+                    }
                     Some(crate::apps_view::Action::Close) => self.apps_box = None,
+                    Some(crate::apps_view::Action::AskAgain) => {
+                        self.phone_action(
+                            &id,
+                            pocketdesk_core::protocol::phone_action::PhoneAction::Apps,
+                        );
+                        self.apps_box = Some(crate::apps_view::AppsBox::new(id.clone(), now));
+                    }
                     None => {}
                 }
             } else {
@@ -1802,7 +1848,8 @@ impl PocketdeskApp {
         if cancel {
             self.overview_link = None;
         } else if send && let Some((id, url)) = self.overview_link.take() {
-            match model::queue_link(&self.state_dir, &id, &url, now_unix()) {
+            let who = model::device_label(&self.snapshot.devices, &id);
+            match model::queue_link(&self.state_dir, &id, &who, &url, now_unix()) {
                 Ok(said) => self.notice = crate::notice::Notice::outcome(Ok(said)),
                 Err(e) => {
                     // Keep the box, so the link can be fixed.
@@ -1911,8 +1958,22 @@ impl PocketdeskApp {
         let mut rename = None;
         let mut save_profile = None;
         let mut apply_profile = None;
-        // P9: the saved profiles, to apply.
-        let profiles = pocketdesk_core::local::permission_profiles::read(&self.state_dir);
+        // P9: the saved profiles, to apply; a file that cannot be read is
+        // said, not taken for none (Q2 review).
+        let (profiles, profiles_error) =
+            match pocketdesk_core::local::permission_profiles::load(&self.state_dir) {
+                Ok(profiles) => (profiles, None),
+                Err(e) => (Vec::new(), Some(e.to_string())),
+            };
+        if let Some(e) = &profiles_error {
+            ui.colored_label(
+                crate::theme::warn(ui),
+                format!("The saved profiles cannot be read: {e}"),
+            );
+        }
+        let mut remove_profile = None;
+        let mut profile_answer = None;
+        let mut remove_answer = None;
         // L7 review: Settings that turn a feature off for every phone.
         let settings_off = self
             .config
@@ -1957,11 +2018,13 @@ impl PocketdeskApp {
                                 .hint_text("a name, such as Kids")
                                 .desired_width(140.0),
                         );
+                        let named = !name.trim().is_empty();
                         if ui
-                            .button("Save as profile")
+                            .add_enabled(named, egui::Button::new("Save as profile"))
                             .on_hover_text(
                                 "Keep what it may do under this name, to apply to another phone or to pair one with.",
                             )
+                            .on_disabled_hover_text("Type a name for it first.")
                             .clicked()
                         {
                             // What a computer's page hides stays the default,
@@ -1978,14 +2041,88 @@ impl PocketdeskApp {
                         if !profiles.is_empty() {
                             ui.menu_button("Apply a profile", |ui| {
                                 for profile in &profiles {
-                                    if ui.button(&profile.name).clicked() {
+                                    if ui
+                                        .button(&profile.name)
+                                        .on_hover_text(format!(
+                                            "Allows: {}.",
+                                            crate::pair_view::profile_allows(&profile.permissions)
+                                        ))
+                                        .clicked()
+                                    {
                                         apply_profile = Some((device.id.clone(), profile.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                            ui.menu_button("Remove a profile\u{2026}", |ui| {
+                                for profile in &profiles {
+                                    if ui.button(&profile.name).clicked() {
+                                        remove_profile =
+                                            Some((device.id.clone(), profile.name.clone()));
                                         ui.close();
                                     }
                                 }
                             });
                         }
                     });
+                    // Q2 review: Apply turns switches off and may end a
+                    // session, so it asks, saying what goes; Remove asks too.
+                    if let Some((id, profile)) = &self.confirm_profile
+                        && *id == device.id
+                    {
+                        let off = model::profile_turns_off(
+                            &device.permissions,
+                            &profile.permissions,
+                            |c| profile_touches(c, device.computer),
+                        );
+                        let ends = off.iter().any(|c| model::fixed_at_session_start(*c));
+                        let turns_off = if off.is_empty() {
+                            "It turns nothing off.".to_string()
+                        } else {
+                            format!(
+                                "It turns off: {}.",
+                                off.iter()
+                                    .map(|c| PERMISSIONS
+                                        .iter()
+                                        .find(|(p, _, _)| p == c)
+                                        .map_or_else(|| format!("{c:?}"), |(_, l, _)| l.to_string()))
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
+                            )
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!(
+                                "Give {label} the {} profile? {turns_off}{}",
+                                profile.name,
+                                if ends {
+                                    " Its running session ends, to reconnect with them."
+                                } else {
+                                    ""
+                                }
+                            ));
+                            if ui.button("Apply").clicked() {
+                                profile_answer = Some(true);
+                            }
+                            if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
+                                profile_answer = Some(false);
+                            }
+                        });
+                    }
+                    if let Some((id, name)) = &self.confirm_remove_profile
+                        && *id == device.id
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!(
+                                "Remove the {name} profile? Phones given it keep their permissions."
+                            ));
+                            if ui.button("Remove").clicked() {
+                                remove_answer = Some(true);
+                            }
+                            if ui.button("Cancel").clicked() || crate::keys::escaped(ui) {
+                                remove_answer = Some(false);
+                            }
+                        });
+                    }
                     let mut ask_first = device.permissions.ask_first;
                     if ui
                         .checkbox(&mut ask_first, "Ask before each session")
@@ -2060,8 +2197,37 @@ impl PocketdeskApp {
                 .map_err(|e| format!("Could not save the profile: {e}")),
             );
         }
-        if let Some((id, profile)) = apply_profile {
-            self.apply_profile(&id, &profile);
+        if let Some(chosen) = apply_profile {
+            self.confirm_profile = Some(chosen);
+        }
+        if let Some(chosen) = remove_profile {
+            self.confirm_remove_profile = Some(chosen);
+        }
+        if let Some(yes) = profile_answer
+            && let Some((id, asked)) = self.confirm_profile.take()
+            && yes
+        {
+            // Read again: one replaced or removed since it was asked is
+            // not applied as it was (Q2 review).
+            match pocketdesk_core::local::permission_profiles::get(&self.state_dir, &asked.name) {
+                Some(profile) => self.apply_profile(&id, &profile),
+                None => {
+                    self.notice = crate::notice::Notice::error(format!(
+                        "The {} profile is gone: nothing was changed.",
+                        asked.name
+                    ))
+                }
+            }
+        }
+        if let Some(yes) = remove_answer
+            && let Some((_, name)) = self.confirm_remove_profile.take()
+            && yes
+        {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::permission_profiles::remove(&self.state_dir, &name)
+                    .map(|()| format!("Removed the {name} profile."))
+                    .map_err(|e| format!("Could not remove the {name} profile: {e}")),
+            );
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;
@@ -2978,9 +3144,14 @@ impl PocketdeskApp {
                     0 => "Also to…".to_string(),
                     n => format!("And {n} more…"),
                 };
-                ui.menu_button(title, |ui| {
+                let names: Vec<&str> = others
+                    .iter()
+                    .filter(|(id, _)| also.contains(id))
+                    .map(|(_, name)| name.as_str())
+                    .collect();
+                let menu = ui.menu_button(title, |ui| {
                     let mut every = others.iter().all(|(id, _)| also.contains(id));
-                    if ui.checkbox(&mut every, "Every one").changed() {
+                    if ui.checkbox(&mut every, "All of them").changed() {
                         *also = if every {
                             others.iter().map(|(id, _)| id.clone()).collect()
                         } else {
@@ -2998,6 +3169,11 @@ impl PocketdeskApp {
                         }
                     }
                 });
+                // Q2 review: "And 2 more…" says who.
+                if !names.is_empty() {
+                    menu.response
+                        .on_hover_text(format!("Also to {}", names.join(", ")));
+                }
             });
         }
         let mut send = None;
@@ -3018,8 +3194,12 @@ impl PocketdeskApp {
             // egui takes that key for text only, and with files copied
             // there is none.
             if ui
-                .button("Paste copied files")
+                .add_enabled(
+                    self.pasting.is_none(),
+                    egui::Button::new("Paste copied files"),
+                )
                 .on_hover_text("Send the files copied in Explorer or a file manager")
+                .on_disabled_hover_text("Reading the copied files\u{2026}")
                 .clicked()
             {
                 paste = true;
@@ -3046,6 +3226,7 @@ impl PocketdeskApp {
         // Read on a thread (P7 review: the clipboard's retries, or a dead
         // network drive's files, held the window).
         if paste && self.pasting.is_none() {
+            self.notice = crate::notice::Notice::working("Reading the copied files\u{2026}");
             self.pasting = Some(std::thread::spawn(
                 pocketdesk_core::local::clipboard_files::read,
             ));
@@ -3076,10 +3257,21 @@ impl PocketdeskApp {
                 return;
             }
             self.notice = crate::notice::Notice::outcome(
-                match model::queue_link(&self.state_dir, &device, &url, now_unix()) {
+                match model::queue_link(
+                    &self.state_dir,
+                    &device,
+                    &model::device_label(&self.snapshot.devices, &device),
+                    &url,
+                    now_unix(),
+                ) {
                     Ok(said) => {
                         self.send_link.clear();
-                        Ok(said)
+                        // Q2 review: the ticks under "Also to" are for files.
+                        Ok(if self.send_also.is_empty() {
+                            said
+                        } else {
+                            format!("{said} A link goes to the phone under To only.")
+                        })
                     }
                     Err(e) => Err(e),
                 },
@@ -3323,6 +3515,9 @@ impl PocketdeskApp {
         }
         // P7: files pasted from the clipboard, once read.
         if self.pasting.as_ref().is_some_and(|h| h.is_finished()) {
+            // Its "Reading…" ends with the read (Q2 review: a question for
+            // several phones left it spinning for five minutes).
+            self.notice = None;
             match self.pasting.take().and_then(|h| h.join().ok()).flatten() {
                 Some(copied) => {
                     let left_out = copied.left_out;

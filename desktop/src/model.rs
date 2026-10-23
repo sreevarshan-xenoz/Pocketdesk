@@ -616,7 +616,7 @@ pub const FEATURES: &[Feature] = &[
         key: "phone_actions",
         what: "Screenshots of it and locking it from here",
         phone_switch: "Let the computer take screenshots and lock this phone",
-        permission_name: "Take screenshots of it and lock it from here",
+        permission_name: "Take screenshots of it, lock it and open its apps from here",
         android: "the Pocketdesk control Accessibility service and notification access",
     },
 ];
@@ -626,7 +626,9 @@ pub const FEATURES: &[Feature] = &[
 /// not, as the Overview and the tray say it.
 pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static str> {
     if !allowed {
-        Err("This phone's \"Take screenshots of it and lock it from here\" is off in Devices.")
+        Err(
+            "This phone's \"Take screenshots of it, lock it and open its apps from here\" is off in Devices.",
+        )
     } else if !linked {
         Err("The phone is not linked now: a session, or one of its background features, links it.")
     } else {
@@ -716,6 +718,26 @@ pub fn mute_refused(
     quiet
         .and_then(|q| q.refused_unix)
         .is_some_and(|at| at <= now_unix && now_unix - at <= REFUSAL_SHOWN_SECS)
+}
+
+/// What the phone's last switches report says against Screenshot of the
+/// phone and Lock the phone (Q2 review: the Overview said "Asked" while
+/// the phone's own switch was off, and nothing came).
+pub fn phone_actions_refused(
+    switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
+) -> Option<&'static str> {
+    let said = switches?.switches.get("phone_actions")?;
+    if !said.on {
+        Some(
+            "Its \"Let the computer take screenshots and lock this phone\" is off, so it refuses a screenshot or a lock.",
+        )
+    } else if said.android == Some(false) {
+        Some(
+            "Android is not letting Pocketdesk's control service or notification access work on it, so it refuses a screenshot or a lock.",
+        )
+    } else {
+        None
+    }
 }
 
 /// Whether the phone is in its owner's own Do Not Disturb (D2 review): the
@@ -1066,6 +1088,7 @@ pub fn join_drops(waiting: &mut Vec<std::path::PathBuf>, dropped: Vec<std::path:
 pub fn queue_link(
     state_dir: &Path,
     device_id: &str,
+    who: &str,
     url: &str,
     now_unix: u64,
 ) -> Result<String, String> {
@@ -1075,10 +1098,12 @@ pub fn queue_link(
         .map(|store| store.permissions(device_id).allows(Capability::Links))
         .unwrap_or(true);
     if !allowed {
-        return Err("Not sent: Links is off for this phone (Devices tab).".to_string());
+        return Err(format!(
+            "Not sent: \"Open its links here\" is off for {who} on Devices."
+        ));
     }
     pocketdesk_core::local::links::request(state_dir, device_id, url, now_unix)
-        .map(|_| "Link sent: it waits on the phone as a notification.".to_string())
+        .map(|_| format!("Link sent to {who}: it waits there as a notification."))
         .map_err(|e| format!("Not sent: {e}."))
 }
 
@@ -1166,6 +1191,20 @@ pub fn apply_profile(
         p.ask_first = profile.ask_first;
     })?;
     Ok(narrowed)
+}
+
+/// What applying `profile` would turn off on a phone that has `current`:
+/// each permission shown for it that is on now and off in the profile, in
+/// the order of [`Capability::ALL`] (Q2 review: Apply asks first, saying so).
+pub fn profile_turns_off(
+    current: &DevicePermissions,
+    profile: &DevicePermissions,
+    shown: impl Fn(Capability) -> bool,
+) -> Vec<Capability> {
+    Capability::ALL
+        .into_iter()
+        .filter(|c| shown(*c) && current.allows(*c) && !profile.allows(*c))
+        .collect()
 }
 
 /// Whether a running session keeps its own copy of this permission, taken at
@@ -1266,6 +1305,23 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Q2: what a profile would turn off, only among the switches shown.
+    #[test]
+    fn a_profile_says_what_it_turns_off() {
+        use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
+        let mut current = DevicePermissions::default();
+        current.set(Capability::Input, true);
+        current.set(Capability::Exec, true);
+        current.set(Capability::Ring, true);
+        let mut profile = current.clone();
+        profile.set(Capability::Input, false);
+        profile.set(Capability::Exec, false);
+        profile.set(Capability::Ring, false);
+        let off = super::profile_turns_off(&current, &profile, |c| c != Capability::Ring);
+        assert_eq!(off, vec![Capability::Input, Capability::Exec]);
+        assert!(super::profile_turns_off(&current, &current, |_| true).is_empty());
+    }
+
     #[test]
     fn the_pages_features_are_the_phones() {
         let ours: Vec<&str> = super::FEATURES.iter().map(|f| f.key).collect();
@@ -1292,6 +1348,36 @@ mod tests {
                 .unwrap_err()
                 .contains("not linked")
         );
+    }
+
+    /// Q2: the phone's own switch against Screenshot and Lock, said.
+    #[test]
+    fn a_phone_s_switch_off_says_it_refuses_screenshots() {
+        use pocketdesk_core::local::phone_switches::{PhoneSwitches, from_body};
+        let said = |body: serde_json::Value| PhoneSwitches {
+            switches: from_body(&serde_json::json!({ "switches": body })).unwrap(),
+            updated_unix: 1,
+        };
+        let off = said(serde_json::json!({"phone_actions": {"on": false}}));
+        assert!(
+            super::phone_actions_refused(Some(&off))
+                .unwrap()
+                .contains("is off")
+        );
+        let no_control = said(serde_json::json!({"phone_actions": {"on": true, "android": false}}));
+        assert!(
+            super::phone_actions_refused(Some(&no_control))
+                .unwrap()
+                .contains("control")
+        );
+        let ready = said(serde_json::json!({"phone_actions": {"on": true, "android": true}}));
+        assert_eq!(super::phone_actions_refused(Some(&ready)), None);
+        // An older phone that never said: nothing claimed.
+        assert_eq!(
+            super::phone_actions_refused(Some(&said(serde_json::json!({})))),
+            None
+        );
+        assert_eq!(super::phone_actions_refused(None), None);
     }
 
     #[test]
@@ -2147,20 +2233,23 @@ mod tests {
     #[test]
     fn a_link_is_queued_for_the_server_and_one_that_may_not_open_is_refused() {
         let dir = temp_dir("link");
-        assert!(queue_link(&dir, "a", " https://example.org/page ", 100).is_ok());
+        assert!(queue_link(&dir, "a", "A", " https://example.org/page ", 100).is_ok());
         let queued = pocketdesk_core::local::links::take_all(&dir, 101);
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].url, "https://example.org/page", "trimmed");
-        assert!(queue_link(&dir, "a", "javascript:alert(1)", 100).is_err());
-        assert!(queue_link(&dir, "a", "", 100).is_err());
+        assert!(queue_link(&dir, "a", "A", "javascript:alert(1)", 100).is_err());
+        assert!(queue_link(&dir, "a", "A", "", 100).is_err());
 
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("a").unwrap();
         let mut permissions = store.permissions("a");
         permissions.links = Some(false);
         store.set_permissions("a", permissions).unwrap();
-        let refused = queue_link(&dir, "a", "https://example.org/", 100).unwrap_err();
-        assert!(refused.contains("Links"), "{refused}");
+        let refused = queue_link(&dir, "a", "A", "https://example.org/", 100).unwrap_err();
+        assert!(
+            refused.contains("Open its links here") && refused.contains(" A "),
+            "{refused}"
+        );
         assert!(pocketdesk_core::local::links::take_all(&dir, 101).is_empty());
     }
 

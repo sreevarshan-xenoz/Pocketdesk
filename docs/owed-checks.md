@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-933 open items.
+938 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 557 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 560 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 55 |
 | A phone with a SIM | 30 |
 | A second phone | 11 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 116 |
+| A Linux desktop (the Azure VM serves for some) | 118 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 31 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 91 |
 
@@ -1149,6 +1149,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
 
+**204. The desktop's O and P pages after their design pass (Q2)**
+
+- Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name.
+- The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours.
+- Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from.
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1977,6 +1983,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **200. Links by site (P8)**
 
 - A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
+
+**204. The desktop's O and P pages after their design pass (Q2)**
+
+- Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
+- Settings on Linux: no presenting or "Never send copies from these programs" rows; a bad link rule, words line or quiet hours keeping Save off.
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

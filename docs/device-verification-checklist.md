@@ -2714,6 +2714,16 @@ Owed:
 - [ ] The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
 - [ ] Texts turned off on Devices and the phone unpaired: the list forgotten.
 
+## 204. The desktop's O and P pages after their design pass (Q2)
+
+Built 2026-10-23. Unit-tested: what a profile turns off, the phone's switch against a screenshot, unread lines holding Save, a count's words. A harness test applies a profile through its question.
+Owed:
+- [ ] Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name.
+- [ ] The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours.
+- [ ] Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from.
+- [ ] Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
+- [ ] Settings on Linux: no presenting or "Never send copies from these programs" rows; a bad link rule, words line or quiet hours keeping Save off.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

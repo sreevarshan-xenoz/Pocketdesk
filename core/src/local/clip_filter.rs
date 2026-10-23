@@ -1,5 +1,5 @@
 //! Copies kept on this computer by the program that made them or by how
-//! they look (O4): desktop Settings "Never send copies from" (programs, by
+//! they look (O4): desktop Settings "Never send copies from these programs" (programs, by
 //! their file name) and "Never send copies that look like" (patterns,
 //! regular expressions). A copy either names stays here whatever road would
 //! have carried it (T10b's push, a session's sync, the tray's Send the
