@@ -204,6 +204,59 @@ def control_port(config_toml: str, default: int = 1716) -> int:
     return int(found.group(1)) if found else default
 
 
+def with_config(config_toml: str, values: dict[str, str]) -> str:
+    """`config_toml` with each top-level key in `values` set to its TOML
+    value, at the file's top; a key under a table is left alone, and an
+    array spread over lines goes whole."""
+    kept: list[str] = []
+    in_table = False
+    # Inside a multi-line array: whether it is dropped. It ends at a line
+    # that starts with `]`, as the config's writer lays one out (a `]`
+    # inside a string does not end it).
+    array: Optional[bool] = None
+    for line in config_toml.splitlines(keepends=True):
+        if array is not None:
+            if array:
+                kept.append(line)
+            if line.lstrip().startswith("]"):
+                array = None
+            continue
+        if re.match(r"\s*\[", line):
+            in_table = True
+        key = re.match(r"\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$", line)
+        opens = bool(key) and key.group(2).startswith("[") and not key.group(2).endswith("]")
+        if key and not in_table and key.group(1) in values:
+            array = False if opens else None
+            continue
+        kept.append(line)
+        if opens:
+            array = True
+    head = "".join(f"{k} = {v}\n" for k, v in values.items())
+    return head + "".join(kept)
+
+
+def alarm_vibrations(dump: str, package: str) -> list[tuple[str, int]]:
+    """`package`'s finished alarm vibrations in `dumpsys vibrator_manager`:
+    when each began (to the second) and how long it ran, in ms."""
+    found = []
+    for line in dump.splitlines():
+        if f"opPkg={package}," not in line or "Usage=ALARM" not in line:
+            continue
+        when = re.search(r"createTime: (\d\d-\d\d \d\d:\d\d:\d\d)", line)
+        ran = re.search(r"durationMs: (\d+)", line)
+        if when and ran:
+            found.append((when.group(1), int(ran.group(1))))
+    return found
+
+
+def torch_turns(dump: str, since: str) -> list[tuple[str, str]]:
+    """The torch turned on or off at `since` or after (`MM-DD HH:MM:SS`,
+    the phone's clock), oldest first, from `dumpsys media.camera` (which
+    lists the newest first; two in one second keep their order)."""
+    turns = re.findall(r"(\d\d-\d\d \d\d:\d\d:\d\d) : Torch for camera id \S+ turned (on|off)", dump)
+    return [(when, how) for when, how in reversed(turns) if when >= since]
+
+
 # ---- the phone and the server ----
 
 
@@ -325,6 +378,13 @@ class Phone:
     def logcat(self, tag: str) -> str:
         return adb("logcat", "-d", "-s", f"{tag}:*")
 
+    def clock(self) -> str:
+        """The phone's time as its dumpsys lines write it, `MM-DD HH:MM:SS`."""
+        return adb("shell", device_command("date", "+%m-%d %H:%M:%S")).strip()
+
+    def granted(self, permission: str) -> bool:
+        return f"{permission}: granted=true" in adb("shell", "dumpsys", "package", APP)
+
     def shows_media(self, title: str) -> bool:
         """Pocketdesk's own media session shows `title` (N5)."""
         return media_session_shows(adb("shell", "dumpsys", "media_session"), APP, title)
@@ -344,7 +404,60 @@ class Server:
             "POCKETDESK_CLIPBOARD_FILE": str(self.root / "clip.txt"),
             # N5: what plays here, read from a file, so this box's players are untouched.
             "POCKETDESK_MEDIA_FILE": str(self.root / "computer_media.json"),
+            # P3: presenting while this file is there.
+            "POCKETDESK_PRESENTING_FILE": str(self.root / "presenting"),
+            # P7: the files copied here, one path a line.
+            "POCKETDESK_CLIPBOARD_FILES_FILE": str(self.root / "clip_files.txt"),
         }
+
+    def cli(self, *args: str) -> tuple[int, str]:
+        return run([str(self.exe), *args], env=self.env())
+
+    def configure(self, values: dict[str, str]) -> str:
+        """Set top-level config keys while it runs (it reads them at each
+        notification); the file as it was, to put back."""
+        path = self.root / "config" / "config.toml"
+        before = path.read_text(encoding="utf-8") if path.exists() else ""
+        tmp = path.with_suffix(".toml.tmp")
+        tmp.write_text(with_config(before, values), encoding="utf-8")
+        os.replace(tmp, path)
+        return before
+
+    def restore_config(self, before: str) -> None:
+        path = self.root / "config" / "config.toml"
+        tmp = path.with_suffix(".toml.tmp")
+        tmp.write_text(before, encoding="utf-8")
+        os.replace(tmp, path)
+
+    def ask_phone(self, device: str, action: str, app: Optional[str] = None) -> None:
+        """As the desktop app asks (core::local::phone_actions)."""
+        folder = self.root / "state" / "phone_actions_out"
+        folder.mkdir(exist_ok=True)
+        rid = str(uuid.uuid4())
+        body = {"id": rid, "device_id": device, "action": action, "created_unix": int(time.time())}
+        if app:
+            body["app"] = app
+        tmp = folder / f"{rid}.json.tmp"
+        tmp.write_text(json.dumps(body), encoding="utf-8")
+        os.replace(tmp, folder / f"{rid}.json")
+
+    def send_clipboard(self, device: str) -> None:
+        """As the tray's Send the clipboard asks (core::local::clip_history::request_current)."""
+        folder = self.root / "state" / "clipboard_out"
+        folder.mkdir(exist_ok=True)
+        rid = str(uuid.uuid4())
+        body = {"id": rid, "device_id": device, "text": "", "created_unix": int(time.time()), "current": True}
+        tmp = folder / f"{rid}.json.tmp"
+        tmp.write_text(json.dumps(body), encoding="utf-8")
+        os.replace(tmp, folder / f"{rid}.json")
+
+    def kept(self, name: str, device: str) -> Optional[dict]:
+        """`device`'s entry in a `{device_id: …}` file the server keeps."""
+        try:
+            kept = json.loads((self.root / "state" / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return kept.get(device) if isinstance(kept, dict) else None
 
     def running(self) -> bool:
         _, out = run([str(self.exe), "status", "--json"], env=self.env())
@@ -855,6 +968,285 @@ def n6_put(ctx: Ctx) -> tuple[str, str]:
     # this computer's owner so). Its write is checked on the LAN road.
     refused = ", refused in an unmarked folder" if unmarked else ""
     return "PASS", f"made a folder the phone listed after{refused}; a file's write is owed on the LAN road"
+
+
+# ---- the O and P cycles (Q1) ----
+
+
+def sharing(ctx: Ctx) -> Optional[str]:
+    """Why the fixture's notifications would not reach the computer, if not."""
+    notes = ctx.phone.prefs("pocketdesk-phone-notifications")
+    if not notes.get("enabled") or FIXTURE not in (notes.get("shared") or []):
+        return f"turn on This phone's notifications for {FIXTURE}"
+    if not ctx.phone.may_notify(FIXTURE):
+        return "allow the fixture's notifications (open its field once and press Allow)"
+    return None
+
+
+def asleep_note(ctx: Ctx, nid: int, text: str, style: str = "plain", timeout: float = 30) -> Optional[dict]:
+    """A fixture notification posted with the phone asleep, so M6's hold
+    for a phone in hand never comes first; its event on the computer."""
+    count = ctx.server.event_count()
+    ctx.phone.sleep()
+    ctx.phone.notify(nid, "Ann", text, style=style)
+    got = wait_for(lambda: ctx.server.events_since(count, "notification", ctx.device, "Pocketdesk fixture"), timeout)
+    ctx.phone.cancel(nid)
+    ctx.phone.wake()
+    return got[-1] if got else None
+
+
+def clock_at(minutes_from_now: int) -> str:
+    """This computer's local time `minutes_from_now`, as `HH:MM`."""
+    return time.strftime("%H:%M", time.localtime(time.time() + 60 * minutes_from_now))
+
+
+def front_activity() -> str:
+    """The activity in front, as `dumpsys activity` names it."""
+    found = re.search(r"(?:topResumedActivity|mResumedActivity)=\S+ \S+ (\S+)", adb("shell", "dumpsys", "activity", "activities"))
+    return found.group(1) if found else ""
+
+
+ALL_DAYS = '["mon", "tue", "wed", "thu", "fri", "sat", "sun"]'
+
+
+@check("p2-apps", "§194")
+def p2_apps(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("apps_from_computer"):
+        return "SKIP", "turn on Let the computer open my apps in the phone's Settings"
+    ctx.phone.wake()
+    asked = int(time.time())
+    ctx.server.ask_phone(ctx.device, "apps")
+    listed = wait_for(lambda: (k := ctx.server.kept("phone_apps.json", ctx.device)) and k["at"] >= asked and k, 30)
+    try:
+        if not listed:
+            return "TIMEOUT", "no list of apps came"
+        ids = [a.get("id") for a in listed["apps"]]
+        if APP in ids:
+            return "FAIL", "Pocketdesk listed itself"
+        if "com.android.settings" not in ids:
+            return "FAIL", f"{len(ids)} apps listed, Settings not among them"
+        adb("shell", "input", "keyevent", "KEYCODE_HOME")
+        adb("logcat", "-c")
+        ctx.server.ask_phone(ctx.device, "open", "com.android.settings")
+        # What the phone made of it, as its own log says (Q1 review: any
+        # "Tap to open" left by an earlier check had passed): at once with
+        # the control service bound, else offered with "Tap to open".
+        said = wait_for(lambda: re.search(r"an app the computer named: ([^\r\n]+)", ctx.phone.logcat("PhoneActions")), 20)
+        front = said and said.group(1) == "opened" and wait_for(lambda: "com.android.settings" in front_activity(), 10)
+    finally:
+        (ctx.server.root / "state" / "phone_apps.json").unlink(missing_ok=True)
+        adb("shell", "input", "keyevent", "KEYCODE_HOME")
+    if not said:
+        return "TIMEOUT", f"{len(ids)} apps listed, but no word on the open"
+    outcome = said.group(1)
+    if outcome == "opened":
+        return ("PASS", f"{len(ids)} apps listed; Settings opened") if front else (
+            "FAIL", "the phone said opened, but Settings is not in front")
+    if outcome == "offered" and not ctx.phone.accessibility_on():
+        return "PASS", f"{len(ids)} apps listed; Settings offered with Tap to open (Pocketdesk control off)"
+    return "FAIL", f"the open was {outcome!r}"
+
+
+@check("p3-presenting", "§195")
+def p3_presenting(ctx: Ctx) -> tuple[str, str]:
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    flag = ctx.server.root / "presenting"
+    before = ctx.server.configure({"quiet_presenting": "true", "quiet_hours": "false"})
+    try:
+        flag.write_text("", encoding="utf-8")
+        held = asleep_note(ctx, 701, "Presenting " + secrets.token_hex(2))
+        flag.unlink()
+        shown = asleep_note(ctx, 702, "Not presenting " + secrets.token_hex(2))
+    finally:
+        flag.unlink(missing_ok=True)
+        ctx.server.restore_config(before)
+    if not held or not shown:
+        return "TIMEOUT", "a notification did not reach the computer"
+    if not held.get("presenting"):
+        return "FAIL", "shown while presenting"
+    if shown.get("presenting") or shown.get("alarm") or held.get("alarm"):
+        return "FAIL", "held with nothing presented, or marked alarm"
+    return "PASS", "held while presenting (presenting); shown after"
+
+
+@check("p3-hours", "§195")
+def p3_hours(ctx: Ctx) -> tuple[str, str]:
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    common = {"quiet_hours": "true", "quiet_presenting": "false", "quiet_days": ALL_DAYS}
+    before = ctx.server.configure({**common, "quiet_from": f'"{clock_at(-2)}"', "quiet_to": f'"{clock_at(10)}"'})
+    try:
+        held = asleep_note(ctx, 703, "Quiet now " + secrets.token_hex(2))
+        ctx.server.configure({**common, "quiet_from": f'"{clock_at(60)}"', "quiet_to": f'"{clock_at(70)}"'})
+        shown = asleep_note(ctx, 704, "Quiet later " + secrets.token_hex(2))
+    finally:
+        ctx.server.restore_config(before)
+    if not held or not shown:
+        return "TIMEOUT", "a notification did not reach the computer"
+    if not held.get("quiet_hours"):
+        return "FAIL", "shown within quiet hours"
+    if shown.get("quiet_hours") or shown.get("alarm") or held.get("alarm"):
+        return "FAIL", "held by a span later today, or marked alarm"
+    return "PASS", "held within quiet hours (quiet_hours); shown with a span later today"
+
+
+@check("p4-words", "§196")
+def p4_words(ctx: Ctx) -> tuple[str, str]:
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    words = "p4 " + secrets.token_hex(3)
+    before = ctx.server.configure({"hold_words": json.dumps([words])})
+    try:
+        held = asleep_note(ctx, 705, f"Today only: {words.upper()}")
+        shown = asleep_note(ctx, 706, "Lunch? " + secrets.token_hex(2))
+    finally:
+        ctx.server.restore_config(before)
+    if not held or not shown:
+        return "TIMEOUT", "a notification did not reach the computer"
+    if not held.get("held_by_words"):
+        return "FAIL", "shown with the words in it"
+    if shown.get("held_by_words") or shown.get("alarm") or held.get("alarm"):
+        return "FAIL", "held without the words, or marked alarm"
+    return "PASS", "held by its words, case aside (held_by_words); another shown"
+
+
+@check("p5-alarm", "§197")
+def p5_alarm(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("alarms_on_computer"):
+        return "SKIP", "turn on Alarms on the computer in the phone's Settings"
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    # Paused, so nothing rings on this computer.
+    code, out = ctx.server.cli("pause", "--for", "5")
+    if code != 0:
+        return "FAIL", f"the pause: {out.strip()[-200:]}"
+    try:
+        event = asleep_note(ctx, 707, "Wake up " + secrets.token_hex(2), style="alarm")
+        plain = asleep_note(ctx, 708, "Not an alarm " + secrets.token_hex(2))
+    finally:
+        # 4. A pause left on would hold the next run's notifications.
+        resumed, out = ctx.server.cli("pause", "--resume")
+    if resumed != 0:
+        return "FAIL", f"the pause was not ended: {out.strip()[-200:]}"
+    if not event or not plain:
+        return "TIMEOUT", "a notification did not reach the computer"
+    if not event.get("alarm"):
+        return "FAIL", "the alarm reached the computer as a plain notification"
+    if plain.get("alarm"):
+        return "FAIL", "a plain notification was marked alarm"
+    return "PASS", "marked alarm, a plain one not (paused here, so it did not ring)"
+
+
+@check("p6-several", "§198")
+def p6_several(ctx: Ctx) -> tuple[str, str]:
+    path = ctx.server.root / "p6-check.txt"
+    path.write_text("P6 " + secrets.token_hex(4), encoding="utf-8")
+    try:
+        code, out = ctx.server.cli("send", f"{ctx.device},nosuchphone,{ctx.device}", str(path), "--json")
+    finally:
+        path.unlink(missing_ok=True)
+    result = next((json.loads(line) for line in reversed(out.splitlines()) if line.startswith("{")), None)
+    if not result:
+        return "FAIL", f"no JSON (exit {code})"
+    sends = result.get("sends") or []
+    if len(sends) != 2:
+        return "FAIL", f"{len(sends)} sends, not 2 (the repeat skipped, the unknown refused)"
+    if result.get("error") != "1 of 2 did not go" or code != 2:
+        return "FAIL", f"error {result.get('error')!r}, exit {code}"
+    return "PASS", "the phone once, the repeat skipped, the unknown refused: 1 of 2 did not go, exit 2"
+
+
+@check("p7-files", "§199")
+def p7_files(ctx: Ctx) -> tuple[str, str]:
+    files = [ctx.server.root / f"p7-{n}.txt" for n in (1, 2)]
+    for f in files:
+        f.write_text("P7", encoding="utf-8")
+    listing = ctx.server.root / "clip_files.txt"
+    listing.write_text("".join(f"{f}\n" for f in files), encoding="utf-8")
+    seen = len(ctx.server.log())
+    try:
+        ctx.server.send_clipboard(ctx.device)
+        said = wait_for(lambda: re.search(r"(Queued \d+ copied file\(s\)|not sent the copied files: [^\n]*|not sent the copy[^\n]*)",
+                                          ctx.server.log()[seen:]), 15)
+    finally:
+        listing.unlink(missing_ok=True)
+        # A queued offer is read when the phone fetches it, which over adb
+        # reverse it cannot: the files go now.
+        for f in files:
+            f.unlink(missing_ok=True)
+    if not said:
+        return "TIMEOUT", "the request was not taken"
+    line = said.group(1)
+    if line.startswith("not sent the copy:"):
+        return "FAIL", f"taken as text: {line}"
+    # Over adb reverse files cannot reach the phone, so "phone not connected"
+    # is the answer expected here; on the LAN they are queued.
+    return "PASS", f"read as files: {line}"
+
+
+@check("p10-contacts", "§203")
+def p10_contacts(ctx: Ctx) -> tuple[str, str]:
+    if not ctx.phone.prefs("pocketdesk-texts").get("contacts_to_computer"):
+        return "SKIP", "turn on My contacts on the computer in the phone's Settings"
+    if not ctx.phone.granted("android.permission.READ_CONTACTS"):
+        return "SKIP", "allow Pocketdesk's contacts permission"
+    ctx.phone.wake()
+    asked = int(time.time())
+    ctx.server.ask_phone(ctx.device, "contacts")
+    try:
+        # Counts only: the list is the phone owner's.
+        listed = wait_for(lambda: (k := ctx.server.kept("phone_contacts.json", ctx.device)) and k["at"] >= asked and k, 30)
+        count = len(listed["contacts"]) if listed else 0
+    finally:
+        (ctx.server.root / "state" / "phone_contacts.json").unlink(missing_ok=True)
+    if not listed:
+        return "TIMEOUT", "no list of contacts came"
+    if count == 0:
+        return "SKIP", "the phone listed no contacts: add one to check the list"
+    return "PASS", f"{count} contacts listed (counts only; the list deleted)"
+
+
+@check("p11-ring", "§202")
+def p11_ring(ctx: Ctx) -> tuple[str, str]:
+    ui = ctx.phone.prefs("pocketdesk-ui")
+    if not ui.get("ring_from_computer"):
+        return "SKIP", "turn on Ring from the computer in the phone's Settings"
+    vibrates, flashes = ui.get("ring_vibrates", True), ui.get("ring_flashes", True)
+    if not (vibrates or flashes):
+        return "SKIP", "turn on Vibrate or Flash the torch while it rings"
+    since = ctx.phone.clock()
+    code, out = ctx.server.cli("ring", ctx.device)
+    if code != 0:
+        return "FAIL", out.strip().splitlines()[-1] if out.strip() else f"exit {code}"
+    # A vibration is listed once it has ended: the ring's 30 s.
+    def shaken():
+        return [v for v in alarm_vibrations(adb("shell", "dumpsys", "vibrator_manager"), APP) if v[0] >= since]
+    if vibrates:
+        shook = wait_for(shaken, 50, step=2)
+    else:
+        time.sleep(35)
+        shook = shaken()
+    turns = torch_turns(adb("shell", "dumpsys", "media.camera"), since)
+    said = []
+    if vibrates:
+        if not shook:
+            return "TIMEOUT", "no vibration ended within 50 s"
+        if shook[-1][1] < 25000:
+            return "FAIL", f"vibrated {shook[-1][1]} ms, not the ring's 30 s"
+        said.append(f"vibrated {shook[-1][1]} ms")
+    if flashes:
+        blinks = sum(1 for _, how in turns if how == "on")
+        if blinks < 3:
+            return "FAIL", f"the torch turned on {blinks} times"
+        if turns[-1][1] != "off":
+            return "FAIL", "the torch was left on"
+        said.append(f"the torch blinked {blinks} times, off at the end")
+    if not vibrates and shook:
+        return "FAIL", "vibrated with Vibrate off"
+    if not flashes and turns:
+        return "FAIL", "the torch blinked with Flash off"
+    return "PASS", ", ".join(said)
 
 
 # ---- main ----

@@ -2629,6 +2629,7 @@ Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server throu
 - [x] The apps asked for: 77 listed on the computer (Settings among them, Pocketdesk left out).
 - [x] An open with the control service off: "Tap to open: Settings" offered, and its tap opening Settings.
 - [x] An open with "Let the computer open my apps" off: refused (`OFF`).
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p2-apps`: 77 apps listed, Settings offered with Tap to open.
 Owed:
 - [ ] An open with the control service on: the app in front at once, also with the screen locked (refused) and from the background.
 - [ ] The Overview's "Open an app on the phone…" by hand: the search, "No answer from the phone" with the phone locked, Open greyed on an old list.
@@ -2639,6 +2640,7 @@ Owed:
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the fixture app's notifications, the config changed while it ran:
 - [x] "While presenting or in full screen" on with the seam's file (`POCKETDESK_PRESENTING_FILE`): logged with `presenting`; without the file, not.
 - [x] Quiet hours from two minutes ago to ten minutes on: logged with `quiet_hours`; with a span later today, not.
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p3-presenting`, `p3-hours`: held with `presenting` and with `quiet_hours`, each with a control shown.
 Owed:
 - [ ] Windows' own state: a PowerPoint slideshow, a game in full screen, and a video in a browser's full screen.
 - [ ] A notification under quiet hours with the phone locked: no pop-up, on Activity and, when answerable, on the Notifications page.
@@ -2647,14 +2649,18 @@ Owed:
 
 Built 2026-10-22. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the fixture app's notifications, the config changed while it ran:
 - [x] `big sale` held "Today only: BIG SALE" (logged with `held_by_words`); `Pocketdesk fixture: standup` held "Standup at 10"; "Lunch?" was not held.
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p4-words`: held by its words, case aside, with a control shown.
 Owed:
 - [ ] The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
 - [ ] An update held by its words closing the toast its first showed.
-- [ ] A call's note with words in it (a SIM): still shown.## 197. A phone's ringing alarm on the computer (P5)
+- [ ] A call's note with words in it (a SIM): still shown.
+
+## 197. A phone's ringing alarm on the computer (P5)
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, paused so nothing rang here, the alarm set with `SET_ALARM`:
 - [x] With "Alarms on the computer" on and Clock not shared, the ringing alarm (ColorOS: no category, no-clear, a foreground service) reached the computer logged with `alarm`.
 - [x] Seen first: with the switch off it never left the phone (dropped as ongoing).
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p5-alarm`: the fixture's `CATEGORY_ALARM` notification reached the computer marked `alarm`, the server paused.
 Owed:
 - [ ] The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
 - [ ] Linux's urgent notification.
@@ -2663,6 +2669,7 @@ Owed:
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, by the CLI:
 - [x] `pocketdesk send <phone>,nosuchphone,<the phone's id> file --json`: the OPPO's send queued once (the repeat skipped), the unknown name refused, `"error": "1 of 2 did not go"`, exit 2.
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p6-several`: the phone once, the repeat skipped, the unknown refused, exit 2.
 Owed:
 - [ ] Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 - [ ] The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
@@ -2670,6 +2677,7 @@ Owed:
 
 Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, both clipboard seams set (`POCKETDESK_CLIPBOARD_FILE`, `POCKETDESK_CLIPBOARD_FILES_FILE`), the request written as the tray writes it:
 - [x] Two copied files with the phone linked over `adb reverse` (which files cannot use): refused at once, "phone not connected", with the notification, nothing queued.
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p7-files`: two copied files read through the seam and queued.
 Owed:
 - [ ] On the LAN: two files copied in Explorer, the tray's Send the clipboard and the key each sending them, rows in the sent list.
 - [ ] Files off and text copied too: the text sent instead.
@@ -2681,7 +2689,9 @@ Owed:
 Built 2026-10-23. Unit-tested: the rules' reading and matching (the longest site, a name under it, an address whole, a backslash), and the links plugin with a stand-in opener and runner (a site shown, one handed to a program, one opened, a program that fails said).
 Owed:
 - [ ] A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
-- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.## 201. Permission profiles (P9)
+- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.
+
+## 201. Permission profiles (P9)
 
 Built 2026-10-23. Unit-tested: the store (saved, replaced, removed, a broken file kept), the PIN file's `profile` line (with its space, CRLF, a bad name still someone else's), the pairing preset (a profile's permissions for a new phone, never widening one paired, none for a computer).
 Owed:
@@ -2691,6 +2701,7 @@ Owed:
 
 Built 2026-10-23. JVM-tested: the torch's blink and the vibration's pattern. Checked on the OPPO (CPH2359) with `pocketdesk ring` from a throwaway server through `adb reverse`:
 - [x] The ring vibrates (an alarm vibration of 30,009 ms) and blinks the torch every 0.4 s, both ending with the ring's 30 seconds.
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p11-ring`: a 30 s alarm vibration and 38 torch blinks, off at the end.
 Owed:
 - [ ] Stop and a dismiss ending both at once.
 - [ ] Each switch off: no shaking, no torch; the camera open in an app: the torch left alone, the ring going on.
@@ -2698,6 +2709,7 @@ Owed:
 
 Built 2026-10-23. Unit-tested: the list's reading (names cleaned, numbers a call takes, each once, five a contact), the store, the phone's rule (its switch, its own computer, Android's permission, the minute), the desktop's search. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, the ask written as the desktop app writes it:
 - [x] With the switch on and contacts allowed, the phone's list reached the computer (counts only were looked at; the file was deleted after).
+- [x] 2026-10-23, by `scripts/device_checks.py` (Q1) on the OPPO, `p10-contacts`: the list reached the computer (its count only), then deleted.
 Owed:
 - [ ] The Messages page by hand: Ask, the search, Text filling the number, Copy, Call (and with Dial off), "No answer" with the switch off.
 - [ ] Texts turned off on Devices and the phone unpaired: the list forgotten.

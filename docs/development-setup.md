@@ -185,8 +185,14 @@ types into it and posts notifications on it.
    allow its notifications.
 4. On the phone, turn on what the checks use: Typing from the computer's keyboard,
    Copies by themselves, This phone's notifications for "Pocketdesk fixture" and
-   Quiet on the computer while I use the phone. A check whose switch is off is
-   SKIPped with what to turn on.
+   Quiet on the computer while I use the phone. The P cycle's checks also use Let
+   the computer open my apps, Alarms on the computer, Ring from the computer and My
+   contacts on the computer (the contacts check looks only at the count and deletes
+   the list). A check whose switch is off is SKIPped with what to turn on.
+
+   The P cycle's checks change the throwaway's `config.toml` while it runs (quiet
+   hours, words, putting it back after) and pause it for the alarm, so nothing rings
+   here; P11's ring sounds, shakes and flashes the phone for 30 s.
 5. Run `python scripts/device_checks.py --server-root <root> --server-exe <pocketdesk>`
    (`--only ID…` for some, `--serial` with more than one phone). On Git Bash, give
    Windows paths (`C:/…`): with `MSYS_NO_PATHCONV=1`, `/c/…` reaches Python as is.

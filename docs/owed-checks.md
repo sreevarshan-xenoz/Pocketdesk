@@ -1119,6 +1119,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings box by hand: its warning for a line ending with a colon, and Activity naming the line with "Details in events" on.
 - An update held by its words closing the toast its first showed.
+
+**197. A phone's ringing alarm on the computer (P5)**
+
 - A finished timer, and a Pixel's clock (`CATEGORY_ALARM`, local only).
 
 **198. Files to several phones or computers at once (P6)**
@@ -1132,7 +1135,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **200. Links by site (P8)**
 
-- The Settings box by hand: its warning for a bad line, a .bat refused.## 201. Permission profiles (P9)
+- The Settings box by hand: its warning for a bad line, a .bat refused.
+
+**201. Permission profiles (P9)**
+
 - Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
 
 **202. A ring that vibrates and flashes (P11)**
@@ -1451,7 +1457,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **196. Notifications held by their words (P4)**
 
-- A call's note with words in it (a SIM): still shown.## 197. A phone's ringing alarm on the computer (P5)
+- A call's note with words in it (a SIM): still shown.
 
 **203. The phone's contacts on the computer (P10)**
 
@@ -1960,7 +1966,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Settings row by hand (the days, a bad time's warning) and the Overview's line, also on Linux.
 
-**196. Notifications held by their words (P4)**
+**197. A phone's ringing alarm on the computer (P5)**
 
 - Linux's urgent notification.
 
@@ -2361,7 +2367,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - TalkBack reads the box and its Clear; Spanish and Tamil search their own words.
 
-**196. Notifications held by their words (P4)**
+**197. A phone's ringing alarm on the computer (P5)**
 
 - The Windows alarm toast by ear and eye: its sound, Snooze and Stop pressed from here, Dismiss, its close when the phone stops it, and its end after ten minutes.
 
@@ -2369,7 +2375,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - On the LAN: two files copied in Explorer, the tray's Send the clipboard and the key each sending them, rows in the sent list.
 
-**200. Links by site (P8)**
+**201. Permission profiles (P9)**
 
 - Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
 
