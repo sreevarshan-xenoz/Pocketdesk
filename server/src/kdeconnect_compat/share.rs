@@ -226,6 +226,165 @@ async fn receive(
     receive_into(&mut tls, offer, places, Pace::DEFAULT, allowed).await
 }
 
+/// How long a device is given to come for a file once told of it (T6).
+const COME_FOR_IT: Duration = Duration::from_secs(60);
+
+/// Files this computer sends KDE Connect devices at once (T6).
+static SENDING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// How long a file waits for the one before it to the same device (T6
+/// review: a device fetches one file at a time, so a second one told at
+/// once timed out while the first went).
+const DEVICE_WAIT: Duration = Duration::from_secs(30 * 60);
+
+/// Each device's turn: one file to it at a time.
+fn device_turn(device_id: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    static TURNS: std::sync::LazyLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::LazyLock::new(Default::default);
+    let mut turns = TURNS.lock().unwrap_or_else(|e| e.into_inner());
+    // Turns no one holds or waits for go.
+    turns.retain(|_, turn| std::sync::Arc::strong_count(turn) > 1);
+    turns.entry(device_id.to_string()).or_default().clone()
+}
+
+/// Send the file at `path` to the paired KDE Connect device `device_id`
+/// (T6), as KDE Connect sends one: this computer listens on a port of
+/// [`PORTS`], tells the device of the file on its link, and the device
+/// comes for it from the link's address, TLS with this computer as the
+/// server, held to the device's pinned certificate; the file's bytes, then
+/// done. The device keeps it in its own Downloads (its owner may be asked).
+pub async fn send(device_id: &str, path: &Path) -> Result<(), String> {
+    let dir = crate::state::state_dir().map_err(|e| e.to_string())?;
+    let pin = super::link::pin_of(&dir, device_id).ok_or("the device is not paired")?;
+    let identity = super::load_identity().map_err(|e| format!("no KDE identity: {e:#}"))?;
+    let turn = device_turn(device_id);
+    let _device = tokio::time::timeout(DEVICE_WAIT, turn.lock())
+        .await
+        .map_err(|_| "the files before it to this device took too long".to_string())?;
+    let _turn = tokio::time::timeout(TURN_WAIT, SENDING.acquire())
+        .await
+        .map_err(|_| "busy with other files".to_string())?
+        .map_err(|e| e.to_string())?;
+    // Its address as it is now, after the wait (T6 review).
+    let address = super::link::address_of(device_id).ok_or("the device is not connected now")?;
+    // This computer listens on IPv4 (T6 review: a device linked over IPv6
+    // dialled a closed port and the send waited a minute).
+    if !address.to_canonical().is_ipv4() {
+        return Err("the device is linked over IPv6, where it cannot come for a file".to_string());
+    }
+    let listener = listen().await?;
+    send_with(
+        &identity,
+        device_id,
+        pin,
+        address,
+        listener,
+        path,
+        |offer| super::link::tell(device_id, offer),
+    )
+    .await
+}
+
+/// A listener on the first free port of [`PORTS`].
+async fn listen() -> Result<tokio::net::TcpListener, String> {
+    for port in PORTS {
+        if let Ok(listener) = tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
+            return Ok(listener);
+        }
+    }
+    Err("no free port for KDE Connect files (1739 to 1764)".to_string())
+}
+
+/// [`send`]'s work: `tell` gives the link the offer.
+async fn send_with(
+    identity: &CompatIdentity,
+    device_id: &str,
+    pin: [u8; 32],
+    address: IpAddr,
+    listener: tokio::net::TcpListener,
+    path: &Path,
+    tell: impl FnOnce(super::link::Event) -> bool,
+) -> Result<(), String> {
+    let meta = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| format!("it cannot be read: {e}"))?;
+    if !meta.is_file() {
+        return Err("not a file".to_string());
+    }
+    let size = meta.len();
+    // As this computer takes a device's: a KDE device makes nothing of one.
+    if size == 0 {
+        return Err("an empty file".to_string());
+    }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("no file name")?;
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let config = super::handshake::server_config(identity, device_id, pin)?;
+    if !tell(super::link::Event::Share {
+        name,
+        size,
+        port,
+        modified_ms,
+    }) {
+        return Err("the device is not connected now".to_string());
+    }
+    // Only the device, from its link's address, may come for it.
+    let deadline = tokio::time::Instant::now() + COME_FOR_IT;
+    let tcp = loop {
+        let (tcp, from) = tokio::time::timeout_at(deadline, listener.accept())
+            .await
+            .map_err(|_| "the device did not come for it (is KDE Connect open there?)".to_string())?
+            .map_err(|e| e.to_string())?;
+        if from.ip().to_canonical() == address.to_canonical() {
+            break tcp;
+        }
+        tracing::warn!("A connection for a KDE Connect file from another address was refused");
+    };
+    drop(listener);
+    let mut tls = tokio::time::timeout(STEP, tokio_rustls::TlsAcceptor::from(config).accept(tcp))
+        .await
+        .map_err(|_| "no TLS handshake in time".to_string())?
+        .map_err(|e| format!("TLS: {e}"))?;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| format!("it cannot be read: {e}"))?;
+    // In pieces, each given the pace's quiet time (T6 review: a device that
+    // stopped reading held the send for as long as the system kept the
+    // connection).
+    let pace = Pace::DEFAULT;
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut sent = 0u64;
+    while sent < size {
+        let want = buffer.len().min((size - sent) as usize);
+        let n = file
+            .read(&mut buffer[..want])
+            .await
+            .map_err(|e| format!("it cannot be read: {e}"))?;
+        if n == 0 {
+            return Err("the file shrank while it was sent".to_string());
+        }
+        tokio::time::timeout(pace.quiet, tls.write_all(&buffer[..n]))
+            .await
+            .map_err(|_| "the device stopped taking it".to_string())?
+            .map_err(|e| format!("it broke off: {e}"))?;
+        sent += n as u64;
+    }
+    tokio::time::timeout(pace.quiet, tls.flush())
+        .await
+        .map_err(|_| "the device stopped taking it".to_string())?
+        .map_err(|e| format!("it broke off: {e}"))?;
+    let _ = tls.shutdown().await;
+    Ok(())
+}
+
 /// Why a file stopped when its device was no longer allowed it.
 const NO_LONGER: &str = "the device is no longer paired or allowed files";
 
@@ -359,6 +518,91 @@ mod tests {
             parts: downloads.with_extension("parts"),
             downloads: downloads.to_path_buf(),
         }
+    }
+
+    /// T6: a file sent to a device: told on its link with the port, taken
+    /// from that port by the device over TLS with each side's certificate,
+    /// byte for byte; a device with another certificate is refused.
+    #[tokio::test]
+    async fn a_file_goes_to_the_device_that_comes_for_it() {
+        let dir = temp("send");
+        let ours = CompatIdentity::load_or_create(&dir.join("ours")).unwrap();
+        let device = CompatIdentity::load_or_create(&dir.join("device")).unwrap();
+        let stranger = CompatIdentity::load_or_create(&dir.join("stranger")).unwrap();
+        let file = dir.join("Report.pdf");
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &bytes).unwrap();
+        let pin = super::super::handshake::cert_hash(&device.cert_der);
+        let ours_pin = super::super::handshake::cert_hash(&ours.cert_der);
+
+        let come_for_it = |who: CompatIdentity, port: u16| {
+            let ours_id = ours.id.clone();
+            tokio::spawn(async move {
+                let tcp = tokio::net::TcpStream::connect(("127.0.0.1", port))
+                    .await
+                    .unwrap();
+                let config =
+                    super::super::handshake::client_config(&who, &ours_id, Some(ours_pin)).unwrap();
+                let name = rustls::pki_types::ServerName::try_from("kdeconnect").unwrap();
+                let mut tls = tokio_rustls::TlsConnector::from(config)
+                    .connect(name, tcp)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let mut got = Vec::new();
+                tls.read_to_end(&mut got).await.map_err(|e| e.to_string())?;
+                Ok::<_, String>(got)
+            })
+        };
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // The device comes for it as it is told; the listener is up first.
+        let device_side = come_for_it(device.clone(), port);
+        let (told, offered) = std::sync::mpsc::channel();
+        send_with(
+            &ours,
+            &device.id,
+            pin,
+            "127.0.0.1".parse().unwrap(),
+            listener,
+            &file,
+            |offer| told.send(offer).is_ok(),
+        )
+        .await
+        .unwrap();
+        let super::super::link::Event::Share {
+            name,
+            size,
+            port: told_port,
+            ..
+        } = offered.try_recv().unwrap()
+        else {
+            panic!("not a share");
+        };
+        assert_eq!(
+            (name.as_str(), size, told_port),
+            ("Report.pdf", 300_000, port)
+        );
+        assert_eq!(device_side.await.unwrap().unwrap(), bytes);
+
+        // Another certificate is refused: the send ends without the bytes.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let refused = tokio::join!(
+            send_with(
+                &ours,
+                &device.id,
+                pin,
+                "127.0.0.1".parse().unwrap(),
+                listener,
+                &file,
+                |_| true
+            ),
+            come_for_it(stranger, port)
+        );
+        assert!(refused.0.is_err(), "the stranger's certificate");
+        assert!(refused.1.unwrap().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

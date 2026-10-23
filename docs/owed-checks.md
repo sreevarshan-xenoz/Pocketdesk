@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-891 open items.
+895 open items.
 
 | Where | Items |
 |---|---|
@@ -13,9 +13,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 35 |
 | A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 163 |
+| A Linux desktop (the Azure VM serves for some) | 164 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 355 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 358 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -247,7 +247,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
 - The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
-- Windows: after `pocketdesk install`, the firewall has TCP 1716-1725 and UDP 4716 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
+- Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 
 **89. The phone's navigation and feedback (U2)**
 
@@ -1322,6 +1322,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
 - Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
 
+**211. Files to a KDE Connect device (T6)**
+
+- KDE Connect on a Linux desktop (or GSConnect), the same. (where: linux)
+
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
 **13. PiP + multitask (Tier-3 #14, DeX)**
@@ -2328,3 +2332,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On a LAN: Save the chosen landing, a video opening in the player, a HEIC photo's PNG on the computer's clipboard. (where: by hand)
 - The desktop app's Phone page by hand: More photos, the ticks and their limit of 20, a page of screenshots only. (where: by hand)
 - "Its videos too" asking for video access; Settings in Spanish and Tamil. (where: by hand)
+
+**211. Files to a KDE Connect device (T6)**
+
+- KDE Connect on Android, paired: a file from the Files page and from `pocketdesk send <device>` lands in its Downloads, its name and date kept; two files one after the other. (where: by hand)
+- The device not connected: the send fails in the Sent list with why; a folder refused with why. (where: by hand)
+- Windows: `pocketdesk install` opening TCP 1739-1764, and a device coming for a file through the firewall. (where: by hand)

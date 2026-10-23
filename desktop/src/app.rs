@@ -3273,11 +3273,13 @@ impl PocketdeskApp {
             }
         });
         if let Some(url) = link {
-            // A link opens on a phone; another computer takes files (2h).
+            // A link opens on a phone; another computer or a KDE Connect
+            // device takes files (2h, T6).
             if self
                 .snapshot
                 .linked_computers
                 .iter()
+                .chain(&self.snapshot.kde_devices)
                 .any(|(id, _)| *id == device)
             {
                 self.notice = crate::notice::Notice::error(

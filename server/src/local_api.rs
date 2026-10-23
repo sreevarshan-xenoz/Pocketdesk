@@ -459,14 +459,22 @@ pub fn send_in(
         Err(reason) => return refused(exit::FAILED, reason),
     };
     let computers = pocketdesk_core::local::computers::read(state_dir).computers;
+    // T6: a paired KDE Connect device, by its id or its name.
+    let kde = pocketdesk_core::local::kdeconnect_devices::devices(state_dir);
     let device_id = match resolve_phone(&ids, query) {
         Ok(id) => id,
         Err(reason) => match resolve_computer(&computers, query) {
             Some(Ok(id)) => id,
             Some(Err(ambiguous)) => return refused(exit::BAD_ARGUMENTS, ambiguous),
-            None => return refused(exit::BAD_ARGUMENTS, reason),
+            None => match resolve_kde(&kde, query) {
+                Some(Ok(id)) => id,
+                Some(Err(ambiguous)) => return refused(exit::BAD_ARGUMENTS, ambiguous),
+                None => return refused(exit::BAD_ARGUMENTS, reason),
+            },
         },
     };
+    // The server says whether its link is up: the desktop app does not know.
+    let to_kde = kde.iter().any(|d| d.device_id == device_id);
     // An offer reaches only a phone files can reach (holding a control
     // link at home, a session's or a background one, T10d, or by the
     // internet road with `internet_files` on, 2c), and a computer only
@@ -480,7 +488,7 @@ pub fn send_in(
                 format!("{} is not linked now ({})", computer.name, computer.link),
             );
         }
-    } else {
+    } else if !to_kde {
         let mirror = live_mirror(state_dir, now, true);
         if !mirror.as_ref().is_some_and(|m| m.files_reach(&device_id)) {
             // Linked, but files cannot reach it: by the internet road with
@@ -1455,6 +1463,30 @@ pub fn resolve_phone(ids: &[String], query: &str) -> Result<String, String> {
             "{} paired phones' ids start with {query:?}: give more of it",
             matches.len()
         )),
+    }
+}
+
+/// A paired KDE Connect device named by `query` (T6): its id, or its name
+/// (any case); `Err` when several share the name.
+fn resolve_kde(
+    devices: &[pocketdesk_core::local::kdeconnect_devices::KdeDevice],
+    query: &str,
+) -> Option<Result<String, String>> {
+    let query = query.trim();
+    if let Some(d) = devices.iter().find(|d| d.device_id == query) {
+        return Some(Ok(d.device_id.clone()));
+    }
+    let named: Vec<_> = devices
+        .iter()
+        .filter(|d| d.name.eq_ignore_ascii_case(query))
+        .collect();
+    match named.as_slice() {
+        [] => None,
+        [one] => Some(Ok(one.device_id.clone())),
+        _ => Some(Err(format!(
+            "{} paired KDE Connect devices are named {query:?}: give its id",
+            named.len()
+        ))),
     }
 }
 
@@ -2655,6 +2687,36 @@ mod tests {
             pocketdesk_core::local::links::take_all(&dir, pocketdesk_core::local::pin::now_unix())
                 .is_empty()
         );
+    }
+
+    /// T6: a paired KDE Connect device is named by its id or its name.
+    #[test]
+    fn a_kde_connect_device_is_found_by_id_or_name() {
+        let device = |id: &str, name: &str| pocketdesk_core::local::kdeconnect_devices::KdeDevice {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            cert_hash: String::new(),
+            paired_unix: 0,
+            permissions: Default::default(),
+        };
+        let devices = [
+            device("kde_1", "Tablet"),
+            device("kde_2", "Phone"),
+            device("kde_3", "phone"),
+        ];
+        assert_eq!(
+            resolve_kde(&devices, "tablet"),
+            Some(Ok("kde_1".to_string()))
+        );
+        assert_eq!(
+            resolve_kde(&devices, "kde_2"),
+            Some(Ok("kde_2".to_string()))
+        );
+        assert!(
+            resolve_kde(&devices, "Phone").unwrap().is_err(),
+            "two of that name"
+        );
+        assert_eq!(resolve_kde(&devices, "Laptop"), None);
     }
 
     #[test]

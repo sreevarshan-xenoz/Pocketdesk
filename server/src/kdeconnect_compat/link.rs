@@ -70,17 +70,27 @@ pub enum Event {
     Clipboard(String),
     /// Ring a paired device allowed it.
     Ring,
+    /// Offer a paired device a file this computer sends it (T6): the device
+    /// comes for it at `port`, as KDE Connect's own sending does.
+    Share {
+        name: String,
+        size: u64,
+        port: u16,
+        /// Its date, milliseconds since the epoch, kept there (K1).
+        modified_ms: Option<u64>,
+    },
 }
 
 /// A live link: its token, the certificate it came with, the way to tell
-/// it of an event, and what closes it when a newer link takes its place (a
+/// it of an event, what closes it when a newer link takes its place (a
 /// token, not an event: an event is dropped when the link's queue is full,
-/// 3c review).
+/// 3c review), and the device's address (T6: only it may come for a file).
 type LiveLink = (
     u64,
     [u8; 32],
     mpsc::Sender<Event>,
     tokio_util::sync::CancellationToken,
+    Option<std::net::IpAddr>,
 );
 
 /// The links up now, by device id, each with a token of its own.
@@ -124,8 +134,16 @@ pub fn tell(device_id: &str, event: Event) -> bool {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(device_id)
-        .map(|(_, _, tx, _)| tx.clone());
+        .map(|(_, _, tx, _, _)| tx.clone());
     link.is_some_and(|tx| tx.try_send(event).is_ok())
+}
+
+/// The address `device_id`'s live link came from (T6), if it has one.
+pub fn address_of(device_id: &str) -> Option<std::net::IpAddr> {
+    LIVE.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .and_then(|(_, _, _, _, address)| *address)
 }
 
 /// A link counted live while held. A newer one from the same device, with
@@ -137,18 +155,23 @@ pub fn tell(device_id: &str, event: Event) -> bool {
 struct Live(String, u64, tokio_util::sync::CancellationToken);
 
 impl Live {
-    fn new(device_id: &str, cert_hash: [u8; 32], tx: mpsc::Sender<Event>) -> Option<Self> {
+    fn new(
+        device_id: &str,
+        cert_hash: [u8; 32],
+        tx: mpsc::Sender<Event>,
+        address: Option<std::net::IpAddr>,
+    ) -> Option<Self> {
         let token = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let replaced = tokio_util::sync::CancellationToken::new();
         let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
         if live
             .get(device_id)
-            .is_some_and(|(_, theirs, _, _)| *theirs != cert_hash)
+            .is_some_and(|(_, theirs, _, _, _)| *theirs != cert_hash)
         {
             return None;
         }
-        let entry = (token, cert_hash, tx, replaced.clone());
-        if let Some((_, _, _, older)) = live.insert(device_id.to_string(), entry) {
+        let entry = (token, cert_hash, tx, replaced.clone(), address);
+        if let Some((_, _, _, older, _)) = live.insert(device_id.to_string(), entry) {
             older.cancel();
         }
         Some(Self(device_id.to_string(), token, replaced))
@@ -165,7 +188,7 @@ impl Drop for Live {
         let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
         if live
             .get(&self.0)
-            .is_some_and(|(token, _, _, _)| *token == self.1)
+            .is_some_and(|(token, _, _, _, _)| *token == self.1)
         {
             live.remove(&self.0);
         }
@@ -280,7 +303,7 @@ async fn run_in<S: AsyncRead + AsyncWrite + Unpin>(
     let device_id = link.hello.device_id.clone();
     let name = link.hello.device_name.clone();
     let (tx, mut events) = mpsc::channel(8);
-    let Some(_live) = Live::new(&device_id, link.cert_hash, tx) else {
+    let Some(_live) = Live::new(&device_id, link.cert_hash, tx, address) else {
         tracing::warn!(
             device_id,
             "A KDE Connect link refused: this device is connected with another certificate"
@@ -757,7 +780,30 @@ impl State {
             Event::Ring if self.paired && self.permissions().find => {
                 vec![NetworkPacket::new(RING)]
             }
-            Event::Ping | Event::Clipboard(_) | Event::Ring => Vec::new(),
+            // T6: a file the owner sends it; the device comes for it.
+            Event::Share {
+                name,
+                size,
+                port,
+                modified_ms,
+            } if self.paired => {
+                // KDE Connect's own senders say how many go and their size.
+                let mut body = serde_json::json!({
+                    "filename": name,
+                    "open": false,
+                    "numberOfFiles": 1,
+                    "totalPayloadSize": size,
+                });
+                if let Some(ms) = modified_ms {
+                    body["lastModified"] = ms.into();
+                }
+                let mut packet = NetworkPacket::new(super::share::SHARE)
+                    .with_body(body)
+                    .with_payload_size(size);
+                packet.payload_transfer_info = Some(serde_json::json!({ "port": port }));
+                vec![packet]
+            }
+            Event::Ping | Event::Clipboard(_) | Event::Ring | Event::Share { .. } => Vec::new(),
         }
     }
 
@@ -1207,10 +1253,10 @@ mod tests {
     async fn a_newer_link_takes_the_older_ones_place_and_its_going_leaves_the_new_one() {
         let id = "r".repeat(32);
         let (old_tx, mut old_rx) = mpsc::channel(1);
-        let old = Live::new(&id, [1; 32], old_tx).unwrap();
+        let old = Live::new(&id, [1; 32], old_tx, None).unwrap();
         let (other_tx, _other_rx) = mpsc::channel(4);
         assert!(
-            Live::new(&id, [2; 32], other_tx).is_none(),
+            Live::new(&id, [2; 32], other_tx, None).is_none(),
             "another certificate does not take a live link's place"
         );
         assert!(
@@ -1220,7 +1266,7 @@ mod tests {
         // The old link's queue is full: its closing must not need room.
         assert!(tell(&id, Event::Ping));
         let (new_tx, mut new_rx) = mpsc::channel(4);
-        let new = Live::new(&id, [1; 32], new_tx).unwrap();
+        let new = Live::new(&id, [1; 32], new_tx, None).unwrap();
         assert!(old.replaced().is_cancelled(), "the old link is closed");
         assert_eq!(old_rx.try_recv().unwrap(), Event::Ping);
         drop(old);
@@ -1230,7 +1276,7 @@ mod tests {
         assert!(!tell(&id, Event::Ping));
         let (other_tx, _other_rx) = mpsc::channel(4);
         assert!(
-            Live::new(&id, [2; 32], other_tx).is_some(),
+            Live::new(&id, [2; 32], other_tx, None).is_some(),
             "once none is live, it may connect"
         );
     }

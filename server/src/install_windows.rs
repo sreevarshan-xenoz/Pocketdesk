@@ -60,7 +60,7 @@ const TAILSCALE_ADAPTER: &str = "Tailscale";
 /// Ports the phone reaches, with the protocol, the last port of the range,
 /// and what each carries. Control is a range (T1): the server moves past
 /// 1716 when KDE Connect for Windows or another program holds it.
-const PORTS: [(&str, u16, u16, &str); 2] = [
+const PORTS: [(&str, u16, u16, &str); 3] = [
     (
         "TCP",
         1716,
@@ -68,6 +68,9 @@ const PORTS: [(&str, u16, u16, &str); 2] = [
         "control",
     ),
     ("UDP", 4716, 4716, "media"),
+    // T6: a KDE Connect device comes for a file this computer sends it on
+    // one of KDE Connect's payload ports.
+    ("TCP", 1739, 1764, "KDE Connect files"),
 ];
 
 /// A port or range as `New-NetFirewallRule -LocalPort` takes it.
@@ -344,7 +347,9 @@ pub fn install(elevated: bool) -> Result<()> {
 
     match run_elevated("firewall-add") {
         Ok(0) => {
-            println!("Opened TCP 1716-1725 and UDP 4716 to this program (local subnet + tailnet)")
+            println!(
+                "Opened TCP 1716-1725, UDP 4716 and TCP 1739-1764 to this program (local subnet + tailnet)"
+            )
         }
         Ok(code) => println!(
             "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `pocketdesk firewall-add`"
@@ -466,7 +471,8 @@ mod tests {
             opened,
             [
                 ("TCP", "1716-1725".to_string()),
-                ("UDP", "4716".to_string())
+                ("UDP", "4716".to_string()),
+                ("TCP", "1739-1764".to_string())
             ]
         );
     }
