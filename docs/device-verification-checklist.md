@@ -2666,6 +2666,15 @@ Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server throu
 Owed:
 - [ ] Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 - [ ] The Files page by hand: "Also to…", "Every one", "And 2 more…", a drop's "All of them", the notice when one has left.
+## 199. Files copied in Explorer sent with the clipboard key (P7)
+
+Built 2026-10-23. Checked on the OPPO (CPH2359) against a throwaway server through `adb reverse`, both clipboard seams set (`POCKETDESK_CLIPBOARD_FILE`, `POCKETDESK_CLIPBOARD_FILES_FILE`), the request written as the tray writes it:
+- [x] Two copied files with the phone linked over `adb reverse` (which files cannot use): refused at once, "phone not connected", with the notification, nothing queued.
+Owed:
+- [ ] On the LAN: two files copied in Explorer, the tray's Send the clipboard and the key each sending them, rows in the sent list.
+- [ ] Files off and text copied too: the text sent instead.
+- [ ] The Files page's "Paste copied files", one target and several; more than 100 copied.
+- [ ] Linux: files copied in Nautilus or Dolphin (`text/uri-list`).
 
 ## Recording results
 
