@@ -180,9 +180,10 @@ fun PhoneNotificationsSection() {
             }
             ListItem(
                 headlineContent = { Text(stringResource(label), style = MaterialTheme.typography.bodyLarge) },
-                leadingContent = { RadioButton(selected = wait == minutes, onClick = null) },
+                leadingContent = { RadioButton(selected = wait == minutes, onClick = null, enabled = !LocalSettingsParentOff.current) },
                 modifier = Modifier
-                    .selectable(selected = wait == minutes, role = Role.RadioButton) {
+                    // Greyed under sharing that is off, as the switches are (Q3 review).
+                    .selectable(selected = wait == minutes, enabled = !LocalSettingsParentOff.current, role = Role.RadioButton) {
                         PhoneNotificationPrefs.setWaitMinutes(context, minutes)
                         version++
                     }

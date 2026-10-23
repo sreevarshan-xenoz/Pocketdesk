@@ -149,6 +149,10 @@ pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
         off.push(("answers", "Phone notifications"));
         off.push(("alarms", "Phone notifications"));
     }
+    // A phone's alarm comes as a plain notification here then (Q3 review).
+    if config.phone_notifications && !config.phone_alarms {
+        off.push(("alarms", "Phones' alarms ring here"));
+    }
     if !config.clipboard_push {
         off.push(("clipboard", "Clipboard to phones"));
     }
@@ -276,9 +280,19 @@ mod tests {
             [
                 ("notifications", "Phone notifications"),
                 ("answers", "Phone notifications"),
+                ("alarms", "Phone notifications"),
                 ("clipboard", "Clipboard to phones"),
                 ("control", "Control phones from their screen window"),
             ]
+        );
+        // Q3: alarms rung here or not, said by their own setting.
+        let plain = crate::local::config::Config {
+            phone_alarms: false,
+            ..crate::local::config::Config::default()
+        };
+        assert_eq!(
+            settings_off(&plain),
+            [("alarms", "Phones' alarms ring here")]
         );
     }
 

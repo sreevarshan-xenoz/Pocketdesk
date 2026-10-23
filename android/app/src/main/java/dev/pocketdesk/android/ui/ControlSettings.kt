@@ -117,8 +117,16 @@ fun PhoneActionsSetting() {
     var on by remember { mutableStateOf(Prefs.phoneActionsFromComputer(context)) }
     val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
     val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
-    // What carries a screenshot here (Q3 review: on, it went nowhere unsaid).
-    val carried = remember(resumes, on) {
+    // What carries a screenshot here (Q3 review: on, it went nowhere
+    // unsaid), read again when Send new screenshots' own rows change.
+    var screenshotsChanged by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val prefs = context.getSharedPreferences("pocketdesk-screenshots", android.content.Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> screenshotsChanged++ }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    val carried = remember(resumes, on, screenshotsChanged) {
         dev.pocketdesk.android.files.ScreenshotPrefs.on(context) &&
             dev.pocketdesk.android.files.ScreenshotPrefs.granted(context) &&
             (dev.pocketdesk.android.files.ScreenshotPrefs.clipboard(context) ||

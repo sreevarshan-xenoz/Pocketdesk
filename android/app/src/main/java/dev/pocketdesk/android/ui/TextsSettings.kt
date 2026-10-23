@@ -56,7 +56,11 @@ fun TextsSection() {
     val contactsOn = (version + resumes).let { TextPrefs.contactsToComputer(context) }
     // A refusal is said, with Android's page for Pocketdesk (Q3 review:
     // the switch stayed off without a word, also when denied for good).
-    var contactsRefused by remember { mutableStateOf(false) }
+    var contactsRefused by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    // Granted since, in Android's settings: the refusal is over (Q3 review).
+    androidx.compose.runtime.LaunchedEffect(canReadContacts) {
+        if (canReadContacts) contactsRefused = false
+    }
     val askContactsList =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             TextPrefs.setContactsToComputer(context, granted)
