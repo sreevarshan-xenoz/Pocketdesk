@@ -15,27 +15,41 @@ use crate::model::Device;
 /// Whose phone the next code pairs (M2b): the owner's, someone else's
 /// (files and links only), or a guest's for a while (I3), which is someone
 /// else's too.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Whose {
     /// A guest's seconds; None pairs for good.
     pub grant_secs: Option<u64>,
     pub someone_else: bool,
+    /// P9: pairs with this saved profile's permissions, as someone else's.
+    pub profile: Option<String>,
 }
 
 impl Whose {
     pub const MINE: Self = Self {
         grant_secs: None,
         someone_else: false,
+        profile: None,
     };
     pub const SOMEONE_ELSE: Self = Self {
         grant_secs: None,
         someone_else: true,
+        profile: None,
     };
 
     pub const fn guest(secs: u64) -> Self {
         Self {
             grant_secs: Some(secs),
             someone_else: true,
+            profile: None,
+        }
+    }
+
+    /// A phone paired with the profile `name`'s permissions (P9).
+    pub fn with_profile(name: &str) -> Self {
+        Self {
+            grant_secs: None,
+            someone_else: true,
+            profile: Some(name.to_string()),
         }
     }
 
@@ -45,6 +59,7 @@ impl Whose {
             // A guest's code from an older `pair --grant` says nothing, and
             // pairs as someone else's all the same (M2 review).
             someone_else: file.someone_else || file.grant_secs.is_some(),
+            profile: file.profile.clone(),
         }
     }
 }
@@ -76,6 +91,7 @@ pub fn link_for(
                 now_unix,
                 whose.grant_secs,
                 whose.someone_else,
+                whose.profile.as_deref(),
             )?;
             pin
         }
@@ -225,6 +241,27 @@ pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) 
     }
 }
 
+/// What a profile lets a phone do, in words: its permissions that are on.
+pub fn profile_allows(
+    permissions: &pocketdesk_core::protocol::permissions::DevicePermissions,
+) -> String {
+    use pocketdesk_core::protocol::permissions::Capability;
+    let on: Vec<String> = Capability::ALL
+        .into_iter()
+        .filter(|c| permissions.allows(*c))
+        .map(|c| format!("{c:?}").to_lowercase())
+        .collect();
+    let mut words = if on.is_empty() {
+        "nothing".to_string()
+    } else {
+        on.join(", ")
+    };
+    if permissions.ask_first {
+        words.push_str("; each session asked first");
+    }
+    words
+}
+
 /// The choices of whose phone a code pairs (M2b), a guest's for a while (I3).
 const WHOSE: [(Whose, &str); 5] = [
     (Whose::MINE, "Mine"),
@@ -241,7 +278,7 @@ impl PairView {
     pub fn reset(&mut self, state_dir: &Path) {
         self.withdraw(state_dir);
         // The choice of whose phone it pairs stays for the next code.
-        let whose = self.whose;
+        let whose = self.whose.clone();
         *self = Self::default();
         self.whose = whose;
     }
@@ -373,22 +410,49 @@ impl PairView {
                 ui.add_space(10.0);
                 // M2b: someone else's phone, or a guest's for a while (I3,
                 // Devices counts it down), pairs with files and links only.
-                let mut chosen = self.whose;
+                let mut chosen = self.whose.clone();
+                // P9: each saved profile is a choice too.
+                let profiles = pocketdesk_core::local::permission_profiles::read(state_dir);
+                let mut choices: Vec<(Whose, String)> = WHOSE
+                    .iter()
+                    .map(|(whose, label)| (whose.clone(), label.to_string()))
+                    .collect();
+                choices.extend(profiles.iter().map(|p| {
+                    (Whose::with_profile(&p.name), format!("With the {} profile", p.name))
+                }));
                 ui.horizontal(|ui| {
                     ui.label("Whose phone is it?");
-                    let shown = WHOSE
+                    let shown = choices
                         .iter()
                         .find(|(whose, _)| *whose == chosen)
-                        .map_or("Mine", |(_, label)| label);
+                        .map_or("Mine".to_string(), |(_, label)| label.clone());
                     egui::ComboBox::from_id_salt("pair-grant")
                         .selected_text(shown)
                         .show_ui(ui, |ui| {
-                            for (whose, label) in WHOSE {
-                                ui.selectable_value(&mut chosen, whose, label);
+                            for (whose, label) in &choices {
+                                ui.selectable_value(&mut chosen, whose.clone(), label);
                             }
                         });
                 });
-                if chosen.someone_else {
+                if let Some(name) = &chosen.profile {
+                    // What it may do, said (P9 review: a profile saved from
+                    // the owner's phone may run commands).
+                    let allows = profiles
+                        .iter()
+                        .find(|p| p.name == *name)
+                        .map(|p| profile_allows(&p.permissions));
+                    ui.label(
+                        RichText::new(match allows {
+                            Some(allows) => format!(
+                                "It pairs with the {name} profile's permissions: {allows}. A phone paired already keeps only what both allow."
+                            ),
+                            None => format!(
+                                "The {name} profile is gone: it pairs as someone else's, with files and links only."
+                            ),
+                        })
+                        .small(),
+                    );
+                } else if chosen.someone_else {
                     ui.label(
                         RichText::new(
                             "It may send files and links only. Change what it may do on Devices.",
@@ -468,11 +532,11 @@ impl PairView {
         let config = config.cloned().unwrap_or_default();
         self.whose = whose_for(
             self.whose_chosen,
-            self.whose,
+            self.whose.clone(),
             pin::read(state_dir, now_unix).as_ref(),
         );
         self.whose_chosen = false;
-        match link_for(state_dir, &config, now_unix, addresses, self.whose) {
+        match link_for(state_dir, &config, now_unix, addresses, self.whose.clone()) {
             Ok(link) => match qr_modules(&link.to_uri()) {
                 Ok(modules) => {
                     self.texture = Some(ui.ctx().load_texture(
@@ -627,6 +691,7 @@ mod tests {
     #[test]
     fn a_code_on_file_keeps_its_time_unless_another_was_just_chosen() {
         let on_file = pin::FilePin {
+            profile: None,
             pin: "123456".to_string(),
             minted_unix: 0,
             grant_secs: Some(3600),
@@ -681,6 +746,7 @@ mod tests {
 
     fn file_pin(pin: &str) -> pin::FilePin {
         pin::FilePin {
+            profile: None,
             pin: pin.to_string(),
             minted_unix: 1_000,
             grant_secs: None,

@@ -103,6 +103,20 @@ fn someone_else_for(
     }
 }
 
+/// The permissions of the profile the code that paired names (P9), as the
+/// Pair page saved them: read now, so a profile changed since the code was
+/// shown pairs as it is now; one removed since is none.
+fn profile_for(
+    cli: Option<&local_pin::FilePin>,
+    matches_pending: bool,
+    live: Option<&local_pin::FilePin>,
+) -> Option<DevicePermissions> {
+    let file = cli.or(live.filter(|_| matches_pending))?;
+    let name = file.profile.as_deref()?;
+    let dir = state::state_dir().ok()?;
+    pocketdesk_core::local::permission_profiles::get(&dir, name).map(|p| p.permissions)
+}
+
 /// The permissions a pairing sets (M2b), or `None` to leave them: someone
 /// else's phone, and every new guest, sends files and links only; the
 /// owner's own phone keeps what it has (the defaults when new), a computer
@@ -115,6 +129,7 @@ fn preset_permissions(
     someone_else: bool,
     computer: bool,
     current: Option<&DevicePermissions>,
+    profile: Option<&DevicePermissions>,
 ) -> Option<DevicePermissions> {
     let narrow = if computer {
         false
@@ -126,7 +141,10 @@ fn preset_permissions(
     if !narrow {
         return None;
     }
-    let preset = DevicePermissions::someone_else();
+    // P9: a profile's permissions in place of someone else's.
+    let preset = profile
+        .cloned()
+        .unwrap_or_else(DevicePermissions::someone_else);
     Some(match current {
         Some(current) => current.narrowed_to(&preset),
         None => preset,
@@ -939,6 +957,9 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
     // M2b: the Pair page said the phone is someone else's.
     let someone_else = someone_else_for(cli.as_ref(), matches_pending, live.as_ref());
+    // P9: with a profile's permissions, if it named one still saved; else
+    // someone else's.
+    let profile = profile_for(cli.as_ref(), matches_pending, live.as_ref());
     let matches_cli = cli_grant.is_some();
 
     if matches_pending || matches_cli {
@@ -1002,6 +1023,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 someone_else,
                 computer,
                 was_trusted.then(|| store.permissions(&phone_id)).as_ref(),
+                profile.as_ref(),
             ) {
                 store.set_permissions(&phone_id, permissions)?;
             }
@@ -1142,6 +1164,7 @@ mod tests {
     #[test]
     fn a_pin_shown_for_the_phone_follows_the_pair_pages_choice() {
         let file = |someone_else, grant_secs| local_pin::FilePin {
+            profile: None,
             pin: "123456".to_string(),
             minted_unix: 0,
             grant_secs,
@@ -1163,14 +1186,17 @@ mod tests {
         let narrow = Some(DevicePermissions::someone_else());
         let mine = DevicePermissions::default();
         // The owner's own phone: as it was.
-        assert_eq!(preset_permissions(false, false, false, None), None);
-        assert_eq!(preset_permissions(false, false, false, Some(&mine)), None);
+        assert_eq!(preset_permissions(false, false, false, None, None), None);
+        assert_eq!(
+            preset_permissions(false, false, false, Some(&mine), None),
+            None
+        );
         // Someone else's: narrow when new.
-        assert_eq!(preset_permissions(false, true, false, None), narrow);
+        assert_eq!(preset_permissions(false, true, false, None, None), narrow);
         // Paired again as someone else's: narrowed, never widened.
         let mut no_links = DevicePermissions::default();
         no_links.set(Capability::Links, false);
-        let again = preset_permissions(false, true, false, Some(&no_links)).unwrap();
+        let again = preset_permissions(false, true, false, Some(&no_links), None).unwrap();
         assert!(again.allows(Capability::Files));
         assert!(
             !again.allows(Capability::Links),
@@ -1179,10 +1205,13 @@ mod tests {
         assert!(!again.allows(Capability::Input));
         assert!(again.ask_first);
         // A guest: narrow when new; a phone already paired keeps its own.
-        assert_eq!(preset_permissions(true, false, false, None), narrow);
-        assert_eq!(preset_permissions(true, true, false, Some(&mine)), None);
+        assert_eq!(preset_permissions(true, false, false, None, None), narrow);
+        assert_eq!(
+            preset_permissions(true, true, false, Some(&mine), None),
+            None
+        );
         // A computer keeps its own set.
-        assert_eq!(preset_permissions(false, true, true, None), None);
+        assert_eq!(preset_permissions(false, true, true, None, None), None);
     }
     use super::*;
 
@@ -1854,5 +1883,29 @@ forged log line"
     fn unknown_device_is_not_paired() {
         // QUIC paths lean on this being a strict deny-by-default lookup.
         assert!(!is_paired_device("00000000-0000-0000-0000-00000000dead"));
+    }
+
+    /// P9: a profile's permissions for a new phone; never widening one paired.
+    #[test]
+    fn a_profile_sets_its_permissions_and_never_widens() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let mut kids = DevicePermissions::someone_else();
+        kids.set(Capability::Audio, true);
+        assert_eq!(
+            preset_permissions(false, true, false, None, Some(&kids)),
+            Some(kids.clone())
+        );
+        let mut no_audio = DevicePermissions::default();
+        no_audio.set(Capability::Audio, false);
+        let again = preset_permissions(false, true, false, Some(&no_audio), Some(&kids)).unwrap();
+        assert!(
+            !again.allows(Capability::Audio),
+            "never on what the owner turned off"
+        );
+        // A computer's are its own, profile or not.
+        assert_eq!(
+            preset_permissions(false, true, true, None, Some(&kids)),
+            None
+        );
     }
 }

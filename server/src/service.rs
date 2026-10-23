@@ -1665,8 +1665,15 @@ pub async fn pair(
     // R4 D3: an optional grant (secs) caps how long pairing with this PIN
     // trusts the phone — the PIN file itself still lives 5 minutes.
     let dir = state::state_dir()?;
-    local_pin::write_preset(&dir, &pin_value, local_pin::now_unix(), grant, someone_else)
-        .with_context(|| format!("failed to write the PIN file in {}", dir.display()))?;
+    local_pin::write_preset(
+        &dir,
+        &pin_value,
+        local_pin::now_unix(),
+        grant,
+        someone_else,
+        None,
+    )
+    .with_context(|| format!("failed to write the PIN file in {}", dir.display()))?;
     let path = state::pair_pin_path()?;
 
     if json {

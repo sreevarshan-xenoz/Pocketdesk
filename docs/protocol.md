@@ -153,7 +153,7 @@ A device id must be 1 to 128 bytes. It may contain no control characters and no 
 | Lifetime | 300 s. A minting time more than 60 s in the future is refused. A file without a minting time holds no PIN | `pin.rs` (`PIN_TTL`, `MAX_FUTURE_SECS`) |
 | Wrong guesses | After 5 wrong guesses against the current PIN, it is discarded | `pair.rs` (`MAX_WRONG_GUESSES`) |
 | Minting pace | At most one new PIN every 10 s. A request inside that window gets `pinSent` again and no new PIN | `pair.rs` (`MintPace::GAP`) |
-| One use | A PIN pairs one phone. A guest grant (`pair --grant`) trusts the phone for that long only. The PIN file may say the phone is someone else's (`someone-else`, M2b): it then pairs with Files and Links only and its sessions held, binding its key as a guest's does (never another phone's proved id); a PIN shown for the phone's own ask follows a live Pair-page code that says so | `pair.rs` (`trust_device_with_ttl`, `preset_permissions`, `someone_else_for`), `core/src/local/pin.rs`, `SECURITY.md` |
+| One use | A PIN pairs one phone. A guest grant (`pair --grant`) trusts the phone for that long only. The PIN file may say the phone is someone else's (`someone-else`, M2b): it then pairs with Files and Links only and its sessions held, binding its key as a guest's does (never another phone's proved id); a PIN shown for the phone's own ask follows a live Pair-page code that says so. It may also name a profile (`profile <name>`, P9): the phone pairs as someone else's with that profile's permissions as they are when it pairs, a phone paired already keeping only what both allow; a profile gone since pairs as someone else's | `pair.rs` (`trust_device_with_ttl`, `preset_permissions`, `someone_else_for`), `core/src/local/pin.rs`, `SECURITY.md` |
 | Where it travels | Inside the control channel's TLS | §1.2 |
 | Where it is written down | The desktop notification. The server log gets it only when no notification can be shown (`"No desktop notification available; the pairing PIN is …"`) | `pair.rs` (`show_pin_notification`) |
 
@@ -426,7 +426,8 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/certs/identity.der` | The TLS certificate | Default | same |
 | `<state>/certs/known_peers.json` | Certificate pins (for `pocketdesk connect`, and the other computers this one paired with, 2f) | Default | same (`update_pins`) |
 | `<state>/device_id` | The desktop's device id | Default | `server/src/kde.rs` |
-| `<state>/pairing.pin` | The PIN, minting time, grant length | Owner-only | `core/src/local/pin.rs` |
+| `<state>/pairing.pin` | The PIN, minting time, grant length, `someone-else`, `profile <name>` | Owner-only | `core/src/local/pin.rs` |
+| `<state>/permission_profiles.json` | Permissions saved under a name on the Devices page (P9) | Owner-only | `core/src/local/permission_profiles.rs` |
 | `<state>/trusted_devices.json` (+ `.lock`) | Paired device ids, guest grants, per-device permissions, and each one's name: what it calls itself and the owner's rename (U3) | Default | `core/src/protocol/kdeconnect.rs` (`TrustStore`) |
 | `<state>/device_keys.json` | Per device: TLS key hash and iroh id | Default; atomic and synced | `core/src/local/device_keys.rs` |
 | `<state>/endpoint.json` | The WAN endpoint body: id, relay URLs, direct addresses, `dht` | Default | `core/src/local/identity.rs`, `iroh_endpoint.rs` |

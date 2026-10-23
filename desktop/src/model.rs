@@ -1140,6 +1140,34 @@ pub fn set_permission(
     update_permissions(state_dir, id, |p| p.set(capability, allowed))
 }
 
+/// Give `id` a profile's permissions in one write (P9 review: a switch at a
+/// time could stop half way): those its page shows, and `ask_first`; the
+/// others as they are, and AwayLock only where `away_lock` may be set.
+/// Whether a permission fixed at a session's start was turned off, so its
+/// session must end.
+pub fn apply_profile(
+    state_dir: &Path,
+    id: &str,
+    profile: &DevicePermissions,
+    shown: impl Fn(Capability) -> bool,
+) -> pocketdesk_core::error::Result<bool> {
+    let mut narrowed = false;
+    update_permissions(state_dir, id, |p| {
+        for capability in Capability::ALL {
+            if !shown(capability) {
+                continue;
+            }
+            let allowed = profile.allows(capability);
+            if p.allows(capability) && !allowed && fixed_at_session_start(capability) {
+                narrowed = true;
+            }
+            p.set(capability, allowed);
+        }
+        p.ask_first = profile.ask_first;
+    })?;
+    Ok(narrowed)
+}
+
 /// Whether a running session keeps its own copy of this permission, taken at
 /// its start; the control channel re-reads the others for every packet.
 pub fn fixed_at_session_start(capability: Capability) -> bool {

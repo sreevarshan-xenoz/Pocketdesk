@@ -284,6 +284,8 @@ pub struct PocketdeskApp {
     raised_approvals: Vec<String>,
     /// The phone the Files tab sends to (F7b).
     send_to: Option<String>,
+    /// The Devices page's profile names being typed, by phone (P9).
+    profile_names: std::collections::HashMap<String, String>,
     /// The others a send goes to as well (P6).
     send_also: Vec<String>,
     /// Files being read from the clipboard (P7).
@@ -378,6 +380,7 @@ impl PocketdeskApp {
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
+            profile_names: std::collections::HashMap::new(),
             send_also: Vec::new(),
             pasting: None,
             dropped: Vec::new(),
@@ -934,6 +937,41 @@ impl PocketdeskApp {
                 self.label(id)
             ));
         }
+    }
+
+    /// Give `id` the profile's permissions (P9), in one write, its session
+    /// ended once if a permission it started with was turned off.
+    fn apply_profile(
+        &mut self,
+        id: &str,
+        profile: &pocketdesk_core::local::permission_profiles::Profile,
+    ) {
+        let Some(device) = self.snapshot.devices.iter().find(|d| d.id == id).cloned() else {
+            return;
+        };
+        let away_lock = away_lock_unavailable().is_none();
+        let shown = |c: Capability| {
+            shown_for(c, device.computer) && (c != Capability::AwayLock || away_lock)
+        };
+        let label = model::device_label(&self.snapshot.devices, id);
+        match model::apply_profile(&self.state_dir, id, &profile.permissions, shown) {
+            Ok(narrowed) => {
+                if narrowed {
+                    self.end_sessions_of(id);
+                }
+                self.notice = crate::notice::Notice::done(format!(
+                    "{label} has the {} profile's permissions now.",
+                    profile.name
+                ));
+            }
+            Err(e) => {
+                self.notice = crate::notice::Notice::error(format!(
+                    "Could not give {label} the {} profile: {e}",
+                    profile.name
+                ))
+            }
+        }
+        self.refresh();
     }
 
     fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
@@ -1864,6 +1902,10 @@ impl PocketdeskApp {
         let mut change = None;
         let mut ask = None;
         let mut rename = None;
+        let mut save_profile = None;
+        let mut apply_profile = None;
+        // P9: the saved profiles, to apply.
+        let profiles = pocketdesk_core::local::permission_profiles::read(&self.state_dir);
         // L7 review: Settings that turn a feature off for every phone.
         let settings_off = self
             .config
@@ -1897,6 +1939,44 @@ impl PocketdeskApp {
                             .clicked()
                         {
                             rename = Some((device.id.clone(), text.clone()));
+                        }
+                    });
+                    // P9: these permissions under a name, or a profile's.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Profile");
+                        let name = self.profile_names.entry(device.id.clone()).or_default();
+                        ui.add(
+                            egui::TextEdit::singleline(name)
+                                .hint_text("a name, such as Kids")
+                                .desired_width(140.0),
+                        );
+                        if ui
+                            .button("Save as profile")
+                            .on_hover_text(
+                                "Keep what it may do under this name, to apply to another phone or to pair one with.",
+                            )
+                            .clicked()
+                        {
+                            // What a computer's page hides stays the default,
+                            // so its profile turns nothing off on a phone
+                            // (P9 review).
+                            let mut kept = device.permissions.clone();
+                            for capability in Capability::ALL {
+                                if !shown_for(capability, device.computer) {
+                                    kept.set(capability, capability.default_allowed());
+                                }
+                            }
+                            save_profile = Some((kept, name.clone()));
+                        }
+                        if !profiles.is_empty() {
+                            ui.menu_button("Apply a profile", |ui| {
+                                for profile in &profiles {
+                                    if ui.button(&profile.name).clicked() {
+                                        apply_profile = Some((device.id.clone(), profile.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
                         }
                     });
                     let mut ask_first = device.permissions.ask_first;
@@ -1954,6 +2034,27 @@ impl PocketdeskApp {
         if let Some((id, name)) = rename {
             self.renaming.remove(&id);
             self.rename_device(&id, &name);
+        }
+        if let Some((permissions, name)) = save_profile {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::permission_profiles::save(
+                    &self.state_dir,
+                    &name,
+                    &permissions,
+                )
+                .map(|saved| {
+                    // A profile of that name is replaced, and says so (P9 review).
+                    let verb = if saved.replaced { "Replaced" } else { "Saved" };
+                    format!(
+                        "{verb} the {} profile: apply it to a phone below, or pair one with it.",
+                        saved.name
+                    )
+                })
+                .map_err(|e| format!("Could not save the profile: {e}")),
+            );
+        }
+        if let Some((id, profile)) = apply_profile {
+            self.apply_profile(&id, &profile);
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;

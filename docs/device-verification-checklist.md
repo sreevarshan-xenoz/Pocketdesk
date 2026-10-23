@@ -2681,7 +2681,13 @@ Owed:
 Built 2026-10-23. Unit-tested: the rules' reading and matching (the longest site, a name under it, an address whole, a backslash), and the links plugin with a stand-in opener and runner (a site shown, one handed to a program, one opened, a program that fails said).
 Owed:
 - [ ] A phone's link through each rule on a real server: `show`, `browser`, a program (Windows and Linux), a program that is not there.
-- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.
+- [ ] The Settings box by hand: its warning for a bad line, a .bat refused.## 201. Permission profiles (P9)
+
+Built 2026-10-23. Unit-tested: the store (saved, replaced, removed, a broken file kept), the PIN file's `profile` line (with its space, CRLF, a bad name still someone else's), the pairing preset (a profile's permissions for a new phone, never widening one paired, none for a computer).
+Owed:
+- [ ] Devices page by hand: Save as profile, Replaced, Apply a profile (a narrowed one ending the phone's session once).
+- [ ] Pair page: a profile chosen, its words, a new code; a phone paired with it gets those permissions; the profile removed before the scan pairs as someone else's.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
