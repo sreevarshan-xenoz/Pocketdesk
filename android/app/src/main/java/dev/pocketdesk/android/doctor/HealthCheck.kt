@@ -95,7 +95,7 @@ object HealthCheck {
         }
         // M4: typing needs the same Accessibility service.
         val control = Prefs.controlFromComputer(ctx) || Prefs.typingFromComputer(ctx) ||
-            Prefs.phoneActionsFromComputer(ctx) || Prefs.appsFromComputer(ctx) ||
+            Prefs.phoneActionsFromComputer(ctx) ||
             (Prefs.copiesByThemselves(ctx) && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT))
         return HealthSnapshot(
             listenerFeatures = listenerFeatures(ctx),
@@ -120,7 +120,10 @@ object HealthCheck {
             // Turned on by the owner, both off by default (D1 review): links
             // from the computer are on by default and post only in a session,
             // so they would flag every phone that said no to notifications.
-            postingFeatures = Prefs.ringFromComputer(ctx) || Prefs.filesInBackground(ctx),
+            // P2 without the control service offers "Tap to open" as a
+            // notification (Q3 review).
+            postingFeatures = Prefs.ringFromComputer(ctx) || Prefs.filesInBackground(ctx) ||
+                (Prefs.appsFromComputer(ctx) && !ControlRunner.serviceEnabled(ctx)),
             mayPost = NotificationManagerCompat.from(ctx).areNotificationsEnabled(),
             control = control,
             controlService = !control || ControlRunner.serviceEnabled(ctx),

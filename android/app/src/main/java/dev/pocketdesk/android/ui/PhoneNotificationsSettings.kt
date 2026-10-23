@@ -68,8 +68,9 @@ fun PhoneNotificationsSection() {
         warning = enabled && !granted,
     )
     if (enabled && !granted) AllowNotificationAccess()
-    // Its neighbours go while sharing is off, and so does it (E6).
-    if (!enabled) return
+    // Its neighbours go while sharing is off, and so does it (E6); a search
+    // still finds them, greyed (Q3 review).
+    UnderSwitch(enabled) {
     // L1: closed on the computer, cleared here.
     SettingSwitch(
         stringResource(R.string.phone_notifications_clear),
@@ -179,9 +180,10 @@ fun PhoneNotificationsSection() {
             }
             ListItem(
                 headlineContent = { Text(stringResource(label), style = MaterialTheme.typography.bodyLarge) },
-                leadingContent = { RadioButton(selected = wait == minutes, onClick = null) },
+                leadingContent = { RadioButton(selected = wait == minutes, onClick = null, enabled = !LocalSettingsParentOff.current) },
                 modifier = Modifier
-                    .selectable(selected = wait == minutes, role = Role.RadioButton) {
+                    // Greyed under sharing that is off, as the switches are (Q3 review).
+                    .selectable(selected = wait == minutes, enabled = !LocalSettingsParentOff.current, role = Role.RadioButton) {
                         PhoneNotificationPrefs.setWaitMinutes(context, minutes)
                         version++
                     }
@@ -221,7 +223,7 @@ fun PhoneNotificationsSection() {
                     // Its app named beside its kind, for TalkBack too (O5 review).
                     SettingSwitch(
                         kind.example.ifBlank { stringResource(R.string.phone_notifications_kind_untitled) },
-                        stringResource(R.string.phone_notifications_kind, label, kind.id),
+                        stringResource(R.string.phone_notifications_kind, label),
                         kind.id !in kept,
                         {
                             PhoneNotificationPrefs.setKindKept(context, pkg, kind.id, !it)
@@ -266,5 +268,6 @@ fun PhoneNotificationsSection() {
                 enabled = on || more,
             )
         }
+    }
     }
 }

@@ -11,9 +11,9 @@ object SwitchReport {
 
     /** The features, in the order the computer shows them (its own list matches). */
     val FEATURES = listOf(
-        "notifications", "answers", "texts", "clipboard", "files", "folders", "photos",
+        "notifications", "answers", "alarms", "texts", "contacts", "clipboard", "files", "images", "folders", "photos",
         "screenshots", "camera", "links", "ring", "media", "media_background", "computer_media", "mute", "control", "dial",
-        "commands", "phone_actions",
+        "commands", "tasks", "phone_actions", "apps",
     )
 
     data class Switch(val on: Boolean, val android: Boolean?)

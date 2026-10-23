@@ -25,9 +25,12 @@ pub const SWITCHES: &str = "kdeconnect.pocketdesk.switches";
 pub const FEATURES: &[&str] = &[
     "notifications",
     "answers",
+    "alarms",
     "texts",
+    "contacts",
     "clipboard",
     "files",
+    "images",
     "folders",
     "photos",
     "screenshots",
@@ -41,7 +44,9 @@ pub const FEATURES: &[&str] = &[
     "control",
     "dial",
     "commands",
+    "tasks",
     "phone_actions",
+    "apps",
 ];
 
 /// One feature as the phone says it stands.
@@ -116,10 +121,10 @@ pub const ALLOWED: &str = "kdeconnect.pocketdesk.allowed";
 /// one table the Devices page and the phone's mirror both read.
 pub fn capability(feature: &str) -> Option<Capability> {
     Some(match feature {
-        "notifications" | "answers" => Capability::Notifications,
-        "texts" => Capability::Texts,
+        "notifications" | "answers" | "alarms" => Capability::Notifications,
+        "texts" | "contacts" => Capability::Texts,
         "clipboard" => Capability::Clipboard,
-        "files" | "folders" | "photos" | "screenshots" | "camera" => Capability::Files,
+        "files" | "images" | "folders" | "photos" | "screenshots" | "camera" => Capability::Files,
         "links" => Capability::Links,
         "ring" => Capability::Ring,
         "media" | "media_background" => Capability::Media,
@@ -128,7 +133,8 @@ pub fn capability(feature: &str) -> Option<Capability> {
         "control" => Capability::Cast,
         "dial" => Capability::Dial,
         "commands" => Capability::Command,
-        "phone_actions" => Capability::PhoneActions,
+        "tasks" => Capability::Tasks,
+        "phone_actions" | "apps" => Capability::PhoneActions,
         _ => return None,
     })
 }
@@ -141,6 +147,11 @@ pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
     if !config.phone_notifications {
         off.push(("notifications", "Phone notifications"));
         off.push(("answers", "Phone notifications"));
+        off.push(("alarms", "Phone notifications"));
+    }
+    // A phone's alarm comes as a plain notification here then (Q3 review).
+    if config.phone_notifications && !config.phone_alarms {
+        off.push(("alarms", "Phones' alarms ring here"));
     }
     if !config.clipboard_push {
         off.push(("clipboard", "Clipboard to phones"));
@@ -269,9 +280,19 @@ mod tests {
             [
                 ("notifications", "Phone notifications"),
                 ("answers", "Phone notifications"),
+                ("alarms", "Phone notifications"),
                 ("clipboard", "Clipboard to phones"),
                 ("control", "Control phones from their screen window"),
             ]
+        );
+        // Q3: alarms rung here or not, said by their own setting.
+        let plain = crate::local::config::Config {
+            phone_alarms: false,
+            ..crate::local::config::Config::default()
+        };
+        assert_eq!(
+            settings_off(&plain),
+            [("alarms", "Phones' alarms ring here")]
         );
     }
 

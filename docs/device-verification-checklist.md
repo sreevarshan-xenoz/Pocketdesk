@@ -2724,6 +2724,19 @@ Owed:
 - [ ] Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
 - [ ] Settings on Linux: no presenting or "Never send copies from these programs" rows; a bad link rule, words line or quiet hours keeping Save off.
 
+## 205. The phone's O and P rows after their design pass (Q3)
+
+Built 2026-10-23. Unit-tested: the switches report's list on both sides and what Settings hold back (alarms by phone notifications or "Phones' alarms ring here"). Checked on the OPPO (CPH2359) against a throwaway server built from the branch:
+- [x] All 24 features reported, alarms, contacts, images, tasks and apps among them with the phone's own values.
+- [x] "Let the computer open my apps" on: its summary says it opens at once with Pocketdesk control on, else as "Tap to open", and no Accessibility link is offered.
+- [x] "Vibrate while it rings" and "Flash the torch while it rings" live with their "in a session too" summaries.
+Owed:
+- [ ] Settings' search with "This phone's notifications" off: "alarms" and "timer" find Alarms on the computer greyed, and the camera's "Also onto its clipboard".
+- [ ] "Let the computer take screenshots and lock this phone" warning while Send new screenshots carries nothing, and gone once it does; hidden on Android 8.
+- [ ] My contacts on the computer: the permission refused (the line and Android's page), then granted there; without notification access, its warning and link.
+- [ ] The Devices page and the phone's "What this computer allows" naming the five new features.
+- [ ] A kind of notification's row, Spanish and Tamil on screen, font scale 2.0, TalkBack across the moved and changed rows.
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

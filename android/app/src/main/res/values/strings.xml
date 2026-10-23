@@ -95,7 +95,7 @@
     <string name="auto_connect">Connect to it when the app opens</string>
     <string name="connect">Connect</string>
     <string name="send_wol">Send Wake-on-LAN</string>
-    <string name="home_computer_moved">Found %1$s at its new address, %2$s, and moved it there.</string>
+    <string name="home_computer_moved">%1$s is now at %2$s; its card follows it there.</string>
     <string name="wake_sent">Wake sent to %1$s.</string>
     <string name="wake_failed">Wake failed: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>
@@ -367,7 +367,7 @@
     <string name="phone_notifications_share">This phone\'s notifications on my computer</string>
     <string name="phone_notifications_share_summary">Notifications from this phone appear on the computer you used last</string>
     <string name="phone_notifications_no_access">Needs notification access: allow it below</string>
-    <string name="phone_notifications_kind">%1$s, kind %2$s</string>
+    <string name="phone_notifications_kind">A kind of %1$s\'s notifications</string>
     <string name="phone_notifications_kind_untitled">Untitled</string>
     <string name="phone_notifications_apps_empty">Apps appear here once they notify. None is shared until you switch it on.</string>
     <string name="texts_show">Show texts on my computer</string>
@@ -556,6 +556,8 @@
     <string name="texts_names_summary">A text shows on the computer with the sender\'s name from this phone\'s contacts, not only the number</string>
     <string name="texts_contacts">My contacts on the computer</string>
     <string name="texts_contacts_summary">Your own computer can ask for your contacts, names and numbers only, to search them on its Messages page and text or call them through this phone. Asks for contacts access</string>
+    <string name="texts_contacts_refused">Needs contacts access: Android said no. Allow Contacts in Android\'s settings for Pocketdesk</string>
+    <string name="texts_contacts_open_app_settings">Open Android\'s settings for Pocketdesk</string>
     <string name="settings_capture_mouse">Use a connected mouse on the computer</string>
     <string name="settings_capture_mouse_summary">During a session, a mouse plugged into this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="send_clipboard_label">Send clipboard</string>
@@ -734,9 +736,9 @@
     <string name="ring_channel_description">When your computer rings this phone to find it</string>
     <string name="settings_ring_from_computer">Ring from the computer</string>
     <string name="settings_ring_vibrates">Vibrate while it rings</string>
-    <string name="settings_ring_vibrates_summary">The phone shakes in a pattern as it rings, so you find it in a pocket or under a cushion</string>
+    <string name="settings_ring_vibrates_summary">The phone shakes in a pattern as it rings, in a session too, so you find it in a pocket or under a cushion</string>
     <string name="settings_ring_flashes">Flash the torch while it rings</string>
-    <string name="settings_ring_flashes_summary">The torch blinks as it rings, so you find it in the dark; not while an app uses the camera</string>
+    <string name="settings_ring_flashes_summary">The torch blinks as it rings, in a session too, so you find it in the dark; not while an app uses the camera</string>
     <string name="settings_ring_from_computer_summary">Your computer can ring this phone to find it: loud, for 30 seconds, through Do Not Disturb when alarms are allowed. Keeps a link to it in the background</string>
     <string name="hud_fps">fps</string>
     <string name="hud_kbps">kbps</string>
@@ -788,7 +790,7 @@
     <string name="sound_here_refused">This computer does not send this phone its sound. On the computer, turn on \"Hear and change this computer\'s sound\" for this phone in Pocketdesk\'s Devices page</string>
     <string name="sound_mic_refused">This computer does not take this phone\'s microphone. On the computer, turn on \"Use the phone as a microphone\" for this phone in Pocketdesk\'s Devices page</string>
     <string name="err_permissions_changed">This computer\'s owner changed what this phone may do, which ended the session. They can change it back on Pocketdesk\'s Devices page.</string>
-    <string name="settings_ring_from_computer_summary_17">Your computer can ring this phone to find it: at your alarm volume (at zero it only vibrates), for 30 seconds, through Do Not Disturb when alarms are allowed, while Pocketdesk\'s notifications are on. Keeps a link in the background</string>
+    <string name="settings_ring_from_computer_summary_17">Your computer can ring this phone to find it: at your alarm volume (at zero it is silent unless \"Vibrate while it rings\" is on), for 30 seconds, through Do Not Disturb when alarms are allowed, while Pocketdesk\'s notifications are on. Keeps a link in the background</string>
     <string name="texts_show_summary_17">Texts this phone receives appear in Messages on the computer you used last. Android holds a text with a code for three hours first</string>
     <string name="settings_capture_mouse_summary_17">During a session, a mouse or touchpad connected to this phone (USB or Bluetooth) moves the computer\'s cursor and clicks there</string>
     <string name="control_service_label">Pocketdesk control</string>
@@ -820,10 +822,10 @@
     <string name="health_listener_stopped">Android stopped the part of Pocketdesk that runs in the background. Turning its notification access off and on again starts it.</string>
     <string name="health_texts_receive">Texts can\'t reach the computer: Pocketdesk isn\'t allowed to receive them.</string>
     <string name="health_texts_send">Replies from the computer can\'t be sent: Pocketdesk isn\'t allowed to send texts.</string>
-    <string name="health_contacts">Texts show numbers, not names: Pocketdesk isn\'t allowed to read contacts.</string>
+    <string name="health_contacts">Pocketdesk isn\'t allowed to read contacts: texts show numbers, not names, and the computer can\'t get your contacts.</string>
     <string name="health_photos">Screenshots and photos can\'t reach the computer: Pocketdesk isn\'t allowed to see photos.</string>
     <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
-    <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone or type on it, and copies are not sent by themselves.</string>
+    <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone, type on it, take screenshots of it or lock it, and copies are not sent by themselves.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
@@ -989,12 +991,13 @@
     <string name="typing_stop">Stop</string>
     <string name="typing_stopped">No typing from the computer for 10 minutes</string>
     <string name="settings_phone_apps">Let the computer open my apps</string>
-    <string name="settings_phone_apps_summary_off">Off. With it on, the computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
-    <string name="settings_phone_apps_summary_on">The computer can list this phone\'s apps (their names only) and open one, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_off">The computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_on">On: the computer can list this phone\'s apps (their names only) and open one while the phone is unlocked and awake: at once with \"Pocketdesk control\" on, else as \"Tap to open\"</string>
     <string name="settings_phone_actions">Let the computer take screenshots and lock this phone</string>
     <string name="settings_phone_actions_summary_off">The computer\'s Screenshot of the phone and Lock the phone do them here: a screenshot comes to the computer as \"Send new screenshots\" sends it (turn that on too), never of the lock screen. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_phone_actions_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer asks</string>
     <string name="settings_phone_actions_summary_on">On: this phone\'s own computer can take a screenshot here (it arrives as new screenshots do) or lock it</string>
+    <string name="settings_phone_actions_summary_needs_screenshots">On, but a screenshot goes nowhere until \"Send new screenshots\" is on, sending it somewhere; Lock the phone works now</string>
     <string name="settings_typing_from_computer">Typing from the computer\'s keyboard</string>
     <string name="settings_typing_summary_off">\"Type on the phone\" on the computer types into the field in front here, with no screen shown. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_typing_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer types</string>

@@ -6,6 +6,15 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **Q3, the phone's design pass on what O and P added (branch `feat/phone-design-op`).** An audit of the O and P rows against the U2, U4, U6, C5 and E6 rules (18 findings: 6 Important, 12 Minor), fixed in six groups:
+  - **The switches report:** the phone now tells its computer of P5's alarms, P10's contacts, P2's apps, O1's tasks and O7's images, with what Android must allow. They map to their permissions in core's one table, and the mirror's labels are exhaustive.
+  - **The ring:** the vibrate and torch rows are never greyed (a ring in a session reads them) and show only where the phone has them. The Android 17 summary no longer promises a vibration at zero.
+  - **P2 and O2:** opening apps asks for no Accessibility service, since it falls back to "Tap to open"; Health counts that as posting. O2 warns while Send new screenshots carries nothing anywhere and is hidden below Android 9. Health's Accessibility line names screenshots and locks.
+  - **P10:** My contacts on the computer asks for notification access, says a refused permission with Android's page, and Health's contacts line names both uses.
+  - **Search:** rows under a switch that is off are found, greyed (`UnderSwitch`).
+  - **Words:** a notification kind's row names its app, not the channel's id. "Images from the computer onto my clipboard" moves to Files and links. A computer found at a new address says its card follows. The O and P rows' Spanish says "equipo".
+
+  Fresh review (0 Critical, 1 Important, 3 Minor), fixed: a core test expecting the old list (and "Phones' alarms ring here" off now holds alarms back by name); plus a stale screenshots warning, a refusal outliving a grant, ungreyed choices under search. Checked on the OPPO against a throwaway server built from the branch: all 24 features reported, the new five with their values; P2's summary; the ring rows live. Owed: the search with sharing off, Spanish and Tamil on screen, font scale 2.0, TalkBack (checklist §205).
 - 2026-10-23: **Q2, the desktop's design pass on what O and P added (branch `feat/desktop-design-op`).** An audit of the O and P pages against the U1, U5 and E5 rules (31 findings: 7 Important, 24 Minor), fixed in seven groups:
   - **Words:** a profile's permissions by their Devices labels; Phone actions names opening apps; Texts says it covers the contacts and forgets them when off; switches quoted as they read; Open names the app.
   - **Profiles:** Apply asks first, saying what it turns off and whether the session ends (`model::profile_turns_off`, tested; a harness test applies one); "Remove a profile…" (none could be removed); an unreadable file said; Save needs a name.

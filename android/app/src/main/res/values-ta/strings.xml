@@ -86,7 +86,7 @@
     <string name="auto_connect">செயலி திறக்கும்போது இதனுடன் இணை</string>
     <string name="connect">இணை</string>
     <string name="send_wol">Wake-on-LAN அனுப்பு</string>
-    <string name="home_computer_moved">%1$s அதன் புதிய முகவரியான %2$s-இல் கண்டறியப்பட்டு அங்கு நகர்த்தப்பட்டது.</string>
+    <string name="home_computer_moved">%1$s இப்போது %2$s-இல் உள்ளது; அதன் அட்டை அங்கே பின்தொடர்கிறது.</string>
     <string name="wake_sent">%1$s க்கு எழுப்புதல் அனுப்பப்பட்டது.</string>
     <string name="wake_failed">விழிக்க முடியவில்லை: %1$s</string>
     <string name="rust_core_version">Rust core v%1$s</string>
@@ -358,7 +358,7 @@
     <string name="phone_notifications_share">இந்த தொலைபேசியின் அறிவிப்புகள் என் கணினியில்</string>
     <string name="phone_notifications_share_summary">இந்த தொலைபேசியின் அறிவிப்புகள் நீங்கள் கடைசியாகப் பயன்படுத்திய கணினியில் தோன்றும்</string>
     <string name="phone_notifications_no_access">அறிவிப்பு அணுகல் தேவை: கீழே அனுமதிக்கவும்</string>
-    <string name="phone_notifications_kind">%1$s, வகை %2$s</string>
+    <string name="phone_notifications_kind">%1$s அறிவிப்புகளின் ஒரு வகை</string>
     <string name="phone_notifications_kind_untitled">தலைப்பில்லை</string>
     <string name="phone_notifications_apps_empty">அறிவிப்பு அனுப்பிய பயன்பாடுகள் இங்கே தோன்றும். நீங்கள் இயக்கும் வரை எதுவும் பகிரப்படாது.</string>
     <string name="texts_show">குறுஞ்செய்திகளை என் கணினியில் காட்டு</string>
@@ -547,6 +547,8 @@
     <string name="texts_names_summary">செய்தி கணினியில் எண்ணுடன், இந்தத் தொலைபேசியின் தொடர்புகளில் உள்ள அனுப்புநரின் பெயருடன் காட்டப்படும்</string>
     <string name="texts_contacts">என் தொடர்புகள் கணினியில்</string>
     <string name="texts_contacts_summary">உங்கள் கணினி உங்கள் தொடர்புகளை, பெயர்களும் எண்களும் மட்டும், கேட்கலாம்: அதன் செய்திகள் பக்கத்தில் தேடி, இந்தத் தொலைபேசி வழியாக அவர்களுக்குச் செய்தி அனுப்பவோ அழைக்கவோ. தொடர்புகள் அணுகலைக் கேட்கும்</string>
+    <string name="texts_contacts_refused">தொடர்புகள் அணுகல் தேவை: Android மறுத்தது. Pocketdesk-க்கான Android அமைப்புகளில் தொடர்புகளை அனுமதிக்கவும்</string>
+    <string name="texts_contacts_open_app_settings">Pocketdesk-க்கான Android அமைப்புகளைத் திற</string>
     <string name="settings_capture_mouse">இணைக்கப்பட்ட சுட்டியைக் கணினியில் பயன்படுத்து</string>
     <string name="settings_capture_mouse_summary">அமர்வின்போது இந்தத் தொலைபேசியில் இணைத்த சுட்டி (USB அல்லது Bluetooth) கணினியின் சுட்டுக்குறியை நகர்த்திச் சொடுக்கும்</string>
     <string name="send_clipboard_label">கிளிப்போர்டை அனுப்பு</string>
@@ -725,9 +727,9 @@
     <string name="ring_channel_description">தொலைபேசியைக் கண்டுபிடிக்க உங்கள் கணினி அதை ஒலிக்கச் செய்யும்போது</string>
     <string name="settings_ring_from_computer">கணினியிலிருந்து ஒலித்தல்</string>
     <string name="settings_ring_vibrates">ஒலிக்கும்போது அதிரும்</string>
-    <string name="settings_ring_vibrates_summary">ஒலிக்கும்போது தொலைபேசி ஒரு முறையில் அதிரும், பையிலோ தலையணைக்கடியிலோ கண்டுபிடிக்க</string>
+    <string name="settings_ring_vibrates_summary">ஒலிக்கும்போது தொலைபேசி ஒரு முறையில் அதிரும், அமர்விலும் கூட, பையிலோ தலையணைக்கடியிலோ கண்டுபிடிக்க</string>
     <string name="settings_ring_flashes">ஒலிக்கும்போது டார்ச் மினுக்கும்</string>
-    <string name="settings_ring_flashes_summary">ஒலிக்கும்போது டார்ச் மினுக்கும், இருட்டில் கண்டுபிடிக்க; ஒரு செயலி கேமராவைப் பயன்படுத்தும்போது அல்ல</string>
+    <string name="settings_ring_flashes_summary">ஒலிக்கும்போது டார்ச் மினுக்கும், அமர்விலும் கூட, இருட்டில் கண்டுபிடிக்க; ஒரு செயலி கேமராவைப் பயன்படுத்தும்போது அல்ல</string>
     <string name="settings_ring_from_computer_summary">உங்கள் கணினி இந்தத் தொலைபேசியைக் கண்டுபிடிக்க ஒலிக்கச் செய்யலாம்: சத்தமாக, 30 விநாடிகள், அலாரங்கள் அனுமதிக்கப்பட்டால் தொந்தரவு செய்ய வேண்டாம் நிலையிலும். பின்னணியில் ஓர் இணைப்பை வைத்திருக்கும்</string>
     <string name="hud_fps">fps</string>
     <string name="hud_kbps">kbps</string>
@@ -779,7 +781,7 @@
     <string name="sound_here_refused">இந்தக் கணினி தன் ஒலியை இந்தத் தொலைபேசிக்கு அனுப்பவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Hear and change this computer\'s sound\" என்பதை இயக்கவும்</string>
     <string name="sound_mic_refused">இந்தக் கணினி இந்தத் தொலைபேசியின் மைக்கைப் பயன்படுத்தவில்லை. கணினியில், Pocketdesk-இன் Devices பக்கத்தில் இந்தத் தொலைபேசிக்கு \"Use the phone as a microphone\" என்பதை இயக்கவும்</string>
     <string name="err_permissions_changed">இந்தக் கணினியின் உரிமையாளர் இந்தத் தொலைபேசி செய்யக்கூடியதை மாற்றினார், அதனால் அமர்வு முடிந்தது. Pocketdesk-இன் Devices பக்கத்தில் அதை மீண்டும் மாற்றலாம்.</string>
-    <string name="settings_ring_from_computer_summary_17">உங்கள் கணினி இந்தத் தொலைபேசியைக் கண்டுபிடிக்க ஒலிக்கச் செய்யலாம்: உங்கள் அலார ஒலியளவில் (பூஜ்ஜியத்தில் அதிர்வு மட்டும்), 30 விநாடிகள், அலாரங்கள் அனுமதிக்கப்பட்டால் தொந்தரவு செய்ய வேண்டாம் நிலையிலும், Pocketdesk அறிவிப்புகள் இயக்கத்தில் இருக்கும்போது. பின்னணியில் ஓர் இணைப்பை வைத்திருக்கும்</string>
+    <string name="settings_ring_from_computer_summary_17">உங்கள் கணினி இந்தத் தொலைபேசியைக் கண்டுபிடிக்க ஒலிக்கச் செய்யலாம்: உங்கள் அலார ஒலியளவில் (பூஜ்ஜியத்தில், “ஒலிக்கும்போது அதிரும்” இயக்கத்தில் இல்லையெனில் ஒலியில்லை), 30 விநாடிகள், அலாரங்கள் அனுமதிக்கப்பட்டால் தொந்தரவு செய்ய வேண்டாம் நிலையிலும், Pocketdesk அறிவிப்புகள் இயக்கத்தில் இருக்கும்போது. பின்னணியில் ஓர் இணைப்பை வைத்திருக்கும்</string>
     <string name="texts_show_summary_17">இந்த தொலைபேசி பெறும் குறுஞ்செய்திகள் நீங்கள் கடைசியாகப் பயன்படுத்திய கணினியின் செய்திகளில் தோன்றும். குறியீடு உள்ள குறுஞ்செய்தியை Android முதலில் மூன்று மணி நேரம் நிறுத்தி வைக்கும்</string>
     <string name="settings_capture_mouse_summary_17">அமர்வின்போது இந்தத் தொலைபேசியில் இணைத்த சுட்டி அல்லது தொடுதிண்டு (USB அல்லது Bluetooth) கணினியின் சுட்டுக்குறியை நகர்த்திச் சொடுக்கும்</string>
     <string name="control_service_label">Pocketdesk கட்டுப்பாடு</string>
@@ -811,10 +813,10 @@
     <string name="health_listener_stopped">பின்னணியில் இயங்கும் Pocketdesk பகுதியை Android நிறுத்தியது. அதன் அறிவிப்பு அணுகலை அணைத்து மீண்டும் இயக்கினால் அது தொடங்கும்.</string>
     <string name="health_texts_receive">குறுஞ்செய்திகள் கணினியை அடைய முடியாது: அவற்றைப் பெற Pocketdesk-க்கு அனுமதி இல்லை.</string>
     <string name="health_texts_send">கணினியிலிருந்து வரும் பதில்களை அனுப்ப முடியாது: குறுஞ்செய்தி அனுப்ப Pocketdesk-க்கு அனுமதி இல்லை.</string>
-    <string name="health_contacts">குறுஞ்செய்திகளில் பெயர்களுக்குப் பதிலாக எண்கள் தெரியும்: தொடர்புகளைப் படிக்க Pocketdesk-க்கு அனுமதி இல்லை.</string>
+    <string name="health_contacts">தொடர்புகளைப் படிக்க Pocketdesk-க்கு அனுமதி இல்லை: குறுஞ்செய்திகளில் பெயர்களுக்குப் பதிலாக எண்கள் தெரியும், கணினியால் உங்கள் தொடர்புகளைப் பெற முடியாது.</string>
     <string name="health_photos">திரைப்பிடிப்புகளும் படங்களும் கணினியை அடைய முடியாது: படங்களைப் பார்க்க Pocketdesk-க்கு அனுமதி இல்லை.</string>
     <string name="health_app_notifications">Pocketdesk அறிவிப்புகளைக் காட்ட முடியாது, அதனால் கணினியிலிருந்து வரும் ஒலிப்புகளும் கோப்புகளும் கவனிக்கப்படாமல் போகும்.</string>
-    <string name="health_control_service">Android-இன் அணுகல்தன்மை அமைப்புகளில் «Pocketdesk கட்டுப்பாடு» அணைக்கப்பட்டுள்ளது: கணினியால் இந்தத் தொலைபேசியைக் கட்டுப்படுத்தவோ அதில் தட்டச்சு செய்யவோ முடியாது, நீங்கள் நகலெடுப்பது தானாக அனுப்பப்படாது.</string>
+    <string name="health_control_service">Android-இன் அணுகல்தன்மை அமைப்புகளில் «Pocketdesk கட்டுப்பாடு» அணைக்கப்பட்டுள்ளது: கணினியால் இந்தத் தொலைபேசியைக் கட்டுப்படுத்தவோ, அதில் தட்டச்சு செய்யவோ, திரைப்பிடிப்பு எடுக்கவோ, பூட்டவோ முடியாது, நீங்கள் நகலெடுப்பது தானாக அனுப்பப்படாது.</string>
     <string name="health_control_blocked">கணினியால் இந்தத் தொலைபேசியைக் கட்டுப்படுத்த முடியாது: மேம்பட்ட பாதுகாப்பு அணுகல்தன்மைச் சேவைகளை அணுகல்தன்மைக் கருவிகளுக்கு மட்டுமே அனுமதிக்கிறது.</string>
     <string name="health_download_folder">கணினிகளிலிருந்து வரும் கோப்புகளுக்குத் தேர்ந்தெடுத்த கோப்புறை இல்லை அல்லது இனி அனுமதிக்கப்படவில்லை, எனவே கோப்புகள் Downloads/Pocketdesk-க்குச் செல்கின்றன.</string>
     <string name="health_screenshots_stopped">படங்கள் அணுகல் நீக்கப்பட்டபோது புதிய திரைப்பிடிப்புகள் கணினிக்குச் செல்வது நின்றது. அமைப்புகளில் மீண்டும் இயக்கவும்.</string>
@@ -966,12 +968,13 @@
     <string name="typing_stop">நிறுத்து</string>
     <string name="typing_stopped">10 நிமிடங்களுக்குக் கணினியிலிருந்து தட்டச்சு இல்லை</string>
     <string name="settings_phone_apps">என் செயலிகளைக் கணினி திறக்கட்டும்</string>
-    <string name="settings_phone_apps_summary_off">அணைக்கப்பட்டுள்ளது. இயக்கினால், கணினி இந்தத் தொலைபேசியின் செயலிகளைப் பட்டியலிட்டு (பெயர்கள் மட்டும்), நீங்கள் அங்கே தேர்வு செய்வதைத் திறக்கும், தொலைபேசி திறக்கப்பட்டு திரை இயங்கும்போது</string>
-    <string name="settings_phone_apps_summary_on">கணினி இந்தத் தொலைபேசியின் செயலிகளைப் பட்டியலிட்டு (பெயர்கள் மட்டும்) ஒன்றைத் திறக்கலாம், தொலைபேசி திறக்கப்பட்டு திரை இயங்கும்போது</string>
+    <string name="settings_phone_apps_summary_off">கணினி இந்தத் தொலைபேசியின் செயலிகளைப் பட்டியலிட்டு (பெயர்கள் மட்டும்), நீங்கள் அங்கே தேர்வு செய்வதைத் திறக்கும், தொலைபேசி திறக்கப்பட்டு திரை இயங்கும்போது</string>
+    <string name="settings_phone_apps_summary_on">இயக்கம்: கணினி இந்தத் தொலைபேசியின் செயலிகளைப் பட்டியலிட்டு (பெயர்கள் மட்டும்) ஒன்றைத் திறக்கலாம், தொலைபேசி திறக்கப்பட்டு திரை இயங்கும்போது: «Pocketdesk கட்டுப்பாடு» இயக்கத்தில் இருந்தால் உடனே, இல்லையெனில் «திறக்கத் தட்டவும்» ஆக</string>
     <string name="settings_phone_actions">கணினி திரைப்பிடிப்பு எடுக்கவும் இந்தத் தொலைபேசியைப் பூட்டவும் அனுமதி</string>
     <string name="settings_phone_actions_summary_off">கணினியின் தொலைபேசியின் திரைப்பிடிப்பு, தொலைபேசியைப் பூட்டு இங்கே செய்கின்றன: திரைப்பிடிப்பு \"புதிய திரைப்பிடிப்புகளை அனுப்பு\" அனுப்புவது போலக் கணினிக்கு வரும் (அதையும் இயக்கவும்), பூட்டுத் திரையை ஒருபோதும் இல்லை. \"Pocketdesk கட்டுப்பாடு\" அணுகல்தன்மைச் சேவையைப் பயன்படுத்தும்</string>
     <string name="settings_phone_actions_summary_needs_access">கிட்டத்தட்ட: கணினி கேட்பதற்காகக் காத்திருக்க Pocketdesk-க்கு அறிவிப்பு அணுகல் தேவை</string>
     <string name="settings_phone_actions_summary_on">இயக்கம்: இந்தத் தொலைபேசியின் சொந்தக் கணினி இங்கே திரைப்பிடிப்பு எடுக்கலாம் (புதிய திரைப்பிடிப்புகள் போல வரும்) அல்லது பூட்டலாம்</string>
+    <string name="settings_phone_actions_summary_needs_screenshots">இயக்கத்தில், ஆனால் \"புதிய திரைப்பிடிப்புகளை அனுப்பு\" ஓர் இடத்துக்கு அனுப்பும் வரை திரைப்பிடிப்பு எங்கும் போகாது; தொலைபேசியைப் பூட்டு இப்போதே வேலை செய்யும்</string>
     <string name="settings_typing_from_computer">கணினியின் விசைப்பலகையிலிருந்து தட்டச்சு</string>
     <string name="settings_typing_summary_off">கணினியில் \"ஃபோனில் தட்டச்சு செய்\" இங்கே முன்னால் உள்ள புலத்தில் தட்டச்சு செய்யும், திரையைக் காட்டாமல். கடவுச்சொல் புலத்திலும் ஃபோன் பூட்டியிருக்கும்போதும் ஒருபோதும் இல்லை. \"Pocketdesk control\" அணுகல்தன்மை சேவையைப் பயன்படுத்துகிறது</string>
     <string name="settings_typing_summary_needs_access">கிட்டத்தட்ட: கணினி தட்டச்சு செய்வதற்குக் காத்திருக்க Pocketdesk-க்கு அறிவிப்பு அணுகல் தேவை</string>

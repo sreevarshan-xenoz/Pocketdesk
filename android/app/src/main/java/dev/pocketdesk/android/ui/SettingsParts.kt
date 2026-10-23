@@ -60,6 +60,23 @@ class SettingsFilter {
     fun nothingFound(): Boolean = SettingsSearch.searching(query) && rows.values.none { it.second }
 }
 
+/**
+ * Q3: rows under a switch that is off. They go while it is off (E6), but a
+ * search still finds them, greyed, so "No setting matches" never hides a
+ * row that is there (Q3 review: "alarms" found nothing with sharing off).
+ */
+val LocalSettingsParentOff = compositionLocalOf { false }
+
+/** Q3: [content] under a switch: drawn while [on], and while off only for a search, greyed. */
+@Composable
+fun UnderSwitch(on: Boolean, content: @Composable () -> Unit) {
+    when {
+        on -> content()
+        SettingsSearch.searching(LocalSettingsFilter.current.query) ->
+            CompositionLocalProvider(LocalSettingsParentOff provides true) { content() }
+    }
+}
+
 /** The screen's filter; outside Settings (the Sound screen's rows) one that never searches. */
 val LocalSettingsFilter = compositionLocalOf { SettingsFilter() }
 private val LocalSettingsGroup = compositionLocalOf { "" }
@@ -122,6 +139,8 @@ fun SettingSwitch(
     indent: Boolean = false,
     nested: Boolean = false,
 ) {
+    // Greyed under a switch that is off (Q3).
+    val usable = enabled && !LocalSettingsParentOff.current
     SettingRow(
         title = title,
         summary = summary,
@@ -129,10 +148,10 @@ fun SettingSwitch(
         // The indent inside the toggle, so it is no dead strip (U4 review);
         // a nested row (O5's kinds under their app) twice as deep.
         modifier = Modifier
-            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .toggleable(value = checked, enabled = usable, role = Role.Switch, onValueChange = onChange)
             .padding(start = if (nested) 48.dp else if (indent) 24.dp else 0.dp),
     ) {
-        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+        Switch(checked = checked, onCheckedChange = null, enabled = usable)
     }
 }
 

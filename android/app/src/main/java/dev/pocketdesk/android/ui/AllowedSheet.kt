@@ -144,9 +144,12 @@ private fun AllowedRowView(row: AllowedRule.Row) {
 private fun featureName(feature: String): Int = when (feature) {
     "notifications" -> R.string.phone_notifications_share
     "answers" -> R.string.phone_notifications_answer
+    "alarms" -> R.string.phone_notifications_alarms
     "texts" -> R.string.texts_show
+    "contacts" -> R.string.texts_contacts
     "clipboard" -> R.string.settings_clipboard_background
     "files" -> R.string.settings_files_background
+    "images" -> R.string.settings_received_images_clipboard
     "folders" -> R.string.settings_phone_folders
     "photos" -> R.string.recent_photos_on
     "screenshots" -> R.string.screenshots_on
@@ -159,6 +162,11 @@ private fun featureName(feature: String): Int = when (feature) {
     "mute" -> R.string.settings_let_computer_mute
     "control" -> R.string.settings_control_from_computer
     "dial" -> R.string.settings_calls_from_computer
+    "commands" -> R.string.settings_commands_from_computer
+    "tasks" -> R.string.settings_others_run_tasks
     "phone_actions" -> R.string.settings_phone_actions
-    else -> R.string.settings_commands_from_computer
+    "apps" -> R.string.settings_phone_apps
+    // Only SwitchReport.FEATURES come here (Q3 review: a new one had read
+    // as Commands).
+    else -> error("no label for the feature $feature")
 }

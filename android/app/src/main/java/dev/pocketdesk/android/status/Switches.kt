@@ -32,9 +32,16 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "notifications" to s(notifications, access),
         // Answers need the notifications they answer (L7 review).
         "answers" to s(Prefs.answerNotifications(ctx) && notifications, access),
+        // P5: an alarm goes as a notification does (Q3: told, so the
+        // computer can show it).
+        "alarms" to s(Prefs.alarmsOnComputer(ctx) && notifications, access),
         "texts" to s(TextPrefs.show(ctx), granted(Manifest.permission.RECEIVE_SMS)),
+        // P10: read on the listener's link, with Android's contacts permission.
+        "contacts" to s(TextPrefs.contactsToComputer(ctx), access && granted(Manifest.permission.READ_CONTACTS)),
         "clipboard" to s(Prefs.clipboardInBackground(ctx), access),
         "files" to s(Prefs.filesInBackground(ctx), access && mayPost),
+        // O7: a received image put on the clipboard as it lands.
+        "images" to s(Prefs.receivedImagesToClipboard(ctx)),
         "folders" to s(runCatching { PhoneFolders.all(ctx).isNotEmpty() }.getOrDefault(false), access),
         "photos" to s(RecentPhotoPrefs.on(ctx), access && photos),
         "screenshots" to s(ScreenshotPrefs.on(ctx), access && photos),
@@ -50,7 +57,12 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "control" to s(Prefs.controlFromComputer(ctx), ControlRunner.serviceEnabled(ctx)),
         "dial" to s(Prefs.callsFromComputer(ctx), mayPost),
         "commands" to s(Prefs.commandsFromComputer(ctx), access),
+        // O1: another app's broadcast, taken whatever runs.
+        "tasks" to s(Prefs.othersRunTasks(ctx)),
         // O2: the control service does them; the listener waits for the asks.
         "phone_actions" to s(Prefs.phoneActionsFromComputer(ctx), ControlRunner.serviceEnabled(ctx) && access),
+        // P2: listed on the listener's link; an app opens at once with the
+        // control service, else as "Tap to open".
+        "apps" to s(Prefs.appsFromComputer(ctx), access),
     )
 }
