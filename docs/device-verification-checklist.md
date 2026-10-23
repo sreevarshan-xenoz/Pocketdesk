@@ -1144,7 +1144,7 @@ On the A71 against Windows, 2026-10-15, portrait, input off for the phone:
 Owed:
 - [x] The on-screen keyboard opening in portrait: the layout stayed split, the desktop kept its full top pane, and the key bar and keyboard sat over the dock (2026-10-15).
 - [x] Turning the phone: on its side the A71 keeps one pane, the stream full screen (C5 changed this: it had split side by side, the stream on half the screen).
-- [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual.
+- [ ] A 16:9 desktop's pane, a monitor switch between shapes, picture-in-picture, and Pane: Single and Dual. (where: by hand)
 
 After the owner tried it (2026-10-19: the chrome over the picture, a trackpad three quarters of the screen, and a trackpad in Direct touch), on the A71 against a throwaway server, input off:
 - [x] Direct touch, held upright: one pane, the desktop centred with the link and window chips above it and the mode chip, keyboard and menu below, none over the picture.
@@ -1152,17 +1152,17 @@ After the owner tried it (2026-10-19: the chrome over the picture, a trackpad th
 - [x] Switching between Direct touch and Trackpad mid-session: the pane changes without a new decoder (three switches, the session held, no decoder surface change in logcat; 2026-10-19).
 - [x] The chrome stays on screen when held upright (12 s untouched in both modes), and the menu opens with one tap (2026-10-19).
 - [x] Turned on its side the chrome fades over the full-screen picture as before; turned upright again it comes back by itself (2026-10-19).
-- [ ] Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch).
+- [ ] Pinch-zoomed upright: the zoomed picture stays inside its area, not under the chrome (adb cannot pinch). (where: by hand) (adb cannot pinch.)
 - [ ] Pane: two panes with Direct touch: taps land on the point under the finger in the smaller picture.
 - [x] "Show connection details" on, held upright: the details, the link and the window chips sit above the picture in both modes (the bands follow the chrome's measured height).
 
 ## 62. A mouse on the phone (T9c)
 
 No mouse was at hand; with none connected, a session on the A71 started and Back ended it as before. Owed, with a USB OTG or Bluetooth mouse:
-- [ ] Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel.
+- [ ] Motion, all five buttons and the wheel (both ways) reach the desktop, and a fast mouse keeps its travel. (where: other hardware) (a mouse.)
 - [ ] The phone's pointer is hidden during the session and back over Home after Exit.
-- [ ] Opening and closing the in-session keyboard: the mouse keeps working.
-- [ ] The mouse's Back button goes to the desktop and does not end the session.
+- [ ] Opening and closing the in-session keyboard: the mouse keeps working. (where: other hardware) (a mouse.)
+- [ ] The mouse's Back button goes to the desktop and does not end the session. (where: other hardware) (a mouse.)
 - [ ] Settings off: the phone's own pointer, no capture.
 
 ## 63. Contact names in texts (T8e)
@@ -1184,9 +1184,9 @@ On the A71 against this box, 2026-10-16: the saved computer's control port was p
 
 Owed:
 - [ ] From outside the home network (mobile data, or another Wi-Fi), with Tailscale off: notifications, texts, battery and the phone's media reach the computer with the app in the background, and Send link reaches the phone.
-- [ ] A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home.
+- [ ] A phone with no iroh key registered (paired, never streamed on the LAN) is refused, with one log line, and works again after one session at home. (where: owner) (a session at home needs the throwaway's LAN port open.)
 - [x] Unpairing on the desktop ends the internet link's packets at once: the phone's background link over the internet road gone within 5 s of `pocketdesk unpair` (2026-10-19, A71, throwaway server, by script).
-- [ ] A file offer to a phone on the internet link fails as "not reachable", not stuck.
+- [x] A file offer to a phone on the internet link rides that link (2c; S2's 150 MB offer, #285), and with files over the internet off a send is refused at once with the reason (#288). (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
 - [ ] The phone's battery over an hour with the link up in the background (iroh's 5 s heartbeat).
 - [ ] A session riding a relay (no direct path) with the control link up at the same time. Founded: two endpoints with one key cannot share a relay (`server/tests/one_key_two_endpoints.rs`); since 2b both ride one endpoint. Owed on the VM, relayed (checklist §85).
 
@@ -1199,7 +1199,7 @@ On the A71 against this box, 2026-10-16:
 Owed:
 - [ ] Away from home (the internet link): both directions.
 - [x] Desktop "Clipboard to phones" off: nothing pushed (C6: the phone linked, nothing in 40 s; on, it arrived in 5 s).
-- [ ] With it off, a session still gets the clipboard on request.
+- [x] With it off, a session still gets the clipboard on request. (seen 2026-10-24 on the OPPO against a throwaway server (S3): with `clipboard_push = false`, a copy changed on the computer mid-session reached the phone by the session's poll.)
 - [x] A phone with Clipboard off on the desktop gets no pushes (C6: linked, nothing in 40 s).
 - [x] Linux (the Azure VM, headless Sway, this branch's release build): text copied with `wl-copy` reached the A71 in the background. The VM had no `wl-clipboard` at first; without it the computer's clipboard is never read (`wl-paste` is a runtime need on Wayland).
 - [ ] Linux with an image on the clipboard, and a copy offering `x-kde-passwordManagerHint` (KeePassXC).
@@ -1212,13 +1212,13 @@ On the A71 against this box, 2026-10-16, with a throwaway chat app that posts a 
 - [x] A reply written as the desktop app writes it reached the app through its `RemoteInput`; "Mark as read" ran; a button it did not offer was refused by the server.
 - [x] Found and fixed on the way: nearly every notification arrived as "New notification" (an app's default private was always hidden), and answers were dropped while the phone had no live link.
 - [x] After the review fixes: a button that requires unlocking (`Approve`) was not offered, and a press of it was refused; reply and "Mark as read" ran again.
-- [ ] "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing.
+- [ ] "Hide sensitive content" on the lock screen turned on: the probe's notification arrives as "New notification" and offers nothing. (where: by hand)
 
 Owed:
 - [ ] The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
 - [ ] The switch off: nothing offered, an answer not run.
 - [ ] From away from home (the internet link).
-- [ ] An action that opens an activity on Android 14+ (background launches may be blocked).
+- [ ] An action that opens an activity on Android 14+ (background launches may be blocked). (where: by hand)
 
 ## 67. Files from the computer without a session (T10d)
 
@@ -1226,9 +1226,9 @@ On the A71 against this box, 2026-10-16:
 - [x] With "Files from the computer in the background" on and notification access, the app in the background and no session, the mirror listed the phone as linked with files, and `pocketdesk send … --wait` ended "saved on the phone", MD5s matching. Android 16 let the listener start the download at once.
 
 Owed:
-- [ ] A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it.
+- [ ] A phone that refuses background starts: the "The computer sends a file" notification, and Save downloading it. (where: by hand)
 - [x] A folder sent this way (C6: a folder with a sub-folder, no session, checksums matching).
-- [ ] The desktop app's Files tab listing a linked phone with no session.
+- [ ] The desktop app's Files tab listing a linked phone with no session. (where: by hand)
 - [ ] Away from home: `pocketdesk send` refused at once as not reachable.
 
 ## 68. Typing any character on Linux (F4)
@@ -1249,10 +1249,10 @@ On this box with the A71, 2026-10-16:
 - [x] `send-to-phone` with two files, with the phone linked in the background: both were saved, MD5s matching, and the desktop notification said what was sent.
 
 Owed:
-- [ ] Send To in Explorer itself, with several files and a folder.
+- [ ] Send To in Explorer itself, with several files and a folder. (where: by hand)
 - [ ] Nautilus, Nemo and Dolphin on Linux.
-- [ ] The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry.
-- [ ] No phone connected: the notification says so.
+- [ ] The desktop app's Settings switch, and `install` / `uninstall` adding and removing the entry. (where: owner) (`install` changes this computer.)
+- [x] No phone connected: the notification says so. (seen 2026-10-24 on the OPPO against a throwaway server (S3): `pocketdesk send-to-phone` exited 1 and a toast said no phone is connected, read back from Windows' notification store.)
 
 ## 70. The phone's folders on the computer (T10g)
 
@@ -1262,7 +1262,7 @@ On the A71 against this box, 2026-10-16:
 - [x] Again after the review fixes: a hidden file neither listed nor sent when named; a fetch of a file deleted on the phone answered "gone.bin is not on the phone any more" with its folder; a list of a removed root answered "That folder is no longer shared"; a fetch with MD5s matching.
 
 Owed:
-- [ ] The desktop app's Phone tab itself (roots, folders, Up, Download).
+- [ ] The desktop app's Phone tab itself (roots, folders, Up, Download). (where: by hand)
 - [ ] A folder of more than 2000 entries; a file renamed between list and fetch.
 - [ ] A second computer asking: nothing answered.
 
@@ -1290,7 +1290,7 @@ On the A71 against this box, 2026-10-16:
 - [x] After the review fixes: a screenshot taken with the server stopped waited, and arrived about 20 s after it started (MD5s matching); revoking photo access turned the switch off.
 
 Owed:
-- [ ] A screenshot with the side keys, and a JPEG screenshot (One UI's other format).
+- [ ] A screenshot with the side keys, and a JPEG screenshot (One UI's other format). (where: by hand)
 - [ ] Android 14+'s "selected photos only" answer, and Android 12 and older.
 - [ ] Away from home (the internet road), and the Linux host.
 
@@ -1306,9 +1306,10 @@ On the Azure VM (headless Sway, uinput root-only) from the A71 over the internet
 - [x] Admitted with no capture; into `wev`: Page Down, Right, F5, B, Play/Pause and Volume Up from the rows, "Hi PD" from the keyboard, trackpad motion and a tap as a left click.
 
 Owed:
-- [ ] The owner's approval prompt ("Ask before each session") before ready.
-- [ ] Over the internet road, and a phone driving while another has a picture session (driving rules).
-- [ ] I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone.
+- [x] "Ask before each session" holds a remote before it is ready: held 10 s after Remote, the phone saying "Waiting for the computer to allow it…", turned down some 30 s later with no answer. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
+- [ ] The desktop app's prompt for a remote, clicked. (where: by hand)
+- [ ] Over the internet road, and a phone driving while another has a picture session (driving rules). (where: owner) (a remote needs the Input permission.)
+- [ ] I1: the computer's server restarted under a remote: "Reconnecting in N s…" on its card, then the remote back by itself, the talk timer still counting; Kick from the computer: not retried; Settings "Reconnect by itself" off: Retry only; after ten minutes, "Stopped trying" and the session's notification gone. (where: owner) (a remote needs the Input permission.)
   - Checked 2026-10-20 on the OPPO (CPH2359, Android 14) against the throwaway server: the server killed under a remote with a talk timer; first noticed only at 47 s (the transport's idle timeout), then, with I1b, at 14 s, "the computer stopped answering" and its countdown, and the remote ready again by itself 14 s after the server returned, the timer counting through.
 
 ## 74. The phone's battery without a session
@@ -1320,7 +1321,7 @@ On the A71 against this box, 2026-10-16, with "Computer's clipboard in the backg
 
 Owed:
 - [ ] With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
-- [ ] Over the internet road.
+- [x] Over the internet road. (seen 2026-10-24 on the OPPO against a throwaway server (S3): with `adb reverse` removed the control link came by iroh and a battery report arrived as it came up.)
 
 ## 75. A second screen at the phone's shape (T10j)
 
@@ -1336,7 +1337,7 @@ Owed:
 
 JVM-tested only (the A71's build cannot start its hotspot from adb, and a computer joining it would mean changing this box's network). Owed:
 - [ ] A computer joined to the phone's hotspot, saved under that address: "on this phone's hotspot or tethering".
-- [ ] The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it.
+- [ ] The same computer saved under its home address: the network finding, with "This phone is sharing its connection" beside it. (where: other hardware) (the phone's hotspot.)
 - [ ] USB tethering (`rndis0`/`ncm0`), and the interface names on other makers' phones (Pixel's hotspot may be `wlan1`, not read).
 
 ## 77. This phone's screen on the computer (T10k)
@@ -1354,8 +1355,8 @@ A71 (Android 16) → this Windows box, LAN, debug builds, 2026-10-16:
 
 Owed:
 - [ ] The latency against a stopwatch, and over the internet road (WAN, relayed and direct).
-- [ ] The notification's Stop (the A71 showed only the redacted notification in the shade while locked), and Sessions' "Show screen" after the window was closed.
-- [ ] "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery.
+- [ ] The notification's Stop (the A71 showed only the redacted notification in the shade while locked), and Sessions' "Show screen" after the window was closed. (where: by hand)
+- [ ] "Share one app" instead of the entire screen; a phone call or a secure screen (banking apps black out); a long cast's heat and battery. (where: by hand)
 - [ ] The Linux desktop app (Wayland and X11), and a computer without `ffmpeg` (the window says so).
 
 ## 78. Events and hooks (ecosystem 1a)
@@ -1368,9 +1369,13 @@ A71 → this Windows box, LAN, debug server, 2026-10-16, with `pocketdesk events
 - [x] After the review fixes: a hook starting with a quoted program (`"C:\Windows\System32\cmd.exe" /C more > "…"`) ran through the queue with the event on stdin, exit code 0.
 
 Owed:
-- [ ] `notification`, `text_received`, `file_received` and `link_received` from a phone, at both detail levels.
-- [ ] The desktop Settings hooks box saving a hook the server then runs; "Event log" off writing nothing.
-- [ ] A hook killed at 30 s, and the 33rd waiting hook skipped, on a real server.
+- [x] `notification` and `link_received` from a phone at both detail levels: metadata gave the app and the host only, "Details in events" added title, text and URL. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
+- [ ] `file_received` at both detail levels.
+- [ ] `text_received` at both detail levels. (where: sim)
+- [x] "Event log" off (`events = false`): a notification and a link wrote no line. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
+- [ ] The desktop Settings hooks box saving a hook the server then runs. (where: by hand)
+- [x] A hook killed at 30 s on a real server: a `ping -n 60` hook on `notification` gave `hook_ran` 32 s later with `timed_out: true` and no code. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
+- [ ] The 33rd waiting hook skipped, on a real server: 37 events of a kind within 30 s (a phone sends at most 20 notifications a minute, so another source).
 - [ ] Linux: `sh -c` hooks, and the log's mode (0600).
 
 ## 79. The Activity Center (ecosystem 1b)
@@ -1380,7 +1385,7 @@ A71 → this Windows box, LAN, debug server, 2026-10-16:
 
 Owed:
 - [ ] The Activity tab itself on screen (its rows, filters, Show in folder): a click posted to the window did not reach egui, and real input into this box's desktop is not used for tests.
-- [ ] Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving.
+- [ ] Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving. (where: by hand)
 
 ## 80. Named tasks (ecosystem 1c)
 
@@ -1392,7 +1397,7 @@ A71 → this Windows box, LAN, debug server, 2026-10-16, three tasks in config.t
 - [x] After the review fixes: "Say hello" again over the live link, and "Slow" stopped at its deadline with what it wrote before it (its first lines) kept and shown on the phone.
 
 Owed:
-- [ ] The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor.
+- [ ] The desktop app's Allow / Deny prompt itself (clicked, not written), Deny on the phone, and the Settings task editor. (where: by hand)
 - [x] "Start my tasks" off: the phone gives up with "no answer" after 20 s. Found there: it showed the bridge's "The desktop did not answer over the control connection"; fixed, the computer answers at once and the sheet says 'Could not ask the computer: "Start my tasks" is turned off for this phone on the computer' (2026-10-19, A71, throwaway server).
 - [ ] Linux (`sh -c`), a long output's end on the phone, and two phones at once.
 
@@ -1405,7 +1410,7 @@ This Windows box and the A71, debug builds, 2026-10-16:
 - [x] After the review fixes, again through the host with a session on the A71: a PNG from Wikimedia arrived in `Download/Pocketdesk`, MD5 matching (it had answered 403 until the download named itself with a User-Agent); an SVG refused as not a picture Pocketdesk sends; a redirect to `127.0.0.1` refused with why; a link sent.
 
 Owed:
-- [ ] The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications.
+- [ ] The extension itself loaded in Brave or Chrome and in Firefox (unpacked), and its menus and notifications. (where: by hand)
 - [ ] Linux registration (`~/.config/<browser>/NativeMessagingHosts`, `~/.mozilla/native-messaging-hosts`), images waiting in `~/.cache/pocketdesk-browser`, and the desktop Settings switch.
 
 ## 82. Home Assistant over MQTT (ecosystem 1e)
@@ -1473,21 +1478,21 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 - [x] 2c/2d, phone → computer: a 50 MB share, in Downloads in 11 s, MD5 matching.
 - [x] A 150 MB offer broken by 15 s without Wi-Fi: the phone's retries continued it ("The phone had 27869840 of 157286400 bytes; sent the rest"), MD5 matching; the iroh control connection itself survived the drop.
 - [ ] The remote file browser's download and a folder fetch over the internet road.
-- [ ] 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image).
+- [ ] 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image). (where: by hand)
 - [ ] A real WAN (the VM): 500 MB resumed with TCP 1716 unreachable.
-- [ ] The too-old message against a computer from before 2c.
-- [ ] Both Settings switches off: a send refused at once, with the reason.
+- [ ] The too-old message against a computer from before 2c. (where: other hardware) (a computer running a release from before 2c.)
+- [x] Both Settings switches off: a send refused at once, with the reason. (seen 2026-10-24 on the OPPO against a throwaway server (S3) by the internet road with `internet_files = false`: refused at once; its words fixed in #288 to name the setting.)
 
 ## 86. Two computers: pairing, the link, the clipboard and files (2f–2h)
 
 Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17): a forged certificate and a wrong PIN paired nothing, the code paired, B listed A as a computer with the narrow profile and held A's iroh key, the link came up over iroh, a copy crossed each way (stand-in clipboards), a 3 MB file each way byte for byte, Forget dropped the link. Owed on two real computers (Windows, the R6a throwaway instance for A so the installed server is untouched, and the Azure VM for B):
 
-- [ ] Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first.
-- [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute).
-- [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays.
-- [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`.
-- [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason.
-- [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works.
+- [ ] Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first. (where: second computer)
+- [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute). (where: second computer)
+- [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
+- [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
+- [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason. (where: second computer)
+- [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 
 ## 87. KDE Connect devices (3a–3c)
 
@@ -1501,7 +1506,7 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 - [ ] The desktop app's Find button, list, Allow/Deny and Pair on screen.
 - [x] Find again after the 3a review: the device connected (paired) and held for the minute, one link, no churn.
 - [x] After the 3b review: Pair from here (the request file), the phone showed the same code, Accept there held it here as accepted with nothing pinned, then Confirm (Allow with the code) pinned it. A request left past 30 s lapsed and the phone's prompt went with it.
-- [ ] Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new.
+- [ ] Cancel after the device's Accept unpairs it on the phone; a second request from the phone while one waits shows nothing new. (where: other hardware) (KDE Connect's app.)
 - [x] 3c, battery: the A71's KDE Connect sent it as the link came up (100 %, charging), kept in `phone_status.json`.
 - [x] 3c, the clipboard from here (the clipboard stand-in file): pasted on the phone. Found: the watcher rested while only a KDE device was connected, so nothing went; fixed.
 - [x] 3c, the clipboard from the phone ("Send clipboard" in KDE Connect): the computer's set.
@@ -1511,7 +1516,7 @@ The A71 with KDE Connect 1.36.0 (F-Droid) against a throwaway server on this box
 - [x] Found and fixed: the battery the A71 sent as it accepted was dropped while the owner confirmed; now held and kept at pairing (none before Confirm, 100 % right after).
 - [x] Files again after the review's intake changes: Files turned on with the one-switch request, a 3 MB file kept as `pd-kde-3c (1).bin` beside the first, MD5 matching, nothing left in `kdeconnect_parts/`.
 - [ ] 3c, a text or link share refused with its notice, the low-battery warning from a KDE device, and the switches, battery and Ring on screen.
-- [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits).
+- [ ] A device that broadcasts first (this computer dialing it): not built (the receive half waits). (where: other hardware) (KDE Connect's app.)
 - [ ] Linux, with `kdeconnectd` holding UDP 1716.
 
 ## 88. The desktop app's shell (U1)
@@ -1523,9 +1528,9 @@ On this box, the app's own window captured (no input into it):
 - [x] Windows UI Automation reads the navigation, the group titles, the page's heading and its text.
 - [x] A second run opened on the page the first had shown.
 - [x] Settings' Save bar after an edit, Undo taking it away and Save writing the file and saying "Saved." (C4's harness).
-- [ ] A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs.
+- [ ] A notice clearing after 6 s, "Copied.", and the two settings' switches while their change runs. (where: by hand)
 - [ ] Narrator reading the app; the Linux build (Orca, the Noto fonts through fc-list).
-- [ ] A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it.
+- [ ] A line mixing Arabic or Hebrew with Latin (egui has no bidirectional layout), read by someone who reads it. (where: by hand)
 
 ## 89. The phone's navigation and feedback (U2)
 
@@ -1538,7 +1543,7 @@ On the A71, against this box and a throwaway server reached through `adb reverse
 - [x] The pairing sheet: the PIN field, Pair, "Show a PIN on the computer", Cancel; the eye says Show PIN and Hide PIN; paired with a PIN.
 - [x] A wake's result as a snackbar that goes by itself; the scanner's Cancel and its hint.
 - [ ] Lock confirmed, and refused with Power off (the server's answer is unit-tested): never against this box, so on the VM or a spare computer.
-- [ ] Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link.
+- [ ] Ring's snackbar (it rings the computer), and a shortcut key's failure message on a dropped link. (where: owner) (it sounds a siren on this computer.)
 - [ ] TalkBack reading the snackbars and the checking card.
 
 ## 90. Names on both sides (U3)
@@ -1549,7 +1554,7 @@ On the A71, against a throwaway server named "Test Desk" (`COMPUTERNAME`) reache
 - [x] The computer keeps the phone's name at pairing (Android's device name), and a name set in the phone's Settings, changed mid-run too (the link reopens), and the device name again once cleared.
 - [x] `pocketdesk devices --json` gives `name`; the desktop app's Devices page shows the name over the id.
 - [ ] Rename on the desktop's Devices page, and the approval prompt's "(calls itself)" (they need clicks).
-- [ ] A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?".
+- [ ] A computer's name from a scanned pairing code, the session notification and launcher shortcuts by name, and "Lock <name>?". (where: by hand)
 - [ ] The Linux host (its kernel host name), and a phone whose Android name holds a person's name.
 
 ## 91. Ring the phone from the computer (N1)
@@ -1561,7 +1566,7 @@ On the A71, against a throwaway server reached through `adb reverse`; each ring 
 - [x] With the switch off, the computer sent the ring and the phone dropped it ("not rung"); the switch shows its change at once (it had not, with eight others).
 - [x] After the review: with the remote open (and the background link up), a ring sounded through the remote's own watcher with its Silence dialog, the alarm stream at 7 of 7 while it rang and back at 6 after Silence, the notification gone.
 - [ ] The desktop's Ring button on screen (it needs a click), Ring off in Devices refusing it, and once a minute from the button.
-- [ ] Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted.
+- [ ] Do Not Disturb with alarms allowed and not; a phone with a secure lock screen (the full-screen ring and Stop); a phone where the full-screen permission is not granted. (where: by hand)
 - [ ] The Linux host.
 
 ## 92. Phone → computer text in one tap (N2)
@@ -1572,7 +1577,7 @@ On the A71, against a throwaway server with a stand-in clipboard (`POCKETDESK_CL
 - [x] The connect shortcuts carry the share category (long-lived); a share through a computer's shortcut id reached that computer, and one through an unknown id went nowhere.
 - [x] After the review: the connect shortcuts' ids carry the token; a share through the real id reached the computer, one through the old `connect:<address>` form (as another app would forge it) went nowhere, and the selection menu's text still arrived.
 - [ ] "To computer" in a real app's selection menu, on screen; the Sharesheet's Direct Share row showing the computers (adb opens only the app chooser).
-- [ ] A copy marked sensitive (a password manager's) asking first through the tile.
+- [ ] A copy marked sensitive (a password manager's) asking first through the tile. (where: by hand)
 
 ## 93. The phone's Home card, Add form, Settings and session menu (U4)
 
@@ -1585,9 +1590,9 @@ On the A71, against a throwaway server (`adb reverse`, input off for the phone):
 - [x] The session menu: the groups, segmented choices (Trackpad chosen, the chip followed), no chevron on Ring, Lock, Blackout and picture-in-picture.
 - [ ] TalkBack on a card ("Connect"), a Settings row (one stop) and a heading.
 - [x] "Show connection details" on, during a session: the numbers and the computer's battery (fps, kbps, rtt, delay, lost, "computer 55%⚡" and the caption) (2026-10-19, A71, throwaway server, by script).
-- [ ] A row's "Allow notification access" with a feature on and access off.
+- [x] A row's "Allow notification access" with a feature on and access off. (seen 2026-10-24 on the OPPO against a throwaway server (S3): access revoked with `cmd notification disallow_listener`, Settings offered the row, which opened Android's notification access page.)
 - [x] Spanish and Tamil (the app's own language set by `cmd locale`): the card's buttons fit (Tamil wraps Show screen to a second row), and the four quality choices fit after the review.
-- [ ] Landscape: the bottom chrome with 48 dp chips.
+- [ ] Landscape: the bottom chrome with 48 dp chips. (where: by hand)
 
 ## 94. The desktop's Settings and words (U5)
 
@@ -1595,10 +1600,10 @@ On this box through the app's own window (screenshots only), with a throwaway co
 
 - [x] Settings in sections, Connection and Phones open, each heading with what it holds; rows with their notes under them.
 - [x] Devices: "Unpair…" and a battery's age as "9 min ago"; Files with nothing to send to says which phones and computers can take a file.
-- [ ] Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it.
-- [ ] A narrow window wrapping every row; a section with a problem held open.
+- [ ] Opening and closing sections; a change shown as applying now or after a restart in the save bar, and the restart notice naming it. (where: by hand)
+- [ ] A narrow window wrapping every row; a section with a problem held open. (where: by hand)
 - [x] Unpair's question for a phone, Cancel keeping it and Unpair removing it (C4's harness, `desktop/src/ui_tests.rs`).
-- [ ] Unpair's question for a computer.
+- [ ] Unpair's question for a computer. (where: by hand)
 - [x] Pair a phone and Overview buttons on the empty pages (C4's harness: Devices, Sessions and Files).
 
 ## 95. The phone app in Spanish and Tamil (U6)
@@ -1607,17 +1612,18 @@ On the A71 with the app's language set by `cmd locale set-app-locales` (reset af
 
 - [x] Tamil: Home's bottom row wraps to two lines; a session's chip says நேரடித் தொடுதல் as its menu does; the connection details in Tamil, clear of Exit after the fix.
 - [x] Spanish: the details (retardo, perdidos, equipo, "tasas en 1,5 s"), the chip "Toque directo", and the shortcut bar's Ctrl+Alt+Supr and Impr Pant.
-- [ ] The keyboard bar's keys and the remote's presenter keys in Spanish.
-- [ ] Every screen in Spanish and Tamil for text that runs out of its box.
+- [x] The keyboard bar's keys in Spanish: Ctrl, Alt, Mayús, Super, Esc, Tab, Inicio, Fin, Re Pág, Av Pág, Supr, Insert. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
+- [ ] The remote's presenter keys in Spanish. (where: owner) (A remote needs the Input permission.)
+- [ ] Every screen in Spanish and Tamil for text that runs out of its box. (where: by hand)
 
 ## 96. Answer a phone notification in the toast itself (N3)
 
 On this box with the A71 and a throwaway chat app (not committed) posting Reply and "Mark as read":
 
 - [x] The phone's notification reached the computer as a toast whose delivered XML (read from the notification history) holds the reply box, Send and "Mark as read"; the server kept it answerable; clearing it on the phone took the toast back.
-- [ ] Typing a reply in the toast and pressing Send: the phone's app gets it (its RemoteInput), at most 10 a minute.
-- [ ] Pressing "Mark as read" in the toast, and from the Action Center after the banner has gone.
-- [ ] Settings "Answer in the notification" off: the toast is plain.
+- [ ] Typing a reply in the toast and pressing Send: the phone's app gets it (its RemoteInput), at most 10 a minute. (where: by hand)
+- [ ] Pressing "Mark as read" in the toast, and from the Action Center after the banner has gone. (where: by hand)
+- [ ] Settings "Answer in the notification" off: the toast is plain. (where: by hand)
 - [ ] Linux: a notification server with actions (mako's `makoctl invoke`, dunst's menu) and KDE's inline reply.
 
 ## 97. The phone as the computer's speaker and mic (N5)
@@ -1634,20 +1640,20 @@ On the A71 against this box (a throwaway server, the internet road):
 - [ ] By ear: the computer's sound on the phone (lag, quality, across the room).
 - [ ] Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
 - [ ] Linux: the computer's sound through PipeWire and the phone's mic as "Pocketdesk Mic" (`pw-loopback`).
-- [ ] An hour with the screen off: the session holds, and what it costs the phone's battery.
+- [ ] An hour with the screen off: the session holds, and what it costs the phone's battery. (where: by hand)
 
 ## 98. An Android 17 pass (N4)
 
 Owed, on an Android 17 device or the API 37 emulator (the emulator here stalled under both software and host rendering, so none of this has run; the owner will check it):
 
-- [ ] The app starts, asks for local network access, and a session works once it is granted.
-- [ ] Ring from the computer with the app in the background and `adb shell cmd audio set-enable-hardening enable`: the notification sounds at the alarm volume, the volume is not raised, and no `AudioHardening` entry names the app.
-- [ ] On Android 16 and older (the A71): the ring still raises the alarm volume and puts it back.
+- [ ] The app starts, asks for local network access, and a session works once it is granted. (where: other hardware) (Android 17.)
+- [ ] Ring from the computer with the app in the background and `adb shell cmd audio set-enable-hardening enable`: the notification sounds at the alarm volume, the volume is not raised, and no `AudioHardening` entry names the app. (where: other hardware) (Android 17.)
+- [x] On Android 16 and older (the A71): the ring still raises the alarm volume and puts it back. (seen 2026-10-24 on the OPPO against a throwaway server (S3) on Android 14 with #284: two rings raised it 6 to 16 and put it back to 6.)
 - [ ] Settings shows the Android 17 notes beside "Ring from the computer" and "Show texts on my computer".
 - [ ] A touchpad connected to the phone drives the computer's pointer and scrolls during a session: a tap and a press of a clickpad click, two-finger scroll goes the right way at a sensible step, and a game controller's touchpad does nothing unwanted.
-- [ ] A text with a code: does it reach the computer at all after the three hours, and with its own time?
-- [ ] A ring that raised the volume on Android 16, cut short, then the phone on 17: the volume is put back when the app is opened.
-- [ ] A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use).
+- [ ] A text with a code: does it reach the computer at all after the three hours, and with its own time? (where: sim)
+- [ ] A ring that raised the volume on Android 16, cut short, then the phone on 17: the volume is put back when the app is opened. (where: other hardware) (Android 17.)
+- [ ] A screen, remote and sound session with the screen off: the computer's sound keeps playing (the session's foreground service holds while-in-use). (where: by hand) (by ear.)
 - [ ] A tablet-size window: the session lays out, rotates and resizes (orientation limits are ignored there).
 
 ## 99. The phone panel and a Linux tray (N6)
@@ -1677,7 +1683,7 @@ On the A71 with KDE Connect 1.36 (F-Droid), paired with a throwaway server on th
 - [x] A notification posted on the phone shows here as a toast (its app, title and text); closing it there takes the toast away.
 - [x] Notifications already on the phone when it connects (marked silent) are not shown.
 - [x] With the device's "Show its notifications here" off, nothing shows.
-- [ ] A chat app's notification, an update to one (replacing the toast), and a flood held to the limit.
+- [ ] A chat app's notification, an update to one (replacing the toast), and a flood held to the limit. (where: other hardware) (KDE Connect's app.)
 - [ ] Linux: the notification over D-Bus, and closed by its id.
 
 ## 102. The phone's background cost (N7)
@@ -1686,9 +1692,9 @@ On the A71 against a throwaway server, with the clipboard, files and ringing on 
 
 - [x] Before the cuts: 21.0 s of CPU in the hour (0.58 % of one core), no wake locks, no alarms, deep idle all hour.
 - [x] After the cuts: 15.9 s (0.44 %), the same otherwise.
-- [ ] The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps.
-- [ ] Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives.
-- [ ] A release build (R8): the CPU again.
+- [ ] The same hour on battery, without USB: the battery's drop, and the CPU while the phone really sleeps. (where: by hand)
+- [ ] Over Wi-Fi rather than `adb reverse`: the radio's wakes and bytes for the link's keepalives. (where: by hand)
+- [ ] A release build (R8): the CPU again. (where: by hand)
 
 ## 103. Transfers you can watch and stop (C1)
 
@@ -1699,8 +1705,8 @@ On the A71 against a throwaway server on this box, a 1.5 GB file over the intern
 - [x] Cancel on the phone (the notification's button): the computer's row went, the Sent list says "the phone declined it: cancelled on the phone", and the phone's transfer service stopped.
 - [x] Sending the same file again continued from what arrived (615 MB), its speed starting from 0 rather than counting the jump, and was saved whole.
 - [x] A folder cancelled on the computer: one Cancel stops all of it ("4 of 4 files not sent"), nothing more arrives, and no part is left on the phone (C6 fixed the part kept after the computer's Cancel; the phone's own Cancel keeps it, so a resend continues).
-- [ ] A folder cancelled on the phone: the app's notifications sit folded under "Silent" in the shade, so its Cancel was not reached by script (a single 1.5 GB file's was, in C1).
-- [ ] A share from the phone cancelled on the computer, then shared again.
+- [ ] A folder cancelled on the phone: the app's notifications sit folded under "Silent" in the shade, so its Cancel was not reached by script (a single 1.5 GB file's was, in C1). (where: by hand)
+- [x] A share from the phone cancelled on the computer, then shared again. (seen 2026-10-24 on the OPPO against a throwaway server (S3) by the internet road: 150 MB cancelled through `transfer_cancels/` at 20 MB, the phone said "Not sent: 1 of 1" and "The computer refused the file: cancelled on the computer", nothing kept; shared again, whole in 16 s, MD5 matching.)
 
 ## 104. Control the phone from the computer (C8)
 
@@ -1712,9 +1718,9 @@ On the A71 against a throwaway server, the cast over the internet road through a
 - [x] The service turned off: the phone said control is off within a second, and its notification changed.
 - [x] Latency: 40 to 75 ms from a click to the first changed frame from a still screen; 85 to 200 ms to a transition's first large frame.
 - [ ] The window by hand: a click, a drag, the wheel, the right and middle buttons, typing, the bar's buttons, Watch only, and a drag that leaves the window.
-- [ ] The phone locked with a PIN: taps and typing refused, Back and Home taken.
-- [ ] A password field.
-- [ ] Over the home network (not the relay): latency again.
+- [ ] The phone locked with a PIN: taps and typing refused, Back and Home taken. (where: by hand)
+- [ ] A password field. (where: by hand)
+- [ ] Over the home network (not the relay): latency again. (where: owner)
 - [ ] Rotation: taps land right after the phone turns.
 - [ ] Android 13+ sideloaded: the restricted-settings step.
 - [ ] Advanced Protection (Android 17): the service refused.
@@ -1727,8 +1733,8 @@ On the A71 against a throwaway server, the phone in the background with files on
 - [x] A folder picked in the phone's Settings; a file from the computer saved there (checksum matching), the same again as `name (1)`, and a folder with a sub-folder arriving whole.
 - [x] The picked folder deleted: the next file in Downloads/Pocketdesk, and the notification says why.
 - [ ] The computer's chosen folder with a phone's share, a KDE device's file and another computer's; a folder that is gone; Settings' Choose folder… and Use Downloads.
-- [ ] The phone's grant taken back in Android's settings, then a file.
-- [ ] A download broken and continued in a picked folder.
+- [ ] The phone's grant taken back in Android's settings, then a file. (where: by hand)
+- [ ] A download broken and continued in a picked folder. (where: by hand)
 - [ ] A picked folder on an SD card or a cloud provider.
 - [ ] Linux.
 
@@ -1739,10 +1745,10 @@ On the A71 against a throwaway server:
 - [x] The computer stopped, a notification posted 2 s later, the computer back 65 s after: it arrives within 10 s, "Sent 1 min late", `late_secs` in its event.
 - [x] A notification closed on the phone closes its toast at once.
 - [x] An hour in forced deep idle (USB in): all 12 arrive within a second.
-- [ ] Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late.
+- [ ] Doze on battery without USB, where the phone suspends; a notification waiting through it and arriving marked late. (where: by hand)
 - [x] Settings "When the computer is out of reach" chosen on screen (A71, by taps on the phone, 2026-10-19): Don't wait dropped a notification posted while the computer was away; Wait up to an hour kept one and sent it once the computer was back, its event saying 127 s late.
 - [ ] "Wait up to 10 minutes" on screen, and one posted more than 10 minutes before the computer comes back.
-- [ ] A computer from before C3: notifications arrive once each, as before.
+- [ ] A computer from before C3: notifications arrive once each, as before. (where: other hardware) (a computer running a release from before C3.)
 - [x] The computer's Notifications permission off: nothing waits on the phone. A notification posted then was refused (logged once) and did not arrive in the minute after the permission was turned on again (2026-10-19, A71, throwaway server, by script).
 - [ ] Linux: the late line in a D-Bus notification.
 
@@ -1769,15 +1775,15 @@ On the A71 (1080×2400 at 420 dpi):
 - [x] On its side: Home fits, and a session's stream fills the screen with no trackpad dock.
 - [x] The choice row at 1.0 and 2.0, with four options and with three, in a Compose instrumented test (`ChoiceRowTest`).
 - [ ] A TalkBack walk by hand: Home, the Add form, Settings, the session menu (TalkBack's tutorial takes the screen when it is turned on from adb, and adb cannot read which node it reads).
-- [ ] Split screen: Home and a session in half a screen.
-- [ ] Landscape with the keyboard open (§26).
-- [ ] Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0).
+- [ ] Split screen: Home and a session in half a screen. (where: by hand)
+- [ ] Landscape with the keyboard open (§26). (where: by hand)
+- [ ] Spanish and Tamil at 1.0, 1.3 and 2.0 (a long word such as "Individual" may already make a list at 1.0). (where: by hand)
 
 ## 109. The owed checks by where they run (C6)
 
 - [x] `docs/owed-checks.md`, generated by `scripts/owed_checks.py`, held to the checklist by CI.
 - [x] The batch run here on 2026-10-18 (each ticked in its own section): sound underruns (§25), the background clipboard's two switches (§65), a folder with no session (§67), a folder cancelled on the computer (§103). Found and fixed: a download cancelled on the computer kept its part on the phone.
-- [ ] The rest of "here", in later batches.
+- [ ] The rest of "here", in later batches: the S cycle (`docs/research/2026-10-23-s-cycle.md`), S1 to S5.
 
 ## 110. Recent photos on the computer (C7)
 
@@ -1785,11 +1791,11 @@ On the A71 against a throwaway server:
 
 - [x] Three JPEGs pushed into DCIM/Camera: listed newest first with thumbnails; one fetched into the received files, checksums matching.
 - [x] The grid with each photo's Save, Copy and Open (a picture only), in the desktop's headless harness.
-- [ ] The Phone page by hand: Refresh, Save, Open and Copy.
+- [ ] The Phone page by hand: Refresh, Save, Open and Copy. (where: by hand)
 - [x] The phone's switch off: the computer keeps its reason, "Recent photos are turned off in Pocketdesk's Settings on the phone", with no photos (2026-10-19, A71, by script).
 - [ ] Photo access denied: the same with its reason; and the page showing either (by eye).
 - [x] A phone with a thousand camera photos: the newest 24 answered in 3 to 4 s (2026-10-19, A71, twice; the photos made for the test and removed after).
-- [ ] HEIC photos: thumbnails shown, Copy saying it cannot.
+- [ ] HEIC photos: thumbnails shown, Copy saying it cannot. (where: other hardware) (a phone that saves HEIC.)
 - [ ] Android 8 or 9: the legacy thumbnail path.
 
 ## 111. Health after updates (D1)
