@@ -4,7 +4,7 @@
 //! for `away_lock_minutes`, and nobody has touched the keyboard or mouse
 //! for that long, the computer locks: once per departure. Where the
 //! computer cannot say how long it has been idle (a wlroots desktop, a
-//! session without GNOME, KDE or `xprintidle`), it never locks: a phone
+//! session without GNOME, KDE on X11 or `xprintidle`), it never locks: a phone
 //! whose network sleeps must not lock the owner out mid-work. On Linux the
 //! idle time comes from GNOME, KDE or X11 (R3).
 //! With `POCKETDESK_LOCK_FILE` set to an absolute path, the lock is a line
@@ -37,6 +37,29 @@ pub struct AwayLock {
 }
 
 impl AwayLock {
+    /// Whether [`tick`](Self::tick) at `now` could lock, so the idle time
+    /// is worth asking (R3 review: on Linux that is other programs, and
+    /// every 5 s with nobody using the switch undid R6's idle cuts).
+    pub fn wants_idle(
+        &self,
+        now: u64,
+        switched: &[String],
+        present: &[String],
+        after_secs: u64,
+    ) -> bool {
+        if !self.armed || present.iter().any(|p| switched.contains(p)) {
+            return false;
+        }
+        let last = self
+            .seen
+            .iter()
+            .filter(|(phone, _)| switched.contains(phone))
+            .map(|(_, at)| *at)
+            .max();
+        last.is_some_and(|last| now.saturating_sub(last) >= after_secs)
+            && self.retry_at.is_none_or(|at| now >= at)
+    }
+
     /// One look at `now` (seconds): `switched` phones have the switch on,
     /// `present` those with a link now; `idle_secs` how long the keyboard
     /// and mouse were quiet (`None` when unknown, which never locks). The
@@ -149,8 +172,11 @@ pub(crate) fn idle_secs() -> Option<u64> {
             return Some(ms / 1000);
         }
     }
+    // Never under Wayland, where XWayland sees only X clients' input (R3
+    // review: a service that kept DISPLAY alone would read the owner idle).
     let x11 = std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty())
-        && std::env::var_os("WAYLAND_DISPLAY").is_none_or(|d| d.is_empty());
+        && std::env::var_os("WAYLAND_DISPLAY").is_none_or(|d| d.is_empty())
+        && std::env::var("XDG_SESSION_TYPE").map_or(true, |t| t != "wayland");
     if x11 {
         return output_within("xprintidle", &[])
             .and_then(|out| first_number(&out))
@@ -172,7 +198,7 @@ fn first_number(out: &str) -> Option<u64> {
         .collect();
     // Past the type's own digits: `uint64 12345` reads 12345, not 64.
     let rest = out[start + digits.len()..].trim_start();
-    if out[..start].ends_with("uint") && rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+    if out[..start].ends_with("int") && rest.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return first_number(rest);
     }
     digits.parse().ok()
@@ -304,12 +330,18 @@ pub async fn run() {
             .iter()
             .map(|c| c.device_id().to_string())
             .collect();
+        // Off the runtime, and only when a lock could follow: on Linux it
+        // asks other programs (R3, R3 review).
+        let idle = if away.wants_idle(now, &last_switched, &present, u64::from(last_minutes) * 60) {
+            tokio::task::spawn_blocking(idle_secs).await.ok().flatten()
+        } else {
+            None
+        };
         let Some(phone) = away.tick(
             now,
             &last_switched,
             &present,
-            // Off the runtime: on Linux it asks other programs (R3).
-            tokio::task::spawn_blocking(idle_secs).await.ok().flatten(),
+            idle,
             u64::from(last_minutes) * 60,
         ) else {
             continue;
@@ -347,11 +379,31 @@ pub async fn run() {
 mod tests {
     use super::*;
 
+    /// R3 review: the idle time is asked only once a lock could follow.
+    #[test]
+    fn the_idle_time_is_asked_only_when_a_lock_could_follow() {
+        let phones = vec!["p".to_string()];
+        let mut away = AwayLock::default();
+        assert!(
+            !away.wants_idle(0, &phones, &[], 300),
+            "never seen: nothing to lock for"
+        );
+        away.tick(0, &phones, &phones, None, 300);
+        assert!(!away.wants_idle(10, &phones, &phones, 300), "present");
+        assert!(
+            !away.wants_idle(100, &phones, &[], 300),
+            "not gone long enough"
+        );
+        assert!(away.wants_idle(300, &phones, &[], 300), "gone its time");
+        assert!(!away.wants_idle(300, &[], &[], 300), "its switch off");
+    }
+
     /// R3: GNOME's, KDE's and xprintidle's answers read as milliseconds.
     #[test]
     fn the_idle_answers_are_read() {
         assert_eq!(first_number("(uint64 12345,)\n"), Some(12345));
         assert_eq!(first_number("(uint32 900,)"), Some(900));
+        assert_eq!(first_number("(int32 5,)"), Some(5));
         assert_eq!(first_number("67890\n"), Some(67890));
         assert_eq!(
             first_number("Error: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown"),
