@@ -308,6 +308,52 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
         );
     }
 
+    // T5: a folder from A, the other way: each file a share on the link,
+    // into one new folder in B's Downloads, a subfolder kept.
+    let album = a_state.parent().unwrap().join("Album");
+    std::fs::create_dir_all(album.join("Day 2")).unwrap();
+    for n in 0..3u8 {
+        std::fs::write(album.join(format!("pic-{n}.bin")), vec![n + 10; 200_000]).unwrap();
+    }
+    std::fs::write(album.join("Day 2").join("pic-9.bin"), vec![9; 50_000]).unwrap();
+    // An empty file is left out and said, not the end of the send.
+    std::fs::write(album.join("empty.txt"), b"").unwrap();
+    let asked = outbox::request(&a_state, &b_id, album.to_str().unwrap(), pin::now_unix()).unwrap();
+    let sent = wait_for(90, "the folder from A to end", || {
+        sent::read(&a_state)
+            .into_iter()
+            .find(|f| f.id == asked.id && f.state != SentState::Offered)
+            .map(|f| f.state)
+    });
+    assert_eq!(sent, SentState::Sent);
+    let row = sent::read(&a_state)
+        .into_iter()
+        .find(|f| f.id == asked.id)
+        .unwrap();
+    assert_eq!(row.name, "Album/");
+    assert_eq!(row.note.as_deref(), Some("1 empty file left out"));
+    for n in 0..3u8 {
+        let arrived = downloads(&b_state)
+            .join("Album")
+            .join(format!("pic-{n}.bin"));
+        assert_eq!(
+            std::fs::read(&arrived).unwrap(),
+            vec![n + 10; 200_000],
+            "{}",
+            arrived.display()
+        );
+    }
+    assert_eq!(
+        std::fs::read(
+            downloads(&b_state)
+                .join("Album")
+                .join("Day 2")
+                .join("pic-9.bin")
+        )
+        .unwrap(),
+        vec![9; 50_000]
+    );
+
     // Pairing again (a fresh code) starts the link over, and it says so.
     let again = pin::mint_value();
     pin::write(&b_state, &again, pin::now_unix(), None).unwrap();

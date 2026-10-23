@@ -1166,7 +1166,9 @@ pub(crate) async fn refuse(sender: &dyn DeviceSender, key: &str, reason: &str) {
 }
 
 /// Send the file at `path` to the phone by `route`, and return its size
-/// once the phone says it saved it.
+/// once the phone says it saved it (the tests'; the server counts its
+/// progress, [`send_file_counted`]).
+#[cfg(test)]
 pub(crate) async fn send_file_to(route: Route, key: &str, path: &Path) -> Result<u64> {
     send_file_counted(route, key, path, |_| {}).await
 }

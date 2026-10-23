@@ -611,8 +611,13 @@ fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
 
 /// Send a file to another of the owner's computers (2h): on the link to it,
 /// as a phone shares one, never as an offer (the other computer is not this
-/// one's client). Recorded first, then sent on a task of its own.
+/// one's client). Recorded first, then sent on a task of its own. A folder
+/// goes as [`deliver_folder_to_computer`] sends it (T5).
 fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
+    if path.is_dir() {
+        deliver_folder_to_computer(dir, request, path);
+        return;
+    }
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -621,9 +626,7 @@ fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
         .ok()
         .filter(|m| m.is_file())
         .map(|m| m.len());
-    let checked = if path.is_dir() {
-        Err("a folder does not go to another computer yet: send its files")
-    } else if is_servers_own(&path, &crate::plugins::file_browse::private_dirs()) {
+    let checked = if is_servers_own(&path, &crate::plugins::file_browse::private_dirs()) {
         Err("the server's own files are not sent")
     } else if size.is_none() {
         Err("there is no such file")
@@ -661,7 +664,7 @@ fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
     }
     let dir = dir.to_path_buf();
     tokio::spawn(async move {
-        let state = match crate::peer_computers::send_file(&request.device_id, &path).await {
+        let state = match crate::peer_computers::send_file(&request.device_id, &path, None).await {
             Ok(()) => SentState::Sent,
             Err(reason) => {
                 tracing::warn!(
@@ -671,6 +674,131 @@ fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
                 SentState::Failed(reason)
             }
         };
+        update_sent(&dir, &request.id, state);
+    });
+}
+
+/// Send a folder to another of the owner's computers (T5), the way a phone
+/// sends one (T6b): each of its files as a share on the link, carrying the
+/// send's id, the folder's name and the file's path under it, so the other
+/// computer puts them all in one new folder in its Downloads. The files are
+/// those a folder offered to a phone would be ([`folder_files`]), less
+/// empty ones, which the other computer refuses (T5 review: one ended the
+/// send); one row in the sent list for the whole folder, as a phone's. One
+/// file after another, each retried as a single file is, the link waited
+/// for a few seconds between them; the first that cannot be sent (or a
+/// Cancel) ends the send, and the row says how far it got.
+fn deliver_folder_to_computer(dir: &Path, request: SendRequest, root: PathBuf) {
+    let dir = dir.to_path_buf();
+    tokio::spawn(async move {
+        let folder = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Folder".to_string());
+        let found = {
+            let root = root.clone();
+            tokio::task::spawn_blocking(move || folder_files(&root))
+                .await
+                .unwrap_or_else(|e| Err(format!("the folder could not be read: {e}")))
+        };
+        let (found, empty) = match found {
+            Ok(mut found) => {
+                let before = found.files.len();
+                found.files.retain(|f| f.size > 0);
+                let empty = before - found.files.len();
+                (Ok(found), empty)
+            }
+            Err(reason) => (Err(reason), 0),
+        };
+        let name_problem = pocketdesk_core::protocol::relpath::component_problem(&folder);
+        let checked = match &found {
+            _ if name_problem.is_some() => Err(format!(
+                "the folder's name: {}",
+                name_problem.clone().unwrap_or_default()
+            )),
+            _ if is_servers_own(&root, &crate::plugins::file_browse::private_dirs()) => {
+                Err("the server's own files are not sent".to_string())
+            }
+            Ok(found) if found.files.is_empty() => {
+                Err("the folder has nothing to send".to_string())
+            }
+            Ok(_) if !crate::peer_computers::is_linked(&request.device_id) => {
+                Err("the computer is not linked now".to_string())
+            }
+            Ok(_) => Ok(()),
+            Err(reason) => Err(reason.clone()),
+        };
+        let total: u64 = found
+            .as_ref()
+            .map_or(0, |f| f.files.iter().map(|f| f.size).sum());
+        {
+            let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let row = SentFile {
+                id: request.id.clone(),
+                name: format!("{folder}/"),
+                path: request.path.clone(),
+                size: total,
+                device_id: request.device_id.clone(),
+                sent_unix: now_unix(),
+                state: match &checked {
+                    Ok(()) => SentState::Offered,
+                    Err(reason) => SentState::Failed(reason.clone()),
+                },
+                note: found.as_ref().ok().and_then(|f| {
+                    let empties = (empty > 0).then(|| match empty {
+                        1 => "1 empty file left out".to_string(),
+                        n => format!("{n} empty files left out"),
+                    });
+                    match (left_out_note(f), empties) {
+                        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+                        (a, b) => a.or(b),
+                    }
+                }),
+            };
+            if let Err(e) = sent::record(&dir, row) {
+                tracing::warn!("Could not record the sent folder: {e}");
+            }
+        }
+        let found = match (found, checked) {
+            (Ok(found), Ok(())) => found,
+            (_, Err(reason)) | (Err(reason), _) => {
+                tracing::warn!(
+                    "Not sending {} to {}: {reason}",
+                    root.display(),
+                    request.device_id
+                );
+                return;
+            }
+        };
+        // The receiver takes a send's id as 32 hex digits, as a phone's.
+        let folder_id = request.id.replace('-', "");
+        let count = found.files.len();
+        let mut state = SentState::Sent;
+        for (n, file) in found.files.iter().enumerate() {
+            // A link that dropped between files is given a few seconds
+            // to come back (T5 review: the rest failed at once).
+            for _ in 0..10 {
+                if crate::peer_computers::is_linked(&request.device_id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+            let part = crate::peer_computers::FolderPart {
+                id: &folder_id,
+                folder: &folder,
+                path: &file.path,
+            };
+            if let Err(reason) =
+                crate::peer_computers::send_file(&request.device_id, &file.full, Some(&part)).await
+            {
+                tracing::warn!(
+                    "Sending folder {folder} to another computer stopped at {}: {reason}",
+                    file.path.join("/")
+                );
+                state = SentState::Failed(format!("{n} of {count} files sent: {reason}"));
+                break;
+            }
+        }
         update_sent(&dir, &request.id, state);
     });
 }

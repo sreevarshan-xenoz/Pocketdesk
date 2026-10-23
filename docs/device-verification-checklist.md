@@ -1491,7 +1491,7 @@ Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17)
 - [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute). (where: second computer)
 - [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
 - [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
-- [ ] A folder from B to A lands under one new folder; a folder from A to B is refused with its reason. (where: second computer)
+- [ ] A folder from B to A lands under one new folder; a folder from A to B too (T5). (where: second computer)
 - [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 
 ## 87. KDE Connect devices (3a–3c)
