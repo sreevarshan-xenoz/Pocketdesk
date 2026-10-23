@@ -30,6 +30,7 @@ value class LlGlyph internal constructor(@DrawableRes internal val resId: Int)
 object LlIcons {
     val MoreVert = LlGlyph(R.drawable.ic_ll_more_vert)
     val Close = LlGlyph(R.drawable.ic_ll_close)
+    val Search = LlGlyph(R.drawable.ic_ll_search)
     val Check = LlGlyph(R.drawable.ic_ll_check)
     val ChevronRight = LlGlyph(R.drawable.ic_ll_chevron_right)
     val ArrowBack = LlGlyph(R.drawable.ic_ll_arrow_back)

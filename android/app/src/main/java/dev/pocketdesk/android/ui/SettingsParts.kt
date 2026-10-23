@@ -12,7 +12,11 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +42,57 @@ import dev.pocketdesk.android.R
  * switch row that is one toggle and one TalkBack stop (a long summary's ⓘ is
  * a second, its own button).
  */
+
+/**
+ * O8: what Settings' search box holds, and each row's group and whether the
+ * search shows it, as last drawn. One for the screen's life, so a new word
+ * starts from what the last showed, not from nothing: headings and "No
+ * setting matches" would flash at each key (O8 review).
+ */
+class SettingsFilter {
+    var query by mutableStateOf("")
+    internal val rows = mutableStateMapOf<Any, Pair<String, Boolean>>()
+
+    /** How many of [group]'s rows show. */
+    fun found(group: String): Int = rows.values.count { it.first == group && it.second }
+
+    /** Whether a search shows no row at all. */
+    fun nothingFound(): Boolean = SettingsSearch.searching(query) && rows.values.none { it.second }
+}
+
+/** The screen's filter; outside Settings (the Sound screen's rows) one that never searches. */
+val LocalSettingsFilter = compositionLocalOf { SettingsFilter() }
+private val LocalSettingsGroup = compositionLocalOf { "" }
+
+/** A group: its heading, shown unless a search found nothing in it, then its rows. */
+@Composable
+fun SettingsGroup(label: String, content: @Composable () -> Unit) {
+    val filter = LocalSettingsFilter.current
+    if (SettingsSearch.groupShown(filter.query, filter.found(label))) SettingsHeader(label)
+    CompositionLocalProvider(LocalSettingsGroup provides label) { content() }
+}
+
+/**
+ * O8: whether a row of [texts] shows for the search, reported to its group
+ * so the group's heading shows with it.
+ */
+@Composable
+fun rememberSettingShown(vararg texts: String?): Boolean {
+    val filter = LocalSettingsFilter.current
+    val group = LocalSettingsGroup.current
+    val shown = SettingsSearch.rowShown(filter.query, texts.filterNotNull(), group)
+    val key = remember { Any() }
+    val entry = group to shown
+    SideEffect { if (filter.rows[key] != entry) filter.rows[key] = entry }
+    DisposableEffect(filter, key) { onDispose { filter.rows.remove(key) } }
+    return shown
+}
+
+/** O8: a block that is not a [SettingRow] (a field, a slider, a choice), shown as a row of [texts] is. */
+@Composable
+fun SettingsBlock(vararg texts: String?, content: @Composable () -> Unit) {
+    if (rememberSettingShown(*texts)) content()
+}
 
 /** A group's heading. */
 @Composable
@@ -106,6 +161,8 @@ fun SettingRow(
     warning: Boolean = false,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    // O8: a row the search does not find is not drawn.
+    if (!rememberSettingShown(title, summary)) return
     var long by remember(summary) { mutableStateOf(false) }
     var showing by remember { mutableStateOf(false) }
     ListItem(

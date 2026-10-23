@@ -157,6 +157,8 @@ fun PhoneNotificationsSection() {
     // C3: how long a notification waits for a computer out of reach.
     val wait = version.let { PhoneNotificationPrefs.waitMinutes(context) }
     SettingRow(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary))
+    // Its choices hide with it (O8 review).
+    SettingsBlock(stringResource(R.string.phone_notifications_wait), stringResource(R.string.phone_notifications_wait_summary)) {
     Column(Modifier.selectableGroup()) {
         PhoneNotificationPrefs.WAIT_CHOICES.forEach { minutes ->
             val label = when (minutes) {
@@ -176,13 +178,17 @@ fun PhoneNotificationsSection() {
             )
         }
     }
+    }
     if (seen.isEmpty()) {
-        Text(
-            stringResource(R.string.phone_notifications_apps_empty),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
+        // O8: shown as a row is, for the search.
+        SettingsBlock(stringResource(R.string.phone_notifications_apps_empty)) {
+            Text(
+                stringResource(R.string.phone_notifications_apps_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
     }
     seen.forEach { (pkg, label) ->
         SettingSwitch(

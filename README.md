@@ -222,6 +222,7 @@ The Android app needs Android 8 or newer. It was device-checked on a Galaxy A71 
 - **Rust core** reused via a JNI bridge (no Flutter)
 - **Shortcuts** — long-press the app's icon for "Connect to …" or "Wake …" on a saved computer; the Pocketdesk Quick Settings tile connects to the last one
 - **Computers on this network** — Home lists Pocketdesk computers on the same Wi-Fi (mDNS); a tap connects and an unpaired one asks for its PIN. Saved computers that are reachable get an "On this network" label
+- **Find a setting** — the box at the top of Settings shows only the settings whose title, summary or group hold every word typed; Back empties it first
 - **Remote desktop** with tap/drag/double-tap gesture input
 - **Link status** — connecting/LAN/WAN indicator on the video surface, with failure reasons and one-tap retry
 - **Staying connected in the background** — battery optimization cuts Pocketdesk's network while the phone sleeps, so a notification waits on the phone (and goes marked late, or is given up after the wait set in Settings) and a text arrives late. When phone notifications or texts are on and that can happen (or battery use is set to Restricted), Home says so, opens the app's battery page, and links this phone maker's own setting (dontkillmyapp.com). Settings shows the status and turns the reminder off

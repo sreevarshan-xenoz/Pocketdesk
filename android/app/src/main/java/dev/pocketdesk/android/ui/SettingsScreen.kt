@@ -1,5 +1,8 @@
 package dev.pocketdesk.android.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Column
@@ -33,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -49,6 +53,9 @@ import dev.pocketdesk.android.notify.PhoneNotificationPrefs
  * background, Notifications and texts, Automation, Pairing, Wake,
  * Appearance, System, About.
  */
+/** The longest search typed. */
+private const val SEARCH_CHARS = 64
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -62,6 +69,12 @@ fun SettingsScreen(onBack: () -> Unit) {
             runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
         }
     }
+
+    var query by rememberSaveable { mutableStateOf("") }
+    val filter = remember { SettingsFilter() }
+    filter.query = query
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -84,402 +97,465 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 24.dp),
         ) {
-            // U3: what this phone calls itself to computers.
-            SettingsHeader(stringResource(R.string.settings_this_phone))
-            var phoneName by remember { mutableStateOf(Prefs.phoneName(context)) }
-            // Applied as Settings closes, not per key: a changed name closes
-            // the control link so the next one carries it.
-            DisposableEffect(Unit) {
-                onDispose { Thread { dev.pocketdesk.android.PhoneName.apply(context) }.start() }
-            }
+            // O8: find a setting; Back empties the box first.
             OutlinedTextField(
-                value = phoneName,
-                onValueChange = {
-                    phoneName = it.take(dev.pocketdesk.android.ComputerName.MAX_CHARS * 2)
-                    Prefs.setPhoneName(context, phoneName)
+                value = query,
+                onValueChange = { query = it.take(SEARCH_CHARS) },
+                placeholder = { Text(stringResource(R.string.settings_find)) },
+                leadingIcon = { LlIcon(LlIcons.Search, null) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { query = "" }) {
+                            LlIcon(LlIcons.Close, stringResource(R.string.settings_find_clear))
+                        }
+                    }
+                } else {
+                    null
                 },
-                label = { Text(stringResource(R.string.settings_phone_name)) },
-                placeholder = { Text(dev.pocketdesk.android.PhoneName.deviceName(context)) },
-                supportingText = { Text(stringResource(R.string.settings_phone_name_summary)) },
                 singleLine = true,
+                // Search closes the keyboard (O8 review).
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            ControlSetting()
-            TypingSetting()
-            PhoneActionsSetting()
-            CopiesSetting()
-            CastSoundSetting()
-
-            SettingsHeader(stringResource(R.string.settings_session))
-            SettingSwitch(
-                stringResource(R.string.settings_keep_screen_on),
-                stringResource(R.string.settings_keep_screen_on_summary),
-                Prefs.keepScreenOn(context),
-                { Prefs.setKeepScreenOn(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_auto_reconnect),
-                stringResource(R.string.settings_auto_reconnect_summary),
-                Prefs.autoReconnect(context),
-                { Prefs.setAutoReconnect(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_volume_keys),
-                stringResource(R.string.settings_volume_keys_summary),
-                Prefs.volumeKeys(context),
-                { Prefs.setVolumeKeys(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_show_driving),
-                stringResource(R.string.settings_show_driving_summary),
-                Prefs.showDriving(context),
-                { Prefs.setShowDriving(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_haptics),
-                stringResource(R.string.settings_haptics_summary),
-                Prefs.haptics(context),
-                { Prefs.setHaptics(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_connection_details),
-                stringResource(R.string.settings_connection_details_summary),
-                Prefs.connectionDetails(context),
-                { Prefs.setConnectionDetails(context, it) },
-            )
-
-            // E6: what drives the computer, under a heading of its own.
-            SettingsHeader(stringResource(R.string.settings_input))
-            SettingSwitch(
-                stringResource(R.string.settings_capture_mouse),
-                // A touchpad too on Android 17 (N4).
-                stringResource(
-                    if (Android17.captures(android.os.Build.VERSION.SDK_INT, false, false, true)) {
-                        R.string.settings_capture_mouse_summary_17
-                    } else {
-                        R.string.settings_capture_mouse_summary
-                    },
-                ),
-                Prefs.captureMouse(context),
-                { Prefs.setCaptureMouse(context, it) },
-            )
-            TrackpadSpeed()
-            AirMouseSpeed()
-            // H2: the talk timer in Remote.
-            SettingSwitch(
-                stringResource(R.string.settings_talk_timer_buzz),
-                stringResource(R.string.settings_talk_timer_buzz_summary),
-                Prefs.talkTimerBuzz(context),
-                { Prefs.setTalkTimerBuzz(context, it) },
-            )
-            PenPressure()
-            SettingSwitch(
-                stringResource(R.string.settings_gamepad_controller),
-                stringResource(R.string.settings_gamepad_controller_summary),
-                Prefs.gamepadController(context),
-                { Prefs.setGamepadController(context, it) },
-            )
-            DeckColumns()
-
-            SettingsHeader(stringResource(R.string.settings_files_links))
-            // F3: a photo the computer asks for; the listener keeps its link.
-            val cameraNeedsAccess = Prefs.cameraAsks(context) &&
-                !dev.pocketdesk.android.notify.PhoneNotificationPrefs.accessGranted(context)
-            SettingSwitch(
-                stringResource(R.string.settings_camera_asks),
-                stringResource(
-                    if (cameraNeedsAccess) R.string.settings_camera_asks_needs_access else R.string.settings_camera_asks_summary,
-                ),
-                Prefs.cameraAsks(context),
-                { Prefs.setCameraAsks(context, it) },
-                warning = cameraNeedsAccess,
-            )
-            if (cameraNeedsAccess) AllowNotificationAccess()
-            if (Prefs.cameraAsks(context)) {
-                SettingSwitch(
-                    stringResource(R.string.settings_camera_clipboard),
-                    stringResource(R.string.settings_camera_clipboard_summary),
-                    Prefs.cameraClipboard(context),
-                    { Prefs.setCameraClipboard(context, it) },
+            if (filter.nothingFound()) {
+                Text(
+                    stringResource(R.string.settings_find_none, query.trim()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // Said to TalkBack as it comes (O8 review).
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
                 )
             }
-            SettingSwitch(
-                stringResource(R.string.settings_retry_transfers),
-                stringResource(R.string.settings_retry_transfers_summary),
-                Prefs.retryTransfers(context),
-                { Prefs.setRetryTransfers(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_keep_file_dates),
-                stringResource(R.string.settings_keep_file_dates_summary),
-                Prefs.keepFileDates(context),
-                { Prefs.setKeepFileDates(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_internet_files),
-                stringResource(R.string.settings_internet_files_summary),
-                Prefs.internetFiles(context),
-                {
-                    Prefs.setInternetFiles(context, it)
-                    RustCore.setInternetFiles(it)
-                },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_links_from_computer),
-                stringResource(R.string.settings_links_from_computer_summary),
-                Prefs.linksFromComputer(context),
-                { Prefs.setLinksFromComputer(context, it) },
-            )
-            // L4: the dialer opens with a number the computer sends.
-            SettingSwitch(
-                stringResource(R.string.settings_calls_from_computer),
-                stringResource(R.string.settings_calls_from_computer_summary),
-                Prefs.callsFromComputer(context),
-                { Prefs.setCallsFromComputer(context, it) },
-            )
-            // L6: the computer's commands to the automation apps.
-            CommandsSetting()
-            DownloadFolderSetting()
-            PhoneFoldersSection()
-
-            SettingsHeader(stringResource(R.string.settings_background))
-            SettingSwitch(
-                stringResource(R.string.settings_clipboard_background),
-                stringResource(R.string.settings_clipboard_background_summary),
-                Prefs.clipboardInBackground(context),
-                {
-                    Prefs.setClipboardInBackground(context, it)
-                    askForListener(it)
-                },
-            )
-            // M3: an image copied on the computer too, on Wi-Fi.
-            SettingSwitch(
-                stringResource(R.string.settings_clipboard_images_background),
-                stringResource(R.string.settings_clipboard_images_background_summary),
-                Prefs.clipboardImagesInBackground(context),
-                { Prefs.setClipboardImagesInBackground(context, it) },
-                enabled = Prefs.clipboardInBackground(context),
-                indent = true,
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_files_background),
-                stringResource(R.string.settings_files_background_summary),
-                Prefs.filesInBackground(context),
-                {
-                    Prefs.setFilesInBackground(context, it)
-                    askForListener(it)
-                },
-            )
-            // N1: the computer may ring this phone to find it.
-            SettingSwitch(
-                stringResource(R.string.settings_ring_from_computer),
-                // Android 17 rings at the owner's alarm volume (N4).
-                stringResource(
-                    if (Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) {
-                        R.string.settings_ring_from_computer_summary
-                    } else {
-                        R.string.settings_ring_from_computer_summary_17
+            CompositionLocalProvider(LocalSettingsFilter provides filter) {
+            // U3: what this phone calls itself to computers.
+            SettingsGroup(stringResource(R.string.settings_this_phone)) {
+                var phoneName by remember { mutableStateOf(Prefs.phoneName(context)) }
+                // Applied as Settings closes, not per key: a changed name closes
+                // the control link so the next one carries it.
+                DisposableEffect(Unit) {
+                    onDispose { Thread { dev.pocketdesk.android.PhoneName.apply(context) }.start() }
+                }
+                SettingsBlock(
+                    stringResource(R.string.settings_phone_name),
+                    stringResource(R.string.settings_phone_name_summary),
+                ) {
+                OutlinedTextField(
+                    value = phoneName,
+                    onValueChange = {
+                        phoneName = it.take(dev.pocketdesk.android.ComputerName.MAX_CHARS * 2)
+                        Prefs.setPhoneName(context, phoneName)
                     },
-                ),
-                Prefs.ringFromComputer(context),
-                {
-                    Prefs.setRingFromComputer(context, it)
-                    askForListener(it)
-                },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_share_battery),
-                stringResource(R.string.settings_share_battery_summary),
-                Prefs.shareBattery(context),
-                { Prefs.setShareBattery(context, it) },
-            )
-            // G1: the state widget's own refresh.
-            SettingSwitch(
-                stringResource(R.string.settings_state_widget_auto),
-                stringResource(R.string.settings_state_widget_auto_summary),
-                Prefs.stateWidgetAuto(context),
-                { Prefs.setStateWidgetAuto(context, it) },
-            )
-            // Android shows other apps' media only to an app with notification access.
-            SettingSwitch(
-                stringResource(R.string.settings_phone_media),
-                stringResource(R.string.settings_phone_media_summary),
-                Prefs.phoneMediaOnComputer(context),
-                {
-                    Prefs.setPhoneMediaOnComputer(context, it)
-                    askForListener(it)
-                },
-            )
-            // N2: the same without a session, from the listener.
-            SettingSwitch(
-                stringResource(R.string.settings_phone_media_background),
-                stringResource(R.string.settings_phone_media_background_summary),
-                Prefs.phoneMediaInBackground(context),
-                {
-                    Prefs.setPhoneMediaInBackground(context, it)
-                    if (it) Prefs.setPhoneMediaOnComputer(context, true)
-                    askForListener(it)
-                },
-            )
-            // N5: the other way, the computer's music in this phone's controls.
-            SettingSwitch(
-                stringResource(R.string.settings_computer_media_controls),
-                stringResource(R.string.settings_computer_media_controls_summary),
-                Prefs.computerMediaInControls(context),
-                {
-                    Prefs.setComputerMediaInControls(context, it)
-                    askForListener(it)
-                },
-            )
-            ScreenshotsSection()
-            RecentPhotosSection()
-            // M5: a photo's place kept when it is sent.
-            PhotoPlaceSection()
-            // T2: whether Android holds those back while the phone sleeps.
-            BackgroundSection()
-            SettingSwitch(
-                stringResource(R.string.settings_background_remind),
-                stringResource(R.string.settings_background_remind_summary),
-                Prefs.backgroundReminder(context),
-                { Prefs.setBackgroundReminder(context, it) },
-            )
+                    label = { Text(stringResource(R.string.settings_phone_name)) },
+                    placeholder = { Text(dev.pocketdesk.android.PhoneName.deviceName(context)) },
+                    supportingText = { Text(stringResource(R.string.settings_phone_name_summary)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+                }
+                ControlSetting()
+                TypingSetting()
+                PhoneActionsSetting()
+                CopiesSetting()
+                CastSoundSetting()
+            }
 
-            SettingsHeader(stringResource(R.string.settings_notifications_texts))
-            // E6: both Do Not Disturb settings in one place.
-            // D2: the computer may turn on Do Not Disturb for a while. Its
-            // own preferences, so the switch redraws from a local state.
-            var letMute by remember { mutableStateOf(dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(context)) }
-            SettingSwitch(
-                stringResource(R.string.settings_let_computer_mute),
-                stringResource(R.string.settings_let_computer_mute_summary),
-                letMute,
-                {
-                    dev.pocketdesk.android.notify.QuietPrefs.setLetComputerMute(context, it)
-                    letMute = it
-                    askForListener(it)
-                },
-            )
-            PhoneNotificationsSection()
-            TextsSection()
-            CallsSection()
+            SettingsGroup(stringResource(R.string.settings_session)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_keep_screen_on),
+                    stringResource(R.string.settings_keep_screen_on_summary),
+                    Prefs.keepScreenOn(context),
+                    { Prefs.setKeepScreenOn(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_auto_reconnect),
+                    stringResource(R.string.settings_auto_reconnect_summary),
+                    Prefs.autoReconnect(context),
+                    { Prefs.setAutoReconnect(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_volume_keys),
+                    stringResource(R.string.settings_volume_keys_summary),
+                    Prefs.volumeKeys(context),
+                    { Prefs.setVolumeKeys(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_show_driving),
+                    stringResource(R.string.settings_show_driving_summary),
+                    Prefs.showDriving(context),
+                    { Prefs.setShowDriving(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_haptics),
+                    stringResource(R.string.settings_haptics_summary),
+                    Prefs.haptics(context),
+                    { Prefs.setHaptics(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_connection_details),
+                    stringResource(R.string.settings_connection_details_summary),
+                    Prefs.connectionDetails(context),
+                    { Prefs.setConnectionDetails(context, it) },
+                )
+            }
 
-            SettingsHeader(stringResource(R.string.settings_automation))
-            SettingSwitch(
-                stringResource(R.string.settings_others_choose),
-                stringResource(R.string.settings_others_choose_summary),
-                Prefs.othersChooseComputer(context),
-                { Prefs.setOthersChooseComputer(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_others_run_tasks),
-                stringResource(R.string.settings_others_run_tasks_summary),
-                Prefs.othersRunTasks(context),
-                { Prefs.setOthersRunTasks(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_tell_other_apps),
-                stringResource(R.string.settings_tell_other_apps_summary),
-                Prefs.tellOtherApps(context),
-                { Prefs.setTellOtherApps(context, it) },
-            )
+            // E6: what drives the computer, under a heading of its own.
+            SettingsGroup(stringResource(R.string.settings_input)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_capture_mouse),
+                    // A touchpad too on Android 17 (N4).
+                    stringResource(
+                        if (Android17.captures(android.os.Build.VERSION.SDK_INT, false, false, true)) {
+                            R.string.settings_capture_mouse_summary_17
+                        } else {
+                            R.string.settings_capture_mouse_summary
+                        },
+                    ),
+                    Prefs.captureMouse(context),
+                    { Prefs.setCaptureMouse(context, it) },
+                )
+                TrackpadSpeed()
+                AirMouseSpeed()
+                // H2: the talk timer in Remote.
+                SettingSwitch(
+                    stringResource(R.string.settings_talk_timer_buzz),
+                    stringResource(R.string.settings_talk_timer_buzz_summary),
+                    Prefs.talkTimerBuzz(context),
+                    { Prefs.setTalkTimerBuzz(context, it) },
+                )
+                PenPressure()
+                SettingSwitch(
+                    stringResource(R.string.settings_gamepad_controller),
+                    stringResource(R.string.settings_gamepad_controller_summary),
+                    Prefs.gamepadController(context),
+                    { Prefs.setGamepadController(context, it) },
+                )
+                DeckColumns()
+            }
 
-            SettingsHeader(stringResource(R.string.settings_pairing))
-            SettingSwitch(
-                stringResource(R.string.settings_reveal_pin),
-                stringResource(R.string.settings_reveal_pin_summary),
-                Prefs.revealPin(context),
-                { Prefs.setRevealPin(context, it) },
-            )
+            SettingsGroup(stringResource(R.string.settings_files_links)) {
+                // F3: a photo the computer asks for; the listener keeps its link.
+                val cameraNeedsAccess = Prefs.cameraAsks(context) &&
+                    !dev.pocketdesk.android.notify.PhoneNotificationPrefs.accessGranted(context)
+                SettingSwitch(
+                    stringResource(R.string.settings_camera_asks),
+                    stringResource(
+                        if (cameraNeedsAccess) R.string.settings_camera_asks_needs_access else R.string.settings_camera_asks_summary,
+                    ),
+                    Prefs.cameraAsks(context),
+                    { Prefs.setCameraAsks(context, it) },
+                    warning = cameraNeedsAccess,
+                )
+                if (cameraNeedsAccess) AllowNotificationAccess()
+                if (Prefs.cameraAsks(context)) {
+                    SettingSwitch(
+                        stringResource(R.string.settings_camera_clipboard),
+                        stringResource(R.string.settings_camera_clipboard_summary),
+                        Prefs.cameraClipboard(context),
+                        { Prefs.setCameraClipboard(context, it) },
+                    )
+                }
+                SettingSwitch(
+                    stringResource(R.string.settings_retry_transfers),
+                    stringResource(R.string.settings_retry_transfers_summary),
+                    Prefs.retryTransfers(context),
+                    { Prefs.setRetryTransfers(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_keep_file_dates),
+                    stringResource(R.string.settings_keep_file_dates_summary),
+                    Prefs.keepFileDates(context),
+                    { Prefs.setKeepFileDates(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_internet_files),
+                    stringResource(R.string.settings_internet_files_summary),
+                    Prefs.internetFiles(context),
+                    {
+                        Prefs.setInternetFiles(context, it)
+                        RustCore.setInternetFiles(it)
+                    },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_links_from_computer),
+                    stringResource(R.string.settings_links_from_computer_summary),
+                    Prefs.linksFromComputer(context),
+                    { Prefs.setLinksFromComputer(context, it) },
+                )
+                // L4: the dialer opens with a number the computer sends.
+                SettingSwitch(
+                    stringResource(R.string.settings_calls_from_computer),
+                    stringResource(R.string.settings_calls_from_computer_summary),
+                    Prefs.callsFromComputer(context),
+                    { Prefs.setCallsFromComputer(context, it) },
+                )
+                // L6: the computer's commands to the automation apps.
+                CommandsSetting()
+                DownloadFolderSetting()
+                PhoneFoldersSection()
+            }
+
+            SettingsGroup(stringResource(R.string.settings_background)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_clipboard_background),
+                    stringResource(R.string.settings_clipboard_background_summary),
+                    Prefs.clipboardInBackground(context),
+                    {
+                        Prefs.setClipboardInBackground(context, it)
+                        askForListener(it)
+                    },
+                )
+                // M3: an image copied on the computer too, on Wi-Fi.
+                SettingSwitch(
+                    stringResource(R.string.settings_clipboard_images_background),
+                    stringResource(R.string.settings_clipboard_images_background_summary),
+                    Prefs.clipboardImagesInBackground(context),
+                    { Prefs.setClipboardImagesInBackground(context, it) },
+                    enabled = Prefs.clipboardInBackground(context),
+                    indent = true,
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_files_background),
+                    stringResource(R.string.settings_files_background_summary),
+                    Prefs.filesInBackground(context),
+                    {
+                        Prefs.setFilesInBackground(context, it)
+                        askForListener(it)
+                    },
+                )
+                // N1: the computer may ring this phone to find it.
+                SettingSwitch(
+                    stringResource(R.string.settings_ring_from_computer),
+                    // Android 17 rings at the owner's alarm volume (N4).
+                    stringResource(
+                        if (Android17.ringRaisesVolume(android.os.Build.VERSION.SDK_INT)) {
+                            R.string.settings_ring_from_computer_summary
+                        } else {
+                            R.string.settings_ring_from_computer_summary_17
+                        },
+                    ),
+                    Prefs.ringFromComputer(context),
+                    {
+                        Prefs.setRingFromComputer(context, it)
+                        askForListener(it)
+                    },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_share_battery),
+                    stringResource(R.string.settings_share_battery_summary),
+                    Prefs.shareBattery(context),
+                    { Prefs.setShareBattery(context, it) },
+                )
+                // G1: the state widget's own refresh.
+                SettingSwitch(
+                    stringResource(R.string.settings_state_widget_auto),
+                    stringResource(R.string.settings_state_widget_auto_summary),
+                    Prefs.stateWidgetAuto(context),
+                    { Prefs.setStateWidgetAuto(context, it) },
+                )
+                // Android shows other apps' media only to an app with notification access.
+                SettingSwitch(
+                    stringResource(R.string.settings_phone_media),
+                    stringResource(R.string.settings_phone_media_summary),
+                    Prefs.phoneMediaOnComputer(context),
+                    {
+                        Prefs.setPhoneMediaOnComputer(context, it)
+                        askForListener(it)
+                    },
+                )
+                // N2: the same without a session, from the listener.
+                SettingSwitch(
+                    stringResource(R.string.settings_phone_media_background),
+                    stringResource(R.string.settings_phone_media_background_summary),
+                    Prefs.phoneMediaInBackground(context),
+                    {
+                        Prefs.setPhoneMediaInBackground(context, it)
+                        if (it) Prefs.setPhoneMediaOnComputer(context, true)
+                        askForListener(it)
+                    },
+                )
+                // N5: the other way, the computer's music in this phone's controls.
+                SettingSwitch(
+                    stringResource(R.string.settings_computer_media_controls),
+                    stringResource(R.string.settings_computer_media_controls_summary),
+                    Prefs.computerMediaInControls(context),
+                    {
+                        Prefs.setComputerMediaInControls(context, it)
+                        askForListener(it)
+                    },
+                )
+                ScreenshotsSection()
+                RecentPhotosSection()
+                // M5: a photo's place kept when it is sent.
+                PhotoPlaceSection()
+                // T2: whether Android holds those back while the phone sleeps.
+                BackgroundSection()
+                SettingSwitch(
+                    stringResource(R.string.settings_background_remind),
+                    stringResource(R.string.settings_background_remind_summary),
+                    Prefs.backgroundReminder(context),
+                    { Prefs.setBackgroundReminder(context, it) },
+                )
+            }
+
+            SettingsGroup(stringResource(R.string.settings_notifications_texts)) {
+                // E6: both Do Not Disturb settings in one place.
+                // D2: the computer may turn on Do Not Disturb for a while. Its
+                // own preferences, so the switch redraws from a local state.
+                var letMute by remember { mutableStateOf(dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(context)) }
+                SettingSwitch(
+                    stringResource(R.string.settings_let_computer_mute),
+                    stringResource(R.string.settings_let_computer_mute_summary),
+                    letMute,
+                    {
+                        dev.pocketdesk.android.notify.QuietPrefs.setLetComputerMute(context, it)
+                        letMute = it
+                        askForListener(it)
+                    },
+                )
+                PhoneNotificationsSection()
+                TextsSection()
+                CallsSection()
+            }
+
+            SettingsGroup(stringResource(R.string.settings_automation)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_others_choose),
+                    stringResource(R.string.settings_others_choose_summary),
+                    Prefs.othersChooseComputer(context),
+                    { Prefs.setOthersChooseComputer(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_others_run_tasks),
+                    stringResource(R.string.settings_others_run_tasks_summary),
+                    Prefs.othersRunTasks(context),
+                    { Prefs.setOthersRunTasks(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_tell_other_apps),
+                    stringResource(R.string.settings_tell_other_apps_summary),
+                    Prefs.tellOtherApps(context),
+                    { Prefs.setTellOtherApps(context, it) },
+                )
+            }
+
+            SettingsGroup(stringResource(R.string.settings_pairing)) {
+                SettingSwitch(
+                    stringResource(R.string.settings_reveal_pin),
+                    stringResource(R.string.settings_reveal_pin_summary),
+                    Prefs.revealPin(context),
+                    { Prefs.setRevealPin(context, it) },
+                )
+            }
 
             // N6: what Wake does once the packet is out. How each computer
             // is woken is set on its card ("Wake settings").
-            SettingsHeader(stringResource(R.string.settings_wake))
-            SettingSwitch(
-                stringResource(R.string.settings_connect_after_wake),
-                stringResource(R.string.settings_connect_after_wake_summary),
-                Prefs.connectAfterWake(context),
-                { Prefs.setConnectAfterWake(context, it) },
-            )
-            SettingSwitch(
-                stringResource(R.string.settings_offer_wake),
-                stringResource(R.string.settings_offer_wake_summary),
-                Prefs.offerWake(context),
-                { Prefs.setOfferWake(context, it) },
-            )
-
-            SettingsHeader(stringResource(R.string.settings_appearance))
-            Column(Modifier.selectableGroup()) {
-                listOf(
-                    Prefs.THEME_SYSTEM to stringResource(R.string.theme_system),
-                    Prefs.THEME_LIGHT to stringResource(R.string.theme_light),
-                    Prefs.THEME_DARK to stringResource(R.string.theme_dark),
-                ).forEach { (value, label) ->
-                    val selected = Prefs.themeMode(context) == value
-                    ListItem(
-                        headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
-                        leadingContent = { RadioButton(selected = selected, onClick = null) },
-                        modifier = Modifier.selectable(selected = selected, role = Role.RadioButton) {
-                            Prefs.setThemeMode(context, value)
-                        },
-                    )
-                }
-            }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            SettingsGroup(stringResource(R.string.settings_wake)) {
                 SettingSwitch(
-                    stringResource(R.string.settings_dynamic),
-                    stringResource(R.string.settings_dynamic_summary),
-                    Prefs.dynamicColor(context),
-                    { Prefs.setDynamicColor(context, it) },
+                    stringResource(R.string.settings_connect_after_wake),
+                    stringResource(R.string.settings_connect_after_wake_summary),
+                    Prefs.connectAfterWake(context),
+                    { Prefs.setConnectAfterWake(context, it) },
+                )
+                SettingSwitch(
+                    stringResource(R.string.settings_offer_wake),
+                    stringResource(R.string.settings_offer_wake_summary),
+                    Prefs.offerWake(context),
+                    { Prefs.setOfferWake(context, it) },
                 )
             }
 
-            SettingsHeader(stringResource(R.string.settings_system))
-            // D1: what stopped working, on Home and after updates.
-            SettingSwitch(
-                stringResource(R.string.settings_health),
-                stringResource(R.string.settings_health_summary),
-                Prefs.healthAlerts(context),
-                { Prefs.setHealthAlerts(context, it) },
-            )
-            // M1: a quiet foreground service keeps the background link with the screen off.
-            SettingSwitch(
-                stringResource(R.string.settings_stay_linked),
-                stringResource(R.string.settings_stay_linked_summary),
-                Prefs.stayLinked(context),
-                {
-                    Prefs.setStayLinked(context, it)
-                    val app = context.applicationContext
-                    Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
-                },
-            )
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                SettingLink(stringResource(R.string.language), null) {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Settings.ACTION_APP_LOCALE_SETTINGS, ("package:${context.packageName}").toUri()),
+            SettingsGroup(stringResource(R.string.settings_appearance)) {
+                SettingsBlock(
+                    stringResource(R.string.theme_system),
+                    stringResource(R.string.theme_light),
+                    stringResource(R.string.theme_dark),
+                ) {
+                Column(Modifier.selectableGroup()) {
+                    listOf(
+                        Prefs.THEME_SYSTEM to stringResource(R.string.theme_system),
+                        Prefs.THEME_LIGHT to stringResource(R.string.theme_light),
+                        Prefs.THEME_DARK to stringResource(R.string.theme_dark),
+                    ).forEach { (value, label) ->
+                        val selected = Prefs.themeMode(context) == value
+                        ListItem(
+                            headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
+                            leadingContent = { RadioButton(selected = selected, onClick = null) },
+                            modifier = Modifier.selectable(selected = selected, role = Role.RadioButton) {
+                                Prefs.setThemeMode(context, value)
+                            },
                         )
+                    }
+                }
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    SettingSwitch(
+                        stringResource(R.string.settings_dynamic),
+                        stringResource(R.string.settings_dynamic_summary),
+                        Prefs.dynamicColor(context),
+                        { Prefs.setDynamicColor(context, it) },
+                    )
+                }
+            }
+
+            SettingsGroup(stringResource(R.string.settings_system)) {
+                // D1: what stopped working, on Home and after updates.
+                SettingSwitch(
+                    stringResource(R.string.settings_health),
+                    stringResource(R.string.settings_health_summary),
+                    Prefs.healthAlerts(context),
+                    { Prefs.setHealthAlerts(context, it) },
+                )
+                // M1: a quiet foreground service keeps the background link with the screen off.
+                SettingSwitch(
+                    stringResource(R.string.settings_stay_linked),
+                    stringResource(R.string.settings_stay_linked_summary),
+                    Prefs.stayLinked(context),
+                    {
+                        Prefs.setStayLinked(context, it)
+                        val app = context.applicationContext
+                        Thread { runCatching { dev.pocketdesk.android.service.LinkKeeperService.sync(app) } }.start()
+                    },
+                )
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    SettingLink(stringResource(R.string.language), null) {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APP_LOCALE_SETTINGS, ("package:${context.packageName}").toUri()),
+                            )
+                        }
                     }
                 }
             }
 
-            SettingsHeader(stringResource(R.string.settings_about))
-            ListItem(
-                headlineContent = {
-                    Text(
-                        stringResource(R.string.app_version, appVersionName(context)),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                },
-                supportingContent = {
-                    Text(
-                        stringResource(R.string.rust_core_version, RustCore.version),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-            )
+            SettingsGroup(stringResource(R.string.settings_about)) {
+                SettingsBlock(stringResource(R.string.app_version, appVersionName(context))) {
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            stringResource(R.string.app_version, appVersionName(context)),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            stringResource(R.string.rust_core_version, RustCore.version),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                )
+                }
+            }
+            }
         }
     }
 }
@@ -490,6 +566,7 @@ private fun TrackpadSpeed() {
     val context = LocalContext.current
     val title = stringResource(R.string.settings_trackpad_speed)
     var speed by remember { mutableFloatStateOf(Prefs.trackpadSensitivity(context)) }
+    if (!rememberSettingShown(title, stringResource(R.string.settings_trackpad_speed_summary))) return
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
         supportingContent = {
@@ -520,6 +597,7 @@ private fun AirMouseSpeed() {
     val context = LocalContext.current
     val title = stringResource(R.string.settings_air_speed)
     var speed by remember { mutableFloatStateOf(Prefs.airMouseSpeed(context)) }
+    if (!rememberSettingShown(title, stringResource(R.string.settings_air_speed_summary))) return
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
         supportingContent = {
@@ -551,8 +629,12 @@ private fun PenPressure() {
     // Read again when a choice is saved, so the chosen one redraws (E6 review).
     Prefs.observedVersion()
     val chosen = Prefs.penCurve(context)
-    // A row like its neighbours (E6): title and summary, the choice under.
-    SettingRow(stringResource(R.string.settings_pen_pressure), stringResource(R.string.settings_pen_pressure_summary))
+    // A row like its neighbours (E6): title and summary, the choice under,
+    // which hides with it (O8 review).
+    val title = stringResource(R.string.settings_pen_pressure)
+    val summary = stringResource(R.string.settings_pen_pressure_summary)
+    if (!rememberSettingShown(title, summary)) return
+    SettingRow(title, summary)
     ChoiceRow(
         null,
         listOf(
@@ -571,7 +653,10 @@ private fun DeckColumns() {
     val context = LocalContext.current
     Prefs.observedVersion()
     val choices = listOf(2, 3, 4)
-    SettingRow(stringResource(R.string.settings_deck_columns), stringResource(R.string.settings_deck_columns_summary))
+    val title = stringResource(R.string.settings_deck_columns)
+    val summary = stringResource(R.string.settings_deck_columns_summary)
+    if (!rememberSettingShown(title, summary)) return
+    SettingRow(title, summary)
     ChoiceRow(
         null,
         choices.map { it.toString() },
