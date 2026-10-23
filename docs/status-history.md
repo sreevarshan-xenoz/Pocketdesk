@@ -6,6 +6,13 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **The R cycle (plan `docs/research/2026-10-23-r-cycle.md`), after Q.** 2026's requests (KDE Connect's forum, Phone Link's moves, LocalSend's queue) found nothing Pocketdesk lacks, so the cycle finishes what is half-done:
+  - R1: the O cycle's device checks by script;
+  - R2: what the computer cannot see yet (the typing and copies switches, the Overview's presenting line);
+  - R3: lock when the phone leaves, on Linux;
+  - R4: send the clipboard with a key, on Linux;
+  - R5: one word for "computer" in Spanish;
+  - R6: 0.6.0 once the owner says go.
 - 2026-10-23: **Q4, Linux catch-up for P (branch `feat/linux-catchup-p`).**
   - **Presenting (P3):** "While presenting or in full screen" on Linux holds phones' notifications and texts while GNOME's Do Not Disturb (`show-banners` off) or KDE's (its notification server's `Inhibited`) is on. A thread of its own asks every 5 s while the switch is on, with a second's deadline each; the answers' readers are tested. Settings draws the row on Linux with its own words.
   - **Alarms (P5):** a phone's alarm on Linux carries the theme's `alarm-clock-elapsed` sound.
