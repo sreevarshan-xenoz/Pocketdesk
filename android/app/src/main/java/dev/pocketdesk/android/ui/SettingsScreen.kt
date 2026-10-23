@@ -425,6 +425,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     },
                 )
                 ScreenshotsSection()
+                CameraUploadsSection()
                 RecentPhotosSection()
                 // M5: a photo's place kept when it is sent.
                 PhotoPlaceSection()

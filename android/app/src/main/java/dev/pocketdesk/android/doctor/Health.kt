@@ -27,6 +27,9 @@ enum class HealthProblem {
     /** New screenshots to the computer turned itself off when photo access went. */
     SCREENSHOTS_STOPPED,
 
+    /** New camera photos to the computer turned itself off when photo access went (T3). */
+    CAMERA_STOPPED,
+
     /** A feature that shows the phone a notification, and the app may not post any. */
     APP_NOTIFICATIONS,
 
@@ -66,6 +69,8 @@ data class HealthSnapshot(
     val photoAccess: Boolean,
     /** Screenshots to the computer turned itself off for want of photo access. */
     val screenshotsStopped: Boolean = false,
+    /** New camera photos to the computer turned itself off for want of photo access (T3). */
+    val cameraStopped: Boolean = false,
     /** Whether a feature that needs to post on the phone is on (ring, files in the background). */
     val postingFeatures: Boolean,
     val mayPost: Boolean,
@@ -93,6 +98,7 @@ object Health {
         if (s.contactNames && !s.readContacts) add(HealthProblem.CONTACTS)
         if (s.photoFeatures && !s.photoAccess) add(HealthProblem.PHOTOS)
         if (s.screenshotsStopped) add(HealthProblem.SCREENSHOTS_STOPPED)
+        if (s.cameraStopped) add(HealthProblem.CAMERA_STOPPED)
         if (s.postingFeatures && !s.mayPost) add(HealthProblem.APP_NOTIFICATIONS)
         if (s.control && !s.controlService) {
             add(if (s.advancedProtection) HealthProblem.CONTROL_BLOCKED else HealthProblem.CONTROL_SERVICE)

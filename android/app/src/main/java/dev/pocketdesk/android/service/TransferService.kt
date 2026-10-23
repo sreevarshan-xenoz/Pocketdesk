@@ -188,6 +188,7 @@ class TransferService : Service() {
                 return START_NOT_STICKY
             }
             queued++
+            jobs.set(queued)
             number = ++enqueued
         }
         worker.execute { run(job ?: return@execute, startId, number) }
@@ -512,6 +513,7 @@ class TransferService : Service() {
     private fun finishJob(startId: Int) {
         synchronized(lock) {
             queued--
+            jobs.set(queued)
             if (queued > 0) return
             if (cancelledAny) notice = getString(R.string.transfer_cancelled)
             val done = doneNotification()
@@ -885,6 +887,12 @@ class TransferService : Service() {
 
     companion object {
         private const val TAG = "TransferService"
+
+        /** Jobs queued or running now (T3: new camera photos wait for them, so Wi-Fi only holds). */
+        private val jobs = java.util.concurrent.atomic.AtomicInteger()
+
+        /** Whether a transfer is queued or running now. */
+        fun busy(): Boolean = jobs.get() > 0
         private const val CHANNEL_ID = "transfers"
         private const val NOTIFICATION_ID = 7
         private const val PROGRESS_MS = 500L

@@ -35,6 +35,7 @@ pub const FEATURES: &[&str] = &[
     "folders",
     "photos",
     "screenshots",
+    "camera_photos",
     "camera",
     "links",
     "ring",
@@ -126,7 +127,9 @@ pub fn capability(feature: &str) -> Option<Capability> {
         "notifications" | "answers" | "alarms" => Capability::Notifications,
         "texts" | "contacts" => Capability::Texts,
         "clipboard" | "copies" => Capability::Clipboard,
-        "files" | "images" | "folders" | "photos" | "screenshots" | "camera" => Capability::Files,
+        "files" | "images" | "folders" | "photos" | "screenshots" | "camera_photos" | "camera" => {
+            Capability::Files
+        }
         "links" => Capability::Links,
         "ring" => Capability::Ring,
         "media" | "media_background" => Capability::Media,

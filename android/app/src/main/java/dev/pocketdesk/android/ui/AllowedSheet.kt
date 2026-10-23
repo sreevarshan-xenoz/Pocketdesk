@@ -154,6 +154,7 @@ private fun featureName(feature: String): Int = when (feature) {
     "folders" -> R.string.settings_phone_folders
     "photos" -> R.string.recent_photos_on
     "screenshots" -> R.string.screenshots_on
+    "camera_photos" -> R.string.camera_uploads_on
     "camera" -> R.string.settings_camera_asks
     "links" -> R.string.settings_links_from_computer
     "ring" -> R.string.settings_ring_from_computer

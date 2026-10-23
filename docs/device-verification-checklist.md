@@ -2814,6 +2814,16 @@ Owed:
 - [ ] X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
 - [ ] Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
 
+## 209. New camera photos to the computer (T3)
+
+Built 2026-10-24. Unit-tested: the camera's folder, taken since the switch, an empty file waited for, Wi-Fi only. Checked on the OPPO against a throwaway server: a photo and a video pushed into `DCIM/Camera` handed to the transfer service and offered to the computer, a photo in `Pictures` not, one taken with Wi-Fi off waiting and going when Wi-Fi came back.
+- [x] Seen in `DCIM/Camera` and handed over; another folder not; Wi-Fi only holding one back (OPPO, 2026-10-24).
+Owed:
+- [ ] On a LAN (not `adb reverse`): photos and a video landing in the computer's received files, matching their bytes. (where: by hand)
+- [ ] The phone's own camera: a burst of 20, a 4K video, and photos taken while the computer was off going when it is back. (where: by hand)
+- [ ] Photo access taken back: the switch off and Home's notice; video access taken back: "Videos too" off. (where: by hand)
+- [ ] The computer's Devices page listing "Its new camera photos here"; Settings in Spanish and Tamil. (where: by hand)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

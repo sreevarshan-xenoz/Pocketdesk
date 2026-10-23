@@ -590,6 +590,13 @@ pub const FEATURES: &[Feature] = &[
         android: "notification access and photo access",
     },
     Feature {
+        key: "camera_photos",
+        what: "Its new camera photos here",
+        phone_switch: "Send new camera photos",
+        permission_name: "Send files",
+        android: "notification access and photo access",
+    },
+    Feature {
         key: "camera",
         what: "Photos asked from here",
         phone_switch: "Photos the computer asks for",

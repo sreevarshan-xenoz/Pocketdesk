@@ -1030,7 +1030,7 @@ private fun HealthCard(
                             TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }
                         HealthProblem.DOWNLOAD_FOLDER ->
                             TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
-                        HealthProblem.SCREENSHOTS_STOPPED ->
+                        HealthProblem.SCREENSHOTS_STOPPED, HealthProblem.CAMERA_STOPPED ->
                             TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.health_settings)) }
                         HealthProblem.PAUSED_STAY_LINKED_OFF ->
                             TextButton(onClick = onTurnOnStayLinked) { Text(stringResource(R.string.health_turn_on)) }
@@ -1055,6 +1055,7 @@ private fun healthText(problem: HealthProblem): Int = when (problem) {
     HealthProblem.CONTACTS -> R.string.health_contacts
     HealthProblem.PHOTOS -> R.string.health_photos
     HealthProblem.SCREENSHOTS_STOPPED -> R.string.health_screenshots_stopped
+    HealthProblem.CAMERA_STOPPED -> R.string.health_camera_stopped
     HealthProblem.APP_NOTIFICATIONS -> R.string.health_app_notifications
     HealthProblem.CONTROL_SERVICE -> R.string.health_control_service
     HealthProblem.CONTROL_BLOCKED -> R.string.health_control_blocked

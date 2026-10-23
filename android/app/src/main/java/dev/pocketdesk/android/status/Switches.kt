@@ -52,6 +52,8 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         "folders" to s(runCatching { PhoneFolders.all(ctx).isNotEmpty() }.getOrDefault(false), access),
         "photos" to s(RecentPhotoPrefs.on(ctx), access && photos),
         "screenshots" to s(ScreenshotPrefs.on(ctx), access && photos),
+        // T3: on the same listener, with photo access.
+        "camera_photos" to s(dev.pocketdesk.android.files.CameraPrefs.on(ctx), access && photos),
         // The camera asks for itself when it opens; the ask comes as a notification.
         "camera" to s(Prefs.cameraAsks(ctx), access && mayPost),
         "links" to s(Prefs.linksFromComputer(ctx), mayPost),

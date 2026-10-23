@@ -262,6 +262,9 @@ class PhoneNotificationListener : NotificationListenerService() {
 
     /** New screenshots to the computer (T10h), on a 2 s tick of their own: a send takes seconds. */
     private val screenshots by lazy { dev.pocketdesk.android.files.Screenshots(applicationContext) }
+
+    /** T3: new camera photos to the computer, on the same tick. */
+    private val cameraUploads by lazy { dev.pocketdesk.android.files.CameraUploads(applicationContext) }
     private val screenshotsTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     // N2: the phone's music without a session.
     private val media by lazy { dev.pocketdesk.android.media.BackgroundMedia(applicationContext) }
@@ -323,7 +326,10 @@ class PhoneNotificationListener : NotificationListenerService() {
             TimeUnit.SECONDS,
         )
         screenshotsTicker.scheduleWithFixedDelay(
-            { runCatching { screenshots.tick() }.onFailure { Log.w("PhoneNotifications", "screenshots failed", it) } },
+            {
+                runCatching { screenshots.tick() }.onFailure { Log.w("PhoneNotifications", "screenshots failed", it) }
+                runCatching { cameraUploads.tick() }.onFailure { Log.w("PhoneNotifications", "camera photos failed", it) }
+            },
             2,
             2,
             TimeUnit.SECONDS,
@@ -376,6 +382,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         ringTicker.shutdownNow()
         screenshotsTicker.shutdownNow()
         screenshots.close()
+        cameraUploads.close()
         clipboardTicker.shutdownNow()
         dev.pocketdesk.android.control.TypeRunner.stop(this)
         liveTicker.shutdownNow()
