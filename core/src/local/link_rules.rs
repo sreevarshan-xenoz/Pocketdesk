@@ -130,11 +130,17 @@ mod tests {
                 action: Action::Show
             })
         );
+        // A whole path on either system (P8: Linux CI).
+        let zoom = if cfg!(windows) {
+            "C:\\Program Files\\Zoom\\Zoom.exe"
+        } else {
+            "/opt/zoom/zoom"
+        };
         assert_eq!(
-            parse_line("*.zoom.us = C:\\Program Files\\Zoom\\Zoom.exe"),
+            parse_line(&format!("*.zoom.us = {zoom}")),
             Some(Rule {
                 site: "zoom.us".into(),
-                action: Action::Program(PathBuf::from("C:\\Program Files\\Zoom\\Zoom.exe"))
+                action: Action::Program(PathBuf::from(zoom))
             })
         );
         assert_eq!(
