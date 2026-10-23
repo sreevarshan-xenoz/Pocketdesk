@@ -210,6 +210,54 @@ fn encode_png(image: &Rgba) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// O7: a received image file's bytes as the PNG the clipboard takes. A PNG
+/// stays as it is once it decodes within the limits; a JPEG is decoded
+/// within them, turned as its EXIF says, and encoded as PNG. Anything else
+/// is refused.
+pub fn png_from_file(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if is_png(bytes) {
+        // Its header only: decoding it whole to check it would take as much
+        // memory as the picture (O7 review); the clipboard decodes it later
+        // under the same limits.
+        let reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .map_err(|e| format!("not a PNG: {e}"))?;
+        checked_size(reader.info().width, reader.info().height)?;
+        return Ok(bytes.to_vec());
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return encode_png(&decode_jpeg(bytes)?);
+    }
+    Err("not a PNG or a JPEG".to_string())
+}
+
+fn decode_jpeg(bytes: &[u8]) -> Result<Rgba, String> {
+    use image::ImageDecoder;
+    let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("not a JPEG: {e}"))?;
+    let (width, height) = decoder.dimensions();
+    checked_size(width, height)?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(MAX_PIXELS * 4 + (64 << 20));
+    decoder
+        .set_limits(limits)
+        .map_err(|e| format!("the JPEG is too large: {e}"))?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut picture = image::DynamicImage::from_decoder(decoder)
+        .map_err(|e| format!("the JPEG does not decode: {e}"))?;
+    picture.apply_orientation(orientation);
+    let rgba = picture.to_rgba8();
+    Ok(Rgba {
+        width: rgba.width(),
+        height: rgba.height(),
+        pixels: rgba.into_raw(),
+    })
+}
+
 /// A `CF_DIB` clipboard bitmap as PNG.
 pub fn png_from_dib(dib: &[u8]) -> Result<Vec<u8>, String> {
     encode_png(&decode_dib(dib)?)
@@ -223,6 +271,34 @@ pub fn dib_from_png(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// O7: a received PNG goes as it is, a JPEG as PNG, anything else not.
+    #[test]
+    fn a_received_png_claiming_a_huge_picture_is_refused() {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, 20_000, 20_000);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::One);
+        // Its header alone: refused before any picture is read.
+        std::mem::forget(encoder.write_header().unwrap());
+        assert!(png_from_file(&out).is_err());
+    }
+
+    #[test]
+    fn a_received_png_or_jpeg_is_a_clipboard_png() {
+        let png = encode_png(&picture()).unwrap();
+        assert_eq!(png_from_file(&png).unwrap(), png);
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut jpeg)
+            .encode(&[200u8; 4 * 3 * 3], 4, 3, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let out = png_from_file(&jpeg).unwrap();
+        assert!(is_png(&out));
+        let back = decode_png(&out).unwrap();
+        assert_eq!((back.width, back.height), (4, 3));
+        assert!(png_from_file(b"GIF89a....").is_err());
+        assert!(png_from_file(&png[..20]).is_err(), "a cut PNG");
+    }
 
     /// A 3x2 test picture: red, green, blue on top; white, black, half-clear
     /// grey below.

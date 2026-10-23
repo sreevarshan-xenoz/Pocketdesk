@@ -2562,6 +2562,13 @@ Built 2026-10-22. Owed (it moves this computer to a second address, so with the 
 - [ ] Another computer announcing the first one's id at a new address (its own certificate): no move.
 - [ ] A card saved by name (`mypc.local`) is left alone.
 
+## 190. Received images onto the clipboard (O7)
+
+Built 2026-10-22. Owed:
+- [ ] A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
+- [ ] A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
+- [ ] Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
+- [ ] Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
 ## 189. Find a setting on the phone (O8)
 
 Built 2026-10-22. Checked on the OPPO:

@@ -129,6 +129,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Images to phones' clipboards",
         Section::Phones,
     ),
+    (
+        "received_images_clipboard",
+        "Images sent here onto the clipboard",
+        Section::Phones,
+    ),
     ("clipboard_history", "Clipboard history", Section::Phones),
     (
         "clipboard_never_from",
@@ -452,6 +457,7 @@ pub fn applies_live(key: &str) -> bool {
             | "clipboard_never_from"
             | "clipboard_never_like"
             | "clipboard_images"
+            | "received_images_clipboard"
             | "clipboard_hotkey"
             | "typing_hotkey"
             | "phone_media_controls"
@@ -936,6 +942,16 @@ impl SettingsForm {
                     note(
                         ui,
                         "Only to phones the clipboard goes to, and only with \"Computer's copied images in the background\" on there, which fetches it on Wi-Fi. Never a copy marked private.",
+                    );
+                });
+                row(ui, "received_images_clipboard", |ui| {
+                    ui.checkbox(
+                        &mut e.received_images_clipboard,
+                        "put an image sent here on the clipboard too",
+                    );
+                    note(
+                        ui,
+                        "From a phone, a computer or a KDE device allowed the clipboard: a PNG or a JPEG of at most 32 MB, sent on its own (not in a folder, nor a file you asked the phone for). It stays in the folder it landed in as well.",
                     );
                 });
                 row(ui, "clipboard_history", |ui| {

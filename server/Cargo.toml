@@ -50,6 +50,8 @@ futures-lite = "2"
 url = "2"
 # Clipboard images (N4): PNG on the wire, DIB for Windows apps.
 png = "0.18"
+# O7: a received JPEG goes onto the clipboard as PNG.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # The clipboard image id: SHA-256 (already in the graph through rustls).
 ring = "0.17"
 

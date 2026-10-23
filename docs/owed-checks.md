@@ -2,18 +2,18 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-893 open items.
+897 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the A71, without touching the owner's power, lock or input | 537 |
+| Here: this Windows box and the A71, without touching the owner's power, lock or input | 540 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 19 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 54 |
 | A phone with a SIM | 28 |
 | A second phone | 10 |
 | Away from home: another network, or through a router | 12 |
 | A second computer | 11 |
-| A Linux desktop (the Azure VM serves for some) | 105 |
+| A Linux desktop (the Azure VM serves for some) | 106 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 30 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 87 |
 
@@ -1081,6 +1081,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A card saved by name (`mypc.local`) is left alone.
 
+**190. Received images onto the clipboard (O7)**
+
+- A photo from the phone, with "Images sent here onto the clipboard" on: pasted into Paint upright (a portrait photo turned by its EXIF), and the file still in Downloads.
+- A PNG from the computer, with "Images from the computer onto my clipboard" on: pasted into a chat app, and not sent back by the tile or a session's clipboard sync.
+- Either switch off, or a folder of images, or a GIF: the clipboard unchanged.
+
 **189. Find a setting on the phone (O8)**
 
 - Clear by tap; Back again leaves Settings.
@@ -1867,6 +1873,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - GNOME's and KDE's media controls by eye, and the media keys.
 - A press on the cast window's picture (the VM has no pointer). (where: linux)
 - Orca with the window (AccessKit's Linux backend, fixed here: it had panicked at start).
+
+**190. Received images onto the clipboard (O7)**
+
+- Linux: a JPEG onto the Wayland clipboard (`wl-paste --list-types` says `image/png`). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

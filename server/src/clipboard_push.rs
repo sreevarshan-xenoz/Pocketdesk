@@ -148,6 +148,52 @@ pub(crate) fn note_from_phone(device_id: &str, text: &str) {
         Some((device_id.to_string(), text.to_string()));
 }
 
+/// The device the clipboard's image came from, with the image's id (O7):
+/// M3's push does not tell it back to that device.
+static IMAGE_FROM: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Note that `device_id` just put the image `id` on the clipboard.
+pub(crate) fn note_image_from(device_id: &str, id: &str) {
+    *IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((device_id.to_string(), id.to_string()));
+}
+
+/// Forget the note: the write it was for did not happen (O7 review).
+pub(crate) fn forget_image_from(id: &str) {
+    let mut note = IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner());
+    if note.as_ref().is_some_and(|(_, image)| image == id) {
+        *note = None;
+    }
+}
+
+/// Whether `device_id` may put something on this computer's clipboard (O7
+/// review): a phone with Clipboard, a computer while `computer_clipboard`
+/// is on, a paired KDE Connect device allowed the clipboard. Someone
+/// else's phone and a guest (Files and Links only, M2b) may not.
+pub(crate) fn may_set_clipboard(device_id: &str) -> bool {
+    let permitted = crate::plugins::pair::permits(device_id, "kdeconnect.clipboard");
+    if crate::plugins::pair::is_computer_device(device_id) {
+        return with_computers() && permitted;
+    }
+    permitted
+        || crate::state::state_dir()
+            .ok()
+            .and_then(|dir| {
+                pocketdesk_core::local::kdeconnect_devices::permissions(&dir, device_id)
+            })
+            .is_some_and(|p| p.clipboard)
+}
+
+/// Whether the image `id` came from `device_id`: not told back to it, by a
+/// push or by a session's ask (O7 review).
+pub(crate) fn image_came_from(device_id: &str, id: &str) -> bool {
+    IMAGE_FROM
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|(from, image)| from == device_id && image == id)
+}
+
 /// The note, used once: the next change it explains, or not. A copy of the
 /// same text later is the computer's own, and goes to that phone too.
 fn take_from_phone() -> Option<(String, String)> {
@@ -470,11 +516,33 @@ async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
     let packet = image_packet(id, size);
     for target in clients
         .into_iter()
-        .filter(|c| may_push_image(c.device_id()))
+        .filter(|c| may_push_image(c.device_id()) && !image_came_from(c.device_id(), id))
     {
         if let Err(e) = target.send_packet(&packet).await {
             tracing::debug!("Clipboard image not told to {}: {e}", target.device_id());
         }
+    }
+}
+
+#[cfg(test)]
+mod image_note_tests {
+    use super::*;
+
+    /// O7: an image is not told back to the device it came from, and a note
+    /// for a write that failed is forgotten.
+    #[test]
+    fn an_image_is_not_told_back_to_where_it_came_from() {
+        note_image_from("phone-a", "img1");
+        assert!(image_came_from("phone-a", "img1"));
+        assert!(!image_came_from("phone-b", "img1"), "another device");
+        assert!(!image_came_from("phone-a", "img2"), "another image");
+        forget_image_from("img2");
+        assert!(
+            image_came_from("phone-a", "img1"),
+            "another image's failure"
+        );
+        forget_image_from("img1");
+        assert!(!image_came_from("phone-a", "img1"));
     }
 }
 

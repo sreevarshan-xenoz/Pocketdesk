@@ -157,6 +157,16 @@ impl Plugin for ClipboardPlugin {
                 // phone is not left waiting out its query.
                 let clip = match read_clipboard().await {
                     Ok(Clip::Text(text)) if is_pairing_link(&text) => Clip::Empty,
+                    // An image this phone put here is not handed back to
+                    // it, which would fetch it again (O7 review).
+                    Ok(Clip::Image(image))
+                        if crate::clipboard_push::image_came_from(
+                            sender.device_id(),
+                            &image.id,
+                        ) =>
+                    {
+                        Clip::Empty
+                    }
                     Ok(clip) => clip,
                     Err(e) => {
                         tracing::debug!("Could not read the clipboard: {e}");
@@ -235,13 +245,17 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             return;
         }
     };
+    let from = sender.device_id().to_string();
     tokio::spawn(async move {
         let _slot = slot;
-        let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async {
+        let from = &from;
+        let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async move {
             if !crate::platform::clip_image::is_png(&png) {
                 return Err(share::io_error("clipboard", "not a PNG"));
             }
             let image = Arc::new(Image::new(png));
+            // Not told back to the phone it came from (O7 review of M3).
+            crate::clipboard_push::note_image_from(from, &image.id);
             set_clipboard_image(&image).await?;
             Ok(())
         })
@@ -249,6 +263,65 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         match kept {
             Ok(()) => tracing::info!("Clipboard image received ({size} bytes)"),
             Err(e) => tracing::warn!("Clipboard image not taken: {e}"),
+        }
+    });
+}
+
+/// The largest image file put on the clipboard as it arrives (O7), as N4's.
+pub(crate) const MAX_RECEIVED_IMAGE: u64 = 32 << 20;
+
+/// O7: put the image file `from` sent, saved at `path`, on the clipboard, if
+/// it is a PNG or a JPEG of at most [`MAX_RECEIVED_IMAGE`]; read and
+/// converted off the runtime. Not told back to `from` (M3's push).
+pub(crate) fn put_received_image(path: std::path::PathBuf, size: u64, from: String) {
+    if size > MAX_RECEIVED_IMAGE {
+        return;
+    }
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    runtime.spawn(async move {
+        // One at a time: a decoded photo takes hundreds of megabytes, and a
+        // burst of them must not take them all at once (O7 review).
+        static ONE_AT_A_TIME: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        let Ok(_turn) = ONE_AT_A_TIME.acquire().await else {
+            return;
+        };
+        let read = tokio::task::spawn_blocking(move || -> std::result::Result<Vec<u8>, String> {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)
+                .map_err(|e| e.to_string())?
+                .take(MAX_RECEIVED_IMAGE + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_RECEIVED_IMAGE {
+                return Err("too large".to_string());
+            }
+            let png = crate::platform::clip_image::png_from_file(&bytes)?;
+            // As large as N4's images may be, made PNG (O7 review).
+            if png.len() as u64 > MAX_CLIPBOARD_IMAGE {
+                return Err("too large as a PNG".to_string());
+            }
+            Ok(png)
+        })
+        .await;
+        let png = match read {
+            Ok(Ok(png)) => png,
+            Ok(Err(e)) => {
+                tracing::debug!("A received file is not put on the clipboard: {e}");
+                return;
+            }
+            Err(_) => return,
+        };
+        let image = Arc::new(Image::new(png));
+        crate::clipboard_push::note_image_from(&from, &image.id);
+        match set_clipboard_image(&image).await {
+            Ok(()) => tracing::info!("A received image is on the clipboard"),
+            Err(e) => {
+                crate::clipboard_push::forget_image_from(&image.id);
+                tracing::warn!("A received image could not go onto the clipboard: {e}");
+            }
         }
     });
 }
