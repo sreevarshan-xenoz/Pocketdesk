@@ -76,6 +76,8 @@ pub const PHONE_SWITCHES_FILE: &str = "phone_switches.json";
 pub const PHONE_QUIET_FILE: &str = "phone_quiet.json";
 /// Phone apps whose notifications this computer does not show (K2b).
 pub const MUTED_APPS_FILE: &str = "muted_apps.json";
+/// Permission profiles (P9): permissions saved under a name.
+pub const PERMISSION_PROFILES_FILE: &str = "permission_profiles.json";
 /// A pause on what the phones bring to this computer (K2a).
 pub const PAUSE_FILE: &str = "pause.json";
 /// The icons and pictures phones' notifications bring (K3).

@@ -284,6 +284,8 @@ pub struct PocketdeskApp {
     raised_approvals: Vec<String>,
     /// The phone the Files tab sends to (F7b).
     send_to: Option<String>,
+    /// The Devices page's profile names being typed, by phone (P9).
+    profile_names: std::collections::HashMap<String, String>,
     /// The others a send goes to as well (P6).
     send_also: Vec<String>,
     /// Files being read from the clipboard (P7).
@@ -378,6 +380,7 @@ impl PocketdeskApp {
             confirm_restart: false,
             raised_approvals: Vec::new(),
             send_to: None,
+            profile_names: std::collections::HashMap::new(),
             send_also: Vec::new(),
             pasting: None,
             dropped: Vec::new(),
@@ -932,6 +935,43 @@ impl PocketdeskApp {
             self.notice = crate::notice::Notice::error(format!(
                 "Could not end {}'s session: {e}",
                 self.label(id)
+            ));
+        }
+    }
+
+    /// Give `id` the profile's permissions (P9): switch by switch through
+    /// [`Self::set_permission`], so a narrowed one ends a session as a
+    /// switch does, and one notice for them all.
+    fn apply_profile(
+        &mut self,
+        id: &str,
+        profile: &pocketdesk_core::local::permission_profiles::Profile,
+    ) {
+        let Some(device) = self.snapshot.devices.iter().find(|d| d.id == id).cloned() else {
+            return;
+        };
+        let changes: Vec<(Capability, bool)> = Capability::ALL
+            .into_iter()
+            .filter(|c| shown_for(*c, device.computer))
+            .map(|c| (c, profile.permissions.allows(c)))
+            .filter(|(c, allowed)| device.permissions.allows(*c) != *allowed)
+            .collect();
+        for (capability, allowed) in &changes {
+            self.set_permission(id, *capability, *allowed);
+        }
+        if device.permissions.ask_first != profile.permissions.ask_first {
+            self.set_ask_first(id, profile.permissions.ask_first);
+        }
+        let label = model::device_label(&self.snapshot.devices, id);
+        // The last switch's notice says one thing; this says all of it.
+        if !self
+            .notice
+            .as_ref()
+            .is_some_and(|n| matches!(n.kind, crate::notice::Kind::Error))
+        {
+            self.notice = crate::notice::Notice::done(format!(
+                "{label} has the {} profile's permissions now.",
+                profile.name
             ));
         }
     }
@@ -1864,6 +1904,10 @@ impl PocketdeskApp {
         let mut change = None;
         let mut ask = None;
         let mut rename = None;
+        let mut save_profile = None;
+        let mut apply_profile = None;
+        // P9: the saved profiles, to apply.
+        let profiles = pocketdesk_core::local::permission_profiles::read(&self.state_dir);
         // L7 review: Settings that turn a feature off for every phone.
         let settings_off = self
             .config
@@ -1897,6 +1941,35 @@ impl PocketdeskApp {
                             .clicked()
                         {
                             rename = Some((device.id.clone(), text.clone()));
+                        }
+                    });
+                    // P9: these permissions under a name, or a profile's.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Profile");
+                        let name = self.profile_names.entry(device.id.clone()).or_default();
+                        ui.add(
+                            egui::TextEdit::singleline(name)
+                                .hint_text("a name, such as Kids")
+                                .desired_width(140.0),
+                        );
+                        if ui
+                            .button("Save as profile")
+                            .on_hover_text(
+                                "Keep what it may do under this name, to apply to another phone or to pair one with.",
+                            )
+                            .clicked()
+                        {
+                            save_profile = Some((device.permissions.clone(), name.clone()));
+                        }
+                        if !profiles.is_empty() {
+                            ui.menu_button("Apply a profile", |ui| {
+                                for profile in &profiles {
+                                    if ui.button(&profile.name).clicked() {
+                                        apply_profile = Some((device.id.clone(), profile.clone()));
+                                        ui.close();
+                                    }
+                                }
+                            });
                         }
                     });
                     let mut ask_first = device.permissions.ask_first;
@@ -1954,6 +2027,24 @@ impl PocketdeskApp {
         if let Some((id, name)) = rename {
             self.renaming.remove(&id);
             self.rename_device(&id, &name);
+        }
+        if let Some((permissions, name)) = save_profile {
+            self.notice = crate::notice::Notice::outcome(
+                pocketdesk_core::local::permission_profiles::save(
+                    &self.state_dir,
+                    &name,
+                    &permissions,
+                )
+                .map(|name| {
+                    format!(
+                        "Saved the {name} profile: apply it to a phone below, or pair one with it."
+                    )
+                })
+                .map_err(|e| format!("Could not save the profile: {e}")),
+            );
+        }
+        if let Some((id, profile)) = apply_profile {
+            self.apply_profile(&id, &profile);
         }
         if let Some(choice) = revoke {
             self.confirm_revoke = choice;

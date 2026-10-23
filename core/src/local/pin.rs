@@ -32,10 +32,16 @@ pub struct FilePin {
     pub grant_secs: Option<u64>,
     /// M2b: the phone is someone else's, so it pairs with files and links only.
     pub someone_else: bool,
+    /// P9: the profile whose permissions it pairs with, as someone else's
+    /// phone does otherwise.
+    pub profile: Option<String>,
 }
 
 /// The PIN file's word for a phone that is someone else's (M2b).
 const SOMEONE_ELSE: &str = "someone-else";
+
+/// The PIN file's word before a profile's name (P9).
+const PROFILE: &str = "profile ";
 
 /// Exactly six ASCII digits.
 pub fn is_valid(pin: &str) -> bool {
@@ -56,16 +62,18 @@ pub fn write(
     now_unix: u64,
     grant_secs: Option<u64>,
 ) -> io::Result<()> {
-    write_preset(state_dir, pin, now_unix, grant_secs, false)
+    write_preset(state_dir, pin, now_unix, grant_secs, false, None)
 }
 
-/// [`write`], saying whether the phone it pairs is someone else's (M2b).
+/// [`write`], saying whether the phone it pairs is someone else's (M2b),
+/// and with which profile's permissions (P9), which makes it someone else's.
 pub fn write_preset(
     state_dir: &Path,
     pin: &str,
     now_unix: u64,
     grant_secs: Option<u64>,
     someone_else: bool,
+    profile: Option<&str>,
 ) -> io::Result<()> {
     if !is_valid(pin) {
         return Err(io::Error::new(
@@ -75,14 +83,18 @@ pub fn write_preset(
     }
     std::fs::create_dir_all(state_dir)?;
     let grant_line = grant_secs.map(|s| format!("{s}\n")).unwrap_or_default();
-    let preset_line = if someone_else {
+    let profile = profile.and_then(super::permission_profiles::valid_name);
+    let preset_line = if someone_else || profile.is_some() {
         format!("{SOMEONE_ELSE}\n")
     } else {
         String::new()
     };
+    let profile_line = profile
+        .map(|name| format!("{PROFILE}{name}\n"))
+        .unwrap_or_default();
     crate::secure_fs::write_private(
         &state_dir.join(PIN_FILE),
-        format!("{pin}\n{now_unix}\n{grant_line}{preset_line}").as_bytes(),
+        format!("{pin}\n{now_unix}\n{grant_line}{preset_line}{profile_line}").as_bytes(),
     )
 }
 
@@ -101,7 +113,11 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
     // After the time, in any order: a grant's seconds, and the preset.
     let rest: Vec<&str> = lines.collect();
     let grant_secs = rest.iter().find_map(|s| s.parse::<u64>().ok());
-    let someone_else = rest.contains(&SOMEONE_ELSE);
+    let profile = rest
+        .iter()
+        .find_map(|s| s.strip_prefix(PROFILE.trim_end()))
+        .and_then(super::permission_profiles::valid_name);
+    let someone_else = rest.contains(&SOMEONE_ELSE) || profile.is_some();
     if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
         return None;
     }
@@ -113,6 +129,7 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
         minted_unix: minted,
         grant_secs,
         someone_else,
+        profile,
     })
 }
 
@@ -242,16 +259,34 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("pocketdesk-pin-preset-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        write_preset(&dir, "123456", 1_000, None, true).unwrap();
+        write_preset(&dir, "123456", 1_000, None, true, None).unwrap();
         let read_back = read(&dir, 1_010).unwrap();
         assert!(read_back.someone_else);
         assert_eq!(read_back.grant_secs, None);
-        write_preset(&dir, "123456", 1_000, Some(900), true).unwrap();
+        write_preset(&dir, "123456", 1_000, Some(900), true, None).unwrap();
         let read_back = read(&dir, 1_010).unwrap();
         assert!(read_back.someone_else);
         assert_eq!(read_back.grant_secs, Some(900));
         write(&dir, "123456", 1_000, Some(900)).unwrap();
         assert!(!read(&dir, 1_010).unwrap().someone_else);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P9: a profile's name rides the file, and makes the phone someone
+    /// else's.
+    #[test]
+    fn a_profile_rides_the_pin_file() {
+        let dir = temp_dir("profile");
+        write_preset(&dir, "123456", 1_000, None, false, Some(" Kids ")).unwrap();
+        let read = read(&dir, 1_000).unwrap();
+        assert_eq!(read.profile.as_deref(), Some("Kids"));
+        assert!(read.someone_else);
+        write_preset(&dir, "123456", 1_000, None, false, Some("bad\nname")).unwrap();
+        assert_eq!(read_profile(&dir), None, "a name that is no name is none");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn read_profile(dir: &std::path::Path) -> Option<String> {
+        read(dir, 1_000).and_then(|p| p.profile)
     }
 }
