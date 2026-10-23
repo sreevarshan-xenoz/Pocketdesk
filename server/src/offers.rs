@@ -90,7 +90,18 @@ struct Offer {
     /// The real root of the folder the phone asked for, when it did: the
     /// file is checked against it again as it is fetched.
     within: Option<PathBuf>,
+    /// The offer's body as it was pushed, to push again when the phone's
+    /// link comes back ([`offer_again`]).
+    body: Option<serde_json::Value>,
+    /// Its place in the order offers were made, kept when they go again.
+    seq: u64,
 }
+
+/// The least time between one phone's pushes again (S2 review): a link
+/// that comes and goes, or a one-off connection per fetch, must not send a
+/// folder's thousands of offers again each time. The first push does not
+/// count: an app killed just after an offer comes back for it at once.
+const PUSH_AGAIN_AFTER: Duration = Duration::from_secs(30);
 
 /// Offers by id. The server has one ([`offers`]); a test that sweeps uses
 /// its own, so a sweep at a far-future instant cannot take another test's.
@@ -165,6 +176,11 @@ fn offer_with(table: &Table, id: &str, path: PathBuf, device_id: &str, expires: 
             expires,
             attempts: 0,
             within: None,
+            body: None,
+            seq: {
+                static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
         },
     );
 }
@@ -179,6 +195,85 @@ impl Offer {
     fn touch(&self, now: Instant) {
         let mut until = self.expires.lock().unwrap_or_else(|e| e.into_inner());
         *until = (*until).max(now + OFFER_TTL);
+    }
+}
+
+/// Keep offer `id`'s pushed body, for [`offer_again`].
+fn remember_body(id: &str, body: serde_json::Value) {
+    remember_body_in(offers(), id, body);
+}
+
+fn remember_body_in(table: &Table, id: &str, body: serde_json::Value) {
+    if let Some(offer) = table.lock().unwrap_or_else(|e| e.into_inner()).get_mut(id) {
+        offer.body = Some(body);
+    }
+}
+
+/// The offers still open for `device_id` at `now`, as they were pushed and
+/// in the order they were made.
+fn again_in(table: &Table, device_id: &str, now: Instant) -> Vec<NetworkPacket> {
+    let offers = table.lock().unwrap_or_else(|e| e.into_inner());
+    let mut open: Vec<&Offer> = offers
+        .values()
+        .filter(|o| o.device_id == device_id && !o.expired(now))
+        .collect();
+    open.sort_by_key(|o| o.seq);
+    open.into_iter()
+        .filter_map(|o| {
+            o.body
+                .clone()
+                .map(|b| NetworkPacket::new(OFFER).with_body(b))
+        })
+        .collect()
+}
+
+/// Whether `device_id` may be pushed its offers again at `now`, at most once
+/// a [`PUSH_AGAIN_AFTER`]; a yes counts as its push.
+fn due_again(last: &Mutex<HashMap<String, Instant>>, device_id: &str, now: Instant) -> bool {
+    let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
+    if last
+        .get(device_id)
+        .is_some_and(|t| now.saturating_duration_since(*t) < PUSH_AGAIN_AFTER)
+    {
+        return false;
+    }
+    last.insert(device_id.to_string(), now);
+    true
+}
+
+/// Push the phone on `sender` its offers still open (S2): the phone keeps
+/// its offers in memory only, so one its app lost (killed mid-download, say)
+/// would otherwise wait unfetched until its time ran out. Its fetch continues
+/// the part the phone kept (T6a); a phone still at work on one skips it.
+/// Only as the first push was made: where files reach the phone, and while
+/// it may have them (S2 review: an offer names its file).
+pub(crate) async fn offer_again(sender: &dyn DeviceSender) {
+    let now = Instant::now();
+    if again_in(offers(), sender.device_id(), now).is_empty()
+        || !crate::plugins::share::files_reach(sender)
+    {
+        return;
+    }
+    let device = sender.device_id().to_string();
+    let allowed = tokio::task::spawn_blocking(move || {
+        crate::plugins::pair::allows(&device, Capability::Files)
+    })
+    .await
+    .unwrap_or(false);
+    static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    if !allowed || !due_again(LAST.get_or_init(Default::default), sender.device_id(), now) {
+        return;
+    }
+    let again = again_in(offers(), sender.device_id(), now);
+    tracing::info!(
+        "Offered {} file(s) again to {}, its link back",
+        again.len(),
+        sender.device_id()
+    );
+    for packet in again {
+        if sender.send_packet(&packet).await.is_err() {
+            break;
+        }
     }
 }
 
@@ -708,6 +803,7 @@ async fn deliver(
         }),
         &path,
     ));
+    remember_body(&request.id, packet.body.clone());
     if target.send_packet(&packet).await.is_err() {
         offers()
             .lock()
@@ -1109,6 +1205,7 @@ async fn offer_folder(
             }),
             &file.full,
         ));
+        remember_body(id, packet.body.clone());
         if target.send_packet(&packet).await.is_err() {
             // The phone left: every file not yet offered ends here.
             for id in &ids {
@@ -1222,6 +1319,49 @@ fn update_sent(dir: &Path, id: &str, state: SentState) {
 mod tests {
     use super::*;
     use pocketdesk_core::error::Result;
+
+    /// S2: an offer the phone lost (its app killed mid-download) is offered
+    /// again, as it was and in the order made, when its phone's link comes
+    /// back; never to another phone, nor once its time is up.
+    #[test]
+    fn open_offers_are_offered_again_to_their_own_phone() {
+        let table = Table::default();
+        let now = Instant::now();
+        offer_in(&table, "z", PathBuf::from("/x/z.bin"), "phone-a", now);
+        remember_body_in(&table, "z", serde_json::json!({"id": "z"}));
+        offer_in(&table, "a", PathBuf::from("/x/a.bin"), "phone-a", now);
+        remember_body_in(&table, "a", serde_json::json!({"id": "a"}));
+        offer_in(&table, "b", PathBuf::from("/x/b.bin"), "phone-b", now);
+        remember_body_in(&table, "b", serde_json::json!({"id": "b"}));
+        // Offered, but its push never made: nothing to say again.
+        offer_in(&table, "c", PathBuf::from("/x/c.bin"), "phone-a", now);
+
+        let again = again_in(&table, "phone-a", now);
+        let ids: Vec<_> = again.iter().map(|p| p.body["id"].clone()).collect();
+        assert_eq!(
+            ids,
+            vec![serde_json::json!("z"), serde_json::json!("a")],
+            "in the order made"
+        );
+        assert!(again.iter().all(|p| p.packet_type == OFFER));
+        assert!(again_in(&table, "phone-c", now).is_empty());
+        assert!(
+            again_in(&table, "phone-a", now + OFFER_TTL).is_empty(),
+            "its time is up"
+        );
+    }
+
+    /// S2 review: a link that comes and goes is pushed its offers again at
+    /// most once in [`PUSH_AGAIN_AFTER`], each phone on its own.
+    #[test]
+    fn a_phone_is_pushed_its_offers_again_at_most_once_in_a_while() {
+        let last = Mutex::new(HashMap::new());
+        let now = Instant::now();
+        assert!(due_again(&last, "phone-a", now), "the first time at once");
+        assert!(!due_again(&last, "phone-a", now + Duration::from_secs(5)));
+        assert!(due_again(&last, "phone-b", now + Duration::from_secs(5)));
+        assert!(due_again(&last, "phone-a", now + PUSH_AGAIN_AFTER));
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ll-offers-{name}-{}", std::process::id()));
