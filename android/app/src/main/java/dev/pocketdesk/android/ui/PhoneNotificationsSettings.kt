@@ -68,8 +68,9 @@ fun PhoneNotificationsSection() {
         warning = enabled && !granted,
     )
     if (enabled && !granted) AllowNotificationAccess()
-    // Its neighbours go while sharing is off, and so does it (E6).
-    if (!enabled) return
+    // Its neighbours go while sharing is off, and so does it (E6); a search
+    // still finds them, greyed (Q3 review).
+    UnderSwitch(enabled) {
     // L1: closed on the computer, cleared here.
     SettingSwitch(
         stringResource(R.string.phone_notifications_clear),
@@ -266,5 +267,6 @@ fun PhoneNotificationsSection() {
                 enabled = on || more,
             )
         }
+    }
     }
 }

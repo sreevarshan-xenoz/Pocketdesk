@@ -256,7 +256,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                     warning = cameraNeedsAccess,
                 )
                 if (cameraNeedsAccess) AllowNotificationAccess()
-                if (Prefs.cameraAsks(context)) {
+                UnderSwitch(Prefs.cameraAsks(context)) {
                     SettingSwitch(
                         stringResource(R.string.settings_camera_clipboard),
                         stringResource(R.string.settings_camera_clipboard_summary),
