@@ -11,8 +11,8 @@ object SwitchReport {
 
     /** The features, in the order the computer shows them (its own list matches). */
     val FEATURES = listOf(
-        "notifications", "answers", "alarms", "texts", "contacts", "clipboard", "files", "images", "folders", "photos",
-        "screenshots", "camera", "links", "ring", "media", "media_background", "computer_media", "mute", "control", "dial",
+        "notifications", "answers", "alarms", "texts", "contacts", "clipboard", "copies", "files", "images", "folders", "photos",
+        "screenshots", "camera", "links", "ring", "media", "media_background", "computer_media", "mute", "control", "typing", "dial",
         "commands", "tasks", "phone_actions", "apps",
     )
 

@@ -29,6 +29,7 @@ pub const FEATURES: &[&str] = &[
     "texts",
     "contacts",
     "clipboard",
+    "copies",
     "files",
     "images",
     "folders",
@@ -42,6 +43,7 @@ pub const FEATURES: &[&str] = &[
     "computer_media",
     "mute",
     "control",
+    "typing",
     "dial",
     "commands",
     "tasks",
@@ -123,14 +125,15 @@ pub fn capability(feature: &str) -> Option<Capability> {
     Some(match feature {
         "notifications" | "answers" | "alarms" => Capability::Notifications,
         "texts" | "contacts" => Capability::Texts,
-        "clipboard" => Capability::Clipboard,
+        "clipboard" | "copies" => Capability::Clipboard,
         "files" | "images" | "folders" | "photos" | "screenshots" | "camera" => Capability::Files,
         "links" => Capability::Links,
         "ring" => Capability::Ring,
         "media" | "media_background" => Capability::Media,
         "computer_media" => Capability::Audio,
         "mute" => Capability::Mute,
-        "control" => Capability::Cast,
+        // M4: typing rides the screen window's permission (type_reach).
+        "control" | "typing" => Capability::Cast,
         "dial" => Capability::Dial,
         "commands" => Capability::Command,
         "tasks" => Capability::Tasks,
@@ -158,6 +161,8 @@ pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
     }
     if !config.cast_control {
         off.push(("control", "Control phones from their screen window"));
+        // M4's typing is held by it too (R2 review).
+        off.push(("typing", "Control phones from their screen window"));
     }
     off
 }
@@ -283,6 +288,7 @@ mod tests {
                 ("alarms", "Phone notifications"),
                 ("clipboard", "Clipboard to phones"),
                 ("control", "Control phones from their screen window"),
+                ("typing", "Control phones from their screen window"),
             ]
         );
         // Q3: alarms rung here or not, said by their own setting.

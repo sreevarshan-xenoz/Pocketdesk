@@ -6,6 +6,11 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **R2, what the computer could not see (branch `feat/quiet-seen`).**
+  - **The Overview:** says when presenting or full screen (Windows), or GNOME's or KDE's Do Not Disturb (Linux), holds phones' notifications and texts, with Change it, as quiet hours' line does. The check moved into `core::local::quiet_hours::presenting`, which the server and the Overview both ask; on Linux its thread ends a minute after the last ask, and the server keeps it asked every 30 s while the switch is on.
+  - **The switches report:** gains M4's typing and M10's copies by themselves, with what Android must allow. They are mapped to the screen window's and the clipboard's permissions, and "Control phones from their screen window" off holds typing back.
+
+  Fresh review (0 Critical, 2 Important), fixed: a Linux notification after a quiet minute read a stale "not quiet", and typing not said held by the control setting. Owed: the Overview's line by hand on Windows and Linux; the two switches on the Devices page (checklist §205).
 - 2026-10-23: **R1, the O cycle's device checks by script (branch `feat/device-checks-o`).** `scripts/device_checks.py` gains three checks against its throwaway server:
   - `o1-task`: O1's `RUN_TASK` broadcast runs a task appended to the config that only runs `echo`, its control an unknown name the phone refuses;
   - `o1-deck`: `PRESS_DECK` presses a deck button bound to that task (never a key, text, media or link button, which would act on this computer);

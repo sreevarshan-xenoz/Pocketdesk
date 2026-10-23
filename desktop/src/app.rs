@@ -1332,6 +1332,25 @@ impl PocketdeskApp {
                 self.switch_to(Tab::Settings);
                 self.chosen = Tab::Settings;
             }
+        } else if self.config.as_ref().is_some_and(|c| c.quiet_presenting)
+            && pocketdesk_core::local::quiet_hours::presenting()
+        {
+            // R2: what the server holds them by, said here as quiet hours are.
+            let mut open = false;
+            ui.group(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(if cfg!(windows) {
+                        "Presenting or in full screen: phones' notifications and texts are not shown here, as in a pause."
+                    } else {
+                        "Do Not Disturb is on: phones' notifications and texts are not shown here, as in a pause."
+                    });
+                    open = ui.button("Change it").clicked();
+                });
+            });
+            if open {
+                self.switch_to(Tab::Settings);
+                self.chosen = Tab::Settings;
+            }
         }
         if let Some(minutes) = picked {
             self.pause(minutes);

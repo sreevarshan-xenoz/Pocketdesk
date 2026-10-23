@@ -529,6 +529,13 @@ pub const FEATURES: &[Feature] = &[
         android: "notification access",
     },
     Feature {
+        key: "copies",
+        what: "Its copies sent here by themselves",
+        phone_switch: "Send my copies by themselves",
+        permission_name: "Share the clipboard",
+        android: "the Pocketdesk control Accessibility service (Android 13 and later)",
+    },
+    Feature {
         key: "files",
         what: "Files from here without a session",
         phone_switch: "Files from the computer in the background",
@@ -618,6 +625,13 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Let the computer control this phone",
         permission_name: "Show its screen or camera here",
         android: "the Pocketdesk control Accessibility service",
+    },
+    Feature {
+        key: "typing",
+        what: "Typing on it from this keyboard",
+        phone_switch: "Typing from the computer's keyboard",
+        permission_name: "Show its screen or camera here",
+        android: "the Pocketdesk control Accessibility service, notification access and its notifications",
     },
     Feature {
         key: "dial",
