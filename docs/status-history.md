@@ -6,6 +6,19 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **Q5, 0.6.0 ready (#272), and the Q cycle ends.** The release workflow's dry run on `68b0d2c1` (main, CI green), checked:
+  - the sums;
+  - the APK signed with the release key (its certificate as in `packaging/README.md`), `versionCode` 6, `versionName` 0.6.0;
+  - `pocketdesk --version` 0.6.0 from the Windows zip and the Linux tar.gz.
+
+  The tag `v0.6.0` waits for the owner's go. The Q cycle (Q1 to Q5) is built, and its plan is removed (in git history).
+- 2026-10-23: **The R cycle (plan `docs/research/2026-10-23-r-cycle.md`), after Q.** 2026's requests (KDE Connect's forum, Phone Link's moves, LocalSend's queue) found nothing Pocketdesk lacks, so the cycle finishes what is half-done:
+  - R1: the O cycle's device checks by script;
+  - R2: what the computer cannot see yet (the typing and copies switches, the Overview's presenting line);
+  - R3: lock when the phone leaves, on Linux;
+  - R4: send the clipboard with a key, on Linux;
+  - R5: one word for "computer" in Spanish;
+  - R6: 0.6.0 once the owner says go.
 - 2026-10-23: **Q4, Linux catch-up for P (branch `feat/linux-catchup-p`).**
   - **Presenting (P3):** "While presenting or in full screen" on Linux holds phones' notifications and texts while GNOME's Do Not Disturb (`show-banners` off) or KDE's (its notification server's `Inhibited`) is on. A thread of its own asks every 5 s while the switch is on, with a second's deadline each; the answers' readers are tested. Settings draws the row on Linux with its own words.
   - **Alarms (P5):** a phone's alarm on Linux carries the theme's `alarm-clock-elapsed` sound.
