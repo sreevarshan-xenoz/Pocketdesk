@@ -259,7 +259,11 @@ mod tests {
         ]}));
         assert_eq!(contacts.len(), 2);
         assert_eq!(contacts[0].name, "Ann Lee");
-        assert_eq!(contacts[0].numbers, vec!["+1 555 0100", "555-0101"], "each once, no codes");
+        assert_eq!(
+            contacts[0].numbers,
+            vec!["+1 555 0100", "555-0101"],
+            "each once, no codes"
+        );
         assert_eq!(contacts[1].numbers.len(), MAX_NUMBERS);
     }
 }
