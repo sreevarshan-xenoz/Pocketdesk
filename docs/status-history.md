@@ -6,6 +6,7 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **The S cycle (plan `docs/research/2026-10-23-s-cycle.md`), after R.** The owed checks that can run here are worked down: 562 items, in five batches by checklist section (S1 §0–§22, S2 §23–§60, S3 §61–§110, S4 §111–§160, S5 §161–§206), on the OPPO against throwaway servers. Each pass is ticked, each failure fixed in a PR of its own, each stale item rewritten or removed, each one this box may not run moved to where it can.
 - 2026-10-23: **The R cycle ends (R1 to R5 merged; R6, the 0.6.0 tag, waits for the owner's go).** R5 was checked on the OPPO with the app set to Spanish (`cmd locale set-app-locales`): across Home and every Settings screen, "equipo" on 132 lines and "ordenador" on none, then the app's language put back. The plan is removed (in git history).
 - 2026-10-23: **R4, the clipboard key and the typing key on Linux (branch `feat/clipboard-key-linux`).** H3's and N9's keys work on Linux through the desktop's GlobalShortcuts portal (KDE Plasma 6, GNOME 48 and later, Hyprland's portal).
   - **The portal:** the tray program binds both in one session with Settings' keys as their preferred triggers (`hotkey::portal_trigger`, tested), and the desktop asks its owner once. A press comes as the portal's `Activated` signal and wakes the tray's loop as `WM_HOTKEY` does on Windows. A change in Settings binds them again in a new session.
