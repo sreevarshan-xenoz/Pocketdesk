@@ -97,6 +97,26 @@ pub async fn run_sends() {
         .await;
         let now = pocketdesk_core::local::pin::now_unix();
         for request in clip_history::take_sends(&dir, now) {
+            // P7: files copied in Explorer go as files, as Send file… sends.
+            if request.current
+                && let Ok(Some(files)) =
+                    tokio::task::spawn_blocking(pocketdesk_core::local::clipboard_files::read).await
+            {
+                let allowed = crate::plugins::pair::permits(
+                    &request.device_id,
+                    "kdeconnect.pocketdesk.file_fetch",
+                );
+                match send_files(&dir, &request.device_id, &files, allowed, now) {
+                    Ok(count) => {
+                        tracing::info!("Queued {count} copied file(s) for {}", request.device_id)
+                    }
+                    Err(reason) => {
+                        tracing::info!("{} not sent the copied files: {reason}", request.device_id);
+                        tell_not_sent(&request.device_id, &reason);
+                    }
+                }
+                continue;
+            }
             let clients = crate::state::clone_clients().await;
             let allowed = crate::plugins::pair::permits(&request.device_id, "kdeconnect.clipboard");
             // D5: the clipboard now, read as a push reads it (never a
@@ -115,23 +135,53 @@ pub async fn run_sends() {
                 }
                 Err(reason) => {
                     tracing::info!("{} not sent the copy: {reason}", request.device_id);
-                    // Asked from the tray, its window hidden: the refusal
-                    // is shown, or the pick seems to do nothing (D5 review).
-                    if request.current && !cfg!(test) {
-                        let short: String = request.device_id.chars().take(8).collect();
-                        let body = format!("Phone {short}: {reason}");
-                        std::thread::spawn(move || {
-                            crate::platform::notify(
-                                "The clipboard was not sent",
-                                &body,
-                                Duration::from_secs(10),
-                            );
-                        });
+                    if request.current {
+                        tell_not_sent(&request.device_id, &reason);
                     }
                 }
             }
         }
     }
+}
+
+/// Asked from the tray or its key, its window hidden: a refusal is shown,
+/// or the pick seems to do nothing (D5 review).
+fn tell_not_sent(device_id: &str, reason: &str) {
+    if cfg!(test) {
+        return;
+    }
+    let short: String = device_id.chars().take(8).collect();
+    let body = format!("Phone {short}: {reason}");
+    std::thread::spawn(move || {
+        crate::platform::notify("The clipboard was not sent", &body, Duration::from_secs(10));
+    });
+}
+
+/// Queue `files`, copied on this computer, for `device_id` as Send file…
+/// queues them (P7): through the outbox, so the server's checks and the
+/// sent list follow. How many, or why none.
+fn send_files(
+    dir: &std::path::Path,
+    device_id: &str,
+    files: &[std::path::PathBuf],
+    allowed: bool,
+    now: u64,
+) -> Result<usize, String> {
+    if !allowed {
+        return Err("Files is off for this phone".to_string());
+    }
+    let mut queued = 0;
+    for file in files {
+        match pocketdesk_core::local::outbox::request(dir, device_id, &file.to_string_lossy(), now)
+        {
+            Ok(_) => queued += 1,
+            Err(e) => tracing::warn!("A copied file was not queued: {e}"),
+        }
+    }
+    if queued == 0 {
+        return Err("the copied files could not be queued".to_string());
+    }
+    Ok(queued)
 }
 
 /// Send one text to its phone: allowed and connected, and say what went. A
@@ -183,6 +233,27 @@ async fn send(
 
 #[cfg(test)]
 mod tests {
+
+    /// P7: copied files are queued through the outbox, one request each,
+    /// only with Files on.
+    #[test]
+    fn copied_files_are_queued_as_send_file_queues_them() {
+        let dir = std::env::temp_dir().join(format!("pd-clipfiles-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.txt"), dir.join("b.txt"));
+        std::fs::write(&a, b"a").unwrap();
+        std::fs::write(&b, b"b").unwrap();
+        assert!(
+            send_files(&dir, "phone-a", std::slice::from_ref(&a), false, 1_000).is_err(),
+            "Files off"
+        );
+        assert_eq!(send_files(&dir, "phone-a", &[a, b], true, 1_000), Ok(2));
+        let queued = pocketdesk_core::local::outbox::take_all(&dir, 1_000);
+        assert_eq!(queued.len(), 2);
+        assert!(queued.iter().all(|r| r.device_id == "phone-a"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
     use pocketdesk_core::error::Result;
     use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
