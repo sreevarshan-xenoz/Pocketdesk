@@ -501,11 +501,25 @@ pub const FEATURES: &[Feature] = &[
         android: "notification access",
     },
     Feature {
+        key: "alarms",
+        what: "Its ringing alarms here",
+        phone_switch: "Alarms on the computer",
+        permission_name: "Show its notifications here",
+        android: "notification access",
+    },
+    Feature {
         key: "texts",
         what: "Its texts here",
         phone_switch: "Show texts on my computer",
         permission_name: "Show its texts and send replies",
         android: "the SMS permission",
+    },
+    Feature {
+        key: "contacts",
+        what: "Its contacts on the Messages page",
+        phone_switch: "My contacts on the computer",
+        permission_name: "Show its texts and send replies",
+        android: "the contacts permission and notification access",
     },
     Feature {
         key: "clipboard",
@@ -520,6 +534,13 @@ pub const FEATURES: &[Feature] = &[
         phone_switch: "Files from the computer in the background",
         permission_name: "Send files",
         android: "notification access and its notifications",
+    },
+    Feature {
+        key: "images",
+        what: "Images it receives onto its clipboard",
+        phone_switch: "Images from the computer onto my clipboard",
+        permission_name: "Send files",
+        android: "",
     },
     Feature {
         key: "folders",
@@ -613,11 +634,25 @@ pub const FEATURES: &[Feature] = &[
         android: "notification access",
     },
     Feature {
+        key: "tasks",
+        what: "Its automation apps starting the tasks and deck here",
+        phone_switch: "Let other apps run the computer's tasks",
+        permission_name: "Start my tasks",
+        android: "",
+    },
+    Feature {
         key: "phone_actions",
         what: "Screenshots of it and locking it from here",
         phone_switch: "Let the computer take screenshots and lock this phone",
         permission_name: "Take screenshots of it, lock it and open its apps from here",
         android: "the Pocketdesk control Accessibility service and notification access",
+    },
+    Feature {
+        key: "apps",
+        what: "Opening its apps from here",
+        phone_switch: "Let the computer open my apps",
+        permission_name: "Take screenshots of it, lock it and open its apps from here",
+        android: "notification access",
     },
 ];
 
