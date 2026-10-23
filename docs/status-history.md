@@ -6,6 +6,12 @@ what every session loads small. `git log` holds the commit-level detail.
 
 Add each new entry at the top, at the milestone level.
 
+- 2026-10-23: **R1, the O cycle's device checks by script (branch `feat/device-checks-o`).** `scripts/device_checks.py` gains three checks against its throwaway server:
+  - `o1-task`: O1's `RUN_TASK` broadcast runs a task appended to the config that only runs `echo`, its control an unknown name the phone refuses;
+  - `o1-deck`: `PRESS_DECK` presses a deck button bound to that task (never a key, text, media or link button, which would act on this computer);
+  - `o5-kinds`: a fixture kind kept on the phone stays there while another kind arrives.
+
+  O6's player choice needs several players the media seam cannot fake, and O2's and O7's need the control service and the LAN road, so they stay owed by hand. Fresh review (0 Critical, 1 Important), fixed: `o5-kinds` read two events of one app the same, so a leaked kept one could stand in for a lost shared one (now one at a time, with the post seen on the phone). Run on the OPPO: 3 PASS.
 - 2026-10-23: **Q5, 0.6.0 ready (#272), and the Q cycle ends.** The release workflow's dry run on `68b0d2c1` (main, CI green), checked:
   - the sums;
   - the APK signed with the release key (its certificate as in `packaging/README.md`), `versionCode` 6, `versionName` 0.6.0;
