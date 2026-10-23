@@ -16,86 +16,68 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.5.0 is about the phone and the computer working as one:
-- the phone's notifications, calls, battery and music on the computer;
-- the computer's music, state and buttons on the phone, its home screen and Quick Settings;
-- the phone's screen, camera and sound in a window you can control;
-- files and the clipboard you can watch, stop and send again.
+Pocketdesk 0.6.0 is about the phone and the computer staying linked and acting on each other:
+- linked with the screen off;
+- typing, opening apps, screenshots and locks on the phone from the computer;
+- the phone's music, alarms and ongoing updates on the computer, and the computer's music in the phone's media controls;
+- holding notifications by schedule, by words, or while you present.
 
-Both apps also had a design pass, and the desktop has a tray of its own. It updates 0.4.0 in place (same signing key), keeping your saved computers and pairings.
+Both apps had a design pass over what is new. It updates 0.5.0 in place (same signing key), keeping your saved computers and pairings.
 
-**The phone's notifications and calls on the computer**
-- **Answering:** answer a notification in its Windows toast or Linux notification. Each answer says whether it reached the app.
-- **Waiting:** notifications that could not be sent wait up to an hour and arrive marked late.
-- **What a notification shows:** chats show their recent messages, and notifications carry their app's icon (and, if you turn it on, their picture).
-- **Quiet:**
-  - Do Not Disturb on the phone keeps its notifications off the computer.
-  - The computer can mute the phone for a while.
-  - "Not from this app" mutes one app here.
-  - Pause quiets every phone for an hour, 8 hours or until resumed.
-- **Clearing:** a notification closed on the computer is cleared on the phone too.
-- **Calls:** a ringing call shows on the computer, where you can silence it or decline it.
-- **Other computers:** other paired computers you pick can get a copy of each notification, to see but not answer.
+**Staying linked**
+- **With the screen off:** a quiet service keeps the phone linked on phones whose system freezes background apps (measured on ColorOS), with "Stay linked with the screen off" in Settings.
+- **Found again:** a paired computer that moved to a new address is found by its key.
+- **On the phone:** "What this computer allows" lines up its own switches with the computer's permissions, and pairing asks "Whose phone is it?" (Mine, someone else's, a guest's, or a saved profile).
 
 **The phone from the computer**
-- **Ring it:** ring the phone from the Devices page or the tray.
-- **See it:** show its screen or its camera in a window. With "Let the computer control this phone" on, the mouse and keyboard drive it there. The window takes dropped files and pasted text, takes screenshots and records video, and can play the phone's sound.
-- **Ask it for things:**
-  - ask it to take a photo, and see its recent photos;
-  - open its shared folders as a drive;
-  - send it a number to call, which you then press Call for on the phone;
-  - hand a command to Tasker, Automate or MacroDroid.
-- **How it is doing:**
-  - its battery, free storage, network and ringer;
-  - an alert when it has charged to 80, 90 or 100 %;
-  - on the Devices page, which of its features are on, on each side, and which side holds one back.
-- **Its music:** shown in the computer's media controls (Windows).
+- **Type on the phone** from the computer's keyboard, from the Overview, the tray or a key.
+- **Open an app on the phone**, take a screenshot of it or lock it, from the Overview or the tray.
+- **Its contacts** on the Messages page, to text or call (names and numbers only, when you turn it on).
+- **Ring it:** it now vibrates and flashes its torch as it rings.
+- **Its sound** on the computer without its screen.
+- **Files into its folders** from the drive in File Explorer, into folders you mark.
 
-**The computer from the phone**
-- **Remote** (the phone as a remote control) reconnects by itself and notices a computer that went quiet. It now has a talk timer, an air mouse and a laser pointer.
-- **More ways to use it:** the phone works as a pen and as a gamepad, a connected game controller passes through, and the volume keys set the computer's volume.
-- **The deck:** buttons you set up on the computer show on the phone, each running keys, a task, media, a link or text.
-- **"How it is doing":** the computer's CPU, memory, disks, battery and uptime.
-- **Home-screen widgets:** for the computer's state, the deck and its music.
-- **Quick Settings tiles:** the computer's music, and waking the computer.
-- **Sound session:** the phone as the computer's speaker and microphone, with no picture.
+**The phone's notifications on the computer**
+- **Alarms:** a ringing alarm or finished timer rings on the computer too.
+- **Ongoing updates:** a download's bar or a running timer shows as a live card that updates in place.
+- **Open on the phone:** open a notification's app on the phone from the computer.
+- **Where they show:** only on the computer you are using; not while the phone is in your hand; kinds you keep on the phone stay there.
+- **Holding them:** quiet hours on a schedule, while presenting or in full screen (Windows; GNOME's or KDE's Do Not Disturb on Linux), and by words you choose.
+
+**Music**
+- **The phone's music** shows on the computer without a session, with its cover, in Windows' media controls and as an MPRIS player on Linux.
+- **The computer's music** shows in the phone's media controls, lock screen and watch; choose which player when several play.
 
 **Files and the clipboard**
-- **Transfers:** each transfer shows its progress, with Cancel on both sides.
-- **Where files land:** choose where received files go on each side, and files keep their dates.
-- **Clipboard:**
-  - its history, with Resend;
-  - send the clipboard with a key;
-  - send selected text from any app with "To computer".
-- **Reading:** continue reading a web page on the phone, at the paragraph you were on.
-- **Dropping files** on the desktop app asks which phone they go to when there is more than one.
+- **Image copies** reach the phone's clipboard without a session, and received images can go onto its clipboard.
+- **Copies on the phone** go to the computer by themselves (on phones that show Android's clipboard preview).
+- **Copies kept here:** never send copies from programs or with looks you list (a password manager's, a key's).
+- **Copied files:** files copied in Explorer or a file manager go with Send the clipboard and "Paste copied files" (`xclip` on X11).
+- **Several at once:** send files to several phones or computers.
+- **Photos keep where they were taken.**
+
+**Automation**
+- **Automation apps** on the phone (Tasker and others) can start the computer's tasks and press its deck buttons.
+- **Home Assistant** gets buttons for commands to the phone.
+- **`tel:` links** on the computer open the call on the phone, and a call's notification has Call back.
+- **Links by site:** a site's links open in the browser, are only shown, or go to a program you name.
 
 **The desktop app**
-- **The tray** is a small program of its own, with each phone's battery and actions. Linux has a tray too.
-- **Pages:** new Activity and Logs pages, search on Settings, Activity and Clipboard, and a Sessions page with recent sessions.
-- **Design:** a design pass over every page, with the light and dark themes and a screen reader in mind.
-- **Lock when the phone leaves:** the computer can lock once your phone is gone (Windows).
+- **Permission profiles:** save a phone's permissions under a name, apply one to a phone (it asks first), or pair a phone with one.
+- **A design pass** over the O and P pages: words, questions before what cannot be undone, empty and waiting states, screen-reader names.
 
 **The phone app**
-- Its own design pass: names on both sides, Spanish and Tamil, large fonts, TalkBack and landscape.
-- A health card that says when an update stopped something from working.
-- An Android 17 pass, and a lower background cost.
-
-**Reliability**
-- **The battery in the background:** the phone now reads its battery from Android's battery service, since some phones (ColorOS) left the background reading stale.
-- **GNOME and KDE:** they can keep the screen-sharing grant and take input through the portal.
+- **Find a setting** with search.
+- **A design pass** over the new rows, with their permissions asked for and refusals said.
+- **Its switches** for alarms, contacts, apps, tasks and images are told to the computer, so the Devices page can say why an ask got no answer.
 
 ### Not yet checked on a device
 
-These work in tests, and many were checked on two phones against Windows, but not yet:
-- **Calls, a number to call and texts** on a phone with a SIM.
-- **Linux:** most of this release's features, including the tray, pen and gamepad input, phone sound and media controls.
-- **By hand at the computer:** the desktop app's new pages at their smallest size, the tray's menus, drops and paste on the phone's window, and screenshots and recordings.
-- **Other apps and systems:**
-  - Tasker with the automation commands;
-  - Home Assistant itself;
-  - Android 17;
-  - a real stylus and game controller.
-- **Updating:** from 0.4.0 to this release on a phone.
+These work in tests, and many were checked on an OPPO phone against Windows, but not yet:
+- **Linux:** GNOME's and KDE's Do Not Disturb, an alarm's sound, files copied on X11, and most of this release's features by hand.
+- **By hand at the computer:** the new desktop pages and questions, the typing window, the Overview's buttons.
+- **A phone with a SIM:** calls, Call back and `tel:` links reaching a call.
+- **Other apps and systems:** Tasker itself, Home Assistant, a password manager's copies, Android 17.
+- **Updating:** from 0.5.0 to this release on a phone, and a clean Linux install.
 
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§88–§164 are this release's).
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§166–§206 are this release's).

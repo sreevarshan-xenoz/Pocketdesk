@@ -1,0 +1,4 @@
+* Stays linked with the screen off; a computer that moved is found again.
+* Type, open apps, take screenshots and lock the phone from the computer.
+* Alarms, ongoing updates and music on the computer; the computer's music in the phone's controls.
+* Quiet hours, holding by words, permission profiles, contacts on the computer.
