@@ -823,7 +823,7 @@
     <string name="health_contacts">Texts show numbers, not names: Pocketdesk isn\'t allowed to read contacts.</string>
     <string name="health_photos">Screenshots and photos can\'t reach the computer: Pocketdesk isn\'t allowed to see photos.</string>
     <string name="health_app_notifications">Pocketdesk can\'t show notifications, so rings and files from the computer go unseen.</string>
-    <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone or type on it, and copies are not sent by themselves.</string>
+    <string name="health_control_service">\"Pocketdesk control\" is off in Android\'s Accessibility settings: the computer can\'t control this phone, type on it, take screenshots of it or lock it, and copies are not sent by themselves.</string>
     <string name="health_control_blocked">The computer can\'t control this phone: Advanced Protection allows Accessibility services only to accessibility tools.</string>
     <string name="health_download_folder">The folder picked for files from computers is gone or no longer allowed, so files go to Downloads/Pocketdesk.</string>
     <string name="health_screenshots_stopped">New screenshots stopped going to the computer when photo access was taken away. Turn it on again in Settings.</string>
@@ -989,12 +989,13 @@
     <string name="typing_stop">Stop</string>
     <string name="typing_stopped">No typing from the computer for 10 minutes</string>
     <string name="settings_phone_apps">Let the computer open my apps</string>
-    <string name="settings_phone_apps_summary_off">Off. With it on, the computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
-    <string name="settings_phone_apps_summary_on">The computer can list this phone\'s apps (their names only) and open one, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_off">The computer can list this phone\'s apps (their names only) and open one you pick there, while the phone is unlocked and awake</string>
+    <string name="settings_phone_apps_summary_on">On: the computer can list this phone\'s apps (their names only) and open one while the phone is unlocked and awake: at once with \"Pocketdesk control\" on, else as \"Tap to open\"</string>
     <string name="settings_phone_actions">Let the computer take screenshots and lock this phone</string>
     <string name="settings_phone_actions_summary_off">The computer\'s Screenshot of the phone and Lock the phone do them here: a screenshot comes to the computer as \"Send new screenshots\" sends it (turn that on too), never of the lock screen. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_phone_actions_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer asks</string>
     <string name="settings_phone_actions_summary_on">On: this phone\'s own computer can take a screenshot here (it arrives as new screenshots do) or lock it</string>
+    <string name="settings_phone_actions_summary_needs_screenshots">On, but a screenshot goes nowhere until \"Send new screenshots\" is on, sending it somewhere; Lock the phone works now</string>
     <string name="settings_typing_from_computer">Typing from the computer\'s keyboard</string>
     <string name="settings_typing_summary_off">\"Type on the phone\" on the computer types into the field in front here, with no screen shown. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_typing_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer types</string>

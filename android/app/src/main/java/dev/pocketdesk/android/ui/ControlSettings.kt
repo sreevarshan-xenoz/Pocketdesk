@@ -111,10 +111,19 @@ fun TypingSetting() {
 @Composable
 fun PhoneActionsSetting() {
     val context = LocalContext.current
+    // Android 9 and later only (Q3 review: below it every ask was refused).
+    if (android.os.Build.VERSION.SDK_INT < dev.pocketdesk.android.control.PhoneActionRule.MIN_SDK) return
     val resumes = rememberResumes()
     var on by remember { mutableStateOf(Prefs.phoneActionsFromComputer(context)) }
     val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
     val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
+    // What carries a screenshot here (Q3 review: on, it went nowhere unsaid).
+    val carried = remember(resumes, on) {
+        dev.pocketdesk.android.files.ScreenshotPrefs.on(context) &&
+            dev.pocketdesk.android.files.ScreenshotPrefs.granted(context) &&
+            (dev.pocketdesk.android.files.ScreenshotPrefs.clipboard(context) ||
+                dev.pocketdesk.android.files.ScreenshotPrefs.save(context))
+    }
     val openAccessibility = {
         runCatching {
             context.startActivity(
@@ -129,11 +138,12 @@ fun PhoneActionsSetting() {
                 !on -> R.string.settings_phone_actions_summary_off
                 !serviceOn -> R.string.settings_control_summary_needs_service
                 !listening -> R.string.settings_phone_actions_summary_needs_access
+                !carried -> R.string.settings_phone_actions_summary_needs_screenshots
                 else -> R.string.settings_phone_actions_summary_on
             },
         ),
         checked = on,
-        warning = on && (!serviceOn || !listening),
+        warning = on && (!serviceOn || !listening || !carried),
         onChange = { want ->
             on = want
             Prefs.setPhoneActionsFromComputer(context, want)
@@ -195,48 +205,36 @@ fun CopiesSetting() {
 
 /**
  * P2: the phone's own computer may list this phone's apps (their names
- * only) and open one, with C8's Accessibility service to open it and the
- * notification listener to wait for the asks.
+ * only) and open one, the notification listener waiting for the asks. It
+ * opens at once with C8's Accessibility service, else as "Tap to open", so
+ * the service is not asked for (Q3 review).
  */
 @Composable
 fun AppsSetting() {
     val context = LocalContext.current
     val resumes = rememberResumes()
     var on by remember { mutableStateOf(Prefs.appsFromComputer(context)) }
-    val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
     val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
-    val openAccessibility = {
-        runCatching {
-            context.startActivity(
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
-    }
     SettingSwitch(
         title = stringResource(R.string.settings_phone_apps),
         summary = stringResource(
             when {
                 !on -> R.string.settings_phone_apps_summary_off
-                !serviceOn -> R.string.settings_control_summary_needs_service
                 !listening -> R.string.settings_phone_actions_summary_needs_access
                 else -> R.string.settings_phone_apps_summary_on
             },
         ),
         checked = on,
-        warning = on && (!serviceOn || !listening),
+        warning = on && !listening,
         onChange = { want ->
             on = want
             Prefs.setAppsFromComputer(context, want)
-            if (want && !ControlRunner.serviceEnabled(context)) {
-                openAccessibility()
-            } else if (want && !PhoneNotificationPrefs.accessGranted(context)) {
+            if (want && !PhoneNotificationPrefs.accessGranted(context)) {
                 runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
             }
         },
     )
-    if (on && !serviceOn) {
-        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
-    } else if (on && !listening) {
+    if (on && !listening) {
         AllowNotificationAccess()
     }
 }

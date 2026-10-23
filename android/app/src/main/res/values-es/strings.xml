@@ -820,7 +820,7 @@
     <string name="health_contacts">Los mensajes muestran números, no nombres: Pocketdesk no tiene permiso para leer los contactos.</string>
     <string name="health_photos">Las capturas y las fotos no pueden llegar al ordenador: Pocketdesk no tiene permiso para ver las fotos.</string>
     <string name="health_app_notifications">Pocketdesk no puede mostrar notificaciones, así que los timbres y archivos del ordenador pasan desapercibidos.</string>
-    <string name="health_control_service">«Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android: el ordenador no puede controlar este teléfono ni escribir en él, y lo que copias no se envía por sí solo.</string>
+    <string name="health_control_service">«Control de Pocketdesk» está desactivado en los ajustes de Accesibilidad de Android: el ordenador no puede controlar este teléfono, escribir en él, hacerle capturas ni bloquearlo, y lo que copias no se envía por sí solo.</string>
     <string name="health_control_blocked">El ordenador no puede controlar este teléfono: la Protección avanzada solo permite servicios de accesibilidad a las herramientas de accesibilidad.</string>
     <string name="health_download_folder">La carpeta elegida para los archivos de ordenadores ya no existe o ya no está permitida, así que los archivos van a Descargas/Pocketdesk.</string>
     <string name="health_screenshots_stopped">Las capturas nuevas dejaron de ir al ordenador cuando se retiró el acceso a las fotos. Vuelve a activarlo en Ajustes.</string>
@@ -974,12 +974,13 @@
     <string name="typing_stop">Detener</string>
     <string name="typing_stopped">Sin escritura desde el equipo durante 10 minutos</string>
     <string name="settings_phone_apps">Dejar que el ordenador abra mis apps</string>
-    <string name="settings_phone_apps_summary_off">Desactivado. Si se activa, el ordenador puede ver la lista de apps de este teléfono (solo sus nombres) y abrir la que elijas allí, con el teléfono desbloqueado y la pantalla encendida</string>
-    <string name="settings_phone_apps_summary_on">El ordenador puede ver la lista de apps de este teléfono (solo sus nombres) y abrir una, con el teléfono desbloqueado y la pantalla encendida</string>
+    <string name="settings_phone_apps_summary_off">El ordenador puede ver la lista de apps de este teléfono (solo sus nombres) y abrir la que elijas allí, con el teléfono desbloqueado y la pantalla encendida</string>
+    <string name="settings_phone_apps_summary_on">Activado: el ordenador puede ver la lista de apps de este teléfono (solo sus nombres) y abrir una con el teléfono desbloqueado y la pantalla encendida: al momento con «Control de Pocketdesk» activado, si no como «Toca para abrir»</string>
     <string name="settings_phone_actions">Permitir que el equipo haga capturas y bloquee este teléfono</string>
     <string name="settings_phone_actions_summary_off">Captura del teléfono y Bloquear el teléfono del equipo lo hacen aquí: la captura llega al equipo como la envía \"Enviar capturas nuevas\" (actívalo también), nunca de la pantalla de bloqueo. Usa el servicio de accesibilidad \"Control de Pocketdesk\"</string>
     <string name="settings_phone_actions_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que pide el equipo</string>
     <string name="settings_phone_actions_summary_on">Activado: el equipo propio de este teléfono puede hacer una captura aquí (llega como las capturas nuevas) o bloquearlo</string>
+    <string name="settings_phone_actions_summary_needs_screenshots">Activado, pero la captura no llega a ningún sitio hasta activar \"Enviar capturas nuevas\" con algún destino; Bloquear el teléfono ya funciona</string>
     <string name="settings_typing_from_computer">Escribir con el teclado del equipo</string>
     <string name="settings_typing_summary_off">\"Escribir en el teléfono\" en el equipo escribe en el campo de delante, sin mostrar la pantalla. Nunca en un campo de contraseña ni con el teléfono bloqueado. Usa el servicio de accesibilidad \"Pocketdesk control\"</string>
     <string name="settings_typing_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que escribe el equipo</string>
