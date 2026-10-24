@@ -2257,6 +2257,7 @@ def ac2_changed(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: in_session(ctx), 30, 1):
             return "TIMEOUT", "no session within 30 s"
         path = big_file(ctx, GIB)
+        settled = False
         try:
             first = send_cli(ctx, path, None)
             try:
@@ -2286,6 +2287,7 @@ def ac2_changed(ctx: Ctx) -> tuple[str, str]:
             except subprocess.TimeoutExpired:
                 second.kill()
                 return "TIMEOUT", "the second send ran past 21 minutes"
+            settled = True
             said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
             # Its words reach the phone's log through the job's failure, and
             # the server's through the send's (either is the prefix hash).
@@ -2301,10 +2303,15 @@ def ac2_changed(ctx: Ctx) -> tuple[str, str]:
             told = "the change was seen" if noticed else "no word of the change in either log"
             if continued:
                 return "FAIL", f"{cut}; {told}, but continued from {int(continued.group(1)) * 100 // int(continued.group(2))} %, MD5 of the new file {'matches' if same else 'differs'}"
-            if second.returncode != 0 and not same:
+            if second.returncode != 0:
                 return "FAIL", f"{cut}; {told}; the second send's exit {second.returncode}: {out.strip()[-200:]}"
             return ("PASS" if same and noticed else "FAIL"), f"{cut}; {told} and started over, MD5 of the new file {'matches' if same else 'differs'}"
         finally:
+            if not settled:
+                # A send may still run: stopped first, so the cleanup does
+                # not race it (AC2 review, as in cut_share).
+                ctx.server.stop()
+                ctx.on_road = False
             drop_from_phone(path.name)
             path.unlink(missing_ok=True)
     return session_check(ctx, body)
