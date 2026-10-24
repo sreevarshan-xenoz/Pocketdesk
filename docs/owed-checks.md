@@ -1313,11 +1313,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **207. Start beside KDE Connect (T1)**
 
-- Linux with KDE Connect (or GSConnect) running: the server starts on 1717, the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
+- Linux with KDE Connect (or GSConnect) itself running: the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
 
 **208. The clipboard on X11 (T2)**
 
-- X11 (Mint, or Xfce): text copied on the computer reaches a phone in a session and in the background, with `xclip` running once per copy (no read every 2 s while nothing changes), and a phone's text and image land on the computer's clipboard. (where: linux)
+- X11 on a real desktop (Mint, or Xfce): the same in a session, and an image both ways. (where: linux)
 - X11 with KeePassXC: a password it copies stays on the computer. (where: linux)
 - X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
 - Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
@@ -1328,14 +1328,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **212. The phone's gamepad as a game controller on Linux (T7)**
 
-- Linux with `/dev/uinput` access: `evtest` lists "Pocketdesk Gamepad" (045e:028e) while the phone's gamepad is up; each button, both sticks and the D-pad show as named. (where: linux)
+- Both sticks and the other buttons in `evtest`. (where: linux)
 - A game or Steam's controller test seeing an Xbox 360 pad, A/B/X/Y in their places. (where: linux)
-- The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
+- The same with a stick pushed. (where: linux)
 - Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
 
 **213. Lock when the phone leaves on Sway and Hyprland (T8)**
 
-- Sway: with a phone's "Lock this computer when it leaves" on, the phone gone for the set minutes and the keyboard untouched, the computer locks once; touched meanwhile, it does not. (where: linux)
+- Sway: touched meanwhile, it does not lock. (where: linux)
 - Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
 - A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
 
