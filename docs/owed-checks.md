@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-902 open items.
+899 open items.
 
 | Where | Items |
 |---|---|
@@ -11,9 +11,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 35 |
-| A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 171 |
+| Away from home: another network, or through a router | 36 |
+| A second computer | 28 |
+| A Linux desktop (the Azure VM serves for some) | 168 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 358 |
 
@@ -695,6 +695,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 ## Away from home: another network, or through a router
 
+**8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
+
+- `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications"). Tried on the Azure VM (Xvfb, `dunst` as the daemon, 2026-10-24): the server's monitor started (dbus-monitor) and `notify-send` succeeded, but the phone showed nothing: outside a session, as it should (the phone shows the computer's notifications only in a session's screen), and the session tried with it did not start, so the item stays open.
+
 **11. WAN over iroh (R1)**
 
 - Hole punching through a real NAT (relay-free if possible): check `directAddrs` paths get used. (where: away)
@@ -812,11 +816,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **86. Two computers: pairing, the link, the clipboard and files (2f–2h)**
 
-- Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first. (where: second computer)
-- The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute). (where: second computer)
-- The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
+- The same from the desktop app: the link pasted in Settings → Other computers, the outcome shown, B's Devices tab. (where: second computer)
+- The link comes back after the network drops ("linked" again within a minute). (where: second computer)
+- Off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
 - A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
-- A folder from B to A lands under one new folder; a folder from A to B too (T5). (where: second computer)
 - Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 
 **105. Choose where received files land (C2)**
@@ -920,7 +923,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
 
-- `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications").
 - Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears. (where: linux)
 
 **8a. Control-channel versioning (R4 D4)**
@@ -1036,7 +1038,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
-- Linux: after `pocketdesk start`, `stat -c %a ~/.local/state/pocketdesk` is `700`, and the log says "Made … owner-only" once; a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts.
+- Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
 
 **50. Resumable transfers (T6a)**
 
@@ -1049,10 +1051,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **52. Download a folder from the remote browser**
 
 - The Linux host.
-
-**53. The local API (T7)**
-
-- The Linux host: `status`, `devices`, `send --wait`.
 
 **58. The computer's media from the phone (T8c)**
 
@@ -1087,10 +1085,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **77. This phone's screen on the computer (T10k)**
 
 - The Linux desktop app (Wayland and X11), and a computer without `ffmpeg` (the window says so).
-
-**78. Events and hooks (ecosystem 1a)**
-
-- Linux: `sh -c` hooks, and the log's mode (0600).
 
 **81. Send from the browser (ecosystem 1d)**
 

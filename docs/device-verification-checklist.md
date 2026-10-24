@@ -259,7 +259,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 
 ## 8. Notifications + find-my-device (R3#11c, Tier-2 #11)
 
-- [ ] `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications").
+- [ ] `notify-send -a Test "Hi" "body"` on desktop → phone notification appears (channel "Desktop notifications"). Tried on the Azure VM (Xvfb, `dunst` as the daemon, 2026-10-24): the server's monitor started (dbus-monitor) and `notify-send` succeeded, but the phone showed nothing: outside a session, as it should (the phone shows the computer's notifications only in a session's screen), and the session tried with it did not start, so the item stays open.
 - [ ] Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears. (where: linux)
 - [ ] "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio). (where: by hand)
 - [x] Desktop pushes findmydevice ring → phone alarm loops at max volume 30 s (phone in alarm-volume >0; check DoNotDisturb doesn't block USAGE_ALARM). (2026-10-23 (P11, Q1's `p11-ring`): `pocketdesk ring` rang the OPPO 30 s at its alarm volume (no longer the maximum since N4), with the alarm vibration and the torch.)
@@ -972,7 +972,8 @@ On the A71, 2026-10-14:
 - [x] A WAN dial (stream port closed to force it) resolves n0's relay through the network's DNS: no `android context was not initialized` panic and no `failed to read system DNS configuration, using fallback` in logcat (the build before logged both).
 
 Owed:
-- [ ] Linux: after `pocketdesk start`, `stat -c %a ~/.local/state/pocketdesk` is `700`, and the log says "Made … owner-only" once; a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts.
+- [x] Linux: after `pocketdesk start`, the state folder is `700` and the first start said "owner-only" once (the Azure VM, Ubuntu 24.04, 2026-10-24).
+- [ ] Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
 - [ ] Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
 - [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
@@ -1035,7 +1036,7 @@ On this box with the A71, 2026-10-15 (`docs/local-api.md`):
 - Seen on the way: the desktop's "sent" can come a moment before the phone's download is published (the MediaStore entry is still pending for a few milliseconds). Not new to this change.
 
 Owed:
-- [ ] The Linux host: `status`, `devices`, `send --wait`.
+- [x] The Linux host: `status`, `devices`, `send --wait` (a folder to another computer) (the Azure VM, Ubuntu 24.04, 2026-10-24).
 - [x] `send` of a folder with `--wait`, and a phone that leaves mid-send (exit 1). Five files and one in a sub-folder "sent" in 4 s, MD5s matching; the app force-stopped 2 s into six 40 MB files: "offered" (exit 4) while the offer's 10 minutes run, then exit 1 at 637 s, "6 of 6 files not sent: the phone did not take it in time" (2026-10-19, A71, throwaway server, by script).
 - [x] A broken config.toml with `--json` (exit 1, JSON): `status --json` gave `api` 1 and the TOML error (2026-10-19, A71, throwaway server, by script).
 
@@ -1376,7 +1377,7 @@ Owed:
 - [ ] The desktop Settings hooks box saving a hook the server then runs. (where: by hand)
 - [x] A hook killed at 30 s on a real server: a `ping -n 60` hook on `notification` gave `hook_ran` 32 s later with `timed_out: true` and no code. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
 - [ ] The 33rd waiting hook skipped, on a real server: 37 events of a kind within 30 s (a phone sends at most 20 notifications a minute, so another source).
-- [ ] Linux: `sh -c` hooks, and the log's mode (0600).
+- [x] Linux: a `file_received` hook using shell syntax ran through `sh -c`, the event on stdin and in `POCKETDESK_EVENT`; `events.jsonl` is `600` (the Azure VM, Ubuntu 24.04, 2026-10-24).
 
 ## 79. The Activity Center (ecosystem 1b)
 
@@ -1487,11 +1488,14 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 
 Two real servers on this box passed `server/tests/two_computers.rs` (2026-10-17): a forged certificate and a wrong PIN paired nothing, the code paired, B listed A as a computer with the narrow profile and held A's iroh key, the link came up over iroh, a copy crossed each way (stand-in clipboards), a 3 MB file each way byte for byte, Forget dropped the link. Owed on two real computers (Windows, the R6a throwaway instance for A so the installed server is untouched, and the Azure VM for B):
 
-- [ ] Pairing from the Pair tab's copied link pasted in Settings → Other computers; the outcome shown; B's Devices tab lists A with Clipboard, Files and Links only, and ask first. (where: second computer)
-- [ ] The link survives a restart of either computer, and comes back after the network drops ("linked" again within a minute). (where: second computer)
-- [ ] The clipboard both ways in under 2 s with "Clipboard with my computers" on on both; off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
+- [x] Pairing by B's pairing link (asked through `computers_out/`, as Settings does) across the internet: "paired", then "linked"; B's trust store gives A Clipboard, Files and Links only, and ask first (the Azure VM, Ubuntu 24.04, and this box's throwaway server, 2026-10-24).
+- [ ] The same from the desktop app: the link pasted in Settings → Other computers, the outcome shown, B's Devices tab. (where: second computer)
+- [x] The link came back after both servers restarted (the Azure VM, Ubuntu 24.04, and this box's throwaway server, 2026-10-24).
+- [ ] The link comes back after the network drops ("linked" again within a minute). (where: second computer)
+- [x] The clipboard both ways with "Clipboard with my computers" on on both, within a few seconds across the internet (this box's stand-in file, the VM's X11 clipboard) (the Azure VM, Ubuntu 24.04, and this box's throwaway server, 2026-10-24).
+- [ ] Off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
 - [ ] A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
-- [ ] A folder from B to A lands under one new folder; a folder from A to B too (T5). (where: second computer)
+- [x] A folder from A to B (a subfolder kept, the empty file left out and said) and from B to A, each under one new folder, MD5s matching, across the internet (the Azure VM, Ubuntu 24.04, and this box's throwaway server, 2026-10-24).
 - [ ] Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 
 ## 87. KDE Connect devices (3a–3c)
