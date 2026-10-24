@@ -376,7 +376,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 
 ## 16. Long-run / hygiene
 
-- [ ] 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills.
+- [ ] 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills. (2026-10-24, the OPPO over the internet road against a throwaway server, 50 minutes before the run was stopped for this computer's memory: the app's memory level at 144-151 MB throughout, no stall or drop card; the frame rate followed the screen, 12-18 fps at first, 0-1 once it held still, as capture sends changes only. The full hour, and resolution changes, still owed.)
 - [x] Force-stop app mid-stream: desktop auto-releases privacy within TTL, encoder sessions stop (no server-side zombie capture), siren/WoL relays unaffected. (seen 2026-10-23 on the OPPO against a throwaway server (S1): the session ended on the computer 30.9 s after a force-stop (the 30 s unheard rule), no live session and no ffmpeg left; privacy was not on.)
 - [x] Airplane-mode mid-session then back: clean Down chip + retry, no ANR. (seen 2026-10-23 on the OPPO against a throwaway server (S1): "Connecting…" during 20 s of airplane mode, a new session 4.1 s after it went off, the picture at 9.8 s, no ANR or crash.)
 
@@ -945,7 +945,7 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 - [x] 30 minutes after the fixes: private memory 85 → 89 MB, handles flat at about 680, CPU 10–13 %.
 - [x] Session start: one control connection that stays, plus two one-off queries.
 - [x] An hour (2026-10-14): steady for 30 minutes (82 → 87 MB), then a reconnect left the old session running on the desktop, at up to 177 MB and double CPU. **Fixed:** the phone closes a stopped stream on the wire, and the desktop ends a session unheard from for 30 s. Re-run: a monitor switch leaves one live session.
-- [ ] An hour with one session from start to end, to confirm the memory levels off.
+- [ ] An hour with one session from start to end, to confirm the memory levels off. (2026-10-24, the OPPO over the internet road against a throwaway server, 50 minutes before the run was stopped for this computer's memory: the app's memory level at 144-151 MB throughout, no stall or drop card; the frame rate followed the screen, 12-18 fps at first, 0-1 once it held still, as capture sends changes only. The full hour, and resolution changes, still owed.)
 - [ ] The computer sleeping and waking (the user's to run), and the phone switching between Wi-Fi and mobile data (needs a SIM).
 - [ ] The same on the Linux host.
 - [ ] A file transfer cut by a drop (today it fails and is sent again whole).

@@ -62,7 +62,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **16. Long-run / hygiene**
 
-- 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills.
+- 1 h continuous session: memory stable (no decoder leak across resolution changes), fps steady, no watchdog kills. (2026-10-24, the OPPO over the internet road against a throwaway server, 50 minutes before the run was stopped for this computer's memory: the app's memory level at 144-151 MB throughout, no stall or drop card; the frame rate followed the screen, 12-18 fps at first, 0-1 once it held still, as capture sends changes only. The full hour, and resolution changes, still owed.)
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
@@ -103,7 +103,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **46. Phase R2: long sessions and recovery**
 
-- An hour with one session from start to end, to confirm the memory levels off.
+- An hour with one session from start to end, to confirm the memory levels off. (2026-10-24, the OPPO over the internet road against a throwaway server, 50 minutes before the run was stopped for this computer's memory: the app's memory level at 144-151 MB throughout, no stall or drop card; the frame rate followed the screen, 12-18 fps at first, 0-1 once it held still, as capture sends changes only. The full hour, and resolution changes, still owed.)
 - A file transfer cut by a drop (today it fails and is sent again whole).
 
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
