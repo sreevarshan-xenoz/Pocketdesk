@@ -223,4 +223,13 @@ class HealthTest {
             Health.notifyAfterUpdate(listOf(HealthProblem.PAUSED_ANYWAY, HealthProblem.PHOTOS), seen = null, dismissed = null),
         )
     }
+
+    /** V2: the reminder card steps aside when the health card says Android pauses Pocketdesk. */
+    @Test
+    fun healthSaysPausedOnlyForThePauses() {
+        assertTrue(Health.saysPaused(listOf(HealthProblem.PAUSED_ANYWAY)))
+        assertTrue(Health.saysPaused(listOf(HealthProblem.CONTROL_SERVICE, HealthProblem.PAUSED_STAY_LINKED_OFF)))
+        assertFalse(Health.saysPaused(listOf(HealthProblem.CONTROL_SERVICE)))
+        assertFalse(Health.saysPaused(emptyList()))
+    }
 }
