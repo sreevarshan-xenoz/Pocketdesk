@@ -3379,6 +3379,100 @@ def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
         ctx.on_road = False
 
 
+def session_records(root: pathlib.Path) -> list[dict[str, str]]:
+    """The throwaway's session records (`streaming_sessions.log`), each a
+    line of tab-separated `key=value` fields, as dicts."""
+    path = root / "state" / "streaming_sessions.log"
+    if not path.exists():
+        return []
+    return [dict(f.split("=", 1) for f in line.split(chr(9)) if "=" in f)
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+
+
+AE2_CROPS = 6
+
+
+@check("ae2-crops", "§16")
+def ae2_crops(ctx: Ctx) -> tuple[str, str]:
+    """Crops to a window and back, six times in one session: each rebuilds
+    at its size, the session stays up with no redial (no watchdog), the
+    app's memory level holds (§16, across resolution changes). The
+    session's record is read after, its tails reported: they cannot show
+    §11's stall, as the encode timer leaves a rebuild out and the round
+    trip is sampled apart from the crops (review)."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        time.sleep(10)
+        sessions = ctx.server.log().count("Client codec caps negotiated")
+        if sessions < 1:
+            return "TIMEOUT", "no codec negotiated for the session: a redial could not be seen"
+        records = len(session_records(ctx.server.root))
+        desktop = capture_size(ctx.server.log())
+        if desktop is None:
+            return "SKIP", "the server's log gives no desktop size to crop from"
+        memory = [pss_mb()]
+        sizes = []
+        try:
+            for _ in range(AE2_CROPS):
+                for whole in (False, True):
+                    seen = len(rebuilds(ctx.server.log()))
+                    if whole:
+                        why = open_picker(ctx)
+                        if why:
+                            return "TIMEOUT", why
+                        if not tap_text("Whole desktop", ctx.phone.dump()):
+                            return "TIMEOUT", "no Whole desktop in the window picker"
+                    else:
+                        size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
+                        if size is None:
+                            return "SKIP", why
+                    # The rebuild this change makes (AE1 review): at the
+                    # desktop's size going back, away from it cropping.
+                    new = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:]
+                                            if (r[:2] == desktop) == whole], 30, 1)
+                    if not new:
+                        return "FAIL", f"no rebuild after crop {len(sizes) + 1}"
+                    sizes.append(f"{new[-1][0]}x{new[-1][1]}")
+                    close_sheets(ctx)
+                    time.sleep(5)
+                    if not in_session(ctx):
+                        return "FAIL", f"the session ended after {len(sizes)} changes of size"
+                memory.append(pss_mb())
+        finally:
+            close_sheets(ctx)
+        # A redial shows as a new negotiation, or as a session's record
+        # written before this one ends (review: not every redial negotiates).
+        redials = max(ctx.server.log().count("Client codec caps negotiated") - sessions,
+                      len(session_records(ctx.server.root)) - records)
+        end_session(ctx)
+        record = wait_for(lambda: session_records(ctx.server.root)[records:], 30, 1)
+        tail = record[-1] if record else {}
+        if memory[0] is None or memory[-1] is None:
+            return "TIMEOUT", "the app's memory level could not be read at the start or the end"
+        levels = [m for m in memory if m is not None]
+        grew = levels[-1] - levels[0]
+        peak = max(levels) - levels[0]
+        said = (f"{len(sizes)} changes of size ({', '.join(sorted(set(sizes)))}); redials {redials};"
+                f" memory {' → '.join(f'{m:.1f}' for m in levels)} MB;"
+                f" record ({tail.get('outcome', '?')}): enc p50 {tail.get('enc_p50', '?')} max {tail.get('enc_max', '?')},"
+                f" rtt p50 {tail.get('rtt_p50', '?')} max {tail.get('rtt_max', '?')} ms")
+        if not tail:
+            return "TIMEOUT", said + "; no session record after the session ended"
+        # A leak shows as a climb that keeps on: more than 40 MB over six
+        # rounds (at the end or at any round), where a round's rebuilds are a
+        # few MB and come back.
+        good = tail.get("outcome") in ("completed", "lan_direct", "wan_punched", "wan_relayed")
+        ok = redials == 0 and grew <= 40 and peak <= 40 and good
+        return ("PASS" if ok else "FAIL"), said
+    return session_check(ctx, body)
+
+
+LONG.add("ae2-crops")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
