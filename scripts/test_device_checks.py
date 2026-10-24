@@ -261,6 +261,12 @@ class SessionParts(unittest.TestCase):
             self.assertNotEqual(data[:1 << 20], bytes(1 << 20))
             self.assertEqual(data[1 << 20:], bytes(2 << 20))
 
+    def test_how_a_received_file_is_dated(self):
+        original, arrived = 1_577_968_200, 1_793_000_000
+        self.assertEqual(dc.dated_as(original + 1, original, arrived), "kept")
+        self.assertEqual(dc.dated_as(arrived - 30, original, arrived), "arrival")
+        self.assertEqual(dc.dated_as(original + 86_400, original, arrived), "other")
+
 
 if __name__ == "__main__":
     unittest.main()
