@@ -198,6 +198,16 @@ class SessionParts(unittest.TestCase):
         ])
         self.assertEqual(dc.bitrate_changes(log), 2)
 
+    def test_the_history_sheet_s_rows(self):
+        dump = (
+            '<hierarchy><node text="Clipboard history" clickable="false" bounds="[0,0][9,72]" />'
+            '<node text="Clear" clickable="true" bounds="[0,80][9,140]" />'
+            '<node text="a copy" clickable="true" bounds="[0,200][9,344]" />'
+            '<node text="" clickable="true" bounds="[0,400][9,544]" />'
+            '<node text="another" clickable="true" bounds="[0,600][9,621]" /></hierarchy>'
+        )
+        self.assertEqual(dc.history_rows(dump), [144, 21])
+
     def test_a_logcat_line_s_time(self):
         line = "10-24 10:47:56.619 23512 23723 I PocketdeskRust:  INFO connected"
         self.assertAlmostEqual(dc.log_seconds(line), 10 * 3600 + 47 * 60 + 56.619, places=3)

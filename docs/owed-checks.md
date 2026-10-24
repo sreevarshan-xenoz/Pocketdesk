@@ -81,7 +81,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pairing sheet: progress bar while waiting, PIN field auto-focused, eye toggle honors the reveal-PIN pref, animated check on success then auto-dismiss.
 - Home empty state (no saved computers) shows the desktop glyph + explainer.
 - Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
-- Clipboard sheet: Clear asks for confirmation first (Cancel keeps history); empty state has the clipboard icon.
+- Clipboard sheet: the empty state has the clipboard icon.
 - Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live.
 
 **22. Owed verification register**
@@ -155,7 +155,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **125. The phone app's design pass (E6)**
 
-- The history sheet's entries 48 dp, and no Clear when empty.
+- No Clear when the history is empty.
 - The Health card's Choose opens the folder picker.
 
 **128. Take a photo with the phone (F3)**
