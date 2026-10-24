@@ -82,6 +82,9 @@ fun writeLocalClipboard(ctx: Context, text: String) {
     val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return
     if (localClipboardText(ctx) == text) return
     cm.setPrimaryClip(ClipData.newPlainText("Pocketdesk", text))
+    // AA1: how long, never the text, as the received image's line says it
+    // (a copy from the computer, or one picked from the history).
+    android.util.Log.i("PocketdeskClip", "text put on the clipboard (${text.length} chars)")
 }
 
 /**
