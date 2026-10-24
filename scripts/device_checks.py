@@ -2076,6 +2076,161 @@ def x2_resume(ctx: Ctx) -> tuple[str, str]:
 LONG.add("x2-resume")
 
 
+# ---- a share from the phone cut and continued (AC1) ----
+
+
+def continued_from(log: str, name: str) -> Optional[tuple[int, int]]:
+    """The offset and size the server's log says it continued `name` from
+    (its colour codes stripped), or None when it did not."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    found = re.search(r"Continued " + re.escape(name) + r" from (\d+) of (\d+) bytes", plain)
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+def partial_bytes(folder: pathlib.Path, before: frozenset = frozenset()) -> int:
+    """The largest unfinished file in the server's `partials` folder, of
+    those not named in `before` (AC1 review: a leftover must not pass for
+    this share's)."""
+    if not folder.is_dir():
+        return 0
+    return max((p.stat().st_size for p in folder.glob("*.part") if p.name not in before), default=0)
+
+
+def part_names(folder: pathlib.Path) -> frozenset:
+    return frozenset(p.name for p in folder.glob("*.part")) if folder.is_dir() else frozenset()
+
+
+def forget_partials(folder: pathlib.Path, name: str) -> None:
+    """Remove what the server kept of `name`, its record and its bytes."""
+    if not folder.is_dir():
+        return
+    for record in folder.glob("*.json"):
+        try:
+            kept = json.loads(record.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if kept.get("name") == name:
+            if kept.get("location"):
+                (folder / kept["location"]).unlink(missing_ok=True)
+            record.unlink(missing_ok=True)
+
+
+def cut_share(ctx: Ctx, kept: bool) -> tuple[str, str]:
+    """Share 1 GiB from the phone by the internet road, stop the throwaway at
+    30 % (as a dropped network would), start it again, and let the phone's
+    retry finish it; shared again from the same file when the phone's
+    retries ran out while the server was away. With unfinished files `kept`
+    the computer continues from what it had, else it starts over."""
+    partials = ctx.server.root / "state" / "partials"
+    local = big_file(ctx, GIB)
+    local = local.rename(local.with_name("ac1-" + local.name[3:]))
+    landed = ctx.server.root / "downloads" / local.name
+    size = local.stat().st_size
+    before = part_names(partials)
+    settled = False
+    try:
+        want = md5_of(local)
+        stage_in_fixture(local)
+        adb("logcat", "-c")
+        share_to_throwaway(local.name)
+        if not wait_for(lambda: partial_bytes(partials, before) >= size * 0.3, 600, 1):
+            return "TIMEOUT", "the share never reached 30 % on the computer"
+        cut = partial_bytes(partials, before) * 100 // size
+        ctx.server.stop()
+        # Off the road until it is set up again (as in x2-resume).
+        ctx.on_road = False
+        if landed.exists():
+            # AC1 review: a share that ended before the stop was never cut.
+            return "TIMEOUT", "the share finished before the cut"
+        why = by_road(ctx)
+        if why:
+            return "TIMEOUT", f"after the cut: {why}"
+        ctx.on_road = True
+        how = "the phone's retry"
+        # Wait while the file grows; share again only once it has stood
+        # still for two minutes (the phone's retries, 5, 15 and 45 s apart,
+        # can run out while the road rests), never over a retry still
+        # sending (AC1 review). The same file has the same source id.
+        deadline = time.monotonic() + 1500
+        last, since = -1, time.monotonic()
+        while not (landed.exists() and landed.stat().st_size == size):
+            if time.monotonic() > deadline:
+                return "TIMEOUT", f"cut at {cut} %; not whole in the throwaway's downloads within 25 minutes ({how})"
+            now = partial_bytes(partials, before)
+            if now != last:
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since > 120 and how != "shared again":
+                how = "shared again"
+                share_to_throwaway(local.name)
+                since = time.monotonic()
+            time.sleep(2)
+        settled = True
+        same = md5_of(landed) == want
+        found = continued_from(ctx.server.log(), local.name)
+        said = f"cut at {cut} %; {how}"
+        if kept:
+            if not found:
+                return "FAIL", f"{said} started over (no \"Continued\" in the server's log), MD5 {'matches' if same else 'differs'}"
+            return ("PASS" if same and found[0] > 0 else "FAIL"), (
+                f"{said} continued from {found[0] * 100 // found[1]} %, MD5 {'matches' if same else 'differs'}")
+        if found:
+            return "FAIL", f"{said} continued from {found[0] * 100 // found[1]} % with unfinished files not kept"
+        return ("PASS" if same else "FAIL"), f"{said} started over, MD5 {'matches' if same else 'differs'}"
+    finally:
+        if not settled:
+            # A transfer may still run: stopped first, so nothing lands
+            # after the cleanup (AC1 review).
+            ctx.server.stop()
+            ctx.on_road = False
+        unstage(local.name)
+        local.unlink(missing_ok=True)
+        landed.unlink(missing_ok=True)
+        forget_partials(partials, local.name)
+        # Parts with no record (unfinished files not kept) go too.
+        for name in part_names(partials) - before:
+            (partials / name).unlink(missing_ok=True)
+
+
+def share_resume_ready(ctx: Ctx) -> Optional[str]:
+    why = needs_choosing(ctx)
+    if why:
+        return why
+    if not ctx.phone.prefs("pocketdesk-ui").get("retry_transfers", True):
+        return "turn on Retry failed files in the phone's Settings"
+    return None
+
+
+@check("ac1-share-resume", "§50")
+def ac1_share_resume(ctx: Ctx) -> tuple[str, str]:
+    """A share from the phone cut part way and sent again: the computer
+    continues from what it kept, and the file ends whole (§46, §50)."""
+    why = share_resume_ready(ctx)
+    if why:
+        return "SKIP", why
+    return road_check(ctx, lambda ctx: cut_share(ctx, kept=True))
+
+
+@check("ac1-not-kept", "§50")
+def ac1_not_kept(ctx: Ctx) -> tuple[str, str]:
+    """With `transfer_keep_hours = 0` (unfinished files not kept), a share
+    cut part way starts over when sent again."""
+    why = share_resume_ready(ctx)
+    if why:
+        return "SKIP", why
+    # Read at the server's start: the cut's restart takes it.
+    before = ctx.server.configure({"transfer_keep_hours": "0"})
+    try:
+        return road_check(ctx, lambda ctx: cut_share(ctx, kept=False))
+    finally:
+        ctx.server.restore_config(before)
+        # The running server still keeps nothing: the next road check starts
+        # it again with the config put back.
+        ctx.on_road = False
+
+
+LONG.update({"ac1-share-resume", "ac1-not-kept"})
+
+
 # ---- a session's codec (X3) ----
 
 
