@@ -1219,7 +1219,7 @@ On the A71 against this box, 2026-10-16, with a throwaway chat app that posts a 
 
 Owed:
 - [ ] The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
-- [ ] The switch off: nothing offered, an answer not run.
+- [x] The switch off: nothing offered, an answer not run. On the OPPO with the fixture app's chat notification and a throwaway server, no session: with "Let the computer answer notifications" on, the computer kept it with "Mark as read" and a reply; with it turned off, an answer to that note came back `not_sent` ("answering is off on the phone") and the app ran nothing, and a new note offered nothing (2026-10-24).
 - [ ] From away from home (the internet link).
 - [ ] An action that opens an activity on Android 14+ (background launches may be blocked). (where: by hand)
 
