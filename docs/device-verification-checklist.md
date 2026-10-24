@@ -815,7 +815,7 @@ Built on `feat/image-clipboard`. On the Windows box, a 320x200 image put on the 
 - [x] The Windows clipboard holds a PNG as both "PNG" and `CF_DIB`, and reads it back byte for byte (live ignored test).
 - [ ] Desktop → phone: paste it into a chat app on the phone. (The A71 has no app that pastes images.) (where: by hand)
 - [ ] Phone → desktop: copy a photo on the phone and paste it into Paint. (The A71 has no app that copies an image: no browser.) (where: by hand)
-- [ ] With the phone's Clipboard permission off, neither direction moves.
+- [ ] With the phone's Clipboard permission off, neither direction moves. (2026-10-25, the computer-to-phone half: the runner's `ad1-image-copy` with the permission off on a throwaway server: the image not told to the OPPO, not fetched. The phone-to-computer half is owed: the OPPO cannot copy an image by script.)
 - [ ] A 4K screenshot (over 10 MB): it moves, and the phone's memory holds.
 - [ ] The Linux host (`wl-copy` / `wl-paste` with `image/png`).
 
@@ -1046,7 +1046,7 @@ Owed:
 - [x] A refusal's reason: with Files turned off after browsing, "The computer refused the folder: Files is turned off for this phone on t…", cut at the toast's two lines (2026-10-19, A71, throwaway server, by script).
 - [ ] The toast "Asked the computer for …" (the folder arrived, the toast was not caught on screen), and a third folder while two are on the way.
 - [ ] Closing the sheet before the answer, and the toast still showing. (where: by hand) (a toast uiautomator cannot read.)
-- [ ] A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
+- [x] A folder of thousands of files: the answer arrives, and other queries keep working while the offers come. (2026-10-25, the OPPO against a throwaway server whose browser shows its own folder, the runner's `ad2-big-folder`: 2000 files asked for whole, another folder listed 26 s later with 135 of them in, all 2000 on the phone by name in 422 s.)
 - [ ] The Linux host.
 
 ## 53. The local API (T7)
@@ -2257,7 +2257,7 @@ Built and checked 2026-10-20 on the OPPO against the throwaway server.
 Built and checked 2026-10-20 on the OPPO against a throwaway server built from the branch.
 - [x] A file dated June here, sent to the phone: dated June there, by `stat` and in MediaStore.
 - [x] The same file shared from the phone: dated June here.
-- [ ] A file downloaded from the remote file browser, and a folder each way.
+- [ ] A file downloaded from the remote file browser, and a folder each way. (2026-10-25, to the phone: the runner's `ad3-dates`, a file and a folder's file dated 2020 kept their dates on the OPPO. A folder to the computer is owed: its picker is by hand.)
 - [ ] A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so. (where: by hand) (the phone's folder picker.)
 - [x] "Keep files' dates" on the computer: a file dated 2020 sent to the phone kept 2020; with `keep_file_dates = false` it was dated as it arrived. (Seen 2026-10-24 on the OPPO against a throwaway server (S4).)
 - [x] "Keep files' dates" off on the phone: a share to the computer dated as it arrives. (2026-10-24, the runner's `ac4-dates`, the fixture's file dated 2020: with the phone's switch on, kept with the computer's on and dated as it arrived with the computer's off; with the phone's off, dated as it arrived either way.)
@@ -2439,8 +2439,8 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 ## 168. Image copies without a session (M3)
 
 Built 2026-10-21; tested through units, nothing on a device yet.
-- [ ] A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app.
-- [ ] Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then.
+- [x] A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app. (2026-10-25, the runner's `ad1-image-copy`, by the internet road: told and fetched, three runs. By adb reverse the server rightly refused to dial the phone back at 127.0.0.1.)
+- [ ] Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then. (2026-10-25, the images switch off: the image told to the OPPO and not fetched. Mobile data needs a SIM.)
 - [ ] A screenshot copied on Windows (Win+Shift+S) with a phone linked: it goes once, even while the Snipping Tool holds the clipboard. (where: owner) (keys pressed on this computer.)
 - [ ] A copy marked private on Windows (a password manager): neither pushed nor answered to a session's poll. (where: owner)
 - [ ] The tile with an image copied on the phone: the seam file holds it; away from home with no link, it opens one and sends.

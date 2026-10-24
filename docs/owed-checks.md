@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-888 open items.
+886 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 58 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 56 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -95,7 +95,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **38. Image clipboard (N4)**
 
-- With the phone's Clipboard permission off, neither direction moves.
+- With the phone's Clipboard permission off, neither direction moves. (2026-10-25, the computer-to-phone half: the runner's `ad1-image-copy` with the permission off on a throwaway server: the image not told to the OPPO, not fetched. The phone-to-computer half is owed: the OPPO cannot copy an image by script.)
 
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
@@ -105,10 +105,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A file from the remote browser broken and continued.
 - "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
-
-**52. Download a folder from the remote browser**
-
-- A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
 
 **74. The phone's battery without a session**
 
@@ -162,7 +158,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **149. Files keep their dates (K1)**
 
-- A file downloaded from the remote file browser, and a folder each way.
+- A file downloaded from the remote file browser, and a folder each way. (2026-10-25, to the phone: the runner's `ad3-dates`, a file and a folder's file dated 2020 kept their dates on the OPPO. A folder to the computer is owed: its picker is by hand.)
 
 **162. The phone's state on the computer (L9)**
 
@@ -177,10 +173,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A phone paired as mine, paired again as someone else's: what was off stays off.
 - `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
-
-**168. Image copies without a session (M3)**
-
-- A PNG in `POCKETDESK_CLIPBOARD_IMAGE_FILE` on a throwaway server, its "Images to phones' clipboards" on; the OPPO with "Computer's clipboard in the background" and "Computer's copied images in the background" on, on Wi-Fi: the image reaches the phone's clipboard, read back by its SHA-256 through a throwaway app.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -599,7 +591,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **168. Image copies without a session (M3)**
 
-- Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then.
+- Either switch off, or the phone on mobile data: nothing fetched; back on Wi-Fi, it is fetched then. (2026-10-25, the images switch off: the image told to the OPPO and not fetched. Mobile data needs a SIM.)
 
 **173. tel: links and Call back (M8)**
 
