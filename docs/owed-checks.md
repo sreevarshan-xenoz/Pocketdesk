@@ -6,7 +6,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 73 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 72 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 361 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 362 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -201,7 +201,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **167. Both sides' switches, part 2 (M2)**
 
-- The OPPO paired to a throwaway server: "What this computer allows" matches the server's Devices page, with one permission and one Setting turned off.
 - A phone paired as mine, paired again as someone else's: what was off stays off.
 - `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
 
@@ -2140,6 +2139,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **167. Both sides' switches, part 2 (M2)**
 
+- The same beside the desktop app's Devices page, by eye. (where: by hand)
 - Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused. (where: by hand) (the Pair page.)
 - Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions. (where: by hand) (the Pair page.)
 

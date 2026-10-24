@@ -2406,7 +2406,8 @@ Built 2026-10-21. Checked on the OPPO by adb: the service started from the backg
 ## 167. Both sides' switches, part 2 (M2)
 
 Built 2026-10-21; tested through units and the desktop harness, nothing on a device yet.
-- [ ] The OPPO paired to a throwaway server: "What this computer allows" matches the server's Devices page, with one permission and one Setting turned off.
+- [x] The OPPO paired to a throwaway server, with Links off for this phone in its trust store and "Clipboard to phones" off in its Settings: "What this computer allows" said "The computer: off for this phone" on the Links row and "off in its Settings" on the clipboard's (2026-10-24).
+- [ ] The same beside the desktop app's Devices page, by eye. (where: by hand)
 - [ ] The sheet for a computer that is not the phone's own: every row "with its own computer only", the notifications too unless picked under "Other computers of mine". (where: second computer)
 - [ ] A computer from before M2: the sheet says it cannot tell. (where: other hardware) (a computer on a release from before M2.)
 - [ ] Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused. (where: by hand) (the Pair page.)
