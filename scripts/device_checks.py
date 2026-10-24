@@ -3893,6 +3893,9 @@ def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
     had = json.loads(path.read_text(encoding="utf-8")).get("permissions", {}).get(ctx.device, {}).get("away_lock")
     before = None
     switched = False
+    if os.environ.get("ANDROID_SERIAL", "").count(":"):
+        # Restarting adb's server would lose a phone on wireless adb (review).
+        return "SKIP", "the phone is on wireless adb: adb's server cannot be restarted under it"
     try:
         # A run starts at home; only a check before this one moved it to the
         # road (a phone that found home unreachable may stay on the road:
@@ -3905,11 +3908,15 @@ def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
         # switch is never turned on: nothing may lock this computer.
         if f"POCKETDESK_LOCK_FILE is set: {lock}" not in re.sub(chr(27) + r"\[[0-9;]*m", "", ctx.server.log()):
             return "SKIP", "the throwaway did not say its lock seam was set: the away lock stays off"
+        if lock.exists():
+            # A run cut short may have left it read-only (review).
+            os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
         lock.unlink(missing_ok=True)
         lock.write_text("", encoding="utf-8")
         os.chmod(lock, stat.S_IREAD)
         before = ctx.server.configure({"away_lock_minutes": "2", "events": "true"})
         count = ctx.server.event_count()
+        failures = lock_failures(ctx.server.log(), ctx.device)
         set_permission_live(ctx, "away_lock", True)
         switched = True
         time.sleep(20)
@@ -3920,18 +3927,19 @@ def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
         adb("reverse", "--remove", f"tcp:{ctx.phone_port}")
         run(["adb", "kill-server"])
         run(["adb", "start-server"], timeout=60)
-        ctx.on_road = True
+        run(["adb", "wait-for-device"], timeout=60)
         if not wait_for(lambda: iroh_loops(ctx.server.log()) > loops, 240, 3):
             return "TIMEOUT", "the phone did not come back by the internet road within 240 s"
+        ctx.on_road = True
         gone = time.monotonic()
-        first = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= 1, 8 * 60, 5)
+        first = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= failures + 1, 8 * 60, 5)
         if not first:
             return "TIMEOUT", "no lock tried within 8 minutes of the phone leaving (is this computer in use?)"
         tried = (time.monotonic() - gone) / 60
         failed_event = wait_for(lambda: any(e.get("event") == "away_locked" and e.get("failed")
                                             for e in ctx.server.events_after_count(count)), 30, 2)
         again_at = time.monotonic()
-        second = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= 2, 180, 5)
+        second = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= failures + 2, 180, 5)
         again = time.monotonic() - again_at
         # Writable again: the next try writes its line.
         os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
@@ -3943,13 +3951,20 @@ def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
         ok = failed_event and second and 45 <= again <= 120 and written
         return ("PASS" if ok else "FAIL"), said
     finally:
+        # Each step whatever the one before did (review); the switch first,
+        # and never back to on.
+        steps = []
         if switched:
-            set_permission_live(ctx, "away_lock", had)
+            steps.append(lambda: set_permission_live(ctx, "away_lock", False if had is False else None))
         if before is not None:
-            ctx.server.restore_config(before)
-        if lock.exists():
-            os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
-            lock.unlink(missing_ok=True)
+            steps.append(lambda: ctx.server.restore_config(before))
+        steps.append(lambda: lock.exists() and os.chmod(lock, stat.S_IREAD | stat.S_IWRITE))
+        steps.append(lambda: lock.unlink(missing_ok=True))
+        for step in steps:
+            try:
+                step()
+            except (OSError, ValueError) as error:
+                print(f"note: an AG1 cleanup step failed: {error}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
