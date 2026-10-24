@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-880 open items.
+879 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 50 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 48 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 363 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 364 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -71,13 +71,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)**
 
-- Theme follows the system light/dark; toggling the mode in Settings restyles every screen immediately (no restart), and the window background matches on cold start (no white flash in dark mode or vice-versa). *Partly verified: the Dark radio restyles Settings immediately; cold-start window colour not yet checked.*
+- Theme follows the system light/dark; toggling the mode in Settings restyles every screen immediately (no restart), and the window background matches on cold start (no white flash in dark mode or vice-versa). *Partly verified: the Dark radio restyles Settings immediately; cold-start window colour not yet checked.* *2026-10-25: the system's dark mode turned on and off restyled Home at once, the app's process running throughout (the runner's `ag3-theme`, Home's background 251 light, 20 dark). The cold-start window colour is still to see.*
 - Edge-to-edge on all screens: content draws behind the status/nav bars and no control is unreachable under them.
 - Pairing sheet: progress bar while waiting, PIN field auto-focused, eye toggle honors the reveal-PIN pref, animated check on success then auto-dismiss.
 - Home empty state (no saved computers) shows the desktop glyph + explainer.
 - Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
 - Clipboard sheet: the empty state has the clipboard icon.
-- Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live.
 
 **22. Owed verification register**
 
@@ -116,10 +115,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The rest of "here": what the S cycle (S1 to S5, 2026-10-23 and 24) did not reach, mostly long transfer and battery runs.
 
-**118. Lock when the phone leaves (D9)**
-
-- A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
-
 **120. Answers that say how they went (E1)**
 
 - A desktop notification for such a failure.
@@ -127,7 +122,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **125. The phone app's design pass (E6)**
 
 - No Clear when the history is empty.
-- The Health card's Choose opens the folder picker.
+- The Health card's Choose opens the folder picker. (2026-10-25: it shows only when a chosen downloads folder has lost its grant; the OPPO has none chosen, and choosing one is the folder picker, by hand. The card's Fix for Pocketdesk control did open Android's Accessibility settings.)
 
 **128. Take a photo with the phone (F3)**
 
@@ -1514,6 +1509,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Recents thumbnail blank during blackout. (where: by hand)
 - Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay). (where: by hand)
+
+**21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)**
+
+- Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live. (2026-10-25: not readable on the OPPO. Android's vibrator record showed the session's menu tap as Pocketdesk's CLICK at strength 0 and nothing for the mode toggle or Exit: the phone is on silent, which mutes touch vibrations. By hand, with the ringer on.)
 
 **24. Desktop app and QR pairing**
 

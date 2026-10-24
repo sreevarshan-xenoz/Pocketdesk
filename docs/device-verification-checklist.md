@@ -444,7 +444,7 @@ any touch on the stream summons faded chrome (`PointerEventPass.Initial`, so the
 tap still reaches the desktop). The app also gained an adaptive launcher icon.
 Items below are re-scored against that build.
 
-- [ ] Theme follows the system light/dark; toggling the mode in Settings restyles every screen immediately (no restart), and the window background matches on cold start (no white flash in dark mode or vice-versa). *Partly verified: the Dark radio restyles Settings immediately; cold-start window colour not yet checked.*
+- [ ] Theme follows the system light/dark; toggling the mode in Settings restyles every screen immediately (no restart), and the window background matches on cold start (no white flash in dark mode or vice-versa). *Partly verified: the Dark radio restyles Settings immediately; cold-start window colour not yet checked.* *2026-10-25: the system's dark mode turned on and off restyled Home at once, the app's process running throughout (the runner's `ag3-theme`, Home's background 251 light, 20 dark). The cold-start window colour is still to see.*
 - [ ] Material You: on Android 12+ the palette follows the wallpaper when "Dynamic color" is on; turning it off falls back to the brand palette.
 - [ ] Edge-to-edge on all screens: content draws behind the status/nav bars and no control is unreachable under them.
 - [x] Session goes immersive: system bars hidden on entry, transient reveal on swipe, restored on Exit/PiP/blackout. After a reveal, video keeps rendering and taps stay pixel-exact (decoder-stability spot check — if OPPO shows black bars, see plan C2 fallback). *Bars stay hidden through a full session and the decoder is stable across reveal + exit; the black-bars fallback never had to be used.*
@@ -458,7 +458,7 @@ Items below are re-scored against that build.
 - [ ] Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
 - [x] Clipboard sheet: Clear asks for confirmation first (Cancel keeps history): its dialog asked, and after Cancel the 7 rows stayed (`y3-history-sheet`, the OPPO, 2026-10-24).
 - [ ] Clipboard sheet: the empty state has the clipboard icon.
-- [ ] Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live.
+- [ ] Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live. (2026-10-25: not readable on the OPPO. Android's vibrator record showed the session's menu tap as Pocketdesk's CLICK at strength 0 and nothing for the mode toggle or Exit: the phone is on silent, which mutes touch vibrations. By hand, with the ringer on.)
 - [x] Session notification: real Pocketdesk status-bar icon (not the stock eye), Disconnect + Lock-desktop actions carry icons, channel shows its description in system settings. *`dumpsys notification` shows the custom `ic_stat_pocketdesk` resource and both actions; the shade renders the monitor glyph plus power/lock action icons, and the session channel carries its description.*
 - [x] Shortcut bar: System | Workspaces groups with divider and localized captions; chips are ≥32 dp touch targets; key caps stay literal in es/ta. *Now a dark floating pill, legible over video; scrolls horizontally past PrtSc.*
 - [x] es/ta: every Phase-C string shipped (locales in sync at 161 each).
@@ -1938,7 +1938,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [x] The server takes the switch and the time without a restart: the switch turned off in the trust store while running, no line; the time set from 5 to 1 minute while running, a line at 2 minutes (the floor: the time is held to 2..60, as Settings offers) (the OPPO, a throwaway server with the seam, 2026-10-24: home through `adb reverse`, away by the internet road alone).
 - [ ] The same set from the desktop app's Devices page and Settings. (where: by hand)
 - [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
-- [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
+- [x] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`. (2026-10-25, the OPPO against a throwaway server whose lock is its own file, the runner's `ag1-failed-lock`, this computer never locked: the file read-only, the phone gone (home, then the internet road alone), the lock tried 1.3 min later and failed, `away_locked` with `failed`, tried again 60 s later; the file writable again, a line written. Twice.)
 - [x] V1: a phone linked only by the internet road counts as gone: the OPPO linked through `adb reverse`, then (the reverse removed, the app restarted) only by the internet road; a line 121 s later, at the set 2 minutes (throwaway server with the seam, 2026-10-24).
 - [ ] V1: a phone that walks off on mobile data, on a computer where locking is allowed: locked at the set time. (where: by hand)
 - [x] A failed lock (the seam's path a folder): `away_locked` with `failed`, and tried again 65 s later, `failed` again (the OPPO, a throwaway server with the seam, 2026-10-24: home through `adb reverse`, away by the internet road alone).
@@ -2011,7 +2011,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [x] The history sheet from Home says a tap sends ("Tap one to send it to Test Desk") (2026-10-19, A71, throwaway server, by script).
 - [x] The history sheet's entries 48 dp: 7 rows, each 144 px on the OPPO's 3x screen (the runner's `y3-history-sheet`, 2026-10-24).
 - [ ] No Clear when the history is empty.
-- [ ] The Health card's Choose opens the folder picker.
+- [ ] The Health card's Choose opens the folder picker. (2026-10-25: it shows only when a chosen downloads folder has lost its grant; the OPPO has none chosen, and choosing one is the folder picker, by hand. The card's Fix for Pocketdesk control did open Android's Accessibility settings.)
 - [ ] TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
 - [ ] Spanish and Tamil on the changed screens. (where: by hand)
 
