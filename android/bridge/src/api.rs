@@ -2281,6 +2281,8 @@ pub async fn connect_streaming(
         }
         if let Some(handle) = handle_guard.take() {
             teardown_streaming_handle(handle).await;
+            // V7 review: the session it replaces says nothing of this one.
+            clear_hud_window();
         }
         crate::CONNECT_GENERATION.begin()
     };
@@ -2513,6 +2515,8 @@ pub async fn connect_streaming_wan(
         }
         if let Some(handle) = handle_guard.take() {
             teardown_streaming_handle(handle).await;
+            // V7 review: the session it replaces says nothing of this one.
+            clear_hud_window();
         }
         crate::CONNECT_GENERATION.begin()
     };
@@ -2668,8 +2672,7 @@ async fn install_streaming(
     RENDER_SAMPLES.clear();
     // Same for the HUD's window: a rate or RTT carried over from the computer
     // this session replaced would be quoted as if it were measured here.
-    RTT_HISTORY.lock().unwrap().clear();
-    RATE_SNAPSHOTS.lock().unwrap().clear();
+    clear_hud_window();
     QUIET.lock().unwrap().reset();
     *STREAM_CLOSED_REASON.lock().unwrap() = None;
 
@@ -3151,6 +3154,25 @@ mod laser_tests {
 }
 
 #[cfg(test)]
+mod hud_window_tests {
+    /// V7: a stopped session leaves the HUD no link figure. The next connect
+    /// takes seconds (the home try, then the internet road), and the HUD
+    /// quoted the last session's "rtt median of 8" all that while (the OPPO).
+    #[tokio::test]
+    async fn a_stop_leaves_no_rtt_or_rate_for_the_next_session() {
+        let _serial = super::receive_tests::SESSION_STATICS.lock().await;
+        crate::session::update_streaming_rtt(12_000);
+        crate::session::update_streaming_rtt(14_000);
+        assert_eq!(super::rtt_samples(), 2);
+        let _ = super::get_streaming_stats();
+        super::stop_streaming().await.unwrap();
+        assert_eq!(super::rtt_samples(), 0);
+        assert_eq!(super::get_streaming_rtt(), 0);
+        assert!(crate::RATE_SNAPSHOTS.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
 mod cast_state_tests {
     use super::{cast_sound_taken, sound_grants, state_name};
 
@@ -3284,7 +3306,17 @@ pub async fn stop_streaming() -> Result<(), String> {
     *STREAM_CLOSED_REASON.lock().unwrap() = None;
     // No session, no video counted: the next one installs its own.
     *crate::VIDEO_BYTES.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    // V7: nor a link figure. The next connect takes seconds (the home try,
+    // then the internet road), and the HUD quoted this session's RTT median
+    // all that while.
+    clear_hud_window();
     Ok(())
+}
+
+/// Forget the HUD's RTT polls and rate snapshots: they describe one session.
+fn clear_hud_window() {
+    RTT_HISTORY.lock().unwrap().clear();
+    RATE_SNAPSHOTS.lock().unwrap().clear();
 }
 
 /// Why the live session's connection closed, or `None` while it is open (or
