@@ -1497,6 +1497,12 @@ def start_session(ctx: Ctx) -> Optional[float]:
     the tap, in seconds of the day, or None when there is no card."""
     ctx.phone.wake()
     adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    # A session that dropped when its server stopped stays on its card
+    # ("The connection to the computer dropped…"): left by its Exit first.
+    if wait_for(lambda: any(t.startswith("The connection to the computer dropped")
+                            for t, _, _ in dump_nodes(ctx.phone.dump())), 4, 2):
+        tap_text("Exit", ctx.phone.dump())
+        time.sleep(2)
     spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 20, 2)
     if not spot:
         return None
