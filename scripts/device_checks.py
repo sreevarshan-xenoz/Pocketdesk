@@ -2265,6 +2265,93 @@ def y1_renamed(ctx: Ctx) -> tuple[str, str]:
     finally:
         adb("shell", device_command("rm", "-rf", where), timeout=60)
         (ctx.server.root / "downloads" / "f1.txt").unlink(missing_ok=True)
+# ---- the phone's sheets from UI dumps (Y3) ----
+
+
+def dump_rows(dump: str) -> list[tuple[str, str, int, int]]:
+    """Each view as `(text, content-desc, clickable 0/1, height in px)`."""
+    out = []
+    for node in re.findall(r"<node [^>]*>", dump):
+        text = re.search(r' text="([^"]*)"', node)
+        desc = re.search(r'content-desc="([^"]*)"', node)
+        box = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if box:
+            _, y1, _, y2 = map(int, box.groups())
+            out.append((html.unescape(text.group(1)) if text else "", html.unescape(desc.group(1)) if desc else "",
+                        int('clickable="true"' in node), y2 - y1))
+    return out
+
+
+def tap_text(label: str, dump: str) -> bool:
+    """Tap the first view whose text or description is `label`."""
+    spot = next(((x, y) for text, x, y in dump_nodes(dump) if text == label), None)
+    if spot is None:
+        found = re.search(r'<node [^>]*content-desc="' + re.escape(label) + r'"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', dump)
+        if found:
+            x1, y1, x2, y2 = map(int, found.groups())
+            spot = ((x1 + x2) // 2, (y1 + y2) // 2)
+    if spot is None:
+        return False
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    return True
+
+
+def density() -> float:
+    found = re.search(r"(\d+)", adb("shell", "wm", "density").split("Override")[-1])
+    return int(found.group(1)) / 160 if found else 3.0
+
+
+def history_rows(dump: str) -> list[int]:
+    """The heights of the clipboard history sheet's rows: the clickable
+    views that carry a copy's text (their text is not read here)."""
+    controls = {"Clear", "Cancel", "Clipboard history"}
+    return [h for text, _, click, h in dump_rows(dump) if click and text and text not in controls]
+
+
+@check("y3-history-sheet", "§125")
+def y3_history_sheet(ctx: Ctx) -> tuple[str, str]:
+    """The clipboard history sheet from a computer's card: rows 48 dp tall,
+    Clear asking first (Cancel keeps every row), and with nothing kept, its
+    words and no Clear. Rows are counted, never read; Clear is never
+    confirmed."""
+    ctx.phone.wake()
+    adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    if not wait_for(lambda: tap_text("More for Test Desk", ctx.phone.dump()), 20, 2):
+        return "SKIP", "no Test Desk card on Home"
+    time.sleep(1)
+    if not tap_text("Send from clipboard history", ctx.phone.dump()):
+        # The card's menu closed again for the next check (Y3 review).
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        return "FAIL", "no Send from clipboard history in the card's menu"
+    time.sleep(1.5)
+    sheet = ctx.phone.dump()
+    try:
+        rows = history_rows(sheet)
+        has_clear = any(r[0] == "Clear" for r in dump_rows(sheet))
+        empty = any(r[0].startswith("Nothing copied yet") for r in dump_rows(sheet))
+        if empty:
+            return ("PASS" if not has_clear else "FAIL"), f"empty: its words, {'a Clear' if has_clear else 'no Clear'}"
+        if not rows:
+            return "FAIL", "neither rows nor the empty words in the sheet"
+        # The last row may be cut by the screen's edge: not its height.
+        full = rows[:-1] if len(rows) > 1 and rows[-1] < max(rows) else rows
+        least = min(full) / density()
+        if not tap_text("Clear", sheet):
+            return "FAIL", f"{len(rows)} rows and no Clear"
+        time.sleep(1)
+        dialog = ctx.phone.dump()
+        asked = "This deletes every saved clipboard entry from this phone." in dialog
+        tap_text("Cancel", dialog)
+        time.sleep(1)
+        after = history_rows(ctx.phone.dump())
+        said = f"{len(rows)} rows, at least {least:.0f} dp; Clear {'asked' if asked else 'did not ask'}; after Cancel {len(after)} rows"
+        return ("PASS" if least >= 48 and asked and len(after) == len(rows) else "FAIL"), said
+    finally:
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        # A dialog left open took that Back: the sheet goes too (Y3 review).
+        time.sleep(1)
+        if any(text == "Clipboard history" for text, _, _ in dump_nodes(ctx.phone.dump())):
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
 
 
 # ---- main ----
