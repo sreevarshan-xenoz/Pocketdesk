@@ -127,9 +127,12 @@ fn browse_home() -> Option<PathBuf> {
 }
 
 fn home_from(seam: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
-    seam.map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or(home)
+    // Set but not absolute: none, so a throwaway server meant to show its
+    // own folder never shows the owner's (review).
+    match seam {
+        Some(path) => Some(PathBuf::from(path)).filter(|path| path.is_absolute()),
+        None => home,
+    }
 }
 
 /// The file a phone may download: a regular file inside home, as its real
@@ -371,14 +374,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_test_seam_stands_in_for_home_only_as_an_absolute_path() {
+    fn a_test_seam_stands_in_for_home_and_fails_closed() {
         let real = Some(PathBuf::from("/home/owner"));
         let seam = std::env::temp_dir().join("pd-browse-home");
         assert_eq!(
             home_from(Some(seam.clone().into_os_string()), real.clone()),
             Some(seam)
         );
-        assert_eq!(home_from(Some("relative".into()), real.clone()), real);
+        // Set but unusable: no home at all, never the owner's (review).
+        assert_eq!(home_from(Some("relative".into()), real.clone()), None);
+        assert_eq!(home_from(Some("".into()), real.clone()), None);
         assert_eq!(home_from(None, real.clone()), real);
     }
 

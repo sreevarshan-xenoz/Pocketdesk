@@ -119,6 +119,9 @@ pub async fn run(config: Config) -> Result<()> {
             let path = std::path::Path::new(&value);
             if path.is_absolute() {
                 tracing::warn!("{seam} is set: {} stands in (a test seam)", path.display());
+            } else if seam == "POCKETDESK_BROWSE_HOME" {
+                // Fails closed (AD2 review): never the owner's home instead.
+                tracing::warn!("{seam} is not an absolute path: the file browser shows no folder");
             } else {
                 tracing::warn!("{seam} is not an absolute path; ignored");
             }
