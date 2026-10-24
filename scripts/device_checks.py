@@ -3065,9 +3065,31 @@ def close_sheets(ctx: Ctx) -> None:
         time.sleep(1)
 
 
+def phone_names(folder: str) -> set[str]:
+    """The files in `folder` of the phone's Pocketdesk downloads (a pending
+    one, hidden, is not listed)."""
+    return set(adb("shell", device_command("ls", f"{PHONE_DOWNLOADS}/{folder}"), timeout=60).split()) - {"ls:"}
+
+
 def phone_count(folder: str) -> int:
     out = adb("shell", f"ls {PHONE_DOWNLOADS}/{folder} 2>/dev/null | wc -l", timeout=60).strip()
     return int(out) if out.isdigit() else 0
+
+
+def settle_then_drop(ctx: Ctx, folder: str, settled: bool) -> None:
+    """Remove `folder` from the phone once nothing more arrives in it: after
+    a step that timed out, the server is stopped first and the phone's
+    queued fetches allowed to end (AD2 review), or it would make it again."""
+    if not settled:
+        ctx.server.stop()
+        ctx.on_road = False
+    last, since, end = -1, time.monotonic(), time.monotonic() + 90
+    while time.monotonic() < end and time.monotonic() - since < 15:
+        now = phone_count(folder)
+        if now != last:
+            last, since = now, time.monotonic()
+        time.sleep(3)
+    drop_folder_from_phone(folder)
 
 
 def drop_folder_from_phone(folder: str) -> None:
@@ -3084,6 +3106,7 @@ def ad2_big_folder(ctx: Ctx) -> tuple[str, str]:
     tag = secrets.token_hex(3)
     home = ctx.server.root / "home"
     many, other = f"ad2-many-{tag}", f"ad2-other-{tag}"
+    settled = False
 
     def body(ctx: Ctx) -> tuple[str, str]:
         try:
@@ -3110,14 +3133,26 @@ def ad2_big_folder(ctx: Ctx) -> tuple[str, str]:
         if not enter(ctx, other) or not wait_for(lambda: shows(ctx, "x.txt"), 30, 1):
             return "FAIL", "another folder did not list while the big one came"
         listed = time.monotonic() - asked
+        # Overlapped only if the folder was still arriving (review).
+        meanwhile = phone_count(many)
         if not wait_for(lambda: phone_count(many) > 0, 120, 3):
             return "TIMEOUT", "no file of the folder on the phone within 120 s"
         if not wait_for(lambda: phone_count(many) >= AD2_FILES, 2400, 10):
             return "TIMEOUT", f"{phone_count(many)} of {AD2_FILES} files on the phone after 40 minutes"
         took = time.monotonic() - asked
-        count = phone_count(many)
-        return ("PASS" if count == AD2_FILES else "FAIL"), (
-            f"{count} of {AD2_FILES} files on the phone in {took:.0f} s; another folder listed {listed:.0f} s after the ask")
+        nonlocal settled
+        settled = True
+        # Each file by its name (review): a retry's "f0001 (1).txt" must not
+        # stand in for a file that never came.
+        want = {f"f{i:04}.txt" for i in range(AD2_FILES)}
+        got = phone_names(many)
+        said = (f"{len(got & want)} of {AD2_FILES} files on the phone in {took:.0f} s;"
+                f" another folder listed {listed:.0f} s after the ask, with {meanwhile} of them in")
+        if got != want:
+            return "FAIL", said + f"; missing {len(want - got)}, extra {len(got - want)}"
+        if meanwhile >= AD2_FILES:
+            return "SKIP", said + ": the folder had all come, nothing overlapped"
+        return "PASS", said
 
     try:
         (home / many).mkdir(parents=True)
@@ -3127,9 +3162,9 @@ def ad2_big_folder(ctx: Ctx) -> tuple[str, str]:
         (home / other / "x.txt").write_text("x" + NL, encoding="utf-8")
         return session_check(ctx, body)
     finally:
-        drop_folder_from_phone(many)
         shutil.rmtree(home / many, ignore_errors=True)
         shutil.rmtree(home / other, ignore_errors=True)
+        settle_then_drop(ctx, many, settled)
 
 
 LONG.add("ad2-big-folder")
@@ -3145,6 +3180,7 @@ def ad3_dates(ctx: Ctx) -> tuple[str, str]:
     home = ctx.server.root / "home"
     top, fold, name = f"ad3-{tag}", f"ad3-fold-{tag}", f"ad3-{tag}.txt"
     past = 1577968200  # 2020-01-02 12:30 UTC
+    settled = False
 
     def phone_date(path: str) -> Optional[int]:
         out = adb("shell", device_command("stat", "-c", "%Y", f"{PHONE_DOWNLOADS}/{path}")).strip()
@@ -3168,10 +3204,22 @@ def ad3_dates(ctx: Ctx) -> tuple[str, str]:
             return "TIMEOUT", f"the browser did not open {top}"
         if not download_here(ctx, name):
             return "TIMEOUT", f"no Download for {name}"
-        file_date = wait_for(lambda: phone_date(name), 60, 2)
+        # The phone publishes a file, then dates it (review): its date read
+        # until it is the one sent, the last read kept for a FAIL.
+        seen = {}
+
+        def dated(path: str) -> bool:
+            seen[path] = phone_date(path)
+            return seen[path] is not None and abs(seen[path] - past) <= 2
+
+        wait_for(lambda: dated(name), 75, 2)
+        file_date = seen.get(name)
         if not enter(ctx, fold) or not download_here(ctx, "Download this folder"):
             return "TIMEOUT", f"no Download this folder in {fold}"
-        folder_date = wait_for(lambda: phone_date(f"{fold}/inner.txt"), 90, 3)
+        wait_for(lambda: dated(f"{fold}/inner.txt"), 105, 3)
+        folder_date = seen.get(f"{fold}/inner.txt")
+        nonlocal settled
+        settled = True
         said = []
         for what, date in (("the file", file_date), ("the folder's file", folder_date)):
             if date is None:
@@ -3188,9 +3236,9 @@ def ad3_dates(ctx: Ctx) -> tuple[str, str]:
             os.utime(path, (past, past))
         return session_check(ctx, body)
     finally:
-        drop_from_phone(name)
-        drop_folder_from_phone(fold)
         shutil.rmtree(home / top, ignore_errors=True)
+        settle_then_drop(ctx, fold, settled)
+        drop_from_phone(name)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
