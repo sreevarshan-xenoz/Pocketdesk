@@ -119,10 +119,23 @@ fn parent_of(home: &Path, shown: &Path) -> Option<String> {
         .map(|p| p.display().to_string())
 }
 
+/// The folder the browser shows as home: this computer's, or the test seam
+/// `POCKETDESK_BROWSE_HOME` (an absolute path; AD2), so a throwaway server
+/// beside the owner's never lists the owner's files to a test phone.
+fn browse_home() -> Option<PathBuf> {
+    home_from(std::env::var_os("POCKETDESK_BROWSE_HOME"), dirs::home_dir())
+}
+
+fn home_from(seam: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    seam.map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or(home)
+}
+
 /// The file a phone may download: a regular file inside home, as its real
 /// path and its size.
 pub(crate) fn resolve_file(requested: &str) -> std::result::Result<(PathBuf, u64), String> {
-    let home = dirs::home_dir().ok_or("this computer has no home folder")?;
+    let home = browse_home().ok_or("this computer has no home folder")?;
     resolve_file_in(&home, requested)
 }
 
@@ -143,7 +156,7 @@ fn resolve_file_in(home: &Path, requested: &str) -> std::result::Result<(PathBuf
 /// the browser's own rules. Home itself is refused: it holds too much to
 /// mean.
 pub(crate) fn resolve_folder(requested: &str) -> std::result::Result<(PathBuf, PathBuf), String> {
-    let home = dirs::home_dir().ok_or("this computer has no home folder")?;
+    let home = browse_home().ok_or("this computer has no home folder")?;
     resolve_folder_in(&home, requested)
 }
 
@@ -337,7 +350,7 @@ impl Plugin for FileBrowsePlugin {
                 .get("path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let body = match dirs::home_dir() {
+            let body = match browse_home() {
                 Some(home) => browse_reply(&home, requested),
                 None => json!({
                     "error": "This computer has no home folder.",
@@ -356,6 +369,18 @@ impl Plugin for FileBrowsePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_seam_stands_in_for_home_only_as_an_absolute_path() {
+        let real = Some(PathBuf::from("/home/owner"));
+        let seam = std::env::temp_dir().join("pd-browse-home");
+        assert_eq!(
+            home_from(Some(seam.clone().into_os_string()), real.clone()),
+            Some(seam)
+        );
+        assert_eq!(home_from(Some("relative".into()), real.clone()), real);
+        assert_eq!(home_from(None, real.clone()), real);
+    }
 
     #[test]
     fn a_huge_folder_is_listed_in_part_within_one_packet() {

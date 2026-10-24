@@ -108,6 +108,7 @@ pub async fn run(config: Config) -> Result<()> {
     crate::quiet_hours::keep_warm();
     // Test seams (2g, 2h, D9): said, so one left set by mistake is noticed.
     for seam in [
+        "POCKETDESK_BROWSE_HOME",
         "POCKETDESK_CLIPBOARD_FILE",
         "POCKETDESK_CLIPBOARD_IMAGE_FILE",
         "POCKETDESK_DOWNLOAD_DIR",
