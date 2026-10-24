@@ -330,6 +330,20 @@ class SessionParts(unittest.TestCase):
         ])
         self.assertEqual(dc.rebuilds(log), [(1280, 720, "H.265 (HEVC)"), (1920, 1080, "H.264")])
 
+    def test_the_session_records(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as name:
+            root = pathlib.Path(name)
+            self.assertEqual(dc.session_records(root), [])
+            (root / "state").mkdir()
+            tab = chr(9)
+            lines = [tab.join(["outcome=wan_punched", "rtt_p50=4", "rtt_max=5"]), "", tab.join(["outcome=lan", "enc_max=9"])]
+            (root / "state" / "streaming_sessions.log").write_text(chr(10).join(lines), encoding="utf-8")
+            self.assertEqual(dc.session_records(root), [
+                {"outcome": "wan_punched", "rtt_p50": "4", "rtt_max": "5"},
+                {"outcome": "lan", "enc_max": "9"},
+            ])
+
 
 if __name__ == "__main__":
     unittest.main()

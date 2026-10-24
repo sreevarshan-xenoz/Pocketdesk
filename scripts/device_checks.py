@@ -3379,6 +3379,86 @@ def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
         ctx.on_road = False
 
 
+def session_records(root: pathlib.Path) -> list[dict[str, str]]:
+    """The throwaway's session records (`streaming_sessions.log`), each a
+    line of tab-separated `key=value` fields, as dicts."""
+    path = root / "state" / "streaming_sessions.log"
+    if not path.exists():
+        return []
+    return [dict(f.split("=", 1) for f in line.split(chr(9)) if "=" in f)
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+
+
+AE2_CROPS = 6
+
+
+@check("ae2-crops", "§16")
+def ae2_crops(ctx: Ctx) -> tuple[str, str]:
+    """Crops to a window and back, six times in one session: each rebuilds
+    at its size, the session stays up with no redial (no watchdog), the
+    app's memory level holds (§16, across resolution changes); and the
+    session's record then shows the stalls in its encode or round-trip
+    tail, max above p50 (§11)."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        time.sleep(10)
+        sessions = ctx.server.log().count("Client codec caps negotiated")
+        records = len(session_records(ctx.server.root))
+        desktop = capture_size(ctx.server.log())
+        memory = [pss_mb()]
+        sizes = []
+        try:
+            for _ in range(AE2_CROPS):
+                for whole in (False, True):
+                    seen = len(rebuilds(ctx.server.log()))
+                    if whole:
+                        why = open_picker(ctx)
+                        if why:
+                            return "TIMEOUT", why
+                        tap_text("Whole desktop", ctx.phone.dump())
+                    else:
+                        size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
+                        if size is None:
+                            return "SKIP", why
+                    new = wait_for(lambda: rebuilds(ctx.server.log())[seen:], 30, 1)
+                    if not new:
+                        return "FAIL", f"no rebuild after crop {len(sizes) + 1}"
+                    sizes.append(f"{new[-1][0]}x{new[-1][1]}")
+                    close_sheets(ctx)
+                    time.sleep(5)
+                    if not in_session(ctx):
+                        return "FAIL", f"the session ended after {len(sizes)} changes of size"
+                memory.append(pss_mb())
+        finally:
+            close_sheets(ctx)
+        redials = ctx.server.log().count("Client codec caps negotiated") - sessions
+        end_session(ctx)
+        record = wait_for(lambda: session_records(ctx.server.root)[records:], 30, 1)
+        tail = record[-1] if record else {}
+        stalls = [k for k in ("enc", "rtt")
+                  if tail.get(f"{k}_max", "").isdigit() and tail.get(f"{k}_p50", "").isdigit()
+                  and int(tail[f"{k}_max"]) > int(tail[f"{k}_p50"])]
+        levels = [m for m in memory if m is not None]
+        grew = levels[-1] - levels[0] if len(levels) >= 2 else 0.0
+        said = (f"{len(sizes)} changes of size ({', '.join(sorted(set(sizes)))}); redials {redials};"
+                f" memory {' → '.join(f'{m:.1f}' for m in levels)} MB;"
+                f" record: enc p50 {tail.get('enc_p50', '?')} max {tail.get('enc_max', '?')},"
+                f" rtt p50 {tail.get('rtt_p50', '?')} max {tail.get('rtt_max', '?')} ms")
+        if not tail:
+            return "TIMEOUT", said + "; no session record after the session ended"
+        # A leak shows as a climb that keeps on: more than 40 MB over six
+        # rounds, where a round's rebuilds are a few MB and come back.
+        ok = redials == 0 and grew <= 40 and bool(stalls)
+        return ("PASS" if ok else "FAIL"), said
+    return session_check(ctx, body)
+
+
+LONG.add("ae2-crops")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
