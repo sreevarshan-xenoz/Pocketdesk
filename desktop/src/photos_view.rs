@@ -141,6 +141,16 @@ fn taken_text(taken_ms: u64, now_unix: u64) -> String {
     }
 }
 
+/// A tile's line under its thumbnail: when it was taken, "Video" first
+/// for a video (U4: one with no time read "Video ·").
+fn caption(video: bool, when: &str) -> String {
+    match (video, when.is_empty()) {
+        (true, true) => "Video".to_string(),
+        (true, false) => format!("Video · {when}"),
+        (false, _) => when.to_string(),
+    }
+}
+
 /// The longest side a copied photo keeps: a phone's 50 or 108 MP photo
 /// would hold gigabytes on its way to the clipboard (C7 review).
 const MAX_COPY_SIDE: u32 = 4096;
@@ -361,12 +371,7 @@ impl PhotosView {
                                 self.chosen.remove(&mark);
                             }
                         }
-                        let when = taken_text(photo.taken, now_unix);
-                        let text = if photo.video {
-                            format!("Video · {when}")
-                        } else {
-                            when
-                        };
+                        let text = caption(photo.video, &taken_text(photo.taken, now_unix));
                         ui.label(RichText::new(text).small().color(crate::theme::muted(ui)))
                             .on_hover_text(&photo.name);
                     });
@@ -763,6 +768,14 @@ mod tests {
         let copied = decode(wide).recv().unwrap().unwrap();
         assert_eq!(copied.size[0], MAX_COPY_SIDE as usize);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_videos_caption_has_no_dangling_dot() {
+        assert_eq!(caption(true, ""), "Video");
+        assert_eq!(caption(true, "2 hours ago"), "Video · 2 hours ago");
+        assert_eq!(caption(false, "2 hours ago"), "2 hours ago");
+        assert_eq!(caption(false, ""), "");
     }
 
     #[test]
