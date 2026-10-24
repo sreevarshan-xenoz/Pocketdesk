@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-898 open items.
+899 open items.
 
 | Where | Items |
 |---|---|
@@ -11,7 +11,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 36 |
+| Away from home: another network, or through a router | 37 |
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
@@ -693,6 +693,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Relayed session (R4 A3): within ~2 s of the badge reading "relayed", the desktop log shows "Encoder bitrate target changed" (relay_cap engaged) at effective ≤ 2 Mbit/s followed by "Encoder rebuilt for new bitrate", and picture is visibly softer than LAN/direct. (where: away)
 - Full-quality override (R4 A3): while relaying, the badge area offers "Full quality: off" — tap → log shows "Relay quality override changed" then a fresh "Encoder bitrate target changed" back to configured (`pocketdesk sessions` kbps over the next session line). Tap again to re-clamp; toggle survives a stream retry (re-arms). (where: away)
 - Clamp release on punch-through: start relayed (override off), wait for the direct upgrade → within ~2 s the log shows "Encoder bitrate target changed" back to configured without touching anything. (where: away)
+- V8: back home with the link still by the internet road, the session's home dial answers within its 2 s and the session is a LAN one. (where: away)
 
 **12. Roaming (Tier-3 #13 remainder)**
 

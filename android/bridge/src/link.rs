@@ -120,6 +120,19 @@ async fn by_internet(address: &str, port: u16) -> bool {
             .is_some_and(|(host, live)| host == address && *live == port)
 }
 
+/// Whether the live control connection to the computer at `address` came by
+/// the internet road (V8): its home address most likely does not answer. How
+/// the link was dialed, not a reading of now: a phone back home keeps it. By
+/// host alone, as a session names the stream port, not the control one.
+pub(crate) async fn home_unreachable(address: &str) -> bool {
+    crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
+        && (*crate::CONTROL_PEER)
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|(host, _)| host == address)
+}
+
 /// What a computer from before 2c answers a request without a port; the
 /// phone says what it means.
 pub(crate) fn too_old(reason: &str) -> bool {
