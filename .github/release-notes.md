@@ -16,80 +16,39 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.6.0 is about the phone and the computer staying linked and acting on each other:
-- linked with the screen off;
-- typing, opening apps, screenshots and locks on the phone from the computer;
-- the phone's music, alarms and ongoing updates on the computer, and the computer's music in the phone's media controls;
-- holding notifications by schedule, by words, or while you present.
+Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves more of your phone's photos and files to the computer by themselves. It also carries fixes from a long run of checks on a real phone, with sessions, transfers and the clipboard driven by script. It updates 0.6.0 in place (same signing key), keeping your saved computers and pairings.
 
-Both apps had a design pass over what is new. It updates 0.5.0 in place (same signing key), keeping your saved computers and pairings.
+**Beside KDE Connect**
+- **Starts next to it:** with KDE Connect or GSConnect holding port 1716, the server takes the next free port and says so, instead of stopping.
+- **Files to KDE Connect devices:** a paired KDE Connect device is a target on the Files page and for `pocketdesk send`.
 
-**Staying linked**
-- **With the screen off:** a quiet service keeps the phone linked on phones whose system freezes background apps (measured on ColorOS), with "Stay linked with the screen off" in Settings.
-- **Found again:** a paired computer that moved to a new address is found by its key.
-- **On the phone:** "What this computer allows" lines up its own switches with the computer's permissions, and pairing asks "Whose phone is it?" (Mine, someone else's, a guest's, or a saved profile).
+**Photos and folders**
+- **New camera photos** go to the computer by themselves, when you turn on "Send new camera photos" on the phone.
+- **The whole gallery:** the Phone page's "More photos" goes back through every photo, not only the newest 24.
+- **Folders between computers** go both ways.
 
-**The phone from the computer**
-- **Type on the phone** from the computer's keyboard, from the Overview, the tray or a key.
-- **Open an app on the phone**, take a screenshot of it or lock it, from the Overview or the tray.
-- **Its contacts** on the Messages page, to text or call (names and numbers only, when you turn it on).
-- **Ring it:** it now vibrates and flashes its torch as it rings.
-- **Its sound** on the computer without its screen.
-- **Files into its folders** from the drive in File Explorer, into folders you mark.
+**Linux**
+- **The clipboard on X11** (Mint and other X11 sessions), both ways, with images, without polling.
+- **The phone as a game controller:** its gamepad drives a real controller on Linux, so games see one.
+- **Lock when the phone leaves** on Sway and Hyprland, from the compositor's own idle time; its minutes are now in Settings on Linux too.
 
-**The phone's notifications on the computer**
-- **Alarms:** a ringing alarm or finished timer rings on the computer too.
-- **Ongoing updates:** a download's bar or a running timer shows as a live card that updates in place.
-- **Open on the phone:** open a notification's app on the phone from the computer.
-- **Where they show:** only on the computer you are using; not while the phone is in your hand; kinds you keep on the phone stay there.
-- **Holding them:** quiet hours on a schedule, while presenting or in full screen (Windows; GNOME's or KDE's Do Not Disturb on Linux), and by words you choose.
+**Sessions and the link**
+- **Sessions from away start sooner:** a phone linked by the internet road no longer waits out a home dial first (about 3 s from the tap, down from 11).
+- **A phone that vanishes** with data waiting counts as gone within a minute on a Linux computer, not after a quarter of an hour.
+- **The away lock** counts only a phone on this computer's network: one that walked off on mobile data, still linked over the internet, now counts as gone.
+- **The session's numbers** start fresh: a new session no longer shows the last one's round-trip figures while it connects.
 
-**Music**
-- **The phone's music** shows on the computer without a session, with its cover, in Windows' media controls and as an MPRIS player on Linux.
-- **The computer's music** shows in the phone's media controls, lock screen and watch; choose which player when several play.
-
-**Files and the clipboard**
-- **Image copies** reach the phone's clipboard without a session, and received images can go onto its clipboard.
-- **Copies on the phone** go to the computer by themselves (on phones that show Android's clipboard preview).
-- **Copies kept here:** never send copies from programs or with looks you list (a password manager's, a key's).
-- **Copied files:** files copied in Explorer or a file manager go with Send the clipboard and "Paste copied files" (`xclip` on X11).
-- **Several at once:** send files to several phones or computers.
-- **Photos keep where they were taken.**
-
-**Automation**
-- **Automation apps** on the phone (Tasker and others) can start the computer's tasks and press its deck buttons.
-- **Home Assistant** gets buttons for commands to the phone.
-- **`tel:` links** on the computer open the call on the phone, and a call's notification has Call back.
-- **Links by site:** a site's links open in the browser, are only shown, or go to a program you name.
-
-**On Linux**
-- **Lock when the phone leaves** works on Linux too, with the keyboard's and mouse's idle time from GNOME, KDE on X11, or `xprintidle` on X11.
-- **The clipboard key and the typing key** work on Linux through the desktop's GlobalShortcuts portal (KDE Plasma 6, GNOME 48 and later, Hyprland), which asks once.
-- **The Overview** says when presenting, a full-screen app or Do Not Disturb is holding the phones' notifications, with Change it.
-
-**The desktop app**
-- **Permission profiles:** save a phone's permissions under a name, apply one to a phone (it asks first), or pair a phone with one.
-- **A design pass** over the O and P pages: words, questions before what cannot be undone, empty and waiting states, screen-reader names.
-
-**The phone app**
-- **Find a setting** with search.
-- **A design pass** over the new rows, with their permissions asked for and refusals said.
-- **Its switches** for alarms, contacts, apps, tasks, images, typing and copies are told to the computer, so the Devices page can say why an ask got no answer.
-- **Spanish** says "equipo" for the computer everywhere, as Windows does.
-
-**Fixed after checking on a phone**
-- **The alarm volume:** after a ring, the phone could set its alarm volume every two seconds, forever, when the volume it had saved was lower than Android lets an app set. It now puts the volume back once, never lower than allowed, and leaves one you changed since.
-- **A file the app lost:** a file sent from the computer while the phone's app was closed mid-download is offered again when the phone comes back, and continues where it stopped.
-- **Saying why:** a session the computer ended (unpaired, or its video encoder gave up) no longer reads as a dropped connection, and a send refused because files over the internet are off says so.
-- **Home:** the battery card's Allow button no longer runs off the card, and Home opens at its top with its cards in view.
+**Smaller fixes**
+- Home shows one card when Android pauses Pocketdesk, with its Allow button.
+- The Overview names which Android setting stops a screenshot or a lock.
+- A send to another computer says what became of it in a computer's words; a video without a date has no stray dot.
 
 ### Not yet checked on a device
 
-These work in tests, and many were checked on an OPPO phone against Windows, but not yet:
-- **Linux:** GNOME's and KDE's Do Not Disturb, an alarm's sound, files copied on X11, the away lock and the portal's keys on a real desktop, and most of this release's features by hand.
-- **By hand at the computer:** the new desktop pages and questions, the typing window, the Overview's buttons.
-- **A phone with a SIM:** calls, Call back and `tel:` links reaching a call.
-- **Other apps and systems:** Tasker itself, Home Assistant, a password manager's copies, Android 17.
-- **Updating:** from 0.5.0 to this release on a phone, and a clean Linux install.
+These work in tests, and many were checked on an OPPO phone against Windows and a Linux VM, but not yet:
+- **Linux desktops:** the game controller in real games, the away lock on a real Sway or Hyprland, and the clipboard on a real X11 desktop (they were seen on a VM).
+- **KDE Connect:** files to a real KDE Connect device.
+- **By hand:** the camera photos and gallery pages, and the Settings rows that are new.
+- **Updating:** from 0.6.0 to this release on a phone, and a clean Linux install.
 
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§166–§206 are this release's).
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§207 on are this release's).
