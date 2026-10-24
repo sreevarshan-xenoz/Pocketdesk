@@ -3759,6 +3759,80 @@ def af3_mic_refused(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- a sound session left without its computer (AF4) ----
+
+
+def media_volume() -> Optional[int]:
+    out = adb("shell", "cmd", "media_session", "volume", "--stream", "3", "--get")
+    found = re.search(r"volume is (\d+) in range", out)
+    return int(found.group(1)) if found else None
+
+
+def session_service_state() -> Optional[bool]:
+    """Whether the phone's SessionForegroundService runs; None when dumpsys
+    did not answer as it does."""
+    out = adb("shell", "dumpsys", "activity", "services", f"{APP}/.service.SessionForegroundService")
+    if "ServiceRecord" in out:
+        return True
+    return False if "ACTIVITY MANAGER SERVICES" in out else None
+
+
+@check("af4-sound-gives-up", "§97")
+def af4_sound_gives_up(ctx: Ctx) -> tuple[str, str]:
+    """A sound session (the phone as the computer's speaker and mic) left
+    without its computer tries again for ten minutes, then stops trying and
+    releases its service (§97). The phone's media volume is held at 0 for
+    the run (it is night in the owner's home) and put back after."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("auto_reconnect", True):
+        return "SKIP", "turn on reconnecting in the phone's Settings"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        volume = media_volume()
+        if volume is None:
+            return "SKIP", "the phone's media volume could not be read, so it could not be held at 0"
+        if volume:
+            adb("shell", "cmd", "media_session", "volume", "--stream", "3", "--set", "0")
+        try:
+            ctx.phone.wake()
+            adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+            if not wait_for(lambda: tap_text("More for Test Desk", ctx.phone.dump()), 20, 2):
+                return "SKIP", "no More for Test Desk on Home"
+            if not wait_for(lambda: tap_text("Sound", ctx.phone.dump()), 10, 1):
+                return "TIMEOUT", "no Sound in the card's menu"
+            if not wait_for(lambda: session_service_state() is True, 60, 2):
+                return "TIMEOUT", "the sound session's service did not start"
+            # Admitted by the computer, not only started on the phone (review:
+            # the service starts before the dial).
+            if not wait_for(lambda: in_session(ctx), 60, 2):
+                return "TIMEOUT", "the computer never admitted the sound session"
+            time.sleep(15)
+            # The computer goes away and stays away.
+            ctx.server.stop()
+            ctx.on_road = False
+            cut = time.monotonic()
+            seen = []
+            ended = wait_for(lambda: seen.append(session_service_state() is False) or seen[-2:] == [True, True],
+                             15 * 60, 10)
+            took = (time.monotonic() - cut) / 60
+            said = (f"the computer stopped; the service {'released' if ended else 'still held'} "
+                    f"{f'{took:.1f} min after' if ended else 'after 15 min'}")
+            # Ten minutes of tries with backoff (2, 4, 8, 16, then 30 s
+            # apart), given up after a failed try: released between 9 and 13.
+            return ("PASS" if ended and 9 <= took <= 13 else "FAIL"), said
+        finally:
+            # Exit first, the screen woken (it is off by now), and only then
+            # the volume back (review: never the computer's sound out loud).
+            ctx.phone.wake()
+            tap_text("Exit", ctx.phone.dump())
+            if volume:
+                adb("shell", "cmd", "media_session", "volume", "--stream", "3", "--set", str(volume))
+
+    return road_check(ctx, body)
+
+
+LONG.add("af4-sound-gives-up")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
