@@ -198,6 +198,15 @@ types into it and posts notifications on it.
    here; P11's ring sounds, shakes and flashes the phone for 30 s. O1's add a task
    that runs `echo` on this computer and a deck button for it, never one that types,
    plays or opens a link here.
+
+   The `w1-*` checks (W1) open a session, which shows this computer's screen on the
+   phone: they run only with the phone's input off in the throwaway's trust store (the
+   runner turns it off at each start). The video cannot ride `adb reverse`, so they
+   restart the throwaway without the reverse and wait for the phone to link by the
+   internet road (up to 200 s: a road dial that failed during the restart rests 60 s),
+   and stay on that road until the run ends. Those reading the HUD need the phone's
+   Show connection details on. `w1-hour` runs only when named with
+   `--only` (an hour; `POCKETDESK_HOUR_MINUTES` for less).
 5. Run `python scripts/device_checks.py --server-root <root> --server-exe <pocketdesk>`
    (`--only ID…` for some, `--serial` with more than one phone). On Git Bash, give
    Windows paths (`C:/…`): with `MSYS_NO_PATHCONV=1`, `/c/…` reaches Python as is.
