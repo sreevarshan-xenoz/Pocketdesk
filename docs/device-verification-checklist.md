@@ -2872,6 +2872,7 @@ Owed:
 - [ ] Sway: touched meanwhile, it does not lock. (where: linux)
 - [ ] Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
 - [ ] A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
+- [ ] V5: the desktop app's Settings shows "Lock after the phone leaves" on Linux, and a change there is taken without a restart. (where: linux)
 
 ## Recording results
 
