@@ -1115,10 +1115,13 @@ impl StreamingServer {
                             };
                             match rebuilt {
                                 Ok(e) => {
+                                    // AE1: the codec too, so a crop that
+                                    // kept HEVC (R4 C1) can be seen.
                                     info!(
                                         width = frame.width,
                                         height = frame.height,
                                         backend = e.backend_name(),
+                                        codec = e.config().codec.display_name(),
                                         "Encoder rebuilt at frame resolution"
                                     );
                                     encoder_preferred = e.config().clone();
