@@ -275,6 +275,8 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.main_log_size(said), "256K")
         self.assertEqual(dc.main_log_size("main: ring buffer is 16 MiB (1 KiB consumed)"), "16M")
         self.assertIsNone(dc.main_log_size("error: no such buffer"))
+        self.assertEqual(dc.kib("256K"), 256)
+        self.assertEqual(dc.kib("16M"), 16384)
 
 
 if __name__ == "__main__":

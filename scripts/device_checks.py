@@ -2877,6 +2877,11 @@ def main_log_size(said: str) -> Optional[str]:
     return f"{found.group(1)}{found.group(2)}" if found else None
 
 
+def kib(size: str) -> int:
+    """A `-G` size ("256K", "16M") in KiB."""
+    return int(size[:-1]) * (1024 if size.endswith("M") else 1)
+
+
 # ---- main ----
 
 
@@ -2923,8 +2928,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     failed = False
     # A bigger main log for the run, put back after (AC6).
     log_size = main_log_size(adb("logcat", "-b", "main", "-g"))
-    if log_size:
+    # Never smaller than it was (review): one already this big is left.
+    if log_size and kib(log_size) < kib(RUN_LOG_SIZE):
         adb("logcat", "-b", "main", "-G", RUN_LOG_SIZE)
+    else:
+        log_size = None
     try:
         why = server.start()
         if why:
