@@ -133,6 +133,51 @@ def field_text(dump: str, description: str = "fixture-field") -> Optional[str]:
     return None
 
 
+def dump_nodes(dump: str) -> list[tuple[str, int, int]]:
+    """Each view's text with its centre, top to bottom as dumped."""
+    out = []
+    for node in re.findall(r"<node [^>]*>", dump):
+        text = re.search(r' text="([^"]*)"', node)
+        box = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if text and box:
+            x1, y1, x2, y2 = map(int, box.groups())
+            out.append((html.unescape(text.group(1)), (x1 + x2) // 2, (y1 + y2) // 2))
+    return out
+
+
+def connect_button(dump: str, address: str) -> Optional[tuple[int, int]]:
+    """Where to tap Connect on Home's card for the computer at `address`:
+    the first Connect below the line that starts with it (W1)."""
+    nodes = dump_nodes(dump)
+    card = next((y for text, _, y in nodes if text.startswith(address + " ")), None)
+    if card is None:
+        return None
+    return next(((x, y) for text, x, y in nodes if text == "Connect" and y > card), None)
+
+
+def hud_caption(dump: str) -> Optional[str]:
+    """The session HUD's basis caption, `rates over … · rtt …` (§2d)."""
+    return next((text for text, _, _ in dump_nodes(dump) if text.startswith("rates over ")), None)
+
+
+def rtt_count(caption: str) -> Optional[int]:
+    """How many RTT polls the caption says its median is of; 0 before the
+    first."""
+    if "rtt not measured yet" in caption:
+        return 0
+    found = re.search(r"rtt median of (\d+)", caption)
+    return int(found.group(1)) if found else None
+
+
+def log_seconds(line: str) -> Optional[float]:
+    """A logcat line's time of day, in seconds."""
+    found = re.match(r"\d\d-\d\d (\d\d):(\d\d):(\d\d\.\d+) ", line)
+    if not found:
+        return None
+    hours, minutes, seconds = found.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
 def prefs(xml: str) -> dict[str, object]:
     """A SharedPreferences file's booleans, strings and string sets."""
     out: dict[str, object] = {}
@@ -635,6 +680,11 @@ class Ctx:
     server: Server
     phone: Phone
     device: str
+    # The phone's saved control port and the throwaway's, for `adb reverse`.
+    phone_port: int = 1716
+    port: int = 1726
+    # The session checks moved the phone to the internet road (W1).
+    on_road: bool = False
 
 
 Check = Callable[[Ctx], tuple[str, str]]
@@ -1376,6 +1426,225 @@ def o5_kinds(ctx: Ctx) -> tuple[str, str]:
     return "PASS", "the kept kind stayed on the phone; the other kind arrived"
 
 
+# ---- sessions over the internet road (W1) ----
+#
+# A session shows this computer's screen on the phone. It runs only with the
+# phone's input off in the throwaway's trust store (the server turns it off
+# at each start; checked again here). The video cannot ride `adb reverse`
+# (UDP), so a session goes by the internet road: the server is restarted
+# without the reverse, and the phone relinks that way. Pocketdesk is never
+# force-stopped (see the module's doc).
+
+# Checks that run only when named with --only: they take long.
+LONG: set[str] = set()
+
+
+def input_off_for(ctx: Ctx) -> bool:
+    store = json.loads((ctx.server.root / "state" / "trusted_devices.json").read_text(encoding="utf-8"))
+    return store.get("permissions", {}).get(ctx.device, {}).get("input") is False
+
+
+def iroh_loops(log: str) -> int:
+    """Control links the server's log says came by the internet road (its
+    colour codes stripped: they split `transport="iroh"`)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum('transport="iroh"' in line for line in plain.splitlines() if "Entering main packet loop" in line)
+
+
+def by_road(ctx: Ctx) -> Optional[str]:
+    """The server restarted without the reverse, the phone linked again by
+    the internet road; why not, when it is not."""
+    ctx.server.stop()
+    adb("reverse", "--remove", f"tcp:{ctx.phone_port}")
+    why = ctx.server.start()
+    if why:
+        return why
+    ctx.phone.wake()
+    adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    # A road dial that failed while the server restarted rests 60 s (the
+    # bridge's INTERNET_REST) before the phone's next try.
+    if not wait_for(lambda: iroh_loops(ctx.server.log()) and ctx.device in ctx.server.linked(), 200, 2):
+        return "the phone did not link by the internet road within 200 s"
+    return None
+
+
+def start_session(ctx: Ctx) -> Optional[float]:
+    """Tap Connect on the throwaway's card (127.0.0.1); the phone's time of
+    the tap, in seconds of the day, or None when there is no card."""
+    ctx.phone.wake()
+    adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 20, 2)
+    if not spot:
+        return None
+    adb("logcat", "-c")
+    now = adb("shell", "date", "+%H:%M:%S.%N").strip()
+    hours, minutes, seconds = now.split(":")
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds[:6])
+
+
+def end_session(ctx: Ctx) -> None:
+    """Exit the session as its button does; Back when it is not found."""
+    exit_spot = next(((x, y) for text, x, y in dump_nodes(ctx.phone.dump()) if text == "Exit"), None)
+    if exit_spot:
+        adb("shell", "input", "tap", str(exit_spot[0]), str(exit_spot[1]))
+    else:
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(3)
+
+
+def connected_at() -> Optional[float]:
+    """When the phone's log says the session connected, from the last
+    logcat clear."""
+    for line in adb("logcat", "-d", "-s", "PocketdeskRust:*").splitlines():
+        if "Streaming session connected" in line:
+            return log_seconds(line)
+    return None
+
+
+def captions(ctx: Ctx, seconds: float) -> list[tuple[float, str]]:
+    """The HUD's caption each time it changed, over `seconds`."""
+    seen: list[tuple[float, str]] = []
+    start = time.monotonic()
+    while time.monotonic() - start < seconds:
+        caption = hud_caption(ctx.phone.dump())
+        if caption and (not seen or seen[-1][1] != caption):
+            seen.append((round(time.monotonic() - start, 1), caption))
+        time.sleep(0.5)
+    return seen
+
+
+def needs_details(ctx: Ctx) -> Optional[str]:
+    """The HUD's numbers and caption show only with this on (off by default)."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("connection_details"):
+        return "turn on Show connection details in the phone's Settings"
+    return None
+
+
+def in_session(ctx: Ctx) -> bool:
+    """Whether the phone shows a session: its Exit button."""
+    return any(text == "Exit" for text, _, _ in dump_nodes(ctx.phone.dump()))
+
+
+def session_check(ctx: Ctx, body: Callable[[Ctx], tuple[str, str]]) -> tuple[str, str]:
+    """Run `body` by the internet road with input off. The session checks
+    are registered last and share the road: the phone stays on it until
+    the runner stops the server and removes the reverse."""
+    if not input_off_for(ctx):
+        return "SKIP", "the phone's input is on in the throwaway's trust store"
+    if not ctx.on_road:
+        why = by_road(ctx)
+        if why:
+            return "TIMEOUT", why
+        ctx.on_road = True
+    try:
+        return body(ctx)
+    finally:
+        end_session(ctx)
+
+
+@check("w1-away-connect", "§11")
+def w1_away_connect(ctx: Ctx) -> tuple[str, str]:
+    """V8: a session from away connects within a few seconds of the tap."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        tapped = start_session(ctx)
+        if tapped is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        up = wait_for(connected_at, 20, 0.5)
+        if not up:
+            return "TIMEOUT", "no session within 20 s of the tap"
+        took = (up - tapped) % 86400
+        return ("PASS" if took <= 6 else "FAIL"), f"connected {took:.1f} s after the tap"
+    return session_check(ctx, body)
+
+
+@check("w1-caption", "§2d")
+def w1_caption(ctx: Ctx) -> tuple[str, str]:
+    """The HUD's basis caption fills in: rates over a span, then an RTT
+    median of a count."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        seen = captions(ctx, 25)
+        if not seen:
+            return "TIMEOUT", "no caption within 25 s"
+        counts = [rtt_count(c) for _, c in seen]
+        said = " → ".join(c for _, c in seen)
+        if any(n and n > 0 for n in counts if n is not None):
+            return "PASS", said
+        return "FAIL", f"no RTT median within 25 s: {said}"
+    why = needs_details(ctx)
+    if why:
+        return "SKIP", why
+    return session_check(ctx, body)
+
+
+@check("w1-reset", "§2d")
+def w1_reset(ctx: Ctx) -> tuple[str, str]:
+    """V7: a new session's caption starts from its own polls, never with the
+    last session's count."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        first = captions(ctx, 20)
+        before = max((rtt_count(c) or 0 for _, c in first), default=0)
+        end_session(ctx)
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect after the first session"
+        early = captions(ctx, 6)
+        if not early:
+            return "TIMEOUT", "no caption in the new session's first 6 s"
+        carried = [c for _, c in early if (rtt_count(c) or 0) >= max(before, 3)]
+        said = " → ".join(c for _, c in early)
+        return ("FAIL", f"carried over ({before} before): {said}") if carried else ("PASS", f"{before} before; then {said}")
+    why = needs_details(ctx)
+    if why:
+        return "SKIP", why
+    return session_check(ctx, body)
+
+
+def pss_mb() -> Optional[float]:
+    out = adb("shell", "dumpsys", "meminfo", APP)
+    found = re.search(r"TOTAL PSS:\s+(\d+)", out) or re.search(r"^\s*TOTAL\s+(\d+)", out, re.M)
+    return round(int(found.group(1)) / 1024, 1) if found else None
+
+
+@check("w1-hour", "§16")
+def w1_hour(ctx: Ctx) -> tuple[str, str]:
+    """An hour's session (POCKETDESK_HOUR_MINUTES for less): the app's memory
+    levels off, and the session is still up at the end."""
+    minutes = int(os.environ.get("POCKETDESK_HOUR_MINUTES", "60"))
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        time.sleep(20)
+        samples = []
+        start = time.monotonic()
+        while True:
+            samples.append(pss_mb())
+            left = minutes * 60 - (time.monotonic() - start)
+            if left <= 0:
+                break
+            time.sleep(min(300, left))
+        up = in_session(ctx)
+        mb = [s for s in samples if s is not None]
+        if not mb:
+            return "TIMEOUT", "no memory reading"
+        grew = mb[-1] - mb[0]
+        said = f"{minutes} min: {mb[0]} → {mb[-1]} MB (max {max(mb)})"
+        if not up:
+            return "FAIL", f"the session was gone at the end; {said}"
+        return ("PASS" if grew <= 30 else "FAIL"), said
+    why = needs_details(ctx)
+    if why:
+        return "SKIP", why
+    return session_check(ctx, body)
+
+
+LONG.add("w1-hour")
+
+
 # ---- main ----
 
 
@@ -1435,9 +1704,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if device not in linked:
             print(f"TIMEOUT  {device} is not linked")
             return 1
-        ctx = Ctx(server, phone, device)
+        ctx = Ctx(server, phone, device, args.phone_port, port)
         for cid, (section, fn) in CHECKS.items():
             if args.only and cid not in args.only:
+                continue
+            if cid in LONG and not (args.only and cid in args.only):
                 continue
             try:
                 status, detail = fn(ctx)

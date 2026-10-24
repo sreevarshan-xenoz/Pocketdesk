@@ -152,7 +152,47 @@ class PureParts(unittest.TestCase):
 
     def test_every_check_names_a_checklist_section(self):
         for cid, (section, _) in dc.CHECKS.items():
-            self.assertRegex(section, r"^§\d+$", cid)
+            # Some sections carry a letter (2d, 11b).
+            self.assertRegex(section, r"^§\d+[a-z]?$", cid)
+
+
+
+class SessionParts(unittest.TestCase):
+    """W1: what the session checks read from a UI dump and the phone's log."""
+
+    DUMP = (
+        '<hierarchy><node text="Test Desk" bounds="[60,1490][700,1540]" />'
+        '<node text="127.0.0.1 · Paired" bounds="[60,1550][700,1600]" />'
+        '<node text="Connect" bounds="[60,1670][300,1740]" />'
+        '<node text="Test Desk" bounds="[60,2040][700,2090]" />'
+        '<node text="192.0.2.5 · Paired" bounds="[60,2100][700,2150]" />'
+        '<node text="Connect" bounds="[60,2220][300,2290]" />'
+        '<node text="rates over 2.5 s · rtt median of 6" bounds="[0,0][9,9]" /></hierarchy>'
+    )
+
+    def test_the_connect_button_of_a_card(self):
+        self.assertEqual(dc.connect_button(self.DUMP, "127.0.0.1"), (180, 1705))
+        self.assertEqual(dc.connect_button(self.DUMP, "192.0.2.5"), (180, 2255))
+        self.assertIsNone(dc.connect_button(self.DUMP, "198.51.100.1"))
+
+    def test_the_hud_caption_and_its_rtt_count(self):
+        caption = dc.hud_caption(self.DUMP)
+        self.assertEqual(caption, "rates over 2.5 s · rtt median of 6")
+        self.assertEqual(dc.rtt_count(caption), 6)
+        self.assertEqual(dc.rtt_count("rates over 1.0 s · rtt not measured yet"), 0)
+        self.assertIsNone(dc.rtt_count("fps 12"))
+        self.assertIsNone(dc.hud_caption("<hierarchy />"))
+
+    def test_links_by_the_internet_road_in_a_coloured_log(self):
+        esc = chr(27)
+        coloured = f'INFO conn{{{esc}[3mtransport{esc}[0m{esc}[2m={esc}[0m"iroh"}}: x: Entering main packet loop'
+        home = 'INFO conn{transport="tcp"}: x: Entering main packet loop'
+        self.assertEqual(dc.iroh_loops(coloured + chr(10) + home), 1)
+
+    def test_a_logcat_line_s_time(self):
+        line = "10-24 10:47:56.619 23512 23723 I PocketdeskRust:  INFO connected"
+        self.assertAlmostEqual(dc.log_seconds(line), 10 * 3600 + 47 * 60 + 56.619, places=3)
+        self.assertIsNone(dc.log_seconds("--------- beginning of main"))
 
 
 if __name__ == "__main__":
