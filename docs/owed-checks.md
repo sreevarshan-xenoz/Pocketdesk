@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+898 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 70 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 69 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -38,8 +38,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2d. Rate and link basis (roadmap 2056)**
 
-- Right after connect: the caption starts at something like `rates over 0.5 s · rtt not measured yet` and reaches `rates over 3.0 s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says ~2.5 s or more, and `rtt` is dim until its first poll (~1 s). A number that arrives already bright means the basis is not being reported.
-- Basis reset: end the session and reconnect to the same (or a different) desktop → the caption must come back up from a small span and `rtt median of 1`, never showing a figure or a sample count carried over from the session that just died.
+- Right after connect: the caption starts at something like `rates over 0.5 s · rtt not measured yet` and reaches `rates over 3.0 s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says ~2.5 s or more, and `rtt` is dim until its first poll (~1 s). A number that arrives already bright means the basis is not being reported. (2026-10-24, the OPPO over the internet road, the caption only: `rates over 1.0 s · rtt not measured yet` at 3.5 s, `rates over 2.6 s · rtt median of 6` at 18.5 s. The first poll came ~14 s in, as the connect itself took that long by the internet road; the 8 s and the dimming still owed on the LAN.)
 - Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it must not wrap into a single-character column the way the six metric chips did before they became a `FlowRow`, and must not be clipped by the HUD panel's padding.
 - Optional cross-check: while the caption reads `rates over 3.0 s`, `pocketdesk sessions` for the same session should report a mean kbps within the same order of magnitude — the session record averages over the whole session, the HUD does not, and a large disagreement is a measurement bug in one of them.
 

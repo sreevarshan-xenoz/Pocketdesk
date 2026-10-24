@@ -179,13 +179,20 @@ is still filling in is dimmed. What to confirm on a real phone:
       reaches `rates over 3.0 s · rtt median of 8` within ~8 s; fps/kbps are dim until the caption says
       ~2.5 s or more, and `rtt` is dim until its first poll (~1 s). A number that arrives already bright
       means the basis is not being reported.
+      (2026-10-24, the OPPO over the internet road, the caption only: `rates over 1.0 s · rtt not measured
+      yet` at 3.5 s, `rates over 2.6 s · rtt median of 6` at 18.5 s. The first poll came ~14 s in, as the
+      connect itself took that long by the internet road; the 8 s and the dimming still owed on the LAN.)
 - [ ] The stall check this replaces: freeze the desktop's output (sleep the display, or `SIGSTOP` the (where: linux)
       server) → HUD `fps` and `kbps` must reach 0 within ~3 s and stay there, with the caption still
       naming a real span. Under the old lifetime average this was the bug: a dead link read healthy for
       minutes. Resume → the rates recover within ~3 s, not within a session's worth of averaging.
-- [ ] Basis reset: end the session and reconnect to the same (or a different) desktop → the caption must
+- [x] Basis reset: end the session and reconnect to the same (or a different) desktop → the caption must
       come back up from a small span and `rtt median of 1`, never showing a figure or a sample count
       carried over from the session that just died.
+      (2026-10-24, the OPPO over the internet road against a throwaway server, read from UI dumps: it
+      failed first, the new session's caption reading `rtt median of 8` for its first ~10 s while the
+      connect went home then by the internet road (V7); with the fix it started at `rates over 1.0 s ·
+      rtt not measured yet` and counted up from the new session's own polls.)
 - [ ] Portrait legibility: the caption is one line of 10 sp monospace; in portrait on a narrow phone it
       must not wrap into a single-character column the way the six metric chips did before they became a
       `FlowRow`, and must not be clipped by the HUD panel's padding.
