@@ -2359,14 +2359,16 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
 - [ ] Behind Tailscale on the phone: Wi-Fi with its bars, not nothing. (where: away)
 - [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
-- [ ] The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+- [x] "Share the phone's state" off: nothing sent for 330 s, past the 5-minute resend; on again, the state arrived 8 s after the app started (the OPPO, a throwaway server, no session, 2026-10-24).
+- [ ] The phone away: the line is gone.
 - [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: the computer kept 90.3 GB free of 128 GB, Wi-Fi with 4 bars and the ringer on silent, as the phone's own settings said.
 - Found there: in the background the battery broadcast stayed stale on ColorOS (72 % kept while the phone was at 79 %); the level is now read from BatteryManager (`BatteryRule.fresh`), and the background report then followed the phone's real level.
 
 ## 163. Features on both sides (L7)
 
 Built 2026-10-21; tested through units and the desktop harness, nothing on a device yet.
-- [ ] A switch turned off on the phone shows on the computer's Devices page within 15 s in a session, and within 30 s with only a background link.
+- [x] A switch turned off in the phone's Settings ("Links from the computer") reached the computer's `phone_switches.json` in 1 s, and on again in 24 s, with no session (the OPPO, a throwaway server, no session, 2026-10-24).
+- [ ] The same within 15 s in a session, and on the computer's Devices page. (where: by hand)
 - [ ] Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
 - [ ] Settings "Phone notifications" off on the computer: the notifications rows name it. (where: by hand)
 - [ ] A phone unpaired: its report gone from `phone_switches.json` within seconds.

@@ -6,7 +6,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 74 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 73 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 360 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 361 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -193,11 +193,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **162. The phone's state on the computer (L9)**
 
 - The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
-- The phone away: the line is gone; "Share the phone's state" off: nothing is sent.
+- The phone away: the line is gone.
 
 **163. Features on both sides (L7)**
 
-- A switch turned off on the phone shows on the computer's Devices page within 15 s in a session, and within 30 s with only a background link.
 - A phone unpaired: its report gone from `phone_switches.json` within seconds.
 
 **167. Both sides' switches, part 2 (M2)**
@@ -2129,6 +2128,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **163. Features on both sides (L7)**
 
+- The same within 15 s in a session, and on the computer's Devices page. (where: by hand)
 - Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
 - Settings "Phone notifications" off on the computer: the notifications rows name it. (where: by hand)
 
