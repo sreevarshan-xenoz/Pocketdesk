@@ -355,6 +355,12 @@ class SessionParts(unittest.TestCase):
         self.assertIs(dc.switch_on_row(dump, "Clipboard sync"), False)
         self.assertIsNone(dc.switch_on_row(dump, "Nothing"))
 
+    def test_every_throwaway_has_the_lock_seam(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as name:
+            env = dc.Server(pathlib.Path(name), pathlib.Path(name) / "pocketdesk.exe").env()
+            self.assertEqual(env["POCKETDESK_LOCK_FILE"], str(pathlib.Path(name) / "lock.txt"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -462,6 +462,8 @@ class Server:
             # AD2: the phone's file browser shows this folder as home, never
             # the owner's.
             "POCKETDESK_BROWSE_HOME": str(self.root / "home"),
+            # AG1: a lock is a line in this file, never this computer's lock.
+            "POCKETDESK_LOCK_FILE": str(self.root / "lock.txt"),
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
