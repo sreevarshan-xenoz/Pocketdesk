@@ -2265,6 +2265,8 @@ def y1_renamed(ctx: Ctx) -> tuple[str, str]:
     finally:
         adb("shell", device_command("rm", "-rf", where), timeout=60)
         (ctx.server.root / "downloads" / "f1.txt").unlink(missing_ok=True)
+
+
 # ---- the phone's sheets from UI dumps (Y3) ----
 
 
@@ -2385,12 +2387,17 @@ def z1_echo(ctx: Ctx) -> tuple[str, str]:
             return "TIMEOUT", "the server never sent the copy to the phone"
         time.sleep(20)
         sent = pushes(ctx.server.log(), ctx.device, len(token)) - before
-        back = sum(f"({len(token)} chars)" in line and "Clipboard sent to" in line
-                   for line in adb("logcat", "-d", "-s", "PocketdeskRust:*").splitlines())
+        phone_log = adb("logcat", "-d", "-s", "PocketdeskRust:*", "PocketdeskClip:*").splitlines()
+        back = sum(f"({len(token)} chars)" in line and "Clipboard sent to" in line for line in phone_log)
+        # AA1: the phone says it took it, so "not sent back" means something.
+        took = sum(f"text put on the clipboard ({len(token)} chars)" in line for line in phone_log)
         kept = ctx.server.clipboard() == token
-        said = f"sent to the phone {sent} time(s); the phone sent it back {back} time(s); the computer's copy {'kept' if kept else 'changed'}"
-        return ("PASS" if sent == 1 and back == 0 and kept else "FAIL"), said
+        said = (f"sent to the phone {sent} time(s); the phone took it {took} time(s) and sent it back "
+                f"{back} time(s); the computer's copy {'kept' if kept else 'changed'}")
+        return ("PASS" if sent == 1 and took >= 1 and back == 0 and kept else "FAIL"), said
     return session_check(ctx, body)
+
+
 # ---- shares from the phone, repeated (Z2) ----
 
 # Sizes for z2-many-shares: small and large mixed, in this order.
