@@ -288,6 +288,15 @@ class SessionParts(unittest.TestCase):
         size = int.from_bytes(png[at - 4:at], "big")
         self.assertEqual(len(zlib.decompress(png[at + 4:at + 4 + size])), 16 * (1 + 16 * 3))
 
+    def test_images_told_to_a_phone(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"INFO x: Clipboard image told to phone-a ({esc}[1m4096 bytes)",
+            "INFO x: Clipboard image told to phone-b (4096 bytes)",
+            "INFO x: Clipboard sent to phone-a (5 chars)",
+        ])
+        self.assertEqual(dc.images_told(log, "phone-a"), 1)
+
     def test_images_in_the_phone_s_clipboard_cache(self):
         listing = chr(10).join(["a" * 64 + ".png", "b" * 64 + ".part", "notes.txt", "C" * 64 + ".png"])
         self.assertEqual(dc.cached_images(listing), {"a" * 64})

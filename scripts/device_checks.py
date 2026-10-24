@@ -2894,15 +2894,23 @@ def cached_images(listing: str) -> set[str]:
     return {m.group(1) for m in re.finditer(r"^([0-9a-f]{64})\.png$", listing, re.MULTILINE)}
 
 
+def images_told(log: str, device: str) -> int:
+    """The server's "Clipboard image told to" lines for `device` (AD1)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum(f"Clipboard image told to {device} (" in line for line in plain.splitlines())
+
+
 def phone_images() -> set[str]:
     return cached_images(adb("shell", device_command("run-as", APP, "ls", "cache/clipboard")))
 
 
-def copy_image(ctx: Ctx, wait: float) -> tuple[str, bool]:
+def copy_image(ctx: Ctx, wait: float) -> tuple[bool, bool]:
     """Put a new image on the throwaway's stand-in clipboard (the text
-    stand-in emptied, as a real clipboard's text would win), and whether
-    the phone fetched it within `wait` seconds; its id."""
+    stand-in emptied, as a real clipboard's text would win): whether the
+    server told the phone of it, and whether the phone fetched it, within
+    `wait` seconds."""
     import hashlib
+    told = images_told(ctx.server.log(), ctx.device)
     png = made_png(secrets.token_bytes(8))
     sha = hashlib.sha256(png).hexdigest()
     clip = ctx.server.root / "clip.txt"
@@ -2913,7 +2921,8 @@ def copy_image(ctx: Ctx, wait: float) -> tuple[str, bool]:
     tmp = image.with_suffix(".tmp")
     tmp.write_bytes(png)
     os.replace(tmp, image)
-    return sha, bool(wait_for(lambda: sha in phone_images(), wait, 3))
+    fetched = bool(wait_for(lambda: sha in phone_images(), wait, 3))
+    return images_told(ctx.server.log(), ctx.device) > told, fetched
 
 
 def restart_with_permission(ctx: Ctx, key: str, value: Optional[bool]) -> Optional[str]:
@@ -2960,9 +2969,11 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
     changed = False
     try:
         time.sleep(2)
-        sha, got = copy_image(ctx, 60 if images_on else 45)
-        said.append(f"images in the background {'on' if images_on else 'off'}: {'fetched' if got else 'not fetched'}")
-        if got != images_on:
+        told, got = copy_image(ctx, 60 if images_on else 45)
+        said.append(f"images in the background {'on' if images_on else 'off'}: "
+                    f"{'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
+        # Told either way: what keeps it from the phone is the phone's switch.
+        if not told or got != images_on:
             return "FAIL", "; ".join(said)
         if not images_on:
             return "PASS", "; ".join(said)
@@ -2970,9 +2981,9 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
         why = restart_with_permission(ctx, "clipboard", False)
         if why:
             return "TIMEOUT", f"with the Clipboard permission off: {why}"
-        sha, got = copy_image(ctx, 45)
-        said.append(f"the Clipboard permission off: {'fetched' if got else 'not fetched'}")
-        return ("FAIL" if got else "PASS"), "; ".join(said)
+        told, got = copy_image(ctx, 45)
+        said.append(f"the Clipboard permission off: {'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
+        return ("FAIL" if told or got else "PASS"), "; ".join(said)
     finally:
         ctx.server.restore_config(before)
         (ctx.server.root / "clip.png").unlink(missing_ok=True)
