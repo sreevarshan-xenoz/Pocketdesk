@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-894 open items.
+893 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 64 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 63 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -116,10 +116,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **52. Download a folder from the remote browser**
 
 - A folder of thousands of files: the answer arrives, and other queries keep working while the offers come.
-
-**70. The phone's folders on the computer (T10g)**
-
-- A folder of more than 2000 entries; a file renamed between list and fetch.
 
 **74. The phone's battery without a session**
 

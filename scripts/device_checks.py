@@ -2135,6 +2135,138 @@ def x3_codec(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- the phone's folders at scale (Y1) ----
+
+
+def shared_folder(ctx: Ctx, writable: bool) -> Optional[tuple[int, str]]:
+    """`(root id, path on the phone)` of a folder the phone shares (its
+    Folders the computer may open), when its tree is on the phone's own
+    storage."""
+    import urllib.parse
+    raw = ctx.phone.prefs("pocketdesk-phone-folders").get("folders")
+    try:
+        folders = json.loads(raw) if isinstance(raw, str) else []
+    except ValueError:
+        return None
+    for folder in folders:
+        if bool(folder.get("add")) != writable:
+            continue
+        tree = urllib.parse.unquote(str(folder.get("uri", "")).rsplit("/tree/", 1)[-1])
+        if tree.startswith("primary:"):
+            return int(folder.get("id", 0)), "/sdcard/" + tree[len("primary:"):]
+    return None
+
+
+def ask_phone_files(ctx: Ctx, kind: str, root: int, path: list[str]) -> None:
+    """As the Phone files page asks (core::local::phone_files::request)."""
+    folder = ctx.server.root / "state" / "phone_files_out"
+    folder.mkdir(exist_ok=True)
+    rid = str(uuid.uuid4())
+    body = {"id": rid, "device_id": ctx.device, "kind": kind, "root": root, "path": path,
+            "created_unix": int(time.time())}
+    tmp = folder / f"{rid}.json.tmp"
+    tmp.write_text(json.dumps(body), encoding="utf-8")
+    os.replace(tmp, folder / f"{rid}.json")
+
+
+def kept_listing(ctx: Ctx, path: list[str], after: float) -> Optional[dict]:
+    """The phone's listing of `path` the server kept since `after`."""
+    try:
+        phones = json.loads((ctx.server.root / "state" / "phone_files.json").read_text(encoding="utf-8")).get("phones", {})
+    except (OSError, ValueError):
+        return None
+    kept = phones.get(ctx.device)
+    if not kept or kept.get("at_unix", 0) < int(after):
+        return None
+    listing = kept.get("listing", {})
+    return listing if listing.get("path") == path else None
+
+
+def y1_place(found: tuple[int, str]) -> tuple[int, str, str]:
+    """Where a new folder goes in the shared folder `found`: `(root, its
+    path on the phone, its name)`."""
+    root, base = found
+    name = "y1-" + secrets.token_hex(3)
+    return root, f"{base}/{name}", name
+
+
+def y1_fill(where: str, count: int) -> None:
+    """Make the folder `where` on the phone with `count` small files (inside
+    the caller's cleanup, Y1 review)."""
+    adb("shell", f"mkdir -p {shlex.quote(where)} && cd {shlex.quote(where)} && "
+                 f"i=1; while [ $i -le {count} ]; do echo y1 > f$i.txt; i=$((i+1)); done", timeout=600)
+
+
+@check("y1-big-folder", "§70")
+def y1_big_folder(ctx: Ctx) -> tuple[str, str]:
+    """A shared folder of more than 2000 entries: the listing carries the
+    first 2000 (MAX_ENTRIES) and says there are more (`truncated`), which
+    the Phone files page shows."""
+    found = shared_folder(ctx, writable=False)
+    if not found:
+        return "SKIP", "no read-only folder on the phone's storage in its Folders the computer may open"
+    root, where, name = y1_place(found)
+    try:
+        y1_fill(where, 2100)
+        asked = time.time()
+        ask_phone_files(ctx, "list", root, [name])
+        listing = wait_for(lambda: kept_listing(ctx, [name], asked), 60, 1)
+        if not listing:
+            return "TIMEOUT", "no listing of the folder within 60 s"
+        if listing.get("error"):
+            return "FAIL", f"the listing said: {listing['error']}"
+        got = len(listing.get("entries", []))
+        cut = bool(listing.get("truncated"))
+        said = f"{got} of 2100 entries listed, {'marked' if cut else 'not marked'} as cut"
+        return ("PASS" if got == 2000 and cut else "FAIL"), said
+    finally:
+        adb("shell", device_command("rm", "-rf", where), timeout=300)
+
+
+@check("y1-renamed", "§70")
+def y1_renamed(ctx: Ctx) -> tuple[str, str]:
+    """A file renamed between the listing and the fetch: the fetch says so,
+    and nothing arrives under the old name."""
+    found = shared_folder(ctx, writable=False)
+    if not found:
+        return "SKIP", "no read-only folder on the phone's storage in its Folders the computer may open"
+    root, where, name = y1_place(found)
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        asked = time.time()
+        ask_phone_files(ctx, "list", root, [name])
+        first = wait_for(lambda: kept_listing(ctx, [name], asked), 60, 1)
+        if not first:
+            return "TIMEOUT", "no listing of the folder within 60 s"
+        if first.get("error"):
+            return "FAIL", f"the first listing said: {first['error']}"
+        adb("shell", device_command("mv", f"{where}/f1.txt", f"{where}/g1.txt"))
+        time.sleep(1)
+        asked = time.time()
+        ask_phone_files(ctx, "fetch", root, [name, "f1.txt"])
+        # The phone answers with the folder's listing and its words for this
+        # file; another error (a grant gone) is not this check's (Y1 review).
+        said = wait_for(lambda: (l := kept_listing(ctx, [name], asked))
+                        and "f1.txt is not on the phone any more" in (l.get("error") or "") and l, 30, 1)
+        arrived = (ctx.server.root / "downloads" / "f1.txt").exists()
+        if arrived:
+            return "FAIL", "a file arrived under the old name"
+        if not said:
+            other = kept_listing(ctx, [name], asked)
+            if other and other.get("error"):
+                return "FAIL", f"the fetch said: {other['error']}"
+            return "TIMEOUT", "no word on the fetch within 30 s"
+        return "PASS", f"the fetch said: {said['error']}"
+
+    try:
+        y1_fill(where, 3)
+        # A fetched file is sent as a share: by the internet road here.
+        return road_check(ctx, body)
+    finally:
+        adb("shell", device_command("rm", "-rf", where), timeout=60)
+        (ctx.server.root / "downloads" / "f1.txt").unlink(missing_ok=True)
+
+
 # ---- main ----
 
 
