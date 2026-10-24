@@ -3105,8 +3105,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         if log_size:
             # A size set again empties the log: what the run saw is kept
             # in the throwaway's folder first, for a failure to be read.
-            with open(args.server_root / "phone_log.txt", "w", encoding="utf-8") as kept:
-                kept.write(adb("logcat", "-b", "main", "-d", "-v", "time", timeout=120))
+            # Kept in the throwaway's folder only, never in the repo: it is
+            # the phone's whole log.
+            try:
+                with open(args.server_root / "phone_log.txt", "w", encoding="utf-8") as kept:
+                    kept.write(adb("logcat", "-b", "main", "-d", "-v", "time", timeout=120))
+            except OSError as error:
+                print(f"note: the phone's log was not kept: {error}", file=sys.stderr)
             adb("logcat", "-b", "main", "-G", log_size)
     return 1 if failed else 0
 
