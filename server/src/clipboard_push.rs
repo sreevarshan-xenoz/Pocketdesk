@@ -615,8 +615,15 @@ async fn push_change(
         crate::clip_history::note(&text, None);
     }
     for target in targets {
-        if let Err(e) = target.send_packet(&packet).await {
-            tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id());
+        match target.send_packet(&packet).await {
+            // Z1: who and how long, never the text: a copy sent once, and
+            // never back to the phone it came from, can be seen.
+            Ok(()) => tracing::info!(
+                "Clipboard sent to {} ({} chars)",
+                target.device_id(),
+                text.chars().count()
+            ),
+            Err(e) => tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id()),
         }
     }
     for computer in linked {

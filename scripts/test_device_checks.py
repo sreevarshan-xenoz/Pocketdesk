@@ -208,6 +208,16 @@ class SessionParts(unittest.TestCase):
         )
         self.assertEqual(dc.history_rows(dump), [144, 21])
 
+    def test_copies_sent_to_a_phone(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"INFO x: Clipboard sent to phone-a ({esc}[1m15 chars)",
+            "INFO x: Clipboard sent to phone-a (15 chars)",
+            "INFO x: Clipboard sent to phone-b (15 chars)",
+            "INFO x: Clipboard sent to phone-a (9 chars)",
+        ])
+        self.assertEqual(dc.pushes(log, "phone-a", 15), 2)
+
     def test_a_logcat_line_s_time(self):
         line = "10-24 10:47:56.619 23512 23723 I PocketdeskRust:  INFO connected"
         self.assertAlmostEqual(dc.log_seconds(line), 10 * 3600 + 47 * 60 + 56.619, places=3)

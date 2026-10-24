@@ -2354,6 +2354,45 @@ def y3_history_sheet(ctx: Ctx) -> tuple[str, str]:
             adb("shell", "input", "keyevent", "KEYCODE_BACK")
 
 
+# ---- the clipboard's echo (Z1) ----
+
+
+def pushes(log: str, device: str, length: int) -> int:
+    """The server's "Clipboard sent to" lines for `device` of `length` chars."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum(f"Clipboard sent to {device} ({length} chars)" in line for line in plain.splitlines())
+
+
+@check("z1-echo", "§7")
+def z1_echo(ctx: Ctx) -> tuple[str, str]:
+    """No echo loop: a copy on the computer reaches the phone in a session
+    once, and the phone, which then holds it, does not send it back."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        # The session's own first exchange settles first.
+        time.sleep(8)
+        token = "z1-" + secrets.token_hex(6)
+        before = pushes(ctx.server.log(), ctx.device, len(token))
+        adb("logcat", "-c")
+        clip = ctx.server.root / "clip.txt"
+        tmp = clip.with_suffix(".tmp")
+        tmp.write_text(token, encoding="utf-8")
+        os.replace(tmp, clip)
+        if not wait_for(lambda: pushes(ctx.server.log(), ctx.device, len(token)) > before, 20, 1):
+            return "TIMEOUT", "the server never sent the copy to the phone"
+        time.sleep(20)
+        sent = pushes(ctx.server.log(), ctx.device, len(token)) - before
+        back = sum(f"({len(token)} chars)" in line and "Clipboard sent to" in line
+                   for line in adb("logcat", "-d", "-s", "PocketdeskRust:*").splitlines())
+        kept = ctx.server.clipboard() == token
+        said = f"sent to the phone {sent} time(s); the phone sent it back {back} time(s); the computer's copy {'kept' if kept else 'changed'}"
+        return ("PASS" if sent == 1 and back == 0 and kept else "FAIL"), said
+    return session_check(ctx, body)
+
+
 # ---- main ----
 
 

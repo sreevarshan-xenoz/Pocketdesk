@@ -42,7 +42,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **7. Clipboard + files (Tier 1 #4)**
 
-- No echo loop (toggle sync off/on, paste both ways repeatedly).
+- The same from the phone's side, and with the sync turned off and on: it needs the phone's Copies by themselves (Pocketdesk control).
 
 **10a. Phone mic share (R4 E2)**
 
