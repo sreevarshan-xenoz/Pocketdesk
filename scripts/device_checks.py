@@ -2087,11 +2087,17 @@ def continued_from(log: str, name: str) -> Optional[tuple[int, int]]:
     return (int(found.group(1)), int(found.group(2))) if found else None
 
 
-def partial_bytes(folder: pathlib.Path) -> int:
-    """The largest unfinished file in the server's `partials` folder."""
+def partial_bytes(folder: pathlib.Path, before: frozenset = frozenset()) -> int:
+    """The largest unfinished file in the server's `partials` folder, of
+    those not named in `before` (AC1 review: a leftover must not pass for
+    this share's)."""
     if not folder.is_dir():
         return 0
-    return max((p.stat().st_size for p in folder.glob("*.part")), default=0)
+    return max((p.stat().st_size for p in folder.glob("*.part") if p.name not in before), default=0)
+
+
+def part_names(folder: pathlib.Path) -> frozenset:
+    return frozenset(p.name for p in folder.glob("*.part")) if folder.is_dir() else frozenset()
 
 
 def forget_partials(folder: pathlib.Path, name: str) -> None:
@@ -2120,30 +2126,45 @@ def cut_share(ctx: Ctx, kept: bool) -> tuple[str, str]:
     local = local.rename(local.with_name("ac1-" + local.name[3:]))
     landed = ctx.server.root / "downloads" / local.name
     size = local.stat().st_size
+    before = part_names(partials)
+    settled = False
     try:
         want = md5_of(local)
         stage_in_fixture(local)
         adb("logcat", "-c")
         share_to_throwaway(local.name)
-        if not wait_for(lambda: partial_bytes(partials) >= size * 0.3, 600, 1):
+        if not wait_for(lambda: partial_bytes(partials, before) >= size * 0.3, 600, 1):
             return "TIMEOUT", "the share never reached 30 % on the computer"
-        cut = partial_bytes(partials) * 100 // size
+        cut = partial_bytes(partials, before) * 100 // size
         ctx.server.stop()
         # Off the road until it is set up again (as in x2-resume).
         ctx.on_road = False
+        if landed.exists():
+            # AC1 review: a share that ended before the stop was never cut.
+            return "TIMEOUT", "the share finished before the cut"
         why = by_road(ctx)
         if why:
             return "TIMEOUT", f"after the cut: {why}"
         ctx.on_road = True
-        whole = lambda: landed.exists() and landed.stat().st_size == size  # noqa: E731
         how = "the phone's retry"
-        if not wait_for(whole, 300, 2):
-            # Its retries (5, 15 and 45 s apart) can run out while the road
-            # rests; the same file shared again has the same source id.
-            how = "shared again"
-            share_to_throwaway(local.name)
-            if not wait_for(whole, 900, 2):
-                return "TIMEOUT", f"cut at {cut} %; not whole in the throwaway's downloads after the retry or a second share"
+        # Wait while the file grows; share again only once it has stood
+        # still for two minutes (the phone's retries, 5, 15 and 45 s apart,
+        # can run out while the road rests), never over a retry still
+        # sending (AC1 review). The same file has the same source id.
+        deadline = time.monotonic() + 1500
+        last, since = -1, time.monotonic()
+        while not (landed.exists() and landed.stat().st_size == size):
+            if time.monotonic() > deadline:
+                return "TIMEOUT", f"cut at {cut} %; not whole in the throwaway's downloads within 25 minutes ({how})"
+            now = partial_bytes(partials, before)
+            if now != last:
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since > 120 and how != "shared again":
+                how = "shared again"
+                share_to_throwaway(local.name)
+                since = time.monotonic()
+            time.sleep(2)
+        settled = True
         same = md5_of(landed) == want
         found = continued_from(ctx.server.log(), local.name)
         said = f"cut at {cut} %; {how}"
@@ -2156,10 +2177,18 @@ def cut_share(ctx: Ctx, kept: bool) -> tuple[str, str]:
             return "FAIL", f"{said} continued from {found[0] * 100 // found[1]} % with unfinished files not kept"
         return ("PASS" if same else "FAIL"), f"{said} started over, MD5 {'matches' if same else 'differs'}"
     finally:
+        if not settled:
+            # A transfer may still run: stopped first, so nothing lands
+            # after the cleanup (AC1 review).
+            ctx.server.stop()
+            ctx.on_road = False
         unstage(local.name)
         local.unlink(missing_ok=True)
         landed.unlink(missing_ok=True)
         forget_partials(partials, local.name)
+        # Parts with no record (unfinished files not kept) go too.
+        for name in part_names(partials) - before:
+            (partials / name).unlink(missing_ok=True)
 
 
 def share_resume_ready(ctx: Ctx) -> Optional[str]:

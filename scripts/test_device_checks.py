@@ -242,6 +242,8 @@ class SessionParts(unittest.TestCase):
             (folder / "b.part").write_bytes(b"x" * 3)
             (folder / "index.json").write_bytes(b"x" * 50)
             self.assertEqual(dc.partial_bytes(folder), 7)
+            self.assertEqual(dc.part_names(folder), frozenset({"a.part", "b.part"}))
+            self.assertEqual(dc.partial_bytes(folder, frozenset({"a.part"})), 3)
 
 
 if __name__ == "__main__":
