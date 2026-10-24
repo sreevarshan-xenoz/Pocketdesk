@@ -21,6 +21,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.PersistableBundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
 import java.io.File
@@ -220,12 +221,15 @@ class FilesProvider : ContentProvider() {
 
     override fun query(uri: Uri, projection: Array<String>?, selection: String?, args: Array<String>?, sort: String?): Cursor? {
         val found = file(uri) ?: return null
-        val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+        // Its date too, as a documents provider gives it (AC4: files' dates).
+        val columns = projection
+            ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED)
         return MatrixCursor(columns).apply {
             addRow(columns.map {
                 when (it) {
                     OpenableColumns.DISPLAY_NAME -> found.name
                     OpenableColumns.SIZE -> found.length()
+                    DocumentsContract.Document.COLUMN_LAST_MODIFIED -> found.lastModified()
                     else -> null
                 }
             })

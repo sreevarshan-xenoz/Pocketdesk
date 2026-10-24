@@ -2407,6 +2407,77 @@ def ac3_send_during_share(ctx: Ctx) -> tuple[str, str]:
 LONG.add("ac3-send-during-share")
 
 
+# ---- files' dates from the phone (AC4) ----
+
+# A date in the past for the staged file, as `touch -t` takes it.
+PAST = "202001021230.00"
+
+
+def dated_as(landed: float, original: float, arrived: float) -> str:
+    """How a received file is dated: its own date ("kept", within 2 s), the
+    time it arrived ("arrival", the 10 minutes before `arrived`), or
+    "other"."""
+    if abs(landed - original) <= 2:
+        return "kept"
+    if arrived - 600 <= landed <= arrived + 2:
+        return "arrival"
+    return "other"
+
+
+def dated_share(ctx: Ctx) -> tuple[Optional[str], str]:
+    """Share a small file dated in the past from the phone; how the
+    computer dated it, or None and why it did not arrive."""
+    local = ctx.server.root / f"ac4-{secrets.token_hex(3)}.txt"
+    landed = ctx.server.root / "downloads" / local.name
+    try:
+        local.write_text("ac4" + NL, encoding="utf-8")
+        stage_in_fixture(local)
+        staged = f"files/{local.name}"
+        adb("shell", device_command("run-as", FIXTURE, "touch", "-t", PAST, staged))
+        stamp = adb("shell", device_command("run-as", FIXTURE, "stat", "-c", "%Y", staged)).strip()
+        if not stamp.isdigit():
+            return None, f"the staged file's date could not be read: {stamp[-80:]}"
+        share_to_throwaway(local.name)
+        if not wait_for(lambda: landed.exists() and landed.stat().st_size == local.stat().st_size, 120, 2):
+            return None, "not in the throwaway's downloads within 120 s"
+        # The date is set once the file is in place: a moment to settle.
+        time.sleep(2)
+        return dated_as(landed.stat().st_mtime, int(stamp), time.time()), ""
+    finally:
+        unstage(local.name)
+        local.unlink(missing_ok=True)
+        landed.unlink(missing_ok=True)
+
+
+@check("ac4-dates", "§149")
+def ac4_dates(ctx: Ctx) -> tuple[str, str]:
+    """A share from the phone dated in the past keeps its date while both
+    sides keep dates, and is dated as it arrives with the phone's Keep
+    files' dates off, or the computer's `keep_file_dates` off (K1)."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+    phone_keeps = bool(ctx.phone.prefs("pocketdesk-ui").get("keep_file_dates", True))
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        said = []
+        # Read at each file: no restart needed.
+        for computer_keeps in (True, False):
+            before = ctx.server.configure({"keep_file_dates": "true" if computer_keeps else "false"})
+            try:
+                got, why = dated_share(ctx)
+            finally:
+                ctx.server.restore_config(before)
+            if got is None:
+                return "TIMEOUT", f"the computer's dates {'on' if computer_keeps else 'off'}: {why}"
+            want = "kept" if phone_keeps and computer_keeps else "arrival"
+            said.append(f"the computer's dates {'on' if computer_keeps else 'off'}: {got}")
+            if got != want:
+                return "FAIL", f"the phone's dates {'on' if phone_keeps else 'off'}; " + "; ".join(said) + f" (wanted {want})"
+        return "PASS", f"the phone's dates {'on' if phone_keeps else 'off'}; " + "; ".join(said)
+    return road_check(ctx, body)
+
+
 # ---- a session's codec (X3) ----
 
 
