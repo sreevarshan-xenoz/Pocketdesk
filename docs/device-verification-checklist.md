@@ -81,13 +81,16 @@ of exactly that, including the one fix that merged without its confirming observ
       or upside-down frames (YInvert handling).
 - [ ] R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (where: linux)
       (x,y)" shows that monitor's wl_output origin and frames are its size.
-- [ ] R4 C1 codec negotiation, default off: connect normally → server log shows
+- [x] R4 C1 codec negotiation, default off: connect normally → server log shows
       "Client codec caps negotiated" with `codec=H.264` even on a HEVC-capable phone
       (allow_hevc defaults false); video unaffected.
+      (2026-10-24, the OPPO, which announces HEVC, over the internet road against a throwaway server:
+      `codec=H.264` by default; the runner's `x3-codec`.)
 - [ ] R4 C1 forced HEVC round-trip: `allow_hevc = true` in config.toml, restart server,
       reconnect → log shows `codec=H.265 (HEVC)`; phone decodes (sniffed `video/hevc`)
       with video within ~1 s and input still mapped. A pre-C1 phone build (no caps
       stream) must still get H.264.
+      (The log part seen 2026-10-24 by `x3-codec`, the session up 8 s later; the decode not checked.)
 - [ ] R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at
       window size keeps HEVC and the phone reconfigures on size change without codec change.
 - [ ] R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken
