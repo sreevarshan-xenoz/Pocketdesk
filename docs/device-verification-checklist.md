@@ -722,7 +722,8 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - [ ] Download into a phone without enough space: "Not enough space for …", nothing left in Downloads. (where: other hardware) (a full phone.)
 - [x] A file over 1 GB to the phone, in a session by the internet road: 1,074,790,400 bytes in 130 s (7.9 MiB/s), the MD5 the same on the phone (the runner's `w3-big-send`, the OPPO, 2026-10-24).
 - [x] A send to the phone cut at 30 % (the server stopped, as a dropped network would): no file published under its name, only its partial (`w3-cut-send`, the OPPO, 2026-10-24).
-- [ ] A file over 1 GB from the phone to the computer, and a download from the phone cut halfway (Wi-Fi off).
+- [x] A file over 1 GB from the phone to the computer by the internet road: 1,074,790,400 bytes, the same MD5, 114 s on the wire (`x1-share-big`, shared by the fixture app, the OPPO, 2026-10-24; a first run's share never reached the computer and was not explained, the next passed).
+- [ ] A download from the phone cut halfway (Wi-Fi off).
 - [ ] Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
 - [ ] The Linux host: browse `/home/<user>`, a download, and a send from the app's path field.
 
@@ -1386,7 +1387,7 @@ A71 → this Windows box, LAN, debug server, 2026-10-16, with `pocketdesk events
 
 Owed:
 - [x] `notification` and `link_received` from a phone at both detail levels: metadata gave the app and the host only, "Details in events" added title, text and URL. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
-- [ ] `file_received` at both detail levels.
+- [x] `file_received` at both detail levels: a share from the phone by the internet road gave the size alone with `events_detail = "metadata"`, and the size and the file's name with `"full"` (the runner's `x1-file-received`, the OPPO, 2026-10-24).
 - [ ] `text_received` at both detail levels. (where: sim)
 - [x] "Event log" off (`events = false`): a notification and a link wrote no line. (Seen 2026-10-24 on the OPPO against a throwaway server (S3).)
 - [ ] The desktop Settings hooks box saving a hook the server then runs. (where: by hand)

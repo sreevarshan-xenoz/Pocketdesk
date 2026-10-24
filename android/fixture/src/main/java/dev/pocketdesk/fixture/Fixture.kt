@@ -11,11 +11,20 @@ import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.ContentProvider
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
+import android.database.MatrixCursor
+import android.net.Uri
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.os.PersistableBundle
+import android.provider.OpenableColumns
 import android.util.Log
+import java.io.File
+import java.io.FileNotFoundException
 import android.view.ViewGroup
 import android.widget.EditText
 
@@ -162,4 +171,70 @@ class AnswerReceiver : BroadcastReceiver() {
             "id=${intent.getIntExtra("id", 0)} what=${intent.getStringExtra("what")} reply=${reply ?: ""}",
         )
     }
+}
+
+/**
+ * X1: shares one of its own files to Pocketdesk, as an app's share sheet
+ * does, naming the computer, under a read grant (the adb shell cannot grant
+ * Pocketdesk a MediaStore file). The file is in its files folder, put there
+ * with `run-as dev.pocketdesk.fixture`.
+ * `am start -n dev.pocketdesk.fixture/.ShareOutActivity --es name F --es address A`.
+ */
+class ShareOutActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val name = intent.getStringExtra("name").orEmpty()
+        val uri = Uri.parse("content://${FilesProvider.AUTHORITY}/${Uri.encode(name)}")
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("application/octet-stream")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .putExtra("dev.pocketdesk.android.extra.ADDRESS", intent.getStringExtra("address"))
+            .setClassName("dev.pocketdesk.android", "dev.pocketdesk.android.ShareActivity")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // The grant rides the clip as a share sheet's does.
+        send.clipData = ClipData.newRawUri(name, uri)
+        startActivity(send)
+        Log.i(TAG, "shared $name")
+        finish()
+    }
+}
+
+/** X1: its files folder, read-only, to whoever it grants a URI. */
+class FilesProvider : ContentProvider() {
+    companion object {
+        const val AUTHORITY = "dev.pocketdesk.fixture.files"
+    }
+
+    override fun onCreate(): Boolean = true
+
+    private fun file(uri: Uri): File? {
+        val name = uri.lastPathSegment ?: return null
+        if (name.contains('/') || name == "." || name == "..") return null
+        return File(context?.filesDir ?: return null, name).takeIf { it.isFile }
+    }
+
+    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
+        ParcelFileDescriptor.open(file(uri) ?: throw FileNotFoundException(uri.toString()), ParcelFileDescriptor.MODE_READ_ONLY)
+
+    override fun getType(uri: Uri): String = "application/octet-stream"
+
+    override fun query(uri: Uri, projection: Array<String>?, selection: String?, args: Array<String>?, sort: String?): Cursor? {
+        val found = file(uri) ?: return null
+        val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+        return MatrixCursor(columns).apply {
+            addRow(columns.map {
+                when (it) {
+                    OpenableColumns.DISPLAY_NAME -> found.name
+                    OpenableColumns.SIZE -> found.length()
+                    else -> null
+                }
+            })
+        }
+    }
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+
+    override fun delete(uri: Uri, selection: String?, args: Array<String>?): Int = 0
+
+    override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<String>?): Int = 0
 }
