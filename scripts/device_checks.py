@@ -2391,6 +2391,51 @@ def z1_echo(ctx: Ctx) -> tuple[str, str]:
         said = f"sent to the phone {sent} time(s); the phone sent it back {back} time(s); the computer's copy {'kept' if kept else 'changed'}"
         return ("PASS" if sent == 1 and back == 0 and kept else "FAIL"), said
     return session_check(ctx, body)
+# ---- shares from the phone, repeated (Z2) ----
+
+# Sizes for z2-many-shares: small and large mixed, in this order.
+Z2_SIZES = [1 << 10, 1 << 20, 50 << 20, 4 << 10, 200 << 20, 10 << 20, 100, 25 << 20]
+
+
+@check("z2-many-shares", "§31")
+def z2_many_shares(ctx: Ctx) -> tuple[str, str]:
+    """Shares from the phone one after another, by the internet road: every
+    one arrives whole. One that does not is named with the time it was
+    shared, to be found in both logs (X1 saw one share never reach the
+    computer)."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        lost = []
+        arrived = 0
+        for i, size in enumerate(Z2_SIZES):
+            local = ctx.server.root / f"z2-{i}-{secrets.token_hex(3)}.bin"
+            where = ctx.server.root / "downloads" / local.name
+            try:
+                # Inside the cleanup (Z2 review): a failed write leaves nothing.
+                with open(local, "wb") as out:
+                    out.write(os.urandom(size))
+                # The staging starts here; the share follows it within seconds.
+                at = time.strftime("%H:%M:%S")
+                landed, why = shared(ctx, local, 120 + size // (1 << 20))
+                if landed and md5_of(landed) == md5_of(local):
+                    arrived += 1
+                elif not landed and wait_for(lambda: where.exists() and where.stat().st_size == size, 60, 2):
+                    # Slow, not lost: said so, and it does not run into the next.
+                    lost.append(f"#{i} ({size} bytes, staged at {at}): late, past its deadline")
+                else:
+                    lost.append(f"#{i} ({size} bytes, staged at {at}): {why or 'not the same bytes'}")
+            finally:
+                local.unlink(missing_ok=True)
+                where.unlink(missing_ok=True)
+        said = f"{arrived} of {len(Z2_SIZES)} arrived whole"
+        return ("PASS", said) if not lost else ("FAIL", said + "; lost: " + "; ".join(lost))
+    return road_check(ctx, body)
+
+
+LONG.add("z2-many-shares")
 
 
 # ---- main ----
