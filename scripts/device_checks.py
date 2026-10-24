@@ -28,6 +28,7 @@ import pathlib
 import re
 import secrets
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -458,6 +459,9 @@ class Server:
             # X1 review: what phones send lands in the throwaway's own folder,
             # whatever its config says, never this computer's Downloads.
             "POCKETDESK_DOWNLOAD_DIR": str(self.root / "downloads"),
+            # AD2: the phone's file browser shows this folder as home, never
+            # the owner's.
+            "POCKETDESK_BROWSE_HOME": str(self.root / "home"),
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
@@ -554,6 +558,7 @@ class Server:
             return "a server already runs for this folder: stop it first (pocketdesk stop with its folders)"
         self.input_off()
         (self.root / "downloads").mkdir(exist_ok=True)
+        (self.root / "home").mkdir(exist_ok=True)
         (self.root / "state" / "live_sessions.json").unlink(missing_ok=True)
         full = dict(os.environ)
         full.update(self.env())
@@ -3000,6 +3005,240 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
             why = restart_with_permission(ctx, "clipboard", had)
             if why:
                 print(f"note: putting the Clipboard permission back: {why}", file=sys.stderr)
+# ---- the phone's remote file browser (AD2, AD3) ----
+#
+# The session's Files on this computer… lists the throwaway's own `home`
+# (POCKETDESK_BROWSE_HOME), never the owner's. Its sheets are read from UI
+# dumps; a tap is only ever on the phone's own controls, and the phone's
+# input is off for the session checks anyway.
+
+AD2_FILES = 2000
+
+
+def tap_scrolling(ctx: Ctx, label: str, swipes: int = 8) -> bool:
+    """Tap `label` in a sheet, scrolling it up until it shows."""
+    for _ in range(swipes):
+        if tap_text(label, ctx.phone.dump()):
+            return True
+        adb("shell", "input", "swipe", "540", "1900", "540", "1100", "300")
+        time.sleep(1)
+    return False
+
+
+def shows(ctx: Ctx, label: str) -> bool:
+    return any(text == label for text, _, _ in dump_nodes(ctx.phone.dump()))
+
+
+def open_browser(ctx: Ctx) -> Optional[str]:
+    """From a session, the browse sheet at home; why not, when it is not."""
+    if not wait_for(lambda: tap_text("Session menu", ctx.phone.dump()), 20, 2):
+        return "no Session menu on the session's screen"
+    time.sleep(1)
+    if not tap_scrolling(ctx, "Files on this computer…"):
+        return "no Files on this computer… in the session menu"
+    if not wait_for(lambda: shows(ctx, "Send a folder to this computer"), 20, 1):
+        return "the browse sheet did not open"
+    return None
+
+
+def enter(ctx: Ctx, name: str) -> bool:
+    """Open the folder `name` the sheet lists, and wait for its listing."""
+    if not wait_for(lambda: tap_text(name, ctx.phone.dump()), 30, 2):
+        return False
+    return bool(wait_for(lambda: shows(ctx, "Up"), 30, 1))
+
+
+def download_here(ctx: Ctx, what: str) -> bool:
+    """Tap `what` ("Download this folder", or a file's name) and confirm."""
+    if not tap_text(what, ctx.phone.dump()):
+        return False
+    return bool(wait_for(lambda: tap_text("Download", ctx.phone.dump()), 15, 1))
+
+
+def close_sheets(ctx: Ctx) -> None:
+    """Back out of the browse sheet and the session menu, so the session
+    ends from its own screen and the next check finds Home."""
+    for _ in range(3):
+        if not (shows(ctx, "Send a folder to this computer") or shows(ctx, "Session settings")):
+            return
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1)
+
+
+def phone_names(folder: str) -> set[str]:
+    """The files in `folder` of the phone's Pocketdesk downloads (a pending
+    one, hidden, is not listed)."""
+    return set(adb("shell", device_command("ls", f"{PHONE_DOWNLOADS}/{folder}"), timeout=60).split()) - {"ls:"}
+
+
+def phone_count(folder: str) -> int:
+    out = adb("shell", f"ls {PHONE_DOWNLOADS}/{folder} 2>/dev/null | wc -l", timeout=60).strip()
+    return int(out) if out.isdigit() else 0
+
+
+def settle_then_drop(ctx: Ctx, folder: str, settled: bool) -> None:
+    """Remove `folder` from the phone once nothing more arrives in it: after
+    a step that timed out, the server is stopped first and the phone's
+    queued fetches allowed to end (AD2 review), or it would make it again."""
+    if not settled:
+        ctx.server.stop()
+        ctx.on_road = False
+    last, since, end = -1, time.monotonic(), time.monotonic() + 90
+    while time.monotonic() < end and time.monotonic() - since < 15:
+        now = phone_count(folder)
+        if now != last:
+            last, since = now, time.monotonic()
+        time.sleep(3)
+    drop_folder_from_phone(folder)
+
+
+def drop_folder_from_phone(folder: str) -> None:
+    # Only a name this runner made: letters, digits and dashes.
+    if re.fullmatch(r"ad[23]-[a-z0-9-]+", folder):
+        adb("shell", device_command("rm", "-rf", f"{PHONE_DOWNLOADS}/{folder}"), timeout=120)
+
+
+@check("ad2-big-folder", "§52")
+def ad2_big_folder(ctx: Ctx) -> tuple[str, str]:
+    """A folder of thousands of files downloaded from the remote browser:
+    the answer arrives, other folders still list while the offers come, and
+    every file lands (§52)."""
+    tag = secrets.token_hex(3)
+    home = ctx.server.root / "home"
+    many, other = f"ad2-many-{tag}", f"ad2-other-{tag}"
+    settled = False
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        try:
+            return steps(ctx)
+        finally:
+            close_sheets(ctx)
+
+    def steps(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        why = open_browser(ctx)
+        if why:
+            return "TIMEOUT", why
+        if not enter(ctx, many):
+            return "TIMEOUT", f"the browser did not open {many}"
+        asked = time.monotonic()
+        if not download_here(ctx, "Download this folder"):
+            return "TIMEOUT", "no Download this folder, or no Download to confirm it"
+        # Another query while the folder's offers come.
+        if not wait_for(lambda: tap_text("Up", ctx.phone.dump()), 15, 1):
+            return "TIMEOUT", "no Up after asking for the folder"
+        if not enter(ctx, other) or not wait_for(lambda: shows(ctx, "x.txt"), 30, 1):
+            return "FAIL", "another folder did not list while the big one came"
+        listed = time.monotonic() - asked
+        # Overlapped only if the folder was still arriving (review).
+        meanwhile = phone_count(many)
+        if not wait_for(lambda: phone_count(many) > 0, 120, 3):
+            return "TIMEOUT", "no file of the folder on the phone within 120 s"
+        if not wait_for(lambda: phone_count(many) >= AD2_FILES, 2400, 10):
+            return "TIMEOUT", f"{phone_count(many)} of {AD2_FILES} files on the phone after 40 minutes"
+        took = time.monotonic() - asked
+        nonlocal settled
+        settled = True
+        # Each file by its name (review): a retry's "f0001 (1).txt" must not
+        # stand in for a file that never came.
+        want = {f"f{i:04}.txt" for i in range(AD2_FILES)}
+        got = phone_names(many)
+        said = (f"{len(got & want)} of {AD2_FILES} files on the phone in {took:.0f} s;"
+                f" another folder listed {listed:.0f} s after the ask, with {meanwhile} of them in")
+        if got != want:
+            return "FAIL", said + f"; missing {len(want - got)}, extra {len(got - want)}"
+        if meanwhile >= AD2_FILES:
+            return "SKIP", said + ": the folder had all come, nothing overlapped"
+        return "PASS", said
+
+    try:
+        (home / many).mkdir(parents=True)
+        (home / other).mkdir(parents=True)
+        for i in range(AD2_FILES):
+            (home / many / f"f{i:04}.txt").write_text(f"{i}" + NL, encoding="utf-8")
+        (home / other / "x.txt").write_text("x" + NL, encoding="utf-8")
+        return session_check(ctx, body)
+    finally:
+        shutil.rmtree(home / many, ignore_errors=True)
+        shutil.rmtree(home / other, ignore_errors=True)
+        settle_then_drop(ctx, many, settled)
+
+
+LONG.add("ad2-big-folder")
+
+
+@check("ad3-dates", "§149")
+def ad3_dates(ctx: Ctx) -> tuple[str, str]:
+    """A file and a folder downloaded from the remote browser keep their
+    dates (§149), with both sides' Keep files' dates on (the defaults)."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("keep_file_dates", True):
+        return "SKIP", "turn on Keep files' dates in the phone's Settings"
+    tag = secrets.token_hex(3)
+    home = ctx.server.root / "home"
+    top, fold, name = f"ad3-{tag}", f"ad3-fold-{tag}", f"ad3-{tag}.txt"
+    past = 1577968200  # 2020-01-02 12:30 UTC
+    settled = False
+
+    def phone_date(path: str) -> Optional[int]:
+        out = adb("shell", device_command("stat", "-c", "%Y", f"{PHONE_DOWNLOADS}/{path}")).strip()
+        return int(out) if out.isdigit() else None
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        try:
+            return steps(ctx)
+        finally:
+            close_sheets(ctx)
+
+    def steps(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        why = open_browser(ctx)
+        if why:
+            return "TIMEOUT", why
+        if not enter(ctx, top):
+            return "TIMEOUT", f"the browser did not open {top}"
+        if not download_here(ctx, name):
+            return "TIMEOUT", f"no Download for {name}"
+        # The phone publishes a file, then dates it (review): its date read
+        # until it is the one sent, the last read kept for a FAIL.
+        seen = {}
+
+        def dated(path: str) -> bool:
+            seen[path] = phone_date(path)
+            return seen[path] is not None and abs(seen[path] - past) <= 2
+
+        wait_for(lambda: dated(name), 75, 2)
+        file_date = seen.get(name)
+        if not enter(ctx, fold) or not download_here(ctx, "Download this folder"):
+            return "TIMEOUT", f"no Download this folder in {fold}"
+        wait_for(lambda: dated(f"{fold}/inner.txt"), 105, 3)
+        folder_date = seen.get(f"{fold}/inner.txt")
+        nonlocal settled
+        settled = True
+        said = []
+        for what, date in (("the file", file_date), ("the folder's file", folder_date)):
+            if date is None:
+                return "TIMEOUT", f"{what} did not reach the phone"
+            kept = abs(date - past) <= 2
+            said.append(f"{what} {'kept its date' if kept else 'dated ' + time.strftime('%Y-%m-%d', time.gmtime(date))}")
+        kept = all(abs(d - past) <= 2 for d in (file_date, folder_date))
+        return ("PASS" if kept else "FAIL"), "; ".join(said)
+
+    try:
+        (home / top / fold).mkdir(parents=True)
+        for path in (home / top / name, home / top / fold / "inner.txt"):
+            path.write_text("ad3" + NL, encoding="utf-8")
+            os.utime(path, (past, past))
+        return session_check(ctx, body)
+    finally:
+        shutil.rmtree(home / top, ignore_errors=True)
+        settle_then_drop(ctx, fold, settled)
+        drop_from_phone(name)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
