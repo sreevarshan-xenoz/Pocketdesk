@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-893 open items.
+888 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 63 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 58 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -91,16 +91,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **31. Files both ways and the remote browser**
 
 - A download refused by the desktop (an offer used twice) fails at once with its reason, not after 30 s.
-- Send a file while a large share from the phone is running; the offer still arrives.
 - A download from the phone cut halfway (Wi-Fi off).
 
 **38. Image clipboard (N4)**
 
 - With the phone's Clipboard permission off, neither direction moves.
-
-**46. Phase R2: long sessions and recovery**
-
-- The same from the phone to the computer.
 
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
@@ -110,8 +105,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A file from the remote browser broken and continued.
 - "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
-- "Unfinished files: not kept" on the desktop: a retry starts over.
-- A file that changes between attempts starts over (the prefix hash).
 
 **52. Download a folder from the remote browser**
 
@@ -170,7 +163,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **149. Files keep their dates (K1)**
 
 - A file downloaded from the remote file browser, and a folder each way.
-- "Keep files' dates" off on the phone: a share to the computer dated as it arrives.
 
 **162. The phone's state on the computer (L9)**
 
