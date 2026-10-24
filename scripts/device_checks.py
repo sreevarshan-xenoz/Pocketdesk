@@ -3481,6 +3481,15 @@ def phone_size(path: str) -> Optional[int]:
     return int(out) if out.isdigit() else None
 
 
+def transfers_state() -> Optional[bool]:
+    """Whether the phone's TransferService runs; None when dumpsys did not
+    answer as it does (AF2 review: a failed adb call is not "ended")."""
+    out = adb("shell", "dumpsys", "activity", "services", f"{APP}/.service.TransferService")
+    if "ServiceRecord" in out:
+        return True
+    return False if "ACTIVITY MANAGER SERVICES" in out else None
+
+
 def browse_download(ctx: Ctx, folder: str, name: str) -> Optional[str]:
     """In a new session, ask the remote browser for `folder`/`name`; why not,
     when it could not."""
@@ -3528,10 +3537,14 @@ def af1_browse_resume(ctx: Ctx) -> tuple[str, str]:
             return "TIMEOUT", "the download never reached 30 %"
         ctx.server.stop()
         ctx.on_road = False
+        if phone_size(name) == size:
+            # AF1 review: a download that ended before the stop was never cut.
+            return "TIMEOUT", "the download finished before the cut"
         why = by_road(ctx)
         if why:
             return "TIMEOUT", f"after the cut: {why}"
         ctx.on_road = True
+        said = ""
         # The phone's own retry first (5, 15, 45 s apart; the road can rest
         # longer), then asked again from the browser once it stands still.
         how = "the phone's retry"
@@ -3542,7 +3555,11 @@ def af1_browse_resume(ctx: Ctx) -> tuple[str, str]:
             now = (transfer_done(ctx, name) or (0, 0))[0]
             if now != last:
                 last, since = now, time.monotonic()
-            elif time.monotonic() - since > 120 and how != "asked again":
+            elif time.monotonic() - since > 120 and how != "asked again" and transfers_state() is False:
+                # Only once the phone's retries have ended (review: a re-ask
+                # over a slow retry downloads the file twice). The log first:
+                # a new session's start clears it.
+                said += adb("logcat", "-d", "-s", "PocketdeskRust:*")
                 how = "asked again"
                 end_session(ctx)
                 why = browse_download(ctx, folder, name)
@@ -3551,9 +3568,13 @@ def af1_browse_resume(ctx: Ctx) -> tuple[str, str]:
                 since = time.monotonic()
             time.sleep(3)
         settled = True
-        said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
-        found = re.search(r"Download continued from (\d+) of (\d+) bytes", said)
+        said += adb("logcat", "-d", "-s", "PocketdeskRust:*")
+        # This file's: its size (review).
+        found = next((m for m in re.finditer(r"Download continued from (\d+) of (\d+) bytes", said)
+                      if int(m.group(2)) == size), None)
         got = adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{name}"), timeout=300).split()
+        if got[:1] == ["TIMEOUT"]:
+            return "TIMEOUT", "md5sum on the phone ran past 300 s"
         same = bool(got) and got[0] == want
         cut = f"cut at {part[0] * 100 // part[1]} %; {how}"
         if not found:
