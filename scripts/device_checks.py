@@ -1504,6 +1504,15 @@ def start_session(ctx: Ctx) -> Optional[float]:
         tap_text("Exit", ctx.phone.dump())
         time.sleep(2)
     spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 20, 2)
+    for _ in range(3):
+        if spot:
+            break
+        # Another leftover screen (a kicked session's card, a sheet): Back
+        # towards Home, and look again.
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(2)
+        adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+        spot = wait_for(lambda: connect_button(ctx.phone.dump(), "127.0.0.1"), 8, 2)
     if not spot:
         return None
     adb("logcat", "-c")
