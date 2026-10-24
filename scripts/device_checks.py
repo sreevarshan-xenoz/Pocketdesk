@@ -2377,9 +2377,10 @@ def ac3_send_during_share(ctx: Ctx) -> tuple[str, str]:
             order = "after the share" if landed.exists() else "before the share ended"
             # The phone publishes the file just after the send hears it saved
             # (AC3 review): a few seconds for it to appear.
-            got = wait_for(lambda: [w for w in adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split()
-                                    if len(w) == 32], 20, 2) or []
-            small_same = bool(got) and got[0] == want_small
+            # Until it hashes as sent (review: a half-published copy must not
+            # end the wait).
+            small_same = bool(wait_for(lambda: want_small in adb(
+                "shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split(), 20, 2))
             if not wait_for(lambda: landed.exists() and landed.stat().st_size == size, 1200, 2):
                 return "TIMEOUT", "the share did not end whole within 20 minutes of the send"
             settled = True
