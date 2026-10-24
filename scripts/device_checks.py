@@ -3608,12 +3608,6 @@ LONG.add("af1-browse-resume")
 # ---- the phone's Retry failed files off (AF2) ----
 
 
-def transfers_running() -> bool:
-    """Whether the phone's TransferService runs (a transfer, or its retries)."""
-    out = adb("shell", "dumpsys", "activity", "services", f"{APP}/.service.TransferService")
-    return "ServiceRecord" in out
-
-
 @check("af2-retry-off", "§50")
 def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
     """With the phone's Retry failed files off, a send cut part way fails at
@@ -3628,6 +3622,7 @@ def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: in_session(ctx), 30, 1):
             return "TIMEOUT", "no session within 30 s"
         path = big_file(ctx, GIB)
+        stopped = False
         try:
             first = send_cli(ctx, path, None)
             try:
@@ -3637,13 +3632,16 @@ def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
             part = wait_for(lambda: (d := transfer_done(ctx, path.name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
             if not part:
                 return "TIMEOUT", "the send never reached 30 %"
-            if not transfers_running():
-                return "TIMEOUT", "the phone's transfer service was not running at the cut"
+            if transfers_state() is not True:
+                return "TIMEOUT", "the phone's transfer service was not seen running at the cut"
             # The cut; the server stays down, so a retry could only fail.
             ctx.server.stop()
             ctx.on_road = False
+            stopped = True
             cut = time.monotonic()
-            ended = wait_for(lambda: not transfers_running(), 180, 1)
+            # Ended: seen gone twice running, never a failed adb call (review).
+            gone = []
+            ended = wait_for(lambda: gone.append(transfers_state() is False) or gone[-2:] == [True, True], 180, 1)
             took = time.monotonic() - cut
             time.sleep(5)
             kept = on_phone(path.name)
@@ -3655,6 +3653,10 @@ def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
             # Ending within 60 s is ending at once, with no retry.
             return ("PASS" if ended and took <= 60 and not kept else "FAIL"), said
         finally:
+            if not stopped:
+                # A send may still run, and hold the file: stopped first (review).
+                ctx.server.stop()
+                ctx.on_road = False
             drop_from_phone(path.name)
             path.unlink(missing_ok=True)
     return session_check(ctx, body)
