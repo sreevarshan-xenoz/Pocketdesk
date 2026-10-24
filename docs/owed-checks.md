@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-886 open items.
+885 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 56 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 55 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -26,7 +26,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at window size keeps HEVC and the phone reconfigures on size change without codec change.
 - R4 C2 crop stability: during a software-fallback session, pick/clear a window crop → encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a rebuild must not re-probe the dead hardware).
 
 **2b. Compositor-true latency read (R4 E3)**
@@ -50,7 +49,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **11. WAN over iroh (R1)**
 
-- A deliberate stall (crop to a window, or Wi-Fi off and on mid-session) moves `enc_max` or `rtt_max` above their p50.
+- A deliberate stall (crop to a window, or Wi-Fi off and on mid-session) moves `enc_max` or `rtt_max` above their p50. (2026-10-25: not by the session's record. Its encode tail times `encode_frame` alone, so a crop's rebuild never reaches `enc_*`, and `rtt_*` is sampled every 5 s apart from the crops; `max` sits above `p50` with no crop at all. Owed by another reading, such as the HUD's during the crop.)
 - `dec_*` grows when the desktop is cropped to a bigger window, and `rnd_p50` jumps when the bitrate clamp or a preset slows the link.
 
 **11b. HUD link-profile presets (R4 E5)**
@@ -59,7 +58,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **16. Long-run / hygiene**
 
-- The same across resolution changes (no decoder leak), fps steady, no watchdog kills.
+- The same across resolution changes (no decoder leak), fps steady, no watchdog kills. (2026-10-25, the runner's `ae2-crops`: twelve changes of size in one session (1395x786 and 2560x1440, six rounds) with no redial, the app's memory level 175.9 → 186.3 MB, at most 186.7; three runs. The frame rate was not read: the HUD's numbers need Show connection details on the phone.)
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
