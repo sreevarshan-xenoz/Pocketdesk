@@ -1993,6 +1993,80 @@ def x1_file_received(ctx: Ctx) -> tuple[str, str]:
 LONG.add("x1-share-big")
 
 
+# ---- a cut transfer continued (X2) ----
+
+
+@check("x2-resume", "§50")
+def x2_resume(ctx: Ctx) -> tuple[str, str]:
+    """A send to the phone cut part way (the server stopped, as a dropped
+    network would) and sent again: the phone continues from what it kept,
+    and the file ends whole (§46, §50)."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("retry_transfers", True):
+        return "SKIP", "turn on Retry failed files in the phone's Settings"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        path = big_file(ctx, GIB)
+        try:
+            want = md5_of(path)
+            first = send_cli(ctx, path, None)
+            try:
+                first.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                first.kill()
+            part = wait_for(lambda: (d := transfer_done(ctx, path.name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
+            if not part:
+                return "TIMEOUT", "the first send never reached 30 %"
+            # The cut, as in w3-cut-send, but the partial stays on the phone.
+            ctx.server.stop()
+            # Off the road until it is set up again (X2 review: a failed
+            # relink must not leave the next check thinking it is on it).
+            ctx.on_road = False
+            time.sleep(15)
+            why = by_road(ctx)
+            if why:
+                return "TIMEOUT", f"after the cut: {why}"
+            ctx.on_road = True
+            # The phone is still on the dropped session's card: leave it.
+            end_session(ctx)
+            if start_session(ctx) is None:
+                return "TIMEOUT", "no Connect after the cut"
+            if not wait_for(lambda: in_session(ctx), 30, 1):
+                return "TIMEOUT", "no session after the cut"
+            # start_session cleared the phone's log: what follows is this send's.
+            second = send_cli(ctx, path, 1200)
+            try:
+                out, _ = second.communicate(timeout=1260)
+            except subprocess.TimeoutExpired:
+                second.kill()
+                return "TIMEOUT", "the second send ran past 21 minutes"
+            if second.returncode != 0:
+                return "FAIL", f"the second send's exit {second.returncode}: {out.strip()[-200:]}"
+            said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
+            found = re.search(r"Download continued from (\d+) of (\d+) bytes", said)
+            remote = f"{PHONE_DOWNLOADS}/{path.name}"
+            got = adb("shell", device_command("md5sum", remote), timeout=300).split()
+            if got[:1] == ["TIMEOUT"]:
+                return "TIMEOUT", "md5sum on the phone ran past 300 s"
+            same = bool(got) and got[0] == want
+            cut = f"cut at {part[0] * 100 // part[1]} %"
+            if not found:
+                return "FAIL", f"{cut}; sent again whole (no \"continued\" in the phone's log), MD5 {'matches' if same else 'differs'}"
+            offset = int(found.group(1))
+            return ("PASS" if same and offset > 0 else "FAIL"), (
+                f"{cut}; continued from {offset * 100 // int(found.group(2))} %, MD5 {'matches' if same else 'differs'}")
+        finally:
+            drop_from_phone(path.name)
+            path.unlink(missing_ok=True)
+    return session_check(ctx, body)
+
+
+LONG.add("x2-resume")
+
+
 # ---- main ----
 
 

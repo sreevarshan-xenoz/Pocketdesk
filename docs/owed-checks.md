@@ -101,7 +101,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **46. Phase R2: long sessions and recovery**
 
-- A file transfer cut by a drop (today it fails and is sent again whole).
+- The same from the phone to the computer.
 
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
