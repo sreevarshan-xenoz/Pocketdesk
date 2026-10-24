@@ -3336,10 +3336,13 @@ def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
         try:
             seen = len(rebuilds(ctx.server.log()))
             desktop = capture_size(ctx.server.log())
+            if desktop is None:
+                return "SKIP", "the server's log gives no desktop size to crop from"
             size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
             if size is None:
                 return "SKIP", why
-            new = wait_for(lambda: rebuilds(ctx.server.log())[seen:], 30, 1)
+            # A rebuild away from the desktop's size (review: not some other).
+            new = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] != desktop], 30, 1)
             if not new:
                 return "FAIL", f"no rebuild after a crop to {size[0]}x{size[1]}"
             cropped = new[-1]
@@ -3350,8 +3353,9 @@ def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
             why = open_picker(ctx)
             if why:
                 return "TIMEOUT", f"back to the whole desktop: {why}"
-            tap_text("Whole desktop", ctx.phone.dump())
-            back = wait_for(lambda: rebuilds(ctx.server.log())[seen:], 30, 1)
+            if not tap_text("Whole desktop", ctx.phone.dump()):
+                return "TIMEOUT", "no Whole desktop in the window picker"
+            back = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] == desktop], 30, 1)
             time.sleep(5)
             still = in_session(ctx)
         finally:
