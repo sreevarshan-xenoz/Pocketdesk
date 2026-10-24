@@ -2927,8 +2927,8 @@ def copy_image(ctx: Ctx, wait: float) -> tuple[bool, bool]:
 
 def restart_with_permission(ctx: Ctx, key: str, value: Optional[bool]) -> Optional[str]:
     """Restart the throwaway with the phone's permission `key` set (None
-    takes it out), as the trust store holds it before the start; why not,
-    when the phone did not link again."""
+    takes it out), as the trust store holds it before the start, and the
+    phone linked again by the internet road; why not, when it is not."""
     ctx.server.stop()
     path = ctx.server.root / "state" / "trusted_devices.json"
     store = json.loads(path.read_text(encoding="utf-8"))
@@ -2941,12 +2941,10 @@ def restart_with_permission(ctx: Ctx, key: str, value: Optional[bool]) -> Option
     tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
     os.replace(tmp, path)
     ctx.on_road = False
-    why = ctx.server.start()
+    why = by_road(ctx)
     if why:
         return why
-    ctx.phone.wake()
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
-        return "the phone did not link again within 120 s"
+    ctx.on_road = True
     return None
 
 
@@ -2956,7 +2954,10 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
     a session, with the phone's Computer's clipboard and Computer's copied
     images in the background on (§168); with the latter off, nothing is
     fetched. Then, with the phone's Clipboard permission off on the
-    computer, nothing moves either (§38)."""
+    computer, nothing moves either (§38). By the internet road: the server
+    brings the image to the phone by dialing it back, and never dials back
+    to 127.0.0.1, which a phone through adb reverse is (its first runs
+    passed or failed by which road the phone happened to be on)."""
     prefs = ctx.phone.prefs("pocketdesk-ui")
     if not prefs.get("clipboard_in_background"):
         return "SKIP", "turn on Computer's clipboard in the background in the phone's Settings"
@@ -2968,7 +2969,14 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
     said = []
     changed = False
     try:
-        time.sleep(2)
+        if not ctx.on_road:
+            why = by_road(ctx)
+            if why:
+                return "TIMEOUT", why
+            ctx.on_road = True
+        # The server's clipboard watch primes on its first tick with a phone
+        # linked and never pushes what it primes on (review): a moment first.
+        time.sleep(4)
         told, got = copy_image(ctx, 60 if images_on else 45)
         said.append(f"images in the background {'on' if images_on else 'off'}: "
                     f"{'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
@@ -2981,6 +2989,7 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
         why = restart_with_permission(ctx, "clipboard", False)
         if why:
             return "TIMEOUT", f"with the Clipboard permission off: {why}"
+        time.sleep(4)
         told, got = copy_image(ctx, 45)
         said.append(f"the Clipboard permission off: {'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
         return ("FAIL" if told or got else "PASS"), "; ".join(said)
