@@ -2019,6 +2019,7 @@ def x2_resume(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: in_session(ctx), 30, 1):
             return "TIMEOUT", "no session within 30 s"
         path = big_file(ctx, GIB)
+        settled = False
         try:
             want = md5_of(path)
             first = send_cli(ctx, path, None)
@@ -2052,6 +2053,7 @@ def x2_resume(ctx: Ctx) -> tuple[str, str]:
             except subprocess.TimeoutExpired:
                 second.kill()
                 return "TIMEOUT", "the second send ran past 21 minutes"
+            settled = True
             if second.returncode != 0:
                 return "FAIL", f"the second send's exit {second.returncode}: {out.strip()[-200:]}"
             said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
@@ -2068,6 +2070,10 @@ def x2_resume(ctx: Ctx) -> tuple[str, str]:
             return ("PASS" if same and offset > 0 else "FAIL"), (
                 f"{cut}; continued from {offset * 100 // int(found.group(2))} %, MD5 {'matches' if same else 'differs'}")
         finally:
+            if not settled:
+                # A send may still run: stopped first (AC2 review).
+                ctx.server.stop()
+                ctx.on_road = False
             drop_from_phone(path.name)
             path.unlink(missing_ok=True)
     return session_check(ctx, body)
