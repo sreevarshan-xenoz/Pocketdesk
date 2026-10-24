@@ -3605,6 +3605,66 @@ def af1_browse_resume(ctx: Ctx) -> tuple[str, str]:
 LONG.add("af1-browse-resume")
 
 
+# ---- the phone's Retry failed files off (AF2) ----
+
+
+@check("af2-retry-off", "§50")
+def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
+    """With the phone's Retry failed files off, a send cut part way fails at
+    once (no retries, which would take a minute and more), and nothing of
+    it is kept on the phone (§50)."""
+    if ctx.phone.prefs("pocketdesk-ui").get("retry_transfers", True):
+        return "SKIP", "turn off Retry failed files in the phone's Settings (this checks it off)"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        path = big_file(ctx, GIB)
+        stopped = False
+        try:
+            first = send_cli(ctx, path, None)
+            try:
+                first.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                first.kill()
+            part = wait_for(lambda: (d := transfer_done(ctx, path.name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
+            if not part:
+                return "TIMEOUT", "the send never reached 30 %"
+            if transfers_state() is not True:
+                return "TIMEOUT", "the phone's transfer service was not seen running at the cut"
+            # The cut; the server stays down, so a retry could only fail.
+            ctx.server.stop()
+            ctx.on_road = False
+            stopped = True
+            cut = time.monotonic()
+            # Ended: seen gone twice running, never a failed adb call (review).
+            gone = []
+            ended = wait_for(lambda: gone.append(transfers_state() is False) or gone[-2:] == [True, True], 180, 1)
+            took = time.monotonic() - cut
+            time.sleep(5)
+            kept = on_phone(path.name)
+            said = (f"cut at {part[0] * 100 // part[1]} %; the phone's transfer ended "
+                    f"{f'{took:.0f} s after the cut' if ended else 'not within 180 s'}; "
+                    f"{len(kept)} entr{'y' if len(kept) == 1 else 'ies'} of it kept on the phone")
+            # The phone needs about 30 s to call the link dead (its first run:
+            # 29 s); retries would wait 5, 15 and 45 s more between attempts.
+            # Ending within 60 s is ending at once, with no retry.
+            return ("PASS" if ended and took <= 60 and not kept else "FAIL"), said
+        finally:
+            if not stopped:
+                # A send may still run, and hold the file: stopped first (review).
+                ctx.server.stop()
+                ctx.on_road = False
+            drop_from_phone(path.name)
+            path.unlink(missing_ok=True)
+    return session_check(ctx, body)
+
+
+LONG.add("af2-retry-off")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
