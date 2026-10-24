@@ -1700,6 +1700,142 @@ def w2_quiet(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- long transfers over the internet road (W3) ----
+
+PHONE_DOWNLOADS = "/sdcard/Download/Pocketdesk"
+GIB = 1 << 30
+
+
+def big_file(ctx: Ctx, size: int) -> pathlib.Path:
+    """A file of random bytes in the throwaway's folder, named for this run."""
+    path = ctx.server.root / f"w3-{secrets.token_hex(3)}.bin"
+    try:
+        with open(path, "wb") as out:
+            left = size
+            while left:
+                chunk = min(left, 8 << 20)
+                out.write(os.urandom(chunk))
+                left -= chunk
+    except BaseException:
+        # A full disk or an interrupt leaves no half gigabyte behind (W3 review).
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def md5_of(path: pathlib.Path) -> str:
+    import hashlib
+    digest = hashlib.md5()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(8 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def send_cli(ctx: Ctx, path: pathlib.Path, wait: Optional[int]) -> subprocess.Popen:
+    """`pocketdesk send` to the phone, as the Files tab sends."""
+    args = [str(ctx.server.exe), "send", ctx.device, str(path)] + (["--wait", str(wait)] if wait else [])
+    full = dict(os.environ)
+    full.update(ctx.server.env())
+    return subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=full, text=True)
+
+
+def transfer_done(ctx: Ctx, name: str) -> Optional[tuple[int, int]]:
+    """`(done, size)` of the transfer of `name`, from the server's record."""
+    try:
+        record = json.loads((ctx.server.root / "state" / "transfers.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    found = next((t for t in record.get("transfers", []) if t.get("name") == name), None)
+    return (found.get("done", 0), found.get("size", 0)) if found else None
+
+
+def on_phone(name: str) -> list[str]:
+    """The entries in the phone's Pocketdesk downloads that carry `name`."""
+    out = adb("shell", f"ls -a {PHONE_DOWNLOADS} 2>/dev/null")
+    return [entry for entry in out.split() if name in entry]
+
+
+def drop_from_phone(name: str) -> None:
+    for entry in on_phone(name):
+        adb("shell", device_command("rm", "-f", f"{PHONE_DOWNLOADS}/{entry}"))
+
+
+@check("w3-big-send", "§31")
+def w3_big_send(ctx: Ctx) -> tuple[str, str]:
+    """A file over 1 GB to the phone in a session by the internet road: all
+    of it, the same bytes (size and MD5 on the phone)."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        path = big_file(ctx, GIB + (1 << 20))
+        try:
+            want = md5_of(path)
+            started = time.monotonic()
+            sent = send_cli(ctx, path, 1200)
+            try:
+                out, _ = sent.communicate(timeout=1260)
+            except subprocess.TimeoutExpired:
+                sent.kill()
+                return "TIMEOUT", "the send ran past 21 minutes"
+            took = time.monotonic() - started
+            if sent.returncode != 0:
+                return "FAIL", f"send exit {sent.returncode}: {out.strip()[-200:]}"
+            remote = f"{PHONE_DOWNLOADS}/{path.name}"
+            size = adb("shell", device_command("stat", "-c", "%s", remote)).strip()
+            got = adb("shell", device_command("md5sum", remote), timeout=300).split()
+            if got[:1] == ["TIMEOUT"]:
+                return "TIMEOUT", "md5sum on the phone ran past 300 s"
+            same = size == str(path.stat().st_size) and got and got[0] == want
+            rate = path.stat().st_size / took / (1 << 20)
+            return ("PASS" if same else "FAIL"), f"{size} bytes in {took:.0f} s ({rate:.1f} MiB/s), MD5 {'matches' if same else 'differs'}"
+        finally:
+            drop_from_phone(path.name)
+            path.unlink(missing_ok=True)
+    return session_check(ctx, body)
+
+
+@check("w3-cut-send", "§31")
+def w3_cut_send(ctx: Ctx) -> tuple[str, str]:
+    """A send to the phone cut part way (the server stopped, as a dropped
+    network would): no file published under its name."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        path = big_file(ctx, GIB)
+        try:
+            sent = send_cli(ctx, path, None)
+            try:
+                sent.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                sent.kill()
+            part = wait_for(lambda: (d := transfer_done(ctx, path.name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
+            if not part:
+                return "TIMEOUT", "the send never reached 30 %"
+            # The cut: the server goes, mid-send; the road is set up again
+            # by the next session check.
+            ctx.server.stop()
+            ctx.on_road = False
+            time.sleep(30)
+            left = on_phone(path.name)
+            published = [e for e in left if e == path.name]
+            said = f"cut at {part[0] * 100 // part[1]} %; on the phone: {len(left)} entr{'y' if len(left) == 1 else 'ies'} with its name"
+            return ("FAIL", f"published: {said}") if published else ("PASS", said)
+        finally:
+            drop_from_phone(path.name)
+            path.unlink(missing_ok=True)
+            if ctx.server.child is None or ctx.server.child.poll() is not None:
+                ctx.server.start()
+    return session_check(ctx, body)
+
+
+LONG.update({"w3-big-send", "w3-cut-send"})
+
+
 # ---- main ----
 
 

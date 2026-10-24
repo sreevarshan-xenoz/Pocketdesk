@@ -94,7 +94,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A download refused by the desktop (an offer used twice) fails at once with its reason, not after 30 s.
 - Send a file while a large share from the phone is running; the offer still arrives.
-- A file over 1 GB both ways, and a download stopped halfway (Wi-Fi off): no partial file is published.
+- A file over 1 GB from the phone to the computer, and a download from the phone cut halfway (Wi-Fi off).
 
 **38. Image clipboard (N4)**
 
