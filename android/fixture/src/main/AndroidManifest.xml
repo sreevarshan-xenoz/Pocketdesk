@@ -46,6 +46,20 @@
             android:foregroundServiceType="mediaPlayback"
             android:permission="android.permission.DUMP" />
 
+        <!-- X1: shares one of its files to Pocketdesk, naming the computer. -->
+        <activity
+            android:name=".ShareOutActivity"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- X1: its files, read under the grant a share gives. -->
+        <provider
+            android:name=".FilesProvider"
+            android:authorities="dev.pocketdesk.fixture.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <!-- A notification's answers, written to logcat. -->
         <receiver
             android:name=".AnswerReceiver"

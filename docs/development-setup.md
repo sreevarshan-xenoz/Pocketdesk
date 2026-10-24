@@ -205,7 +205,10 @@ types into it and posts notifications on it.
    restart the throwaway without the reverse and wait for the phone to link by the
    internet road (up to 200 s: a road dial that failed during the restart rests 60 s),
    and stay on that road until the run ends. Those reading the HUD need the phone's
-   Show connection details on. `w1-hour` runs only when named with
+   Show connection details on. The `x1-*` checks share from the phone: the fixture app
+   (reinstall it after an update) shares one of its own files to Pocketdesk naming the
+   throwaway, which needs the phone's Let other apps choose a computer (the adb shell
+   cannot grant Pocketdesk a MediaStore file). `w1-hour` runs only when named with
    `--only` (an hour; `POCKETDESK_HOUR_MINUTES` for less).
 5. Run `python scripts/device_checks.py --server-root <root> --server-exe <pocketdesk>`
    (`--only ID…` for some, `--serial` with more than one phone). On Git Bash, give

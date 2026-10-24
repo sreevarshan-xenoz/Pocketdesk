@@ -453,6 +453,9 @@ class Server:
             "POCKETDESK_PRESENTING_FILE": str(self.root / "presenting"),
             # P7: the files copied here, one path a line.
             "POCKETDESK_CLIPBOARD_FILES_FILE": str(self.root / "clip_files.txt"),
+            # X1 review: what phones send lands in the throwaway's own folder,
+            # whatever its config says, never this computer's Downloads.
+            "POCKETDESK_DOWNLOAD_DIR": str(self.root / "downloads"),
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
@@ -548,6 +551,7 @@ class Server:
         if self.running():
             return "a server already runs for this folder: stop it first (pocketdesk stop with its folders)"
         self.input_off()
+        (self.root / "downloads").mkdir(exist_ok=True)
         (self.root / "state" / "live_sessions.json").unlink(missing_ok=True)
         full = dict(os.environ)
         full.update(self.env())
@@ -587,6 +591,19 @@ class Server:
             return []
         lines = path.read_text(encoding="utf-8").splitlines()[count:]
         return [e for e in events_after(lines, 0, kind) if e.get("device_id") == device and e.get("app") == app]
+
+    def events_after_count(self, count: int) -> list[dict]:
+        """Every event after the log's first `count` lines."""
+        path = self.root / "state" / "events.jsonl"
+        if not path.exists():
+            return []
+        out = []
+        for line in path.read_text(encoding="utf-8").splitlines()[count:]:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
 
     def clipboard(self) -> str:
         path = self.root / "clip.txt"
@@ -1834,6 +1851,146 @@ def w3_cut_send(ctx: Ctx) -> tuple[str, str]:
 
 
 LONG.update({"w3-big-send", "w3-cut-send"})
+
+
+# ---- sharing from the phone (X1) ----
+#
+# The fixture app shares one of its own files to Pocketdesk's ShareActivity,
+# naming the throwaway (127.0.0.1): never "the last computer used", which
+# could be the owner's. (The adb shell cannot grant Pocketdesk a MediaStore
+# file: Android refuses, and Pocketdesk says the file is unreadable.) Naming
+# one needs the phone's "Let other apps choose a computer". At home the
+# computer would dial the phone back for the file, which adb reverse cannot
+# carry, so these too go by the internet road.
+
+FIXTURE_STAGE = "/data/local/tmp"
+NL = chr(10)
+
+
+def stage_in_fixture(local: pathlib.Path) -> None:
+    """Put `local` in the fixture's files folder, which it shares from."""
+    adb("push", str(local), f"{FIXTURE_STAGE}/{local.name}", timeout=900)
+    adb("shell", device_command("run-as", FIXTURE, "cp", f"{FIXTURE_STAGE}/{local.name}", f"files/{local.name}"), timeout=600)
+    adb("shell", device_command("rm", "-f", f"{FIXTURE_STAGE}/{local.name}"))
+
+
+def unstage(name: str) -> None:
+    adb("shell", device_command("run-as", FIXTURE, "rm", "-f", f"files/{name}"))
+
+
+def share_to_throwaway(name: str) -> None:
+    """The fixture shares its file to Pocketdesk, naming the throwaway."""
+    adb("shell", device_command("am", "start", "-n", f"{FIXTURE}/.ShareOutActivity",
+                                "--es", "name", name, "--es", "address", "127.0.0.1"))
+
+
+def needs_choosing(ctx: Ctx) -> Optional[str]:
+    if not ctx.phone.prefs("pocketdesk-ui").get("others_choose_computer"):
+        return "turn on Let other apps choose a computer in the phone's Settings"
+    return None
+
+
+def road_check(ctx: Ctx, body: Callable[[Ctx], tuple[str, str]]) -> tuple[str, str]:
+    """Run `body` with the phone linked by the internet road (no session)."""
+    if not ctx.on_road:
+        why = by_road(ctx)
+        if why:
+            return "TIMEOUT", why
+        ctx.on_road = True
+    return body(ctx)
+
+
+def shared(ctx: Ctx, local: pathlib.Path, deadline: float) -> tuple[Optional[pathlib.Path], str]:
+    """Push `local` to the phone, share it to the throwaway, and wait for it
+    in the throwaway's downloads at its full size. The phone's copy is
+    removed after."""
+    name = local.name
+    stage_in_fixture(local)
+    try:
+        share_to_throwaway(name)
+        landed = ctx.server.root / "downloads" / name
+        size = local.stat().st_size
+        if not wait_for(lambda: landed.exists() and landed.stat().st_size == size, deadline, 2):
+            return None, f"not in the throwaway's downloads at full size within {deadline:.0f} s"
+        return landed, ""
+    finally:
+        unstage(name)
+
+
+@check("x1-share-big", "§31")
+def x1_share_big(ctx: Ctx) -> tuple[str, str]:
+    """A file over 1 GB from the phone to the computer by the internet road:
+    all of it, the same bytes."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        local = big_file(ctx, GIB + (1 << 20))
+        local = local.rename(local.with_name("x1-" + local.name[3:]))
+        landed = None
+        try:
+            want = md5_of(local)
+            started = time.monotonic()
+            landed, why = shared(ctx, local, 1200)
+            if not landed:
+                return "TIMEOUT", why
+            took = time.monotonic() - started
+            same = md5_of(landed) == want
+            return ("PASS" if same else "FAIL"), f"{landed.stat().st_size} bytes in {took:.0f} s (with the push), MD5 {'matches' if same else 'differs'}"
+        finally:
+            local.unlink(missing_ok=True)
+            if landed:
+                landed.unlink(missing_ok=True)
+    return road_check(ctx, body)
+
+
+@check("x1-file-received", "§78")
+def x1_file_received(ctx: Ctx) -> tuple[str, str]:
+    """`file_received` at both detail levels: the size always, the file's
+    name only with events_detail = "full"."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+    before = None
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        nonlocal before
+        said = []
+        try:
+            for detail in ("metadata", "full"):
+                # The runner's helper: keys at the top level, written whole (X1 review).
+                was = ctx.server.configure({"events": "true", "events_detail": f'"{detail}"'})
+                before = was if before is None else before
+                time.sleep(2)
+                local = ctx.server.root / f"x1-{detail}-{secrets.token_hex(3)}.txt"
+                local.write_text("x1" + NL, encoding="utf-8")
+                count = ctx.server.event_count()
+                landed = None
+                try:
+                    landed, why = shared(ctx, local, 120)
+                    if not landed:
+                        return "TIMEOUT", f"{detail}: {why}"
+                    event = wait_for(lambda: next((e for e in ctx.server.events_after_count(count)
+                                                   if e.get("event") == "file_received"), None), 20, 1)
+                    if not event:
+                        return "TIMEOUT", f"{detail}: no file_received event"
+                    has_name = "name" in event
+                    if has_name != (detail == "full") or "size" not in event:
+                        return "FAIL", f"{detail}: the event's fields were {sorted(event)}"
+                    said.append(f"{detail}: size{' and name' if has_name else ', no name'}")
+                finally:
+                    local.unlink(missing_ok=True)
+                    if landed:
+                        landed.unlink(missing_ok=True)
+            return "PASS", "; ".join(said)
+        finally:
+            if before is not None:
+                ctx.server.restore_config(before)
+    return road_check(ctx, body)
+
+
+LONG.add("x1-share-big")
 
 
 # ---- main ----
