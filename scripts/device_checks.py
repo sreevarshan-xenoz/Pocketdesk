@@ -2333,10 +2333,17 @@ LONG.add("ac2-changed")
 def ac3_send_during_share(ctx: Ctx) -> tuple[str, str]:
     """A send to the phone while a large share from the phone runs, by the
     internet road: the offer still arrives, the file the same bytes on the
-    phone, and the share then ends whole too (§31)."""
+    phone, and the share ends whole too (§31). The phone moves one file at
+    a time (TransferService's one worker), so the send waits behind the
+    share; the computer's offer lasts 10 minutes (OFFER_TTL), which a
+    gigabyte by the road takes about two of. Outside a session the phone
+    takes offers only with its Files from the computer in the background
+    on (its first run, without it, waited out the send)."""
     why = needs_choosing(ctx)
     if why:
         return "SKIP", why
+    if not ctx.phone.prefs("pocketdesk-ui").get("files_in_background"):
+        return "SKIP", "turn on Files from the computer in the background in the phone's Settings"
 
     def body(ctx: Ctx) -> tuple[str, str]:
         partials = ctx.server.root / "state" / "partials"
@@ -2356,24 +2363,29 @@ def ac3_send_during_share(ctx: Ctx) -> tuple[str, str]:
             if not wait_for(lambda: partial_bytes(partials, before) >= size * 0.1, 600, 1):
                 return "TIMEOUT", "the share never reached 10 % on the computer"
             at = partial_bytes(partials, before) * 100 // size
-            sent = send_cli(ctx, small, 300)
+            if landed.exists():
+                return "SKIP", "the share ended before the send began: nothing overlapped"
+            started = time.monotonic()
+            sent = send_cli(ctx, small, 900)
             try:
-                out, _ = sent.communicate(timeout=330)
+                out, _ = sent.communicate(timeout=930)
             except subprocess.TimeoutExpired:
                 sent.kill()
-                return "TIMEOUT", f"the send during the share (from {at} %) ran past 330 s"
-            # Overlapped only if the share was still under way when the send ended.
-            overlapped = not landed.exists()
-            got = adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split()
+                return "TIMEOUT", f"the send during the share (from {at} %) ran past 930 s"
+            took = time.monotonic() - started
+            # Which came first: the queued send, or the share it waited for.
+            order = "after the share" if landed.exists() else "before the share ended"
+            # The phone publishes the file just after the send hears it saved
+            # (AC3 review): a few seconds for it to appear.
+            got = wait_for(lambda: [w for w in adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split()
+                                    if len(w) == 32], 20, 2) or []
             small_same = bool(got) and got[0] == want_small
             if not wait_for(lambda: landed.exists() and landed.stat().st_size == size, 1200, 2):
                 return "TIMEOUT", "the share did not end whole within 20 minutes of the send"
             settled = True
             big_same = md5_of(landed) == want_big
-            said = (f"sent during the share at {at} %: exit {sent.returncode}, MD5 {'matches' if small_same else 'differs'};"
-                    f" the share then whole, MD5 {'matches' if big_same else 'differs'}")
-            if not overlapped:
-                return "SKIP", "the share ended before the send did: nothing overlapped; " + said
+            said = (f"sent during the share at {at} %: done in {took:.0f} s, {order}, exit {sent.returncode},"
+                    f" MD5 {'matches' if small_same else 'differs'}; the share whole, MD5 {'matches' if big_same else 'differs'}")
             if sent.returncode != 0:
                 return "FAIL", said + f"; the send said: {out.strip()[-200:]}"
             return ("PASS" if small_same and big_same else "FAIL"), said
