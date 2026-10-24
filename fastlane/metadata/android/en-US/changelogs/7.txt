@@ -1,0 +1,4 @@
+* Starts beside KDE Connect, and sends files to KDE Connect devices.
+* New camera photos to the computer, and the whole photo gallery on it.
+* On Linux: the X11 clipboard, the phone as a game controller, the away lock on Sway and Hyprland.
+* Folders between computers both ways; quicker sessions from away; fixes from checks on a real phone.
