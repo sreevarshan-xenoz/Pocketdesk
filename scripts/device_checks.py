@@ -3473,6 +3473,117 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
 LONG.add("ae2-crops")
 
 
+# ---- a download from the remote browser cut and continued (AF1) ----
+
+
+def phone_size(path: str) -> Optional[int]:
+    out = adb("shell", device_command("stat", "-c", "%s", f"{PHONE_DOWNLOADS}/{path}")).strip()
+    return int(out) if out.isdigit() else None
+
+
+def browse_download(ctx: Ctx, folder: str, name: str) -> Optional[str]:
+    """In a new session, ask the remote browser for `folder`/`name`; why not,
+    when it could not."""
+    if start_session(ctx) is None:
+        return "no Connect on a 127.0.0.1 card on Home"
+    if not wait_for(lambda: in_session(ctx), 30, 1):
+        return "no session within 30 s"
+    try:
+        why = open_browser(ctx)
+        if why:
+            return why
+        if not enter(ctx, folder):
+            return f"the browser did not open {folder}"
+        if not download_here(ctx, name):
+            return f"no Download for {name}"
+        return None
+    finally:
+        close_sheets(ctx)
+
+
+@check("af1-browse-resume", "§50")
+def af1_browse_resume(ctx: Ctx) -> tuple[str, str]:
+    """A file from the remote browser broken and continued: a 1 GiB download
+    cut at 30 % (the throwaway stopped, as a dropped network would)
+    continues from what the phone kept, by its own retry or asked again,
+    and ends with the same MD5 (§50)."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("retry_transfers", True):
+        return "SKIP", "turn on Retry failed files in the phone's Settings"
+    tag = secrets.token_hex(3)
+    home = ctx.server.root / "home"
+    folder, name = f"af1-{tag}", f"af1-{tag}.bin"
+    settled = False
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        nonlocal settled
+        path = home / folder / name
+        want = md5_of(path)
+        size = path.stat().st_size
+        adb("logcat", "-c")
+        why = browse_download(ctx, folder, name)
+        if why:
+            return "TIMEOUT", why
+        part = wait_for(lambda: (d := transfer_done(ctx, name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
+        if not part:
+            return "TIMEOUT", "the download never reached 30 %"
+        ctx.server.stop()
+        ctx.on_road = False
+        why = by_road(ctx)
+        if why:
+            return "TIMEOUT", f"after the cut: {why}"
+        ctx.on_road = True
+        # The phone's own retry first (5, 15, 45 s apart; the road can rest
+        # longer), then asked again from the browser once it stands still.
+        how = "the phone's retry"
+        last, since, end = -1, time.monotonic(), time.monotonic() + 1500
+        while phone_size(name) != size:
+            if time.monotonic() > end:
+                return "TIMEOUT", f"cut at {part[0] * 100 // part[1]} %; not whole on the phone within 25 minutes ({how})"
+            now = (transfer_done(ctx, name) or (0, 0))[0]
+            if now != last:
+                last, since = now, time.monotonic()
+            elif time.monotonic() - since > 120 and how != "asked again":
+                how = "asked again"
+                end_session(ctx)
+                why = browse_download(ctx, folder, name)
+                if why:
+                    return "TIMEOUT", f"asking again: {why}"
+                since = time.monotonic()
+            time.sleep(3)
+        settled = True
+        said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
+        found = re.search(r"Download continued from (\d+) of (\d+) bytes", said)
+        got = adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{name}"), timeout=300).split()
+        same = bool(got) and got[0] == want
+        cut = f"cut at {part[0] * 100 // part[1]} %; {how}"
+        if not found:
+            return "FAIL", f"{cut} started over (no \"continued\" in the phone's log), MD5 {'matches' if same else 'differs'}"
+        offset = int(found.group(1))
+        return ("PASS" if same and offset > 0 else "FAIL"), (
+            f"{cut} continued from {offset * 100 // int(found.group(2))} %, MD5 {'matches' if same else 'differs'}")
+
+    try:
+        (home / folder).mkdir(parents=True)
+        with open(home / folder / name, "wb") as out:
+            left = GIB
+            while left:
+                chunk = min(left, 8 << 20)
+                out.write(os.urandom(chunk))
+                left -= chunk
+        return session_check(ctx, body)
+    finally:
+        if not settled:
+            # A download may still run: stopped first (AD2 review), which also
+            # lets go of the file.
+            ctx.server.stop()
+            ctx.on_road = False
+        shutil.rmtree(home / folder, ignore_errors=True)
+        drop_from_phone(name)
+
+
+LONG.add("af1-browse-resume")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
