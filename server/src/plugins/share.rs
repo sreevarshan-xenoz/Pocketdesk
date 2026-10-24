@@ -837,23 +837,31 @@ async fn handle_fetch(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                 folder: None,
                 size: fetch.size,
             });
+            let device = phone_of(sender);
+            // At its start and end too (AC7 review): a queue of short
+            // fetches never reaches the minute below.
+            crate::offers::keep_device_alive(&device);
             running()
                 .spawn(running_key, async move {
                     let _slot = fetch.slot;
-                    // An offer being fetched stays while bytes go (N6 review).
+                    // An offer being fetched stays while bytes go (N6 review),
+                    // and so do the phone's others, queued behind it (AC7).
                     let mut shown = tracker.progress();
                     let alive = fetch.offer.clone();
+                    let busy = device.clone();
                     let mut touched = std::time::Instant::now();
                     let progress = move |sent: u64| {
                         shown(sent);
-                        if let Some(id) = &alive
-                            && touched.elapsed() >= std::time::Duration::from_secs(60)
-                        {
-                            crate::offers::keep_alive(id);
+                        if touched.elapsed() >= std::time::Duration::from_secs(60) {
+                            if let Some(id) = &alive {
+                                crate::offers::keep_alive(id);
+                            }
+                            crate::offers::keep_device_alive(&busy);
                             touched = std::time::Instant::now();
                         }
                     };
                     let sent = send_file_counted(fetch.route, &key, &fetch.path, progress).await;
+                    crate::offers::keep_device_alive(&device);
                     drop(tracker);
                     match &sent {
                         Ok(size) => {
@@ -1690,6 +1698,10 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         present_key(&mut stream, key).await?;
     }
     tracing::info!("Receiving {name} from {route} ({size} bytes)");
+    // What the computer offered this phone waits while it sends (AC7): it
+    // moves one file at a time.
+    crate::offers::keep_device_alive(device);
+    let mut touched = std::time::Instant::now();
     let outcome = transfer::receive_counted(
         &mut stream,
         &mut file,
@@ -1698,6 +1710,10 @@ async fn receive_file(route: Route, key: &str, incoming: Incoming<'_>) -> Result
         MAX_FILE_BYTES,
         Pace::DEFAULT,
         |size, committed| {
+            if touched.elapsed() >= std::time::Duration::from_secs(60) {
+                crate::offers::keep_device_alive(device);
+                touched = std::time::Instant::now();
+            }
             if resumable {
                 let record = Record {
                     device: device.to_string(),

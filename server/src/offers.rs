@@ -285,6 +285,24 @@ pub(crate) fn keep_alive(id: &str) {
     }
 }
 
+/// The phone `device_id` is moving a file with this computer, either way:
+/// it moves one at a time, so its other open offers wait behind this one,
+/// and each keeps a whole TTL from now (AC7: a send queued behind a share
+/// longer than the TTL lapsed before the phone could fetch it).
+pub(crate) fn keep_device_alive(device_id: &str) {
+    keep_device_alive_in(offers(), device_id, Instant::now());
+}
+
+fn keep_device_alive_in(table: &Table, device_id: &str, now: Instant) {
+    let offers = table.lock().unwrap_or_else(|e| e.into_inner());
+    for offer in offers
+        .values()
+        .filter(|o| o.device_id == device_id && !o.expired(now))
+    {
+        offer.touch(now);
+    }
+}
+
 /// The file offered as `id`, for a fetch by `device_id`. The offer stays
 /// until a fetch settles it ([`finish`]); an offer for another phone is
 /// refused and left for its own phone.
@@ -1955,6 +1973,28 @@ mod tests {
         // ...and ends once the phone stops for a whole TTL.
         let idle = next + OFFER_TTL + Duration::from_secs(1);
         assert_eq!(sweep_in(&table, idle), ["f-2"]);
+    }
+
+    #[test]
+    fn a_phones_offers_wait_while_it_moves_another_file() {
+        // The phone moves one file at a time: a send it queued behind a long
+        // share (or a long fetch) is fetched after the offer's own TTL.
+        let table = Table::default();
+        let now = Instant::now();
+        offer_in(&table, "q-1", PathBuf::from("/a.pdf"), "phone-a", now);
+        offer_in(&table, "q-2", PathBuf::from("/b.pdf"), "phone-a", now);
+        offer_in(&table, "other", PathBuf::from("/c.pdf"), "phone-b", now);
+        let busy = now + OFFER_TTL - Duration::from_secs(1);
+        keep_device_alive_in(&table, "phone-a", busy);
+        let after = now + OFFER_TTL + Duration::from_secs(1);
+        // Only the busy phone's offers were kept.
+        assert_eq!(sweep_in(&table, after), ["other"]);
+        assert!(redeem_in(&table, "q-1", "phone-a", after).is_ok());
+        // An offer already expired is not brought back.
+        offer_in(&table, "late", PathBuf::from("/d.pdf"), "phone-a", now);
+        let long_after = after + OFFER_TTL;
+        keep_device_alive_in(&table, "phone-a", long_after);
+        assert!(redeem_in(&table, "late", "phone-a", long_after).is_err());
     }
 
     #[test]
