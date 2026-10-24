@@ -544,7 +544,11 @@ class Server:
         path = self.root / "state" / "trusted_devices.json"
         store = json.loads(path.read_text(encoding="utf-8"))
         for device in store.get("trusted_device_ids", []):
-            store.setdefault("permissions", {}).setdefault(device, {})["input"] = False
+            mine = store.setdefault("permissions", {}).setdefault(device, {})
+            mine["input"] = False
+            # AG1 review: nor a lock left on by a run cut short (a throwaway
+            # started later by hand, without the seam, would lock this box).
+            mine.pop("away_lock", None)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
         os.replace(tmp, path)
