@@ -344,6 +344,17 @@ class SessionParts(unittest.TestCase):
                 {"outcome": "lan", "enc_max": "9"},
             ])
 
+    def test_a_switch_on_a_row(self):
+        dump = (
+            '<hierarchy><node text="Phone mic share" checkable="false" checked="false" bounds="[100,500][600,560]" />'
+            '<node text="" checkable="true" checked="true" bounds="[900,505][1000,555]" />'
+            '<node text="Clipboard sync" checkable="false" checked="false" bounds="[100,700][600,760]" />'
+            '<node text="" checkable="true" checked="false" bounds="[900,705][1000,755]" /></hierarchy>'
+        )
+        self.assertIs(dc.switch_on_row(dump, "Phone mic share"), True)
+        self.assertIs(dc.switch_on_row(dump, "Clipboard sync"), False)
+        self.assertIsNone(dc.switch_on_row(dump, "Nothing"))
+
 
 if __name__ == "__main__":
     unittest.main()

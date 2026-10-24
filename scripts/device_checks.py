@@ -3671,6 +3671,79 @@ def af2_retry_off(ctx: Ctx) -> tuple[str, str]:
 LONG.add("af2-retry-off")
 
 
+# ---- the mic share's permission refused (AF3) ----
+
+
+def switch_on_row(dump: str, label: str) -> Optional[bool]:
+    """Whether the switch on the row of `label` is on; None when the row or
+    its switch is not shown."""
+    nodes = []
+    for node in re.findall(r"<node [^>]*>", dump):
+        text = re.search(r' text="([^"]*)"', node)
+        box = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if text and box:
+            x1, y1, x2, y2 = map(int, box.groups())
+            nodes.append((html.unescape(text.group(1)), 'checkable="true"' in node,
+                          'checked="true"' in node, (y1 + y2) // 2))
+    row = next((y for text, _, _, y in nodes if text == label), None)
+    if row is None:
+        return None
+    near = [(abs(y - row), checked) for _, checkable, checked, y in nodes if checkable and abs(y - row) <= 60]
+    return min(near)[1] if near else None
+
+
+def mic_permission() -> str:
+    """The phone's RECORD_AUDIO line for Pocketdesk, from dumpsys."""
+    out = adb("shell", "dumpsys", "package", APP)
+    return next((line.strip() for line in out.splitlines() if "android.permission.RECORD_AUDIO: granted=" in line), "")
+
+
+def mic_granted() -> bool:
+    return "granted=true" in mic_permission()
+
+
+@check("af3-mic-refused", "§10a")
+def af3_mic_refused(ctx: Ctx) -> tuple[str, str]:
+    """The session's Phone mic share without the mic permission asks for it;
+    refused, the switch stays off (§10a). One denial marks the permission
+    (USER_SET), and the OPPO's shell may not clear the mark; a second would
+    make Android stop asking (USER_FIXED), so the check runs once and SKIPs
+    on a marked permission. It also SKIPs with the permission granted:
+    taking it back would end the app."""
+    held = mic_permission()
+    if "granted=true" in held:
+        return "SKIP", "Pocketdesk holds the mic permission: taking it back would end the app"
+    if "USER_SET" in held or "USER_FIXED" in held:
+        return "SKIP", "the mic permission was refused once already: a second refusal would stop Android asking"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        time.sleep(4)
+        try:
+            if not wait_for(lambda: tap_text("Session menu", ctx.phone.dump()), 20, 2):
+                return "TIMEOUT", "no Session menu on the session's screen"
+            time.sleep(1)
+            if not tap_scrolling(ctx, "Phone mic share"):
+                return "TIMEOUT", "no Phone mic share in the session menu"
+            if not wait_for(lambda: shows(ctx, "Don't allow"), 15, 1):
+                return "FAIL", "no permission dialog after Phone mic share"
+            tap_text("Don't allow", ctx.phone.dump())
+            time.sleep(2)
+            on = wait_for(lambda: switch_on_row(ctx.phone.dump(), "Phone mic share") is not None
+                          and switch_on_row(ctx.phone.dump(), "Phone mic share"), 5, 1)
+            state = switch_on_row(ctx.phone.dump(), "Phone mic share")
+        finally:
+            close_sheets(ctx)
+        granted = mic_granted()
+        said = f"asked; refused: the switch {'on' if state else 'off' if state is False else 'not seen'}, the permission {'granted' if granted else 'not granted'}"
+        return ("PASS" if state is False and not on and not granted else "FAIL"), said
+
+    return session_check(ctx, body)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
