@@ -1500,7 +1500,7 @@ The A71 against this Windows box, 2026-10-17, debug builds of the branches, inpu
 - [x] 2c/2d, computer → phone: a 50 MB file over the internet link, saved, MD5 matching.
 - [x] 2c/2d, phone → computer: a 50 MB share, in Downloads in 11 s, MD5 matching.
 - [x] A 150 MB offer broken by 15 s without Wi-Fi: the phone's retries continued it ("The phone had 27869840 of 157286400 bytes; sent the rest"), MD5 matching; the iroh control connection itself survived the drop.
-- [ ] The remote file browser's download and a folder fetch over the internet road.
+- [x] The remote file browser's download and a folder fetch over the internet road. (2026-10-25, the OPPO in a session by the internet road against a throwaway server: the runner's `ad3-dates` downloaded a file and a folder from the remote browser, and `ad2-big-folder` a folder of 2000 files, all arriving.)
 - [ ] 2e: a screenshot copied on the computer lands on the phone's clipboard over the internet link (and phone → computer, when an app on the phone can copy an image). (where: by hand)
 - [ ] A real WAN (the VM): 500 MB resumed with TCP 1716 unreachable.
 - [ ] The too-old message against a computer from before 2c. (where: other hardware) (a computer running a release from before 2c.)
