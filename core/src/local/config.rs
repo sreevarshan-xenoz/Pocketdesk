@@ -120,6 +120,11 @@ pub struct Config {
     /// phone allows it (C8); off, the window only shows.
     #[serde(default = "default_true")]
     pub cast_control: bool,
+    /// On Linux, the phone's gamepad is a game controller (T7) where uinput
+    /// may be used; off, or where it may not, it types keys and moves the
+    /// mouse as before.
+    #[serde(default = "default_true")]
+    pub gamepad_controller: bool,
     /// A notification for each text a phone forwards (roadmap N5b).
     #[serde(default = "default_true")]
     pub sms_notify: bool,
@@ -424,6 +429,7 @@ impl Default for Config {
             notification_pictures: true,
             downloads_folder: String::new(),
             cast_control: true,
+            gamepad_controller: true,
             notifications_per_minute: default_notifications_per_minute(),
             sms_notify: true,
             sms_keep: default_sms_keep(),
@@ -664,6 +670,7 @@ impl Config {
         "notification_pictures",
         "downloads_folder",
         "cast_control",
+        "gamepad_controller",
         "notifications_per_minute",
         "sms_notify",
         "open_links",

@@ -2841,6 +2841,14 @@ Owed:
 - [ ] KDE Connect on a Linux desktop (or GSConnect), the same. (where: linux)
 - [ ] The device not connected: the send fails in the Sent list with why; a folder refused with why. (where: by hand)
 - [ ] Windows: `pocketdesk install` opening TCP 1739-1764, and a device coming for a file through the firewall. (where: by hand)
+## 212. The phone's gamepad as a game controller on Linux (T7)
+
+Built 2026-10-24. Unit-tested: the packet as the pad's events (changes only, sticks, triggers, the hat, X and Y as xpad's). The Linux code was type-checked and linted for `x86_64-unknown-linux-gnu` in a scratch crate; CI builds it.
+Owed:
+- [ ] Linux with `/dev/uinput` access: `evtest` lists "Pocketdesk Gamepad" (045e:028e) while the phone's gamepad is up; each button, both sticks and the D-pad show as named. (where: linux)
+- [ ] A game or Steam's controller test seeing an Xbox 360 pad, A/B/X/Y in their places. (where: linux)
+- [ ] The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
+- [ ] Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
 
 ## Recording results
 

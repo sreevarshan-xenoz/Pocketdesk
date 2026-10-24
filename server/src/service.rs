@@ -1906,6 +1906,9 @@ fn release_session(
     held: &mut std::collections::HashMap<u64, crate::driving::Held>,
     session: u64,
 ) {
+    // T7: the game controller at rest, sticks too (its packets keep coming
+    // while a stick is held, so one that stopped held it).
+    injector.release_pad();
     if let Some(buttons) = gamepads.remove(&session).filter(|b| *b != 0) {
         let saved = injector.swap_gamepad_buttons(buttons);
         let _ = handle_input_packet(
