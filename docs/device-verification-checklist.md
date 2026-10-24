@@ -720,7 +720,7 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - [x] Send from the desktop app with "Choose file…"; the phone saves it; the Sent list says so.
 - [x] A phone-to-desktop share reports sent only after the desktop saved it.
 - [ ] A download refused by the desktop (an offer used twice) fails at once with its reason, not after 30 s.
-- [ ] Send a file while a large share from the phone is running; the offer still arrives.
+- [x] Send a file while a large share from the phone is running; the offer still arrives. (2026-10-24, the OPPO by the internet road against a throwaway server, the runner's `ac3-send-during-share`, with the phone's Files from the computer in the background on: the phone moves one file at a time, so 1 MiB sent at 10 % of a 1 GiB share waited behind it and arrived after it, 103 s, both MD5s matching. Behind a 7.5 GiB share, 10.6 minutes, the offer lapsed first, "the phone did not take it in time": fixed by AC7, #347, a busy phone's offers waiting while it moves a file; the same run then passed.)
 - [ ] A phone that has no room declines an offer; the desktop's Sent list says "the phone declined it: …". (where: other hardware) (a full phone.)
 - [ ] Drag a file onto the desktop app's window; it is sent to the chosen phone (Windows, and X11 Linux).
 - [ ] Tap "Saved … to Downloads"; the file opens. (where: by hand) (ColorOS's shade shows uiautomator no notification of the app.)
@@ -959,7 +959,7 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 - [ ] The computer sleeping and waking (the user's to run), and the phone switching between Wi-Fi and mobile data (needs a SIM).
 - [ ] The same on the Linux host.
 - [x] A send to the phone cut by a drop continues where it stopped when sent again: 1 GiB cut at 30 % (the server stopped), the same file sent again continued from 31 % on the phone, and ended with the same MD5 (the runner's `x2-resume`, the OPPO over the internet road, 2026-10-24).
-- [ ] The same from the phone to the computer.
+- [x] The same from the phone to the computer. (2026-10-24, the runner's `ac1-share-resume`: 1 GiB shared from the OPPO by the internet road, the throwaway stopped at 30 %, the phone's own retry continued from 30 % ("Continued … from …" in the server's log), the same MD5.)
 
 ## 47. Check connection (T1)
 
@@ -1013,8 +1013,8 @@ On the A71 against Windows, 2026-10-15:
 Owed:
 - [ ] A file from the remote browser broken and continued.
 - [ ] "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
-- [ ] "Unfinished files: not kept" on the desktop: a retry starts over.
-- [ ] A file that changes between attempts starts over (the prefix hash).
+- [x] "Unfinished files: not kept" on the desktop: a retry starts over. (2026-10-24, the runner's `ac1-not-kept`: `transfer_keep_hours = 0`, a share cut at 30 % was started over by the phone's retry, no "Continued", the same MD5.)
+- [x] A file that changes between attempts starts over (the prefix hash). (2026-10-24, the runner's `ac2-changed`: a send to the OPPO cut at 30 %, the file's first MiB rewritten with its size and date kept, sent again: "changed since the last attempt", started over, no "continued", the new file's MD5 on the phone.)
 - [x] The app killed mid-download, then the offer fetched again within its 10 minutes. (seen 2026-10-23 on the OPPO against a throwaway server (S2) with #285: force-stopped at 42 MB of 150 MB, relaunched, the computer offered it again and the phone continued from 42 MB, MD5 matching; before #285 nothing fetched it again.)
 - [ ] Android 8–9 (the legacy download file), and the Linux host.
 
@@ -2260,7 +2260,7 @@ Built and checked 2026-10-20 on the OPPO against a throwaway server built from t
 - [ ] A file downloaded from the remote file browser, and a folder each way.
 - [ ] A folder picked under "Files from computers go to": the file keeps its arrival date; Settings says so. (where: by hand) (the phone's folder picker.)
 - [x] "Keep files' dates" on the computer: a file dated 2020 sent to the phone kept 2020; with `keep_file_dates = false` it was dated as it arrived. (Seen 2026-10-24 on the OPPO against a throwaway server (S4).)
-- [ ] "Keep files' dates" off on the phone: a share to the computer dated as it arrives.
+- [x] "Keep files' dates" off on the phone: a share to the computer dated as it arrives. (2026-10-24, the runner's `ac4-dates`, the fixture's file dated 2020: with the phone's switch on, kept with the computer's on and dated as it arrived with the computer's off; with the phone's off, dated as it arrived either way.)
 - [ ] Android 10, and a KDE Connect device's share.
 
 ## 150. Not from this app (K2b)
