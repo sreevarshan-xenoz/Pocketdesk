@@ -28,6 +28,8 @@ fun RecentPhotosSection() {
     val granted = (version + resumes).let { RecentPhotoPrefs.granted(context) }
     val listening = (version + resumes).let { PhoneNotificationPrefs.accessGranted(context) }
     val videos = (version + resumes).let { RecentPhotoPrefs.videos(context) }
+    // U5: the ask is said only while it is still to be made.
+    val videoAccess = (version + resumes).let { dev.pocketdesk.android.files.CameraPrefs.videosGranted(context) }
 
     // T4: the camera's videos listed too, asking for video access.
     val askVideos =
@@ -70,7 +72,7 @@ fun RecentPhotosSection() {
     if (active) {
         SettingSwitch(
             stringResource(R.string.recent_photos_videos),
-            stringResource(R.string.camera_uploads_videos_summary),
+            if (videoAccess) null else stringResource(R.string.camera_uploads_videos_summary),
             videos,
             {
                 if (it && !dev.pocketdesk.android.files.CameraPrefs.videosGranted(context)) {

@@ -30,6 +30,8 @@ fun CameraUploadsSection() {
     val granted = (version + resumes).let { CameraPrefs.photosGranted(context) }
     val videos = (version + resumes).let { CameraPrefs.videos(context) && CameraPrefs.videosGranted(context) }
     val wifiOnly = (version + resumes).let { CameraPrefs.wifiOnly(context) }
+    // U5: the ask is said only while it is still to be made.
+    val videoAccess = (version + resumes).let { CameraPrefs.videosGranted(context) }
     val listening = (version + resumes).let { PhoneNotificationPrefs.accessGranted(context) }
 
     val askPhotos =
@@ -71,7 +73,7 @@ fun CameraUploadsSection() {
     if (active) {
         SettingSwitch(
             stringResource(R.string.camera_uploads_videos),
-            stringResource(R.string.camera_uploads_videos_summary),
+            if (videoAccess) null else stringResource(R.string.camera_uploads_videos_summary),
             videos,
             {
                 if (it && !CameraPrefs.videosGranted(context)) {
