@@ -718,7 +718,9 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - [ ] Drag a file onto the desktop app's window; it is sent to the chosen phone (Windows, and X11 Linux).
 - [ ] Tap "Saved … to Downloads"; the file opens. (where: by hand) (ColorOS's shade shows uiautomator no notification of the app.)
 - [ ] Download into a phone without enough space: "Not enough space for …", nothing left in Downloads. (where: other hardware) (a full phone.)
-- [ ] A file over 1 GB both ways, and a download stopped halfway (Wi-Fi off): no partial file is published.
+- [x] A file over 1 GB to the phone, in a session by the internet road: 1,074,790,400 bytes in 130 s (7.9 MiB/s), the MD5 the same on the phone (the runner's `w3-big-send`, the OPPO, 2026-10-24).
+- [x] A send to the phone cut at 30 % (the server stopped, as a dropped network would): no file published under its name, only its partial (`w3-cut-send`, the OPPO, 2026-10-24).
+- [ ] A file over 1 GB from the phone to the computer, and a download from the phone cut halfway (Wi-Fi off).
 - [ ] Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
 - [ ] The Linux host: browse `/home/<user>`, a download, and a send from the app's path field.
 
