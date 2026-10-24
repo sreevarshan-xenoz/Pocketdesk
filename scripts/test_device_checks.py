@@ -189,6 +189,15 @@ class SessionParts(unittest.TestCase):
         home = 'INFO conn{transport="tcp"}: x: Entering main packet loop'
         self.assertEqual(dc.iroh_loops(coloured + chr(10) + home), 1)
 
+    def test_bitrate_changes_in_the_server_s_log(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"INFO x: Encoder bitrate target changed {esc}[3mloss_cap{esc}[0m=800000",
+            "INFO x: Adaptive bitrate: 4000000 bps",
+            "INFO x: Window capture target changed",
+        ])
+        self.assertEqual(dc.bitrate_changes(log), 2)
+
     def test_a_logcat_line_s_time(self):
         line = "10-24 10:47:56.619 23512 23723 I PocketdeskRust:  INFO connected"
         self.assertAlmostEqual(dc.log_seconds(line), 10 * 3600 + 47 * 60 + 56.619, places=3)
