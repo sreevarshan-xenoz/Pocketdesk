@@ -3965,6 +3965,74 @@ def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
                 step()
             except (OSError, ValueError) as error:
                 print(f"note: an AG1 cleanup step failed: {error}", file=sys.stderr)
+# ---- the theme follows the system (AG3) ----
+
+
+def raw_shot() -> Optional[tuple[int, int, bytes]]:
+    """The phone's screen as `(width, height, RGBA bytes)`, from screencap's
+    raw form (a 12- or 16-byte header before the pixels)."""
+    import struct
+    data = subprocess.run(["adb", "exec-out", "screencap"], capture_output=True, timeout=30).stdout
+    if len(data) < 16:
+        return None
+    width, height, _ = struct.unpack("<III", data[:12])
+    for header in (16, 12):
+        if len(data) - header == width * height * 4:
+            return width, height, data[header:]
+    return None
+
+
+def brightness(shot: tuple[int, int, bytes], x: int, y: int, size: int = 30) -> float:
+    """The mean of R, G and B over a `size` square at (x, y)."""
+    width, height, pixels = shot
+    total = count = 0
+    for row in range(y, min(y + size, height)):
+        for col in range(x, min(x + size, width)):
+            at = (row * width + col) * 4
+            total += pixels[at] + pixels[at + 1] + pixels[at + 2]
+            count += 3
+    return total / count if count else 0.0
+
+
+def night_mode() -> str:
+    out = adb("shell", "cmd", "uimode", "night")
+    found = re.search(r"Night mode: (\w+)", out)
+    return found.group(1) if found else ""
+
+
+@check("ag3-theme", "§21")
+def ag3_theme(ctx: Ctx) -> tuple[str, str]:
+    """With the app's theme following the system (its default), the system's
+    dark mode turned on and off restyles Home at once, without the app
+    starting again (§21). Read from screenshots: a stretch of Home's
+    background at its left edge. The system's mode is put back after."""
+    if ctx.phone.prefs("pocketdesk-ui").get("theme_mode", "system") != "system":
+        return "SKIP", "the app's theme is set in its Settings, not the system's"
+    was = night_mode()
+    if was not in ("yes", "no"):
+        return "SKIP", f"the system's night mode is {was or 'unread'}: it could not be put back as it was"
+    try:
+        ctx.phone.wake()
+        adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+        if not wait_for(lambda: shows(ctx, "Your saved computers"), 15, 1):
+            return "SKIP", "the app's Home did not show"
+        pid = adb("shell", "pidof", APP).strip()
+        seen = {}
+        for mode in ("no", "yes", "no"):
+            adb("shell", "cmd", "uimode", "night", mode)
+            time.sleep(3)
+            shot = raw_shot()
+            if shot is None:
+                return "TIMEOUT", "no screenshot"
+            # Home's background: its left edge, halfway down, past the cards' margin.
+            seen.setdefault(mode, []).append(brightness(shot, 6, shot[1] // 2))
+        same = adb("shell", "pidof", APP).strip() == pid
+        light, dark = min(seen["no"]), max(seen["yes"])
+        said = (f"light {', '.join(f'{b:.0f}' for b in seen['no'])}, dark {seen['yes'][0]:.0f} (0-255);"
+                f" the app {'not started again' if same else 'started again'}")
+        return ("PASS" if light > 170 and dark < 90 and same else "FAIL"), said
+    finally:
+        adb("shell", "cmd", "uimode", "night", was)
 
 
 # ---- the phone's log, kept long enough (AC6) ----

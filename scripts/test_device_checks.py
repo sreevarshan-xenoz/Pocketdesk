@@ -369,6 +369,13 @@ class SessionParts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             env = dc.Server(pathlib.Path(name), pathlib.Path(name) / "pocketdesk.exe").env()
             self.assertEqual(env["POCKETDESK_LOCK_FILE"], str(pathlib.Path(name) / "lock.txt"))
+    def test_the_brightness_of_a_stretch_of_screen(self):
+        white, black = bytes([255, 255, 255, 255]), bytes([0, 0, 0, 255])
+        # 4x2: the left half white, the right half black.
+        row = white * 2 + black * 2
+        shot = (4, 2, row * 2)
+        self.assertEqual(dc.brightness(shot, 0, 0, size=2), 255.0)
+        self.assertEqual(dc.brightness(shot, 2, 0, size=2), 0.0)
 
 
 if __name__ == "__main__":
