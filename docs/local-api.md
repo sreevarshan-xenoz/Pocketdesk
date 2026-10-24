@@ -77,7 +77,7 @@ The desktop app's Files tab: the last 20 (`--count N` for another number; the li
                          "received_unix": 1792054100, "from": "0d7c3a52-…", "still_there": true}]}
 ```
 
-A sent row's `state` is `offered` (the phone has not taken it yet), `sent` (saved on the phone) or `failed` (with `reason`). A folder's name ends in `/`, and its `note` says what it left out.
+A sent row's `state` is `offered` (not taken yet), `sent` (saved there: on the phone, the other computer or the KDE Connect device) or `failed` (with `reason`). A folder's name ends in `/`, and its `note` says what it left out.
 
 ### `pocketdesk sessions --json`, `pocketdesk capabilities --json`, `pocketdesk list --json`, `pocketdesk relay-ids --json`
 

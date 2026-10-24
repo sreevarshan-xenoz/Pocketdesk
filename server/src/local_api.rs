@@ -313,8 +313,9 @@ pub fn print_files(sent: bool, count: usize, as_json: bool) -> anyhow::Result<()
         if sent {
             let how = match row["state"].as_str() {
                 Some("failed") => format!("not sent: {}", row["reason"].as_str().unwrap_or("")),
-                Some("sent") => "saved on the phone".to_string(),
-                _ => "waiting for the phone".to_string(),
+                // U3: a computer or a KDE device takes files too.
+                Some("sent") => "saved there".to_string(),
+                _ => "waiting to be taken".to_string(),
             };
             let note = row["note"]
                 .as_str()
@@ -1430,9 +1431,10 @@ pub fn run_send(query: &str, path: &Path, wait_secs: Option<u64>, as_json: bool)
 /// How a send went, in words: its state and any note.
 fn send_words(out: &Value) -> String {
     let how = match out["state"].as_str() {
-        Some("queued") => "queued for the phone".to_string(),
-        Some("offered") => "offered, the phone has not taken it yet".to_string(),
-        Some("sent") => "saved on the phone".to_string(),
+        // U3: the words fit a computer or a KDE device as well as a phone.
+        Some("queued") => "queued".to_string(),
+        Some("offered") => "offered, not taken yet".to_string(),
+        Some("sent") => "saved there".to_string(),
         Some(state) => format!("{state}: {}", out["reason"].as_str().unwrap_or("")),
         None => "unknown".to_string(),
     };
