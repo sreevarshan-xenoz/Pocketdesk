@@ -3396,9 +3396,10 @@ AE2_CROPS = 6
 def ae2_crops(ctx: Ctx) -> tuple[str, str]:
     """Crops to a window and back, six times in one session: each rebuilds
     at its size, the session stays up with no redial (no watchdog), the
-    app's memory level holds (§16, across resolution changes); and the
-    session's record then shows the stalls in its encode or round-trip
-    tail, max above p50 (§11)."""
+    app's memory level holds (§16, across resolution changes). The
+    session's record is read after, its tails reported: they cannot show
+    §11's stall, as the encode timer leaves a rebuild out and the round
+    trip is sampled apart from the crops (review)."""
     def body(ctx: Ctx) -> tuple[str, str]:
         if start_session(ctx) is None:
             return "SKIP", "no Connect on a 127.0.0.1 card on Home"
@@ -3406,6 +3407,8 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
             return "TIMEOUT", "no session within 30 s"
         time.sleep(10)
         sessions = ctx.server.log().count("Client codec caps negotiated")
+        if sessions < 1:
+            return "TIMEOUT", "no codec negotiated for the session: a redial could not be seen"
         records = len(session_records(ctx.server.root))
         desktop = capture_size(ctx.server.log())
         if desktop is None:
@@ -3440,24 +3443,29 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
                 memory.append(pss_mb())
         finally:
             close_sheets(ctx)
-        redials = ctx.server.log().count("Client codec caps negotiated") - sessions
+        # A redial shows as a new negotiation, or as a session's record
+        # written before this one ends (review: not every redial negotiates).
+        redials = max(ctx.server.log().count("Client codec caps negotiated") - sessions,
+                      len(session_records(ctx.server.root)) - records)
         end_session(ctx)
         record = wait_for(lambda: session_records(ctx.server.root)[records:], 30, 1)
         tail = record[-1] if record else {}
-        stalls = [k for k in ("enc", "rtt")
-                  if tail.get(f"{k}_max", "").isdigit() and tail.get(f"{k}_p50", "").isdigit()
-                  and int(tail[f"{k}_max"]) > int(tail[f"{k}_p50"])]
+        if memory[0] is None or memory[-1] is None:
+            return "TIMEOUT", "the app's memory level could not be read at the start or the end"
         levels = [m for m in memory if m is not None]
-        grew = levels[-1] - levels[0] if len(levels) >= 2 else 0.0
+        grew = levels[-1] - levels[0]
+        peak = max(levels) - levels[0]
         said = (f"{len(sizes)} changes of size ({', '.join(sorted(set(sizes)))}); redials {redials};"
                 f" memory {' → '.join(f'{m:.1f}' for m in levels)} MB;"
-                f" record: enc p50 {tail.get('enc_p50', '?')} max {tail.get('enc_max', '?')},"
+                f" record ({tail.get('outcome', '?')}): enc p50 {tail.get('enc_p50', '?')} max {tail.get('enc_max', '?')},"
                 f" rtt p50 {tail.get('rtt_p50', '?')} max {tail.get('rtt_max', '?')} ms")
         if not tail:
             return "TIMEOUT", said + "; no session record after the session ended"
         # A leak shows as a climb that keeps on: more than 40 MB over six
-        # rounds, where a round's rebuilds are a few MB and come back.
-        ok = redials == 0 and grew <= 40 and bool(stalls)
+        # rounds (at the end or at any round), where a round's rebuilds are a
+        # few MB and come back.
+        good = tail.get("outcome") in ("completed", "lan_direct", "wan_punched", "wan_relayed")
+        ok = redials == 0 and grew <= 40 and peak <= 40 and good
         return ("PASS" if ok else "FAIL"), said
     return session_check(ctx, body)
 
