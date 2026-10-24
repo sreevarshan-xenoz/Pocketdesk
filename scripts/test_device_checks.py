@@ -355,6 +355,21 @@ class SessionParts(unittest.TestCase):
         self.assertIs(dc.switch_on_row(dump, "Clipboard sync"), False)
         self.assertIsNone(dc.switch_on_row(dump, "Nothing"))
 
+    def test_failed_locks_in_the_server_s_log(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"WARN x: phone-a left, but the lock failed: {esc}[1mthe lock file: denied",
+            "WARN x: phone-b left, but the lock failed: the lock file: denied",
+            "INFO x: phone-a left: locked this computer (the lock file)",
+        ])
+        self.assertEqual(dc.lock_failures(log, "phone-a"), 1)
+
+    def test_every_throwaway_has_the_lock_seam(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as name:
+            env = dc.Server(pathlib.Path(name), pathlib.Path(name) / "pocketdesk.exe").env()
+            self.assertEqual(env["POCKETDESK_LOCK_FILE"], str(pathlib.Path(name) / "lock.txt"))
+
 
 if __name__ == "__main__":
     unittest.main()

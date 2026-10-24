@@ -29,6 +29,7 @@ import re
 import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -462,6 +463,8 @@ class Server:
             # AD2: the phone's file browser shows this folder as home, never
             # the owner's.
             "POCKETDESK_BROWSE_HOME": str(self.root / "home"),
+            # AG1: a lock is a line in this file, never this computer's lock.
+            "POCKETDESK_LOCK_FILE": str(self.root / "lock.txt"),
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
@@ -541,7 +544,11 @@ class Server:
         path = self.root / "state" / "trusted_devices.json"
         store = json.loads(path.read_text(encoding="utf-8"))
         for device in store.get("trusted_device_ids", []):
-            store.setdefault("permissions", {}).setdefault(device, {})["input"] = False
+            mine = store.setdefault("permissions", {}).setdefault(device, {})
+            mine["input"] = False
+            # AG1 review: nor a lock left on by a run cut short (a throwaway
+            # started later by hand, without the seam, would lock this box).
+            mine.pop("away_lock", None)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
         os.replace(tmp, path)
@@ -3831,6 +3838,133 @@ def af4_sound_gives_up(ctx: Ctx) -> tuple[str, str]:
 
 
 LONG.add("af4-sound-gives-up")
+
+
+# ---- a failed away lock (AG1) ----
+
+
+def by_home(ctx: Ctx) -> Optional[str]:
+    """The server restarted with the reverse, the phone linked at home (not
+    by the internet road); why not, when it is not."""
+    ctx.server.stop()
+    why = ctx.server.start()
+    if why:
+        return why
+    adb("reverse", f"tcp:{ctx.phone_port}", f"tcp:{ctx.port}")
+    ctx.phone.wake()
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+        return "the phone did not link at home within 90 s"
+    if iroh_loops(ctx.server.log()):
+        return "the phone linked by the internet road, not at home"
+    ctx.on_road = False
+    return None
+
+
+def lock_failures(log: str, device: str) -> int:
+    """The server's "left, but the lock failed" lines for `device`."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum(f"{device} left, but the lock failed" in line for line in plain.splitlines())
+
+
+def set_permission_live(ctx: Ctx, key: str, value: Optional[bool]) -> None:
+    """The phone's permission `key` in the trust store, while the server
+    runs (the away lock's switch is read at each tick); None takes it out."""
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    store = json.loads(path.read_text(encoding="utf-8"))
+    mine = store.setdefault("permissions", {}).setdefault(ctx.device, {})
+    if value is None:
+        mine.pop(key, None)
+    else:
+        mine[key] = value
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+@check("ag1-failed-lock", "§118")
+def ag1_failed_lock(ctx: Ctx) -> tuple[str, str]:
+    """A lock that fails is tried again a minute later, and said in an
+    `away_locked` event with `failed` (§118). The lock is the throwaway's
+    seam file, never this computer's: made read-only, it fails; writable
+    again, the next try writes its line. The phone counts as present at
+    home (the reverse) and as gone on the internet road alone (V1)."""
+    lock = ctx.server.root / "lock.txt"
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    had = json.loads(path.read_text(encoding="utf-8")).get("permissions", {}).get(ctx.device, {}).get("away_lock")
+    before = None
+    switched = False
+    if os.environ.get("ANDROID_SERIAL", "").count(":"):
+        # Restarting adb's server would lose a phone on wireless adb (review).
+        return "SKIP", "the phone is on wireless adb: adb's server cannot be restarted under it"
+    try:
+        # A run starts at home; only a check before this one moved it to the
+        # road (a phone that found home unreachable may stay on the road:
+        # then run this check alone, or first).
+        if ctx.on_road or iroh_loops(ctx.server.log()):
+            why = by_home(ctx)
+            if why:
+                return "SKIP", f"{why}: run this check alone"
+        # The seam is set for this server (its own start says so), or the
+        # switch is never turned on: nothing may lock this computer.
+        if f"POCKETDESK_LOCK_FILE is set: {lock}" not in re.sub(chr(27) + r"\[[0-9;]*m", "", ctx.server.log()):
+            return "SKIP", "the throwaway did not say its lock seam was set: the away lock stays off"
+        if lock.exists():
+            # A run cut short may have left it read-only (review).
+            os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
+        lock.unlink(missing_ok=True)
+        lock.write_text("", encoding="utf-8")
+        os.chmod(lock, stat.S_IREAD)
+        before = ctx.server.configure({"away_lock_minutes": "2", "events": "true"})
+        count = ctx.server.event_count()
+        failures = lock_failures(ctx.server.log(), ctx.device)
+        set_permission_live(ctx, "away_lock", True)
+        switched = True
+        time.sleep(20)
+        # Gone: the reverse removed, and adb's own server restarted, as that
+        # alone closes the link already made through the reverse (its first
+        # run kept it); the phone comes back by the internet road alone.
+        loops = iroh_loops(ctx.server.log())
+        adb("reverse", "--remove", f"tcp:{ctx.phone_port}")
+        run(["adb", "kill-server"])
+        run(["adb", "start-server"], timeout=60)
+        run(["adb", "wait-for-device"], timeout=60)
+        if not wait_for(lambda: iroh_loops(ctx.server.log()) > loops, 240, 3):
+            return "TIMEOUT", "the phone did not come back by the internet road within 240 s"
+        ctx.on_road = True
+        gone = time.monotonic()
+        first = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= failures + 1, 8 * 60, 5)
+        if not first:
+            return "TIMEOUT", "no lock tried within 8 minutes of the phone leaving (is this computer in use?)"
+        tried = (time.monotonic() - gone) / 60
+        failed_event = wait_for(lambda: any(e.get("event") == "away_locked" and e.get("failed")
+                                            for e in ctx.server.events_after_count(count)), 30, 2)
+        again_at = time.monotonic()
+        second = wait_for(lambda: lock_failures(ctx.server.log(), ctx.device) >= failures + 2, 180, 5)
+        again = time.monotonic() - again_at
+        # Writable again: the next try writes its line.
+        os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
+        written = wait_for(lambda: lock.read_text(encoding="utf-8").strip(), 180, 5)
+        said = (f"the phone gone, the lock tried {tried:.1f} min later and failed;"
+                f" {'an' if failed_event else 'no'} away_locked event with failed;"
+                f" {f'tried again {again:.0f} s later' if second else 'not tried again within 180 s'};"
+                f" writable again, {'a line written' if written else 'no line within 180 s'}")
+        ok = failed_event and second and 45 <= again <= 120 and written
+        return ("PASS" if ok else "FAIL"), said
+    finally:
+        # Each step whatever the one before did (review); the switch first,
+        # and never back to on.
+        steps = []
+        if switched:
+            steps.append(lambda: set_permission_live(ctx, "away_lock", False if had is False else None))
+        if before is not None:
+            steps.append(lambda: ctx.server.restore_config(before))
+        steps.append(lambda: lock.exists() and os.chmod(lock, stat.S_IREAD | stat.S_IWRITE))
+        steps.append(lambda: lock.unlink(missing_ok=True))
+        for step in steps:
+            try:
+                step()
+            except (OSError, ValueError) as error:
+                print(f"note: an AG1 cleanup step failed: {error}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
