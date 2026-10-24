@@ -953,7 +953,8 @@ On the A71 against this Windows box (LAN, release build, input off), 2026-10-14.
 - [x] An hour with one session from start to end, to confirm the memory levels off (2026-10-24, the OPPO over the internet road against a throwaway server, the runner's `w1-hour`: the app's memory 161.0 → 161.4 MB over 60 minutes, at most 164.2, the session up at the end.)
 - [ ] The computer sleeping and waking (the user's to run), and the phone switching between Wi-Fi and mobile data (needs a SIM).
 - [ ] The same on the Linux host.
-- [ ] A file transfer cut by a drop (today it fails and is sent again whole).
+- [x] A send to the phone cut by a drop continues where it stopped when sent again: 1 GiB cut at 30 % (the server stopped), the same file sent again continued from 31 % on the phone, and ended with the same MD5 (the runner's `x2-resume`, the OPPO over the internet road, 2026-10-24).
+- [ ] The same from the phone to the computer.
 
 ## 47. Check connection (T1)
 
