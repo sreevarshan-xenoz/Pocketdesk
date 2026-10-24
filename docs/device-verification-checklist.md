@@ -306,7 +306,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 
 ## 10a. Phone mic share (R4 E2)
 
-- [ ] "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
+- [x] "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off. (2026-10-25, the runner's `af3-mic-refused`, once: Phone mic share asked, Don't allow left the switch off and the permission not granted. The toast cannot be read by uiautomator. The OPPO's permission now carries that one refusal (USER_SET; the shell may not clear it): it still asks next time, and the check SKIPs.)
 - [ ] Granting it → button reads "Mic: on" (amber) and the desktop gains a source: `pactl list short sources | grep pocketdesk_mic` (or pavucontrol → Recording). (where: linux)
 - [ ] Speaking moves the pavucontrol input meter for "Pocketdesk Mic"; `pw-record --target pocketdesk_mic /tmp/mic.wav` captures audible speech (play it back). (where: linux)
 - [ ] "Mic: on" tap → source disappears immediately; `pgrep -f pocketdesk_mic` empty (no leaked pw-loopback children after repeated toggling). (where: linux)
@@ -1011,8 +1011,8 @@ On the A71 against Windows, 2026-10-15:
 - [x] A share of 120 MB the same way: the retry replaced the stale attempt and continued from 12.6 MB, MD5 matches, nothing left in `<state>/partials`.
 
 Owed:
-- [ ] A file from the remote browser broken and continued.
-- [ ] "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
+- [x] A file from the remote browser broken and continued. (2026-10-25, the OPPO by the internet road against a throwaway server, the runner's `af1-browse-resume`: 1 GiB from the remote browser cut at 30 %, the phone's own retry continued from 30-31 %, the same MD5; three runs.)
+- [x] "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed. (2026-10-25, the runner's `af2-retry-off`: a 1 GiB send cut at 30 % with the server left down; the phone's transfer ended 29 and 32 s after the cut (about the time it takes to call the link dead; retries would add 65 s and more), nothing of it kept.)
 - [x] "Unfinished files: not kept" on the desktop: a retry starts over. (2026-10-24, the runner's `ac1-not-kept`: `transfer_keep_hours = 0`, a share cut at 30 % was started over by the phone's retry, no "Continued", the same MD5.)
 - [x] A file that changes between attempts starts over (the prefix hash). (2026-10-24, the runner's `ac2-changed`: a send to the OPPO cut at 30 %, the file's first MiB rewritten with its size and date kept, sent again: "changed since the last attempt", started over, no "continued", the new file's MD5 on the phone.)
 - [x] The app killed mid-download, then the offer fetched again within its 10 minutes. (seen 2026-10-23 on the OPPO against a throwaway server (S2) with #285: force-stopped at 42 MB of 150 MB, relaunched, the computer offered it again and the phone continued from 42 MB, MD5 matching; before #285 nothing fetched it again.)
@@ -1662,7 +1662,7 @@ On the A71 against this box (a throwaway server, the internet road):
 - [x] With Audio and Mic off for the phone: refused, the phone naming the switches to turn on.
 - [x] Disconnect in the notification ends it on both ends.
 - [x] After the review fixes: with Mic off, the mic switch greyed with its reason; the computer's notification says "a phone is this computer's speaker and mic"; the server stopped and started again, the session counted down and came back with the sound playing; Lock desktop from the notification asks (cancelled); a change of permissions ends it with that reason, no retry, the service released.
-- [ ] Ten minutes without the computer: it stops trying and releases the service.
+- [x] Ten minutes without the computer: it stops trying and releases the service. (2026-10-25, the runner's `af4-sound-gives-up`, the media volume at 0: a sound session admitted, the computer stopped, the service released 10.9 and 10.8 min later.)
 - [ ] By ear: the computer's sound on the phone (lag, quality, across the room).
 - [ ] Windows with VB-CABLE: the phone's mic heard in a recording or a call on the computer.
 - [ ] Linux: the computer's sound through PipeWire and the phone's mic as "Pocketdesk Mic" (`pw-loopback`).

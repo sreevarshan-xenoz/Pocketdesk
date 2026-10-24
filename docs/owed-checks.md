@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-884 open items.
+880 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 54 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 50 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -42,10 +42,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **7. Clipboard + files (Tier 1 #4)**
 
 - The same from the phone's side, and with the sync turned off and on: it needs the phone's Copies by themselves (Pocketdesk control).
-
-**10a. Phone mic share (R4 E2)**
-
-- "Mic: off" tap → RECORD_AUDIO permission dialog; denying it toasts "Microphone permission denied" and the toggle stays off.
 
 **11. WAN over iroh (R1)**
 
@@ -100,11 +96,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Transfers both ways still end "saved" over many runs (the clean close after the status byte), and a desktop share to a full disk fails at once instead of after 10 s.
 
-**50. Resumable transfers (T6a)**
-
-- A file from the remote browser broken and continued.
-- "Retry failed files" off: a broken file fails at once, and no part is kept. Tried 2026-10-19: the phone's Wi-Fi off for 200 s in a 900 MB download did not break it; QUIC carried it on when Wi-Fi came back and the whole file arrived ("sent"), so a real failure is still owed.
-
 **74. The phone's battery without a session**
 
 - With only folders, answers or files keeping the link; with none on, nothing sent and no connection made; the link dropping just before a report (nothing dialed).
@@ -116,10 +107,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **84. The reliability pass before ecosystem phase 2 (R6)**
 
 - A download that waits for the network (next phase, R6i).
-
-**97. The phone as the computer's speaker and mic (N5)**
-
-- Ten minutes without the computer: it stops trying and releases the service.
 
 **100. GNOME and KDE hosts that work unattended (N8)**
 
