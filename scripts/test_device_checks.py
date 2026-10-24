@@ -377,6 +377,14 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.brightness(shot, 0, 0, size=2), 255.0)
         self.assertEqual(dc.brightness(shot, 2, 0, size=2), 0.0)
 
+    def test_screencap_s_raw_form(self):
+        import struct
+        pixels = bytes(range(16))  # 2x2, 4 bytes each
+        self.assertEqual(dc.parse_raw(struct.pack("<III", 2, 2, 1) + pixels), (2, 2, pixels))
+        self.assertEqual(dc.parse_raw(struct.pack("<IIII", 2, 2, 1, 0) + pixels), (2, 2, pixels))
+        self.assertIsNone(dc.parse_raw(struct.pack("<III", 3, 3, 1) + pixels))
+        self.assertIsNone(dc.parse_raw(b"short"))
+
 
 if __name__ == "__main__":
     unittest.main()
