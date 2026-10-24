@@ -267,6 +267,17 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.dated_as(arrived - 30, original, arrived), "arrival")
         self.assertEqual(dc.dated_as(original + 86_400, original, arrived), "other")
 
+    def test_the_phone_s_main_log_buffer(self):
+        said = chr(10).join([
+            "main: ring buffer is 256 KiB (255 KiB consumed, 868 KiB readable), max entry is 5120 B",
+            "system: ring buffer is 1 MiB (248 KiB consumed), max entry is 5120 B",
+        ])
+        self.assertEqual(dc.main_log_size(said), "256K")
+        self.assertEqual(dc.main_log_size("main: ring buffer is 16 MiB (1 KiB consumed)"), "16M")
+        self.assertIsNone(dc.main_log_size("error: no such buffer"))
+        self.assertEqual(dc.kib("256K"), 256)
+        self.assertEqual(dc.kib("16M"), 16384)
+
 
 if __name__ == "__main__":
     unittest.main()

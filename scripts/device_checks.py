@@ -2377,9 +2377,10 @@ def ac3_send_during_share(ctx: Ctx) -> tuple[str, str]:
             order = "after the share" if landed.exists() else "before the share ended"
             # The phone publishes the file just after the send hears it saved
             # (AC3 review): a few seconds for it to appear.
-            got = wait_for(lambda: [w for w in adb("shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split()
-                                    if len(w) == 32], 20, 2) or []
-            small_same = bool(got) and got[0] == want_small
+            # Until it hashes as sent (review: a half-published copy must not
+            # end the wait).
+            small_same = bool(wait_for(lambda: want_small in adb(
+                "shell", device_command("md5sum", f"{PHONE_DOWNLOADS}/{small.name}"), timeout=120).split(), 20, 2))
             if not wait_for(lambda: landed.exists() and landed.stat().st_size == size, 1200, 2):
                 return "TIMEOUT", "the share did not end whole within 20 minutes of the send"
             settled = True
@@ -2862,6 +2863,25 @@ def z2_many_shares(ctx: Ctx) -> tuple[str, str]:
 LONG.add("z2-many-shares")
 
 
+# ---- the phone's log, kept long enough (AC6) ----
+
+# The phone's main log for a run. The OPPO's is 256 KiB, a couple of
+# minutes of Pocketdesk's own lines: a long transfer's (AA2) were gone by
+# the time a check read them.
+RUN_LOG_SIZE = "16M"
+
+
+def main_log_size(said: str) -> Optional[str]:
+    """The main log buffer's size from `adb logcat -g`, as `-G` takes it."""
+    found = re.search(r"^main: ring buffer is (\d+) ([KM])i?B", said, re.MULTILINE)
+    return f"{found.group(1)}{found.group(2)}" if found else None
+
+
+def kib(size: str) -> int:
+    """A `-G` size ("256K", "16M") in KiB."""
+    return int(size[:-1]) * (1024 if size.endswith("M") else 1)
+
+
 # ---- main ----
 
 
@@ -2906,6 +2926,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Refused: adb already reverses tcp:{args.phone_port}; remove it first.", file=sys.stderr)
         return 2
     failed = False
+    # A bigger main log for the run, put back after (AC6).
+    log_size = main_log_size(adb("logcat", "-b", "main", "-g"))
+    # Never smaller than it was (review): one already this big is left.
+    if log_size and kib(log_size) < kib(RUN_LOG_SIZE):
+        adb("logcat", "-b", "main", "-G", RUN_LOG_SIZE)
+    else:
+        log_size = None
     try:
         why = server.start()
         if why:
@@ -2936,6 +2963,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     finally:
         server.stop()
         adb("reverse", "--remove", f"tcp:{args.phone_port}")
+        if log_size:
+            adb("logcat", "-b", "main", "-G", log_size)
     return 1 if failed else 0
 
 
