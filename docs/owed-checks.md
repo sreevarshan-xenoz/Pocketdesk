@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+898 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 69 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 68 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -54,7 +54,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A deliberate stall (crop to a window, or Wi-Fi off and on mid-session) moves `enc_max` or `rtt_max` above their p50.
 - `dec_*` grows when the desktop is cropped to a bigger window, and `rnd_p50` jumps when the bitrate clamp or a preset slows the link.
-- Loss response must not fire on a quiet desktop: hold the screen still (no window movement, no video) for a minute and the log must show no bitrate-change line. Below 100 datagrams in a tick the controller treats the sample as no information, which is the only thing distinguishing "the link is lossy" from "there was nothing to lose" — a bitrate cut on an idle LAN session is a bug, not a measurement.
 
 **11b. HUD link-profile presets (R4 E5)**
 

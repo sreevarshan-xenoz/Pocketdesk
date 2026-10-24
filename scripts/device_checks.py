@@ -1484,11 +1484,21 @@ def start_session(ctx: Ctx) -> Optional[float]:
 
 
 def end_session(ctx: Ctx) -> None:
-    """Exit the session as its button does; Back when it is not found."""
+    """Exit the session as its button does. Once its buttons are hidden, the
+    server ends it (a kick, as `pocketdesk kick` asks) and Back leaves the
+    card that says so."""
     exit_spot = next(((x, y) for text, x, y in dump_nodes(ctx.phone.dump()) if text == "Exit"), None)
     if exit_spot:
         adb("shell", "input", "tap", str(exit_spot[0]), str(exit_spot[1]))
     else:
+        if in_session(ctx):
+            folder = ctx.server.root / "state" / "kicks"
+            folder.mkdir(exist_ok=True)
+            name = str(uuid.uuid4())
+            line = chr(10).join([ctx.device, str(int(time.time())), ""])
+            (folder / f"{name}.tmp").write_text(line, encoding="utf-8")
+            os.replace(folder / f"{name}.tmp", folder / f"{name}.kick")
+            wait_for(lambda: not in_session(ctx), 15, 1)
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
     time.sleep(3)
 
@@ -1522,8 +1532,17 @@ def needs_details(ctx: Ctx) -> Optional[str]:
 
 
 def in_session(ctx: Ctx) -> bool:
-    """Whether the phone shows a session: its Exit button."""
-    return any(text == "Exit" for text, _, _ in dump_nodes(ctx.phone.dump()))
+    """Whether the server has a session from the phone, by its fresh mirror
+    (the phone hides the session's buttons once untouched, and a tap to
+    show them would be a touch toward this computer)."""
+    path = ctx.server.root / "state" / "live_sessions.json"
+    try:
+        mirror = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if time.time() - mirror.get("updated_unix", 0) > 10:
+        return False
+    return any(s.get("device_id") == ctx.device for s in mirror.get("sessions", []))
 
 
 def session_check(ctx: Ctx, body: Callable[[Ctx], tuple[str, str]]) -> tuple[str, str]:
@@ -1643,6 +1662,42 @@ def w1_hour(ctx: Ctx) -> tuple[str, str]:
 
 
 LONG.add("w1-hour")
+
+
+def bitrate_changes(log: str) -> int:
+    """The server's lines that change a session's bitrate: the loss
+    response's target and the adaptive rate (W2)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum(
+        "Encoder bitrate target changed" in line or "Adaptive bitrate:" in line
+        for line in plain.splitlines()
+    )
+
+
+@check("w2-quiet", "§11")
+def w2_quiet(ctx: Ctx) -> tuple[str, str]:
+    """No loss response on a quiet desktop: a session held a minute with
+    nothing moving changes no bitrate (fewer than 100 datagrams a tick are
+    no information). This computer's screen must be still meanwhile."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(connected_at, 20, 0.5):
+            return "TIMEOUT", "no session within 20 s of the tap"
+        time.sleep(15)
+        before = bitrate_changes(ctx.server.log())
+        time.sleep(60)
+        if not in_session(ctx):
+            return "FAIL", "the session was gone after the minute"
+        new = bitrate_changes(ctx.server.log()) - before
+        if new == 0:
+            return "PASS", "no bitrate change in a quiet minute"
+        # Its words: a relayed road going direct lifts its cap with the same
+        # line (`relayed=`), which is not a loss response (W2 review).
+        plain = re.sub(chr(27) + r"\[[0-9;]*m", "", ctx.server.log()).splitlines()
+        last = next((l for l in reversed(plain) if "bitrate target changed" in l or "Adaptive bitrate:" in l), "")
+        return "FAIL", f"{new} bitrate change(s) in a quiet minute; the last: {last[-160:]}"
+    return session_check(ctx, body)
 
 
 # ---- main ----
