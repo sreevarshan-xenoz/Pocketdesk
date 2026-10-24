@@ -2241,6 +2241,10 @@ pub async fn list_remote_files(
 /// (R4 C1: bit 0 = HEVC; H.264 is assumed). 0 keeps a plain H.264 session.
 /// `mode` says what it is for: the computer's screen, the phone as a remote
 /// (T10i), or the phone's own screen shown there (T10k).
+/// How long a session's home dial waits while the control link to that
+/// computer is by the internet road (V8).
+const HOME_TRY_WHILE_AWAY: Duration = Duration::from_secs(2);
+
 pub async fn connect_streaming(
     address: String,
     port: u16,
@@ -2327,17 +2331,35 @@ pub async fn connect_streaming(
     // Device keys: on a LAN session, whose TLS certificate proves this
     // phone, name the WAN key it dials with so the desktop can bind it.
     let iroh_id = device_wan_key().map(|key| key.public().to_string());
-    let (client, packet_rx, audio_rx) = StreamingClient::connect(
+    let identity = client_identity();
+    let connecting = StreamingClient::connect(
         &addr,
         cert_manager,
         monitor_index,
-        Some(&client_identity().device_id),
+        Some(&identity.device_id),
         iroh_id.as_deref(),
         Some(codec_caps),
         mode,
-    )
-    .await
-    .map_err(|e| {
+    );
+    // V8: with the control link to this computer by the internet road, home
+    // most likely does not answer, and a QUIC dial to an address that does
+    // not waits out its 10 s. Home gets a short try instead: a phone back on
+    // its Wi-Fi with the link still on the road answers well within it (V8
+    // review), and one away falls to the road seconds sooner.
+    let connected = if crate::link::home_unreachable(&address).await {
+        match tokio::time::timeout(HOME_TRY_WHILE_AWAY, connecting).await {
+            Ok(connected) => connected,
+            Err(_) => {
+                return Err(format!(
+                    "{address} did not answer at home within {} s, and its control link is by the internet road",
+                    HOME_TRY_WHILE_AWAY.as_secs()
+                ));
+            }
+        }
+    } else {
+        connecting.await
+    };
+    let (client, packet_rx, audio_rx) = connected.map_err(|e| {
         let err_dto = PocketdeskErrorDto::from(pocketdesk_core::error::PocketdeskError::from(e));
         *crate::SESSION_STATUS.lock().unwrap() = SessionStatus::Error(PocketdeskErrorDto {
             code: err_dto.code,
@@ -3169,6 +3191,38 @@ mod hud_window_tests {
         assert_eq!(super::rtt_samples(), 0);
         assert_eq!(super::get_streaming_rtt(), 0);
         assert!(crate::RATE_SNAPSHOTS.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod home_skip_tests {
+    use std::sync::atomic::Ordering;
+
+    /// V8: with the control link to this computer on the internet road, the
+    /// session's home dial gets 2 s, not its 10, and the caller takes the road.
+    #[tokio::test]
+    async fn a_session_skips_home_while_the_link_is_by_the_internet_road() {
+        // The control link's statics, as the pairing road's test holds them.
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let was_peer = crate::CONTROL_PEER.lock().await.clone();
+        let was_road = crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst);
+        // A documentation address: nothing answers there.
+        *crate::CONTROL_PEER.lock().await = Some(("192.0.2.7".to_string(), 1716));
+        crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let said = super::connect_streaming(
+            "192.0.2.7".to_string(),
+            4716,
+            None,
+            0,
+            pocketdesk_core::streaming::SessionMode::Screen,
+        )
+        .await;
+        let took = started.elapsed();
+        *crate::CONTROL_PEER.lock().await = was_peer;
+        crate::CONTROL_OVER_INTERNET.store(was_road, Ordering::SeqCst);
+        assert!(said.unwrap_err().contains("internet road"));
+        assert!(took < std::time::Duration::from_secs(4), "{took:?}");
     }
 }
 
