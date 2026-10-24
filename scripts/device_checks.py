@@ -3094,6 +3094,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         server.stop()
         adb("reverse", "--remove", f"tcp:{args.phone_port}")
         if log_size:
+            # A size set again empties the log: what the run saw is kept
+            # in the throwaway's folder first, for a failure to be read.
+            with open(args.server_root / "phone_log.txt", "w", encoding="utf-8") as kept:
+                kept.write(adb("logcat", "-b", "main", "-d", "-v", "time", timeout=120))
             adb("logcat", "-b", "main", "-G", log_size)
     return 1 if failed else 0
 
