@@ -1219,7 +1219,7 @@ On the A71 against this box, 2026-10-16, with a throwaway chat app that posts a 
 
 Owed:
 - [ ] The desktop app's Notifications tab itself (its buttons and reply box), and a real chat app (WhatsApp, Signal, Messages).
-- [ ] The switch off: nothing offered, an answer not run.
+- [x] The switch off: nothing offered, an answer not run. On the OPPO with the fixture app's chat notification and a throwaway server, no session: with "Let the computer answer notifications" on, the computer kept it with "Mark as read" and a reply; with it turned off, an answer to that note came back `not_sent` ("answering is off on the phone") and the app ran nothing, and a new note offered nothing (2026-10-24).
 - [ ] From away from home (the internet link).
 - [ ] An action that opens an activity on Android 14+ (background launches may be blocked). (where: by hand)
 
@@ -2307,7 +2307,7 @@ Built 2026-10-20; tested through units, the harness and the server's mapping, no
 - [x] An ongoing notification (the fixture's progress) not cleared: the phone logged `NotClearable`. (Seen 2026-10-24 on the OPPO against a throwaway server (S4).)
 - [ ] A ringing call not cleared. (where: sim)
 - [x] Phone Settings "Let the computer clear my notifications" off: not cleared, the phone logged `Off`. (Seen 2026-10-24 on the OPPO against a throwaway server (S4).)
-- [ ] Desktop "Clearing here clears it on the phone" off: not cleared.
+- [x] Desktop "Clearing here clears it on the phone" off: not cleared. On the OPPO with the fixture app's notification and a throwaway server: with `clear_on_phone = false`, a clear written as the Notifications page writes it was taken and dropped, and the notification stayed on the phone; turned on again while the server ran, the next clear removed it (2026-10-24).
 - [ ] Linux (GNOME): closing a notification clears it; pressing its button does not.
 - [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: a shell notification sent to the computer, then cleared there through `notification_clears/` as the Notifications page writes it, was gone from the phone within 8 s.
 
