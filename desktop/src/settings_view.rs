@@ -831,7 +831,7 @@ impl SettingsForm {
                     );
                 });
                 // GNOME and KDE only: nothing to remember elsewhere.
-                if cfg!(target_os = "linux") {
+                if drawn_here("remember_screen_grant") {
                     row(ui, "remember_screen_grant", |ui| {
                         ui.checkbox(
                         &mut e.remember_screen_grant,
@@ -1038,7 +1038,7 @@ impl SettingsForm {
                 });
                 // Windows, and Linux through the portal (R4): elsewhere nothing
                 // registers the key (H3 review).
-                if cfg!(any(windows, target_os = "linux")) {
+                if drawn_here("clipboard_hotkey") {
                     row(ui, "clipboard_hotkey", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut e.clipboard_hotkey)
@@ -1070,7 +1070,7 @@ impl SettingsForm {
                     });
                 }
                 // N9: M4's typing window, from anywhere, where H3's is.
-                if cfg!(any(windows, target_os = "linux")) {
+                if drawn_here("typing_hotkey") {
                     row(ui, "typing_hotkey", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut e.typing_hotkey)
@@ -1117,7 +1117,7 @@ impl SettingsForm {
                     });
                 }
                 // Windows, and Linux through MPRIS (N10).
-                if cfg!(any(windows, target_os = "linux")) {
+                if drawn_here("phone_media_controls") {
                     row(ui, "phone_media_controls", |ui| {
                         ui.checkbox(
                             &mut e.phone_media_controls,
@@ -1158,9 +1158,9 @@ impl SettingsForm {
                         "Only into a folder whose \"The computer may add files\" is on in Pocketdesk's Settings on the phone. Nothing on the phone is replaced, removed or renamed: a name taken gets the next free one.",
                     );
                 });
-                // Only where it locks (E5): Linux cannot tell yet whether
-                // someone is at the keyboard, so it never does.
-                if cfg!(windows) {
+                // Only where it locks: Windows, and Linux since R3 (V5: this
+                // row stayed Windows-only after it).
+                if drawn_here("away_lock_minutes") {
                     row(ui, "away_lock_minutes", |ui| {
                         ui.add(
                             egui::DragValue::new(&mut e.away_lock_minutes)
@@ -1171,6 +1171,14 @@ impl SettingsForm {
                             ui,
                             "How long a phone with \"Lock this computer when this phone leaves\" on (Devices) must be gone, with nobody at the keyboard or mouse, before this computer locks. A sleeping phone can drop its link, so it can lock while you read.",
                         );
+                        // V5 review: Linux cannot always say how long it
+                        // has been idle, and then it never locks.
+                        if !cfg!(windows) {
+                            note(
+                                ui,
+                                "Only where this computer can tell how long it has been idle (GNOME, KDE, Sway, Hyprland, X11 with xprintidle); elsewhere it never locks.",
+                            );
+                        }
                     });
                 }
                 row(ui, "open_links", |ui| {
@@ -1310,7 +1318,7 @@ impl SettingsForm {
                         );
                     });
                 }
-                if cfg!(windows) {
+                if drawn_here("mic_relay_device") {
                     let mic = &mut self.mic_device_text;
                     row(ui, "mic_relay_device", |ui| {
                         ui.add(egui::TextEdit::singleline(mic).hint_text("CABLE Input (VB-CABLE)"));

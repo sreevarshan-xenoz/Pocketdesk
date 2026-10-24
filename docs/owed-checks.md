@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+900 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 36 |
 | A second computer | 28 |
-| A Linux desktop (the Azure VM serves for some) | 168 |
+| A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 360 |
 
@@ -1330,6 +1330,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Sway: touched meanwhile, it does not lock. (where: linux)
 - Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
 - A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
+- V5: the desktop app's Settings shows "Lock after the phone leaves" on Linux, and a change there is taken without a restart. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
