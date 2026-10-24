@@ -1284,7 +1284,7 @@ On the A71 against this box, 2026-10-16:
 
 Owed:
 - [ ] The desktop app's Phone tab itself (roots, folders, Up, Download). (where: by hand)
-- [ ] A folder of more than 2000 entries; a file renamed between list and fetch.
+- [x] A folder of more than 2000 entries: of 2100, the first 2000 listed and marked as cut (`truncated`, the Phone files page's "Showing the first 2000 entries"); a file renamed between list and fetch: the fetch said "f1.txt is not on the phone any more" and nothing arrived (the runner's `y1-big-folder`, `y1-renamed`, the OPPO, 2026-10-24).
 - [ ] A second computer asking: nothing answered.
 
 ## 71. Input on wlroots without uinput (T10f)
