@@ -3408,6 +3408,8 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
         sessions = ctx.server.log().count("Client codec caps negotiated")
         records = len(session_records(ctx.server.root))
         desktop = capture_size(ctx.server.log())
+        if desktop is None:
+            return "SKIP", "the server's log gives no desktop size to crop from"
         memory = [pss_mb()]
         sizes = []
         try:
@@ -3418,12 +3420,16 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
                         why = open_picker(ctx)
                         if why:
                             return "TIMEOUT", why
-                        tap_text("Whole desktop", ctx.phone.dump())
+                        if not tap_text("Whole desktop", ctx.phone.dump()):
+                            return "TIMEOUT", "no Whole desktop in the window picker"
                     else:
                         size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
                         if size is None:
                             return "SKIP", why
-                    new = wait_for(lambda: rebuilds(ctx.server.log())[seen:], 30, 1)
+                    # The rebuild this change makes (AE1 review): at the
+                    # desktop's size going back, away from it cropping.
+                    new = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:]
+                                            if (r[:2] == desktop) == whole], 30, 1)
                     if not new:
                         return "FAIL", f"no rebuild after crop {len(sizes) + 1}"
                     sizes.append(f"{new[-1][0]}x{new[-1][1]}")
