@@ -2850,6 +2850,14 @@ Owed:
 - [ ] The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
 - [ ] Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
 
+## 213. Lock when the phone leaves on Sway and Hyprland (T8)
+
+Built 2026-10-24. Unit-tested: the idle seconds from when the compositor said idle. The Linux code was type-checked and linted for `x86_64-unknown-linux-gnu` against the locked wayland-protocols; CI builds it.
+Owed:
+- [ ] Sway: with a phone's "Lock this computer when it leaves" on, the phone gone for the set minutes and the keyboard untouched, the computer locks once; touched meanwhile, it does not. (where: linux)
+- [ ] Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
+- [ ] A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

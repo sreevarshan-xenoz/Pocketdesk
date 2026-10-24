@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+902 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 35 |
 | A second computer | 29 |
-| A Linux desktop (the Azure VM serves for some) | 168 |
+| A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 358 |
 
@@ -1332,6 +1332,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A game or Steam's controller test seeing an Xbox 360 pad, A/B/X/Y in their places. (where: linux)
 - The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
 - Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
+
+**213. Lock when the phone leaves on Sway and Hyprland (T8)**
+
+- Sway: with a phone's "Lock this computer when it leaves" on, the phone gone for the set minutes and the keyboard untouched, the computer locks once; touched meanwhile, it does not. (where: linux)
+- Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
+- A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
