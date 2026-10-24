@@ -2067,6 +2067,74 @@ def x2_resume(ctx: Ctx) -> tuple[str, str]:
 LONG.add("x2-resume")
 
 
+# ---- a session's codec (X3) ----
+
+
+def negotiated(log: str) -> Optional[tuple[int, str]]:
+    """The last `(caps, codec)` the server's log says a session negotiated."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    found = None
+    for line in plain.splitlines():
+        if "Client codec caps negotiated" in line:
+            caps = re.search(r"caps=(\d+)", line)
+            # The log quotes a string field: "H.265 (HEVC)" has a space.
+            codec = re.search(r'codec="([^"]*)"', line) or re.search(r"codec=(\S+)", line)
+            if caps and codec:
+                found = (int(caps.group(1)), codec.group(1))
+    return found
+
+
+@check("x3-codec", "§2")
+def x3_codec(ctx: Ctx) -> tuple[str, str]:
+    """H.264 by default, even with a phone that can decode HEVC; with
+    `allow_hevc` on, HEVC for such a phone (R4 C1)."""
+    def session_codec(ctx: Ctx) -> tuple[Optional[tuple[int, str]], Optional[bool]]:
+        """The session's `(caps, codec)` and whether it is up 8 s on; `up`
+        None when there was no card to connect."""
+        # Only this session's line: an earlier session check left its own in
+        # the log (X3 review).
+        before = ctx.server.log().count("Client codec caps negotiated")
+        if start_session(ctx) is None:
+            return None, None
+        said = wait_for(lambda: ctx.server.log().count("Client codec caps negotiated") > before
+                        and negotiated(ctx.server.log()), 30, 1)
+        time.sleep(8)
+        return said, in_session(ctx)
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        first, up = session_codec(ctx)
+        if up is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not first:
+            return "TIMEOUT", "no codec negotiated in the first session"
+        caps, codec = first
+        if codec != "H.264":
+            return "FAIL", f"by default the session was {codec} (caps {caps})"
+        end_session(ctx)
+        before = ctx.server.configure({"allow_hevc": "true"})
+        try:
+            # Read at the server's start: a restart, and the road again.
+            why = by_road(ctx)
+            if why:
+                return "TIMEOUT", f"with HEVC allowed: {why}"
+            end_session(ctx)
+            second, up = session_codec(ctx)
+            if not second:
+                return "TIMEOUT", "no codec negotiated with HEVC allowed"
+            caps2, codec2 = second
+            hevc_phone = bool(caps2 & 1)
+            want = "H.265 (HEVC)" if hevc_phone else "H.264"
+            said = f"default {codec}; allowed {codec2} (the phone {'can' if hevc_phone else 'cannot'} decode HEVC), the session {'up' if up else 'gone'} after 8 s"
+            if codec2 != want:
+                return "FAIL", said
+            return ("PASS" if up else "FAIL"), said
+        finally:
+            ctx.server.restore_config(before)
+            # The next session check starts the server again, without HEVC.
+            ctx.on_road = False
+    return session_check(ctx, body)
+
+
 # ---- main ----
 
 
