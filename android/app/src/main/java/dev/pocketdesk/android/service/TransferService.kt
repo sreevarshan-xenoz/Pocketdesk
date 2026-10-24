@@ -239,6 +239,16 @@ class TransferService : Service() {
         val (sentBefore, countBefore) = sentTotal to sendCount
         plannedSends = 0
         var threw = false
+        // AA2: each job's start and end, never a file's name, so a share
+        // that never reaches the computer can be followed.
+        Log.i(
+            TAG,
+            "job $number: " + when (job) {
+                is Job.Send -> "send ${job.uris.size} file(s)"
+                is Job.SendFolder -> "send a folder"
+                is Job.Receive -> "receive"
+            },
+        )
         try {
             when (job) {
                 is Job.Send -> sendAll(job)
@@ -256,6 +266,7 @@ class TransferService : Service() {
                 // stopped it (a throw, the service's time running out).
                 val sent = sentTotal - sentBefore
                 val failed = TransferSummary.failedOf(plannedSends, sendCount - countBefore, sent, threw)
+                Log.i(TAG, "job $number: $sent sent, $failed failed")
                 PhoneEventBroadcast.send(
                     this,
                     PhoneEvents.Kind.FILES_SENT,

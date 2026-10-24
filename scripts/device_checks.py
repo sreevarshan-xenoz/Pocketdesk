@@ -1907,11 +1907,20 @@ def shared(ctx: Ctx, local: pathlib.Path, deadline: float) -> tuple[Optional[pat
     name = local.name
     stage_in_fixture(local)
     try:
+        adb("logcat", "-c")
         share_to_throwaway(name)
         landed = ctx.server.root / "downloads" / name
         size = local.stat().st_size
         if not wait_for(lambda: landed.exists() and landed.stat().st_size == size, deadline, 2):
-            return None, f"not in the throwaway's downloads at full size within {deadline:.0f} s"
+            # AA2: what the phone did with it, in its own words.
+            said = [re.sub(r"^\S+ \S+\s+\d+\s+\d+ ", "", line).strip()
+                    for line in adb("logcat", "-d", "-s", "ShareActivity:*", "TransferService:*").splitlines()
+                    if "ShareActivity" in line or "TransferService" in line]
+            # A stack trace's frames are lines too: they would crowd out the
+            # job's own words (AA2 review).
+            said = [line for line in said if not line.split(": ", 1)[-1].lstrip().startswith("at ")]
+            phone = "; ".join(said[-4:]) or "nothing from ShareActivity or TransferService"
+            return None, f"not in the throwaway's downloads at full size within {deadline:.0f} s; the phone: {phone}"
         return landed, ""
     finally:
         unstage(name)
