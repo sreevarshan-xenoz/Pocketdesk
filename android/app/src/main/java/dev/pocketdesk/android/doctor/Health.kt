@@ -87,6 +87,10 @@ data class HealthSnapshot(
 )
 
 object Health {
+    /** Whether [problems] say Android pauses Pocketdesk in the background (V2). */
+    fun saysPaused(problems: List<HealthProblem>): Boolean =
+        problems.any { it == HealthProblem.PAUSED_ANYWAY || it == HealthProblem.PAUSED_STAY_LINKED_OFF }
+
     fun problems(s: HealthSnapshot): List<HealthProblem> = buildList {
         if ((s.listenerFeatures || s.accessFeatures) && !s.listenerAccess) {
             add(HealthProblem.NOTIFICATION_ACCESS)

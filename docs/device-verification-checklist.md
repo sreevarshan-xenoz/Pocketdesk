@@ -965,6 +965,8 @@ On the A71, 2026-10-14:
 - [ ] Battery use set to Restricted: the card says so, and "Allow" opens the app's page. (where: by hand) (ColorOS keeps no restriction set from the shell.)
 - [ ] With the app allowed, phone notifications and texts keep arriving overnight with the screen off (the reason for all this).
 - [ ] Other makers (Xiaomi, OPPO): the guide link and their own battery managers. (where: other hardware)
+- [x] V2: with the health card saying Android paused Pocketdesk, this card is not shown too: one card on Home, "This phone's own setting" once (the OPPO, 2026-10-24).
+- [x] V2: the health card's "Allow" beside that pause opens what this card's does (on ColorOS the app's page, where battery use is set), Back returns to the app, and "Not now" on the health card brings this card back (the OPPO, 2026-10-24).
 
 ## 49. Protocol audit (what Pocketdesk sends, and to whom)
 

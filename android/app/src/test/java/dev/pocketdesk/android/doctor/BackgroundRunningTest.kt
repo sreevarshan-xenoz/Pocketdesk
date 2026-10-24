@@ -14,6 +14,8 @@ class BackgroundRunningTest {
         assertFalse(BackgroundRunning.shouldRemind(true, BackgroundLimit.NONE, true))
         assertFalse(BackgroundRunning.shouldRemind(false, BackgroundLimit.OPTIMIZED, true))
         assertFalse(BackgroundRunning.shouldRemind(true, BackgroundLimit.OPTIMIZED, false))
+        // V2: not beside the health card saying the same.
+        assertFalse(BackgroundRunning.shouldRemind(true, BackgroundLimit.OPTIMIZED, true, healthSaysPaused = true))
     }
 
     @Test

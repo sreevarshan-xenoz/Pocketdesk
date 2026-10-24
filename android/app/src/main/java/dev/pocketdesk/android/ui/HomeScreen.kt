@@ -300,7 +300,13 @@ fun HomeScreen(
     val backgroundLimit = remember(resumes) { BackgroundRunning.limit(context) }
     val backgroundFeatures = remember(resumes) { BackgroundRunning.featuresOn(context) }
     val remindBackground =
-        BackgroundRunning.shouldRemind(backgroundFeatures, backgroundLimit, Prefs.backgroundReminder(context))
+        BackgroundRunning.shouldRemind(
+            backgroundFeatures,
+            backgroundLimit,
+            Prefs.backgroundReminder(context),
+            // Held until health's first read, so the two do not swap (V2 review).
+            healthSaysPaused = healthProblems == null || (showHealth && Health.saysPaused(healthProblems.orEmpty())),
+        )
     // A computer whose key changed, to remove and scan again (T1).
     var rescanning by remember { mutableStateOf<HostStore.Host?>(null) }
     // Bumped when wake settings change, so the cards re-read their plans.
@@ -449,6 +455,11 @@ fun HomeScreen(
                             },
                             onChooseFolder = chooseFolder,
                             onOpenSettings = onOpenSettings,
+                            onAllowBackground = if (backgroundLimit != BackgroundLimit.NONE) {
+                                { BackgroundRunning.openSettings(context, backgroundLimit) }
+                            } else {
+                                null
+                            },
                             onNotNow = { Prefs.setHealthDismissed(context, Health.key(healthProblems.orEmpty())) },
                         )
                     }
@@ -1002,6 +1013,11 @@ private fun HealthCard(
     /** Pocketdesk's Settings: the download folder, screenshots. */
     onChooseFolder: () -> Unit,
     onOpenSettings: () -> Unit,
+    /**
+     * V2: Android's battery setting, while it limits Pocketdesk: the
+     * reminder card that had it steps aside for a pause said here.
+     */
+    onAllowBackground: (() -> Unit)?,
     onNotNow: () -> Unit,
 ) {
     Card(
@@ -1025,6 +1041,10 @@ private fun HealthCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    val paused = problem == HealthProblem.PAUSED_ANYWAY || problem == HealthProblem.PAUSED_STAY_LINKED_OFF
+                    if (paused && onAllowBackground != null) {
+                        TextButton(onClick = onAllowBackground) { Text(stringResource(R.string.bg_allow)) }
+                    }
                     when (problem) {
                         HealthProblem.CONTROL_BLOCKED ->
                             TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }

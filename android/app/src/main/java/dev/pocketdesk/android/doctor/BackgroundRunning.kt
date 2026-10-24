@@ -58,9 +58,14 @@ object BackgroundRunning {
         return notifications || texts
     }
 
-    /** Whether Home shows the card: a background feature on, Android limiting it, and the reminder on. */
-    fun shouldRemind(featuresOn: Boolean, limit: BackgroundLimit, remindOn: Boolean): Boolean =
-        featuresOn && limit != BackgroundLimit.NONE && remindOn
+    /**
+     * Whether Home shows the card: a background feature on, Android limiting
+     * it, and the reminder on; not while the health card already says Android
+     * paused Pocketdesk ([healthSaysPaused]; V2: two cards said one thing, with
+     * one button twice).
+     */
+    fun shouldRemind(featuresOn: Boolean, limit: BackgroundLimit, remindOn: Boolean, healthSaysPaused: Boolean = false): Boolean =
+        featuresOn && limit != BackgroundLimit.NONE && remindOn && !healthSaysPaused
 
 
     /**
