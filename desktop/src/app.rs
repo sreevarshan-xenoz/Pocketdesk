@@ -3398,10 +3398,12 @@ impl PocketdeskApp {
                     .unwrap_or_default();
                 match &file.state {
                     SentState::Offered => {
-                        ui.label(format!("waiting for the phone{note}"));
+                        // U3: the row says to whom; a computer or a KDE
+                        // device takes files too.
+                        ui.label(format!("waiting to be taken{note}"));
                     }
                     SentState::Sent => {
-                        ui.label(format!("saved on the phone{note}"));
+                        ui.label(format!("saved there{note}"));
                     }
                     SentState::Failed(reason) => {
                         ui.label(
