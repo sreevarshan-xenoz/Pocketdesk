@@ -1,13 +1,14 @@
 //! Lock the computer when the phone leaves (D9). A phone with "Lock this
 //! computer when it leaves" (`AwayLock`) on counts as present while it has
-//! a control link. Once every such phone that was present has been gone
-//! for `away_lock_minutes`, and nobody has touched the keyboard or mouse
-//! for that long, the computer locks: once per departure. Where the
-//! computer cannot say how long it has been idle (a compositor without
-//! `ext-idle-notify-v1`, X11 without `xprintidle`), it never locks: a phone
-//! whose network sleeps must not lock the owner out mid-work. On Linux the
-//! idle time comes from GNOME, KDE, the compositor (Sway, Hyprland; T8) or
-//! X11 (R3).
+//! a control link on this computer's network (V1: one by the internet road
+//! or a tailnet reaches from anywhere, so it counts as gone). Once every
+//! such phone that was present has been gone for `away_lock_minutes`, and
+//! nobody has touched the keyboard or mouse for that long, the computer
+//! locks: once per departure. Where the computer cannot say how long it has
+//! been idle (a compositor without `ext-idle-notify-v1`, X11 without
+//! `xprintidle`), it never locks: a phone whose network sleeps must not
+//! lock the owner out mid-work. On Linux the idle time comes from GNOME,
+//! KDE, the compositor (Sway, Hyprland; T8) or X11 (R3).
 //! With `POCKETDESK_LOCK_FILE` set to an absolute path, the lock is a line
 //! in that file instead (tests, and checks on a computer that must not
 //! lock).
@@ -62,7 +63,7 @@ impl AwayLock {
     }
 
     /// One look at `now` (seconds): `switched` phones have the switch on,
-    /// `present` those with a link now; `idle_secs` how long the keyboard
+    /// `present` those with a link on this network now; `idle_secs` how long the keyboard
     /// and mouse were quiet (`None` when unknown, which never locks). The
     /// phone to say the computer locked for, when it should lock now.
     pub fn tick(
@@ -298,6 +299,30 @@ fn minutes() -> Option<u32> {
         .map(|c| c.away_lock_minutes.clamp(2, 60))
 }
 
+/// Whether a link from `peer` counts as the phone being here (V1): one on
+/// this computer's own network (a private, link-local or loopback address;
+/// loopback is a phone through `adb reverse`, or this computer). A link by
+/// the internet road has no address, and a tailnet's (100.64/10,
+/// `fd7a:115c:a1e0::/48`) reaches from anywhere: neither counts, so a phone
+/// that walked away on mobile data, still linked, is away.
+fn nearby(peer: Option<std::net::SocketAddr>) -> bool {
+    use std::net::IpAddr;
+    match peer.map(|p| p.ip().to_canonical()) {
+        Some(IpAddr::V4(v4)) => {
+            let tailnet = v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64;
+            !tailnet && (v4.is_private() || v4.is_link_local() || v4.is_loopback())
+        }
+        Some(IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            let tailnet = s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0;
+            let unique_local = (s[0] & 0xfe00) == 0xfc00;
+            let link_local = (s[0] & 0xffc0) == 0xfe80;
+            !tailnet && (unique_local || link_local || v6.is_loopback())
+        }
+        None => false,
+    }
+}
+
 /// Watch the phones for the server's life, and lock as they leave.
 pub async fn run() {
     let started = std::time::Instant::now();
@@ -337,9 +362,12 @@ pub async fn run() {
         if !last_switched.is_empty() {
             let _ = tokio::task::spawn_blocking(pocketdesk_core::input::idle_notify::watch).await;
         }
+        // V1: present is nearby, on this computer's network; a phone linked
+        // by the internet road (or a tailnet) from anywhere is not here.
         let present: Vec<String> = crate::state::clone_clients()
             .await
             .iter()
+            .filter(|c| nearby(c.link_addr()))
             .map(|c| c.device_id().to_string())
             .collect();
         // Off the runtime, and only when a lock could follow: on Linux it
@@ -390,6 +418,45 @@ pub async fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// V1: only a link on this computer's network makes a phone present.
+    #[test]
+    fn only_a_link_on_this_network_is_here() {
+        let at = |s: &str| Some(s.parse::<std::net::SocketAddr>().unwrap());
+        for here in [
+            "192.168.1.20:5000",
+            "10.0.0.2:5000",
+            "172.16.4.2:5000",
+            "169.254.3.4:5000",
+            "127.0.0.1:5000",
+            "[fe80::1]:5000",
+            "[fd12:3456::7]:5000",
+            "[::ffff:192.168.1.20]:5000",
+            // Just outside a tailnet's ranges.
+            "[fd7a:115c:a1e1::1]:5000",
+        ] {
+            assert!(nearby(at(here)), "{here}");
+        }
+        for away in [
+            "100.64.1.2:5000",
+            "100.100.3.4:5000",
+            "[fd7a:115c:a1e0::5]:5000",
+            "192.0.2.4:5000",
+            "[2001:db8::1]:5000",
+            // The edges: a tailnet's, and just outside the private ranges.
+            "100.127.255.255:5000",
+            "[fd7a:115c:a1e0:ffff::1]:5000",
+            "[::ffff:100.64.1.2]:5000",
+            "100.63.255.255:5000",
+            "100.128.0.1:5000",
+            "172.15.0.1:5000",
+            "172.32.0.1:5000",
+            "192.169.0.1:5000",
+        ] {
+            assert!(!nearby(at(away)), "{away}");
+        }
+        assert!(!nearby(None), "the internet road");
+    }
 
     /// R3 review: the idle time is asked only once a lock could follow.
     #[test]

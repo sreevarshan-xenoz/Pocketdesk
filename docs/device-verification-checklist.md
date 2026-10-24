@@ -1918,6 +1918,8 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
 - [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
 - [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
+- [x] V1: a phone linked only by the internet road counts as gone: the OPPO linked through `adb reverse`, then (the reverse removed, the app restarted) only by the internet road; a line 121 s later, at the set 2 minutes (throwaway server with the seam, 2026-10-24).
+- [ ] V1: a phone that walks off on mobile data, on a computer where locking is allowed: locked at the set time. (where: by hand)
 
 ## 119. Memory at rest (D7)
 

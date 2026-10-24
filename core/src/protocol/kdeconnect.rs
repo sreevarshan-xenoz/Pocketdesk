@@ -189,6 +189,13 @@ pub trait DeviceSender: Send + Sync {
         None
     }
 
+    /// Where the link comes from, to tell where the phone is (V1: the away
+    /// lock): [`DeviceSender::peer_addr`], unless the transport knows an
+    /// address it does not offer to dial back.
+    fn link_addr(&self) -> Option<std::net::SocketAddr> {
+        self.peer_addr()
+    }
+
     /// The key the connection proved in its TLS handshake, when it did
     /// (phase B: pairing binds it).
     fn peer_key(&self) -> Option<crate::streaming::PeerKey> {

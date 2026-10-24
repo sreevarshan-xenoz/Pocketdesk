@@ -195,7 +195,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
     (
         Capability::AwayLock,
         "Lock this computer when this phone leaves",
-        "When the phone's link has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone asleep may lose its link, so reading or watching without touching anything can lock too. On Linux it reads the keyboard's idle time from GNOME, KDE on X11 or X11 (xprintidle), and never locks on a desktop that does not say it (Sway, Hyprland, Plasma on Wayland).",
+        "When the phone's link on this computer's network has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone linked from away (the internet road or a tailnet) counts as gone. A phone asleep may lose its link, so reading or watching without touching anything can lock too. On Linux it reads the keyboard's idle time from GNOME, KDE, the compositor (Sway, Hyprland and others with ext-idle-notify) or X11 (xprintidle), and never locks on a desktop that says none of these.",
     ),
 ];
 

@@ -90,6 +90,7 @@ pub async fn handle_v2_session(
             peer_identity.device_id.clone(),
             peer_key,
             session_id.clone(),
+            Some(peer_addr),
         ));
 
         // Register v2 client for pushes (one target per device: its newest connection)
@@ -319,6 +320,9 @@ struct QuicDeviceSender {
     device_id: String,
     peer_key: Option<pocketdesk_core::streaming::PeerKey>,
     connection_id: String,
+    /// The address the session came from (V1 review: the away lock tells a
+    /// phone at home by it).
+    peer: Option<std::net::SocketAddr>,
 }
 
 impl QuicDeviceSender {
@@ -327,12 +331,14 @@ impl QuicDeviceSender {
         device_id: String,
         peer_key: Option<pocketdesk_core::streaming::PeerKey>,
         connection_id: String,
+        peer: Option<std::net::SocketAddr>,
     ) -> Self {
         Self {
             send: Arc::new(Mutex::new(send)),
             device_id,
             peer_key,
             connection_id,
+            peer,
         }
     }
 }
@@ -341,6 +347,11 @@ impl QuicDeviceSender {
 impl DeviceSender for QuicDeviceSender {
     fn device_id(&self) -> &str {
         &self.device_id
+    }
+
+    // Not `peer_addr`: downloads are not dialed back to a QUIC session.
+    fn link_addr(&self) -> Option<std::net::SocketAddr> {
+        self.peer
     }
 
     fn connection_id(&self) -> &str {
