@@ -812,18 +812,38 @@ pub fn mute_refused(
 pub fn phone_actions_refused(
     switches: Option<&pocketdesk_core::local::phone_switches::PhoneSwitches>,
 ) -> Option<&'static str> {
-    let said = switches?.switches.get("phone_actions")?;
+    let switches = switches?;
+    let said = switches.switches.get("phone_actions")?;
     if !said.on {
-        Some(
+        return Some(
             "Its \"Let the computer take screenshots and lock this phone\" is off, so it refuses a screenshot or a lock.",
-        )
-    } else if said.android == Some(false) {
-        Some(
-            "Android is not letting Pocketdesk's control service or notification access work on it, so it refuses a screenshot or a lock.",
-        )
-    } else {
-        None
+        );
     }
+    if said.android != Some(false) {
+        return None;
+    }
+    // V6: it needs both; the phone reports each on its own (`control` is
+    // the Accessibility service, `notifications` the access), so say which.
+    let refused = |feature: &str| {
+        switches
+            .switches
+            .get(feature)
+            .is_some_and(|s| s.android == Some(false))
+    };
+    Some(match (refused("control"), refused("notifications")) {
+        (true, false) => {
+            "\"Pocketdesk control\" is off in its Accessibility settings, so it refuses a screenshot or a lock."
+        }
+        (false, true) => {
+            "Pocketdesk's notification access is off in its Android settings, so it refuses a screenshot or a lock."
+        }
+        (true, true) => {
+            "\"Pocketdesk control\" is off in its Accessibility settings and notification access is off too, so it refuses a screenshot or a lock."
+        }
+        (false, false) => {
+            "Android is not letting Pocketdesk's control service or notification access work on it, so it refuses a screenshot or a lock."
+        }
+    })
 }
 
 /// Whether the phone is in its owner's own Do Not Disturb (D2 review): the
@@ -1465,6 +1485,31 @@ mod tests {
             super::phone_actions_refused(Some(&no_control))
                 .unwrap()
                 .contains("control")
+        );
+        // V6: the one Android has off, by the phone's own reports of each.
+        let refused =
+            |body: serde_json::Value| super::phone_actions_refused(Some(&said(body))).unwrap();
+        let blocked = serde_json::json!({"on": true, "android": false});
+        let control_off = refused(serde_json::json!({
+            "phone_actions": blocked, "control": {"on": true, "android": false},
+            "notifications": {"on": true, "android": true}}));
+        assert!(
+            control_off.contains("Accessibility") && !control_off.contains("notification access"),
+            "{control_off}"
+        );
+        let access_off = refused(serde_json::json!({
+            "phone_actions": blocked, "control": {"on": true, "android": true},
+            "notifications": {"on": true, "android": false}}));
+        assert!(
+            access_off.contains("notification access") && !access_off.contains("Accessibility"),
+            "{access_off}"
+        );
+        let both_off = refused(serde_json::json!({
+            "phone_actions": blocked, "control": {"on": false, "android": false},
+            "notifications": {"on": true, "android": false}}));
+        assert!(
+            both_off.contains("Accessibility") && both_off.contains("notification access"),
+            "{both_off}"
         );
         let ready = said(serde_json::json!({"phone_actions": {"on": true, "android": true}}));
         assert_eq!(super::phone_actions_refused(Some(&ready)), None);

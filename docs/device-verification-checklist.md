@@ -2783,6 +2783,7 @@ Built 2026-10-23. Unit-tested: what a profile turns off, the phone's switch agai
 Owed:
 - [ ] Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name. (where: by hand)
 - [ ] The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours. (where: by hand)
+- [ ] V6: with only "Pocketdesk control" off on the phone, the line under its buttons names Accessibility and not notification access. (where: by hand)
 - [ ] Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from. (where: by hand)
 - [ ] Messages and the apps box: "Asking…", Copied., Ask again, the box coming into view; Narrator or Orca reading a row's buttons.
 - [ ] Settings on Linux: the presenting row naming Do Not Disturb (Q4), no "Never send copies from these programs" row; a bad link rule, words line or quiet hours keeping Save off.

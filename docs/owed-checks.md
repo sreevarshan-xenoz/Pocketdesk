@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-898 open items.
+899 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 362 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 363 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -2308,6 +2308,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Devices by hand: Apply a profile's question (what it turns off, the session ending), Remove a profile…, Save as profile without a name, a broken profiles file said; the Pair page's choice wrapping with a long name. (where: by hand)
 - The Overview: the line under a phone's buttons with its "Let the computer take screenshots and lock this phone" off; quiet hours' group and Change quiet hours. (where: by hand)
+- V6: with only "Pocketdesk control" off on the phone, the line under its buttons names Accessibility and not notification access. (where: by hand)
 - Files: a link's notice with "Also to…" ticked, "And 2 more…"'s hover, Paste copied files while reading and with several phones to choose from. (where: by hand)
 
 **205. The phone's O and P rows after their design pass (Q3)**
