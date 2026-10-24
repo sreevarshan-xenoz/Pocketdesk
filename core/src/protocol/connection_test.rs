@@ -352,5 +352,11 @@ mod tests {
 
         crate::protocol::connection::keep_alive(&server).unwrap();
         assert!(socket2::SockRef::from(&server).keepalive().unwrap());
+        // U1: data left unacknowledged ends it too, where the system says so.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        assert_eq!(
+            socket2::SockRef::from(&server).tcp_user_timeout().unwrap(),
+            Some(crate::protocol::connection::UNACKED_LIMIT)
+        );
     }
 }

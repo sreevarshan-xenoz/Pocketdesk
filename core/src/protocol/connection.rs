@@ -29,14 +29,29 @@ pub fn control_peer_addr(stream: &ControlStream) -> std::io::Result<std::net::So
 /// 10 s. A peer that vanished without closing (it slept, or left the
 /// network) is found within about a minute instead of never, so the reader
 /// ends and the phone dials again.
+///
+/// Probes go only while nothing waits to be sent: with data unacknowledged
+/// the system retransmits instead, for 15 minutes or more on Linux. So on
+/// Linux and Android data unacknowledged for [`UNACKED_LIMIT`] also ends it
+/// (U1: a phone that left Wi-Fi while the computer had told it something
+/// stayed "present" for a quarter of an hour, and the away lock waited).
 pub fn keep_alive(stream: &TcpStream) -> std::io::Result<()> {
     let probing = socket2::TcpKeepalive::new()
         .with_time(Duration::from_secs(30))
         .with_interval(Duration::from_secs(10));
     #[cfg(any(target_os = "linux", target_os = "android", windows))]
     let probing = probing.with_retries(3);
-    socket2::SockRef::from(stream).set_tcp_keepalive(&probing)
+    let socket = socket2::SockRef::from(stream);
+    socket.set_tcp_keepalive(&probing)?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    socket.set_tcp_user_timeout(Some(UNACKED_LIMIT))?;
+    Ok(())
 }
+
+/// How long sent data may stay unacknowledged before the connection ends,
+/// where the system lets it be said (Linux, Android): as long as the
+/// keepalive takes to find a silent peer.
+pub const UNACKED_LIMIT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct ConnectionManager {
