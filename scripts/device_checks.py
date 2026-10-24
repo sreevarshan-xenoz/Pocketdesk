@@ -2862,6 +2862,20 @@ def z2_many_shares(ctx: Ctx) -> tuple[str, str]:
 LONG.add("z2-many-shares")
 
 
+# ---- the phone's log, kept long enough (AC6) ----
+
+# The phone's main log for a run. The OPPO's is 256 KiB, a couple of
+# minutes of Pocketdesk's own lines: a long transfer's (AA2) were gone by
+# the time a check read them.
+RUN_LOG_SIZE = "16M"
+
+
+def main_log_size(said: str) -> Optional[str]:
+    """The main log buffer's size from `adb logcat -g`, as `-G` takes it."""
+    found = re.search(r"^main: ring buffer is (\d+) ([KM])i?B", said, re.MULTILINE)
+    return f"{found.group(1)}{found.group(2)}" if found else None
+
+
 # ---- main ----
 
 
@@ -2906,6 +2920,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"Refused: adb already reverses tcp:{args.phone_port}; remove it first.", file=sys.stderr)
         return 2
     failed = False
+    # A bigger main log for the run, put back after (AC6).
+    log_size = main_log_size(adb("logcat", "-b", "main", "-g"))
+    if log_size:
+        adb("logcat", "-b", "main", "-G", RUN_LOG_SIZE)
     try:
         why = server.start()
         if why:
@@ -2936,6 +2954,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     finally:
         server.stop()
         adb("reverse", "--remove", f"tcp:{args.phone_port}")
+        if log_size:
+            adb("logcat", "-b", "main", "-G", log_size)
     return 1 if failed else 0
 
 
