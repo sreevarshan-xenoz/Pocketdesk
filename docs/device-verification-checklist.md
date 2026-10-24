@@ -2800,7 +2800,8 @@ Owed:
 
 Built 2026-10-24. Unit-tested: the ports tried, `listening.json` believed only for the running server, the bind moving past a held port, the Diagnostics finding, the phone's candidates for a card's new port. Checked on the OPPO against a throwaway server (control port 1726 held by another listener): the server took 1727, said why and recorded it, a second start for the same folder stopped at once, and the phone connected on 1727; with 1726 free again it took 1726.
 Owed:
-- [ ] Linux with KDE Connect (or GSConnect) running: the server starts on 1717, the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
+- [x] Linux with a listener holding 1716: the server started on 1717, said why in its log, wrote `listening.json` (1717 for 1716), and a second start for the same folder stopped at once (Azure VM, Ubuntu 24.04, 2026-10-24).
+- [ ] Linux with KDE Connect (or GSConnect) itself running: the KDE bridge off, Diagnostics' "Control port moved", and the pairing code naming 1717. (where: linux)
 - [ ] A phone with a card saved at the computer's LAN address finding it on the moved port by itself (the toast), and its tailnet card following. (where: by hand)
 - [ ] Windows: `pocketdesk install` opening TCP 1716-1725, and a phone reaching a server moved to 1717 through the firewall. (where: by hand)
 - [ ] The desktop app's Overview label and Diagnostics with the port moved. (where: by hand)
@@ -2809,7 +2810,8 @@ Owed:
 
 Built 2026-10-24. Unit-tested: Wayland or X11 from `WAYLAND_DISPLAY` and `DISPLAY` (neither: Wayland, as before), `xclip`'s command lines and the best text target. The X11 watcher and the reads were type-checked and linted for `x86_64-unknown-linux-gnu` here; CI builds the server.
 Owed:
-- [ ] X11 (Mint, or Xfce): text copied on the computer reaches a phone in a session and in the background, with `xclip` running once per copy (no read every 2 s while nothing changes), and a phone's text and image land on the computer's clipboard. (where: linux)
+- [x] X11 under Xvfb, the phone by the internet road: text copied with `xclip` reached the phone in the background (with its "Computer's clipboard in the background" on), read once per copy (no `xclip` but the copy's own over 10 idle seconds: the XFixes watcher); a text the phone sent from its history landed in the X11 clipboard, offered as `UTF8_STRING` (Azure VM, Ubuntu 24.04, 2026-10-24).
+- [ ] X11 on a real desktop (Mint, or Xfce): the same in a session, and an image both ways. (where: linux)
 - [ ] X11 with KeePassXC: a password it copies stays on the computer. (where: linux)
 - [ ] X11 without `xclip`: nothing read, nothing hung, the server says so once. (where: linux)
 - [ ] Wayland as before: Sway and GNOME, the watcher still `wl-paste --watch`. (where: linux)
@@ -2845,16 +2847,19 @@ Owed:
 
 Built 2026-10-24. Unit-tested: the packet as the pad's events (changes only, sticks, triggers, the hat, X and Y as xpad's). The Linux code was type-checked and linted for `x86_64-unknown-linux-gnu` in a scratch crate; CI builds it.
 Owed:
-- [ ] Linux with `/dev/uinput` access: `evtest` lists "Pocketdesk Gamepad" (045e:028e) while the phone's gamepad is up; each button, both sticks and the D-pad show as named. (where: linux)
+- [x] Linux with `/dev/uinput` access, the phone in a session by the internet road: "Pocketdesk Gamepad" (USB 045e:028e, an event and a `js` node) made at the first press; `evtest` saw A as `BTN_SOUTH`, X as 307 (`BTN_X`), Y as 308 (`BTN_Y`), the D-pad's up as `ABS_HAT0Y` −1, each let go (Azure VM, Ubuntu 24.04, 2026-10-24).
+- [ ] Both sticks and the other buttons in `evtest`. (where: linux)
 - [ ] A game or Steam's controller test seeing an Xbox 360 pad, A/B/X/Y in their places. (where: linux)
-- [ ] The session ended (or the phone gone) with a stick pushed and a button held: both let go. (where: linux)
+- [x] A held while the app was stopped: let go once the server saw the session end (about 30 s later) (Azure VM, Ubuntu 24.04, 2026-10-24).
+- [ ] The same with a stick pushed. (where: linux)
 - [ ] Without uinput access, or with the setting off: keys as before, said once in the log. (where: linux)
 
 ## 213. Lock when the phone leaves on Sway and Hyprland (T8)
 
 Built 2026-10-24. Unit-tested: the idle seconds from when the compositor said idle. The Linux code was type-checked and linted for `x86_64-unknown-linux-gnu` against the locked wayland-protocols; CI builds it.
 Owed:
-- [ ] Sway: with a phone's "Lock this computer when it leaves" on, the phone gone for the set minutes and the keyboard untouched, the computer locks once; touched meanwhile, it does not. (where: linux)
+- [x] Sway (headless): with the phone's "Lock this computer when it leaves" on and the keyboard untouched, the phone gone (Wi-Fi off, its link ended) locked the computer once, at the set 2 minutes, the idle time from `ext-idle-notify-v1` (version 1 there) (Azure VM, Ubuntu 24.04, 2026-10-24). Found: a phone that left while the computer had data for it stayed linked for over 15 minutes (fixed in U1's own PR, `TCP_USER_TIMEOUT`).
+- [ ] Sway: touched meanwhile, it does not lock. (where: linux)
 - [ ] Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
 - [ ] A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
 
