@@ -1914,12 +1914,14 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - The computer was in use during the run. The first departure locked nothing within six minutes, the idle check holding it.
 - The second wrote one line when the keyboard and mouse had been quiet for the set 2 minutes, 4 min 9 s after the drop.
 - Once per departure: still to see with the computer untouched throughout.
-- [ ] The phone back, and gone again: a second line; staying gone: no more.
-- [ ] The switch on the Devices page, and the time in Settings, applied without a restart.
+- [x] The phone back, and gone again: a second line, 2 min after it left; staying gone 150 s more: no more (the OPPO, a throwaway server with the seam, 2026-10-24: home through `adb reverse`, away by the internet road alone).
+- [x] The server takes the switch and the time without a restart: the switch turned off in the trust store while running, no line; the time set from 5 to 1 minute while running, a line at 2 minutes (the floor: the time is held to 2..60, as Settings offers) (the OPPO, a throwaway server with the seam, 2026-10-24: home through `adb reverse`, away by the internet road alone).
+- [ ] The same set from the desktop app's Devices page and Settings. (where: by hand)
 - [ ] A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
 - [ ] A failed lock (the seam's file not writable): tried again a minute later, and `away_locked` with `failed`.
 - [x] V1: a phone linked only by the internet road counts as gone: the OPPO linked through `adb reverse`, then (the reverse removed, the app restarted) only by the internet road; a line 121 s later, at the set 2 minutes (throwaway server with the seam, 2026-10-24).
 - [ ] V1: a phone that walks off on mobile data, on a computer where locking is allowed: locked at the set time. (where: by hand)
+- [x] A failed lock (the seam's path a folder): `away_locked` with `failed`, and tried again 65 s later, `failed` again (the OPPO, a throwaway server with the seam, 2026-10-24: home through `adb reverse`, away by the internet road alone).
 
 ## 119. Memory at rest (D7)
 
