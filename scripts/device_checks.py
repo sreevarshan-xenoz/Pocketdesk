@@ -2231,6 +2231,88 @@ def ac1_not_kept(ctx: Ctx) -> tuple[str, str]:
 LONG.update({"ac1-share-resume", "ac1-not-kept"})
 
 
+# ---- a file changed between attempts (AC2) ----
+
+
+def change_start(path: pathlib.Path) -> None:
+    """New bytes in the file's first MiB, its size and modified time kept,
+    so its source id stays the same and only the prefix hash can tell."""
+    seen = path.stat()
+    with open(path, "r+b") as f:
+        f.write(os.urandom(1 << 20))
+    os.utime(path, ns=(seen.st_atime_ns, seen.st_mtime_ns))
+
+
+@check("ac2-changed", "§50")
+def ac2_changed(ctx: Ctx) -> tuple[str, str]:
+    """A send to the phone cut part way, the file's start changed (its size
+    and date kept), and sent again: the phone sees it changed (the prefix
+    hash), starts over, and ends with the new file (§50)."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("retry_transfers", True):
+        return "SKIP", "turn on Retry failed files in the phone's Settings"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        path = big_file(ctx, GIB)
+        try:
+            first = send_cli(ctx, path, None)
+            try:
+                first.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                first.kill()
+            part = wait_for(lambda: (d := transfer_done(ctx, path.name)) and d[1] and d[0] >= d[1] * 0.3 and d, 600, 1)
+            if not part:
+                return "TIMEOUT", "the first send never reached 30 %"
+            ctx.server.stop()
+            ctx.on_road = False
+            change_start(path)
+            want = md5_of(path)
+            time.sleep(15)
+            why = by_road(ctx)
+            if why:
+                return "TIMEOUT", f"after the cut: {why}"
+            ctx.on_road = True
+            end_session(ctx)
+            if start_session(ctx) is None:
+                return "TIMEOUT", "no Connect after the cut"
+            if not wait_for(lambda: in_session(ctx), 30, 1):
+                return "TIMEOUT", "no session after the cut"
+            second = send_cli(ctx, path, 1200)
+            try:
+                out, _ = second.communicate(timeout=1260)
+            except subprocess.TimeoutExpired:
+                second.kill()
+                return "TIMEOUT", "the second send ran past 21 minutes"
+            said = adb("logcat", "-d", "-s", "PocketdeskRust:*")
+            # Its words reach the phone's log through the job's failure, and
+            # the server's through the send's (either is the prefix hash).
+            noticed = any("changed since the last attempt" in log
+                          for log in (adb("logcat", "-d"), ctx.server.log()))
+            continued = re.search(r"Download continued from (\d+) of (\d+) bytes", said)
+            remote = f"{PHONE_DOWNLOADS}/{path.name}"
+            got = adb("shell", device_command("md5sum", remote), timeout=300).split()
+            if got[:1] == ["TIMEOUT"]:
+                return "TIMEOUT", "md5sum on the phone ran past 300 s"
+            same = bool(got) and got[0] == want
+            cut = f"cut at {part[0] * 100 // part[1]} %"
+            told = "the change was seen" if noticed else "no word of the change in either log"
+            if continued:
+                return "FAIL", f"{cut}; {told}, but continued from {int(continued.group(1)) * 100 // int(continued.group(2))} %, MD5 of the new file {'matches' if same else 'differs'}"
+            if second.returncode != 0 and not same:
+                return "FAIL", f"{cut}; {told}; the second send's exit {second.returncode}: {out.strip()[-200:]}"
+            return ("PASS" if same and noticed else "FAIL"), f"{cut}; {told} and started over, MD5 of the new file {'matches' if same else 'differs'}"
+        finally:
+            drop_from_phone(path.name)
+            path.unlink(missing_ok=True)
+    return session_check(ctx, body)
+
+
+LONG.add("ac2-changed")
+
+
 # ---- a session's codec (X3) ----
 
 
