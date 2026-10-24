@@ -301,6 +301,35 @@ class SessionParts(unittest.TestCase):
         listing = chr(10).join(["a" * 64 + ".png", "b" * 64 + ".part", "notes.txt", "C" * 64 + ".png"])
         self.assertEqual(dc.cached_images(listing), {"a" * 64})
 
+    def test_the_window_picker_s_rows(self):
+        dump = (
+            '<hierarchy><node text="Stream a window" bounds="[0,0][9,60]" />'
+            '<node text="Whole desktop" bounds="[0,80][9,140]" />'
+            '<node text="A title" bounds="[0,200][9,240]" />'
+            '<node text="app-a  ·  1280x720  ·  focused" bounds="[0,240][1080,280]" />'
+            '<node text="app-b  ·  ws 2  ·  640x480" bounds="[0,320][1080,360]" /></hierarchy>'
+        )
+        self.assertEqual(dc.window_rows(dump), [(1280, 720, 540, 260), (640, 480, 540, 340)])
+
+    def test_a_window_to_crop_to(self):
+        rows = [(2560, 1440, 1, 1), (1395, 786, 2, 2), (300, 200, 3, 3), (800, 600, 4, 4)]
+        self.assertEqual(dc.a_window(rows, (2560, 1440)), (800, 600, 4, 4))
+        self.assertEqual(dc.a_window([(2560, 1440, 1, 1)], (2560, 1440)), None)
+        self.assertEqual(dc.a_window([(1395, 786, 2, 2)], None), (1395, 786, 2, 2))
+        esc = chr(27)
+        log = f"INFO capture: WGC capture started {esc}[3mwidth{esc}[0m=2560 height=1440"
+        self.assertEqual(dc.capture_size(log), (2560, 1440))
+        self.assertIsNone(dc.capture_size("nothing"))
+
+    def test_encoder_rebuilds_in_the_server_s_log(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f'INFO x: {esc}[3mwidth{esc}[0m=1280 height=720 backend="mf" codec="H.265 (HEVC)" Encoder rebuilt at frame resolution',
+            "INFO x: width=1920 height=1080 backend=sw codec=H.264 Encoder rebuilt at frame resolution",
+            "INFO x: Encoder rebuilt for new bitrate",
+        ])
+        self.assertEqual(dc.rebuilds(log), [(1280, 720, "H.265 (HEVC)"), (1920, 1080, "H.264")])
+
 
 if __name__ == "__main__":
     unittest.main()

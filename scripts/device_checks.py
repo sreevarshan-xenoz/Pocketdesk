@@ -3056,10 +3056,11 @@ def download_here(ctx: Ctx, what: str) -> bool:
 
 
 def close_sheets(ctx: Ctx) -> None:
-    """Back out of the browse sheet and the session menu, so the session
-    ends from its own screen and the next check finds Home."""
+    """Back out of the browse sheet, the window picker and the session
+    menu, so the session ends from its own screen and the next check finds
+    Home."""
     for _ in range(3):
-        if not (shows(ctx, "Send a folder to this computer") or shows(ctx, "Session settings")):
+        if not any(shows(ctx, title) for title in ("Send a folder to this computer", "Session settings", "Stream a window")):
             return
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(1)
@@ -3239,6 +3240,143 @@ def ad3_dates(ctx: Ctx) -> tuple[str, str]:
         shutil.rmtree(home / top, ignore_errors=True)
         settle_then_drop(ctx, fold, settled)
         drop_from_phone(name)
+
+
+# ---- window crops in a session (AE1) ----
+#
+# The phone's window picker lists this computer's real windows. A row's
+# second line is "<app>  ·  <W>x<H>[  ·  focused]": the runner reads the size
+# alone from it and taps the row by position; a title or an app's name is
+# never kept or printed.
+
+
+def window_rows(dump: str) -> list[tuple[int, int, int, int]]:
+    """`(width, height, x, y)` of each window the picker lists."""
+    rows = []
+    for text, x, y in dump_nodes(dump):
+        found = re.search(r"  ·  (\d+)x(\d+)(?:  ·  |$)", text)
+        if found:
+            rows.append((int(found.group(1)), int(found.group(2)), x, y))
+    return rows
+
+
+def rebuilds(log: str) -> list[tuple[int, int, str]]:
+    """`(width, height, codec)` of each "Encoder rebuilt at frame resolution"
+    in the server's log (AE1 added the codec)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    out = []
+    for line in plain.splitlines():
+        if "Encoder rebuilt at frame resolution" not in line:
+            continue
+        width, height = re.search(r"width=(\d+)", line), re.search(r"height=(\d+)", line)
+        codec = re.search(r'codec="([^"]*)"', line) or re.search(r"codec=(\S+)", line)
+        if width and height and codec:
+            out.append((int(width.group(1)), int(height.group(1)), codec.group(1)))
+    return out
+
+
+def open_picker(ctx: Ctx) -> Optional[str]:
+    """From a session, the window picker; why not, when it is not."""
+    if not wait_for(lambda: tap_text("Session menu", ctx.phone.dump()), 20, 2):
+        return "no Session menu on the session's screen"
+    time.sleep(1)
+    if not tap_scrolling(ctx, "Window"):
+        return "no Window in the session menu"
+    if not wait_for(lambda: shows(ctx, "Stream a window"), 20, 1):
+        return "the window picker did not open"
+    return None
+
+
+def crop_to(ctx: Ctx, pick: Callable[[list[tuple[int, int, int, int]]], Optional[tuple[int, int, int, int]]]
+            ) -> tuple[Optional[tuple[int, int]], str]:
+    """Open the picker and tap the row `pick` chooses (None: Whole desktop);
+    the size picked, or None and why not."""
+    why = open_picker(ctx)
+    if why:
+        return None, why
+    rows = wait_for(lambda: window_rows(ctx.phone.dump()), 20, 2) or []
+    row = pick(rows)
+    if row is None:
+        return None, f"no window to crop to among {len(rows)}"
+    adb("shell", "input", "tap", str(row[2]), str(row[3]))
+    return (row[0], row[1]), ""
+
+
+def capture_size(log: str) -> Optional[tuple[int, int]]:
+    """The desktop's size, from the server's last "capture started" line."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    found = re.findall(r"capture started.*?width=(\d+) height=(\d+)", plain)
+    return (int(found[-1][0]), int(found[-1][1])) if found else None
+
+
+def a_window(rows: list[tuple[int, int, int, int]], desktop: Optional[tuple[int, int]]
+             ) -> Optional[tuple[int, int, int, int]]:
+    """The smallest window of at least 400x300 that is not the desktop's own
+    size: its crop changes the frame's size."""
+    fits = [r for r in rows if r[0] >= 400 and r[1] >= 300 and (r[0], r[1]) != desktop]
+    return min(fits, key=lambda r: r[0] * r[1]) if fits else None
+
+
+@check("ae1-crop-hevc", "§2")
+def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
+    """A crop to a window during an HEVC session: the encoder is rebuilt at
+    the window's size and stays HEVC, the session stays up, and back to the
+    whole desktop the same (R4 C1)."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        before = ctx.server.log().count("Client codec caps negotiated")
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        said = wait_for(lambda: ctx.server.log().count("Client codec caps negotiated") > before
+                        and negotiated(ctx.server.log()), 30, 1)
+        if not said:
+            return "TIMEOUT", "no codec negotiated"
+        if said[1] != "H.265 (HEVC)":
+            return "SKIP", f"the session is {said[1]}: the phone cannot decode HEVC (caps {said[0]})"
+        time.sleep(5)
+        try:
+            seen = len(rebuilds(ctx.server.log()))
+            desktop = capture_size(ctx.server.log())
+            if desktop is None:
+                return "SKIP", "the server's log gives no desktop size to crop from"
+            size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
+            if size is None:
+                return "SKIP", why
+            # A rebuild away from the desktop's size (review: not some other).
+            new = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] != desktop], 30, 1)
+            if not new:
+                return "FAIL", f"no rebuild after a crop to {size[0]}x{size[1]}"
+            cropped = new[-1]
+            time.sleep(8)
+            up = in_session(ctx)
+            seen = len(rebuilds(ctx.server.log()))
+            close_sheets(ctx)
+            why = open_picker(ctx)
+            if why:
+                return "TIMEOUT", f"back to the whole desktop: {why}"
+            if not tap_text("Whole desktop", ctx.phone.dump()):
+                return "TIMEOUT", "no Whole desktop in the window picker"
+            back = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] == desktop], 30, 1)
+            time.sleep(5)
+            still = in_session(ctx)
+        finally:
+            close_sheets(ctx)
+        said = (f"cropped to {size[0]}x{size[1]}: rebuilt at {cropped[0]}x{cropped[1]} {cropped[2]},"
+                f" the session {'up' if up else 'gone'} 8 s on")
+        if not back:
+            return "FAIL", said + "; no rebuild back to the whole desktop"
+        said += f"; whole again: {back[-1][0]}x{back[-1][1]} {back[-1][2]}, the session {'up' if still else 'gone'}"
+        hevc = cropped[2] == "H.265 (HEVC)" and back[-1][2] == "H.265 (HEVC)"
+        return ("PASS" if hevc and up and still else "FAIL"), said
+
+    before = ctx.server.configure({"allow_hevc": "true"})
+    try:
+        # Read at the server's start: the road again, from a restart.
+        ctx.on_road = False
+        return session_check(ctx, body)
+    finally:
+        ctx.server.restore_config(before)
+        # The next session check starts the server again, without HEVC.
+        ctx.on_road = False
 
 
 # ---- the phone's log, kept long enough (AC6) ----
