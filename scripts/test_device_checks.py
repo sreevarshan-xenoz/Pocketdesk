@@ -245,6 +245,22 @@ class SessionParts(unittest.TestCase):
             self.assertEqual(dc.part_names(folder), frozenset({"a.part", "b.part"}))
             self.assertEqual(dc.partial_bytes(folder, frozenset({"a.part"})), 3)
 
+    def test_a_changed_start_keeps_size_and_date(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as name:
+            path = pathlib.Path(name) / "f.bin"
+            path.write_bytes(bytes(3 << 20))
+            os.utime(path, ns=(1_000_000_000_000_000_000, 1_600_000_000_123_456_789))
+            before = path.stat()
+            dc.change_start(path)
+            after = path.stat()
+            self.assertEqual(after.st_size, before.st_size)
+            self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+            data = path.read_bytes()
+            self.assertNotEqual(data[:1 << 20], bytes(1 << 20))
+            self.assertEqual(data[1 << 20:], bytes(2 << 20))
+
 
 if __name__ == "__main__":
     unittest.main()
