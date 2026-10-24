@@ -108,6 +108,7 @@ pub async fn run(config: Config) -> Result<()> {
     crate::quiet_hours::keep_warm();
     // Test seams (2g, 2h, D9): said, so one left set by mistake is noticed.
     for seam in [
+        "POCKETDESK_BROWSE_HOME",
         "POCKETDESK_CLIPBOARD_FILE",
         "POCKETDESK_CLIPBOARD_IMAGE_FILE",
         "POCKETDESK_DOWNLOAD_DIR",
@@ -118,6 +119,9 @@ pub async fn run(config: Config) -> Result<()> {
             let path = std::path::Path::new(&value);
             if path.is_absolute() {
                 tracing::warn!("{seam} is set: {} stands in (a test seam)", path.display());
+            } else if seam == "POCKETDESK_BROWSE_HOME" {
+                // Fails closed (AD2 review): never the owner's home instead.
+                tracing::warn!("{seam} is not an absolute path: the file browser shows no folder");
             } else {
                 tracing::warn!("{seam} is not an absolute path; ignored");
             }
