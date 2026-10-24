@@ -3720,6 +3720,9 @@ def af3_mic_refused(ctx: Ctx) -> tuple[str, str]:
     on a marked permission. It also SKIPs with the permission granted:
     taking it back would end the app."""
     held = mic_permission()
+    if not held:
+        # Unread is not unmarked (review): a second refusal cannot be undone.
+        return "SKIP", "the mic permission could not be read"
     if "granted=true" in held:
         return "SKIP", "Pocketdesk holds the mic permission: taking it back would end the app"
     if "USER_SET" in held or "USER_FIXED" in held:
@@ -3737,9 +3740,12 @@ def af3_mic_refused(ctx: Ctx) -> tuple[str, str]:
             time.sleep(1)
             if not tap_scrolling(ctx, "Phone mic share"):
                 return "TIMEOUT", "no Phone mic share in the session menu"
-            if not wait_for(lambda: shows(ctx, "Don't allow"), 15, 1):
+            # Android may write it with a typographic apostrophe (review).
+            deny = wait_for(lambda: next((t for t, _, _ in dump_nodes(ctx.phone.dump())
+                                          if re.fullmatch(r"Don.t allow", t)), None), 15, 1)
+            if not deny:
                 return "FAIL", "no permission dialog after Phone mic share"
-            tap_text("Don't allow", ctx.phone.dump())
+            tap_text(deny, ctx.phone.dump())
             time.sleep(2)
             on = wait_for(lambda: switch_on_row(ctx.phone.dump(), "Phone mic share") is not None
                           and switch_on_row(ctx.phone.dump(), "Phone mic share"), 5, 1)
