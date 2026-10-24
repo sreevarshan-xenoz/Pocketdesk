@@ -646,8 +646,14 @@ async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
         .into_iter()
         .filter(|c| may_push_image(c.device_id()) && !image_came_from(c.device_id(), id))
     {
-        if let Err(e) = target.send_packet(&packet).await {
-            tracing::debug!("Clipboard image not told to {}: {e}", target.device_id());
+        match target.send_packet(&packet).await {
+            // AD1: who and how large, never the image: a phone's switch or
+            // permission keeping it from the phone can be told apart.
+            Ok(()) => tracing::info!(
+                "Clipboard image told to {} ({size} bytes)",
+                target.device_id()
+            ),
+            Err(e) => tracing::debug!("Clipboard image not told to {}: {e}", target.device_id()),
         }
     }
 }
