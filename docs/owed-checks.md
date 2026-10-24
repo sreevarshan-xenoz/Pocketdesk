@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+900 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 168 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 358 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 359 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -1914,6 +1914,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A file over 50 MB in Explorer (refused by Windows' limit). (where: by hand)
 - Explorer's repeated looks (`desktop.ini`, thumbnails) answered without a new listing each time (the phone's log).
 - The setting off: the address gone from the Phone page (by eye).
+
+**118. Lock when the phone leaves (D9)**
+
+- V1: a phone that walks off on mobile data, on a computer where locking is allowed: locked at the set time. (where: by hand)
 
 **119. Memory at rest (D7)**
 
