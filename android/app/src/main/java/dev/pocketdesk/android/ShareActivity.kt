@@ -164,6 +164,9 @@ class ShareActivity : ComponentActivity() {
 
     /** Say [message] where it outlives this screen, and close it. */
     private fun done(message: String) {
+        // AA2: how a share left this screen (its toast's words: counts and a
+        // computer's name, never a file's).
+        android.util.Log.i("ShareActivity", "share: $message")
         Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
         finish()
     }
