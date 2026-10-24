@@ -278,6 +278,20 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.kib("256K"), 256)
         self.assertEqual(dc.kib("16M"), 16384)
 
+    def test_a_made_png(self):
+        import zlib
+        png = dc.made_png(b"seed")
+        self.assertEqual(png[:8], bytes([137, 80, 78, 71, 13, 10, 26, 10]))
+        self.assertNotEqual(png, dc.made_png(b"other"))
+        # Its one IDAT holds 16 rows of a filter byte and 16 RGB pixels.
+        at = png.index(b"IDAT")
+        size = int.from_bytes(png[at - 4:at], "big")
+        self.assertEqual(len(zlib.decompress(png[at + 4:at + 4 + size])), 16 * (1 + 16 * 3))
+
+    def test_images_in_the_phone_s_clipboard_cache(self):
+        listing = chr(10).join(["a" * 64 + ".png", "b" * 64 + ".part", "notes.txt", "C" * 64 + ".png"])
+        self.assertEqual(dc.cached_images(listing), {"a" * 64})
+
 
 if __name__ == "__main__":
     unittest.main()

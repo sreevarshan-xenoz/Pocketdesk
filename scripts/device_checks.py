@@ -447,6 +447,8 @@ class Server:
             "POCKETDESK_STATE_DIR": str(self.root / "state"),
             "POCKETDESK_CONFIG_DIR": str(self.root / "config"),
             "POCKETDESK_CLIPBOARD_FILE": str(self.root / "clip.txt"),
+            # AD1: the clipboard's image, a PNG (none while it is absent).
+            "POCKETDESK_CLIPBOARD_IMAGE_FILE": str(self.root / "clip.png"),
             # N5: what plays here, read from a file, so this box's players are untouched.
             "POCKETDESK_MEDIA_FILE": str(self.root / "computer_media.json"),
             # P3: presenting while this file is there.
@@ -2861,6 +2863,123 @@ def z2_many_shares(ctx: Ctx) -> tuple[str, str]:
 
 
 LONG.add("z2-many-shares")
+
+
+# ---- image copies without a session (AD1) ----
+
+
+def made_png(seed: bytes) -> bytes:
+    """A 16x16 RGB PNG whose pixels come from `seed`: a new image, and so a
+    new id (its SHA-256), for each seed."""
+    import hashlib
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return len(data).to_bytes(4, "big") + body + zlib.crc32(body).to_bytes(4, "big")
+
+    pixels = b""
+    block = hashlib.sha256(seed).digest()
+    while len(pixels) < 16 * 16 * 3:
+        block = hashlib.sha256(block).digest()
+        pixels += block
+    rows = b"".join(b"\0" + pixels[r * 48:(r + 1) * 48] for r in range(16))
+    header = (16).to_bytes(4, "big") * 2 + bytes([8, 2, 0, 0, 0])
+    return (bytes([137, 80, 78, 71, 13, 10, 26, 10]) + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def cached_images(listing: str) -> set[str]:
+    """The ids of the images in the phone's clipboard cache, from `ls`."""
+    return {m.group(1) for m in re.finditer(r"^([0-9a-f]{64})\.png$", listing, re.MULTILINE)}
+
+
+def phone_images() -> set[str]:
+    return cached_images(adb("shell", device_command("run-as", APP, "ls", "cache/clipboard")))
+
+
+def copy_image(ctx: Ctx, wait: float) -> tuple[str, bool]:
+    """Put a new image on the throwaway's stand-in clipboard (the text
+    stand-in emptied, as a real clipboard's text would win), and whether
+    the phone fetched it within `wait` seconds; its id."""
+    import hashlib
+    png = made_png(secrets.token_bytes(8))
+    sha = hashlib.sha256(png).hexdigest()
+    clip = ctx.server.root / "clip.txt"
+    tmp = clip.with_suffix(".tmp")
+    tmp.write_text("", encoding="utf-8")
+    os.replace(tmp, clip)
+    image = ctx.server.root / "clip.png"
+    tmp = image.with_suffix(".tmp")
+    tmp.write_bytes(png)
+    os.replace(tmp, image)
+    return sha, bool(wait_for(lambda: sha in phone_images(), wait, 3))
+
+
+def restart_with_permission(ctx: Ctx, key: str, value: Optional[bool]) -> Optional[str]:
+    """Restart the throwaway with the phone's permission `key` set (None
+    takes it out), as the trust store holds it before the start; why not,
+    when the phone did not link again."""
+    ctx.server.stop()
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    store = json.loads(path.read_text(encoding="utf-8"))
+    mine = store.setdefault("permissions", {}).setdefault(ctx.device, {})
+    if value is None:
+        mine.pop(key, None)
+    else:
+        mine[key] = value
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    ctx.on_road = False
+    why = ctx.server.start()
+    if why:
+        return why
+    ctx.phone.wake()
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
+        return "the phone did not link again within 120 s"
+    return None
+
+
+@check("ad1-image-copy", "§168")
+def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
+    """An image copied on the computer reaches the phone's clipboard without
+    a session, with the phone's Computer's clipboard and Computer's copied
+    images in the background on (§168); with the latter off, nothing is
+    fetched. Then, with the phone's Clipboard permission off on the
+    computer, nothing moves either (§38)."""
+    prefs = ctx.phone.prefs("pocketdesk-ui")
+    if not prefs.get("clipboard_in_background"):
+        return "SKIP", "turn on Computer's clipboard in the background in the phone's Settings"
+    images_on = bool(prefs.get("clipboard_images_in_background"))
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    had = json.loads(path.read_text(encoding="utf-8")).get("permissions", {}).get(ctx.device, {}).get("clipboard")
+    # Read as each copy is pushed: no restart for it.
+    before = ctx.server.configure({"clipboard_images": "true"})
+    said = []
+    changed = False
+    try:
+        time.sleep(2)
+        sha, got = copy_image(ctx, 60 if images_on else 45)
+        said.append(f"images in the background {'on' if images_on else 'off'}: {'fetched' if got else 'not fetched'}")
+        if got != images_on:
+            return "FAIL", "; ".join(said)
+        if not images_on:
+            return "PASS", "; ".join(said)
+        changed = True
+        why = restart_with_permission(ctx, "clipboard", False)
+        if why:
+            return "TIMEOUT", f"with the Clipboard permission off: {why}"
+        sha, got = copy_image(ctx, 45)
+        said.append(f"the Clipboard permission off: {'fetched' if got else 'not fetched'}")
+        return ("FAIL" if got else "PASS"), "; ".join(said)
+    finally:
+        ctx.server.restore_config(before)
+        (ctx.server.root / "clip.png").unlink(missing_ok=True)
+        if changed:
+            why = restart_with_permission(ctx, "clipboard", had)
+            if why:
+                print(f"note: putting the Clipboard permission back: {why}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
