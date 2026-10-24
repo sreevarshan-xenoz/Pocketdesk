@@ -2429,6 +2429,7 @@ def dated_share(ctx: Ctx) -> tuple[Optional[str], str]:
     computer dated it, or None and why it did not arrive."""
     local = ctx.server.root / f"ac4-{secrets.token_hex(3)}.txt"
     landed = ctx.server.root / "downloads" / local.name
+    settled = False
     try:
         local.write_text("ac4" + NL, encoding="utf-8")
         stage_in_fixture(local)
@@ -2440,10 +2441,15 @@ def dated_share(ctx: Ctx) -> tuple[Optional[str], str]:
         share_to_throwaway(local.name)
         if not wait_for(lambda: landed.exists() and landed.stat().st_size == local.stat().st_size, 120, 2):
             return None, "not in the throwaway's downloads within 120 s"
+        settled = True
         # The date is set once the file is in place: a moment to settle.
         time.sleep(2)
         return dated_as(landed.stat().st_mtime, int(stamp), time.time()), ""
     finally:
+        if not settled:
+            # A late share must not land after the cleanup (AC3/AC4 review).
+            ctx.server.stop()
+            ctx.on_road = False
         unstage(local.name)
         local.unlink(missing_ok=True)
         landed.unlink(missing_ok=True)
