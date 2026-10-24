@@ -223,6 +223,26 @@ class SessionParts(unittest.TestCase):
         self.assertAlmostEqual(dc.log_seconds(line), 10 * 3600 + 47 * 60 + 56.619, places=3)
         self.assertIsNone(dc.log_seconds("--------- beginning of main"))
 
+    def test_a_share_continued_by_the_computer(self):
+        esc = chr(27)
+        log = chr(10).join([
+            "INFO x: Receiving ac1-a.bin from iroh (100 bytes)",
+            f"INFO x: Continued ac1-a.bin from {esc}[1m30 of 100 bytes",
+            "INFO x: Continued other.bin from 5 of 9 bytes",
+        ])
+        self.assertEqual(dc.continued_from(log, "ac1-a.bin"), (30, 100))
+        self.assertIsNone(dc.continued_from(log, "ac1-b.bin"))
+
+    def test_the_partial_a_share_left(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as name:
+            folder = pathlib.Path(name)
+            self.assertEqual(dc.partial_bytes(folder / "nothing"), 0)
+            (folder / "a.part").write_bytes(b"x" * 7)
+            (folder / "b.part").write_bytes(b"x" * 3)
+            (folder / "index.json").write_bytes(b"x" * 50)
+            self.assertEqual(dc.partial_bytes(folder), 7)
+
 
 if __name__ == "__main__":
     unittest.main()
