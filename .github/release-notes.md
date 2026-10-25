@@ -45,6 +45,7 @@ Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves
 - Home shows one card when Android pauses Pocketdesk, with its Allow button.
 - The Overview names which Android setting stops a screenshot or a lock.
 - A send to another computer says what became of it in a computer's words; a video without a date has no stray dot.
+- The desktop app's hints and section names are larger (11 points, from 9); the Messages page's text no longer spreads its words, and Logs and Diagnostics show commands without Markdown backticks.
 
 ### Not yet checked on a device
 
