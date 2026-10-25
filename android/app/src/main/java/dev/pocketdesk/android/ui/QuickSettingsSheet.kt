@@ -152,11 +152,13 @@ fun QuickSettingsSheet(
             GroupHeader(stringResource(R.string.group_share))
             ToggleRow(LlIcons.Clipboard, stringResource(R.string.row_clipboard), clipboardSync, onSetClipboardSync)
             OpenRow(LlIcons.History, stringResource(R.string.row_history), null, onOpenHistory)
-            OpenRow(LlIcons.Keyboard, stringResource(R.string.row_send_text), null, onSendText)
-            ActionRow(LlIcons.Clipboard, stringResource(R.string.row_type_clipboard), onTypeClipboard)
+            // Each row its own glyph (AJ4: Send text and Deck shared the
+            // keyboard, Type phone clipboard the clipboard of Clipboard sync).
+            OpenRow(LlIcons.Pen, stringResource(R.string.row_send_text), null, onSendText)
+            ActionRow(LlIcons.Keyboard, stringResource(R.string.row_type_clipboard), onTypeClipboard)
             OpenRow(LlIcons.Folder, stringResource(R.string.row_files), null, onOpenFiles)
             OpenRow(LlIcons.Play, stringResource(R.string.row_tasks), null, onOpenTasks)
-            OpenRow(LlIcons.Keyboard, stringResource(R.string.row_deck), null, onOpenDeck)
+            OpenRow(LlIcons.Grid, stringResource(R.string.row_deck), null, onOpenDeck)
             ToggleRow(LlIcons.Mic, stringResource(R.string.row_mic), micOn, onSetMic)
 
             GroupHeader(stringResource(R.string.group_computer))
