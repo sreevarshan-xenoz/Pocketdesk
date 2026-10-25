@@ -1091,21 +1091,23 @@ fn remember_paired_server(server_id: &str) {
 /// pairs over the internet road (T10a).
 const PAIR_AT_HOME: &str = "Pairing needs the same network as the computer, or Tailscale";
 
-/// Whether the live control link to `address` came by the internet road.
-async fn over_internet_to(address: &str) -> bool {
-    crate::CONTROL_OVER_INTERNET.load(Ordering::SeqCst)
-        && (*CONTROL_PEER)
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|(host, _)| host == address)
+/// Whether a one-off connection's failure is home not answering at all: no
+/// route, refused, or no answer in time, as away from home (AT2 review: a
+/// computer that answered and then failed is not a matter of networks).
+fn home_did_not_answer(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.starts_with("connection failed")
+        && ["timed out", "timeout", "refused", "unreachable", "no route"]
+            .iter()
+            .any(|word| error.contains(word))
 }
 
 /// A pairing query, never over the internet road: the desktop drops pairing
 /// packets there, so asking on it would only wait out a timeout. A phone
 /// whose link to the computer came by it asks by a one-off home connection
 /// instead (AT2: it was refused even with the computer at home reachable),
-/// and is told it needs the same network only when home does not answer.
+/// dialed for no longer than a session's home try while away (V8), and is
+/// told it needs the same network only when home does not answer.
 /// `waited` is what the caller says when the computer does not answer.
 async fn pairing_query(
     address: &str,
@@ -1115,10 +1117,20 @@ async fn pairing_query(
     timeout: Duration,
     waited: &str,
 ) -> Result<serde_json::Value, String> {
-    if over_internet_to(address).await {
-        return oneshot_request(address, port, request, reply_type, timeout)
-            .await
-            .map_err(|_| PAIR_AT_HOME.to_string());
+    if crate::link::home_unreachable(address).await {
+        let asked = oneshot_request_dialing(
+            HOME_TRY_WHILE_AWAY,
+            address,
+            port,
+            request,
+            reply_type,
+            timeout,
+        );
+        return match tokio::time::timeout(HOME_TRY_WHILE_AWAY + timeout, asked).await {
+            Ok(Ok(body)) => Ok(body),
+            Ok(Err(e)) if home_did_not_answer(&e) => Err(PAIR_AT_HOME.to_string()),
+            _ => Err(waited.to_string()),
+        };
     }
     query_peer(address, port, request, reply_type, timeout)
         .await
@@ -1127,11 +1139,9 @@ async fn pairing_query(
 
 /// Request a pairing PIN from the desktop (show-the-PIN flow).
 ///
-/// Pairing rides the live control connection when there is one. A second
-/// connection from the same address evicts the live one from the desktop's
-/// client registry (it is keyed by peer address), and the evicted session
-/// then receives no pushes - HUD, notifications, WAN identity - until the
-/// app reconnects. Returns
+/// Pairing rides the live control connection when there is one at home, so
+/// the desktop's pushes keep to it; a link by the internet road is passed by
+/// for a one-off home connection (AT2, [`pairing_query`]). Returns
 /// `"pinSent"` when the desktop displayed a PIN to read off it, `"pinReady"`
 /// when `pocketdesk pair` already put a PIN up for manual entry, or `"error"`.
 pub async fn request_pair_pin(address: String, port: u16) -> Result<String, String> {
@@ -1545,7 +1555,27 @@ async fn oneshot_request(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
-    let conn_mgr = control_manager(Duration::from_secs(5))?;
+    oneshot_request_dialing(
+        Duration::from_secs(5),
+        address,
+        port,
+        request,
+        reply_type,
+        timeout,
+    )
+    .await
+}
+
+/// [`oneshot_request`], its connection given `dial` to come up.
+async fn oneshot_request_dialing(
+    dial: Duration,
+    address: &str,
+    port: u16,
+    request: &NetworkPacket,
+    reply_type: &str,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    let conn_mgr = control_manager(dial)?;
     let identity = client_identity();
     let (stream, claims) = conn_mgr
         .connect_named(address, port, &identity)
@@ -5338,27 +5368,39 @@ mod internet_road_tests {
         let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
         let home = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = home.local_addr().unwrap().port();
+        let closed = {
+            let gone = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            gone.local_addr().unwrap().port()
+        };
         let dialed = tokio::spawn(async move {
             tokio::time::timeout(Duration::from_secs(5), home.accept())
                 .await
                 .is_ok_and(|accepted| accepted.is_ok())
         });
-        *crate::CONTROL_PEER.lock().await = Some(("127.0.0.1".to_string(), port));
         crate::CONTROL_OVER_INTERNET.store(true, Ordering::SeqCst);
-        // This listener speaks no TLS: the home dial is made, and fails.
-        let refused = pair_with_pin("127.0.0.1".into(), port, "123456".into()).await;
-        let other = over_internet_to("198.51.100.3").await;
-        let road = over_internet_to("127.0.0.1").await;
+        // A home that answers (but speaks no TLS): the PIN went there, and
+        // its failure is not a matter of networks.
+        *crate::CONTROL_PEER.lock().await = Some(("127.0.0.1".to_string(), port));
+        let answered = pair_with_pin("127.0.0.1".into(), port, "123456".into()).await;
+        // A home that does not answer at all: the same network, said.
+        *crate::CONTROL_PEER.lock().await = Some(("127.0.0.1".to_string(), closed));
+        let started = std::time::Instant::now();
+        let refused = pair_with_pin("127.0.0.1".into(), closed, "123456".into()).await;
+        let took = started.elapsed();
         crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
-        let at_home = over_internet_to("127.0.0.1").await;
         *crate::CONTROL_PEER.lock().await = None;
         *crate::CERT_DIR.lock().unwrap() = had;
         let _ = std::fs::remove_dir_all(&certs);
         assert!(dialed.await.unwrap(), "the PIN went by a home connection");
+        assert!(matches!(answered, Err(e) if e.contains("did not answer")));
         assert!(matches!(refused, Err(e) if e.contains("same network")));
-        assert!(road);
-        assert!(!other, "only the computer that link goes to");
-        assert!(!at_home);
+        assert!(took < Duration::from_secs(4), "{took:?}");
+        assert!(super::home_did_not_answer(
+            "Connection failed: connection refused (os error 10061)"
+        ));
+        assert!(!super::home_did_not_answer(
+            "Connection failed: TLS handshake: certificate changed"
+        ));
     }
 
     #[test]

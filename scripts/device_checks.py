@@ -4979,12 +4979,12 @@ def phone_log() -> str:
     return adb("logcat", "-d", "-s", "PocketdeskRust:*", "Pocketdesk:*")
 
 
-def keep_failure(ctx: Ctx, step: str, phone_lines: list[str]) -> None:
+def keep_failure(ctx: Ctx, step: str, phone_lines: list[str], name: str = "at1_failure.txt") -> None:
     """What the phone showed and both logs said when a pairing did not
     take, kept in the throwaway's folder (never the repo) to be read."""
     phone_lines.append(phone_log())
     try:
-        (ctx.server.root / "at1_failure.txt").write_text(
+        (ctx.server.root / name).write_text(
             f"STEP: {step}" + chr(10)
             + "SCREEN: " + " | ".join(t for t, _, _ in dump_nodes(ctx.phone.dump()) if t) + chr(10)
             + "SERVER:" + chr(10)
@@ -5200,16 +5200,20 @@ def at2_pair_from_road(ctx: Ctx) -> tuple[str, str]:
             return unreachable(ctx)
 
         if not (wait_for(probe, 30, 1) and narrowed()):
-            keep_failure(ctx, "pair --someone-else from the road", lines)
+            keep_failure(ctx, "pair --someone-else from the road", lines, "at2_failure.txt")
             refused = unreachable(ctx)
             leave_to_home(ctx)
             return "FAIL", ("refused: the phone could not pair while linked by the internet road"
-                            if refused else "not paired as someone else's within 30 s") + " (at1_failure.txt)"
+                            if refused else "not paired as someone else's within 30 s") + " (at2_failure.txt)"
         leave_to_home(ctx)
         wrong = narrow_as(trusted_store(ctx).get("permissions", {}).get(ctx.device), {"files"})
         if wrong:
             return "FAIL", f"paired from the road: {wrong}"
-        return "PASS", "linked by the internet road, paired from a code at home: files only, Links still off, asks first"
+        # The road link left alone (review): still the phone's link.
+        if ctx.device not in ctx.server.linked():
+            return "FAIL", "paired, but the phone's link by the internet road went"
+        return "PASS", ("linked by the internet road, paired from a code at home: files only, Links still off, "
+                        "asks first; the road link still up")
     finally:
         if changed:
             leave_to_home(ctx)
