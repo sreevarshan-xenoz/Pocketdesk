@@ -1302,7 +1302,7 @@ impl PocketdeskApp {
                 });
             }
             Ok(None) => {
-                ui.menu_button("Pause", |ui| {
+                ui.menu_button(crate::tray_menu::PAUSE_LABEL, |ui| {
                     for (label, minutes) in crate::tray_menu::PAUSES {
                         if ui.button(label).clicked() {
                             picked = Some(minutes);
