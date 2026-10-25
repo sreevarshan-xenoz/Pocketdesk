@@ -331,6 +331,18 @@ pub struct VideoFrame {
 }
 
 impl VideoFrame {
+    /// Trim an odd width or height down to even (AI1), the last column or
+    /// row dropped: `true` when it trimmed. A window captured whole can be
+    /// odd-sized, which H.264's 4:2:0 cannot carry, and a crop's first frames
+    /// (the software crop, already even) would otherwise rebuild the encoder
+    /// once more at the window's own odd size.
+    pub fn to_even(&mut self) -> bool {
+        if (self.width | self.height) & 1 == 0 {
+            return false;
+        }
+        self.crop_region(0, 0, self.width, self.height)
+    }
+
     /// Crop this frame in place to `x, y, width, height`, repacking BGRA rows.
     ///
     /// The rectangle is clamped to the frame bounds and the size is rounded
@@ -426,6 +438,29 @@ mod tests {
         let mut f = pattern_frame();
         assert!(f.crop_region(0, 0, 5, 5));
         assert_eq!((f.width, f.height), (4, 4));
+    }
+
+    #[test]
+    fn an_odd_frame_is_trimmed_to_even_and_an_even_one_left_alone() {
+        // AI1: a window captured whole can be odd-sized (1395 wide), which
+        // H.264's 4:2:0 cannot carry; the software crop already rounds down.
+        let mut odd = pattern_frame();
+        odd.width = 7;
+        odd.height = 5;
+        assert!(odd.to_even());
+        assert_eq!((odd.width, odd.height), (6, 4));
+        assert_eq!(
+            px(&odd, 5, 3),
+            (5, 3),
+            "the same pixels, the last column and row dropped"
+        );
+        let mut even = pattern_frame();
+        assert!(!even.to_even(), "nothing to do");
+        assert_eq!(
+            (even.width, even.height, even.stride),
+            (8, 6, 48),
+            "not repacked"
+        );
     }
 
     #[test]
