@@ -47,8 +47,8 @@ fn phone_action_reach(row: &crate::model::PhoneRow) -> bool {
 /// The longest song line the tray shows, in characters.
 const SONG_CHARS: usize = 48;
 
-/// The pause's menu, by what it holds (AU1: a bare "Pause" said so only on
-/// hover); its hint names the rest.
+/// The pause's menu, by what it holds (AU1: a bare "Pause" said so only in
+/// the Overview's hint, and the tray has none).
 pub const PAUSE_LABEL: &str = "Pause notifications";
 
 /// The pauses offered (K2a): an hour, 8 hours, until resumed.

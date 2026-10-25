@@ -911,7 +911,7 @@ fn the_overview_says_a_broken_pause() {
     .expect("pause");
     let app = fixture.open(None);
     assert!(app.query_by_label_contains("could not be read").is_some());
-    assert!(app.query_by_label("Pause").is_none());
+    assert!(app.query_by_label(crate::tray_menu::PAUSE_LABEL).is_none());
 }
 
 /// K3: a notification on the Notifications page shows its app's icon, as

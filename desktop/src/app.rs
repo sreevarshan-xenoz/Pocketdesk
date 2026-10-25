@@ -1276,7 +1276,7 @@ impl PocketdeskApp {
     }
 
     /// The Overview's pause (K2a): while paused, what is held and Resume;
-    /// else Pause… with its three.
+    /// else Pause notifications with its three.
     fn pause_row(&mut self, ui: &mut egui::Ui) {
         let now = now_unix();
         let mut picked = None;
@@ -1296,7 +1296,7 @@ impl PocketdeskApp {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new(crate::tray_menu::pause_text(&pause, now)).strong());
                     ui.label(
-                        "Phones' notifications are not shown here: they stay on the phone, and those you can answer wait on the Notifications page. Texts wait on Messages. Links are not opened, nor kept: send them again after. A phone ringing this computer stays silent. Sessions, files and the clipboard go on.",
+                        "Phones' notifications are not shown here: they stay on the phone, and those you can answer wait on the Notifications page. Texts wait on Messages. Links are not opened, nor kept: send them again after. A phone ringing this computer stays silent, and its battery warnings and the files that arrive are not announced. Sessions, files and the clipboard go on.",
                     );
                     resume = ui.button("Resume").clicked();
                 });
@@ -1311,7 +1311,9 @@ impl PocketdeskApp {
                     }
                 })
                 .response
-                .on_hover_text("Hold phones' notifications, texts, links and rings for a while");
+                .on_hover_text(
+                    "Hold phones' notifications, texts, links, rings and warnings for a while",
+                );
             }
         }
         // P3: quiet hours now, said beside the pause.
