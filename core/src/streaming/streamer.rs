@@ -1170,8 +1170,13 @@ impl StreamingServer {
                                 cfg.width = encoder.config().width;
                                 cfg.height = encoder.config().height;
                                 cfg.bitrate_bps = *encoder_bitrate_rx.borrow();
+                                // AH2 review: the C2 rung's rebuild is a stall too.
+                                let rebuild_started = Instant::now();
                                 match VideoEncoder::new_software(cfg) {
                                     Ok(e) => {
+                                        if let Some(recorder) = &encode_recorder {
+                                            recorder.record_rebuild(rebuild_started.elapsed());
+                                        }
                                         warn!(
                                             reason = $reason,
                                             backend = e.backend_name(),

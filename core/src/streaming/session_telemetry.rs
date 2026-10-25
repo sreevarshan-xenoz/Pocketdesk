@@ -88,7 +88,9 @@ pub struct SessionReport {
     pub encode_tail: Option<Summary>,
     /// How long each encoder rebuild took (a crop's new size, a bitrate, a
     /// frame rate), or `None` when there was none (AH2): the stall a rebuild
-    /// makes is outside `encode_tail`, which times one frame's encode.
+    /// makes is outside `encode_tail`, which times one frame's encode. A
+    /// lower bound on what a viewer waits: the first frames after it, which
+    /// give no packet until a keyframe, are in neither tail (review).
     pub rebuild_tail: Option<Summary>,
     /// Client-side distributions, reported back over the streaming connection
     /// by the device doing the decoding. All three are `None` for a session
@@ -437,7 +439,8 @@ impl SessionRecorder {
         self.encode_tail.push_micros(elapsed.as_micros() as u64);
     }
 
-    /// Time one encoder rebuild (AH2), kept apart from the frames' encodes.
+    /// Time one encoder rebuild (AH2), kept apart from the frames' encodes:
+    /// building the encoder, not the frames until its first keyframe.
     pub fn record_rebuild(&self, elapsed: Duration) {
         self.rebuild_tail.push_micros(elapsed.as_micros() as u64);
     }
