@@ -472,6 +472,7 @@ mod tests {
     #[test]
     #[ignore = "needs an interactive Windows desktop"]
     fn wgc_captures_a_real_frame_of_the_primary_monitor() {
+        per_monitor_dpi();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -501,6 +502,18 @@ mod tests {
             );
             cancel.cancel();
         });
+    }
+
+    /// Read monitor sizes in pixels, as the server does from its start: a
+    /// test process is not DPI-aware, and on a scaled display it reads them
+    /// scaled (2048 wide for a 2560 monitor at 125 %).
+    fn per_monitor_dpi() {
+        use windows::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+        };
+        // Already set by an earlier test in this process: nothing to do.
+        let _ =
+            unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
     }
 
     /// A window of the test's own, one colour, that resizes itself when told
