@@ -108,9 +108,10 @@ of exactly that, including the one fix that merged without its confirming observ
 - [x] R4 C2 bottom rung exhausted: with software already live, keep killing encoders until the
       log shows "Encoder bottom rung exhausted; ending session" → stream goes Down cleanly
       (status chip + Retry works), never a silent infinite stall. (seen 2026-10-23 on the OPPO against a throwaway server (S2): the software sidecar killed too, "Encoder unrecoverable after 90 failures; ending session" (today's words), and Retry opened a new session on NVENC; on a still screen the phone's 10 s stall watch ends it first and reconnects by itself.)
-- [ ] R4 C2 crop stability: during a software-fallback session, pick/clear a window crop →
+- [x] R4 C2 crop stability: during a software-fallback session, pick/clear a window crop →
       encoder rebuild must NOT re-log the hardware fallback (sticky `encoder_preferred` — a
       rebuild must not re-probe the dead hardware).
+      (2026-10-25, the runner's `am1-sticky-software` on the OPPO: a throwaway whose hardware rungs all fail as they open (`POCKETDESK_FAIL_ENCODERS`, a test seam) fell back to software at the session's start, once; a crop to a 1395x786 window and back rebuilt the encoder with no hardware rung tried again, the session up, its record's encoder the software sidecar.)
 - [ ] R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued. (where: linux)
 
 ## 2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed

@@ -405,6 +405,16 @@ class SessionParts(unittest.TestCase):
         # A square off the screen is nothing drawn, not a division by zero.
         self.assertEqual(dc.marked_share(shot, (20, 20, 30, 30), (9, 9)), 0.0)
 
+    def test_hardware_rungs_given_up_in_the_server_s_log(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"{esc}[33mWARN{esc}[0m pocketdesk_core::streaming::encoder: Hardware encoder unavailable (Nvenc failed) (C2)",
+            "INFO Video encoder: ffmpeg sidecar",
+            "WARN Hardware encoder unavailable (Mf failed) (C2)",
+        ])
+        self.assertEqual(dc.fallbacks(log), 2)
+        self.assertEqual(dc.fallbacks(""), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
