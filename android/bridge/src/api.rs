@@ -646,8 +646,11 @@ pub async fn connect_to_peer(
                                     && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
                                     && pkt.packet_type == "kdeconnect.pocketdesk.endpoint"
                                 {
-                                    let mut id = crate::WAN_IDENTITY.lock().await;
-                                    *id = Some(pkt.body.to_string());
+                                    *crate::WAN_IDENTITY.lock().await = Some((
+                                        from_peer.0.clone(),
+                                        from_peer.1,
+                                        pkt.body.to_string(),
+                                    ));
                                 }
                                 // Who drives, when several phones are
                                 // connected (N7).
@@ -1001,10 +1004,13 @@ pub async fn poll_incoming_packets() -> Vec<String> {
     packets
 }
 
-/// The server's cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint`
-/// body JSON), or `None` if the connected desktop has not announced one.
-pub async fn get_wan_identity() -> Option<String> {
-    crate::WAN_IDENTITY.lock().await.clone()
+/// The cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint` body
+/// JSON) of the computer at `host`:`port`, or `None` if it came from another
+/// computer or none came: a session's card saves only its own computer's
+/// (AQ3: one to an address where nothing answered took the linked
+/// computer's, and was dialed to it by the internet road).
+pub async fn get_wan_identity(host: &str, port: u16) -> Option<String> {
+    wake_info_for(crate::WAN_IDENTITY.lock().await.as_ref(), host, port)
 }
 
 /// Consume the find-my-device siren latch (R3 Tier-2 #11). Returns `true`
@@ -5167,6 +5173,25 @@ mod wake_tests {
         assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.2", 1716), None);
         assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.1", 1717), None);
         assert_eq!(super::wake_info_for(None, "192.0.2.1", 1716), None);
+    }
+
+    #[tokio::test]
+    async fn a_wan_identity_is_handed_out_only_for_the_computer_it_came_from() {
+        // AQ3: a session to another computer's card took this one's
+        // identity, dialed it by the internet road, and saved its name.
+        *crate::WAN_IDENTITY.lock().await = Some((
+            "127.0.0.1".to_string(),
+            1716,
+            "{\"endpointId\":\"x\"}".to_string(),
+        ));
+        assert_eq!(
+            super::get_wan_identity("127.0.0.1", 1716).await.as_deref(),
+            Some("{\"endpointId\":\"x\"}")
+        );
+        assert_eq!(super::get_wan_identity("192.0.2.10", 1716).await, None);
+        assert_eq!(super::get_wan_identity("127.0.0.1", 1717).await, None);
+        *crate::WAN_IDENTITY.lock().await = None;
+        assert_eq!(super::get_wan_identity("127.0.0.1", 1716).await, None);
     }
 
     #[test]

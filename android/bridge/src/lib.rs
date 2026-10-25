@@ -771,14 +771,19 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRemoteS
     to_jstring(&mut env, json)
 }
 
-/// The connected desktop's cached iroh WAN identity, or `{"ok": null}` if it
-/// has not announced one.
+/// The cached iroh WAN identity of the computer at `address`:`port`, or
+/// `{"ok": null}` if it came from another computer or none came (AQ3).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeGetWanIdentity(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
 ) -> jstring {
-    let json = envelope(Ok(RUNTIME.block_on(api::get_wan_identity())));
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(Ok(
+        RUNTIME.block_on(api::get_wan_identity(&address, port as u16))
+    ));
     to_jstring(&mut env, json)
 }
 

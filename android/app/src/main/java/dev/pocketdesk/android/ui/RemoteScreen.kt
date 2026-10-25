@@ -905,7 +905,8 @@ fun RemoteScreen(
     LaunchedEffect(address) {
         var cached: String? = null
         while (isActive) {
-            val identity = withContext(Dispatchers.IO) { RustCore.getWanIdentity() }
+            // Only this computer's (AQ3): the link may be to another one.
+            val identity = withContext(Dispatchers.IO) { RustCore.getWanIdentity(address, controlPort) }
             if (identity != null && identity != cached) {
                 cached = identity
                 HostStore.saveWanIdentity(context, address, identity)
