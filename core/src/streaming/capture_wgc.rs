@@ -63,6 +63,20 @@ const IDLE_HEARTBEAT: Duration = Duration::from_secs(1);
 /// Frames the pool may hold; two lets one be copied while the next lands.
 const POOL_BUFFERS: i32 = 2;
 
+/// How long a frame that arrived `now` waits before it is sent, so frames go
+/// no faster than one a `period`; `None` sends it at once. A frame is never
+/// dropped for coming early (AI3): it may be the last the source sends for a
+/// long while, a still window's first or the end of a burst of changes, and
+/// the heartbeat can only repeat a frame that was kept.
+fn wait_before_sending(
+    last_sent: Option<Instant>,
+    now: Instant,
+    period: Duration,
+) -> Option<Duration> {
+    let since = now.saturating_duration_since(last_sent?);
+    (since < period).then(|| period - since)
+}
+
 /// Start capturing the configured monitor through Windows.Graphics.Capture.
 ///
 /// Returns once the first frame has been copied, so `start_capture_auto` can
@@ -259,8 +273,10 @@ fn run_capture_loop(
 
         let frame = match fresh {
             Some(frame) => {
-                if last_sent.is_some_and(|t| t.elapsed() < frame_period) {
-                    continue; // faster than the configured rate
+                // Faster than the configured rate: this frame waits its turn
+                // rather than being dropped (AI3).
+                if let Some(wait) = wait_before_sending(last_sent, Instant::now(), frame_period) {
+                    std::thread::sleep(wait);
                 }
                 let content = frame.ContentSize()?;
                 if content.Width != capture.size.Width || content.Height != capture.size.Height {
@@ -387,6 +403,30 @@ fn start_item(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frame_that_comes_early_waits_its_turn_instead_of_being_dropped() {
+        // AI3: a window's first frame after a switch came within one frame
+        // period of the monitor's last; dropped, a still window sent no
+        // other, and the phone called the link dead 10 s later.
+        let period = Duration::from_millis(33);
+        let now = Instant::now();
+        assert_eq!(
+            wait_before_sending(None, now, period),
+            None,
+            "the first frame goes at once"
+        );
+        assert_eq!(
+            wait_before_sending(Some(now - period), now, period),
+            None,
+            "on time"
+        );
+        assert_eq!(
+            wait_before_sending(Some(now - Duration::from_millis(3)), now, period),
+            Some(Duration::from_millis(30)),
+            "early: held for the rest of the period, then sent"
+        );
+    }
 
     /// Live: capture one real frame of the primary monitor and check it is
     /// the monitor's size and not uniformly black. Run on a desktop session:
