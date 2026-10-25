@@ -4962,7 +4962,7 @@ def open_pair_link(ctx: Ctx, pin: str) -> Optional[str]:
     uri = pair_uri(name, device_id, ["127.0.0.1"], int(card.get("control_port", 1716)),
                    int(card.get("port", 4716)), pin, fingerprint)
     ctx.phone.wake()
-    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", f"'{uri}'", APP)
+    am("start", "-a", "android.intent.action.VIEW", "-d", uri, APP)
     if not wait_for(lambda: shows(ctx, "Pair"), 15, 1):
         return "the link did not open the pairing screen"
     tap_text("Pair", ctx.phone.dump())
@@ -4973,27 +4973,42 @@ def unreachable(ctx: Ctx) -> bool:
     return node_box(ctx.phone.dump(), "Could not reach the computer") is not None
 
 
-def keep_failure(ctx: Ctx, step: str) -> None:
+def phone_log() -> str:
+    """The phone's Pocketdesk lines since the last clear: read before a
+    screen dump, which clears the log (review)."""
+    return adb("logcat", "-d", "-s", "PocketdeskRust:*", "Pocketdesk:*")
+
+
+def keep_failure(ctx: Ctx, step: str, phone_lines: list[str]) -> None:
     """What the phone showed and both logs said when a pairing did not
     take, kept in the throwaway's folder (never the repo) to be read."""
+    phone_lines.append(phone_log())
     try:
         (ctx.server.root / "at1_failure.txt").write_text(
             f"STEP: {step}" + chr(10)
             + "SCREEN: " + " | ".join(t for t, _, _ in dump_nodes(ctx.phone.dump()) if t) + chr(10)
             + "SERVER:" + chr(10)
             + chr(10).join(l for l in ctx.server.log().splitlines() if re.search(r"(?i)pair|pin|refus|tls", l))
-            + chr(10) + "PHONE:" + chr(10)
-            + adb("logcat", "-d", "-t", "400", "-s", "PocketdeskRust:*", "Pocketdesk:*"),
+            + chr(10) + "PHONE:" + chr(10) + "".join(phone_lines),
             encoding="utf-8")
     except OSError:
         pass
+
+
+def grant_seconds(store: dict, device: str, started: float) -> Optional[float]:
+    """How long the trust store's grant for `device` runs from `started`
+    (its expiry, in Unix seconds), or None when it keeps none."""
+    ends = store.get("grants", {}).get(device)
+    if isinstance(ends, dict):
+        ends = ends.get("expires_unix")
+    return ends - started if isinstance(ends, (int, float)) and not isinstance(ends, bool) else None
 
 
 def leave_to_home(ctx: Ctx) -> None:
     """Back to Home from the session a pairing opens, which waits for the
     owner's Allow: with Back, as its buttons may be hidden (no tap on it)."""
     for _ in range(3):
-        if shows(ctx, HOME_MARK):
+        if shows(ctx, HOME_MARK) or (time.sleep(1) or shows(ctx, HOME_MARK)):
             return
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(2)
@@ -5013,18 +5028,13 @@ def at1_someone_else(ctx: Ctx) -> tuple[str, str]:
     records = phone_records(ctx)
     if ctx.device not in trusted_store(ctx).get("trusted_device_ids", []):
         return "SKIP", "the phone is not paired with the throwaway"
+    # An unpaired phone is let in only while pairing is required: with it
+    # off it would get the defaults, input to this computer too (review).
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off"
     said = []
     changed = False
-    # At home first: nothing pairs over the internet road (T10a), and a
-    # phone linked by it was refused before the server saw a thing (4 runs
-    # of 12, "Pairing needs the same network as the computer").
-    for _ in range(2):
-        if not iroh_loops(ctx.server.log()):
-            break
-        changed = True
-        by_home(ctx)
-    if iroh_loops(ctx.server.log()):
-        return "TIMEOUT", "the phone stayed on the internet road, where nothing pairs"
 
     def pair(*args: str) -> Optional[str]:
         code, out = ctx.server.cli("pair", *args, "--json")
@@ -5034,18 +5044,38 @@ def at1_someone_else(ctx: Ctx) -> tuple[str, str]:
             pin = json.loads(line)["pin"]
         except (ValueError, KeyError, TypeError):
             return f"pocketdesk pair {' '.join(args)} said {code}, no PIN"
+        lines: list[str] = []
         why = open_pair_link(ctx, str(pin))
         if why:
             return why
         narrowed = lambda: trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("ask_first")
-        if not (wait_for(lambda: narrowed() or unreachable(ctx), 30, 1) and narrowed()):
-            keep_failure(ctx, f"pair {' '.join(args)}")
+
+        def probe() -> bool:
+            if narrowed():
+                return True
+            lines.append(phone_log())
+            return unreachable(ctx)
+
+        if not (wait_for(probe, 30, 1) and narrowed()):
+            keep_failure(ctx, f"pair {' '.join(args)}", lines)
             leave_to_home(ctx)
             return f"pair {' '.join(args)}: not paired as someone else's within 30 s (at1_failure.txt)"
         leave_to_home(ctx)
         return None
 
     try:
+        # At home first: nothing pairs over the internet road (T10a), and a
+        # phone linked by it was refused before the server saw a thing (4
+        # runs of 12, "Pairing needs the same network as the computer").
+        for _ in range(2):
+            if not iroh_loops(ctx.server.log()):
+                break
+            changed = True
+            why = by_home(ctx)
+            if why and "internet road" not in why:
+                return "TIMEOUT", why
+        if iroh_loops(ctx.server.log()):
+            return "TIMEOUT", "the phone stayed on the internet road, where nothing pairs"
         # A phone of mine with Links off, paired again as someone else's.
         changed = True
         set_permission_live(ctx, "links", False)
@@ -5071,11 +5101,11 @@ def at1_someone_else(ctx: Ctx) -> tuple[str, str]:
             if wrong:
                 return "FAIL", "; ".join(said + [f"{step}: {wrong}"])
             if step == "--grant 15m":
-                until = store.get("grants", {}).get(ctx.device)
-                ends = (until.get("expires_unix") if isinstance(until, dict) else until) if until else None
-                if not isinstance(ends, (int, float)) or not 840 <= ends - started <= 960:
-                    return "FAIL", "; ".join(said + [f"{step}: its trust does not end in 15 minutes ({until!r})"])
-                said.append(f"{step}: files and links, asks first, trust for {int(ends - started) // 60} min")
+                runs = grant_seconds(store, ctx.device, started)
+                # From before the pairing: 15 minutes, and the seconds it took.
+                if runs is None or not 900 <= runs <= 960:
+                    return "FAIL", "; ".join(said + [f"{step}: its trust does not end in 15 minutes ({runs})"])
+                said.append(f"{step}: files and links, asks first, trust for {round(runs / 60)} min")
             else:
                 said.append(f"{step}: files and links, asks first")
         after = phone_records(ctx)

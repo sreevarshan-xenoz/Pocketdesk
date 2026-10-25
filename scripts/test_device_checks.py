@@ -473,6 +473,16 @@ class SessionParts(unittest.TestCase):
         self.assertIsNone(dc.endpoint_id(None))
         self.assertIsNone(dc.endpoint_id("not json"))
 
+    def test_a_pairing_link_s_name_in_any_script(self):
+        self.assertEqual(dc.link_part("Café 1"), "Caf%C3%A9%201")
+        self.assertEqual(dc.link_part("a-b_c.d~e,f"), "a-b_c.d~e,f")
+
+    def test_how_long_a_grant_runs(self):
+        self.assertEqual(dc.grant_seconds({"grants": {"d": 1900}}, "d", 1000.0), 900)
+        self.assertEqual(dc.grant_seconds({"grants": {"d": {"expires_unix": 1880}}}, "d", 1000.0), 880)
+        self.assertIsNone(dc.grant_seconds({"grants": {}}, "d", 1000.0))
+        self.assertIsNone(dc.grant_seconds({}, "d", 1000.0))
+
     def test_someone_else_s_narrow_permissions(self):
         narrow = dict({c: c in ("files", "links") for c in dc.CAPABILITIES}, ask_first=True)
         self.assertIsNone(dc.narrow_as(narrow, {"files", "links"}))
