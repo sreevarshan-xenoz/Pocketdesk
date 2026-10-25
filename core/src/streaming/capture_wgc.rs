@@ -207,6 +207,9 @@ fn run_capture_loop(
     // When the pool was last recreated for a new size with no frame at that
     // size since.
     let mut resized_at: Option<Instant> = None;
+    // Restarted for a new size with no frame used since: once is enough (a
+    // source whose first frame is not its item's size would restart forever).
+    let mut restarted = false;
     let mut ready_sent = false;
 
     while !cancel.is_cancelled() {
@@ -227,6 +230,7 @@ fn run_capture_loop(
                     window_mode.store(matches!(source, Source::Window(_)), Ordering::Relaxed);
                     last_frame = None;
                     resized_at = None;
+                    restarted = false;
                     info!(?source, "WGC capture source switched");
                 }
                 Err(e) => {
@@ -252,6 +256,7 @@ fn run_capture_loop(
             refused_window = Some(wanted);
             last_frame = None;
             resized_at = None;
+            restarted = false;
         }
 
         let woke = wake_rx.recv_timeout(Duration::from_millis(100)).is_ok();
@@ -272,9 +277,14 @@ fn run_capture_loop(
             {
                 Ok(next) => {
                     capture = next;
+                    restarted = true;
                     debug!(?source, "WGC capture restarted for its new size");
                 }
-                Err(e) => warn!("WGC capture could not restart for its new size ({e:#})"),
+                Err(e) => {
+                    // Tried again after another wait (review).
+                    resized_at = Some(Instant::now());
+                    warn!("WGC capture could not restart for its new size ({e:#})");
+                }
             }
             continue;
         }
@@ -282,10 +292,11 @@ fn run_capture_loop(
         let frame = match fresh {
             Some(frame) => {
                 if resize_pool(&gpu, &mut capture, &frame)? {
-                    resized_at = Some(Instant::now());
+                    resized_at = (!restarted).then(Instant::now);
                     continue; // the next frame arrives at the new size
                 }
                 resized_at = None;
+                restarted = false;
                 let mut video = copy_frame(&mut gpu, &frame)?;
                 drop(frame);
                 // Faster than the configured rate: this frame waits its turn
@@ -299,7 +310,7 @@ fn run_capture_loop(
                     }
                     if let Some(frame) = newer {
                         if resize_pool(&gpu, &mut capture, &frame)? {
-                            resized_at = Some(Instant::now());
+                            resized_at = (!restarted).then(Instant::now);
                         } else {
                             video = copy_frame(&mut gpu, &frame)?;
                         }
@@ -649,6 +660,7 @@ mod tests {
     #[test]
     #[ignore = "needs an interactive Windows desktop"]
     fn wgc_resized_still_window_reaches_its_new_size() {
+        per_monitor_dpi();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
