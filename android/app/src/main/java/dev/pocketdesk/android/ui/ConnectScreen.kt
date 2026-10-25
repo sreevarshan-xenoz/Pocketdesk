@@ -52,8 +52,7 @@ import kotlinx.coroutines.withContext
  * keyboard and Go, ports + WoL MAC under an Advanced expander, and the
  * auto-connect toggle as a whole row.
  * Connecting is the caller's job (see MainActivity's session state). The
- * optional WoL MAC turns the entered host into a wake *relay* (Tier-2 #12):
- * it emits the magic packet for a sleeping desktop on its LAN.
+ * optional WoL MAC is kept with the computer, for its card's Wake (N6).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,7 +78,7 @@ fun ConnectScreen(
     val scope = rememberCoroutineScope()
     val portValue = port.toIntOrNull()
     val controlPortValue = controlPort.toIntOrNull()
-    val macValue = AddComputerRule.macToKeep(wolMac)
+    val macValue = AddComputerRule.macToKeep(wolMac, rememberHost)
 
     val canConnect = address.isNotBlank() && portValue != null && controlPortValue != null
     fun connect() {
@@ -225,6 +224,12 @@ private val MAC_PATTERN = Regex("^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
 
 /** What the add-computer form keeps of its fields. */
 internal object AddComputerRule {
-    /** The wake-on-LAN MAC typed, when it is one, to keep with the computer. */
-    fun macToKeep(typed: String): String? = MAC_PATTERN.matchEntire(typed.trim())?.value
+    /**
+     * The wake-on-LAN MAC typed, when it is one, to keep with the computer,
+     * whatever [connectsOnOpen] (the form's auto-connect switch) says: the
+     * computer is kept either way, and a MAC typed with the switch off was
+     * dropped (AV3).
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun macToKeep(typed: String, connectsOnOpen: Boolean): String? = MAC_PATTERN.matchEntire(typed.trim())?.value
 }
