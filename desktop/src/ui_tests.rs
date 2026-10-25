@@ -880,7 +880,8 @@ fn a_broken_muted_list_is_said_in_settings() {
 fn the_overview_pauses_and_resumes() {
     let fixture = Fixture::new();
     let mut app = fixture.open(None);
-    app.get_by_label("Pause").click();
+    // AU1: it says what it holds, not only on hover.
+    app.get_by_label("Pause notifications").click();
     app.run_steps(3);
     app.get_by_label("For an hour").click();
     app.run_steps(3);
@@ -892,7 +893,7 @@ fn the_overview_pauses_and_resumes() {
     assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_some());
     app.get_by_label("Resume").click();
     app.run_steps(3);
-    assert!(app.query_by_label("Pause").is_some());
+    assert!(app.query_by_label("Pause notifications").is_some());
     assert!(pocketdesk_core::local::pause::current(fixture.state(), now).is_none());
 }
 
@@ -910,7 +911,7 @@ fn the_overview_says_a_broken_pause() {
     .expect("pause");
     let app = fixture.open(None);
     assert!(app.query_by_label_contains("could not be read").is_some());
-    assert!(app.query_by_label("Pause").is_none());
+    assert!(app.query_by_label(crate::tray_menu::PAUSE_LABEL).is_none());
 }
 
 /// K3: a notification on the Notifications page shows its app's icon, as

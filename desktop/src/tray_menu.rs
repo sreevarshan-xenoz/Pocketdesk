@@ -47,6 +47,10 @@ fn phone_action_reach(row: &crate::model::PhoneRow) -> bool {
 /// The longest song line the tray shows, in characters.
 const SONG_CHARS: usize = 48;
 
+/// The pause's menu, by what it holds (AU1: a bare "Pause" said so only in
+/// the Overview's hint, and the tray has none).
+pub const PAUSE_LABEL: &str = "Pause notifications";
+
 /// The pauses offered (K2a): an hour, 8 hours, until resumed.
 pub const PAUSES: [(&str, Option<u32>); 3] = [
     ("For an hour", Some(60)),
@@ -104,7 +108,7 @@ pub fn with_pause(
             },
         ],
         None => vec![Entry::Phone {
-            label: "Pause".to_string(),
+            label: PAUSE_LABEL.to_string(),
             items: PAUSES
                 .iter()
                 .map(|(label, minutes)| Entry::Item {
@@ -373,7 +377,7 @@ mod tests {
         let Entry::Phone { label, items } = &entries[2] else {
             panic!("Pause after Pair: {entries:?}");
         };
-        assert_eq!(label, "Pause");
+        assert_eq!(label, "Pause notifications");
         assert_eq!(items.len(), 3);
         let pause = pocketdesk_core::local::pause::Pause {
             since_unix: 1_000,

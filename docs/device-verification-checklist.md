@@ -2286,7 +2286,7 @@ Built 2026-10-20; tested by JVM tests, nothing on a phone yet. Each press sets t
 ## 152. Pause the phones on the computer (K2a)
 
 Built 2026-10-20; tested through units and the harness, nothing by hand yet.
-- [ ] The tray's Pause → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
+- [ ] The tray's Pause notifications → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
 - [x] While paused: a phone's chat notification showed no toast (one did before the pause) and was kept to answer. (Seen 2026-10-24 on the OPPO against a throwaway server (S4), read from Windows' notification store.)
 - [ ] While paused: a text on Messages without a toast. (where: sim)
 - [ ] While paused: a link not opened, and a phone ringing this computer silent. (where: owner)

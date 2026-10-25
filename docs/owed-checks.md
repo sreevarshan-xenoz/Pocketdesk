@@ -1995,7 +1995,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **152. Pause the phones on the computer (K2a)**
 
-- The tray's Pause → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
+- The tray's Pause notifications → For an hour: the menu says "Paused, 60 min left" with Resume, and the Overview says what is held.
 - Resume from the tray and from the Overview; `pocketdesk pause --for 1` ends by itself in a minute.
 
 **153. Notifications with their app's icon, and pictures (K3)**
