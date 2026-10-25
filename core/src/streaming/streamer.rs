@@ -1099,6 +1099,10 @@ impl StreamingServer {
                             frames_dropped += 1;
                             continue;
                         }
+                        // A window's own frames may be odd-sized (AI1): even,
+                        // as the software crop makes them, so a crop is one
+                        // rebuild and the stream stays 4:2:0.
+                        frame.to_even();
 
                         // Adopt the frame resolution into the encoder: the
                         // crop size (or the real capture size) must be what
