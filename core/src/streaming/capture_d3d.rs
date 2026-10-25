@@ -101,7 +101,6 @@ impl StagingCopy {
     }
 }
 
-/// A fresh-timestamped copy of `frame`, for the idle heartbeat.
 /// How long a frame that arrived `now` waits before it is sent, so frames go
 /// no faster than one a `period`; `None` sends it at once. A frame is never
 /// dropped for coming early (AI3, AI4): it may be the last the source sends for a
@@ -116,6 +115,7 @@ pub(super) fn wait_before_sending(
     (since < period).then(|| period - since)
 }
 
+/// A fresh-timestamped copy of `frame`, for the idle heartbeat.
 pub(super) fn clone_frame(frame: &VideoFrame) -> VideoFrame {
     VideoFrame {
         data: frame.data.clone(),

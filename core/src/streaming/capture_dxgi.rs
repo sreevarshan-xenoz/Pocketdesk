@@ -174,13 +174,33 @@ fn run_capture_loop(
                 unsafe { duplication.dup.ReleaseFrame() }.ok();
                 match copied {
                     Some(video) => {
-                        let video = video?;
-                        last_frame = Some(clone_frame(&video));
+                        let mut video = video?;
                         if let Some(wait) =
                             wait_before_sending(last_sent, Instant::now(), frame_period)
                         {
                             std::thread::sleep(wait);
+                            // What changed meanwhile goes instead (review):
+                            // duplication holds it for the next acquire.
+                            let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+                            let mut resource: Option<IDXGIResource> = None;
+                            let newer = unsafe {
+                                duplication
+                                    .dup
+                                    .AcquireNextFrame(0, &mut info, &mut resource)
+                            };
+                            if newer.is_ok() {
+                                if info.LastPresentTime != 0
+                                    && let Some(resource) = resource
+                                {
+                                    let texture: ID3D11Texture2D = resource.cast()?;
+                                    video = duplication.copier.copy(&texture)?;
+                                }
+                                unsafe { duplication.dup.ReleaseFrame() }.ok();
+                            }
+                            // A timeout keeps the copy in hand; a lost access
+                            // shows at the next acquire, as before.
                         }
+                        last_frame = Some(clone_frame(&video));
                         video
                     }
                     None => continue,
