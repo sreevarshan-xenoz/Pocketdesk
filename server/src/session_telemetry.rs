@@ -246,6 +246,7 @@ mod tests {
             device_id: Some("pixel-9".into()),
             rtt_tail: None,
             encode_tail: None,
+            rebuild_tail: None,
             decode_tail: None,
             render_tail: None,
             e2e_tail: None,
