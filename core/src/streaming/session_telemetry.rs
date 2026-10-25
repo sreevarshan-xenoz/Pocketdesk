@@ -86,6 +86,12 @@ pub struct SessionReport {
     pub rtt_tail: Option<Summary>,
     /// Per-frame encode time distribution, or `None` when no frame was encoded.
     pub encode_tail: Option<Summary>,
+    /// How long each encoder rebuild took (a crop's new size, a bitrate, a
+    /// frame rate), or `None` when there was none (AH2): the stall a rebuild
+    /// makes is outside `encode_tail`, which times one frame's encode. A
+    /// lower bound on what a viewer waits: the first frames after it, which
+    /// give no packet until a keyframe, are in neither tail (review).
+    pub rebuild_tail: Option<Summary>,
     /// Client-side distributions, reported back over the streaming connection
     /// by the device doing the decoding. All three are `None` for a session
     /// whose client never sent a sample — which includes every desktop-to-desktop
@@ -251,6 +257,9 @@ impl SessionReport {
         if let Some(tail) = &self.encode_tail {
             write!(line, "\t{}", tail.format_tail("enc")).expect("infallible");
         }
+        if let Some(tail) = &self.rebuild_tail {
+            write!(line, "\t{}", tail.format_tail("rebuild")).expect("infallible");
+        }
         for (tail, key) in [
             (self.decode_tail.as_ref(), "dec"),
             (self.render_tail.as_ref(), "rnd"),
@@ -358,6 +367,7 @@ pub struct SessionRecorder {
     rtt_samples: AtomicU64,
     rtt_tail: Samples,
     encode_tail: Samples,
+    rebuild_tail: Samples,
     /// Client-reported distributions, filled from `ClientSamples` frames by the
     /// connection monitor. A `Samples` is already internally locked, so these
     /// need no wrapper and the recorder stays `&self` on every path.
@@ -382,6 +392,7 @@ impl SessionRecorder {
             rtt_samples: AtomicU64::new(0),
             rtt_tail: Samples::new(),
             encode_tail: Samples::new(),
+            rebuild_tail: Samples::new(),
             decode_tail: Samples::new(),
             render_tail: Samples::new(),
             e2e_tail: Samples::new(),
@@ -426,6 +437,12 @@ impl SessionRecorder {
     /// it must stay cheap: a mutex over a bounded array, no allocation.
     pub fn record_encode(&self, elapsed: Duration) {
         self.encode_tail.push_micros(elapsed.as_micros() as u64);
+    }
+
+    /// Time one encoder rebuild (AH2), kept apart from the frames' encodes:
+    /// building the encoder, not the frames until its first keyframe.
+    pub fn record_rebuild(&self, elapsed: Duration) {
+        self.rebuild_tail.push_micros(elapsed.as_micros() as u64);
     }
 
     /// Fold one batch of client-measured durations into the distribution named
@@ -508,6 +525,7 @@ impl SessionRecorder {
             device_id: self.device_id.clone(),
             rtt_tail: self.rtt_tail.summary_ms(),
             encode_tail: self.encode_tail.summary_ms(),
+            rebuild_tail: self.rebuild_tail.summary_ms(),
             decode_tail: self.decode_tail.summary_ms(),
             render_tail: self.render_tail.summary_ms(),
             e2e_tail: self.e2e_tail.summary_ms(),
@@ -675,6 +693,7 @@ mod tests {
             device_id: Some("phone-1".into()),
             rtt_tail: None,
             encode_tail: None,
+            rebuild_tail: None,
             decode_tail: None,
             render_tail: None,
             e2e_tail: None,
@@ -763,6 +782,36 @@ mod tests {
         assert_eq!(tail.p95_ms, 120, "a one-in-ten stall has to be visible");
         assert_eq!(tail.p99_ms, 120);
         assert_eq!(tail.max_ms, 120);
+    }
+
+    #[test]
+    fn encoder_rebuilds_reach_the_record_apart_from_the_frames() {
+        // AH2: a crop's or a bitrate's rebuild stalls the stream, but the
+        // encode timer covers one frame's encode only, so the record showed
+        // nothing; its own tail does.
+        let rec = SessionRecorder::new(TransportFamily::Quinn, None);
+        for _ in 0..50 {
+            rec.record_encode(Duration::from_millis(10));
+        }
+        rec.record_rebuild(Duration::from_millis(180));
+        rec.record_rebuild(Duration::from_millis(240));
+        let report = rec.finish(SessionOutcome::Completed, 0);
+        let rebuilds = report.rebuild_tail.expect("rebuilds were timed");
+        assert_eq!(rebuilds.count, 2);
+        assert_eq!(rebuilds.max_ms, 240);
+        assert_eq!(
+            report.encode_tail.expect("frames").max_ms,
+            10,
+            "the frames' tail untouched"
+        );
+        let line = report.format();
+        assert!(line.contains("rebuild_n=2\t"), "{line}");
+        assert!(line.contains("rebuild_max=240"), "{line}");
+        // A session with no rebuild says nothing of them.
+        let quiet =
+            SessionRecorder::new(TransportFamily::Quinn, None).finish(SessionOutcome::Completed, 0);
+        assert!(quiet.rebuild_tail.is_none());
+        assert!(!quiet.format().contains("rebuild_"));
     }
 
     #[test]

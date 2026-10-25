@@ -970,6 +970,8 @@ impl StreamingServer {
                             // A frame rate sent with it is taken in the same
                             // rebuild (each one starts on a keyframe).
                             cfg.fps = *encoder_fps_rx.borrow();
+                            // AH2: the rebuild's own time, apart from the frames' encodes.
+                            let rebuild_started = Instant::now();
                             let rebuilt = match VideoEncoder::new(cfg.clone()) {
                                 Ok(e) => Ok(e),
                                 Err(e) => {
@@ -982,6 +984,9 @@ impl StreamingServer {
                             };
                             match rebuilt {
                                 Ok(e) => {
+                                    if let Some(recorder) = &encode_recorder {
+                                        recorder.record_rebuild(rebuild_started.elapsed());
+                                    }
                                     info!(
                                         bitrate_bps = new_bitrate,
                                         backend = e.backend_name(),
@@ -1014,6 +1019,8 @@ impl StreamingServer {
                         let mut cfg = encoder_preferred.clone();
                         cfg.fps = new_fps;
                         cfg.bitrate_bps = *encoder_bitrate_rx.borrow();
+                        // AH2: the rebuild's own time, apart from the frames' encodes.
+                        let rebuild_started = Instant::now();
                         let rebuilt = match VideoEncoder::new(cfg.clone()) {
                             Ok(e) => Ok(e),
                             Err(e) => {
@@ -1023,6 +1030,9 @@ impl StreamingServer {
                         };
                         match rebuilt {
                             Ok(e) => {
+                                if let Some(recorder) = &encode_recorder {
+                                    recorder.record_rebuild(rebuild_started.elapsed());
+                                }
                                 info!(
                                     fps = new_fps,
                                     backend = e.backend_name(),
@@ -1100,6 +1110,8 @@ impl StreamingServer {
                             cfg.width = frame.width;
                             cfg.height = frame.height;
                             cfg.bitrate_bps = *encoder_bitrate_rx.borrow_and_update();
+                            // AH2: the rebuild's own time, apart from the frames' encodes.
+                            let rebuild_started = Instant::now();
                             let rebuilt = match VideoEncoder::new(cfg.clone()) {
                                 Ok(e) => Ok(e),
                                 Err(e) => {
@@ -1115,6 +1127,9 @@ impl StreamingServer {
                             };
                             match rebuilt {
                                 Ok(e) => {
+                                    if let Some(recorder) = &encode_recorder {
+                                        recorder.record_rebuild(rebuild_started.elapsed());
+                                    }
                                     // AE1: the codec too, so a crop that
                                     // kept HEVC (R4 C1) can be seen.
                                     info!(
@@ -1155,8 +1170,13 @@ impl StreamingServer {
                                 cfg.width = encoder.config().width;
                                 cfg.height = encoder.config().height;
                                 cfg.bitrate_bps = *encoder_bitrate_rx.borrow();
+                                // AH2 review: the C2 rung's rebuild is a stall too.
+                                let rebuild_started = Instant::now();
                                 match VideoEncoder::new_software(cfg) {
                                     Ok(e) => {
+                                        if let Some(recorder) = &encode_recorder {
+                                            recorder.record_rebuild(rebuild_started.elapsed());
+                                        }
                                         warn!(
                                             reason = $reason,
                                             backend = e.backend_name(),
