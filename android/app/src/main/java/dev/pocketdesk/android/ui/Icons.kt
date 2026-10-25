@@ -38,6 +38,8 @@ object LlIcons {
     val Add = LlGlyph(R.drawable.ic_ll_add)
     val Delete = LlGlyph(R.drawable.ic_ll_delete)
     val Desktop = LlGlyph(R.drawable.ic_ll_desktop)
+    /** A grid of buttons: the Deck (AJ4). */
+    val Grid = LlGlyph(R.drawable.ic_ll_grid)
     val Monitor = LlGlyph(R.drawable.ic_ll_desktop)
     val Keyboard = LlGlyph(R.drawable.ic_ll_keyboard)
     val Mouse = LlGlyph(R.drawable.ic_ll_mouse)
