@@ -1,8 +1,10 @@
 package dev.pocketdesk.android.status
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.SystemClock
@@ -11,14 +13,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ControlLink
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal const val BATTERY = "kdeconnect.battery"
@@ -32,6 +36,7 @@ private const val CHECK_MS = 15_000L
  * ([ControlLinkEffect][dev.pocketdesk.android.ui.ControlLinkEffect] keeps
  * it up): never a connection of its own, so a computer that is away is not
  * dialed every 15 s. What was not sent goes at the next check the link is up.
+ * A ringer turned is checked at once, not at the next check (AP3).
  */
 @Composable
 fun BatteryEffect(address: String, controlPort: Int) {
@@ -43,6 +48,8 @@ fun BatteryEffect(address: String, controlPort: Int) {
         // L7: which features are on, told with the battery's ticks.
         val switches = SwitchSender()
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            val wake = TickWake()
+            launch { pokeOnRingerChange(context, wake) }
             while (isActive) {
                 val linked = withContext(Dispatchers.IO) {
                     !ControlLink.needsConnect(RustCore.controlPeer(), address, controlPort)
@@ -78,9 +85,28 @@ fun BatteryEffect(address: String, controlPort: Int) {
                 } else {
                     switches.forget()
                 }
-                delay(CHECK_MS)
+                wake.await(CHECK_MS)
             }
         }
+    }
+}
+
+/** Pokes [wake] each time the ringer changes, until cancelled. */
+private suspend fun pokeOnRingerChange(context: Context, wake: TickWake) {
+    val receiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = wake.poke()
+    }
+    // A system broadcast, so it reaches a receiver not exported.
+    ContextCompat.registerReceiver(
+        context,
+        receiver,
+        IntentFilter(AudioManager.RINGER_MODE_CHANGED_ACTION),
+        ContextCompat.RECEIVER_NOT_EXPORTED,
+    )
+    try {
+        awaitCancellation()
+    } finally {
+        context.unregisterReceiver(receiver)
     }
 }
 

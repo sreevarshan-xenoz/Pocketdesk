@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-873 open items.
+872 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 41 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 40 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -127,7 +127,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **162. The phone's state on the computer (L9)**
 
-- The same within 15 s in a session. Found there: silent took 13.6 to 16.7 s over four runs (2026-10-25), as the session's reporter reads the phone's state on a 15 s tick and the send comes after; the background's reporter is quicker. AP3 sends a ringer change in a session at once.
 - The phone away: the line is gone.
 
 **167. Both sides' switches, part 2 (M2)**
