@@ -461,6 +461,40 @@ class SessionParts(unittest.TestCase):
         self.assertFalse(dc.alarm_playing(line.format(state="started", usage="MEDIA")))
         self.assertFalse(dc.alarm_playing("usage=USAGE_ALARM state:started"))
 
+    def test_a_pairing_link_as_the_computer_writes_it(self):
+        uri = dc.pair_uri("Test Desk", "dev-1", ["127.0.0.1"], 1716, 4716, "123456", "ab12")
+        self.assertEqual(uri, "pocketdesk://pair?v=1&name=Test%20Desk&id=dev-1&a=127.0.0.1&cp=1716"
+                              "&sp=4716&pin=123456&fp=ab12")
+        self.assertNotIn("fp=", dc.pair_uri("A&B", "d", ["192.0.2.1", "192.0.2.2"], 1, 2, "000000", None))
+        self.assertIn("name=A%26B&id=d&a=192.0.2.1,192.0.2.2", dc.pair_uri("A&B", "d", ["192.0.2.1", "192.0.2.2"], 1, 2, "000000", None))
+
+    def test_a_wan_identity_s_endpoint_id(self):
+        self.assertEqual(dc.endpoint_id('{"endpointId":"ab","directAddrs":["192.0.2.1:1"]}'), "ab")
+        self.assertIsNone(dc.endpoint_id(None))
+        self.assertIsNone(dc.endpoint_id("not json"))
+
+    def test_a_pairing_link_s_name_in_any_script(self):
+        self.assertEqual(dc.link_part("Café 1"), "Caf%C3%A9%201")
+        self.assertEqual(dc.link_part("a-b_c.d~e,f"), "a-b_c.d~e,f")
+
+    def test_how_long_a_grant_runs(self):
+        self.assertEqual(dc.grant_seconds({"grants": {"d": 1900}}, "d", 1000.0), 900)
+        self.assertEqual(dc.grant_seconds({"grants": {"d": {"expires_unix": 1880}}}, "d", 1000.0), 880)
+        self.assertIsNone(dc.grant_seconds({"grants": {}}, "d", 1000.0))
+        self.assertIsNone(dc.grant_seconds({}, "d", 1000.0))
+
+    def test_someone_else_s_narrow_permissions(self):
+        narrow = dict({c: c in ("files", "links") for c in dc.CAPABILITIES}, ask_first=True)
+        self.assertIsNone(dc.narrow_as(narrow, {"files", "links"}))
+        self.assertIsNone(dc.narrow_as(dict(narrow, links=False), {"files"}))
+        self.assertIn("ask", dc.narrow_as(dict(narrow, ask_first=False), {"files", "links"}))
+        self.assertIn("clipboard", dc.narrow_as(dict(narrow, clipboard=True), {"files", "links"}))
+        self.assertIn("links", dc.narrow_as(dict(narrow, links=False), {"files", "links"}))
+        # A capability left out is its default: on for most, off for exec.
+        self.assertIsNone(dc.narrow_as({k: v for k, v in narrow.items() if k not in ("files", "exec")}, {"files", "links"}))
+        self.assertIn("browse", dc.narrow_as({k: v for k, v in narrow.items() if k != "browse"}, {"files", "links"}))
+        self.assertIn("no permissions", dc.narrow_as(None, {"files"}))
+
     def test_the_phone_s_ringer_from_dumpsys(self):
         dump = chr(10).join(["Ringer mode: ", "- mode (internal) = VIBRATE", "- mode (external) = SILENT"])
         self.assertEqual(dc.ringer_mode(dump), "silent")

@@ -20,6 +20,7 @@ when no check FAILed or TIMEd OUT.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import http.client
 import json
@@ -4870,6 +4871,288 @@ def aq2_second_card(ctx: Ctx) -> tuple[str, str]:
             why = remove_second_host(ctx, cleanup=True)
             if why or SECOND_HOST in host_addresses(saved_hosts(ctx)):
                 print(f"note: AQ2 left {SECOND_HOST} saved on the phone: {why or 'still there'}", file=sys.stderr)
+
+
+# ---- someone else's phone, paired from the command line (AT1) ----
+
+# The trust store's capabilities (core's Capability::ALL, as serialized).
+CAPABILITIES = [
+    "input", "clipboard", "files", "browse", "audio", "mic", "power", "exec",
+    "notifications", "texts", "links", "media", "cast", "tasks", "ring", "mute",
+    "away_lock", "phone_sound", "dial", "command", "phone_actions",
+]
+# The store keeps a capability only where it differs from its default
+# (core's Capability::default_allowed): these are off unless set.
+OFF_BY_DEFAULT = {"exec", "away_lock", "phone_sound"}
+
+
+def link_part(value: str) -> str:
+    """A pairing link's value, encoded as core's pair_link does."""
+    keep = set("-._~,")
+    return "".join(chr(b) if (chr(b).isascii() and chr(b).isalnum()) or chr(b) in keep else f"%{b:02X}"
+                   for b in value.encode("utf-8"))
+
+
+def pair_uri(name: str, device_id: str, addresses: list[str], control_port: int,
+             stream_port: int, pin: str, fingerprint: Optional[str]) -> str:
+    """The link the desktop's Pair page shows as a code (no WAN endpoint)."""
+    parts = [
+        "v=1",
+        f"name={link_part(name)}",
+        f"id={link_part(device_id)}",
+        f"a={link_part(','.join(addresses))}",
+        f"cp={control_port}",
+        f"sp={stream_port}",
+        f"pin={link_part(pin)}",
+    ]
+    if fingerprint:
+        parts.append(f"fp={link_part(fingerprint)}")
+    return "pocketdesk://pair?" + "&".join(parts)
+
+
+def narrow_as(permissions: Optional[dict], allowed: set[str], every: list[str] = CAPABILITIES) -> Optional[str]:
+    """Why `permissions` are not someone else's: only `allowed` on, every
+    other capability off (one unset is its default), and sessions held to
+    ask first; None when they are."""
+    if permissions is None:
+        return "no permissions kept for it"
+
+    def on(c: str) -> bool:
+        value = permissions.get(c)
+        return value if isinstance(value, bool) else c not in OFF_BY_DEFAULT
+
+    wrong = [c for c in every if on(c) != (c in allowed)]
+    if wrong:
+        return "not as someone else's: " + ", ".join(f"{c} {'on' if on(c) else 'off'}" for c in wrong)
+    if permissions.get("ask_first") is not True:
+        return "its sessions do not ask first"
+    return None
+
+
+def endpoint_id(identity: object) -> Optional[str]:
+    """A WAN identity's endpoint id (the JSON the phone keeps per card)."""
+    try:
+        return json.loads(str(identity)).get("endpointId")
+    except (ValueError, AttributeError):
+        return None
+
+
+def trusted_store(ctx: Ctx) -> dict:
+    try:
+        return json.loads((ctx.server.root / "state" / "trusted_devices.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def open_pair_link(ctx: Ctx, pin: str) -> Optional[str]:
+    """Open a pairing link for the throwaway on the phone, as another app
+    would, and confirm it there; why not, when it could not."""
+    state = ctx.server.root / "state"
+    phone = ctx.phone.prefs("pocketdesk-host")
+    card = next((h for h in json.loads(phone.get("hosts") or "[]") if h.get("address") == "127.0.0.1"), None)
+    if card is None:
+        return "no 127.0.0.1 card on the phone"
+    # The card's own name, so the phone's records stay as they were.
+    name = str(phone.get("computer_name:127.0.0.1") or "Pocketdesk")
+    try:
+        device_id = (state / "device_id").read_text(encoding="utf-8").strip()
+        fingerprint = hashlib.sha256((state / "certs" / "identity.der").read_bytes()).hexdigest()
+    except OSError as error:
+        return f"the throwaway's identity could not be read: {error}"
+    uri = pair_uri(name, device_id, ["127.0.0.1"], int(card.get("control_port", 1716)),
+                   int(card.get("port", 4716)), pin, fingerprint)
+    ctx.phone.wake()
+    am("start", "-a", "android.intent.action.VIEW", "-d", uri, APP)
+    if not wait_for(lambda: shows(ctx, "Pair"), 15, 1):
+        return "the link did not open the pairing screen"
+    tap_text("Pair", ctx.phone.dump())
+    return None
+
+
+def unreachable(ctx: Ctx) -> bool:
+    return node_box(ctx.phone.dump(), "Could not reach the computer") is not None
+
+
+def phone_log() -> str:
+    """The phone's Pocketdesk lines since the last clear: read before a
+    screen dump, which clears the log (review)."""
+    return adb("logcat", "-d", "-s", "PocketdeskRust:*", "Pocketdesk:*")
+
+
+def keep_failure(ctx: Ctx, step: str, phone_lines: list[str]) -> None:
+    """What the phone showed and both logs said when a pairing did not
+    take, kept in the throwaway's folder (never the repo) to be read."""
+    phone_lines.append(phone_log())
+    try:
+        (ctx.server.root / "at1_failure.txt").write_text(
+            f"STEP: {step}" + chr(10)
+            + "SCREEN: " + " | ".join(t for t, _, _ in dump_nodes(ctx.phone.dump()) if t) + chr(10)
+            + "SERVER:" + chr(10)
+            + chr(10).join(l for l in ctx.server.log().splitlines() if re.search(r"(?i)pair|pin|refus|tls", l))
+            + chr(10) + "PHONE:" + chr(10) + "".join(phone_lines),
+            encoding="utf-8")
+    except OSError:
+        pass
+
+
+def grant_seconds(store: dict, device: str, started: float) -> Optional[float]:
+    """How long the trust store's grant for `device` runs from `started`
+    (its expiry, in Unix seconds), or None when it keeps none."""
+    ends = store.get("grants", {}).get(device)
+    if isinstance(ends, dict):
+        ends = ends.get("expires_unix")
+    return ends - started if isinstance(ends, (int, float)) and not isinstance(ends, bool) else None
+
+
+def leave_to_home(ctx: Ctx) -> None:
+    """Back to Home from the session a pairing opens, which waits for the
+    owner's Allow: with Back, as its buttons may be hidden (no tap on it)."""
+    for _ in range(3):
+        if shows(ctx, HOME_MARK) or (time.sleep(1) or shows(ctx, HOME_MARK)):
+            return
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(2)
+
+
+@check("at1-someone-else", "§167")
+def at1_someone_else(ctx: Ctx) -> tuple[str, str]:
+    """`pocketdesk pair --someone-else` and `--grant 15m`, paired from a
+    link opened on the phone, give it someone else's narrow permissions:
+    files and links only, its sessions asking first, a grant's trust
+    ending in 15 minutes. A phone paired as mine with Links off, paired
+    again as someone else's, keeps Links off (§167). The throwaway's trust
+    store and device keys are put back after, as AP2 does."""
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    records = phone_records(ctx)
+    if ctx.device not in trusted_store(ctx).get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    # An unpaired phone is let in only while pairing is required: with it
+    # off it would get the defaults, input to this computer too (review).
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off"
+    said = []
+    changed = False
+
+    def pair(*args: str) -> Optional[str]:
+        code, out = ctx.server.cli("pair", *args, "--json")
+        # Its JSON is the last line: the log may come first.
+        line = next((l for l in reversed(out.splitlines()) if l.strip().startswith("{")), "")
+        try:
+            pin = json.loads(line)["pin"]
+        except (ValueError, KeyError, TypeError):
+            return f"pocketdesk pair {' '.join(args)} said {code}, no PIN"
+        lines: list[str] = []
+        why = open_pair_link(ctx, str(pin))
+        if why:
+            return why
+        narrowed = lambda: trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("ask_first")
+
+        def probe() -> bool:
+            if narrowed():
+                return True
+            lines.append(phone_log())
+            return unreachable(ctx)
+
+        if not (wait_for(probe, 30, 1) and narrowed()):
+            keep_failure(ctx, f"pair {' '.join(args)}", lines)
+            leave_to_home(ctx)
+            return f"pair {' '.join(args)}: not paired as someone else's within 30 s (at1_failure.txt)"
+        leave_to_home(ctx)
+        return None
+
+    try:
+        # At home first: nothing pairs over the internet road (T10a), and a
+        # phone linked by it was refused before the server saw a thing (4
+        # runs of 12, "Pairing needs the same network as the computer").
+        for _ in range(2):
+            if not iroh_loops(ctx.server.log()):
+                break
+            changed = True
+            why = by_home(ctx)
+            if why and "internet road" not in why:
+                return "TIMEOUT", why
+        if iroh_loops(ctx.server.log()):
+            return "TIMEOUT", "the phone stayed on the internet road, where nothing pairs"
+        # A phone of mine with Links off, paired again as someone else's.
+        changed = True
+        set_permission_live(ctx, "links", False)
+        why = pair("--someone-else")
+        if why:
+            return "FAIL", why
+        store = trusted_store(ctx)
+        wrong = narrow_as(store.get("permissions", {}).get(ctx.device), {"files"})
+        if wrong:
+            return "FAIL", f"paired again as someone else's: {wrong}"
+        said.append("paired again as someone else's: files only, Links still off, asks first")
+
+        for args, step in ((("--someone-else",), "--someone-else"), (("--grant", "15m"), "--grant 15m")):
+            code, _ = ctx.server.cli("unpair", ctx.device)
+            if code != 0 or not wait_for(lambda: ctx.device not in trusted_store(ctx).get("trusted_device_ids", []), 15, 1):
+                return "FAIL", "; ".join(said + [f"{step}: the phone not unpaired first"])
+            started = time.time()
+            why = pair(*args)
+            if why:
+                return "FAIL", "; ".join(said + [why])
+            store = trusted_store(ctx)
+            wrong = narrow_as(store.get("permissions", {}).get(ctx.device), {"files", "links"})
+            if wrong:
+                return "FAIL", "; ".join(said + [f"{step}: {wrong}"])
+            if step == "--grant 15m":
+                runs = grant_seconds(store, ctx.device, started)
+                # From before the pairing: 15 minutes, and the seconds it took.
+                if runs is None or not 900 <= runs <= 960:
+                    return "FAIL", "; ".join(said + [f"{step}: its trust does not end in 15 minutes ({runs})"])
+                said.append(f"{step}: files and links, asks first, trust for {round(runs / 60)} min")
+            else:
+                said.append(f"{step}: files and links, asks first")
+        after = phone_records(ctx)
+
+        def same(key: str) -> bool:
+            # A session refreshes the computer's WAN identity from its own
+            # link, its addresses as they are now: the same if its id is.
+            if key.startswith("wan_identity:"):
+                return endpoint_id(records.get(key)) == endpoint_id(after.get(key))
+            return records.get(key) == after.get(key)
+
+        moved = sorted({k.split(":")[0] for k in set(records) | set(after) if not same(k)})
+        if moved:
+            return "FAIL", "; ".join(said + [f"the phone's records changed: {', '.join(moved)}"])
+        return "PASS", "; ".join(said)
+    finally:
+        if changed:
+            leave_to_home(ctx)
+            # As AP2's: each step whatever the one before did.
+            try:
+                ctx.server.stop()
+            except (OSError, ValueError) as error:
+                print(f"note: an AT1 cleanup step failed: {error}", file=sys.stderr)
+            missed = []
+            for name, data in kept.items():
+                for attempt in range(5):
+                    try:
+                        tmp = state / f"{name}.tmp"
+                        tmp.write_bytes(data)
+                        os.replace(tmp, state / name)
+                        break
+                    except OSError as error:
+                        if attempt == 4:
+                            missed.append(f"{name} ({error})")
+                        time.sleep(1)
+            if missed:
+                print(f"note: AT1 could not put back {', '.join(missed)}; the server is left stopped: "
+                      f"put them back in {state} by hand", file=sys.stderr)
+            else:
+                try:
+                    why = by_home(ctx)
+                    if why and "internet road" in why:
+                        why = by_home(ctx)
+                    if why:
+                        print(f"note: AT1 left the phone off its home link: {why}", file=sys.stderr)
+                except (OSError, ValueError) as error:
+                    print(f"note: an AT1 cleanup step failed: {error}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
