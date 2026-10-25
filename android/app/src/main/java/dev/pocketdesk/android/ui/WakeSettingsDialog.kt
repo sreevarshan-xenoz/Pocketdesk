@@ -115,7 +115,10 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                         onValueChange = { outsideHost = it },
                         label = { Text(stringResource(R.string.wake_outside_host)) },
                         isError = !hostOk,
-                        supportingText = { if (!hostOk) Text(stringResource(R.string.wake_bad_host)) },
+                        // The error in its place, else what blank means (AN3).
+                        supportingText = {
+                            Text(stringResource(if (hostOk) R.string.wake_outside_host_hint else R.string.wake_bad_host))
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -124,7 +127,9 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                         onValueChange = { outsidePort = it.filter(Char::isDigit).take(5) },
                         label = { Text(stringResource(R.string.wake_outside_port)) },
                         isError = !portOk,
-                        supportingText = { if (!portOk) Text(stringResource(R.string.wake_bad_port)) },
+                        supportingText = {
+                            Text(stringResource(if (portOk) R.string.wake_outside_port_hint else R.string.wake_bad_port))
+                        },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -136,7 +141,9 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
                         onValueChange = { mac = it.trim() },
                         label = { Text(stringResource(R.string.wake_mac_label)) },
                         isError = !macOk,
-                        supportingText = { if (!macOk) Text(stringResource(R.string.wake_bad_mac)) },
+                        supportingText = {
+                            Text(stringResource(if (macOk) R.string.wake_mac_label_hint else R.string.wake_bad_mac))
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
