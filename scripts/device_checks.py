@@ -589,9 +589,13 @@ class Server:
 
     def linked(self) -> list[str]:
         path = self.root / "state" / "live_sessions.json"
-        if not path.exists():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            # Absent, or being replaced by the server just then (Windows
+            # refuses the read): none this time, as `in_session` reads it.
             return []
-        return fresh_linked(path.read_text(encoding="utf-8"), time.time())
+        return fresh_linked(text, time.time())
 
     def event_count(self) -> int:
         path = self.root / "state" / "events.jsonl"
