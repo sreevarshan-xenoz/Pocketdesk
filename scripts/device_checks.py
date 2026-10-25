@@ -3473,7 +3473,8 @@ def am1_sticky_software(ctx: Ctx) -> tuple[str, str]:
         said = (f"the hardware given up {opened} time(s) at the start; cropped to {size[0]}x{size[1]}"
                 f" and {'back' if back else 'not back'}: given up {again} more time(s); the session"
                 f" {'up' if up else 'gone'}; its record's encoder {encoder}")
-        ok = back and again == 0 and up and encoder == "ffmpeg-sidecar"
+        # The software rung's names: the sidecar, or in-process on Linux (review).
+        ok = back and again == 0 and up and encoder in ("ffmpeg-sidecar", "in-process")
         return ("PASS" if ok else "FAIL"), said
 
     ctx.server.extra = {"POCKETDESK_FAIL_ENCODERS": "nvenc,amf,qsv,mf,vaapi"}
