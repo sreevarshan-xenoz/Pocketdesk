@@ -79,11 +79,13 @@ fun ConnectScreen(
     val scope = rememberCoroutineScope()
     val portValue = port.toIntOrNull()
     val controlPortValue = controlPort.toIntOrNull()
-    val macValue = MAC_PATTERN.matchEntire(wolMac.trim())?.value
+    val macValue = AddComputerRule.macToKeep(wolMac)
 
     val canConnect = address.isNotBlank() && portValue != null && controlPortValue != null
     fun connect() {
-        if (rememberHost && macValue != null) {
+        // Whatever the auto-connect switch says (AV3: [rememberHost] is
+        // it, and a MAC typed with it off was dropped).
+        if (macValue != null) {
             HostStore.saveWolMac(context, address.trim(), macValue)
         }
         onConnect(address.trim(), portValue ?: return, controlPortValue ?: return, rememberHost)
@@ -220,3 +222,9 @@ fun ConnectScreen(
 }
 
 private val MAC_PATTERN = Regex("^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$")
+
+/** What the add-computer form keeps of its fields. */
+internal object AddComputerRule {
+    /** The wake-on-LAN MAC typed, when it is one, to keep with the computer. */
+    fun macToKeep(typed: String): String? = MAC_PATTERN.matchEntire(typed.trim())?.value
+}
