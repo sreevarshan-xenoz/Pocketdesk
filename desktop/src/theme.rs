@@ -36,16 +36,26 @@ pub const MUTED: Token = Token {
     dark: Color32::from_rgb(0x8a, 0x93, 0x91),
 };
 
+/// The size of small text: the hints under settings, the sections' names
+/// down the left, a text's status (AM4: egui's own 9 points read too small
+/// in a screenshot of every page).
+pub const SMALL_TEXT: f32 = 11.0;
+
 /// egui's own lesser text, the muted token in each theme (U1 review: egui's
 /// "weak" text, the text colour at 0.6 alpha, is under 3:1 on the light
-/// panel, and some 20 hints use it).
+/// panel, and some 20 hints use it), and small text at [`SMALL_TEXT`].
 pub fn install(ctx: &egui::Context) {
-    ctx.style_mut_of(egui::Theme::Light, |style| {
-        style.visuals.weak_text_color = Some(MUTED.light);
-    });
-    ctx.style_mut_of(egui::Theme::Dark, |style| {
-        style.visuals.weak_text_color = Some(MUTED.dark);
-    });
+    for (theme, muted) in [
+        (egui::Theme::Light, MUTED.light),
+        (egui::Theme::Dark, MUTED.dark),
+    ] {
+        ctx.style_mut_of(theme, |style| {
+            style.visuals.weak_text_color = Some(muted);
+            if let Some(small) = style.text_styles.get_mut(&egui::TextStyle::Small) {
+                small.size = SMALL_TEXT;
+            }
+        });
+    }
 }
 
 /// `token` in the theme `ui` shows.
@@ -109,6 +119,18 @@ fn contrast(a: Color32, b: Color32) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// AM4: a hint, a section's name down the left and a status under a
+    /// text read at 11 points in both themes, not egui's 9.
+    #[test]
+    fn small_text_is_readable() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        for theme in [egui::Theme::Light, egui::Theme::Dark] {
+            let size = ctx.style_of(theme).text_styles[&egui::TextStyle::Small].size;
+            assert!(size >= SMALL_TEXT, "{theme:?}: {size}");
+        }
+    }
 
     /// egui's panel fills, which the tokens are read against.
     const LIGHT_PANEL: Color32 = Color32::from_gray(248);
