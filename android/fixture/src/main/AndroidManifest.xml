@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- AP1: silent and back needs Do Not Disturb access, which the runner
+         grants for the check (cmd notification allow_dnd) and takes back. -->
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
     <application
         android:allowBackup="false"
@@ -59,6 +62,16 @@
             android:authorities="dev.pocketdesk.fixture.files"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- AP1: sets the phone's ringer on an adb broadcast. -->
+        <receiver
+            android:name=".RingerReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.pocketdesk.fixture.RINGER" />
+            </intent-filter>
+        </receiver>
 
         <!-- A notification's answers, written to logcat. -->
         <receiver

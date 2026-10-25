@@ -17,6 +17,7 @@ import android.content.Context
 import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
@@ -88,6 +89,28 @@ class CopyActivity : Activity() {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
         Log.i(TAG, "copied ${text.length} characters")
         finish()
+    }
+}
+
+/**
+ * AP1: sets the phone's ringer to the "mode" extra (normal, vibrate or
+ * silent), so a check can turn it and put it back: the shell has no way to
+ * on Android 14. Silent, and leaving it, needs Do Not Disturb access.
+ */
+class RingerReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val mode = when (val said = intent.getStringExtra("mode")) {
+            "silent" -> AudioManager.RINGER_MODE_SILENT
+            "vibrate" -> AudioManager.RINGER_MODE_VIBRATE
+            "normal" -> AudioManager.RINGER_MODE_NORMAL
+            else -> {
+                Log.w(TAG, "ringer not set: no mode \"$said\"")
+                return
+            }
+        }
+        runCatching { context.getSystemService(AudioManager::class.java).ringerMode = mode }
+            .onSuccess { Log.i(TAG, "ringer set to $mode") }
+            .onFailure { Log.w(TAG, "ringer not set: ${it.message}") }
     }
 }
 
