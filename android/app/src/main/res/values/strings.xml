@@ -389,9 +389,12 @@
     <string name="wake_method_off">Off</string>
     <string name="wake_relay_label">Computer that sends it</string>
     <string name="wake_relay_none">Save another computer first.</string>
-    <string name="wake_outside_host">Outside address (blank: its last public address)</string>
-    <string name="wake_outside_port">Outside port (blank: the one it announced)</string>
-    <string name="wake_mac_label">MAC address (blank: the one it announced)</string>
+    <string name="wake_outside_host">Outside address</string>
+    <string name="wake_outside_host_hint">Blank: its last public address</string>
+    <string name="wake_outside_port">Outside port</string>
+    <string name="wake_outside_port_hint">Blank: the one it announced</string>
+    <string name="wake_mac_label">MAC address</string>
+    <string name="wake_mac_label_hint">Blank: the one it announced</string>
     <string name="wake_bad_port">A port is 1 to 65535.</string>
     <string name="wake_bad_host">A name or address without a port.</string>
     <string name="wake_bad_mac">Not a MAC address, like AA:BB:CC:DD:EE:FF.</string>

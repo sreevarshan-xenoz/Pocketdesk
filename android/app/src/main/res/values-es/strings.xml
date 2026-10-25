@@ -385,9 +385,12 @@
     <string name="wake_method_off">Desactivado</string>
     <string name="wake_relay_label">Equipo que lo envía</string>
     <string name="wake_relay_none">Guarda antes otro equipo.</string>
-    <string name="wake_outside_host">Dirección exterior (vacía: su última dirección pública)</string>
-    <string name="wake_outside_port">Puerto exterior (vacío: el que anunció)</string>
-    <string name="wake_mac_label">Dirección MAC (vacía: la que anunció)</string>
+    <string name="wake_outside_host">Dirección exterior</string>
+    <string name="wake_outside_host_hint">Vacía: su última dirección pública</string>
+    <string name="wake_outside_port">Puerto exterior</string>
+    <string name="wake_outside_port_hint">Vacío: el que anunció</string>
+    <string name="wake_mac_label">Dirección MAC</string>
+    <string name="wake_mac_label_hint">Vacía: la que anunció</string>
     <string name="wake_bad_port">Un puerto va de 1 a 65535.</string>
     <string name="wake_bad_host">Un nombre o dirección sin puerto.</string>
     <string name="wake_bad_mac">No es una dirección MAC, como AA:BB:CC:DD:EE:FF.</string>

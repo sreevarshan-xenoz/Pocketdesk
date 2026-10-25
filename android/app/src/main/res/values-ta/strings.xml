@@ -380,9 +380,12 @@
     <string name="wake_method_off">அணை</string>
     <string name="wake_relay_label">அனுப்பும் கணினி</string>
     <string name="wake_relay_none">முதலில் வேறொரு கணினியைச் சேமிக்கவும்.</string>
-    <string name="wake_outside_host">வெளி முகவரி (வெறுமை: அதன் கடைசி பொது முகவரி)</string>
-    <string name="wake_outside_port">வெளி போர்ட் (வெறுமை: அது அறிவித்தது)</string>
-    <string name="wake_mac_label">MAC முகவரி (வெறுமை: அது அறிவித்தது)</string>
+    <string name="wake_outside_host">வெளி முகவரி</string>
+    <string name="wake_outside_host_hint">வெறுமை: அதன் கடைசி பொது முகவரி</string>
+    <string name="wake_outside_port">வெளி போர்ட்</string>
+    <string name="wake_outside_port_hint">வெறுமை: அது அறிவித்தது</string>
+    <string name="wake_mac_label">MAC முகவரி</string>
+    <string name="wake_mac_label_hint">வெறுமை: அது அறிவித்தது</string>
     <string name="wake_bad_port">போர்ட் 1 முதல் 65535 வரை.</string>
     <string name="wake_bad_host">போர்ட் இல்லாத பெயர் அல்லது முகவரி.</string>
     <string name="wake_bad_mac">இது MAC முகவரி அல்ல (எ.கா. AA:BB:CC:DD:EE:FF).</string>
