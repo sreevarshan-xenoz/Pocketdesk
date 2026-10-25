@@ -4480,6 +4480,61 @@ def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
             print(f"note: AP1 left the phone's ringer at {phone_ringer()}, not {was}", file=sys.stderr)
 
 
+# ---- an unpaired phone's reports leave the computer (AP2) ----
+
+
+def kept_for(root: pathlib.Path, device: str) -> list[str]:
+    """Which of the computer's per-phone reports still hold `device`."""
+    out = []
+    for name, key in (("phone_switches.json", "phones"), ("phone_status.json", "batteries")):
+        try:
+            data = json.loads((root / "state" / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if device in data.get(key, {}):
+            out.append(name)
+    return out
+
+
+@check("ap2-unpaired-reports", "§163")
+def ap2_unpaired_reports(ctx: Ctx) -> tuple[str, str]:
+    """A phone unpaired (`pocketdesk unpair`, as the desktop app's Unpair
+    does) is gone within seconds from the computer's reports of it: its
+    switches (`phone_switches.json`) and its state (`phone_status.json`)
+    (§163). The throwaway's trust store and device keys are put back after,
+    and the phone linked at home again."""
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    before = kept_for(ctx.server.root, ctx.device)
+    if "phone_switches.json" not in before:
+        return "SKIP", "the computer keeps no switches report for the phone yet"
+    unpaired = False
+    try:
+        code, out = ctx.server.cli("unpair", ctx.device)
+        if code != 0:
+            return "FAIL", f"pocketdesk unpair said {code}: {out.strip()[:120]}"
+        unpaired = True
+        start = time.monotonic()
+        gone = wait_for(lambda: not kept_for(ctx.server.root, ctx.device), 30, 0.5)
+        took = time.monotonic() - start
+        left = kept_for(ctx.server.root, ctx.device)
+        said = (f"held in {', '.join(before)}; unpaired: gone from them in {took:.0f} s" if gone
+                else f"held in {', '.join(before)}; unpaired: still in {', '.join(left)} after 30 s")
+        return ("PASS" if gone and took <= 15 else "FAIL"), said
+    finally:
+        if unpaired:
+            # The pairing back as it was: stopped, the files put back, started.
+            ctx.server.stop()
+            for name, data in kept.items():
+                tmp = state / f"{name}.tmp"
+                tmp.write_bytes(data)
+                os.replace(tmp, state / name)
+            why = by_home(ctx)
+            if why:
+                print(f"note: AP2 left the phone off its home link: {why}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
