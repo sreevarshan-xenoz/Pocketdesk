@@ -180,8 +180,10 @@ pub(crate) static INCOMING_PACKETS: LazyLock<TokioMutex<Option<broadcast::Sender
     LazyLock::new(|| TokioMutex::new(None));
 
 /// The server's iroh WAN identity (`kdeconnect.pocketdesk.endpoint` body JSON),
-/// cached by the control reader so WAN dialing survives the poll loop's absence.
-pub(crate) static WAN_IDENTITY: LazyLock<TokioMutex<Option<String>>> =
+/// cached by the control reader so WAN dialing survives the poll loop's absence,
+/// with the computer (`host`, `port`) whose connection carried it: it is handed
+/// out only for that one (AQ3), as WAKE_INFO is.
+pub(crate) static WAN_IDENTITY: LazyLock<TokioMutex<Option<(String, u16, String)>>> =
     LazyLock::new(|| TokioMutex::new(None));
 
 /// How the connected desktop can be woken (`kdeconnect.pocketdesk.wake_info`

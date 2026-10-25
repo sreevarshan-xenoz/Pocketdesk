@@ -78,7 +78,7 @@ object RustCore {
         monitorIndex: Int,
         codecCaps: Int,
     ): String
-    private external fun nativeGetWanIdentity(): String
+    private external fun nativeGetWanIdentity(address: String, port: Int): String
     private external fun nativeConnectRemote(address: String, port: Int): String
     private external fun nativeConnectRemoteWan(address: String, identityJson: String): String
     private external fun nativeConnectSound(address: String, port: Int): String
@@ -638,9 +638,9 @@ object RustCore {
     /** Run [id]'s latest result as JSON, or empty while none came. */
     fun taskResult(id: String): String = nativeTaskResult(id)
 
-    /** The connected desktop's cached iroh WAN identity, or null if none announced. */
-    fun getWanIdentity(): String? = runCatching {
-        val obj = JSONObject(nativeGetWanIdentity())
+    /** The WAN identity the computer at [address]:[port] announced, or null (AQ3: never another's). */
+    fun getWanIdentity(address: String, port: Int): String? = runCatching {
+        val obj = JSONObject(nativeGetWanIdentity(address, port))
         when (val v = obj.opt("ok")) {
             null, JSONObject.NULL -> null
             else -> v.toString().takeIf { it.isNotBlank() }
