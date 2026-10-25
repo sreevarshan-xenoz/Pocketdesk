@@ -4659,6 +4659,154 @@ def aq1_siren(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- Home with a second computer (AQ2) ----
+
+# A documentation address (RFC 5737): nothing answers there.
+SECOND_HOST = "192.0.2.10"
+
+
+def host_addresses(raw: Optional[str]) -> list[str]:
+    """The saved computers' addresses, in Home's order (HostStore's list)."""
+    try:
+        return [str(h.get("address", "")) for h in json.loads(raw or "[]")]
+    except (ValueError, AttributeError):
+        return []
+
+
+def saved_hosts(ctx: Ctx) -> Optional[str]:
+    return ctx.phone.prefs("pocketdesk-host").get("hosts")  # type: ignore[return-value]
+
+
+def home(ctx: Ctx) -> None:
+    """Home, scrolled to its top (it keeps where it was)."""
+    ctx.phone.wake()
+    adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    time.sleep(2)
+    for _ in range(3):
+        adb("shell", "input", "swipe", "540", "700", "540", "1900", "200")
+    time.sleep(1)
+
+
+def card_menu(dump: str, address: str) -> Optional[tuple[int, int]]:
+    """The menu button of the card whose subtitle starts with `address`:
+    the "More for …" nearest above it, as the card's title may be a name."""
+    sub = next((y for text, _, y in dump_nodes(dump) if text.startswith(address)), None)
+    if sub is None:
+        return None
+    menus = [((int(a) + int(c)) // 2, (int(b) + int(d)) // 2) for a, b, c, d in re.findall(
+        r'<node [^>]*content-desc="More for [^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', dump)]
+    near = [(x, y) for x, y in menus if 0 <= sub - y <= 150]
+    return near[0] if near else None
+
+
+def add_second_host(ctx: Ctx) -> Optional[str]:
+    """Add SECOND_HOST through Home's form; why not, when it was not. Its
+    Connect saves it and dials: the pairing sheet that comes is cancelled,
+    and the session that tries is left with Back."""
+    home(ctx)
+    if not tap_scrolling(ctx, "Add computer", swipes=4):
+        return "no Add computer on Home"
+    box = None
+    if wait_for(lambda: shows(ctx, "Computer's address"), 10, 1):
+        box = next((tuple(map(int, b)) for b in re.findall(
+            r'<node [^>]*class="android.widget.EditText"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+            ctx.phone.dump())), None)
+    if box is None:
+        return "the form had no address field"
+    adb("shell", "input", "tap", str((box[0] + box[2]) // 2), str((box[1] + box[3]) // 2))
+    time.sleep(0.5)
+    adb("shell", "input", "text", SECOND_HOST)
+    time.sleep(0.5)
+    if not tap_text("Connect", ctx.phone.dump()):
+        return "the form had no Connect"
+    if wait_for(lambda: shows(ctx, "Cancel") and node_box(ctx.phone.dump(), "Pair with ") is not None, 15, 1):
+        tap_text("Cancel", ctx.phone.dump())
+        time.sleep(2)
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(2)
+    return None
+
+
+def remove_second_host(ctx: Ctx) -> Optional[str]:
+    """Remove SECOND_HOST's card through its menu, confirmed."""
+    home(ctx)
+    spot = None
+    for _ in range(4):
+        spot = card_menu(ctx.phone.dump(), SECOND_HOST)
+        if spot:
+            break
+        adb("shell", "input", "swipe", "540", "1900", "540", "1100", "300")
+        time.sleep(1)
+    if spot is None:
+        return "no menu on its card"
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    time.sleep(1)
+    if not tap_scrolling(ctx, "Remove", swipes=3):
+        return "no Remove in its menu"
+    # The dialog names the card as Home shows it.
+    if not wait_for(lambda: node_box(ctx.phone.dump(), "Remove ") is not None
+                    and shows(ctx, "Cancel"), 10, 1):
+        return "Remove did not ask first"
+    # The dialog's button, after its title of the same word.
+    spot = [(x, y) for text, x, y in dump_nodes(ctx.phone.dump()) if text == "Remove"][-1]
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    time.sleep(2)
+    return None
+
+
+@check("aq2-second-card", "§20")
+def aq2_second_card(ctx: Ctx) -> tuple[str, str]:
+    """A second computer added through Home's form, at a documentation
+    address, comes first on Home (the last one asked for); removed, and
+    added and removed again, the phone's saved computers are as they were,
+    their pairings and auto-connect untouched (§20). Its Connect dials an
+    address where nothing answers; no tap goes to a computer."""
+    before = saved_hosts(ctx)
+    auto = ctx.phone.prefs("pocketdesk-host").get("auto_connect")
+    kept = host_addresses(before)
+    if not kept:
+        return "SKIP", "the phone has no saved computers"
+    if SECOND_HOST in kept:
+        return "SKIP", f"{SECOND_HOST} is already saved on the phone"
+    said = []
+    try:
+        for step in ("added", "added again"):
+            why = add_second_host(ctx)
+            if why:
+                return "FAIL", "; ".join(said + [why])
+            now = host_addresses(saved_hosts(ctx))
+            if now != [SECOND_HOST] + kept:
+                where = now.index(SECOND_HOST) + 1 if SECOND_HOST in now else None
+                return "FAIL", "; ".join(said + [f"{step}: {'not saved' if where is None else f'card {where} of {len(now)}'}"])
+            # Nothing of another computer's taken on: no name, no WAN identity
+            # (AQ3: it took the linked computer's and was dialed to it).
+            taken = sorted(k.split(":")[0] for k in ctx.phone.prefs("pocketdesk-host")
+                           if k.endswith(f":{SECOND_HOST}") and k.split(":")[0] in ("computer_name", "wan_identity"))
+            if taken:
+                return "FAIL", "; ".join(said + [f"{step}: it took another computer's {' and '.join(taken)}"])
+            # Home shows it above the others, as itself.
+            home(ctx)
+            dump = ctx.phone.dump()
+            rows = [y for text, _, y in dump_nodes(dump) if text == SECOND_HOST]
+            firsts = [y for text, _, y in dump_nodes(dump) if text.startswith("127.0.0.1")]
+            if not rows or (firsts and rows[0] > firsts[0]):
+                return "FAIL", "; ".join(said + [f"{step}: not shown above the throwaway's card"])
+            why = remove_second_host(ctx)
+            if why:
+                return "FAIL", "; ".join(said + [f"{step}: {why}"])
+            if saved_hosts(ctx) != before:
+                return "FAIL", "; ".join(said + [f"{step}, removed: the saved computers not as they were"])
+            said.append(f"{step}: first of {len(kept) + 1}, removed, the rest as they were")
+        same_auto = ctx.phone.prefs("pocketdesk-host").get("auto_connect") == auto
+        said.append("auto-connect " + ("untouched" if same_auto else "changed"))
+        return ("PASS" if same_auto else "FAIL"), "; ".join(said)
+    finally:
+        if SECOND_HOST in host_addresses(saved_hosts(ctx)):
+            why = remove_second_host(ctx)
+            if why or SECOND_HOST in host_addresses(saved_hosts(ctx)):
+                print(f"note: AQ2 left {SECOND_HOST} saved on the phone: {why or 'still there'}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
