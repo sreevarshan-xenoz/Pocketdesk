@@ -42,6 +42,7 @@ Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves
 - **A file sent while the phone shares a big one** now waits for it: the phone moves one file at a time, and the computer's offer no longer runs out behind a share longer than 10 minutes.
 - **A ringer turned during a session** shows on the computer within seconds; it could take up to 17.
 - **A computer added on the phone** keeps to its own address: with the phone linked to another computer, it could take that one's name and reach it over the internet instead.
+- **A phone that moves between computers** no longer carries the first one's links, file offers or pairing answer to the second.
 
 **Smaller fixes**
 - Home shows one card when Android pauses Pocketdesk, with its Allow button.
