@@ -425,6 +425,10 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.preset_changes(log), 2)
         self.assertEqual(dc.preset_changes(""), 0)
 
+    def test_a_stream_s_volume(self):
+        self.assertEqual(dc.volume_of("[V] volume is 6 in range [1..16]"), 6)
+        self.assertIsNone(dc.volume_of("Error: unknown stream"))
+
     def test_an_alarm_playing(self):
         line = ("  AudioPlaybackConfiguration piid:7 deviceId:0 type:android.media.MediaPlayer"
                 " u/pid:10206/2464 state:{state} attr:AudioAttributes: usage=USAGE_{usage} content=X")
