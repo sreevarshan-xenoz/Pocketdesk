@@ -5247,6 +5247,93 @@ def at2_pair_from_road(ctx: Ctx) -> tuple[str, str]:
                     print(f"note: an AT2 cleanup step failed: {error}", file=sys.stderr)
 
 
+# ---- the HUD's delay on an idle desktop (AU2) ----
+
+
+def hud_numbers(dump: str) -> Optional[tuple[int, int]]:
+    """The HUD's delay and round trip, in ms, or None while either is not
+    shown ("delay 23 ms", "rtt 6 ms")."""
+    texts = [text for text, _, _ in dump_nodes(dump)]
+
+    def number(name: str) -> Optional[int]:
+        found = next((re.match(rf"{name} (\d+) ms$", t) for t in texts if re.match(rf"{name} \d+ ms$", t)), None)
+        return int(found.group(1)) if found else None
+
+    delay, rtt = number("delay"), number("rtt")
+    return (delay, rtt) if delay is not None and rtt is not None else None
+
+
+# The delay chip is an average of each frame's estimate that steps toward a
+# new value by quarters, floored, so it can lag the rtt chip's median by
+# a few ms (review): that much under half the round trip is not a fault.
+DELAY_LAG_MS = 3
+
+
+def delay_verdict(samples: list[tuple[int, int]]) -> Optional[str]:
+    """Why the HUD's delay, over `samples` of (delay, rtt) once the round
+    trip is measured, is not what §2b expects on an idle desktop; None when
+    it is. It sits in the low tens of ms, at least about half the round
+    trip (it is the frame's age plus half of it), and is not the round trip
+    itself, the old bug's shape (a literal RTT proxy)."""
+    if len(samples) < 4:
+        return f"only {len(samples)} samples with a round trip measured"
+    delays = sorted(d for d, _ in samples)
+    median = delays[len(delays) // 2]
+    if median >= 100:
+        return f"delay's median {median} ms, not under 100 ms"
+    copies = sum(1 for d, r in samples if d == r)
+    if copies * 2 >= len(samples):
+        return f"delay a copy of the round trip in {copies} of {len(samples)}"
+    under = sum(1 for d, r in samples if (d + DELAY_LAG_MS) * 2 < r)
+    if under * 5 > len(samples):
+        return f"delay under half the round trip in {under} of {len(samples)}"
+    return None
+
+
+@check("au2-hud-delay", "§2b")
+def au2_hud_delay(ctx: Ctx) -> tuple[str, str]:
+    """In a session by the internet road on an idle desktop, the HUD's
+    delay sits in the low tens of ms, about half the round trip or more,
+    never a copy of it (§2b). On an idle desktop the frames are the
+    capture's repeats, so the delay measures their encode and queue, not
+    the compositor's age (review); that and heavy motion stay owed."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        # The round trip is measured once the caption says so (§2d): a
+        # round trip under 1 ms reads "rtt 0 ms" (review).
+        def measured(dump: str) -> bool:
+            caption = hud_caption(dump)
+            return bool(caption) and (rtt_count(caption) or 0) > 0
+
+        if not wait_for(lambda: measured(ctx.phone.dump()), 20, 1):
+            return "TIMEOUT", "no round trip measured on the HUD within 20 s"
+        samples = []
+        end = time.monotonic() + 20
+        while time.monotonic() < end:
+            dump = ctx.phone.dump()
+            numbers = hud_numbers(dump)
+            # A delay of 0 is before the first frame's estimate (review).
+            if numbers and numbers[0] > 0 and measured(dump):
+                samples.append(numbers)
+            time.sleep(1)
+        if len(samples) < 4:
+            return "TIMEOUT", f"only {len(samples)} readings of the HUD in 20 s"
+        why = delay_verdict(samples)
+        delays = sorted(d for d, _ in samples)
+        rtts = sorted(r for _, r in samples)
+        said = (f"{len(samples)} samples: delay median {delays[len(delays) // 2]} ms "
+                f"({delays[0]}-{delays[-1]}), rtt median {rtts[len(rtts) // 2]} ms") if samples else "no samples"
+        return ("FAIL", f"{why}; {said}") if why else ("PASS", said)
+
+    why = needs_details(ctx)
+    if why:
+        return "SKIP", why
+    return session_check(ctx, body)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of

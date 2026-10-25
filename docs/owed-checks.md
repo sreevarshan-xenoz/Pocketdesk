@@ -25,7 +25,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2b. Compositor-true latency read (R4 E3)**
 
-- Sanity: on-LAN idle desktop → HUD `delay` (the e2e estimate) should sit in the low tens of ms and track the `rtt` chip sensibly (e2e ≈ capture age + rtt/2); heavy desktop motion → `delay` rises (encoder/queue age grows), never reads 0 once video is flowing.
+- Sanity: on-LAN idle desktop → HUD `delay` (the e2e estimate) should sit in the low tens of ms and track the `rtt` chip sensibly (e2e ≈ capture age + rtt/2); heavy desktop motion → `delay` rises (encoder/queue age grows), never reads 0 once video is flowing. (2026-10-26, the runner's `au2-hud-delay` on the OPPO by the internet road, an idle desktop: delay 16 to 19 ms against an rtt of 6 to 7 ms in four runs, never equal to it. On an idle desktop the frames are the capture's repeats, so this is their encode and queue, not the compositor's age. The LAN and heavy motion still owed: no LAN session runs through adb, and motion would need input on this computer.)
 - The old bug-shape check: `delay` must NOT equal `rtt` while frames are under load (it used to be a literal RTT proxy).
 - WAN session: `delay` should ≈ rtt/2 higher than a LAN session on the same desktop motion (the network-leg term is RTT/2 by construction).
 
