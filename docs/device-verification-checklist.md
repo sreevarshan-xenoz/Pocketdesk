@@ -2437,8 +2437,8 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] A computer from before M2: the sheet says it cannot tell. (where: other hardware) (a computer on a release from before M2.)
 - [ ] Paired as "Someone else's": a file sent from the phone lands; the remote browser and Download this folder are refused; a session waits for Allow; a clipboard push is refused. (where: by hand) (the Pair page.)
 - [ ] Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions. (where: by hand) (the Pair page.)
-- [ ] A phone paired as mine, paired again as someone else's: what was off stays off.
-- [ ] `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions.
+- [x] A phone paired as mine, paired again as someone else's: what was off stays off. (2026-10-26, the runner's `at1-someone-else` on the OPPO against a throwaway, paired from a link opened on the phone: Links off before, files only after, sessions asking first; five runs.)
+- [x] `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions. (2026-10-26, the same check: files and links only, sessions asking first, the grant's trust ending in 15 minutes; the trust store put back after. Found there: a phone linked by the internet road is refused pairing from a code even on the same network, AT2.)
 
 ## 168. Image copies without a session (M3)
 
