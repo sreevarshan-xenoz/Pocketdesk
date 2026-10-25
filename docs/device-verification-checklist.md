@@ -2380,7 +2380,7 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars. (where: by hand)
 - [x] The ringer turned on the phone shows within a tick in the background: vibrate reached the computer's `phone_status.json` in 2 to 7 s, four times (the OPPO, a throwaway server, no session, 2026-10-25; the runner's `ap1-ringer`, the ringer turned through the fixture app and put back).
-- [ ] The same within 15 s in a session. Found there: silent took 13.6 to 16.7 s over four runs (2026-10-25), as the session's reporter reads the phone's state on a 15 s tick and the send comes after; the background's reporter is quicker. AP3 sends a ringer change in a session at once.
+- [x] The same within 15 s in a session: silent reached the computer in 2.1 to 5.1 s, four times (the OPPO, a throwaway server, the phone's input off, 2026-10-25, with AP3). Found there first: silent took 13.6 to 16.7 s over four runs, as the session's reporter read the phone's state on a 15 s tick and sent after it; AP3 checks at once when the ringer changes.
 - [ ] Behind Tailscale on the phone: Wi-Fi with its bars, not nothing. (where: away)
 - [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
 - [x] "Share the phone's state" off: nothing sent for 330 s, past the 5-minute resend; on again, the state arrived 8 s after the app started (the OPPO, a throwaway server, no session, 2026-10-24).
