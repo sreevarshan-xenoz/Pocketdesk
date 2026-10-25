@@ -43,6 +43,7 @@ Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves
 - **A ringer turned during a session** shows on the computer within seconds; it could take up to 17.
 - **A computer added on the phone** keeps to its own address: with the phone linked to another computer, it could take that one's name and reach it over the internet instead.
 - **A phone that moves between computers** no longer carries the first one's links, file offers or pairing answer to the second.
+- **Pairing from a code** works on the computer's network even when the phone's link to it came over the internet; it used to say the phone needed the same network.
 
 **Smaller fixes**
 - Home shows one card when Android pauses Pocketdesk, with its Allow button.

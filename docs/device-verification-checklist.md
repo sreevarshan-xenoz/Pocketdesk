@@ -2439,6 +2439,7 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] Paired from the phone's "Show PIN on desktop" while the Pair page says "Someone else's": the same narrow permissions. (where: by hand) (the Pair page.)
 - [x] A phone paired as mine, paired again as someone else's: what was off stays off. (2026-10-26, the runner's `at1-someone-else` on the OPPO against a throwaway, paired from a link opened on the phone: Links off before, files only after, sessions asking first; five runs.)
 - [x] `pocketdesk pair --someone-else` and `--grant 15m`: the same narrow permissions. (2026-10-26, the same check: files and links only, sessions asking first, the grant's trust ending in 15 minutes; the trust store put back after. Found there: a phone linked by the internet road is refused pairing from a code even on the same network, AT2.)
+- [x] With the phone linked by the internet road and the computer's home address in reach, pairing from a code goes by a one-off home connection, the road link left up (2026-10-26, the runner's `at2-pair-from-road` on the OPPO, AT2; main's app was refused).
 
 ## 168. Image copies without a session (M3)
 
