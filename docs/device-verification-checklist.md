@@ -435,7 +435,7 @@ Verified on OPPO CPH2359 over the tailnet, 2026-09-22:
 - [x] Remove shows a confirm dialog naming the address and warning that pairing + cached settings go with it; Cancel dismisses without deleting.
 - [ ] Wake row + wake status appear only for hosts the phone knows how to wake (since N6: what the computer announced, or a typed MAC; see §42).
 - [x] Multi-host scenarios (second card ordering, remove-then-readd). (2026-10-25, the runner's `aq2-second-card` on the OPPO, three saved computers with it: a computer added through Home's form at 192.0.2.10, where nothing answers, came first as the last one asked for; removed through its menu, asked first, the saved computers and every record kept with them were exactly as they were, auto-connect too, twice in a run, five runs. Found there first: with the phone linked to another computer, the new card took that computer's name and WAN identity and its session streamed from it, fixed by AQ3.)
-- [ ] es/ta strings for the new keys.
+- [x] es/ta strings for the new keys. (2026-10-26, AS2 on the OPPO: Home's form, a card's menu and Remove's question in Spanish and Tamil, nothing clipped or left in English; Tamil's word for the phone made one, AS4.)
 
 ## 21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)
 
