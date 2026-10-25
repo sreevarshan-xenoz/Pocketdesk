@@ -425,6 +425,29 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.preset_changes(log), 2)
         self.assertEqual(dc.preset_changes(""), 0)
 
+    def test_a_card_s_menu_by_its_subtitle(self):
+        node = '<node index="0" text="{t}" content-desc="{d}" bounds="[{a},{b}][{c},{e}]" />'
+        dump = "".join([
+            node.format(t="Test Desk", d="", a=60, b=590, c=400, e=650),
+            node.format(t="", d="More for Test Desk", a=900, b=580, c=972, e=652),
+            node.format(t="192.0.2.10 · Not paired", d="", a=60, b=640, c=400, e=680),
+            node.format(t="", d="More for Test Desk", a=900, b=1130, c=972, e=1202),
+            node.format(t="127.0.0.1 · Paired", d="", a=60, b=1190, c=400, e=1230),
+        ])
+        self.assertEqual(dc.card_menu(dump, "192.0.2.10"), (936, 616, "Test Desk"))
+        self.assertEqual(dc.card_menu(dump, "127.0.0.1"), (936, 1166, "Test Desk"))
+        self.assertIsNone(dc.card_menu(dump, "192.0.2.99"))
+        # A card with no name has the address as its title.
+        plain = node.format(t="192.0.2.10", d="", a=60, b=570, c=400, e=630) + node.format(
+            t="", d="More for 192.0.2.10", a=900, b=580, c=972, e=652)
+        self.assertEqual(dc.card_menu(plain, "192.0.2.10"), (936, 616, "192.0.2.10"))
+
+    def test_the_saved_computers_addresses(self):
+        raw = '[{"address":"192.0.2.10","port":4716,"control_port":1716},{"address":"127.0.0.1"}]'
+        self.assertEqual(dc.host_addresses(raw), ["192.0.2.10", "127.0.0.1"])
+        self.assertEqual(dc.host_addresses(None), [])
+        self.assertEqual(dc.host_addresses("not json"), [])
+
     def test_a_stream_s_volume(self):
         self.assertEqual(dc.volume_of("[V] volume is 6 in range [1..16]"), 6)
         self.assertIsNone(dc.volume_of("Error: unknown stream"))

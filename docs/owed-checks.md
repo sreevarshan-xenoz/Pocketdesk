@@ -57,7 +57,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **20. Saved-computers home screen (multi-host store + add-computer form)**
 
 - Wake row + wake status appear only for hosts the phone knows how to wake (since N6: what the computer announced, or a typed MAC; see §42).
-- Multi-host scenarios (second card ordering, remove-then-readd) and es/ta strings for the new keys.
+- es/ta strings for the new keys.
 
 **21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)**
 
