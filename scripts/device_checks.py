@@ -4058,6 +4058,93 @@ def ag3_theme(ctx: Ctx) -> tuple[str, str]:
         adb("shell", "cmd", "uimode", "night", was)
 
 
+# ---- a phone the server does not know, by the internet road (AL2) ----
+
+
+@check("al2-unpaired-road", "§1")
+def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
+    """A phone the server has not paired, dialing by the internet road, is
+    refused (§1, the QUIC gate over WAN): the server's log says so, nothing
+    links, and no session sends a frame. It is refused at whichever door it
+    reaches: its control link (the road keeps nothing for pairing), or, if
+    it dials a session straight, the session's gate, whose record (kept for
+    that road alone) then ends `rejected`. The phone's own "session
+    connected" is no sign: it is logged once its link is up and its wishes
+    sent, before the computer's gate has read them.
+    The phone is taken out of the throwaway's paired list for it, its keys
+    left as they are so the pairing alone refuses, and the list is put back
+    after. Without the reverse, the phone's 127.0.0.1 is the phone itself:
+    whatever reaches the server came by the road. Pairing is required in
+    the config for it, as it is by default: without it an unpaired phone
+    gets the default permissions, input among them."""
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    kept = path.read_bytes()
+    store = json.loads(kept)
+    if ctx.device not in store.get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    changed = False
+    before = None
+    try:
+        ctx.server.stop()
+        before = ctx.server.configure({"pairing_required": "true"})
+        adb("reverse", "--remove", f"tcp:{ctx.phone_port}")
+        store["trusted_device_ids"] = [d for d in store["trusted_device_ids"] if d != ctx.device]
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+        changed = True
+        ctx.on_road = False
+        why = ctx.server.start()
+        if why:
+            return "TIMEOUT", why
+        records = len(session_records(ctx.server.root))
+        plain = lambda: re.sub(chr(27) + r"\[[0-9;]*m", "", ctx.server.log())
+        control = f"Refused {ctx.device}'s control connection over the internet"
+        session = "Streaming session rejected: device not paired"
+        # A road dial that failed while the server restarted rests 60 s
+        # before the phone's next try (as in by_road): a second Connect.
+        for _ in range(2):
+            if start_session(ctx) is None:
+                return "SKIP", "no Connect on the throwaway's card"
+            if wait_for(lambda: control in plain() or session in plain(), 120, 2):
+                break
+        else:
+            # The phone's own words of it, kept beside the throwaway.
+            (ctx.server.root / "phone_al2.txt").write_text(
+                adb("logcat", "-d", "-s", "PocketdeskRust:*"), encoding="utf-8")
+            return "TIMEOUT", "nothing refused after two Connects, 120 s each (the phone's log: phone_al2.txt)"
+        # The rest of the phone's tries, refused or not.
+        time.sleep(20)
+        log = plain()
+        doors = [door for door, line in (("its control link", control), ("its session", session)) if line in log]
+        rejected = [r for r in session_records(ctx.server.root)[records:] if r.get("outcome") == "rejected"]
+        framed = [r for r in session_records(ctx.server.root)[records:] if r.get("enc_n", "0") != "0"]
+        linked = bool(iroh_loops(log)) or ctx.device in ctx.server.linked()
+        said = (f"refused at {' and '.join(doors)} in the server's log; {len(rejected)} session records"
+                f" rejected, {len(framed)} with frames; the phone {'linked' if linked else 'never linked'}")
+        ok = not framed and not linked and (session not in log or rejected)
+        return ("PASS" if ok else "FAIL"), said
+    finally:
+        # Each step whatever the one before did; the paired list back before
+        # the server starts again, and the phone home.
+        def home() -> None:
+            why = by_home(ctx)
+            if why:
+                print(f"note: AL2 left the phone off its home link: {why}", file=sys.stderr)
+
+        steps = [lambda: adb("shell", "input", "keyevent", "KEYCODE_BACK"), ctx.server.stop]
+        if changed:
+            steps.append(lambda: path.write_bytes(kept))
+        if before is not None:
+            steps.append(lambda: ctx.server.restore_config(before))
+        steps.append(home)
+        for step in steps:
+            try:
+                step()
+            except (OSError, ValueError) as error:
+                print(f"note: an AL2 cleanup step failed: {error}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of

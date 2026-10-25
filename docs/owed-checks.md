@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-878 open items.
+877 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 47 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 46 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -22,7 +22,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
 
 - Enter desktop IP + streaming port + control port → "Connect" opens a session.
-- QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames).
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
