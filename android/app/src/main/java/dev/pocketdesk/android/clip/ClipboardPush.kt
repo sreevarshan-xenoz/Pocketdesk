@@ -185,11 +185,17 @@ class BackgroundClipboard(private val ctx: Context) {
                 synchronized(images) { images.moved(id) }
                 if (pending?.image?.id == id) pending = null
                 ClipboardShared.lastExchanged = null
-                main.post { runCatching { ClipboardImages.writeLocal(ctx, file) } }
+                main.post {
+                    runCatching { ClipboardImages.writeLocal(ctx, file) }
+                        // AH1 review: fetched but not put on the clipboard, said too.
+                        .onFailure { android.util.Log.w("PocketdeskClip", "image not put on the clipboard: ${it.javaClass.simpleName}") }
+                }
             }
             .onFailure {
                 part.delete()
                 synchronized(images) { images.fetchFailed(id, now) }
+                // AH1: why the computer's image was not taken (tried again later).
+                android.util.Log.w("PocketdeskClip", "image not taken: ${it.message}")
             }
     }
 
