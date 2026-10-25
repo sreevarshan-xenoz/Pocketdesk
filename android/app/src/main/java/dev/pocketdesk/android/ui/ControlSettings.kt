@@ -15,6 +15,39 @@ import dev.pocketdesk.android.control.ControlRunner
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
 
 /**
+ * Which of the switches that need "Pocketdesk control" shows the row that
+ * opens Android's Accessibility settings (AJ3): only the first on the page
+ * that is on while the service is off, so the page has one such row, not
+ * one under each switch.
+ */
+object AccessibilityLink {
+    /** The switches that need the service, in their order on the page. */
+    enum class Switch { CONTROL, TYPING, PHONE_ACTIONS, COPIES }
+
+    fun shownUnder(on: Map<Switch, Boolean>, serviceOn: Boolean): Switch? =
+        if (serviceOn) null else Switch.entries.firstOrNull { on[it] == true }
+}
+
+/** [AccessibilityLink.shownUnder] for this phone, followed as any switch changes. */
+@Composable
+private fun accessibilityLinkUnder(): AccessibilityLink.Switch? {
+    val context = LocalContext.current
+    val version = Prefs.observedVersion()
+    val resumes = rememberResumes()
+    return remember(version, resumes) {
+        AccessibilityLink.shownUnder(
+            mapOf(
+                AccessibilityLink.Switch.CONTROL to Prefs.controlFromComputer(context),
+                AccessibilityLink.Switch.TYPING to Prefs.typingFromComputer(context),
+                AccessibilityLink.Switch.PHONE_ACTIONS to Prefs.phoneActionsFromComputer(context),
+                AccessibilityLink.Switch.COPIES to Prefs.copiesByThemselves(context),
+            ),
+            ControlRunner.serviceEnabled(context),
+        )
+    }
+}
+
+/**
  * C8: whether the computer this phone casts to may control it. On needs
  * Android's Accessibility service too, which only the owner can turn on in
  * Android's own settings; the row says when that is missing and opens them.
@@ -51,7 +84,9 @@ fun ControlSetting() {
         },
     )
     if (on && !serviceOn) {
-        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        if (accessibilityLinkUnder() == AccessibilityLink.Switch.CONTROL) {
+            SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        }
     }
 }
 
@@ -97,7 +132,9 @@ fun TypingSetting() {
         },
     )
     if (on && !serviceOn) {
-        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        if (accessibilityLinkUnder() == AccessibilityLink.Switch.TYPING) {
+            SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        }
     } else if (on && !listening) {
         AllowNotificationAccess()
     }
@@ -163,7 +200,9 @@ fun PhoneActionsSetting() {
         },
     )
     if (on && !serviceOn) {
-        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        if (accessibilityLinkUnder() == AccessibilityLink.Switch.PHONE_ACTIONS) {
+            SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        }
     } else if (on && !listening) {
         AllowNotificationAccess()
     }
@@ -207,7 +246,9 @@ fun CopiesSetting() {
         },
     )
     if (on && !serviceOn) {
-        SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        if (accessibilityLinkUnder() == AccessibilityLink.Switch.COPIES) {
+            SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        }
     }
 }
 

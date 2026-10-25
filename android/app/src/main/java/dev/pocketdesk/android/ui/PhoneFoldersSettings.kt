@@ -88,12 +88,13 @@ fun PhoneFoldersSection() {
                 ) { Text(stringResource(R.string.phone_folders_remove)) }
             },
         )
-        // N6: one row, one switch, one TalkBack stop.
-        ListItem(
-            headlineContent = { Text(stringResource(R.string.phone_folders_add_files)) },
-            supportingContent = { Text(stringResource(R.string.phone_folders_add_files_summary)) },
+        // N6: one row, one switch, one TalkBack stop. A settings row like
+        // the rest (AJ3): its long summary cut at two lines, with an ⓘ.
+        SettingRow(
+            title = stringResource(R.string.phone_folders_add_files),
+            summary = stringResource(R.string.phone_folders_add_files_summary),
             modifier = Modifier.padding(start = 40.dp),
-            trailingContent = {
+            trailing = {
                 val label = stringResource(R.string.phone_folders_add_files_named, folder.name)
                 Switch(
                     checked = folder.add,
