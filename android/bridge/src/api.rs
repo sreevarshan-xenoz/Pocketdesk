@@ -910,22 +910,25 @@ pub async fn connect_to_peer(
                             }
                             line.clear();
                         }
-                        tracing::warn!("Control connection lost");
                         // Only retire the shared slots if they still belong to
                         // *this* connection. An older reader that dies late
                         // would otherwise wipe a newer connection's writer,
                         // permanently pushing every query onto the one-shot
-                        // fallback path.
-                        let still_ours = is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc);
-                        if !still_ours {
+                        // fallback path. Asked under the state's and the
+                        // writer's locks, in connect_to_peer's order: a dial
+                        // holds the state's while it connects, and one that
+                        // succeeded meanwhile must win (AR1 review).
+                        let mut state_guard = (*CONNECTION_STATE).lock().await;
+                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
+                        if !is_live(writer_guard.as_ref(), &writer_arc) {
+                            tracing::debug!("Control connection replaced");
                             return;
                         }
+                        tracing::warn!("Control connection lost");
                         *crate::CONTROL_PEER.lock().await = None;
                         crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
                         *crate::INCOMING_PACKETS.lock().await = None;
-                        let mut state_guard = (*CONNECTION_STATE).lock().await;
                         *state_guard = ConnectionState::Disconnected;
-                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
                         *writer_guard = None;
                         forget_link(&from_peer).await;
                     }
