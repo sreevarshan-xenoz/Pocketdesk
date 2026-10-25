@@ -5155,6 +5155,94 @@ def at1_someone_else(ctx: Ctx) -> tuple[str, str]:
                     print(f"note: an AT1 cleanup step failed: {error}", file=sys.stderr)
 
 
+@check("at2-pair-from-road", "§167")
+def at2_pair_from_road(ctx: Ctx) -> tuple[str, str]:
+    """A phone whose link to the computer came by the internet road pairs
+    from a code all the same when the computer's home address answers: the
+    PIN goes by a one-off home connection, the road link left alone (AT2;
+    it was refused, "Pairing needs the same network as the computer").
+    Paired again as someone else's, with Links off as AT1 does; the
+    throwaway's trust store and device keys are put back after."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off"
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    if ctx.device not in trusted_store(ctx).get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    changed = True
+    try:
+        why = by_road(ctx)
+        if why:
+            return "TIMEOUT", why
+        # Home in reach again, the phone's link still on the road.
+        adb("reverse", f"tcp:{ctx.phone_port}", f"tcp:{ctx.port}")
+        if not iroh_loops(ctx.server.log()) or ctx.device not in ctx.server.linked():
+            return "TIMEOUT", "the phone's link was not on the internet road"
+        set_permission_live(ctx, "links", False)
+        code, out = ctx.server.cli("pair", "--someone-else", "--json")
+        line = next((l for l in reversed(out.splitlines()) if l.strip().startswith("{")), "")
+        try:
+            pin = json.loads(line)["pin"]
+        except (ValueError, KeyError, TypeError):
+            return "FAIL", f"pocketdesk pair --someone-else said {code}, no PIN"
+        lines: list[str] = []
+        why = open_pair_link(ctx, str(pin))
+        if why:
+            return "FAIL", why
+        narrowed = lambda: trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("ask_first")
+
+        def probe() -> bool:
+            if narrowed():
+                return True
+            lines.append(phone_log())
+            return unreachable(ctx)
+
+        if not (wait_for(probe, 30, 1) and narrowed()):
+            keep_failure(ctx, "pair --someone-else from the road", lines)
+            refused = unreachable(ctx)
+            leave_to_home(ctx)
+            return "FAIL", ("refused: the phone could not pair while linked by the internet road"
+                            if refused else "not paired as someone else's within 30 s") + " (at1_failure.txt)"
+        leave_to_home(ctx)
+        wrong = narrow_as(trusted_store(ctx).get("permissions", {}).get(ctx.device), {"files"})
+        if wrong:
+            return "FAIL", f"paired from the road: {wrong}"
+        return "PASS", "linked by the internet road, paired from a code at home: files only, Links still off, asks first"
+    finally:
+        if changed:
+            leave_to_home(ctx)
+            try:
+                ctx.server.stop()
+            except (OSError, ValueError) as error:
+                print(f"note: an AT2 cleanup step failed: {error}", file=sys.stderr)
+            missed = []
+            for name, data in kept.items():
+                for attempt in range(5):
+                    try:
+                        tmp = state / f"{name}.tmp"
+                        tmp.write_bytes(data)
+                        os.replace(tmp, state / name)
+                        break
+                    except OSError as error:
+                        if attempt == 4:
+                            missed.append(f"{name} ({error})")
+                        time.sleep(1)
+            if missed:
+                print(f"note: AT2 could not put back {', '.join(missed)}; the server is left stopped: "
+                      f"put them back in {state} by hand", file=sys.stderr)
+            else:
+                try:
+                    why = by_home(ctx)
+                    if why and "internet road" in why:
+                        why = by_home(ctx)
+                    if why:
+                        print(f"note: AT2 left the phone off its home link: {why}", file=sys.stderr)
+                except (OSError, ValueError) as error:
+                    print(f"note: an AT2 cleanup step failed: {error}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
