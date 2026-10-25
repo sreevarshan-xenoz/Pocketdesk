@@ -469,7 +469,8 @@ impl MessagesView {
             && list.is_none_or(|l| l.at < *at)
             && now_unix.saturating_sub(*at) >= CONTACTS_ANSWER_SECS
         {
-            pane.label(
+            ragged(
+                pane,
                 RichText::new(
                     "No answer from the phone. It answers with \"My contacts on the computer\" on in Pocketdesk's Settings on the phone, and \"Show its texts and send replies\" allowed on Devices here.",
                 )
