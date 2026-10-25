@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{
-    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+    Direct3D11CaptureFrame, Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
@@ -273,26 +273,26 @@ fn run_capture_loop(
 
         let frame = match fresh {
             Some(frame) => {
-                // Faster than the configured rate: this frame waits its turn
-                // rather than being dropped (AI3).
-                if let Some(wait) = wait_before_sending(last_sent, Instant::now(), frame_period) {
-                    std::thread::sleep(wait);
-                }
-                let content = frame.ContentSize()?;
-                if content.Width != capture.size.Width || content.Height != capture.size.Height {
-                    debug!(?content, "WGC content size changed; recreating the pool");
-                    capture.pool.Recreate(
-                        &gpu.winrt_device,
-                        DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                        POOL_BUFFERS,
-                        content,
-                    )?;
-                    capture.size = content;
+                if resize_pool(&gpu, &mut capture, &frame)? {
                     continue; // the next frame arrives at the new size
                 }
-                let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
-                let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
-                let video = gpu.copier.copy(&texture)?;
+                let mut video = copy_frame(&mut gpu, &frame)?;
+                drop(frame);
+                // Faster than the configured rate: this frame waits its turn
+                // rather than being dropped (AI3), copied first so the pool's
+                // buffer is free meanwhile; a newer one by then goes instead.
+                if let Some(wait) = wait_before_sending(last_sent, Instant::now(), frame_period) {
+                    std::thread::sleep(wait);
+                    let mut newer = None;
+                    while let Ok(frame) = capture.pool.TryGetNextFrame() {
+                        newer = Some(frame);
+                    }
+                    if let Some(frame) = newer
+                        && !resize_pool(&gpu, &mut capture, &frame)?
+                    {
+                        video = copy_frame(&mut gpu, &frame)?;
+                    }
+                }
                 last_frame = Some(clone_frame(&video));
                 video
             }
@@ -366,6 +366,32 @@ fn window_item(hwnd: isize) -> Result<GraphicsCaptureItem> {
     }
     let interop = windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
     unsafe { interop.CreateForWindow(hwnd) }.context("CreateForWindow")
+}
+
+/// Recreate the pool when `frame`'s content is another size than the pool
+/// (a window resized): `true` when it did, and `frame` is not to be used.
+fn resize_pool(gpu: &Gpu, capture: &mut Capture, frame: &Direct3D11CaptureFrame) -> Result<bool> {
+    let content = frame.ContentSize()?;
+    if content.Width == capture.size.Width && content.Height == capture.size.Height {
+        return Ok(false);
+    }
+    debug!(?content, "WGC content size changed; recreating the pool");
+    capture.pool.Recreate(
+        &gpu.winrt_device,
+        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        POOL_BUFFERS,
+        content,
+    )?;
+    capture.size = content;
+    Ok(true)
+}
+
+/// `frame` copied into a CPU-side [`VideoFrame`], so the pool's buffer can go
+/// back at once.
+fn copy_frame(gpu: &mut Gpu, frame: &Direct3D11CaptureFrame) -> Result<VideoFrame> {
+    let access: IDirect3DDxgiInterfaceAccess = frame.Surface()?.cast()?;
+    let texture: ID3D11Texture2D = unsafe { access.GetInterface() }?;
+    gpu.copier.copy(&texture)
 }
 
 fn start_item(
