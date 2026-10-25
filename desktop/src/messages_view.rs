@@ -125,6 +125,16 @@ pub struct MessagesView {
     contacts_found: Option<(String, u64, String, Vec<usize>)>,
 }
 
+/// A wrapped label, ragged: `ui.columns` justifies each column, and egui
+/// stretches a wrapped label's words to the edges in a justified layout
+/// (AM3; seen as wide gaps between the words of the empty list's text).
+fn ragged(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.label(text)
+    })
+    .inner
+}
+
 /// Whether `phone` may do `capability` by the trust store, yes when it
 /// cannot be read (the server holds it to it anyway).
 fn phone_allows(
@@ -196,7 +206,8 @@ impl MessagesView {
             }
             list.add_space(6.0);
             if conversations.is_empty() {
-                list.label(
+                ragged(
+                    list,
                     RichText::new(
                         "No texts yet. A phone shares its texts once its owner turns on \
                          \"Show texts on my computer\" in Pocketdesk's Settings on the phone.",
@@ -280,9 +291,9 @@ impl MessagesView {
                                 } else {
                                     RichText::new(&row.body)
                                 };
-                                ui.label(text);
+                                ragged(ui, text);
                                 if let Some(status) = row.status {
-                                    ui.label(RichText::new(status).small().color(muted));
+                                    ragged(ui, RichText::new(status).small().color(muted));
                                 }
                                 ui.add_space(4.0);
                             }
@@ -309,7 +320,10 @@ impl MessagesView {
                     pane.strong("New text");
                     let phones = texting_phones(devices);
                     if phones.is_empty() {
-                        pane.label("No paired phone may send texts (Devices: Show its texts and send replies).");
+                        ragged(
+                            pane,
+                            "No paired phone may send texts (Devices: Show its texts and send replies).",
+                        );
                     } else {
                         let chosen = self
                             .new_phone
@@ -455,7 +469,8 @@ impl MessagesView {
             && list.is_none_or(|l| l.at < *at)
             && now_unix.saturating_sub(*at) >= CONTACTS_ANSWER_SECS
         {
-            pane.label(
+            ragged(
+                pane,
                 RichText::new(
                     "No answer from the phone. It answers with \"My contacts on the computer\" on in Pocketdesk's Settings on the phone, and \"Show its texts and send replies\" allowed on Devices here.",
                 )
