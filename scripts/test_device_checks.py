@@ -385,6 +385,26 @@ class SessionParts(unittest.TestCase):
         self.assertIsNone(dc.parse_raw(struct.pack("<III", 3, 3, 1) + pixels))
         self.assertIsNone(dc.parse_raw(b"short"))
 
+    def test_a_view_s_bounds_by_its_text(self):
+        dump = ('<node text="Clear" bounds="[1,2][3,4]" />'
+                '<node text="Nothing copied yet. Text that crosses&#10;appears here." bounds="[10,200][590,260]" />')
+        self.assertEqual(dc.node_box(dump, "Nothing copied yet"), (10, 200, 590, 260))
+        self.assertIsNone(dc.node_box(dump, "Something else"))
+
+    def test_how_much_of_a_square_is_drawn(self):
+        # A 10x10 white screen with a 4x4 grey mark at (2, 2).
+        width = height = 10
+        pixels = bytearray([255, 255, 255, 255] * width * height)
+        for row in range(2, 6):
+            for col in range(2, 6):
+                at = (row * width + col) * 4
+                pixels[at:at + 3] = bytes([120, 120, 120])
+        shot = (width, height, bytes(pixels))
+        self.assertAlmostEqual(dc.marked_share(shot, (0, 0, 8, 8), (9, 9)), 16 / 64)
+        self.assertEqual(dc.marked_share(shot, (6, 6, 10, 10), (9, 9)), 0.0)
+        # A square off the screen is nothing drawn, not a division by zero.
+        self.assertEqual(dc.marked_share(shot, (20, 20, 30, 30), (9, 9)), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

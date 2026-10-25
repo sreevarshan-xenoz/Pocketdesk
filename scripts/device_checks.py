@@ -4158,6 +4158,92 @@ def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
                     print(f"note: an AL2 cleanup step failed: {error}", file=sys.stderr)
 
 
+# ---- the clipboard history, empty (AL3) ----
+
+
+def node_box(dump: str, starts: str) -> Optional[tuple[int, int, int, int]]:
+    """The bounds of the first view whose text starts with `starts`."""
+    for node in re.findall(r"<node [^>]*>", dump):
+        text = re.search(r' text="([^"]*)"', node)
+        box = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if text and box and html.unescape(text.group(1)).startswith(starts):
+            return tuple(int(v) for v in box.groups())  # type: ignore[return-value]
+    return None
+
+
+def marked_share(shot: tuple[int, int, bytes], box: tuple[int, int, int, int],
+                 ground: tuple[int, int]) -> float:
+    """How much of `box` (left, top, right, bottom) differs from the pixel
+    at `ground` by more than 40 in a colour: something drawn there."""
+    width, height, pixels = shot
+    at = (ground[1] * width + ground[0]) * 4
+    base = pixels[at:at + 3]
+    left, top, right, bottom = box
+    total = drawn = 0
+    for row in range(max(top, 0), min(bottom, height)):
+        for col in range(max(left, 0), min(right, width)):
+            at = (row * width + col) * 4
+            total += 1
+            if any(abs(pixels[at + i] - base[i]) > 40 for i in range(3)):
+                drawn += 1
+    return drawn / total if total else 0.0
+
+
+@check("al3-empty-history", "§21")
+def al3_empty_history(ctx: Ctx) -> tuple[str, str]:
+    """The clipboard history sheet with nothing kept: its words, its
+    clipboard icon above them, and no Clear (§21, §125). The test phone's
+    entries are cleared for it, as its Clear does, confirmed; they are
+    counted, never read. The icon has no words of its own (it is
+    decoration), so it is read from a screenshot kept in memory: a 40 dp
+    square 8 dp above the words with something drawn in it."""
+    ctx.phone.wake()
+    adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+    if not wait_for(lambda: tap_text("More for Test Desk", ctx.phone.dump()), 20, 2):
+        return "SKIP", "no Test Desk card on Home"
+    time.sleep(1)
+    if not tap_text("Send from clipboard history", ctx.phone.dump()):
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        return "FAIL", "no Send from clipboard history in the card's menu"
+    time.sleep(1.5)
+    try:
+        sheet = ctx.phone.dump()
+        cleared = len(history_rows(sheet))
+        if cleared:
+            if not tap_text("Clear", sheet):
+                return "FAIL", f"{cleared} rows and no Clear"
+            time.sleep(1)
+            dialog = ctx.phone.dump()
+            if "This deletes every saved clipboard entry from this phone." not in dialog:
+                return "FAIL", "Clear did not ask first"
+            # The dialog's Clear: the last view by that name, under its words.
+            spots = [(x, y) for text, x, y in dump_nodes(dialog) if text == "Clear"]
+            adb("shell", "input", "tap", str(spots[-1][0]), str(spots[-1][1]))
+            time.sleep(1.5)
+            sheet = ctx.phone.dump()
+        words = node_box(sheet, "Nothing copied yet")
+        has_clear = any(text == "Clear" for text, _, _ in dump_nodes(sheet))
+        if not words:
+            return "FAIL", f"{len(history_rows(sheet))} rows left and no empty words after {cleared} cleared"
+        shot = raw_shot()
+        if not shot:
+            return "FAIL", "no screenshot"
+        dp = density()
+        middle = (words[0] + words[2]) // 2
+        icon = (middle - int(20 * dp), words[1] - int(48 * dp), middle + int(20 * dp), words[1] - int(8 * dp))
+        # The sheet's own colour beside the icon, at its height.
+        ground = (middle + int(60 * dp), words[1] - int(28 * dp))
+        share = marked_share(shot, icon, ground)
+        said = (f"{cleared} entries cleared; the empty words, {'a' if has_clear else 'no'} Clear,"
+                f" {share:.0%} of the icon's square drawn")
+        return ("PASS" if not has_clear and share >= 0.03 else "FAIL"), said
+    finally:
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(1)
+        if any(text == "Clipboard history" for text, _, _ in dump_nodes(ctx.phone.dump())):
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of

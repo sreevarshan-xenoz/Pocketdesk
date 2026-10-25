@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-877 open items.
+875 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 46 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 44 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -74,7 +74,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pairing sheet: progress bar while waiting, PIN field auto-focused, eye toggle honors the reveal-PIN pref, animated check on success then auto-dismiss.
 - Home empty state (no saved computers) shows the desktop glyph + explainer.
 - Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
-- Clipboard sheet: the empty state has the clipboard icon.
 
 **22. Owed verification register**
 
@@ -119,7 +118,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **125. The phone app's design pass (E6)**
 
-- No Clear when the history is empty.
 - The Health card's Choose opens the folder picker. (2026-10-25: it shows only when a chosen downloads folder has lost its grant; the OPPO has none chosen, and choosing one is the folder picker, by hand. The card's Fix for Pocketdesk control did open Android's Accessibility settings.)
 
 **128. Take a photo with the phone (F3)**
