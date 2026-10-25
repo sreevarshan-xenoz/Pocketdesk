@@ -507,6 +507,13 @@ class SessionParts(unittest.TestCase):
         self.assertIsNone(dc.delay_verdict(good))
         self.assertIn("copy", dc.delay_verdict([(6, 6), (7, 7), (6, 6), (5, 5)]))
         self.assertIn("half", dc.delay_verdict([(2, 30), (3, 30), (2, 28), (20, 6)]))
+        # A few ms of the average's lag under half is not a fault.
+        self.assertIsNone(dc.delay_verdict([(3, 10), (3, 10), (3, 10), (3, 10), (20, 6)]))
+        # The cutoffs: copies in half the samples, under half in over a fifth.
+        self.assertIn("copy", dc.delay_verdict([(6, 6), (6, 6), (20, 6), (20, 6)]))
+        self.assertIsNone(dc.delay_verdict([(6, 6), (20, 6), (20, 6), (20, 6)]))
+        self.assertIsNone(dc.delay_verdict([(1, 30), (20, 6), (20, 6), (20, 6), (20, 6)]))
+        self.assertIn("half", dc.delay_verdict([(1, 30), (1, 30), (20, 6), (20, 6), (20, 6)]))
         self.assertIn("100 ms", dc.delay_verdict([(300, 6), (320, 6), (310, 7), (305, 6)]))
         self.assertIn("samples", dc.delay_verdict([(20, 6)]))
 
