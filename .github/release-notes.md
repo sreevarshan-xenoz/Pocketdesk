@@ -38,6 +38,7 @@ Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves
 - **The away lock** counts only a phone on this computer's network: one that walked off on mobile data, still linked over the internet, now counts as gone.
 - **The session's numbers** start fresh: a new session no longer shows the last one's round-trip figures while it connects.
 - **A crop to one window** no longer ends the session when the window is still (its first frame was lost), and costs one encoder rebuild, not two.
+- **A window you crop to and then resize** reaches the phone at its new size even if it then stays still; it used to keep its old size until something on it moved.
 - **A file sent while the phone shares a big one** now waits for it: the phone moves one file at a time, and the computer's offer no longer runs out behind a share longer than 10 minutes.
 
 **Smaller fixes**
