@@ -157,10 +157,16 @@ fn finding_row(ui: &mut egui::Ui, finding: &Finding) {
             });
         ui.strong(finding.check);
     });
-    ui.label(&finding.detail);
+    ui.label(plain(&finding.detail));
     if let Some(hint) = &finding.hint {
-        ui.label(egui::RichText::new(hint).color(crate::theme::muted(ui)));
+        ui.label(egui::RichText::new(plain(hint)).color(crate::theme::muted(ui)));
     }
+}
+
+/// A finding's words without their Markdown backticks: the CLI's report
+/// marks commands with them, which a label shows as they are (AM5 review).
+fn plain(text: &str) -> String {
+    text.replace('`', "")
 }
 
 /// A status's chip: its colour and word.
@@ -423,6 +429,15 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_findings_commands_read_without_backticks() {
+        assert_eq!(
+            super::plain("Run `sudo ufw allow 4716/udp`, then check again."),
+            "Run sudo ufw allow 4716/udp, then check again."
+        );
+        assert_eq!(super::plain("Nothing to strip."), "Nothing to strip.");
+    }
+
     #[test]
     fn every_quote_powershell_reads_is_doubled() {
         assert_eq!(super::single_quoted("Ethernet 2"), "Ethernet 2");
