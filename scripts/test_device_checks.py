@@ -437,6 +437,10 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.card_menu(dump, "192.0.2.10"), (936, 616))
         self.assertEqual(dc.card_menu(dump, "127.0.0.1"), (936, 1166))
         self.assertIsNone(dc.card_menu(dump, "192.0.2.99"))
+        # A card with no name has the address as its title.
+        plain = node.format(t="192.0.2.10", d="", a=60, b=570, c=400, e=630) + node.format(
+            t="", d="More for 192.0.2.10", a=900, b=580, c=972, e=652)
+        self.assertEqual(dc.card_menu(plain, "192.0.2.10"), (936, 616))
 
     def test_the_saved_computers_addresses(self):
         raw = '[{"address":"192.0.2.10","port":4716,"control_port":1716},{"address":"127.0.0.1"}]'

@@ -4688,14 +4688,15 @@ def home(ctx: Ctx) -> None:
 
 
 def card_menu(dump: str, address: str) -> Optional[tuple[int, int]]:
-    """The menu button of the card whose subtitle starts with `address`:
-    the "More for …" nearest above it, as the card's title may be a name."""
+    """The menu button of the card that shows `address`, as its title or,
+    when it has a name, at the start of its subtitle: the "More for …"
+    beside that line (its own words name the card as it is shown)."""
     sub = next((y for text, _, y in dump_nodes(dump) if text.startswith(address)), None)
     if sub is None:
         return None
     menus = [((int(a) + int(c)) // 2, (int(b) + int(d)) // 2) for a, b, c, d in re.findall(
         r'<node [^>]*content-desc="More for [^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', dump)]
-    near = [(x, y) for x, y in menus if 0 <= sub - y <= 150]
+    near = [(x, y) for x, y in menus if abs(sub - y) <= 150]
     return near[0] if near else None
 
 
