@@ -543,8 +543,14 @@ fn no_log_file_says_so_in_plain_words() {
     let fixture = Fixture::new();
     let app = fixture.open(Some(Tab::Logs));
     assert!(app.query_by_label_contains("No log file yet").is_some());
-    assert!(app.query_by_label_contains("pocketdesk start --background").is_some());
-    assert!(app.query_by_label_contains("`").is_none(), "a backtick shown as it is");
+    assert!(
+        app.query_by_label_contains("pocketdesk start --background")
+            .is_some()
+    );
+    assert!(
+        app.query_by_label_contains("`").is_none(),
+        "a backtick shown as it is"
+    );
 }
 
 /// J2: "Find a setting" shows the rows it finds, their sections open, and
