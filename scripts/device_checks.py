@@ -3616,8 +3616,8 @@ def tap_after(dump: str, row: str, choice: str) -> bool:
 def an1_presets(ctx: Ctx) -> tuple[str, str]:
     """The Quality preset changed mid-session from the session menu,
     Economy, Max, Balanced and back to Auto: the server logs each change,
-    the session stays up with no redial, and its record's longest rebuild
-    stays under a second (§11b, R4 E5). The preset is control, never
+    the session stays up with no redial, ends well, and any rebuild in its
+    record stays under a second (§11b, R4 E5). The preset is control, never
     injected: it reaches the server with the phone's input off."""
     def body(ctx: Ctx) -> tuple[str, str]:
         if start_session(ctx) is None:
@@ -3625,8 +3625,11 @@ def an1_presets(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: in_session(ctx), 30, 1):
             return "TIMEOUT", "no session within 30 s"
         records = len(session_records(ctx.server.root))
+        # Counted once the stream is set up, as ae2-crops does (review).
+        time.sleep(10)
         sessions = ctx.server.log().count("Client codec caps negotiated")
-        time.sleep(5)
+        if sessions < 1:
+            return "TIMEOUT", "no codec negotiated for the session: a redial could not be seen"
         before = preset_changes(ctx.server.log())
         taken = []
         try:
@@ -3658,9 +3661,11 @@ def an1_presets(ctx: Ctx) -> tuple[str, str]:
                 f" rebuilds {tail.get('rebuild_n', 'none')}, max {longest or '?'} ms")
         if not record:
             return "TIMEOUT", said + "; no session record after the session ended"
-        logged_all = preset_changes(ctx.server.log()) - before >= 4
+        # Each change logged as it was made, not made up by a stray (review).
+        logged_all = not any(t.endswith("(not logged)") for t in taken) and len(taken) == 4
         quick = not longest or (longest.isdigit() and int(longest) < 1000)
-        ok = logged_all and up and redials == 0 and quick
+        good = tail.get("outcome") in ("completed", "lan_direct", "wan_punched", "wan_relayed")
+        ok = logged_all and up and redials == 0 and quick and good
         return ("PASS" if ok else "FAIL"), said
     return session_check(ctx, body)
 
