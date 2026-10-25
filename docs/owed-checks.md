@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-879 open items.
+878 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 48 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 47 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
 | A phone with a SIM | 39 |
@@ -54,7 +54,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **16. Long-run / hygiene**
 
 - The same across resolution changes (no decoder leak), fps steady, no watchdog kills. (2026-10-25, the runner's `ae2-crops`: twelve changes of size in one session (1395x786 and 2560x1440, six rounds) with no redial, the app's memory level 175.9 → 186.3 MB, at most 186.7; three runs. The frame rate was not read: the HUD's numbers need Show connection details on the phone.)
-- A crop never ends the session. One run of `ae2-crops` in six (2026-10-25) saw the session close right after a crop's first rebuild (1394 wide; the second, at 1395, never came) and the phone redial; the phone's log had rotated past it, so the cause is unknown. Each crop also rebuilds the encoder twice (1394, then 1395 wide), about 0.4 s each.
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
