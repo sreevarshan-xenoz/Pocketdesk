@@ -4716,7 +4716,8 @@ def home(ctx: Ctx) -> bool:
         # Home's form, left open (AV1): its Back is Home, the first perhaps
         # only putting the keyboard away; Back only while the form shows.
         for _ in range(2):
-            if not shows(ctx, "Computer's address"):
+            texts = {t for t, _, _ in dump_nodes(ctx.phone.dump())}
+            if not texts & {"Computer's address", "Advanced (ports, wake-on-LAN)", "Hide advanced"}:
                 break
             adb("shell", "input", "keyevent", "KEYCODE_BACK")
             time.sleep(1.5)
@@ -4954,6 +4955,13 @@ def av2_pin_sheet(ctx: Ctx) -> tuple[str, str]:
         return "SKIP", "the throwaway's config turns pairing_required off"
     if OTHER_NAME in host_addresses(saved_hosts(ctx)):
         return "SKIP", f"{OTHER_NAME} is already saved on the phone"
+    # The form's control port is its default, 1716 (review).
+    if ctx.phone_port != 1716:
+        return "SKIP", f"the phone reaches the throwaway on {ctx.phone_port}, not the form's 1716"
+    # A phone the throwaway does not trust would be paired with the
+    # defaults, input too, by the owner's own PIN (review).
+    if ctx.device not in trusted_store(ctx).get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
     state = ctx.server.root / "state"
     kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
             if (state / name).exists()}
@@ -5018,15 +5026,31 @@ def av2_pin_sheet(ctx: Ctx) -> tuple[str, str]:
             ctx.server.stop()
         except (OSError, ValueError) as error:
             print(f"note: an AV2 cleanup step failed: {error}", file=sys.stderr)
+        # As AT2's: a server killed at its stop may hold a file a moment.
+        missed = []
         for name, data in kept.items():
-            tmp = state / f"{name}.tmp"
-            tmp.write_bytes(data)
-            os.replace(tmp, state / name)
-        why = by_home(ctx)
-        if why and "internet road" in why:
-            why = by_home(ctx)
-        if why:
-            print(f"note: AV2 left the phone off its home link: {why}", file=sys.stderr)
+            for attempt in range(5):
+                try:
+                    tmp = state / f"{name}.tmp"
+                    tmp.write_bytes(data)
+                    os.replace(tmp, state / name)
+                    break
+                except OSError as error:
+                    if attempt == 4:
+                        missed.append(f"{name} ({error})")
+                    time.sleep(1)
+        if missed:
+            print(f"note: AV2 could not put back {', '.join(missed)}; the server is left stopped: "
+                  f"put them back in {state} by hand", file=sys.stderr)
+        else:
+            try:
+                why = by_home(ctx)
+                if why and "internet road" in why:
+                    why = by_home(ctx)
+                if why:
+                    print(f"note: AV2 left the phone off its home link: {why}", file=sys.stderr)
+            except (OSError, ValueError) as error:
+                print(f"note: an AV2 cleanup step failed: {error}", file=sys.stderr)
 
 
 @check("aq2-second-card", "§20")
