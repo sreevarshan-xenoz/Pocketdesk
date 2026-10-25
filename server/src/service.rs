@@ -127,6 +127,12 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    if let Some(list) = std::env::var_os("POCKETDESK_FAIL_ENCODERS") {
+        tracing::warn!(
+            "POCKETDESK_FAIL_ENCODERS is set: {} fail as they open (a test seam)",
+            list.to_string_lossy()
+        );
+    }
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());

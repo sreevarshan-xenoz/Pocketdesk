@@ -352,13 +352,42 @@ fn open_software(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
 /// (C2). VAAPI/NVENC init failures kill FFmpeg *after* `spawn()` succeeds,
 /// so a bare spawn is not evidence of a usable encoder.
 fn open_sidecar_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
+    fail_by_seam(config.hardware_encoder)?;
     let mut encoder = SidecarEncoder::new(config)?;
     encoder.verify_startup(DEFAULT_STARTUP_VERIFY)?;
     Ok(VideoEncoder::Sidecar(encoder))
 }
 
+/// A test seam (AM1): the hardware rungs named in `POCKETDESK_FAIL_ENCODERS`
+/// (comma-separated: nvenc, amf, qsv, mf, vaapi) fail as they open, as one
+/// whose probe passed but whose encoder dies at startup does (C2). Unset in
+/// use; the server says so when it is set.
+fn fail_by_seam(encoder: HardwareEncoder) -> anyhow::Result<()> {
+    match std::env::var("POCKETDESK_FAIL_ENCODERS") {
+        Ok(list) if seam_names(&list, encoder) => {
+            anyhow::bail!("{encoder:?} failed by POCKETDESK_FAIL_ENCODERS (a test seam)")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Whether `list` names the hardware rung `encoder`; never the software
+/// rung, where the ladder ends.
+fn seam_names(list: &str, encoder: HardwareEncoder) -> bool {
+    let name = match encoder {
+        HardwareEncoder::Nvenc => "nvenc",
+        HardwareEncoder::Amf => "amf",
+        HardwareEncoder::Qsv => "qsv",
+        HardwareEncoder::MediaFoundation => "mf",
+        HardwareEncoder::Vaapi => "vaapi",
+        HardwareEncoder::Auto | HardwareEncoder::Software => return false,
+    };
+    list.split(',').any(|n| n.trim().eq_ignore_ascii_case(name))
+}
+
 /// The VAAPI rung: in-process first (C4), verified sidecar as fallback.
 fn open_vaapi_verified(config: StreamingConfig) -> anyhow::Result<VideoEncoder> {
+    fail_by_seam(config.hardware_encoder)?;
     #[cfg(target_os = "linux")]
     match VaapiEncoder::new(config.clone()) {
         Ok(encoder) => return Ok(VideoEncoder::VaapiInProcess(encoder)),
@@ -1247,6 +1276,21 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_fail_seam_names_hardware_rungs_only() {
+        use HardwareEncoder::*;
+        let list = " NVENC, mf,qsv ";
+        assert!(seam_names(list, Nvenc));
+        assert!(seam_names(list, MediaFoundation));
+        assert!(seam_names(list, Qsv));
+        assert!(!seam_names(list, Amf));
+        assert!(!seam_names(list, Vaapi));
+        // The software rung is never failed: it is where the ladder ends.
+        assert!(!seam_names("software,auto,nvenc", Software));
+        assert!(!seam_names("software,auto,nvenc", Auto));
+        assert!(!seam_names("", Nvenc));
+    }
+
     use super::*;
 
     #[test]

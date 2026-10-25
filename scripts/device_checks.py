@@ -34,7 +34,7 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 APP = "dev.pocketdesk.android"
@@ -442,9 +442,11 @@ class Server:
     root: pathlib.Path
     exe: pathlib.Path
     child: Optional[subprocess.Popen] = None
+    # More seams for one check (AM1), read at the next start.
+    extra: dict = field(default_factory=dict)
 
     def env(self) -> dict:
-        return {
+        return self.extra | {
             "COMPUTERNAME": "Test Desk",
             "POCKETDESK_STATE_DIR": str(self.root / "state"),
             "POCKETDESK_CONFIG_DIR": str(self.root / "config"),
@@ -3408,6 +3410,81 @@ def ae1_crop_hevc(ctx: Ctx) -> tuple[str, str]:
     finally:
         ctx.server.restore_config(before)
         # The next session check starts the server again, without HEVC.
+        ctx.on_road = False
+
+
+# ---- a software-fallback session stays on software across crops (AM1) ----
+
+
+def fallbacks(log: str) -> int:
+    """The server's "Hardware encoder unavailable" lines: each a hardware
+    rung tried and given up (C2)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum("Hardware encoder unavailable" in line for line in plain.splitlines())
+
+
+@check("am1-sticky-software", "§2")
+def am1_sticky_software(ctx: Ctx) -> tuple[str, str]:
+    """A session whose hardware encoder failed as it opened goes on in
+    software, and a crop to a window and back rebuilds the encoder there
+    without trying the dead hardware again (§2, R4 C2: the encoder it fell
+    back to is the one each rebuild starts from). The throwaway is started
+    with every hardware rung failing as it opens (`POCKETDESK_FAIL_ENCODERS`,
+    a test seam), as one whose probe passed but whose encoder dies at
+    startup does."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if "POCKETDESK_FAIL_ENCODERS is set" not in re.sub(chr(27) + r"\[[0-9;]*m", "", ctx.server.log()):
+            return "SKIP", "the throwaway did not say its encoder seam was set"
+        records = len(session_records(ctx.server.root))
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: fallbacks(ctx.server.log()) and in_session(ctx), 40, 1):
+            return "TIMEOUT", "no session that fell back to software within 40 s"
+        time.sleep(5)
+        try:
+            opened = fallbacks(ctx.server.log())
+            seen = len(rebuilds(ctx.server.log()))
+            desktop = capture_size(ctx.server.log())
+            if desktop is None:
+                return "SKIP", "the server's log gives no desktop size to crop from"
+            size, why = crop_to(ctx, lambda rows: a_window(rows, desktop))
+            if size is None:
+                return "SKIP", why
+            new = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] != desktop], 30, 1)
+            if not new:
+                return "FAIL", f"no rebuild after a crop to {size[0]}x{size[1]}"
+            time.sleep(5)
+            seen = len(rebuilds(ctx.server.log()))
+            close_sheets(ctx)
+            why = open_picker(ctx)
+            if why:
+                return "TIMEOUT", f"back to the whole desktop: {why}"
+            if not tap_text("Whole desktop", ctx.phone.dump()):
+                return "TIMEOUT", "no Whole desktop in the window picker"
+            back = wait_for(lambda: [r for r in rebuilds(ctx.server.log())[seen:] if r[:2] == desktop], 30, 1)
+            time.sleep(5)
+            up = in_session(ctx)
+            again = fallbacks(ctx.server.log()) - opened
+        finally:
+            close_sheets(ctx)
+        end_session(ctx)
+        ended = wait_for(lambda: session_records(ctx.server.root)[records:], 30, 1)
+        encoder = ended[-1].get("encoder", "?") if ended else "no record"
+        said = (f"the hardware given up {opened} time(s) at the start; cropped to {size[0]}x{size[1]}"
+                f" and {'back' if back else 'not back'}: given up {again} more time(s); the session"
+                f" {'up' if up else 'gone'}; its record's encoder {encoder}")
+        # The software rung's names: the sidecar, or in-process on Linux (review).
+        ok = back and again == 0 and up and encoder in ("ffmpeg-sidecar", "in-process")
+        return ("PASS" if ok else "FAIL"), said
+
+    ctx.server.extra = {"POCKETDESK_FAIL_ENCODERS": "nvenc,amf,qsv,mf,vaapi"}
+    try:
+        # Read at the server's start: the road again, from a restart.
+        ctx.on_road = False
+        return session_check(ctx, body)
+    finally:
+        ctx.server.extra = {}
+        # The next session check starts the server again, without the seam.
         ctx.on_road = False
 
 
