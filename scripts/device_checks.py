@@ -4768,6 +4768,10 @@ def aq2_second_card(ctx: Ctx) -> tuple[str, str]:
         return "SKIP", "the phone has no saved computers"
     if SECOND_HOST in kept:
         return "SKIP", f"{SECOND_HOST} is already saved on the phone"
+    # Linked to the throwaway first: its identity is what a card dialed
+    # elsewhere took on (AQ3).
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+        return "TIMEOUT", "the phone did not link to the throwaway within 90 s"
     said = []
     try:
         for step in ("added", "added again"):
