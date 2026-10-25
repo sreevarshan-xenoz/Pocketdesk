@@ -39,7 +39,7 @@ of exactly that, including the one fix that merged without its confirming observ
 - [x] QUIC gate (v2 + video): before pairing completes, video must not flow — desktop log shows (2026-10-23 (S1): an unpaired OPPO's session refused, the log saying "session refused: the device is not paired"; after pairing it was taken.)
       "Streaming session rejected: device not paired" (or "Unpaired device … on v2 QUIC") and the
       phone's status chip goes Down; after pairing, video works with no app restart beyond Retry.
-- [ ] QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames).
+- [x] QUIC gate over WAN (iroh): unpaired dial is rejected the same way (desktop log + no frames). (2026-10-25, the runner's `al2-unpaired-road`: the OPPO taken out of a throwaway's paired list, its keys kept, dialing by the internet road: refused at its control link in the server's log ("Refused …'s control connection over the internet"), never linked, no session with frames. An earlier try that reached a session straight was refused at the session's gate, its record `rejected`.)
 
 ## 2. Session shell + video (Tier 1 #5, R2#2, R2#5)
 
