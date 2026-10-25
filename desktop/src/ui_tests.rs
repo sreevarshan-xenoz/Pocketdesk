@@ -425,6 +425,11 @@ fn empty_sessions_and_files_say_what_to_do_next() {
         app.query_by_label_contains("No phone or computer can take a file right now.")
             .is_some()
     );
+    // AS3: the sentence after it says what can, with its verb.
+    assert!(
+        app.query_by_label_contains("A phone takes one in a screen or sound session")
+            .is_some()
+    );
     app.get_by_label("Pair a phone").click();
     app.run_steps(3);
     assert!(
