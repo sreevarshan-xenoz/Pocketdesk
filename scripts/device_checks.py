@@ -4407,6 +4407,79 @@ def al3_empty_history(ctx: Ctx) -> tuple[str, str]:
             adb("shell", "input", "keyevent", "KEYCODE_BACK")
 
 
+# ---- the phone's ringer on the computer (AP1) ----
+
+
+def ringer_of(root: pathlib.Path, device: str) -> Optional[str]:
+    """`device`'s ringer as the computer keeps it (`phone_status.json`)."""
+    try:
+        data = json.loads((root / "state" / "phone_status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("batteries", {}).get(device, {}).get("ringer")
+
+
+def ringer_mode(dump: str) -> Optional[str]:
+    """The phone's ringer, from `dumpsys audio`: normal, vibrate or silent."""
+    found = re.search(r"mode \(external\)\s*=\s*(\w+)", dump) or re.search(r"mRingerMode=(\w+)", dump)
+    return found.group(1).lower() if found else None
+
+
+def phone_ringer() -> Optional[str]:
+    return ringer_mode(adb("shell", "dumpsys", "audio"))
+
+
+def set_ringer(mode: str) -> None:
+    """Through the fixture (the shell cannot on Android 14)."""
+    am("broadcast", "-n", f"{FIXTURE}/.RingerReceiver", "-a", "dev.pocketdesk.fixture.RINGER", "--es", "mode", mode)
+
+
+@check("ap1-ringer", "§162")
+def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
+    """The phone's ringer reaches the computer: turned on the phone in the
+    background, the computer's copy follows within a tick (the phone sends
+    its state when the ringer changes); in a session, within 15 s (§162).
+    The phone's ringer is put back as it was."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("share_battery", True):
+        return "SKIP", "turn on Share the phone's state in the phone's Settings"
+    was = phone_ringer()
+    if was not in ("normal", "vibrate", "silent"):
+        return "SKIP", f"the phone's ringer reads {was or 'nothing'}: it could not be put back"
+    first, second = ("vibrate", "silent") if was != "vibrate" else ("silent", "normal")
+    said = []
+    # Silent, and leaving it, needs Do Not Disturb access: the fixture's
+    # for the check, taken back after.
+    adb("shell", "cmd", "notification", "allow_dnd", FIXTURE)
+    try:
+        start = time.monotonic()
+        set_ringer(first)
+        seen = wait_for(lambda: ringer_of(ctx.server.root, ctx.device) == first, 90, 1)
+        said.append(f"{first} in the background: {f'{time.monotonic() - start:.0f} s' if seen else 'not within 90 s'}")
+        if not seen:
+            return "FAIL", "; ".join(said)
+
+        def body(ctx: Ctx) -> tuple[str, str]:
+            if start_session(ctx) is None:
+                return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+            if not wait_for(lambda: in_session(ctx), 30, 1):
+                return "TIMEOUT", "no session within 30 s"
+            at = time.monotonic()
+            set_ringer(second)
+            # Watched past the 15 s it must keep, so a miss says by how much.
+            got = wait_for(lambda: ringer_of(ctx.server.root, ctx.device) == second, 30, 0.5)
+            took = time.monotonic() - at
+            said.append(f"{second} in a session: {f'{took:.1f} s' if got else 'not within 30 s'}")
+            return ("PASS" if got and took <= 15 else "FAIL"), "; ".join(said)
+
+        return session_check(ctx, body)
+    finally:
+        set_ringer(was)
+        time.sleep(1)
+        adb("shell", "cmd", "notification", "disallow_dnd", FIXTURE)
+        if phone_ringer() != was:
+            print(f"note: AP1 left the phone's ringer at {phone_ringer()}, not {was}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
