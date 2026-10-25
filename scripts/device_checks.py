@@ -3589,6 +3589,82 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
 LONG.add("ae2-crops")
 
 
+# ---- Quality presets changed mid-session (AN1) ----
+
+
+def preset_changes(log: str) -> int:
+    """The server's "Link-profile preset changed" lines (R4 E5)."""
+    plain = re.sub(chr(27) + r"\[[0-9;]*m", "", log)
+    return sum("Link-profile preset changed" in line for line in plain.splitlines())
+
+
+def tap_after(dump: str, row: str, choice: str) -> bool:
+    """Tap the first `choice` after the label `row` in the dump: "Auto" is
+    a choice of more than one row of the session menu."""
+    nodes = dump_nodes(dump)
+    at = next((i for i, (text, _, _) in enumerate(nodes) if text == row), None)
+    if at is None:
+        return False
+    spot = next(((x, y) for text, x, y in nodes[at + 1:] if text == choice), None)
+    if spot is None:
+        return False
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    return True
+
+
+@check("an1-presets", "§11b")
+def an1_presets(ctx: Ctx) -> tuple[str, str]:
+    """The Quality preset changed mid-session from the session menu,
+    Economy, Max, Balanced and back to Auto: the server logs each change,
+    the session stays up with no redial, and its record's longest rebuild
+    stays under a second (§11b, R4 E5). The preset is control, never
+    injected: it reaches the server with the phone's input off."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        records = len(session_records(ctx.server.root))
+        sessions = ctx.server.log().count("Client codec caps negotiated")
+        time.sleep(5)
+        before = preset_changes(ctx.server.log())
+        taken = []
+        try:
+            if not wait_for(lambda: tap_text("Session menu", ctx.phone.dump()), 20, 2):
+                return "TIMEOUT", "no Session menu on the session's screen"
+            time.sleep(1)
+            if not tap_scrolling(ctx, "Quality"):
+                return "TIMEOUT", "no Quality in the session menu"
+            for choice in ("Economy", "Max", "Balanced", "Auto"):
+                if not wait_for(lambda: tap_after(ctx.phone.dump(), "Quality", choice), 10, 1):
+                    return "FAIL", f"no {choice} on the Quality row (after {', '.join(taken) or 'none'})"
+                logged = wait_for(lambda: preset_changes(ctx.server.log()) > before + len(taken), 10, 0.5)
+                taken.append(choice if logged else f"{choice} (not logged)")
+                # A few seconds at each: long enough for a rebuild to show.
+                time.sleep(6)
+                if not in_session(ctx):
+                    break
+        finally:
+            close_sheets(ctx)
+        up = in_session(ctx)
+        redials = max(ctx.server.log().count("Client codec caps negotiated") - sessions,
+                      len(session_records(ctx.server.root)) - records)
+        end_session(ctx)
+        record = wait_for(lambda: session_records(ctx.server.root)[records:], 30, 1)
+        tail = record[-1] if record else {}
+        longest = tail.get("rebuild_max", "")
+        said = (f"{', '.join(taken)}; {preset_changes(ctx.server.log()) - before} changes logged;"
+                f" the session {'up' if up else 'gone'}, redials {redials};"
+                f" rebuilds {tail.get('rebuild_n', 'none')}, max {longest or '?'} ms")
+        if not record:
+            return "TIMEOUT", said + "; no session record after the session ended"
+        logged_all = preset_changes(ctx.server.log()) - before >= 4
+        quick = not longest or (longest.isdigit() and int(longest) < 1000)
+        ok = logged_all and up and redials == 0 and quick
+        return ("PASS" if ok else "FAIL"), said
+    return session_check(ctx, body)
+
+
 # ---- a download from the remote browser cut and continued (AF1) ----
 
 

@@ -415,6 +415,16 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.fallbacks(log), 2)
         self.assertEqual(dc.fallbacks(""), 0)
 
+    def test_preset_changes_in_the_server_s_log(self):
+        esc = chr(27)
+        log = chr(10).join([
+            f"INFO {esc}[3mpreset{esc}[0m=2 Link-profile preset changed",
+            "INFO Relay quality override changed",
+            "INFO preset=0 Link-profile preset changed",
+        ])
+        self.assertEqual(dc.preset_changes(log), 2)
+        self.assertEqual(dc.preset_changes(""), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
