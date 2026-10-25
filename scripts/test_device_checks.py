@@ -495,6 +495,21 @@ class SessionParts(unittest.TestCase):
         self.assertIn("browse", dc.narrow_as({k: v for k, v in narrow.items() if k != "browse"}, {"files", "links"}))
         self.assertIn("no permissions", dc.narrow_as(None, {"files"}))
 
+    def test_the_hud_s_delay_and_round_trip(self):
+        node = '<node index="0" text="{t}" bounds="[0,0][10,10]" />'
+        dump = "".join(node.format(t=t) for t in ("fps 12", "rtt 6 ms", "delay 23 ms", "lost 0"))
+        self.assertEqual(dc.hud_numbers(dump), (23, 6))
+        self.assertIsNone(dc.hud_numbers(node.format(t="rtt 6 ms")))
+        self.assertIsNone(dc.hud_numbers(""))
+
+    def test_a_delay_that_is_not_the_round_trip(self):
+        good = [(20, 6), (22, 7), (25, 6), (21, 5)]
+        self.assertIsNone(dc.delay_verdict(good))
+        self.assertIn("copy", dc.delay_verdict([(6, 6), (7, 7), (6, 6), (5, 5)]))
+        self.assertIn("half", dc.delay_verdict([(2, 30), (3, 30), (2, 28), (20, 6)]))
+        self.assertIn("100 ms", dc.delay_verdict([(300, 6), (320, 6), (310, 7), (305, 6)]))
+        self.assertIn("samples", dc.delay_verdict([(20, 6)]))
+
     def test_the_phone_s_ringer_from_dumpsys(self):
         dump = chr(10).join(["Ringer mode: ", "- mode (internal) = VIBRATE", "- mode (external) = SILENT"])
         self.assertEqual(dc.ringer_mode(dump), "silent")
