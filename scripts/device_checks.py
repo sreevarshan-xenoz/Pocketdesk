@@ -4496,6 +4496,9 @@ def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
         set_ringer(was)
         time.sleep(1)
         # The ringer's silent and back turn Do Not Disturb on and off as they go.
+        # Where both cannot be put back (on the OPPO silent is Do Not Disturb:
+        # silent with it off cannot be set), Do Not Disturb wins, as the later
+        # checks need the phone's notifications; the ringer's note says so.
         if zen_mode() != dnd:
             adb("shell", "cmd", "notification", "set_dnd", DND_WORDS[dnd])
             time.sleep(1)
