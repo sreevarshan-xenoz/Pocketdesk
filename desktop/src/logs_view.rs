@@ -88,7 +88,8 @@ impl LogsView {
         if self.read.is_none() {
             ui.label(
                 "No log file yet. The server writes one when it starts at logon \
-                 (`start --background`); started from a terminal it logs there instead.",
+                 (as pocketdesk start --background); started from a terminal it logs \
+                 there instead.",
             );
             return;
         }
