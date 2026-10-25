@@ -458,7 +458,7 @@ Items below are re-scored against that build.
 - [ ] Home empty state (no saved computers) shows the desktop glyph + explainer.
 - [ ] Siren: a desktop-pushed `kdeconnect.findmydevice {ring:true}` rings the alarm AND shows the full-screen dialog; Silence stops both; the 30 s auto-stop still works if the dialog is ignored.
 - [x] Clipboard sheet: Clear asks for confirmation first (Cancel keeps history): its dialog asked, and after Cancel the 7 rows stayed (`y3-history-sheet`, the OPPO, 2026-10-24).
-- [ ] Clipboard sheet: the empty state has the clipboard icon.
+- [x] Clipboard sheet: the empty state has the clipboard icon. (2026-10-25, the runner's `al3-empty-history` on the OPPO: seven entries cleared through the sheet's Clear, confirmed; then the empty words, no Clear, and the clipboard icon above them, read from a screenshot and seen once by eye.)
 - [ ] Haptics: tick on the action disc, mode toggle, picker picks and shortcut chips; heavier buzz on Exit; the Settings haptics switch mutes all of them live. (2026-10-25: not readable on the OPPO. Android's vibrator record showed the session's menu tap as Pocketdesk's CLICK at strength 0 and nothing for the mode toggle or Exit: the phone is on silent, which mutes touch vibrations. By hand, with the ringer on.)
 - [x] Session notification: real Pocketdesk status-bar icon (not the stock eye), Disconnect + Lock-desktop actions carry icons, channel shows its description in system settings. *`dumpsys notification` shows the custom `ic_stat_pocketdesk` resource and both actions; the shade renders the monitor glyph plus power/lock action icons, and the session channel carries its description.*
 - [x] Shortcut bar: System | Workspaces groups with divider and localized captions; chips are ≥32 dp touch targets; key caps stay literal in es/ta. *Now a dark floating pill, legible over video; scrolls horizontally past PrtSc.*
@@ -2011,7 +2011,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] The gamepad in portrait and landscape on the A71 and a 360 dp phone; at font scale 2.0.
 - [x] The history sheet from Home says a tap sends ("Tap one to send it to Test Desk") (2026-10-19, A71, throwaway server, by script).
 - [x] The history sheet's entries 48 dp: 7 rows, each 144 px on the OPPO's 3x screen (the runner's `y3-history-sheet`, 2026-10-24).
-- [ ] No Clear when the history is empty.
+- [x] No Clear when the history is empty. (2026-10-25, the runner's `al3-empty-history` on the OPPO: seven entries cleared through the sheet's Clear, confirmed; then the empty words, no Clear, and the clipboard icon above them, read from a screenshot and seen once by eye.)
 - [ ] The Health card's Choose opens the folder picker. (2026-10-25: it shows only when a chosen downloads folder has lost its grant; the OPPO has none chosen, and choosing one is the folder picker, by hand. The card's Fix for Pocketdesk control did open Android's Accessibility settings.)
 - [ ] TalkBack on the new rows (the mode chip's action, the gamepad's keys, the folders' Remove).
 - [ ] Spanish and Tamil on the changed screens. (where: by hand)
