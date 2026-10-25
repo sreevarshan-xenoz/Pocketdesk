@@ -536,6 +536,17 @@ fn an_empty_log_is_a_log() {
     assert!(app.query_by_label("0 of the last 0 lines").is_some());
 }
 
+/// AM5: with no log file yet, the page says how the server writes one, in
+/// words: no Markdown backticks, which a label shows as they are.
+#[test]
+fn no_log_file_says_so_in_plain_words() {
+    let fixture = Fixture::new();
+    let app = fixture.open(Some(Tab::Logs));
+    assert!(app.query_by_label_contains("No log file yet").is_some());
+    assert!(app.query_by_label_contains("pocketdesk start --background").is_some());
+    assert!(app.query_by_label_contains("`").is_none(), "a backtick shown as it is");
+}
+
 /// J2: "Find a setting" shows the rows it finds, their sections open, and
 /// says when it finds none.
 #[test]
