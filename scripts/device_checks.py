@@ -2931,13 +2931,15 @@ def phone_images() -> set[str]:
     return cached_images(adb("shell", device_command("run-as", APP, "ls", "cache/clipboard")))
 
 
-def copy_image(ctx: Ctx, wait: float) -> tuple[bool, bool]:
+def copy_image(ctx: Ctx, wait: float) -> tuple[bool, bool, bool]:
     """Put a new image on the throwaway's stand-in clipboard (the text
     stand-in emptied, as a real clipboard's text would win): whether the
-    server told the phone of it, and whether the phone fetched it, within
-    `wait` seconds."""
+    server told the phone of it, whether the phone fetched it, within
+    `wait` seconds, and whether the phone said it put it on its clipboard
+    (AH1, its size)."""
     import hashlib
     told = images_told(ctx.server.log(), ctx.device)
+    adb("logcat", "-c")
     png = made_png(secrets.token_bytes(8))
     sha = hashlib.sha256(png).hexdigest()
     clip = ctx.server.root / "clip.txt"
@@ -2949,7 +2951,9 @@ def copy_image(ctx: Ctx, wait: float) -> tuple[bool, bool]:
     tmp.write_bytes(png)
     os.replace(tmp, image)
     fetched = bool(wait_for(lambda: sha in phone_images(), wait, 3))
-    return images_told(ctx.server.log(), ctx.device) > told, fetched
+    line = f"image put on the clipboard ({len(png)} bytes)"
+    said = bool(fetched and wait_for(lambda: line in adb("logcat", "-d", "-s", "PocketdeskClip:*"), 10, 1))
+    return images_told(ctx.server.log(), ctx.device) > told, fetched, said
 
 
 def restart_with_permission(ctx: Ctx, key: str, value: Optional[bool]) -> Optional[str]:
@@ -3004,11 +3008,13 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
         # The server's clipboard watch primes on its first tick with a phone
         # linked and never pushes what it primes on (review): a moment first.
         time.sleep(4)
-        told, got = copy_image(ctx, 60 if images_on else 45)
+        told, got, put = copy_image(ctx, 60 if images_on else 45)
         said.append(f"images in the background {'on' if images_on else 'off'}: "
-                    f"{'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
+                    f"{'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}"
+                    f"{', put on the clipboard' if put else ''}")
         # Told either way: what keeps it from the phone is the phone's switch.
-        if not told or got != images_on:
+        # Fetched, the phone says it put it on its clipboard (AH1).
+        if not told or got != images_on or put != got:
             return "FAIL", "; ".join(said)
         if not images_on:
             return "PASS", "; ".join(said)
@@ -3017,7 +3023,7 @@ def ad1_image_copy(ctx: Ctx) -> tuple[str, str]:
         if why:
             return "TIMEOUT", f"with the Clipboard permission off: {why}"
         time.sleep(4)
-        told, got = copy_image(ctx, 45)
+        told, got, _ = copy_image(ctx, 45)
         said.append(f"the Clipboard permission off: {'told' if told else 'not told'}, {'fetched' if got else 'not fetched'}")
         return ("FAIL" if told or got else "PASS"), "; ".join(said)
     finally:
