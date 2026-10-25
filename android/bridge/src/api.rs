@@ -611,13 +611,21 @@ pub async fn connect_to_peer(
                 let (reader, writer) = tokio::io::split(stream);
                 let writer_arc = Arc::new(Mutex::new(writer));
                 let replaced = (*CONTROL_WRITER).lock().await.replace(writer_arc.clone());
+                let old_peer = crate::CONTROL_PEER.lock().await.replace((address.clone(), port));
                 // A connection this one replaces (to another computer, or one
                 // the check above found dead) is closed, so its reader ends
                 // instead of holding the socket and a server slot.
                 if let Some(old) = replaced {
                     let _ = old.lock().await.shutdown().await;
+                    // Its reader leaves its slots alone, as it is not the
+                    // live one: what another computer's carried is forgotten
+                    // here instead, or its links, offers and pairing answer
+                    // would be read as this one's (AR1). The same computer
+                    // dialed again keeps what is still its own.
+                    if let Some(old_peer) = old_peer.filter(|old| *old != (address.clone(), port)) {
+                        forget_link(&old_peer).await;
+                    }
                 }
-                *crate::CONTROL_PEER.lock().await = Some((address.clone(), port));
                 crate::CONTROL_OVER_INTERNET.store(over_internet, Ordering::SeqCst);
 
                 // Create a broadcast channel for forwarding incoming packets to Flutter
@@ -636,6 +644,13 @@ pub async fn connect_to_peer(
                         let mut line = String::new();
                         while let Ok(n) = reader.read_line(&mut line).await {
                             if n == 0 {
+                                break;
+                            }
+                            // Replaced by a newer connection (another computer,
+                            // or this one dialed again): it handles nothing
+                            // more, or what it latched would be read as the
+                            // newer one's (AR1).
+                            if !is_live((*CONTROL_WRITER).lock().await.as_ref(), &writer_arc) {
                                 break;
                             }
                             let trimmed = line.trim().to_string();
@@ -895,62 +910,27 @@ pub async fn connect_to_peer(
                             }
                             line.clear();
                         }
-                        tracing::warn!("Control connection lost");
                         // Only retire the shared slots if they still belong to
                         // *this* connection. An older reader that dies late
                         // would otherwise wipe a newer connection's writer,
                         // permanently pushing every query onto the one-shot
-                        // fallback path.
-                        let still_ours = {
-                            let guard = (*CONTROL_WRITER).lock().await;
-                            guard
-                                .as_ref()
-                                .is_some_and(|live| Arc::ptr_eq(live, &writer_arc))
-                        };
-                        if !still_ours {
+                        // fallback path. Asked under the state's and the
+                        // writer's locks, in connect_to_peer's order: a dial
+                        // holds the state's while it connects, and one that
+                        // succeeded meanwhile must win (AR1 review).
+                        let mut state_guard = (*CONNECTION_STATE).lock().await;
+                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
+                        if !is_live(writer_guard.as_ref(), &writer_arc) {
+                            tracing::debug!("Control connection replaced");
                             return;
                         }
+                        tracing::warn!("Control connection lost");
                         *crate::CONTROL_PEER.lock().await = None;
                         crate::CONTROL_OVER_INTERNET.store(false, Ordering::SeqCst);
                         *crate::INCOMING_PACKETS.lock().await = None;
-                        let mut state_guard = (*CONNECTION_STATE).lock().await;
                         *state_guard = ConnectionState::Disconnected;
-                        let mut writer_guard = (*CONTROL_WRITER).lock().await;
                         *writer_guard = None;
-                        *crate::WAN_IDENTITY.lock().await = None;
-                        *crate::WAKE_INFO.lock().await = None;
-                        *crate::CONTROL_STATE.lock().await = None;
-                        crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
-                        *crate::PAIR_RESULT.lock().await = None;
-                        // Offers came from this desktop; another one cannot
-                        // fill them (F7b).
-                        crate::PENDING_OFFERS
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .clear();
-                        // So did reply requests (N5b): none outlives the
-                        // connection that carried it.
-                        crate::PENDING_SMS_REQUESTS
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .clear();
-                        // And links (T8a), shown as from the computer of
-                        // the session that takes them.
-                        crate::links::forget();
-                        crate::commands::forget();
-                        crate::dials::forget();
-                        crate::phone_actions::forget();
-                        crate::typing::forget();
-                        crate::media_presses::forget();
-                        crate::computer_media::forget();
-                        // N7 review: it can show nothing now.
-                        crate::in_use::forget(&from_peer.0, from_peer.1);
-                        crate::clipboard_push::forget();
-                        // L8 part 2: the other computers' answers still wait.
-                        crate::notification_answers::forget_from(&from_peer.0, from_peer.1);
-                        crate::phone_file_requests::forget();
-                        crate::photo_requests::forget();
-                        crate::quiet_requests::forget();
+                        forget_link(&from_peer).await;
                     }
                     .instrument(tracing::debug_span!("control_reader")),
                 );
@@ -1002,6 +982,48 @@ pub async fn poll_incoming_packets() -> Vec<String> {
         }
     }
     packets
+}
+
+/// Whether `mine` is the live control connection's writer.
+fn is_live<T>(live: Option<&Arc<T>>, mine: &Arc<T>) -> bool {
+    live.is_some_and(|live| Arc::ptr_eq(live, mine))
+}
+
+/// Forget what the control connection to `from` carried, once it has ended
+/// or been replaced: none of it outlives the connection that carried it.
+async fn forget_link(from: &(String, u16)) {
+    *crate::WAN_IDENTITY.lock().await = None;
+    *crate::WAKE_INFO.lock().await = None;
+    *crate::CONTROL_STATE.lock().await = None;
+    crate::SIREN_RINGING.store(false, std::sync::atomic::Ordering::SeqCst);
+    *crate::PAIR_RESULT.lock().await = None;
+    // Offers came from this desktop; another one cannot fill them (F7b).
+    crate::PENDING_OFFERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    // So did reply requests (N5b).
+    crate::PENDING_SMS_REQUESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    // And links (T8a), shown as from the computer of the session that
+    // takes them.
+    crate::links::forget();
+    crate::commands::forget();
+    crate::dials::forget();
+    crate::phone_actions::forget();
+    crate::typing::forget();
+    crate::media_presses::forget();
+    crate::computer_media::forget();
+    // N7 review: it can show nothing now.
+    crate::in_use::forget(&from.0, from.1);
+    crate::clipboard_push::forget();
+    // L8 part 2: the other computers' answers still wait.
+    crate::notification_answers::forget_from(&from.0, from.1);
+    crate::phone_file_requests::forget();
+    crate::photo_requests::forget();
+    crate::quiet_requests::forget();
 }
 
 /// The cached iroh WAN identity (raw `kdeconnect.pocketdesk.endpoint` body
@@ -5173,6 +5195,16 @@ mod wake_tests {
         assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.2", 1716), None);
         assert_eq!(super::wake_info_for(Some(&slot), "192.0.2.1", 1717), None);
         assert_eq!(super::wake_info_for(None, "192.0.2.1", 1716), None);
+    }
+
+    #[test]
+    fn only_the_live_connection_is_live() {
+        // AR1: a reader whose connection was replaced handles nothing more.
+        let mine = std::sync::Arc::new(());
+        let newer = std::sync::Arc::new(());
+        assert!(super::is_live(Some(&mine), &mine));
+        assert!(!super::is_live(Some(&newer), &mine));
+        assert!(!super::is_live(None, &mine));
     }
 
     #[tokio::test]
