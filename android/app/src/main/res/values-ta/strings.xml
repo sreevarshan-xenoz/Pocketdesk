@@ -69,7 +69,7 @@
     <string name="pen_pressure_even">சமம்</string>
     <string name="pen_pressure_firm">உறுதி</string>
     <string name="settings_gamepad_controller">இணைத்த கேம் கன்ட்ரோலரைக் கணினியில் பயன்படுத்து</string>
-    <string name="settings_gamepad_controller_summary">அமர்வின்போது, இந்தக் கைபேசியுடன் இணைத்த கன்ட்ரோலர் (USB அல்லது Bluetooth) கணினியில் விளையாடும்: A என்பது Enter, B Esc, X Space, Y Tab, மேல் பொத்தான்கள் Page Up, Page Down, Select Backspace, Start ஒரு கிளிக், இடது குச்சி சுட்டி, வலது சக்கரம்</string>
+    <string name="settings_gamepad_controller_summary">அமர்வின்போது, இந்தத் தொலைபேசியுடன் இணைத்த கன்ட்ரோலர் (USB அல்லது Bluetooth) கணினியில் விளையாடும்: A என்பது Enter, B Esc, X Space, Y Tab, மேல் பொத்தான்கள் Page Up, Page Down, Select Backspace, Start ஒரு கிளிக், இடது குச்சி சுட்டி, வலது சக்கரம்</string>
     <string name="settings_system">சிஸ்டம்</string>
     <string name="settings_about">பற்றி</string>
     <string name="app_version">பதிப்பு %1$s</string>
@@ -78,7 +78,7 @@
     <string name="hide_advanced">மேம்பட்டதை மறை</string>
     <string name="wake">எழுப்பு</string>
     <string name="remove_host">நீக்கு</string>
-    <string name="remove_host_message">இந்த கைபேசியில் இருந்து %1$s ஐ நீக்கவா? இணைப்பு மற்றும் சேமித்த அமைப்புகளும் நீக்கப்படும்.</string>
+    <string name="remove_host_message">இந்தத் தொலைபேசியில் இருந்து %1$s ஐ நீக்கவா? இணைப்பு மற்றும் சேமித்த அமைப்புகளும் நீக்கப்படும்.</string>
     <string name="host_ports">ஒளிபரப்பு %1$d · கட்டுப்பாடு %2$d</string>
     <string name="streaming_port">ஸ்ட்ரீமிங் போர்ட்</string>
     <string name="control_port">கண்ட்ரோல் போர்ட் (க்ளிப் போர்டு, கோப்புகள்)</string>
@@ -156,8 +156,8 @@
     <string name="row_clipboard">கிளிப்போர்ட் ஒத்திசைவு</string>
     <string name="row_history">கிளிப்போர்ட் வரலாறு</string>
     <string name="row_audio">ஒலிக் கட்டுப்பாடு</string>
-    <string name="row_mic">கைபேசி ஒலிவாங்கி</string>
-    <string name="row_desktop_sound">கணினியின் ஒலி இந்தக் கைபேசியில்</string>
+    <string name="row_mic">தொலைபேசி ஒலிவாங்கி</string>
+    <string name="row_desktop_sound">கணினியின் ஒலி இந்தத் தொலைபேசியில்</string>
     <string name="keyboard_open">விசைப்பலகை</string>
     <string name="keyboard_hide">விசைப்பலகையை மறை</string>
     <string name="keyboard_mod_off">அணைந்தது</string>
@@ -176,9 +176,9 @@
         <item quantity="one">இது %1$d எழுத்தை விட அதிகம்</item>
         <item quantity="other">இது %1$d எழுத்துகளை விட அதிகம்</item>
     </plurals>
-    <string name="phone_clipboard_no_text">கைபேசி கிளிப்போர்டில் உரை இல்லை</string>
+    <string name="phone_clipboard_no_text">தொலைபேசி கிளிப்போர்டில் உரை இல்லை</string>
     <string name="row_send_text">உரை அனுப்பு…</string>
-    <string name="row_type_clipboard">கைபேசி கிளிப்போர்டை தட்டச்சு செய்</string>
+    <string name="row_type_clipboard">தொலைபேசி கிளிப்போர்டை தட்டச்சு செய்</string>
     <string name="row_files">இந்தக் கணினியின் கோப்புகள்…</string>
     <string name="screen_chip">திரை %1$d, %2$d×%3$d</string>
     <string name="files_up">மேலே</string>
@@ -344,7 +344,7 @@
     <string name="pair_link_title">%1$s உடன் இணைக்கிறது…</string>
     <string name="pair_link_trying">%1$s முயற்சிக்கிறது</string>
     <string name="pair_link_expired">இந்தக் குறியீடு காலாவதியானது: கணினியில் புதியதைக் காட்டி மீண்டும் ஸ்கேன் செய்யுங்கள்.</string>
-    <string name="pair_link_unreachable">கணினியை அதன் எந்த முகவரியிலும் அடைய முடியவில்லை. இந்தக் கைபேசி அதே வலையம் அல்லது tailnet-இல் உள்ளதா? (%1$s)</string>
+    <string name="pair_link_unreachable">கணினியை அதன் எந்த முகவரியிலும் அடைய முடியவில்லை. இந்தத் தொலைபேசி அதே வலையம் அல்லது tailnet-இல் உள்ளதா? (%1$s)</string>
     <string name="pair_link_invalid">அது Pocketdesk இணைப்புக் குறியீடு அல்ல.</string>
     <string name="scan_pairing_code">இணைப்புக் குறியீட்டை ஸ்கேன் செய்</string>
     <string name="scan_hint">உங்கள் கணினியில் உள்ள Pocketdesk செயலியின் Pair பக்கத்தில் உள்ள குறியீட்டை நோக்கி கேமராவைக் காட்டுங்கள்.</string>
@@ -530,7 +530,7 @@
     <string name="settings_links_from_computer">கணினியிலிருந்து இணைப்புகள்</string>
     <string name="settings_links_from_computer_summary">கணினி அனுப்பும் இணைப்பு, அதைத் திறக்கும் அறிவிப்பாகக் காட்டப்படும். அணைத்தால்: அத்தகைய இணைப்புகள் கைவிடப்படும்</string>
     <string name="settings_share_battery">தொலைபேசியின் நிலையைக் கணினியுடன் பகிர்</string>
-    <string name="settings_share_battery_summary">கணினி இந்தத் தொலைபேசியின் மின்கலம், காலி சேமிப்பிடம், வலையமைப்பு (Wi-Fi அல்லது கைபேசித் தரவு, அதன் கம்பிகள்; அதன் பெயர் ஒருபோதும் இல்லை), அழைப்பொலி நிலை ஆகியவற்றைக் காட்டும்; அதன் எந்த அம்சங்கள் இயக்கத்தில் உள்ளன என்பதையும்; மின்கலம் குறைந்தால் எச்சரிக்கலாம்: அமர்வின்போதும், வேறொரு பின்னணி அம்சம் தொலைபேசியை இணைப்பில் வைத்திருக்கும்போது பின்னணியிலும்</string>
+    <string name="settings_share_battery_summary">கணினி இந்தத் தொலைபேசியின் மின்கலம், காலி சேமிப்பிடம், வலையமைப்பு (Wi-Fi அல்லது தொலைபேசித் தரவு, அதன் கம்பிகள்; அதன் பெயர் ஒருபோதும் இல்லை), அழைப்பொலி நிலை ஆகியவற்றைக் காட்டும்; அதன் எந்த அம்சங்கள் இயக்கத்தில் உள்ளன என்பதையும்; மின்கலம் குறைந்தால் எச்சரிக்கலாம்: அமர்வின்போதும், வேறொரு பின்னணி அம்சம் தொலைபேசியை இணைப்பில் வைத்திருக்கும்போது பின்னணியிலும்</string>
     <string name="media_player_label">இயக்கி: %1$s</string>
     <string name="media_player_system">கணினியின் தேர்வு</string>
     <string name="media_player_playing">%1$s (இயங்குகிறது)</string>
@@ -868,7 +868,7 @@
     <string name="deck_done">முடிந்தது</string>
     <string name="deck_waiting">கணினியின் உரிமையாளருக்காகக் காத்திருக்கிறது</string>
     <string name="settings_deck_columns">ஒரு வரிசையில் பொத்தான்கள்</string>
-    <string name="settings_deck_columns_summary">கணினியின் பொத்தான் பலகையில் ஒரு வரிசையில் எத்தனை பொத்தான்கள் இந்தக் கைபேசியில் தெரியும்</string>
+    <string name="settings_deck_columns_summary">கணினியின் பொத்தான் பலகையில் ஒரு வரிசையில் எத்தனை பொத்தான்கள் இந்தத் தொலைபேசியில் தெரியும்</string>
     <string name="card_state">அதன் நிலை</string>
     <string name="card_allowed">இந்தக் கணினி எதை அனுமதிக்கிறது</string>
     <string name="allowed_title">%1$s எதை அனுமதிக்கிறது</string>
@@ -900,11 +900,11 @@
     <string name="state_unit_hour">ம</string>
     <string name="state_unit_minute">நி</string>
     <string name="camera_channel">கணினி கேட்கும் படங்கள்</string>
-    <string name="camera_channel_description">ஒரு கணினி இந்தக் கைபேசியிடம் படம் கேட்கும்போது கேமராவைத் தருகிறது</string>
+    <string name="camera_channel_description">ஒரு கணினி இந்தத் தொலைபேசியிடம் படம் கேட்கும்போது கேமராவைத் தருகிறது</string>
     <string name="camera_ask_title">%1$s ஒரு படம் கேட்கிறது</string>
     <string name="camera_ask_text">கேமராவைத் திறக்கத் தட்டவும்; படம் கணினிக்குச் செல்லும்</string>
     <string name="camera_denied">கேமராவைத் திறக்க Pocketdesk க்குக் கேமரா அனுமதி தேவை</string>
-    <string name="camera_none">இந்தக் கைபேசியில் கேமரா செயலி இல்லை</string>
+    <string name="camera_none">இந்தத் தொலைபேசியில் கேமரா செயலி இல்லை</string>
     <string name="settings_camera_asks">கணினி கேட்கும் படங்கள்</string>
     <string name="settings_camera_asks_summary">கணினி கேட்கும்போது, ஒரு அறிவிப்பு கேமராவைத் திறக்கும்; படம் கணினிக்குச் செல்லும்</string>
     <string name="settings_camera_asks_needs_access">அறிவிப்பு அணுகல் தேவை: கணினியுடனான Pocketdesk இன் பின்னணி இணைப்பு அதிலிருந்து இயங்குகிறது</string>
@@ -912,19 +912,19 @@
     <string name="settings_camera_clipboard_summary">படம் கணினியின் பெற்ற கோப்புகளுடன் அதன் கிளிப்போர்டுக்கும் செல்லும்</string>
     <string name="remote_air">காற்றுச் சுட்டி</string>
     <string name="remote_trackpad">டிராக்பேட்</string>
-    <string name="air_hint">கைபேசியைத் தட்டையாக, அதன் மேற்பகுதி திரையை நோக்கிப் பிடிக்கவும். சுட்டியை நகர்த்த இங்கே அழுத்தித் திருப்பவும்; கிளிக் செய்யத் தட்டவும்.</string>
-    <string name="air_none">இந்தக் கைபேசியில் சுழல்காட்டி இல்லை, எனவே காற்றுச் சுட்டியாக இருக்க முடியாது.</string>
+    <string name="air_hint">தொலைபேசியைத் தட்டையாக, அதன் மேற்பகுதி திரையை நோக்கிப் பிடிக்கவும். சுட்டியை நகர்த்த இங்கே அழுத்தித் திருப்பவும்; கிளிக் செய்யத் தட்டவும்.</string>
+    <string name="air_none">இந்தத் தொலைபேசியில் சுழல்காட்டி இல்லை, எனவே காற்றுச் சுட்டியாக இருக்க முடியாது.</string>
     <string name="settings_air_speed">காற்றுச் சுட்டியின் வேகம்</string>
-    <string name="settings_air_speed_summary">ரிமோட்டின் காற்றுச் சுட்டியில் கைபேசியைத் திருப்பும்போது சுட்டி எவ்வளவு நகரும்</string>
+    <string name="settings_air_speed_summary">ரிமோட்டின் காற்றுச் சுட்டியில் தொலைபேசியைத் திருப்பும்போது சுட்டி எவ்வளவு நகரும்</string>
     <string name="settings_calls">ஒலிக்கும் அழைப்புகள் கணினியில்</string>
-    <string name="settings_calls_summary">இந்தக் கைபேசியில் ஒலிக்கும் அழைப்பு அமைதிப்படுத்து பொத்தானுடன் கணினியில் தெரியும்; கைபேசியின் நிலையையும் அழைப்புப் பதிவையும் (எண்ணுக்காக) படிக்க அனுமதி கேட்கும்</string>
+    <string name="settings_calls_summary">இந்தத் தொலைபேசியில் ஒலிக்கும் அழைப்பு அமைதிப்படுத்து பொத்தானுடன் கணினியில் தெரியும்; தொலைபேசியின் நிலையையும் அழைப்புப் பதிவையும் (எண்ணுக்காக) படிக்க அனுமதி கேட்கும்</string>
     <string name="settings_calls_needs_access">அறிவிப்பு அணுகல் தேவை: அழைப்பு அதிலிருந்து கவனிக்கப்படுகிறது, கணினியின் பதில்களும் அதில் வருகின்றன</string>
     <string name="settings_calls_decline">அழைப்புகளை நிராகரிக்க கணினியை அனுமதி</string>
     <string name="settings_calls_decline_summary">அமைதிப்படுத்து அருகே நிராகரி சேர்க்கும்; அழைப்புகளை முடிக்க அனுமதி கேட்கும்</string>
     <string name="card_show_camera">கேமராவைக் காட்டு</string>
     <string name="cast_showing_camera">%1$s இல் கேமராவைக் காட்டுகிறது</string>
     <string name="cast_camera_denied">கேமராவைக் காட்ட Pocketdesk க்குக் கேமரா அனுமதி தேவை</string>
-    <string name="cast_no_camera">Pocketdesk காட்டக்கூடிய கேமரா இந்தக் கைபேசியில் இல்லை</string>
+    <string name="cast_no_camera">Pocketdesk காட்டக்கூடிய கேமரா இந்தத் தொலைபேசியில் இல்லை</string>
     <string name="cast_camera_lost">கேமரா நின்றது: வேறொரு செயலி அதை எடுத்திருக்கலாம்</string>
     <string name="state_widget_name">Pocketdesk: கணினி நிலை</string>
     <string name="state_widget_description">கடைசி கணினியின் CPU, நினைவகம், வட்டு, பேட்டரி. மீண்டும் கேட்க தட்டவும்.</string>
