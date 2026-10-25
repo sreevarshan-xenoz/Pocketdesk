@@ -218,5 +218,7 @@ object ClipboardImages {
         val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return
         val uri = FileProvider.getUriForFile(ctx, authority(ctx), file)
         cm.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "Pocketdesk", uri))
+        // AH1: how large, never the image, as the text's line (AA1).
+        android.util.Log.i("PocketdeskClip", "image put on the clipboard (${file.length()} bytes)")
     }
 }

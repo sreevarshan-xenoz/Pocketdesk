@@ -190,6 +190,8 @@ class BackgroundClipboard(private val ctx: Context) {
             .onFailure {
                 part.delete()
                 synchronized(images) { images.fetchFailed(id, now) }
+                // AH1: why the computer's image was not taken (tried again later).
+                android.util.Log.w("PocketdeskClip", "image not taken: ${it.message}")
             }
     }
 
