@@ -442,6 +442,14 @@ class SessionParts(unittest.TestCase):
             t="", d="More for 192.0.2.10", a=900, b=580, c=972, e=652)
         self.assertEqual(dc.card_menu(plain, "192.0.2.10"), (936, 616, "192.0.2.10"))
 
+    def test_the_pairing_sheet_s_pin_field(self):
+        field = '<node index="1" text="" class="android.widget.EditText" focused="{f}" bounds="[0,0][9,9]" />'
+        eye = '<node index="2" text="" content-desc="{d}" bounds="[0,0][9,9]" />'
+        self.assertEqual(dc.pin_sheet_facts(field.format(f="true") + eye.format(d="Show PIN")), (True, False))
+        self.assertEqual(dc.pin_sheet_facts(field.format(f="false") + eye.format(d="Hide PIN")), (False, True))
+        self.assertEqual(dc.pin_sheet_facts(eye.format(d="Show PIN")), (None, False))
+        self.assertEqual(dc.pin_sheet_facts(""), (None, None))
+
     def test_the_saved_computers_addresses(self):
         raw = '[{"address":"192.0.2.10","port":4716,"control_port":1716},{"address":"127.0.0.1"}]'
         self.assertEqual(dc.host_addresses(raw), ["192.0.2.10", "127.0.0.1"])

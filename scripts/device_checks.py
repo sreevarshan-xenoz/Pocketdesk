@@ -4713,7 +4713,15 @@ def home(ctx: Ctx) -> bool:
     ctx.phone.wake()
     adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
     if not wait_for(lambda: shows(ctx, HOME_MARK), 10, 1):
-        return False
+        # Home's form, left open (AV1): its Back is Home, the first perhaps
+        # only putting the keyboard away; Back only while the form shows.
+        for _ in range(2):
+            if not shows(ctx, "Computer's address"):
+                break
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            time.sleep(1.5)
+        if not wait_for(lambda: shows(ctx, HOME_MARK), 10, 1):
+            return False
     for _ in range(3):
         adb("shell", "input", "swipe", "540", "700", "540", "1900", "200")
     time.sleep(1)
@@ -4742,10 +4750,14 @@ def phone_records(ctx: Ctx) -> dict[str, object]:
     return kept
 
 
-def add_second_host(ctx: Ctx) -> Optional[str]:
-    """Add SECOND_HOST through Home's form; why not, when it was not. Its
-    Connect saves it and dials: the pairing sheet that comes is cancelled,
-    and the session that tries is left with one Back, to Home."""
+def add_second_host(ctx: Ctx, mac: Optional[str] = None,
+                    on_sheet: Optional[Callable[[str], bool]] = None,
+                    address: str = SECOND_HOST) -> Optional[str]:
+    """Add `address` through Home's form, with a wake-on-LAN `mac` when
+    given (AV1); why not, when it was not. Its Connect saves it and dials:
+    the pairing sheet that comes is cancelled, unless `on_sheet`, given
+    the sheet, says it saw it through (AV2); the session that tries or
+    opens is left with one Back, to Home."""
     if not home(ctx):
         return "the app did not open on Home"
     if not tap_scrolling(ctx, "Add computer", swipes=4):
@@ -4759,14 +4771,37 @@ def add_second_host(ctx: Ctx) -> Optional[str]:
         return "the form had no address field"
     adb("shell", "input", "tap", str((box[0] + box[2]) // 2), str((box[1] + box[3]) // 2))
     time.sleep(0.5)
-    adb("shell", "input", "text", SECOND_HOST)
+    adb("shell", "input", "text", address)
     time.sleep(0.5)
-    if not tap_text("Connect", ctx.phone.dump()):
+    if mac:
+        if not tap_text("Advanced (ports, wake-on-LAN)", ctx.phone.dump()):
+            home(ctx)
+            return "the form had no Advanced"
+        if not wait_for(lambda: tap_text("Wake-on-LAN MAC address", ctx.phone.dump()), 10, 1):
+            home(ctx)
+            return "the form had no wake-on-LAN field"
+        time.sleep(0.5)
+        adb("shell", "input", "text", mac)
+        time.sleep(0.5)
+        # The keyboard covers Connect: Back while it shows only puts it
+        # away (never the wake-on-LAN field's Send).
+        if keyboard_shown():
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            time.sleep(1)
+    if not tap_scrolling(ctx, "Connect", swipes=3):
+        home(ctx)
         return "the form had no Connect"
-    if not wait_for(lambda: shows(ctx, "Cancel")
-                    and node_box(ctx.phone.dump(), f"Pair with {SECOND_HOST}") is not None, 20, 1):
-        return f"no pairing sheet for {SECOND_HOST} within 20 s"
-    tap_text("Cancel", ctx.phone.dump())
+    sheet = ""
+
+    def sheet_up() -> bool:
+        nonlocal sheet
+        sheet = ctx.phone.dump()
+        return any(t == "Cancel" for t, _, _ in dump_nodes(sheet)) and node_box(sheet, f"Pair with {address}") is not None
+
+    if not wait_for(sheet_up, 20, 1):
+        return f"no pairing sheet for {address} within 20 s"
+    if not (on_sheet and on_sheet(sheet)):
+        tap_text("Cancel", ctx.phone.dump())
     time.sleep(2)
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
     # Once: a second Back on Home would close the app (review).
@@ -4775,15 +4810,16 @@ def add_second_host(ctx: Ctx) -> Optional[str]:
     return None
 
 
-def remove_second_host(ctx: Ctx, cleanup: bool = False) -> Optional[str]:
-    """Remove SECOND_HOST's card through its menu, confirmed only when the
-    dialog names that card. A card with a name (as before AQ3) is removed
-    only as cleanup, found by the address on its subtitle."""
+def remove_second_host(ctx: Ctx, cleanup: bool = False, address: str = SECOND_HOST) -> Optional[str]:
+    """Remove `address`'s card through its menu, confirmed only when the
+    dialog names that card. A card with a name (as before AQ3, or one that
+    paired) is removed only as cleanup, found by the address on its
+    subtitle."""
     if not home(ctx):
         return "the app did not open on Home"
     spot = None
     for _ in range(4):
-        spot = card_menu(ctx.phone.dump(), SECOND_HOST)
+        spot = card_menu(ctx.phone.dump(), address)
         if spot:
             break
         adb("shell", "input", "swipe", "540", "1900", "540", "1100", "300")
@@ -4791,8 +4827,8 @@ def remove_second_host(ctx: Ctx, cleanup: bool = False) -> Optional[str]:
     if spot is None:
         return "no menu on its card"
     x, y, label = spot
-    if label != SECOND_HOST and not cleanup:
-        return f"its card is named {label!r}, not {SECOND_HOST}"
+    if label != address and not cleanup:
+        return f"its card is named {label!r}, not {address}"
     adb("shell", "input", "tap", str(x), str(y))
     time.sleep(1)
     if not tap_scrolling(ctx, "Remove", swipes=3):
@@ -4811,6 +4847,186 @@ def remove_second_host(ctx: Ctx, cleanup: bool = False) -> Optional[str]:
     adb("shell", "input", "tap", str(buttons[-1][0]), str(buttons[-1][1]))
     time.sleep(2)
     return None
+
+
+def keyboard_shown() -> bool:
+    """Whether the phone's keyboard is up (`dumpsys input_method`)."""
+    return "mInputShown=true" in adb("shell", "dumpsys", "input_method")
+
+
+def card_menu_items(ctx: Ctx, address: str) -> Optional[list[str]]:
+    """The entries of the menu of the card that shows `address`, read and
+    closed again (Back); None when there is no such card."""
+    if not home(ctx):
+        return None
+    spot = None
+    for _ in range(4):
+        spot = card_menu(ctx.phone.dump(), address)
+        if spot:
+            break
+        adb("shell", "input", "swipe", "540", "1900", "540", "1100", "300")
+        time.sleep(1)
+    if spot is None:
+        return None
+    adb("shell", "input", "tap", str(spot[0]), str(spot[1]))
+    time.sleep(1.5)
+    items = [t for t, _, _ in dump_nodes(ctx.phone.dump()) if t]
+    adb("shell", "input", "keyevent", "KEYCODE_BACK")
+    time.sleep(1)
+    return items
+
+
+def pin_sheet_facts(dump: str) -> tuple[Optional[bool], Optional[bool]]:
+    """The pairing sheet's PIN field: whether it has focus, and whether the
+    PIN shows (its eye offers "Hide PIN") or is masked ("Show PIN")."""
+    field = next((n for n in re.findall(r"<node [^>]*>", dump) if 'class="android.widget.EditText"' in n), None)
+    focused = None if field is None else 'focused="true"' in field
+    shows_pin = True if 'content-desc="Hide PIN"' in dump else False if 'content-desc="Show PIN"' in dump else None
+    return focused, shows_pin
+
+
+# A documentation MAC (RFC 7042): no machine has it.
+DOC_MAC = "00:00:5E:00:53:01"
+
+
+@check("av1-wake-row", "§20")
+def av1_wake_row(ctx: Ctx) -> tuple[str, str]:
+    """A card's menu offers Wake only for a computer the phone knows how to
+    wake (§20, N6): one added at a documentation address with no MAC has
+    none; added again with a documentation MAC, it has Wake; the
+    throwaway's, which announced how to wake it, has Wake. Nothing is
+    woken. The phone's saved computers and their records as they were
+    after."""
+    before = saved_hosts(ctx)
+    records = phone_records(ctx)
+    if SECOND_HOST in host_addresses(before):
+        return "SKIP", f"{SECOND_HOST} is already saved on the phone"
+    said = []
+    try:
+        own = card_menu_items(ctx, "127.0.0.1")
+        if own is None:
+            return "SKIP", "no 127.0.0.1 card on Home"
+        if "Wake" not in own:
+            return "FAIL", "the throwaway's card, which announced how to wake it, offers no Wake"
+        said.append("the throwaway's: Wake")
+        for mac, step in ((None, "no MAC"), (DOC_MAC, "a MAC")):
+            why = add_second_host(ctx, mac)
+            if why:
+                return "FAIL", "; ".join(said + [f"{step}: {why}"])
+            items = card_menu_items(ctx, SECOND_HOST)
+            if items is None:
+                return "FAIL", "; ".join(said + [f"{step}: no menu on its card"])
+            if "Wake settings" not in items:
+                return "FAIL", "; ".join(said + [f"{step}: no Wake settings in its menu"])
+            if ("Wake" in items) != (mac is not None):
+                return "FAIL", "; ".join(said + [f"{step}: Wake {'offered' if 'Wake' in items else 'not offered'}"])
+            said.append(f"{step}: {'Wake' if mac else 'no Wake'}")
+            why = remove_second_host(ctx)
+            if why or saved_hosts(ctx) != before:
+                return "FAIL", "; ".join(said + [f"{step}: {why or 'the saved computers not as they were'}"])
+        after = phone_records(ctx)
+        changed = sorted({k.split(":")[0] for k in set(records) | set(after) if records.get(k) != after.get(k)})
+        if changed:
+            return "FAIL", "; ".join(said + [f"records changed: {', '.join(changed)}"])
+        return "PASS", "; ".join(said)
+    finally:
+        if SECOND_HOST in host_addresses(saved_hosts(ctx)):
+            why = remove_second_host(ctx, cleanup=True)
+            if why or SECOND_HOST in host_addresses(saved_hosts(ctx)):
+                print(f"note: AV1 left {SECOND_HOST} saved on the phone: {why or 'still there'}", file=sys.stderr)
+
+
+# The throwaway by another name: the phone keeps no pairing for it, so its
+# Connect brings the pairing sheet (AV2).
+OTHER_NAME = "localhost"
+
+
+@check("av2-pin-sheet", "§21")
+def av2_pin_sheet(ctx: Ctx) -> tuple[str, str]:
+    """The pairing sheet with a computer that answers (§21): a card for the
+    throwaway by another name (localhost), with a PIN put up by `pocketdesk
+    pair`; Show a PIN on the computer says one is showing, the PIN field
+    has focus, and the PIN is masked or shown as "reveal the PIN" says;
+    the PIN typed, the sheet says paired and goes by itself. The card is
+    removed, and the throwaway's trust store and device keys put back."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off"
+    if OTHER_NAME in host_addresses(saved_hosts(ctx)):
+        return "SKIP", f"{OTHER_NAME} is already saved on the phone"
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    before = saved_hosts(ctx)
+    records = phone_records(ctx)
+    reveal = bool(ctx.phone.prefs("pocketdesk-ui").get("reveal_pin"))
+    seen: dict[str, object] = {}
+    code, out = ctx.server.cli("pair", "--json")
+    line = next((l for l in reversed(out.splitlines()) if l.strip().startswith("{")), "")
+    try:
+        pin = str(json.loads(line)["pin"])
+    except (ValueError, KeyError, TypeError):
+        return "FAIL", f"pocketdesk pair said {code}, no PIN"
+
+    def through(sheet: str) -> bool:
+        if not tap_text("Show a PIN on the computer", sheet):
+            return False
+        if not wait_for(lambda: shows(ctx, "A PIN is showing on the computer. Type it below."), 15, 1):
+            seen["ready"] = False
+            return False
+        seen["ready"] = True
+        time.sleep(1)
+        seen["focused"], seen["shown"] = pin_sheet_facts(ctx.phone.dump())
+        # Typed where the focus is, as a thumb would.
+        adb("shell", "input", "text", pin)
+        time.sleep(0.5)
+        tap_text("Pair", ctx.phone.dump())
+        # "Paired ✓" shows 0.9 s, under a screen read's time: the phone's own
+        # record of the pairing is the proof, then the sheet gone.
+        seen["paired"] = bool(wait_for(
+            lambda: ctx.phone.prefs("pocketdesk-host").get(f"paired_desktop:{OTHER_NAME}"), 15, 1))
+        seen["gone"] = bool(wait_for(lambda: not node_box(ctx.phone.dump(), f"Pair with {OTHER_NAME}"), 10, 1))
+        return True
+
+    try:
+        why = add_second_host(ctx, on_sheet=through, address=OTHER_NAME)
+        if why:
+            return "FAIL", f"{why}; {seen}"
+        if not seen.get("ready"):
+            return "FAIL", "Show a PIN on the computer did not say one is showing"
+        wrong = []
+        if seen.get("focused") is not True:
+            wrong.append("the PIN field without focus")
+        if seen.get("shown") is not reveal:
+            wrong.append(f"the PIN {'shown' if seen.get('shown') else 'masked'} with reveal_pin {reveal}")
+        if not seen.get("paired"):
+            wrong.append("not paired after the PIN")
+        if not seen.get("gone"):
+            wrong.append("the sheet stayed")
+        if wrong:
+            return "FAIL", "; ".join(wrong)
+        return "PASS", (f"a PIN showing, the field focused, the PIN {'shown' if reveal else 'masked'} as "
+                        f"\"reveal the PIN\" says; typed: paired, and the sheet went by itself")
+    finally:
+        if OTHER_NAME in host_addresses(saved_hosts(ctx)):
+            why = remove_second_host(ctx, cleanup=True, address=OTHER_NAME)
+            if why or OTHER_NAME in host_addresses(saved_hosts(ctx)):
+                print(f"note: AV2 left {OTHER_NAME} saved on the phone: {why or 'still there'}", file=sys.stderr)
+        if saved_hosts(ctx) != before or phone_records(ctx) != records:
+            print("note: AV2 left the phone's saved computers changed", file=sys.stderr)
+        try:
+            ctx.server.stop()
+        except (OSError, ValueError) as error:
+            print(f"note: an AV2 cleanup step failed: {error}", file=sys.stderr)
+        for name, data in kept.items():
+            tmp = state / f"{name}.tmp"
+            tmp.write_bytes(data)
+            os.replace(tmp, state / name)
+        why = by_home(ctx)
+        if why and "internet road" in why:
+            why = by_home(ctx)
+        if why:
+            print(f"note: AV2 left the phone off its home link: {why}", file=sys.stderr)
 
 
 @check("aq2-second-card", "§20")
