@@ -4132,17 +4132,30 @@ def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
             if why:
                 print(f"note: AL2 left the phone off its home link: {why}", file=sys.stderr)
 
-        steps = [lambda: adb("shell", "input", "keyevent", "KEYCODE_BACK"), ctx.server.stop]
-        if changed:
-            steps.append(lambda: path.write_bytes(kept))
-        if before is not None:
-            steps.append(lambda: ctx.server.restore_config(before))
-        steps.append(home)
-        for step in steps:
+        def paired_again() -> None:
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_bytes(kept)
+            os.replace(tmp, path)
+
+        for step in (lambda: adb("shell", "input", "keyevent", "KEYCODE_BACK"), ctx.server.stop):
             try:
                 step()
             except (OSError, ValueError) as error:
                 print(f"note: an AL2 cleanup step failed: {error}", file=sys.stderr)
+        try:
+            if changed:
+                paired_again()
+        except OSError as error:
+            # The phone still unpaired: the config keeps pairing required and
+            # nothing starts the server again (review).
+            print(f"note: AL2 could not put the paired list back ({error}); the server is left stopped,"
+                  f" pairing required: put {path} back by hand", file=sys.stderr)
+        else:
+            for step in ([lambda: ctx.server.restore_config(before)] if before is not None else []) + [home]:
+                try:
+                    step()
+                except (OSError, ValueError) as error:
+                    print(f"note: an AL2 cleanup step failed: {error}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----
