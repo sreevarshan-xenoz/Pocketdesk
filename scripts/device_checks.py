@@ -3419,9 +3419,9 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
     """Crops to a window and back, six times in one session: each rebuilds
     at its size, the session stays up with no redial (no watchdog), the
     app's memory level holds (§16, across resolution changes). The
-    session's record is read after, its tails reported: they cannot show
-    §11's stall, as the encode timer leaves a rebuild out and the round
-    trip is sampled apart from the crops (review)."""
+    session's record is read after: its rebuild tail (AH2) times each
+    change of size, the stall a crop makes (§11), which the frames' encode
+    tail leaves out."""
     def body(ctx: Ctx) -> tuple[str, str]:
         if start_session(ctx) is None:
             return "SKIP", "no Connect on a 127.0.0.1 card on Home"
@@ -3480,14 +3480,17 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
         said = (f"{len(sizes)} changes of size ({', '.join(sorted(set(sizes)))}); redials {redials};"
                 f" memory {' → '.join(f'{m:.1f}' for m in levels)} MB;"
                 f" record ({tail.get('outcome', '?')}): enc p50 {tail.get('enc_p50', '?')} max {tail.get('enc_max', '?')},"
-                f" rtt p50 {tail.get('rtt_p50', '?')} max {tail.get('rtt_max', '?')} ms")
+                f" rtt p50 {tail.get('rtt_p50', '?')} max {tail.get('rtt_max', '?')} ms;"
+                f" rebuilds {tail.get('rebuild_n', 'none')}, p50 {tail.get('rebuild_p50', '?')} max {tail.get('rebuild_max', '?')} ms")
         if not tail:
             return "TIMEOUT", said + "; no session record after the session ended"
         # A leak shows as a climb that keeps on: more than 40 MB over six
         # rounds (at the end or at any round), where a round's rebuilds are a
         # few MB and come back.
         good = tail.get("outcome") in ("completed", "lan_direct", "wan_punched", "wan_relayed")
-        ok = redials == 0 and grew <= 40 and peak <= 40 and good
+        # Each change of size rebuilt the encoder, and each is in the record.
+        timed = tail.get("rebuild_n", "").isdigit() and int(tail["rebuild_n"]) >= len(sizes)
+        ok = redials == 0 and grew <= 40 and peak <= 40 and good and timed
         return ("PASS" if ok else "FAIL"), said
     return session_check(ctx, body)
 
