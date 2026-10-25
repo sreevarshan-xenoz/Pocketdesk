@@ -4562,6 +4562,81 @@ def ap2_unpaired_reports(ctx: Ctx) -> tuple[str, str]:
                     print(f"note: an AP2 cleanup step failed: {error}", file=sys.stderr)
 
 
+# ---- the siren in a session (AQ1) ----
+
+SIREN_TITLE = "Your computer is finding this phone"
+
+
+def alarm_playing(dump: str) -> bool:
+    """Whether something plays on the alarm stream now, by `dumpsys audio`'s
+    players. Not the app's own process: Android plays its ringtone from
+    SystemUI's (seen on the OPPO), so a check makes sure none played before."""
+    return any("AudioPlaybackConfiguration" in line and "state:started" in line
+               and "usage=USAGE_ALARM" in line for line in dump.splitlines())
+
+
+def siren_up(ctx: Ctx) -> bool:
+    return node_box(ctx.phone.dump(), SIREN_TITLE) is not None
+
+
+def alarm_now() -> bool:
+    return alarm_playing(adb("shell", "dumpsys", "audio"))
+
+
+@check("aq1-siren", "§21")
+def aq1_siren(ctx: Ctx) -> tuple[str, str]:
+    """In a session, a ring from the computer shows the siren's dialog
+    while the alarm plays; Silence stops both at once, and a ring left
+    alone stops both after 30 s (§21); the second ring a minute after the
+    first, as the computer rings a phone at most once a minute. The ring raises the alarm's volume
+    and the app puts it back (§202)."""
+    def ring() -> Optional[str]:
+        if alarm_now():
+            return "an alarm was playing before the ring"
+        code, out = ctx.server.cli("ring", ctx.device)
+        if code != 0:
+            return out.strip().splitlines()[-1] if out.strip() else f"pocketdesk ring exit {code}"
+        if not wait_for(lambda: siren_up(ctx), 15, 1):
+            return "no siren dialog within 15 s of the ring"
+        if not wait_for(alarm_now, 5, 0.5):
+            return "the dialog up, but no alarm playing"
+        return None
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        said = []
+        first = time.monotonic()
+        why = ring()
+        if why:
+            return "FAIL", why
+        # The phone's own dialog: a tap on the phone, never toward the computer.
+        if not tap_text("Silence", ctx.phone.dump()):
+            return "FAIL", "the dialog had no Silence"
+        at = time.monotonic()
+        stopped = wait_for(lambda: not alarm_now() and not siren_up(ctx), 10, 0.5)
+        said.append(f"Silence: {f'both stopped in {time.monotonic() - at:.1f} s' if stopped else 'not stopped within 10 s'}")
+        if not stopped:
+            return "FAIL", "; ".join(said)
+        if not in_session(ctx):
+            return "FAIL", "; ".join(said + ["the session ended"])
+        # The computer rings a phone at most once a minute.
+        time.sleep(max(0.0, first + 61 - time.monotonic()))
+        why = ring()
+        if why:
+            return "FAIL", "; ".join(said + [f"the second ring: {why}"])
+        at = time.monotonic()
+        stopped = wait_for(lambda: not alarm_now() and not siren_up(ctx), 45, 1)
+        took = time.monotonic() - at
+        said.append(f"left alone: {f'both stopped after {took:.0f} s' if stopped else 'not stopped within 45 s'}")
+        ok = stopped and 25 <= took <= 35 and in_session(ctx)
+        return ("PASS" if ok else "FAIL"), "; ".join(said)
+
+    return session_check(ctx, body)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
