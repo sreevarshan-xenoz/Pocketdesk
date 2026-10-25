@@ -108,7 +108,8 @@ no SDK, so GNU is the one that is exercised.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --exclude pocketdesk-android-bridge --exclude iroh-spike -- -D warnings
 cargo test --workspace --exclude pocketdesk-android-bridge --exclude iroh-spike
-# live tests that need this desktop / GPU (capture, encoders, input, clipboard, toast):
+# live tests that need this desktop / GPU (capture, encoders, input, clipboard, toast);
+# wgc_resized_… opens a small window of its own and resizes it, no input:
 cargo test -p pocketdesk-core --lib -- --ignored wgc_ dxgi_ windows_rung_roundtrip
 cargo test -p pocketdesk-server --lib -- --ignored sendinput_drives clipboard_round_trips a_toast_is_shown
 # prints the current media session (start something playing first):
