@@ -4216,9 +4216,14 @@ def al3_empty_history(ctx: Ctx) -> tuple[str, str]:
             dialog = ctx.phone.dump()
             if "This deletes every saved clipboard entry from this phone." not in dialog:
                 return "FAIL", "Clear did not ask first"
-            # The dialog's Clear: the last view by that name, under its words.
-            spots = [(x, y) for text, x, y in dump_nodes(dialog) if text == "Clear"]
-            adb("shell", "input", "tap", str(spots[-1][0]), str(spots[-1][1]))
+            # The dialog's Clear: the button under its words (its title is
+            # above them), whatever order the dump lists views in (review).
+            words_at = next(y for text, _, y in dump_nodes(dialog)
+                            if text.startswith("This deletes every saved clipboard entry"))
+            spots = [(x, y) for text, x, y in dump_nodes(dialog) if text == "Clear" and y > words_at]
+            if not spots:
+                return "FAIL", "no Clear under the dialog's words"
+            adb("shell", "input", "tap", str(spots[0][0]), str(spots[0][1]))
             time.sleep(1.5)
             sheet = ctx.phone.dump()
         words = node_box(sheet, "Nothing copied yet")
