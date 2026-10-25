@@ -4433,6 +4433,17 @@ def phone_ringer() -> Optional[str]:
     return ringer_mode(adb("shell", "dumpsys", "audio"))
 
 
+# `settings get global zen_mode` to `cmd notification set_dnd`'s words.
+DND_WORDS = {0: "off", 1: "priority", 2: "none", 3: "alarms"}
+
+
+def zen_mode() -> Optional[int]:
+    """The phone's Do Not Disturb (0 off, 1 priority, 2 total silence, 3
+    alarms only)."""
+    said = adb("shell", "settings", "get", "global", "zen_mode").strip()
+    return int(said) if said.isdigit() else None
+
+
 def set_ringer(mode: str) -> None:
     """Through the fixture (the shell cannot on Android 14)."""
     am("broadcast", "-n", f"{FIXTURE}/.RingerReceiver", "-a", "dev.pocketdesk.fixture.RINGER", "--es", "mode", mode)
@@ -4443,12 +4454,17 @@ def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
     """The phone's ringer reaches the computer: turned on the phone in the
     background, the computer's copy follows within a tick (the phone sends
     its state when the ringer changes); in a session, within 15 s (§162).
-    The phone's ringer is put back as it was."""
+    The phone's ringer is put back as it was, and its Do Not Disturb: silent
+    turns it on (AR3: left on, the phone held back every notification the
+    later checks sent)."""
     if not ctx.phone.prefs("pocketdesk-ui").get("share_battery", True):
         return "SKIP", "turn on Share the phone's state in the phone's Settings"
     was = phone_ringer()
     if was not in ("normal", "vibrate", "silent"):
         return "SKIP", f"the phone's ringer reads {was or 'nothing'}: it could not be put back"
+    dnd = zen_mode()
+    if dnd not in DND_WORDS:
+        return "SKIP", f"the phone's Do Not Disturb reads {dnd}: it could not be put back"
     first, second = ("vibrate", "silent") if was != "vibrate" else ("silent", "normal")
     said = []
     # Silent, and leaving it, needs Do Not Disturb access: the fixture's
@@ -4479,9 +4495,18 @@ def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
     finally:
         set_ringer(was)
         time.sleep(1)
+        # The ringer's silent and back turn Do Not Disturb on and off as they go.
+        # Where both cannot be put back (on the OPPO silent is Do Not Disturb:
+        # silent with it off cannot be set), Do Not Disturb wins, as the later
+        # checks need the phone's notifications; the ringer's note says so.
+        if zen_mode() != dnd:
+            adb("shell", "cmd", "notification", "set_dnd", DND_WORDS[dnd])
+            time.sleep(1)
         adb("shell", "cmd", "notification", "disallow_dnd", FIXTURE)
         if phone_ringer() != was:
             print(f"note: AP1 left the phone's ringer at {phone_ringer()}, not {was}", file=sys.stderr)
+        if zen_mode() != dnd:
+            print(f"note: AP1 left the phone's Do Not Disturb at {zen_mode()}, not {dnd}", file=sys.stderr)
 
 
 # ---- an unpaired phone's reports leave the computer (AP2) ----
