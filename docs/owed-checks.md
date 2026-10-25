@@ -45,7 +45,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **11. WAN over iroh (R1)**
 
-- A deliberate stall (crop to a window, or Wi-Fi off and on mid-session) moves `enc_max` or `rtt_max` above their p50. (2026-10-25: not by the session's record. Its encode tail times `encode_frame` alone, so a crop's rebuild never reaches `enc_*`, and `rtt_*` is sampled every 5 s apart from the crops; `max` sits above `p50` with no crop at all. Owed by another reading, such as the HUD's during the crop.)
 - `dec_*` grows when the desktop is cropped to a bigger window, and `rnd_p50` jumps when the bitrate clamp or a preset slows the link.
 
 **11b. HUD link-profile presets (R4 E5)**
@@ -55,6 +54,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **16. Long-run / hygiene**
 
 - The same across resolution changes (no decoder leak), fps steady, no watchdog kills. (2026-10-25, the runner's `ae2-crops`: twelve changes of size in one session (1395x786 and 2560x1440, six rounds) with no redial, the app's memory level 175.9 → 186.3 MB, at most 186.7; three runs. The frame rate was not read: the HUD's numbers need Show connection details on the phone.)
+- A crop never ends the session. One run of `ae2-crops` in six (2026-10-25) saw the session close right after a crop's first rebuild (1394 wide; the second, at 1395, never came) and the phone redial; the phone's log had rotated past it, so the cause is unknown. Each crop also rebuilds the encoder twice (1394, then 1395 wide), about 0.4 s each.
 
 **17. Foldable / tablet dual-pane (R4 E6)**
 
