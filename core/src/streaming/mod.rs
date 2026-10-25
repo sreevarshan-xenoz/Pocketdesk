@@ -449,6 +449,7 @@ mod tests {
         odd.height = 5;
         assert!(odd.to_even());
         assert_eq!((odd.width, odd.height), (6, 4));
+        assert_eq!(odd.stride, 24, "repacked tight: the sidecar encoders ignore stride");
         assert_eq!(
             px(&odd, 5, 3),
             (5, 3),
