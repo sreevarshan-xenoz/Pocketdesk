@@ -589,9 +589,13 @@ class Server:
 
     def linked(self) -> list[str]:
         path = self.root / "state" / "live_sessions.json"
-        if not path.exists():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            # Absent, or being replaced by the server just then (Windows
+            # refuses the read): none this time, as `in_session` reads it.
             return []
-        return fresh_linked(path.read_text(encoding="utf-8"), time.time())
+        return fresh_linked(text, time.time())
 
     def event_count(self) -> int:
         path = self.root / "state" / "events.jsonl"
@@ -3467,7 +3471,11 @@ def ae2_crops(ctx: Ctx) -> tuple[str, str]:
                     close_sheets(ctx)
                     time.sleep(5)
                     if not in_session(ctx):
-                        return "FAIL", f"the session ended after {len(sizes)} changes of size"
+                        # The phone's side, kept at once (AI2): by the run's
+                        # end its log has moved past the moment.
+                        kept = ctx.server.root / f"phone_drop_{int(time.time())}.txt"
+                        kept.write_text(adb("logcat", "-d", "-v", "time", timeout=120), encoding="utf-8")
+                        return "FAIL", f"the session ended after {len(sizes)} changes of size (the phone's log kept in {kept.name})"
                 memory.append(pss_mb())
         finally:
             close_sheets(ctx)
