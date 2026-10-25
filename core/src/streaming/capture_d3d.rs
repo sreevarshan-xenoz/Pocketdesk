@@ -2,7 +2,7 @@
 //! (`capture_wgc.rs`, `capture_dxgi.rs`): turning a GPU texture into a BGRA
 //! [`VideoFrame`], and resolving the phone's monitor index to an `HMONITOR`.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use tracing::warn;
@@ -102,6 +102,20 @@ impl StagingCopy {
 }
 
 /// A fresh-timestamped copy of `frame`, for the idle heartbeat.
+/// How long a frame that arrived `now` waits before it is sent, so frames go
+/// no faster than one a `period`; `None` sends it at once. A frame is never
+/// dropped for coming early (AI3, AI4): it may be the last the source sends for a
+/// long while, a still window's first or the end of a burst of changes, and
+/// the heartbeat can only repeat a frame that was kept.
+pub(super) fn wait_before_sending(
+    last_sent: Option<Instant>,
+    now: Instant,
+    period: Duration,
+) -> Option<Duration> {
+    let since = now.saturating_duration_since(last_sent?);
+    (since < period).then(|| period - since)
+}
+
 pub(super) fn clone_frame(frame: &VideoFrame) -> VideoFrame {
     VideoFrame {
         data: frame.data.clone(),
@@ -167,6 +181,30 @@ pub(super) fn pick_monitor(index: u32) -> HMONITOR {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frame_that_comes_early_waits_its_turn_instead_of_being_dropped() {
+        // AI3: a window's first frame after a switch came within one frame
+        // period of the monitor's last; dropped, a still window sent no
+        // other, and the phone called the link dead 10 s later.
+        let period = Duration::from_millis(33);
+        let now = Instant::now();
+        assert_eq!(
+            wait_before_sending(None, now, period),
+            None,
+            "the first frame goes at once"
+        );
+        assert_eq!(
+            wait_before_sending(Some(now - period), now, period),
+            None,
+            "on time"
+        );
+        assert_eq!(
+            wait_before_sending(Some(now - Duration::from_millis(3)), now, period),
+            Some(Duration::from_millis(30)),
+            "early: held for the rest of the period, then sent"
+        );
+    }
 
     #[test]
     fn there_is_at_least_one_monitor_to_capture() {

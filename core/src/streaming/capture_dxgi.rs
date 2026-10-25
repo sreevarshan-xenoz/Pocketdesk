@@ -32,7 +32,7 @@ use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::core::Interface;
 
 use super::capture::CaptureSession;
-use super::capture_d3d::{StagingCopy, clone_frame, pick_monitor};
+use super::capture_d3d::{StagingCopy, clone_frame, pick_monitor, wait_before_sending};
 use super::{StreamingConfig, VideoFrame};
 
 /// How long [`start_dxgi_capture`] waits for the first frame.
@@ -159,9 +159,11 @@ fn run_capture_loop(
         };
         let frame = match acquired {
             Ok(()) => {
-                // A pointer-only update has no new image.
-                let fresh = info.LastPresentTime != 0
-                    && last_sent.is_none_or(|t| t.elapsed() >= frame_period);
+                // A pointer-only update has no new image. An image that comes
+                // early is still copied, and sent once its period is up (AI4):
+                // dropped, it could be the last change, and the heartbeat
+                // would repeat the one before it until the next.
+                let fresh = info.LastPresentTime != 0;
                 let copied = match (fresh, resource) {
                     (true, Some(resource)) => {
                         let texture: ID3D11Texture2D = resource.cast()?;
@@ -174,6 +176,11 @@ fn run_capture_loop(
                     Some(video) => {
                         let video = video?;
                         last_frame = Some(clone_frame(&video));
+                        if let Some(wait) =
+                            wait_before_sending(last_sent, Instant::now(), frame_period)
+                        {
+                            std::thread::sleep(wait);
+                        }
                         video
                     }
                     None => continue,
