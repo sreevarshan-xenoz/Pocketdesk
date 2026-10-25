@@ -4506,15 +4506,18 @@ def ap2_unpaired_reports(ctx: Ctx) -> tuple[str, str]:
     state = ctx.server.root / "state"
     kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
             if (state / name).exists()}
+    # A server just started has the phone's reports once it has sent them.
+    wait_for(lambda: len(kept_for(ctx.server.root, ctx.device)) == 2, 90, 1)
     before = kept_for(ctx.server.root, ctx.device)
     if "phone_switches.json" not in before:
-        return "SKIP", "the computer keeps no switches report for the phone yet"
+        return "SKIP", "the computer kept no switches report for the phone within 90 s"
     unpaired = False
     try:
+        # Set before the CLI: one that timed out may still have unpaired (review).
+        unpaired = True
         code, out = ctx.server.cli("unpair", ctx.device)
         if code != 0:
             return "FAIL", f"pocketdesk unpair said {code}: {out.strip()[:120]}"
-        unpaired = True
         start = time.monotonic()
         gone = wait_for(lambda: not kept_for(ctx.server.root, ctx.device), 30, 0.5)
         took = time.monotonic() - start
@@ -4524,15 +4527,39 @@ def ap2_unpaired_reports(ctx: Ctx) -> tuple[str, str]:
         return ("PASS" if gone and took <= 15 else "FAIL"), said
     finally:
         if unpaired:
-            # The pairing back as it was: stopped, the files put back, started.
-            ctx.server.stop()
+            # The pairing back as it was: stopped, the files put back, started;
+            # each step whatever the one before did, as AL2's (review).
+            try:
+                ctx.server.stop()
+            except (OSError, ValueError) as error:
+                print(f"note: an AP2 cleanup step failed: {error}", file=sys.stderr)
+            missed = []
             for name, data in kept.items():
-                tmp = state / f"{name}.tmp"
-                tmp.write_bytes(data)
-                os.replace(tmp, state / name)
-            why = by_home(ctx)
-            if why:
-                print(f"note: AP2 left the phone off its home link: {why}", file=sys.stderr)
+                # A server killed at its stop may hold the file a moment.
+                for attempt in range(5):
+                    try:
+                        tmp = state / f"{name}.tmp"
+                        tmp.write_bytes(data)
+                        os.replace(tmp, state / name)
+                        break
+                    except OSError as error:
+                        if attempt == 4:
+                            missed.append(f"{name} ({error})")
+                        time.sleep(1)
+            if missed:
+                print(f"note: AP2 could not put back {', '.join(missed)}; the server is left stopped,"
+                      f" the phone unpaired: put them back in {state} by hand", file=sys.stderr)
+            else:
+                try:
+                    # Unpaired, the phone may have gone to the internet road
+                    # and gone back to it: once more, then a note.
+                    why = by_home(ctx)
+                    if why and "internet road" in why:
+                        why = by_home(ctx)
+                    if why:
+                        print(f"note: AP2 left the phone off its home link: {why}", file=sys.stderr)
+                except (OSError, ValueError) as error:
+                    print(f"note: an AP2 cleanup step failed: {error}", file=sys.stderr)
 
 
 # ---- the phone's log, kept long enough (AC6) ----

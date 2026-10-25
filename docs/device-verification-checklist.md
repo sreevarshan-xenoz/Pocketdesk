@@ -2395,7 +2395,7 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] The same within 15 s in a session, and on the computer's Devices page. (where: by hand)
 - [ ] Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
 - [ ] Settings "Phone notifications" off on the computer: the notifications rows name it. (where: by hand)
-- [x] A phone unpaired: its report gone from `phone_switches.json` within seconds. `pocketdesk unpair` took the OPPO out of `phone_switches.json` and `phone_status.json` in 2 s, twice (a throwaway server, its trust store put back after, 2026-10-25; the runner's `ap2-unpaired-reports`).
+- [x] A phone unpaired: its report gone from `phone_switches.json` within seconds. `pocketdesk unpair` took the OPPO out of `phone_switches.json` and `phone_status.json` in 2 to 5 s, four times (a throwaway server, its trust store put back after, 2026-10-25; the runner's `ap2-unpaired-reports`).
 - [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: the switches arrived with the battery's tick, matching the phone (control on with its Accessibility service off, so "Android allows: no"; photos without photo access). Found there first: the bridge let only listed packets out, and the report was not on the list (fixed).
 
 ## 164. Notifications to every computer of mine (L8)
