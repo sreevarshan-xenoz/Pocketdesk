@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -1030,7 +1031,10 @@ private fun HealthCard(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
-            for (problem in problems) {
+            // On the card's own colour: the theme's primary on red read
+            // faintly in the dark (AJ2).
+            val onCard = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onErrorContainer)
+            problems.forEachIndexed { index, problem ->
                 // The sentence takes the card's width and its button goes
                 // under it: beside it, a long button left the sentence a
                 // column a word wide (S2, on the OPPO).
@@ -1041,27 +1045,30 @@ private fun HealthCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
                 FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    // Not now with the last problem's buttons, one row where
+                    // they fit, dismissing first (AJ2: on a row of its own it
+                    // left the card two rows of single buttons).
+                    if (index == problems.lastIndex) {
+                        TextButton(onClick = onNotNow, colors = onCard) { Text(stringResource(R.string.health_not_now)) }
+                    }
                     val paused = problem == HealthProblem.PAUSED_ANYWAY || problem == HealthProblem.PAUSED_STAY_LINKED_OFF
                     if (paused && onAllowBackground != null) {
-                        TextButton(onClick = onAllowBackground) { Text(stringResource(R.string.bg_allow)) }
+                        TextButton(onClick = onAllowBackground, colors = onCard) { Text(stringResource(R.string.bg_allow)) }
                     }
                     when (problem) {
                         HealthProblem.CONTROL_BLOCKED ->
-                            TextButton(onClick = onTurnOffControl) { Text(stringResource(R.string.health_turn_off)) }
+                            TextButton(onClick = onTurnOffControl, colors = onCard) { Text(stringResource(R.string.health_turn_off)) }
                         HealthProblem.DOWNLOAD_FOLDER ->
-                            TextButton(onClick = onChooseFolder) { Text(stringResource(R.string.health_choose)) }
+                            TextButton(onClick = onChooseFolder, colors = onCard) { Text(stringResource(R.string.health_choose)) }
                         HealthProblem.SCREENSHOTS_STOPPED, HealthProblem.CAMERA_STOPPED ->
-                            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.health_settings)) }
+                            TextButton(onClick = onOpenSettings, colors = onCard) { Text(stringResource(R.string.health_settings)) }
                         HealthProblem.PAUSED_STAY_LINKED_OFF ->
-                            TextButton(onClick = onTurnOnStayLinked) { Text(stringResource(R.string.health_turn_on)) }
+                            TextButton(onClick = onTurnOnStayLinked, colors = onCard) { Text(stringResource(R.string.health_turn_on)) }
                         HealthProblem.PAUSED_ANYWAY ->
-                            TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.bg_maker_guide)) }
-                        else -> TextButton(onClick = { onFix(problem) }) { Text(stringResource(R.string.health_fix)) }
+                            TextButton(onClick = { onFix(problem) }, colors = onCard) { Text(stringResource(R.string.bg_maker_guide)) }
+                        else -> TextButton(onClick = { onFix(problem) }, colors = onCard) { Text(stringResource(R.string.health_fix)) }
                     }
                 }
-            }
-            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onNotNow) { Text(stringResource(R.string.health_not_now)) }
             }
         }
     }
@@ -1103,16 +1110,20 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // Three buttons wrap onto a second line rather than push Allow,
-            // the one that fixes it, off the card (S2, on the OPPO).
-            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                if (guide != null) {
-                    TextButton(onClick = {
+            // The phone maker's own setting reads as a link under the text,
+            // the card's two answers on their row (AJ2: three buttons wrapped
+            // into a lone button above the other two).
+            if (guide != null) {
+                TextButton(
+                    onClick = {
                         if (!BackgroundRunning.openGuide(context, guide)) {
                             android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
                         }
-                    }) { Text(stringResource(R.string.bg_maker_guide)) }
-                }
+                    },
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                ) { Text(stringResource(R.string.bg_maker_guide)) }
+            }
+            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.bg_dont_remind)) }
                 TextButton(onClick = onAllow) { Text(stringResource(R.string.bg_allow)) }
             }
