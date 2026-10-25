@@ -4407,6 +4407,161 @@ def al3_empty_history(ctx: Ctx) -> tuple[str, str]:
             adb("shell", "input", "keyevent", "KEYCODE_BACK")
 
 
+# ---- the phone's ringer on the computer (AP1) ----
+
+
+def ringer_of(root: pathlib.Path, device: str) -> Optional[str]:
+    """`device`'s ringer as the computer keeps it (`phone_status.json`)."""
+    try:
+        data = json.loads((root / "state" / "phone_status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data.get("batteries", {}).get(device, {}).get("ringer")
+
+
+def ringer_mode(dump: str) -> Optional[str]:
+    """The phone's ringer, from `dumpsys audio`: normal, vibrate or silent."""
+    found = re.search(r"mode \(external\)\s*=\s*(\w+)", dump) or re.search(r"mRingerMode=(\w+)", dump)
+    return found.group(1).lower() if found else None
+
+
+def phone_ringer() -> Optional[str]:
+    return ringer_mode(adb("shell", "dumpsys", "audio"))
+
+
+def set_ringer(mode: str) -> None:
+    """Through the fixture (the shell cannot on Android 14)."""
+    am("broadcast", "-n", f"{FIXTURE}/.RingerReceiver", "-a", "dev.pocketdesk.fixture.RINGER", "--es", "mode", mode)
+
+
+@check("ap1-ringer", "§162")
+def ap1_ringer(ctx: Ctx) -> tuple[str, str]:
+    """The phone's ringer reaches the computer: turned on the phone in the
+    background, the computer's copy follows within a tick (the phone sends
+    its state when the ringer changes); in a session, within 15 s (§162).
+    The phone's ringer is put back as it was."""
+    if not ctx.phone.prefs("pocketdesk-ui").get("share_battery", True):
+        return "SKIP", "turn on Share the phone's state in the phone's Settings"
+    was = phone_ringer()
+    if was not in ("normal", "vibrate", "silent"):
+        return "SKIP", f"the phone's ringer reads {was or 'nothing'}: it could not be put back"
+    first, second = ("vibrate", "silent") if was != "vibrate" else ("silent", "normal")
+    said = []
+    # Silent, and leaving it, needs Do Not Disturb access: the fixture's
+    # for the check, taken back after.
+    adb("shell", "cmd", "notification", "allow_dnd", FIXTURE)
+    try:
+        start = time.monotonic()
+        set_ringer(first)
+        seen = wait_for(lambda: ringer_of(ctx.server.root, ctx.device) == first, 90, 1)
+        said.append(f"{first} in the background: {f'{time.monotonic() - start:.0f} s' if seen else 'not within 90 s'}")
+        if not seen:
+            return "FAIL", "; ".join(said)
+
+        def body(ctx: Ctx) -> tuple[str, str]:
+            if start_session(ctx) is None:
+                return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+            if not wait_for(lambda: in_session(ctx), 30, 1):
+                return "TIMEOUT", "no session within 30 s"
+            at = time.monotonic()
+            set_ringer(second)
+            # Watched past the 15 s it must keep, so a miss says by how much.
+            got = wait_for(lambda: ringer_of(ctx.server.root, ctx.device) == second, 30, 0.5)
+            took = time.monotonic() - at
+            said.append(f"{second} in a session: {f'{took:.1f} s' if got else 'not within 30 s'}")
+            return ("PASS" if got and took <= 15 else "FAIL"), "; ".join(said)
+
+        return session_check(ctx, body)
+    finally:
+        set_ringer(was)
+        time.sleep(1)
+        adb("shell", "cmd", "notification", "disallow_dnd", FIXTURE)
+        if phone_ringer() != was:
+            print(f"note: AP1 left the phone's ringer at {phone_ringer()}, not {was}", file=sys.stderr)
+
+
+# ---- an unpaired phone's reports leave the computer (AP2) ----
+
+
+def kept_for(root: pathlib.Path, device: str) -> list[str]:
+    """Which of the computer's per-phone reports still hold `device`."""
+    out = []
+    for name, key in (("phone_switches.json", "phones"), ("phone_status.json", "batteries")):
+        try:
+            data = json.loads((root / "state" / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if device in data.get(key, {}):
+            out.append(name)
+    return out
+
+
+@check("ap2-unpaired-reports", "§163")
+def ap2_unpaired_reports(ctx: Ctx) -> tuple[str, str]:
+    """A phone unpaired (`pocketdesk unpair`, as the desktop app's Unpair
+    does) is gone within seconds from the computer's reports of it: its
+    switches (`phone_switches.json`) and its state (`phone_status.json`)
+    (§163). The throwaway's trust store and device keys are put back after,
+    and the phone linked at home again."""
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    # A server just started has the phone's reports once it has sent them.
+    wait_for(lambda: len(kept_for(ctx.server.root, ctx.device)) == 2, 90, 1)
+    before = kept_for(ctx.server.root, ctx.device)
+    if "phone_switches.json" not in before:
+        return "SKIP", "the computer kept no switches report for the phone within 90 s"
+    unpaired = False
+    try:
+        # Set before the CLI: one that timed out may still have unpaired (review).
+        unpaired = True
+        code, out = ctx.server.cli("unpair", ctx.device)
+        if code != 0:
+            return "FAIL", f"pocketdesk unpair said {code}: {out.strip()[:120]}"
+        start = time.monotonic()
+        gone = wait_for(lambda: not kept_for(ctx.server.root, ctx.device), 30, 0.5)
+        took = time.monotonic() - start
+        left = kept_for(ctx.server.root, ctx.device)
+        said = (f"held in {', '.join(before)}; unpaired: gone from them in {took:.0f} s" if gone
+                else f"held in {', '.join(before)}; unpaired: still in {', '.join(left)} after 30 s")
+        return ("PASS" if gone and took <= 15 else "FAIL"), said
+    finally:
+        if unpaired:
+            # The pairing back as it was: stopped, the files put back, started;
+            # each step whatever the one before did, as AL2's (review).
+            try:
+                ctx.server.stop()
+            except (OSError, ValueError) as error:
+                print(f"note: an AP2 cleanup step failed: {error}", file=sys.stderr)
+            missed = []
+            for name, data in kept.items():
+                # A server killed at its stop may hold the file a moment.
+                for attempt in range(5):
+                    try:
+                        tmp = state / f"{name}.tmp"
+                        tmp.write_bytes(data)
+                        os.replace(tmp, state / name)
+                        break
+                    except OSError as error:
+                        if attempt == 4:
+                            missed.append(f"{name} ({error})")
+                        time.sleep(1)
+            if missed:
+                print(f"note: AP2 could not put back {', '.join(missed)}; the server is left stopped,"
+                      f" the phone unpaired: put them back in {state} by hand", file=sys.stderr)
+            else:
+                try:
+                    # Unpaired, the phone may have gone to the internet road
+                    # and gone back to it: once more, then a note.
+                    why = by_home(ctx)
+                    if why and "internet road" in why:
+                        why = by_home(ctx)
+                    if why:
+                        print(f"note: AP2 left the phone off its home link: {why}", file=sys.stderr)
+                except (OSError, ValueError) as error:
+                    print(f"note: an AP2 cleanup step failed: {error}", file=sys.stderr)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of

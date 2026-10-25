@@ -2379,7 +2379,8 @@ Built 2026-10-21; tested through units, nothing on a device yet.
 
 Built 2026-10-21; tested through units, nothing on a device yet.
 - [ ] The Overview's line matches the phone's Settings: free and total storage, Wi-Fi with its bars. (where: by hand)
-- [ ] The ringer turned to vibrate and to silent on the phone shows within 15 s in a session, and within a tick in the background.
+- [x] The ringer turned on the phone shows within a tick in the background: vibrate reached the computer's `phone_status.json` in 2 to 7 s, four times (the OPPO, a throwaway server, no session, 2026-10-25; the runner's `ap1-ringer`, the ringer turned through the fixture app and put back).
+- [ ] The same within 15 s in a session. Found there: silent took 13.6 to 16.7 s over four runs (2026-10-25), as the session's reporter reads the phone's state on a 15 s tick and the send comes after; the background's reporter is quicker. AP3 sends a ringer change in a session at once.
 - [ ] Behind Tailscale on the phone: Wi-Fi with its bars, not nothing. (where: away)
 - [ ] Mobile data with its bars, on a phone with a SIM (two SIMs: the data SIM's).
 - [x] "Share the phone's state" off: nothing sent for 330 s, past the 5-minute resend; on again, the state arrived 8 s after the app started (the OPPO, a throwaway server, no session, 2026-10-24).
@@ -2394,7 +2395,7 @@ Built 2026-10-21; tested through units and the desktop harness, nothing on a dev
 - [ ] The same within 15 s in a session, and on the computer's Devices page. (where: by hand)
 - [ ] Notification access revoked on the phone: the features the listener runs say "Android allows: no", with the advice.
 - [ ] Settings "Phone notifications" off on the computer: the notifications rows name it. (where: by hand)
-- [ ] A phone unpaired: its report gone from `phone_switches.json` within seconds.
+- [x] A phone unpaired: its report gone from `phone_switches.json` within seconds. `pocketdesk unpair` took the OPPO out of `phone_switches.json` and `phone_status.json` in 2 to 5 s, four times (a throwaway server, its trust store put back after, 2026-10-25; the runner's `ap2-unpaired-reports`).
 - [x] 2026-10-21, on the OPPO (CPH2359) against a throwaway server: the switches arrived with the battery's tick, matching the phone (control on with its Accessibility service off, so "Android allows: no"; photos without photo access). Found there first: the bridge let only listed packets out, and the report was not on the list (fixed).
 
 ## 164. Notifications to every computer of mine (L8)

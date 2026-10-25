@@ -425,6 +425,36 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.preset_changes(log), 2)
         self.assertEqual(dc.preset_changes(""), 0)
 
+    def test_the_phone_s_ringer_from_dumpsys(self):
+        dump = chr(10).join(["Ringer mode: ", "- mode (internal) = VIBRATE", "- mode (external) = SILENT"])
+        self.assertEqual(dc.ringer_mode(dump), "silent")
+        self.assertIsNone(dc.ringer_mode("nothing here"))
+
+    def test_the_ringer_the_computer_keeps(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "state").mkdir()
+            self.assertIsNone(dc.ringer_of(root, "aaa"))
+            (root / "state" / "phone_status.json").write_text(
+                json.dumps({"batteries": {"aaa": {"ringer": "vibrate"}, "bbb": {}}}), encoding="utf-8")
+            self.assertEqual(dc.ringer_of(root, "aaa"), "vibrate")
+            self.assertIsNone(dc.ringer_of(root, "bbb"))
+
+    def test_what_the_computer_keeps_of_a_phone(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "state").mkdir()
+            self.assertEqual(dc.kept_for(root, "aaa"), [])
+            (root / "state" / "phone_status.json").write_text(
+                json.dumps({"batteries": {"aaa": {"ringer": "vibrate"}}}), encoding="utf-8")
+            (root / "state" / "phone_switches.json").write_text(
+                json.dumps({"phones": {"aaa": {}, "bbb": {}}}), encoding="utf-8")
+            self.assertEqual(dc.kept_for(root, "aaa"), ["phone_switches.json", "phone_status.json"])
+            self.assertEqual(dc.kept_for(root, "bbb"), ["phone_switches.json"])
+            self.assertEqual(dc.kept_for(root, "ccc"), [])
+
 
 if __name__ == "__main__":
     unittest.main()
