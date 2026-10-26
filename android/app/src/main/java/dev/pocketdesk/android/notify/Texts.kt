@@ -89,14 +89,15 @@ object TextPrefs {
 
     /**
      * Up to [TextQueue.BATCH] texts waiting for [own] (the own computer's
-     * paired id, null when there is none); those kept for a computer no
-     * longer among [saved] are dropped (BC4).
+     * paired id, null when there is none), or kept for one among
+     * [refusing]; those kept for a computer no longer among [saved] are
+     * dropped (BC4).
      */
     @Synchronized
-    fun queued(ctx: Context, own: String?, saved: Set<String>): List<JSONObject> {
+    fun queued(ctx: Context, own: String?, saved: Set<String>, refusing: Set<String>): List<JSONObject> {
         val queue = array(ctx, KEY_QUEUE)
         val texts = List(queue.length()) { queue.getJSONObject(it) }
-        val split = TextQueue.split(texts.map { it.optString(TextQueue.FOR) }, own, saved)
+        val split = TextQueue.split(texts.map { it.optString(TextQueue.FOR) }, own, saved, refusing)
         if (split.drop.isNotEmpty()) {
             val kept = JSONArray()
             texts.forEachIndexed { i, text -> if (i !in split.drop) kept.put(text) }
@@ -202,8 +203,11 @@ object Texts {
     fun flush(ctx: Context) {
         if (!TextPrefs.show(ctx)) return
         val own = PhoneLink.target(ctx)?.let { HostStore.pairedDesktopId(ctx, it.address) }
-        val saved = HostStore.hosts(ctx).mapNotNull { HostStore.pairedDesktopId(ctx, it.address) }.toSet()
-        val batch = TextPrefs.queued(ctx, own, saved)
+        val hosts = HostStore.hosts(ctx)
+        val saved = hosts.mapNotNull { HostStore.pairedDesktopId(ctx, it.address) }.toSet()
+        val refusing = hosts.filter { RustCore.unpairedBy(it.address) }
+            .mapNotNull { HostStore.pairedDesktopId(ctx, it.address) }.toSet()
+        val batch = TextPrefs.queued(ctx, own, saved, refusing)
         if (batch.isEmpty()) return
         // The sender's name is looked up as the text leaves (T8e), here on the
         // worker, not where it arrived on the main thread, and only if the
@@ -216,7 +220,8 @@ object Texts {
                 contactName(ctx, optString("address"))?.let { put("name", it) }
             }
         }
-        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)))
+        // To that computer only (review: the own one could change between).
+        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)), own)
         if (sent) TextPrefs.dequeue(ctx, batch)
     }
 

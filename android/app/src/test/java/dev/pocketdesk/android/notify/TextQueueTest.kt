@@ -19,6 +19,20 @@ class TextQueueTest {
     }
 
     @Test
+    fun `a text kept for another saved computer waits for it`() {
+        assertEquals(TextQueue.Split(emptyList(), emptyList()), TextQueue.split(listOf("pc-a"), "pc-b", saved))
+    }
+
+    /** Review: one kept for a computer that then said the phone is not paired goes to the own one. */
+    @Test
+    fun `a text kept for a computer that unpaired the phone goes to the own one`() {
+        assertEquals(
+            TextQueue.Split(send = listOf(0), drop = emptyList()),
+            TextQueue.split(listOf("pc-a"), "pc-b", saved, refusing = setOf("pc-a")),
+        )
+    }
+
+    @Test
     fun `a text kept for a computer since removed is dropped`() {
         val fors = listOf("pc-gone", "pc-b")
         assertEquals(TextQueue.Split(send = listOf(1), drop = listOf(0)), TextQueue.split(fors, "pc-b", saved))
