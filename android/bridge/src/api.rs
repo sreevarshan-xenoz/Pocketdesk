@@ -1465,6 +1465,10 @@ async fn request_answer(
     timeout: Duration,
     matches: impl Fn(&serde_json::Value) -> bool,
 ) -> Result<Option<serde_json::Value>, Unanswered> {
+    // A computer that said this phone is not paired gets nothing (BB2).
+    if crate::unpaired::refuses(address, &request.packet_type) {
+        return Err(Unanswered::NotSent);
+    }
     // Only the live connection *to this desktop* may carry the request: with
     // another computer connected, reusing it would send this desktop's query -
     // or its pairing PIN - to the wrong machine, and record that machine's
@@ -1606,6 +1610,9 @@ async fn oneshot_request_dialing(
     reply_type: &str,
     timeout: Duration,
 ) -> Result<serde_json::Value, String> {
+    if crate::unpaired::refuses(address, &request.packet_type) {
+        return Err(crate::unpaired::REFUSED.to_string());
+    }
     let conn_mgr = control_manager(dial)?;
     let identity = client_identity();
     let (stream, claims) = conn_mgr
@@ -1678,6 +1685,9 @@ pub(crate) async fn send_on_live(
     port: u16,
     packet: &NetworkPacket,
 ) -> Result<(), String> {
+    if crate::unpaired::refuses(address, &packet.packet_type) {
+        return Err(crate::unpaired::REFUSED.to_string());
+    }
     let writer = live_writer_for(address, port)
         .await
         .ok_or("Not connected to this computer: open a session first")?;
@@ -1718,6 +1728,9 @@ pub(crate) async fn push_packet(
     port: u16,
     request: &NetworkPacket,
 ) -> Result<(), String> {
+    if crate::unpaired::refuses(address, &request.packet_type) {
+        return Err(crate::unpaired::REFUSED.to_string());
+    }
     // The live connection only if it is to this desktop: a push for another
     // computer (a clipboard, a command) must not reach the connected one.
     if let Some(writer) = live_writer_for(address, port).await {

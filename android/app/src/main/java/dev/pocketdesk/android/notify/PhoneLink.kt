@@ -38,9 +38,21 @@ object PhoneLink {
             seenGeneration = generation
         }
         return recentTarget.get(SystemClock.elapsedRealtime()) {
-            HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null }
+            pick(HostStore.hosts(ctx), { HostStore.pairedDesktopId(ctx, it) }, RustCore::unpairedBy)
         }
     }
+
+    /**
+     * The phone's own computer among [hosts], most recent first: the first
+     * paired one that has not said the phone is not paired with it (BB2: one
+     * that unpaired the phone kept the place, and a second, still paired,
+     * got nothing).
+     */
+    fun pick(
+        hosts: List<HostStore.Host>,
+        pairedId: (String) -> String?,
+        unpairedBy: (String) -> Boolean,
+    ): HostStore.Host? = hosts.firstOrNull { pairedId(it.address) != null && !unpairedBy(it.address) }
 
     /** The saved computers' change count [recentTarget] was last checked at. */
     @Volatile

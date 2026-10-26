@@ -38,15 +38,31 @@ pub fn by(address: &str) -> bool {
     said_set().contains(address)
 }
 
+/// Whether `packet_type` is pairing's own (asked, or answered).
+fn pairing(packet_type: &str) -> bool {
+    packet_type.starts_with("kdeconnect.pair") || packet_type.ends_with(".pair")
+}
+
 /// What a packet of `packet_type` from the computer at `address` says of
 /// this phone's standing there: its word that it is not paired, or, for
 /// anything but pairing's own answers, that it is let in.
 pub(crate) fn heard(address: &str, packet_type: &str) {
     if packet_type == NOT_PAIRED {
         said(address);
-    } else if !packet_type.starts_with("kdeconnect.pair") && !packet_type.ends_with(".pair") {
+    } else if !pairing(packet_type) {
         let_in(address);
     }
+}
+
+/// Why a send goes nowhere: the computer said the phone is not paired.
+pub(crate) const REFUSED: &str = "That computer unpaired this phone: pair again, or remove it";
+
+/// Whether a packet of `packet_type` stays on the phone, as the computer at
+/// `address` said this phone is not paired with it (BB2: its notifications,
+/// texts and clipboard went on, dropped there, and were counted delivered).
+/// Pairing still goes.
+pub(crate) fn refuses(address: &str, packet_type: &str) -> bool {
+    !pairing(packet_type) && by(address)
 }
 
 #[cfg(test)]
@@ -69,5 +85,23 @@ mod tests {
         let_in(address);
         assert!(!by(address), "paired again");
         assert!(!by("192.0.2.91"), "only that computer");
+    }
+
+    /// BB2: nothing but pairing goes to a computer that said so.
+    #[test]
+    fn nothing_but_pairing_goes_to_a_computer_that_said_so() {
+        let address = "192.0.2.92";
+        assert!(!refuses(address, "kdeconnect.notification"));
+        said(address);
+        assert!(refuses(address, "kdeconnect.notification"));
+        assert!(refuses(address, "kdeconnect.pocketdesk.sms"));
+        assert!(!refuses(address, "kdeconnect.pair"));
+        assert!(!refuses(address, "kdeconnect.pocketdesk.pair"));
+        assert!(
+            !refuses("192.0.2.93", "kdeconnect.notification"),
+            "only that computer"
+        );
+        let_in(address);
+        assert!(!refuses(address, "kdeconnect.notification"));
     }
 }

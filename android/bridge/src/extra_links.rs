@@ -147,6 +147,10 @@ pub(crate) async fn send(
     if !SENT.contains(&packet_type) {
         return Err(format!("{packet_type} is not sent this way"));
     }
+    // Its copies stay on the phone once it said the phone is not paired (BB2).
+    if crate::unpaired::refuses(address, packet_type) {
+        return Err(crate::unpaired::REFUSED.to_string());
+    }
     let body: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("Invalid notification: {e}"))?;
     if !body.is_object() {
