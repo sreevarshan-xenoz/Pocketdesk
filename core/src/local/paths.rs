@@ -44,6 +44,8 @@ pub const PHONE_ACTIONS_DIR: &str = "phone_actions_out";
 pub const TYPING_DIR: &str = "typing_out";
 /// Rings the desktop app or the local API asks the server to send to a phone (N1).
 pub const RINGS_DIR: &str = "rings_out";
+/// Alerts `pocketdesk done` leaves for the server to show (BF1), one file an alert.
+pub const ALERTS_DIR: &str = "alerts_out";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).
 pub const QUIET_DIR: &str = "quiet_out";
 /// The texts that crossed between this computer and its phones (D3).

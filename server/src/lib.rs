@@ -2,6 +2,7 @@
 //!
 //! Re-exports for integration testing. The `main.rs` binary uses these same modules.
 
+pub mod alerts;
 pub mod approvals;
 pub mod audio_control;
 pub(crate) mod away_lock;
@@ -14,6 +15,7 @@ pub(crate) mod clipboard_push;
 pub mod config;
 pub mod conn_budget;
 pub mod crash_report;
+pub mod done;
 pub(crate) mod drive;
 pub mod driving;
 pub mod events;

@@ -1001,7 +1001,10 @@ class PhoneNotificationListener : NotificationListenerService() {
         // N5: the computer's music, while its switch is on.
         computerMedia.tick()
         val computerMediaWanted = computerMedia.linkWanted()
-        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || actionsOn || mediaWanted || computerMediaWanted || toastWhere) &&
+        // BF1: alerts from `pocketdesk done` reach only a phone linked when
+        // the command ends.
+        val alertsOn = Prefs.computerAlerts(this)
+        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || actionsOn || mediaWanted || computerMediaWanted || toastWhere || alertsOn) &&
             own != null && RustCore.controlPeer() == null
         ) {
             val now = SystemClock.elapsedRealtime()
@@ -1024,6 +1027,8 @@ class PhoneNotificationListener : NotificationListenerService() {
         if (!dev.pocketdesk.android.calls.Dials.inSession) {
             dev.pocketdesk.android.calls.Dials.take(this, own, inFront = false)
         }
+        // BF1: alerts from `pocketdesk done`, shown with no session open.
+        own?.let { dev.pocketdesk.android.notify.ComputerAlerts.take(this, it.address, it.controlPort) }
         // O2: screenshots and locks the computer asks for, taken whatever
         // the switch says, so they never wait for a later turn of it.
         dev.pocketdesk.android.control.PhoneActions.take(this, own)

@@ -286,6 +286,7 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] Inline reply from the shade → desktop `replies.log` records it, text on desktop clipboard, confirmation popup; originating notification disappears. (where: linux)
 - [ ] "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio). (where: by hand)
 - [x] Desktop pushes findmydevice ring → phone alarm loops at max volume 30 s (phone in alarm-volume >0; check DoNotDisturb doesn't block USAGE_ALARM). (2026-10-23 (P11, Q1's `p11-ring`): `pocketdesk ring` rang the OPPO 30 s at its alarm volume (no longer the maximum since N4), with the alarm vibration and the torch.)
+- [x] `pocketdesk done -- <command>` tells the phone when the command ends, with no session open: a notification with how it ended, how long it took and its last lines, under "Alerts from the computer" (BF1). (2026-10-27, the runner's `bf1-done-tells-the-phone` on the OPPO against a throwaway, BF1's build: a command that exited 3 kept its code, and the phone showed "Failed (3)" with the title given and the command's last line. It found the computer's notifications were dropped by the phone outside a session and refused on Android 14; both fixed in BF1.)
 
 ## 8a. Control-channel versioning (R4 D4)
 

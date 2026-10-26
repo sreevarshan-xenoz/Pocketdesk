@@ -291,6 +291,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.linksFromComputer(context),
                     { Prefs.setLinksFromComputer(context, it) },
                 )
+                // BF1: `pocketdesk done` saying a command on the computer ended.
+                SettingSwitch(
+                    stringResource(R.string.settings_computer_alerts),
+                    stringResource(R.string.settings_computer_alerts_summary),
+                    Prefs.computerAlerts(context),
+                    { Prefs.setComputerAlerts(context, it) },
+                )
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),
