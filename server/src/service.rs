@@ -1592,6 +1592,16 @@ where
                                     tracing::info!(
                                         "Closing {device_id}'s connection: no longer let in"
                                     );
+                                    // Said first, so it learns now, not at its
+                                    // next connection (BB1).
+                                    let _ = sender_ref
+                                        .send_packet(
+                                            &NetworkPacket::new(
+                                                pocketdesk_core::protocol::connection::NOT_PAIRED,
+                                            )
+                                            .with_body(serde_json::json!({})),
+                                        )
+                                        .await;
                                     break;
                                 }
                                 if refusal_said {
