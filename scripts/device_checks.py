@@ -5744,6 +5744,44 @@ def au2_hud_delay(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- a device's own kick (AY3) ----
+
+
+def request_device_kick(ctx: Ctx, device: str) -> None:
+    """Ask the throwaway to end `device`'s sessions alone, as the desktop
+    app's Unpair and permission changes do (`kicks/*.device`)."""
+    folder = ctx.server.root / "state" / "kicks"
+    folder.mkdir(exist_ok=True)
+    name = str(uuid.uuid4())
+    (folder / f"{name}.tmp").write_text(chr(10).join([device, str(int(time.time())), ""]), encoding="utf-8")
+    os.replace(folder / f"{name}.tmp", folder / f"{name}.device")
+
+
+@check("ay3-device-kick", "§2a")
+def ay3_device_kick(ctx: Ctx) -> tuple[str, str]:
+    """A device's own kick ends its sessions alone (§2a, AY3): in a session,
+    one for a device named "all", and one for a prefix of the phone's id,
+    leave it up; one for the phone's id ends it. As a kick target, "all"
+    or the prefix would have ended it, and every other phone's."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        if start_session(ctx) is None:
+            return "SKIP", "no Connect on a 127.0.0.1 card on Home"
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "TIMEOUT", "no session within 30 s"
+        for other in ("all", ctx.device[:8]):
+            request_device_kick(ctx, other)
+            time.sleep(4)
+            if not in_session(ctx):
+                return "FAIL", "a device kick for another id ended the phone's session"
+        request_device_kick(ctx, ctx.device)
+        start = time.monotonic()
+        ended = wait_for(lambda: not in_session(ctx), 15, 0.5)
+        took = time.monotonic() - start
+        return (("PASS", f"\"all\" and a prefix of its id left the session up; its own id ended it in {took:.1f} s")
+                if ended else ("FAIL", "its own id did not end the session within 15 s"))
+    return session_check(ctx, body)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of

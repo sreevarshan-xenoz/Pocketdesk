@@ -173,11 +173,27 @@ pub fn end_session(id: u64, reason: &[u8]) -> Option<LiveSession> {
 /// `close()` on an already-dying connection is a harmless no-op; the RAII
 /// handles deregister as each pipeline exits.
 pub fn kick(target: &str) -> Vec<LiveSession> {
+    kick_where(|info| matches(info, target))
+}
+
+/// Close the sessions of the device `device_id` alone, and return them
+/// (AY3: the desktop app ended a phone's sessions by its id as a [`kick`]
+/// target, where `all` or a prefix of another phone's id named more).
+pub fn kick_device(device_id: &str) -> Vec<LiveSession> {
+    kick_where(|info| is_device(info, device_id))
+}
+
+/// Whether `info` is a session of the device `device_id`, exactly.
+fn is_device(info: &LiveSession, device_id: &str) -> bool {
+    info.device_id.as_deref() == Some(device_id)
+}
+
+fn kick_where(names: impl Fn(&LiveSession) -> bool) -> Vec<LiveSession> {
     let victims: Vec<Entry> = if let Ok(mut reg) = registry().lock() {
         let ids: Vec<u64> = reg
             .sessions
             .iter()
-            .filter(|(_, e)| matches(&e.info, target))
+            .filter(|(_, e)| names(&e.info))
             .map(|(id, _)| *id)
             .collect();
         ids.into_iter()
@@ -341,5 +357,22 @@ mod tests {
         };
         assert!(matches(&anonymous, "192.168.1.7"));
         assert!(!matches(&anonymous, "deadbeef"));
+    }
+
+    #[test]
+    fn a_device_s_sessions_are_its_own_alone() {
+        // AY3: "all", or a prefix of another device's id, names it alone.
+        let info = |id: &str| LiveSession {
+            streamed: Streamed::default(),
+            id: 1,
+            device_id: Some(id.into()),
+            peer: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1),
+            lan: true,
+            started_unix: 0,
+        };
+        assert!(is_device(&info("deadbeef"), "deadbeef"));
+        assert!(!is_device(&info("deadbeefcafe"), "deadbeef"));
+        assert!(!is_device(&info("deadbeef"), "all"));
+        assert!(is_device(&info("all"), "all"));
     }
 }

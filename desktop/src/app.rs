@@ -948,7 +948,9 @@ impl PocketdeskApp {
         if !connected {
             return;
         }
-        if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
+        // Its sessions alone (AY3): as a kick target, an id of "all" or a
+        // prefix of another phone's would end theirs too.
+        if let Err(e) = sessions::request_kick_device(&self.state_dir, id, now_unix()) {
             self.notice = crate::notice::Notice::error(format!(
                 "Could not end {}'s session: {e}",
                 self.label(id)
@@ -1014,23 +1016,30 @@ impl PocketdeskApp {
     }
 
     fn end_session(&mut self, session: &sessions::MirrorSession) {
-        // A device id names it exactly; a session that never announced one
-        // is ended by its address.
-        let target = session.device_id.clone().unwrap_or_else(|| {
-            session
-                .peer
-                .rsplit_once(':')
-                .map_or(session.peer.clone(), |(ip, _)| ip.to_string())
+        // A device id names its device alone (AY3 review: as a kick target,
+        // "all" or a prefix of another's id named others too); a session
+        // that never announced one is ended by its address.
+        let (target, asked) = match &session.device_id {
+            Some(id) => (
+                id.clone(),
+                sessions::request_kick_device(&self.state_dir, id, now_unix()),
+            ),
+            None => {
+                let ip = session
+                    .peer
+                    .rsplit_once(':')
+                    .map_or(session.peer.clone(), |(ip, _)| ip.to_string());
+                let asked = sessions::request_kick(&self.state_dir, &ip, now_unix());
+                (ip, asked)
+            }
+        };
+        self.notice = crate::notice::Notice::outcome(match asked {
+            Ok(()) => Ok(format!(
+                "Asked the session from {} to end.",
+                self.label(&target)
+            )),
+            Err(e) => Err(format!("Could not end the session: {e}")),
         });
-        self.notice = crate::notice::Notice::outcome(
-            match sessions::request_kick(&self.state_dir, &target, now_unix()) {
-                Ok(()) => Ok(format!(
-                    "Asked the session from {} to end.",
-                    self.label(&target)
-                )),
-                Err(e) => Err(format!("Could not end the session: {e}")),
-            },
-        );
     }
 
     /// The page shown, under its heading.
