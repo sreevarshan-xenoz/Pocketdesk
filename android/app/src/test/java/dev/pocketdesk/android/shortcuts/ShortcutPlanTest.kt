@@ -50,6 +50,76 @@ class ShortcutPlanTest {
         assertEquals(ShortcutPlan.Share.NotSaved, ShortcutPlan.shortcutHost("connect::192.0.2.2", hosts, ""))
     }
 
+    /**
+     * AZ1: a paired computer's shortcut is named by its paired id, so it
+     * stays its own across a move and no other computer takes it over.
+     */
+    @Test
+    fun aPairedComputersShortcutIsNamedByItsPairedId() {
+        val token = "0123456789abcdef"
+        assertEquals(
+            "connect:$token:paired:pc-a",
+            ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "192.0.2.1", token, "pc-a").id,
+        )
+        assertEquals("wake:paired:pc-a", ShortcutPlan.Entry(ShortcutPlan.Kind.WAKE, "192.0.2.1", pairedId = "pc-a").id)
+        assertEquals(ShortcutPlan.Target.Paired("pc-a"), ShortcutPlan.targetOf("connect:$token:paired:pc-a"))
+        assertEquals(ShortcutPlan.Target.Paired("pc-a"), ShortcutPlan.targetOf("wake:paired:pc-a"))
+        assertEquals(ShortcutPlan.Target.Address("2001:db8::7"), ShortcutPlan.targetOf("connect:$token:2001:db8::7"))
+        assertEquals(ShortcutPlan.Target.Address("192.0.2.1"), ShortcutPlan.targetOf("wake:192.0.2.1"))
+        assertEquals(ShortcutPlan.Kind.WAKE, ShortcutPlan.kindOf("wake:paired:pc-a"))
+        assertEquals(ShortcutPlan.Kind.CONNECT, ShortcutPlan.kindOf("connect:$token:paired:pc-a"))
+        val plan = ShortcutPlan.plan(
+            listOf(host("192.0.2.1"), host("192.0.2.2")),
+            hasWake = { it == "192.0.2.1" },
+            token = token,
+            pairedId = { if (it == "192.0.2.1") "pc-a" else null },
+        )
+        assertEquals(
+            listOf("connect:$token:paired:pc-a", "connect:$token:192.0.2.2", "wake:paired:pc-a"),
+            plan.map { it.id },
+        )
+    }
+
+    /**
+     * AZ1: a shortcut made for a paired computer reaches it at its new
+     * address, and never another computer saved later at its old one.
+     */
+    @Test
+    fun aShortcutFollowsItsComputerAndNeverAnotherAtItsAddress() {
+        val token = "0123456789abcdef"
+        // A moved from .1 to .9; B was paired later at .1.
+        val paired = mapOf("192.0.2.9" to "pc-a", "192.0.2.1" to "pc-b")
+        val hosts = listOf(host("192.0.2.1"), host("192.0.2.9"))
+        assertEquals(host("192.0.2.9"), ShortcutPlan.savedHost("192.0.2.1", hosts, "pc-a", paired::get))
+        assertNull(ShortcutPlan.savedHost("192.0.2.1", hosts, "pc-gone", paired::get))
+        assertEquals(
+            "one made before AZ1 names an address",
+            host("192.0.2.1"),
+            ShortcutPlan.savedHost("192.0.2.1", hosts, null, paired::get),
+        )
+        fun share(id: String) = ShortcutPlan.shortcutHost(id, hosts, token, paired::get)
+        assertEquals(ShortcutPlan.Share.To(host("192.0.2.9")), share("connect:$token:paired:pc-a"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:$token:paired:pc-gone"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:fedcba9876543210:paired:pc-a"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("wake:paired:pc-a"))
+    }
+
+    /** AZ1: at a refresh, a pinned shortcut is kept, pointed at its computer's new address, or turned off. */
+    @Test
+    fun aPinnedShortcutIsKeptMovedOrTurnedOff() {
+        val token = "0123456789abcdef"
+        val paired = mapOf("192.0.2.9" to "pc-a", "192.0.2.1" to "pc-b")
+        val hosts = listOf(host("192.0.2.1"), host("192.0.2.9"))
+        fun fate(id: String, address: String?) = ShortcutPlan.pinnedFate(id, address, hosts, paired::get)
+        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-b", "192.0.2.1"))
+        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("connect:$token:paired:pc-a", "192.0.2.1"))
+        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("wake:paired:pc-a", null))
+        assertEquals(ShortcutPlan.Pinned.Off, fate("wake:paired:pc-gone", "192.0.2.5"))
+        // Made before AZ1: by its address, as before.
+        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:192.0.2.9", "192.0.2.9"))
+        assertEquals(ShortcutPlan.Pinned.Off, fate("connect:$token:192.0.2.5", "192.0.2.5"))
+    }
+
     @Test
     fun aShortcutIdNamesItsAddressWithOrWithoutAToken() {
         assertEquals("192.0.2.2", ShortcutPlan.addressOf("connect:0123456789abcdef:192.0.2.2"))

@@ -94,10 +94,12 @@ class MainActivity : ComponentActivity() {
         }
         setIntent(Intent(intent).setAction(Intent.ACTION_MAIN))
         tookShortcut = true
+        // AZ1: one made for a paired computer goes to it, wherever it is now.
         val host = dev.pocketdesk.android.shortcuts.ShortcutPlan.savedHost(
             intent.getStringExtra(dev.pocketdesk.android.shortcuts.Shortcuts.EXTRA_ADDRESS),
             HostStore.hosts(this),
-        )
+            intent.getStringExtra(dev.pocketdesk.android.shortcuts.Shortcuts.EXTRA_PAIRED_ID),
+        ) { HostStore.pairedDesktopId(this, it) }
         if (host == null) {
             android.widget.Toast.makeText(this, R.string.shortcut_not_saved, android.widget.Toast.LENGTH_LONG).show()
             return

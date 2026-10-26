@@ -22,11 +22,18 @@ object Shortcuts {
     const val ACTION_WAKE = "dev.pocketdesk.android.action.WAKE"
     const val EXTRA_ADDRESS = "dev.pocketdesk.android.extra.ADDRESS"
 
-    /** Open the app on [kind] for the computer at [address]. */
+    /** The paired id of the computer an intent was made for (AZ1). */
+    const val EXTRA_PAIRED_ID = "dev.pocketdesk.android.extra.PAIRED_ID"
+
+    /**
+     * Open the app on [kind] for the computer at [address], and, once paired,
+     * only for that computer, wherever it is then (AZ1).
+     */
     fun intent(ctx: Context, kind: ShortcutPlan.Kind, address: String): Intent =
         Intent(ctx, MainActivity::class.java)
             .setAction(if (kind == ShortcutPlan.Kind.WAKE) ACTION_WAKE else ACTION_CONNECT)
             .putExtra(EXTRA_ADDRESS, address)
+            .apply { HostStore.pairedDesktopId(ctx, address)?.let { putExtra(EXTRA_PAIRED_ID, it) } }
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 
     /**
@@ -45,9 +52,35 @@ object Shortcuts {
         runCatching {
             ctx.getSystemService(ShortcutManager::class.java)
                 ?.reportShortcutUsed(
-                    ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, address, dev.pocketdesk.android.Prefs.shareToken(ctx)).id,
+                    ShortcutPlan.Entry(
+                        ShortcutPlan.Kind.CONNECT,
+                        address,
+                        dev.pocketdesk.android.Prefs.shareToken(ctx),
+                        HostStore.pairedDesktopId(ctx, address),
+                    ).id,
                 )
         }
+    }
+
+    /** One shortcut: [kind] for the computer at [address], labelled [shown]. */
+    private fun info(app: Context, id: String, kind: ShortcutPlan.Kind, address: String, shown: String): ShortcutInfo {
+        val wake = kind == ShortcutPlan.Kind.WAKE
+        // The icon tells connect from wake.
+        return ShortcutInfo.Builder(app, id)
+            .setShortLabel(shown)
+            .setLongLabel(app.getString(if (wake) R.string.shortcut_wake else R.string.shortcut_connect, shown))
+            .setIcon(
+                Icon.createWithResource(app, if (wake) R.drawable.ic_shortcut_wake else R.drawable.ic_shortcut_connect),
+            )
+            .setIntent(intent(app, kind, address))
+            .apply {
+                // N2: a computer to share to from the share sheet.
+                if (!wake) {
+                    setCategories(setOf(ShortcutPlan.SHARE_CATEGORY))
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) setLongLived(true)
+                }
+            }
+            .build()
     }
 
     /**
@@ -56,58 +89,47 @@ object Shortcuts {
      */
     fun refresh(ctx: Context) {
         val app = ctx.applicationContext
+        val hosts = HostStore.hosts(app)
+        val pairedId = { address: String -> HostStore.pairedDesktopId(app, address) }
         val plan = ShortcutPlan.plan(
-            HostStore.hosts(app),
+            hosts,
             hasWake = { dev.pocketdesk.android.wake.Waker.canWake(dev.pocketdesk.android.wake.Waker.planFor(app, it)) },
             token = dev.pocketdesk.android.Prefs.shareToken(app),
+            pairedId = pairedId,
         )
-        val wake = ShortcutPlan.Kind.WAKE
         // Its name tells computers apart, else its address (U3); two of one
-        // name get their addresses too (U3 review). The icon tells connect
-        // from wake.
-        val names = plan.associate { it.address to HostStore.shownName(app, it.address) }
+        // name get their addresses too (U3 review).
+        val names = hosts.associate { it.address to HostStore.shownName(app, it.address) }
         val shared = names.values.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-        val shortcuts = plan.map { entry ->
-            val name = names.getValue(entry.address)
-            val shown = if (name in shared) "$name (${entry.address})" else name
-            ShortcutInfo.Builder(app, entry.id)
-                .setShortLabel(shown)
-                .setLongLabel(
-                    app.getString(
-                        if (entry.kind == wake) R.string.shortcut_wake else R.string.shortcut_connect,
-                        shown,
-                    ),
-                )
-                .setIcon(
-                    Icon.createWithResource(
-                        app,
-                        if (entry.kind == wake) R.drawable.ic_shortcut_wake else R.drawable.ic_shortcut_connect,
-                    ),
-                )
-                .setIntent(intent(app, entry.kind, entry.address))
-                .apply {
-                    // N2: a computer to share to from the share sheet.
-                    if (entry.kind != wake) {
-                        setCategories(setOf(ShortcutPlan.SHARE_CATEGORY))
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) setLongLived(true)
-                    }
-                }
-                .build()
+
+        fun shown(address: String): String {
+            val name = names[address] ?: address
+            return if (name in shared) "$name ($address)" else name
         }
+        val shortcuts = plan.map { info(app, it.id, it.kind, it.address, shown(it.address)) }
         val manager = app.getSystemService(ShortcutManager::class.java)
         // A launcher may refuse (rate limits for an app in the background);
         // the next refresh catches up.
         runCatching { manager?.dynamicShortcuts = shortcuts }
         // A shortcut pinned to the home screen outlives the list: one for a
-        // computer that was removed is disabled (a computer saved later at
-        // the same address must not inherit it), and enabled again if the
-        // computer is saved again.
+        // computer that was removed is disabled, and enabled again if the
+        // computer is saved again; one for a computer that moved follows it
+        // (AZ1: by address, a move turned it off and another computer saved
+        // at a removed one's address took it over).
         runCatching {
-            val saved = HostStore.hosts(app).map { it.address }.toSet()
-            val (keep, gone) = manager?.pinnedShortcuts.orEmpty().map { it.id }
-                .partition { id -> ShortcutPlan.addressOf(id) in saved }
-            if (gone.isNotEmpty()) manager?.disableShortcuts(gone, app.getString(R.string.shortcut_not_saved))
-            if (keep.isNotEmpty()) manager?.enableShortcuts(keep)
+            val pinned = manager?.pinnedShortcuts.orEmpty()
+            val fates = pinned.associate {
+                it.id to ShortcutPlan.pinnedFate(it.id, it.intent?.getStringExtra(EXTRA_ADDRESS), hosts, pairedId)
+            }
+            val (off, on) = fates.keys.partition { fates[it] == ShortcutPlan.Pinned.Off }
+            if (off.isNotEmpty()) manager?.disableShortcuts(off, app.getString(R.string.shortcut_not_saved))
+            if (on.isNotEmpty()) manager?.enableShortcuts(on)
+            val moved = fates.mapNotNull { (id, fate) ->
+                (fate as? ShortcutPlan.Pinned.Move)?.let {
+                    info(app, id, ShortcutPlan.kindOf(id), it.host.address, shown(it.host.address))
+                }
+            }
+            if (moved.isNotEmpty()) manager?.updateShortcuts(moved)
         }
         // Not every device has app widgets.
         AppWidgetManager.getInstance(app)?.let { widgets ->
