@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.core.content.edit
 import dev.pocketdesk.android.wake.WakeInfo
 import dev.pocketdesk.android.wake.WakeMethod
+import dev.pocketdesk.android.wake.WakePlan
 import dev.pocketdesk.android.wake.WakeSettings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -131,6 +132,15 @@ object HostStore {
                     else -> continue
                 }
                 remove("$prefix$old")
+            }
+        }
+        // The wakes sent through it, the moved card's own too, go to the
+        // new address (AX2).
+        prefs.edit(commit = true) {
+            for ((key, value) in prefs.all) {
+                if (!key.startsWith(KEY_WAKE_SETTINGS_PREFIX) || value !is String) continue
+                val moved = wakeSettingsFrom(value)?.let { WakePlan.relayMoved(it, old, new.address) } ?: continue
+                putString(key, wakeSettingsJson(moved))
             }
         }
         writeHosts(ctx, list.map { if (it.address == old) new else it })
@@ -271,7 +281,12 @@ object HostStore {
         val legacyMac = prefs.getString("$KEY_WOL_MAC_PREFIX$address", "").orEmpty()
         val json = prefs.getString("$KEY_WAKE_SETTINGS_PREFIX$address", null)
             ?: return legacyWakeSettings(address, legacyMac, wakeInfo(ctx, address)?.mac)
-        return runCatching {
+        return wakeSettingsFrom(json) ?: WakeSettings(mac = legacyMac)
+    }
+
+    /** Wake settings as [saveWakeSettings] keeps them, or null when they do not read. */
+    private fun wakeSettingsFrom(json: String): WakeSettings? =
+        runCatching {
             val o = JSONObject(json)
             WakeSettings(
                 method = runCatching {
@@ -282,8 +297,16 @@ object HostStore {
                 outsidePort = o.optInt("outsidePort"),
                 mac = o.optString("mac"),
             )
-        }.getOrDefault(WakeSettings(mac = legacyMac))
-    }
+        }.getOrNull()
+
+    private fun wakeSettingsJson(settings: WakeSettings): String =
+        JSONObject()
+            .put("method", settings.method.name)
+            .put("relay", settings.relay)
+            .put("outsideHost", settings.outsideHost)
+            .put("outsidePort", settings.outsidePort)
+            .put("mac", settings.mac)
+            .toString()
 
     /**
      * Settings for a computer saved before N6 with a typed MAC: Wake asked
@@ -299,15 +322,8 @@ object HostStore {
     }
 
     fun saveWakeSettings(ctx: Context, address: String, settings: WakeSettings) {
-        val json =
-            JSONObject()
-                .put("method", settings.method.name)
-                .put("relay", settings.relay)
-                .put("outsideHost", settings.outsideHost)
-                .put("outsidePort", settings.outsidePort)
-                .put("mac", settings.mac)
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
-            putString("$KEY_WAKE_SETTINGS_PREFIX$address", json.toString())
+            putString("$KEY_WAKE_SETTINGS_PREFIX$address", wakeSettingsJson(settings))
             putString("$KEY_WOL_MAC_PREFIX$address", settings.mac)
         }
     }
