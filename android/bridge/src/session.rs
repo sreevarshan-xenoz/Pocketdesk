@@ -212,11 +212,23 @@ pub(crate) static PAIR_RESULT: LazyLock<TokioMutex<Option<serde_json::Value>>> =
 pub(crate) static PENDING_NOTIFICATIONS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
     LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 
+/// The app name an alert from `pocketdesk done` comes as (BF1).
+pub(crate) const ALERTS_APP: &str = "Pocketdesk done";
+
+/// Alerts from `pocketdesk done` (BF1), held apart from the computer's
+/// other notifications: the phone shows them with no session open.
+/// Bounded; drained by `take_pending_alerts`.
+pub(crate) static PENDING_ALERTS: LazyLock<std::sync::Mutex<Vec<serde_json::Value>>> =
+    LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
 /// Queue one captured `kdeconnect.notification` body for the UI.
 pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
     let Some(id) = body.get("id").and_then(|v| v.as_str()) else {
         return;
     };
+    // BF1: an alert from `pocketdesk done` waits on its own, for the phone
+    // to show with no session open; the rest wait for a session, as before.
+    let alert = body.get("app").and_then(|v| v.as_str()) == Some(ALERTS_APP);
     let entry = serde_json::json!({
         "id": id,
         "app": body.get("app").and_then(|v| v.as_str()).unwrap_or(source),
@@ -224,7 +236,12 @@ pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
         "text": body.get("text").and_then(|v| v.as_str()).unwrap_or(""),
         "source": source,
     });
-    let mut q = PENDING_NOTIFICATIONS.lock().expect("notification queue");
+    let queue = if alert {
+        &PENDING_ALERTS
+    } else {
+        &PENDING_NOTIFICATIONS
+    };
+    let mut q = queue.lock().expect("notification queue");
     if q.iter().any(|n| n.get("id") == entry.get("id")) {
         return; // desktop re-sends on reconnect; keep one per id
     }
@@ -582,5 +599,45 @@ mod offer_age_tests {
         assert!(offer_fresh(Some(1_000), 1_000 + 599));
         assert!(!offer_fresh(Some(1_000), 1_000 + 600));
         assert!(offer_fresh(None, 5_000), "an offer from before the stamp");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn queued(queue: &std::sync::Mutex<Vec<serde_json::Value>>, id: &str) -> bool {
+        queue
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|n| n.get("id").and_then(|v| v.as_str()) == Some(id))
+    }
+
+    /// BF1: an alert from `pocketdesk done` waits apart, for the phone to
+    /// show with no session open; the computer's other notifications wait
+    /// for a session as before.
+    #[test]
+    fn an_alert_waits_apart_from_the_computer_s_notifications() {
+        let alert = serde_json::json!({
+            "id": "Pocketdesk done|Done: bf1-test", "app": ALERTS_APP, "title": "Done: bf1-test",
+        });
+        let other =
+            serde_json::json!({ "id": "Mail|bf1-test", "app": "Mail", "title": "bf1-test" });
+        queue_notification(&alert, "desk");
+        queue_notification(&other, "desk");
+        assert!(queued(&PENDING_ALERTS, "Pocketdesk done|Done: bf1-test"));
+        assert!(!queued(
+            &PENDING_NOTIFICATIONS,
+            "Pocketdesk done|Done: bf1-test"
+        ));
+        assert!(queued(&PENDING_NOTIFICATIONS, "Mail|bf1-test"));
+        assert!(!queued(&PENDING_ALERTS, "Mail|bf1-test"));
+        let taken = crate::api::take_pending_alerts();
+        assert!(taken.contains("Done: bf1-test"), "{taken}");
+        assert!(
+            !queued(&PENDING_ALERTS, "Pocketdesk done|Done: bf1-test"),
+            "drained"
+        );
     }
 }

@@ -1241,6 +1241,16 @@ pub fn take_pending_notifications() -> String {
     serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Drain the alerts from `pocketdesk done` (BF1) as a JSON array, as
+/// [`take_pending_notifications`] does the rest.
+pub fn take_pending_alerts() -> String {
+    let drained = {
+        let mut q = crate::PENDING_ALERTS.lock().expect("notification queue");
+        std::mem::take(&mut *q)
+    };
+    serde_json::to_string(&drained).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// The computer the live control connection is to, as JSON `{host, port}`,
 /// or `None` when there is none.
 pub async fn control_peer() -> Option<String> {

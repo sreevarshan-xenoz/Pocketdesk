@@ -33,6 +33,7 @@ object Prefs {
     private const val KEY_TELL_OTHER_APPS = "tell_other_apps"
     private const val KEY_OTHERS_RUN_TASKS = "others_run_tasks"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
+    private const val KEY_COMPUTER_ALERTS = "computer_alerts"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -272,6 +273,14 @@ object Prefs {
 
     fun setLinksFromComputer(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_LINKS_FROM_COMPUTER, enabled) }
+        bump()
+    }
+
+    /** Alerts from `pocketdesk done` shown with no session open (BF1); on by default. */
+    fun computerAlerts(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_COMPUTER_ALERTS, true)
+
+    fun setComputerAlerts(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_COMPUTER_ALERTS, enabled) }
         bump()
     }
 

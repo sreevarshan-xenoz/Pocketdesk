@@ -49,6 +49,10 @@ fun DesktopNotificationRelay(address: String, controlPort: Int) {
             for (note in notes) {
                 postDesktopNotification(context, address, controlPort, note)
             }
+            // BF1: alerts too, as the background link does without a session.
+            withContext(Dispatchers.IO) {
+                dev.pocketdesk.android.notify.ComputerAlerts.take(context, address, controlPort)
+            }
             delay(2_000)
         }
     }
@@ -65,12 +69,14 @@ private fun ensureDesktopNotificationChannel(context: Context) {
     manager.createNotificationChannel(channel)
 }
 
-private fun postDesktopNotification(
+internal fun postDesktopNotification(
     context: Context,
     address: String,
     controlPort: Int,
     note: DesktopNotification,
 ) {
+    // Posted from the background link too (BF1), before any session made it.
+    ensureDesktopNotificationChannel(context)
     val title = note.title.ifBlank { note.app.ifBlank { note.source } }
     val key = note.id.hashCode()
 

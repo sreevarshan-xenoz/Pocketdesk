@@ -1961,6 +1961,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePen
     to_jstring(&mut env, json)
 }
 
+/// Drain queued alerts from `pocketdesk done` (BF1) as a JSON array.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakePendingAlerts(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(api::take_pending_alerts()));
+    to_jstring(&mut env, json)
+}
+
 /// The computer the live control connection is to, as JSON, or "".
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlPeer(

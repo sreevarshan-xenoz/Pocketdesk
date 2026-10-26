@@ -206,6 +206,7 @@ object RustCore {
     private external fun nativePairWithPin(address: String, port: Int, pin: String): String
     private external fun nativeCheckPairResult(waitSecs: Long): String
     private external fun nativeTakePendingNotifications(): String
+    private external fun nativeTakePendingAlerts(): String
     private external fun nativeDesktopPrivacy(
         address: String,
         port: Int,
@@ -1220,8 +1221,13 @@ object RustCore {
      * (Tier-2 #11c). Each has a stable `id` used for reply correlation and
      * dedup; the queue is emptied on return.
      */
-    fun takePendingNotifications(): List<DesktopNotification> = runCatching {
-        val arr = org.json.JSONArray(envelope(nativeTakePendingNotifications()).getOrThrow())
+    fun takePendingNotifications(): List<DesktopNotification> = notificationsFrom { nativeTakePendingNotifications() }
+
+    /** Drain the alerts from `pocketdesk done` (BF1), held apart from the rest. */
+    fun takePendingAlerts(): List<DesktopNotification> = notificationsFrom { nativeTakePendingAlerts() }
+
+    private fun notificationsFrom(take: () -> String): List<DesktopNotification> = runCatching {
+        val arr = org.json.JSONArray(envelope(take()).getOrThrow())
         List(arr.length()) { i ->
             val o = arr.getJSONObject(i)
             DesktopNotification(
