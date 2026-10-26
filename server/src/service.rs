@@ -123,6 +123,9 @@ pub async fn run(config: Config) -> Result<()> {
             } else if seam == "POCKETDESK_BROWSE_HOME" {
                 // Fails closed (AD2 review): never the owner's home instead.
                 tracing::warn!("{seam} is not an absolute path: the file browser shows no folder");
+            } else if seam == "POCKETDESK_PEEK_FILE" {
+                // Fails closed too (BF2 review): never this screen instead.
+                tracing::warn!("{seam} is not an absolute path: every peek is refused");
             } else {
                 tracing::warn!("{seam} is not an absolute path; ignored");
             }

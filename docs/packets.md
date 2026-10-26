@@ -37,7 +37,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.endpoint` |  | yes |  | server |
 | `kdeconnect.pocketdesk.exec` | yes | yes | Exec | exec |
 | `kdeconnect.pocketdesk.file_fetch` | yes |  | Files | share |
-| `kdeconnect.pocketdesk.file_fetch_refused` |  | yes |  | clipboard, share |
+| `kdeconnect.pocketdesk.file_fetch_refused` |  | yes |  | clipboard, peek, share |
 | `kdeconnect.pocketdesk.file_offer` |  | yes |  | share |
 | `kdeconnect.pocketdesk.file_offer_declined` | yes |  | Files | share |
 | `kdeconnect.pocketdesk.folder_fetch` | yes |  | Browse | share |
