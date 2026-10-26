@@ -1,7 +1,8 @@
 //! Texts (SMS) between a phone and this desktop (roadmap N5b).
 //!
 //! `<state>/sms.json` holds the conversation: the texts a phone forwarded and
-//! the replies sent from here, the newest [`KEEP`]. Only the server writes it.
+//! the replies sent from here, the newest [`KEEP`], a phone's gone when it is
+//! unpaired (AY5). Only the server writes it.
 //! The desktop app asks for a reply by writing one file in
 //! `<state>/sms_outbox/`; the server takes it once the phone is connected,
 //! adds it to the conversation as sending, and records the phone's answer.
