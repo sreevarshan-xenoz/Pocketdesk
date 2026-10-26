@@ -333,6 +333,22 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchCl
     to_jstring(&mut env, json)
 }
 
+/// One still of the computer's screen into `path`, a JPEG (BF2); a refusal
+/// is its reason alone.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeFetchPeek(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    path: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let path = jstring_to_string(&mut env, &path);
+    let json = envelope(RUNTIME.block_on(download::fetch_peek(address, port as u16, path)));
+    to_jstring(&mut env, json)
+}
+
 /// Show one of this phone's notifications on the desktop, asking it to say
 /// it read it (C3): `acked`, `refused`, `unanswered` or `pushed`.
 #[unsafe(no_mangle)]
