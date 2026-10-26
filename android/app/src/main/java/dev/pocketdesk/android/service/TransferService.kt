@@ -401,6 +401,8 @@ class TransferService : Service() {
             }
         }
         sendCount++
+        // For the camera's and the screenshots' marks (BB4).
+        dev.pocketdesk.android.files.SendOutcomes.record(uri, result.isSuccess)
         // A file that went before the press is sent, not cancelled.
         if (result.isFailure && stopped()) cancelledAny = true
         if (result.isSuccess) {

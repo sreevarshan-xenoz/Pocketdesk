@@ -107,6 +107,30 @@ class CameraUploads(private val ctx: Context) {
     private var restUntilMs = 0L
     private val observers = mutableListOf<ContentObserver>()
 
+    /** What went to the transfer service last, its marks moved once it has gone (BB4). */
+    private var handed: List<Pair<CameraPrefs.Kind, Item>> = emptyList()
+
+    /**
+     * Move each kind's mark past what arrived of the last batch (BB4); one
+     * that did not, and what came after it, are looked at again after a rest.
+     */
+    private fun settle() {
+        var failed = false
+        for (kind in handed.map { it.first }.distinct()) {
+            val items = handed.filter { it.first == kind }.map { it.second }
+            val went = items.associate { it.id to SendOutcomes.take(it.uri) }
+            val mark = UploadMarks.after(items.map { it.id }) { went[it] }
+            mark?.let { CameraPrefs.setLastId(ctx, kind, it) }
+            if (mark != items.last().id) failed = true
+        }
+        handed = emptyList()
+        dirty = true
+        if (failed) {
+            Log.w(TAG, "a new camera photo did not reach the computer; it goes again")
+            restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+        }
+    }
+
     fun tick() {
         if (!CameraPrefs.on(ctx) || !CameraPrefs.photosGranted(ctx)) {
             // Access taken back turns it off, said on Home (as screenshots).
@@ -124,6 +148,7 @@ class CameraUploads(private val ctx: Context) {
         // asked (T3 review: a backlog queued at once went on over mobile
         // data when Wi-Fi went).
         if (TransferService.busy()) return
+        if (handed.isNotEmpty()) return settle()
         if (!CameraRule.mayGo(CameraPrefs.wifiOnly(ctx), onWifi())) return
         val own = PhoneLink.target(ctx) ?: return
         dirty = false
@@ -183,7 +208,9 @@ class CameraUploads(private val ctx: Context) {
         if (!CameraPrefs.on(ctx)) return
         runCatching { TransferService.start(ctx, own.address, own.controlPort, ready.map { it.second.uri }) }
             .onSuccess {
-                ready.forEach { (kind, item) -> CameraPrefs.setLastId(ctx, kind, item.id) }
+                // Marked once they have gone, not as they are handed over
+                // (BB4): one that fails goes again.
+                handed = ready.toList()
                 // What waits behind them is looked at once they are through.
                 dirty = true
             }
