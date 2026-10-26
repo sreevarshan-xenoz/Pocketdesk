@@ -4496,6 +4496,36 @@ def bb3_home_says_unpaired(ctx: Ctx) -> tuple[str, str]:
     return "PASS", f"told, Home said \"{words}\"; put back and let in again, it says Paired"
 
 
+@check("bf1-done-tells-the-phone", "§8")
+def bf1_done_tells_the_phone(ctx: Ctx) -> tuple[str, str]:
+    """`pocketdesk done` tells the phone when a command ends, with no session
+    open (§8, BF1): a short command run through the throwaway's
+    `pocketdesk done --title`, its notification found on the phone by its
+    title (`dumpsys notification --noredact`), with how it ended and its last
+    line. Nothing plays: the computer's notifications come silent."""
+    if ctx.phone.prefs("pocketdesk-ui").get("computer_alerts") is False:
+        return "SKIP", "turn on Alerts from the computer in the phone's Settings"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
+        return "SKIP", "the phone is not linked to the throwaway"
+    token = secrets.token_hex(3)
+    title = f"BF1 check {token}"
+    code, out = ctx.server.cli(
+        "done", "--title", title, "--", sys.executable, "-c", f"print('bf1 last line {token}'); raise SystemExit(3)"
+    )
+    if code != 3:
+        return "FAIL", f"pocketdesk done exited {code}, not the command's 3: {out.strip()[-200:]}"
+
+    def posted() -> str:
+        dump = adb("shell", "dumpsys", "notification", "--noredact")
+        return dump if f"Failed (3): {title}" in dump else ""
+
+    dump = wait_for(posted, 30, 2)
+    if not dump:
+        return "FAIL", "no notification on the phone within 30 s"
+    said = f"bf1 last line {token}" in str(dump)
+    return "PASS", f"exit 3 kept; the phone showed \"Failed (3): BF1 check …\"{' with its last line' if said else ''}"
+
+
 @check("bc3-unsaved-pin-forgotten", "§1")
 def bc3_unsaved_pin_forgotten(ctx: Ctx) -> tuple[str, str]:
     """A pairing link with no fingerprint that does not pair leaves no pin
