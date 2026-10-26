@@ -84,14 +84,14 @@ object HostStore {
 
     /** Forget a desktop and every per-address record hanging off it. */
     fun remove(ctx: Context, address: String) {
-        writeHosts(ctx, hosts(ctx).filterNot { it.address == address })
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // No other card's wake is sent through it any more (BC2), as a move
+        // takes them along (AX2); before the card goes (review).
+        rewriteRelays(prefs) { WakePlan.relayRemoved(it, address) }
+        writeHosts(ctx, hosts(ctx).filterNot { it.address == address })
         prefs.edit {
             for (prefix in PER_ADDRESS) remove("$prefix$address")
         }
-        // No other card's wake is sent through it any more (BC2), as a move
-        // takes them along (AX2).
-        rewriteRelays(prefs) { WakePlan.relayRemoved(it, address) }
     }
 
     /** Each card's Wake settings that [change] gives new ones for, written. */

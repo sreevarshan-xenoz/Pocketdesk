@@ -47,7 +47,7 @@ fun WakeSettingsDialog(address: String, onDismiss: () -> Unit) {
     // saved to wake others behind it, as before N6).
     val others = remember { HostStore.hosts(context).map { it.address } }
     var method by remember { mutableStateOf(saved.method) }
-    var relay by remember { mutableStateOf(saved.relay.ifEmpty { others.firstOrNull().orEmpty() }) }
+    var relay by remember { mutableStateOf(WakePlan.relayShown(saved, others)) }
     var outsideHost by remember { mutableStateOf(saved.outsideHost) }
     var outsidePort by remember { mutableStateOf(if (saved.outsidePort > 0) saved.outsidePort.toString() else "") }
     var mac by remember { mutableStateOf(saved.mac) }

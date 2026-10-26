@@ -162,4 +162,14 @@ class WakePlanTest {
         assertNull(WakePlan.relayRemoved(through, "192.0.2.5"))
         assertNull(WakePlan.relayRemoved(WakeSettings(), "192.0.2.1"))
     }
+
+    @Test
+    fun `a relay removed is not shown as chosen`() {
+        // BC2 review: the settings showed the first saved computer as the
+        // one sending the wake, and Save chose it.
+        val saved = listOf("192.0.2.2", "192.0.2.3")
+        assertEquals("", WakePlan.relayShown(WakeSettings(method = WakeMethod.RELAY), saved))
+        assertEquals("192.0.2.2", WakePlan.relayShown(WakeSettings(), saved))
+        assertEquals("192.0.2.3", WakePlan.relayShown(WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.3"), saved))
+    }
 }

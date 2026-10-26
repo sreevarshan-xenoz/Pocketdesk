@@ -50,6 +50,16 @@ object WakePlan {
      */
     fun relayRemoved(settings: WakeSettings, removed: String): WakeSettings? = relayMoved(settings, removed, "")
 
+    /**
+     * The computer the Wake settings show as sending the wake: the chosen
+     * one, else the first saved, as a start for picking it. Not when it is
+     * the method already and none is chosen (BC2 review: its relay removed,
+     * the first saved, maybe the card itself, looked chosen, and Save chose it).
+     */
+    fun relayShown(saved: WakeSettings, saving: List<String>): String = saved.relay.ifEmpty {
+        if (saved.method == WakeMethod.RELAY) "" else saving.firstOrNull().orEmpty()
+    }
+
     /** The port a magic packet goes to on this network. */
     const val LAN_PORT = 9
 
