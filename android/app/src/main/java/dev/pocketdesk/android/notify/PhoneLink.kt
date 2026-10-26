@@ -72,10 +72,15 @@ object PhoneLink {
      */
     private val recentTarget = Recent<HostStore.Host?>(ttlMs = 5_000L)
 
-    /** Send `packetType` with [body] now (on the worker thread). Returns whether it went. */
-    fun sendNow(ctx: Context, packetType: String, body: JSONObject): Boolean {
+    /**
+     * Send `packetType` with [body] now (on the worker thread). Returns
+     * whether it went. With [to], only while the own computer is the one
+     * with that paired id (BC4 review: texts kept for one went to the next).
+     */
+    fun sendNow(ctx: Context, packetType: String, body: JSONObject, to: String? = null): Boolean {
         if (SystemClock.elapsedRealtime() < pausedUntilMs) return false
         val host = target(ctx) ?: return false
+        if (to != null && HostStore.pairedDesktopId(ctx, host.address) != to) return false
         val send = {
             if (packetType == "kdeconnect.notification") {
                 // Asked to be answered (C3): one written into a link that has

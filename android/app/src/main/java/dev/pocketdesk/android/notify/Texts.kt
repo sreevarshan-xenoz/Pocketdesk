@@ -48,7 +48,11 @@ object TextPrefs {
 
     fun show(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_SHOW, false)
 
-    fun setShow(ctx: Context, on: Boolean) = prefs(ctx).edit { putBoolean(KEY_SHOW, on) }
+    /** Turned off, the texts kept for the computer go too (BC4: they were sent once it was on again). */
+    fun setShow(ctx: Context, on: Boolean) = prefs(ctx).edit {
+        putBoolean(KEY_SHOW, on)
+        if (!on) remove(KEY_QUEUE)
+    }
 
     fun reply(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_REPLY, false)
 
@@ -83,19 +87,35 @@ object TextPrefs {
         prefs(ctx).edit { putString(KEY_QUEUE, kept.toString()) }
     }
 
-    /** Up to 50 texts waiting for the computer. */
+    /**
+     * Up to [TextQueue.BATCH] texts waiting for [own] (the own computer's
+     * paired id, null when there is none), or kept for one among
+     * [refusing]; those kept for a computer no longer among [saved] are
+     * dropped (BC4).
+     */
     @Synchronized
-    fun queued(ctx: Context): List<JSONObject> {
+    fun queued(ctx: Context, own: String?, saved: Set<String>, refusing: Set<String>): List<JSONObject> {
         val queue = array(ctx, KEY_QUEUE)
-        return List(minOf(50, queue.length())) { queue.getJSONObject(it) }
+        val texts = List(queue.length()) { queue.getJSONObject(it) }
+        val split = TextQueue.split(texts.map { it.optString(TextQueue.FOR) }, own, saved, refusing)
+        if (split.drop.isNotEmpty()) {
+            val kept = JSONArray()
+            texts.forEachIndexed { i, text -> if (i !in split.drop) kept.put(text) }
+            prefs(ctx).edit { putString(KEY_QUEUE, kept.toString()) }
+        }
+        return split.send.map { texts[it] }
     }
 
-    /** The first [count] queued texts were delivered. */
+    /** These queued texts were delivered (each once, as [queued] gave them). */
     @Synchronized
-    fun dequeue(ctx: Context, count: Int) {
+    fun dequeue(ctx: Context, sent: List<JSONObject>) {
+        val left = sent.map { it.toString() }.toMutableList()
         val queue = array(ctx, KEY_QUEUE)
         val kept = JSONArray()
-        for (i in count until queue.length()) kept.put(queue.get(i))
+        for (i in 0 until queue.length()) {
+            val text = queue.getJSONObject(i)
+            if (!left.remove(text.toString())) kept.put(text)
+        }
         prefs(ctx).edit { putString(KEY_QUEUE, kept.toString()) }
     }
 
@@ -162,10 +182,13 @@ class SmsReceiver : BroadcastReceiver() {
         val texts = SmsReplyRule.joinParts(parts)
         if (texts.isEmpty()) return
         val now = System.currentTimeMillis()
+        // Kept for the own computer of this moment, and sent to it alone (BC4).
+        val forId = PhoneLink.target(app)?.let { HostStore.pairedDesktopId(app, it.address) }.orEmpty()
         TextPrefs.enqueue(
             app,
             texts.map { (address, body) ->
                 JSONObject().put("address", address).put("body", body).put("date", now).put("event", "received")
+                    .put(TextQueue.FOR, forId)
             },
         )
         RustCore.start(app)
@@ -179,7 +202,12 @@ object Texts {
     /** Deliver the texts waiting for the computer, if it is reachable. */
     fun flush(ctx: Context) {
         if (!TextPrefs.show(ctx)) return
-        val batch = TextPrefs.queued(ctx)
+        val own = PhoneLink.target(ctx)?.let { HostStore.pairedDesktopId(ctx, it.address) }
+        val hosts = HostStore.hosts(ctx)
+        val saved = hosts.mapNotNull { HostStore.pairedDesktopId(ctx, it.address) }.toSet()
+        val refusing = hosts.filter { RustCore.unpairedBy(it.address) }
+            .mapNotNull { HostStore.pairedDesktopId(ctx, it.address) }.toSet()
+        val batch = TextPrefs.queued(ctx, own, saved, refusing)
         if (batch.isEmpty()) return
         // The sender's name is looked up as the text leaves (T8e), here on the
         // worker, not where it arrived on the main thread, and only if the
@@ -188,11 +216,13 @@ object Texts {
         val named = batch.map { text ->
             JSONObject(text.toString()).apply {
                 remove("name")
+                remove(TextQueue.FOR)
                 contactName(ctx, optString("address"))?.let { put("name", it) }
             }
         }
-        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)))
-        if (sent) TextPrefs.dequeue(ctx, batch.size)
+        // To that computer only (review: the own one could change between).
+        val sent = PhoneLink.sendNow(ctx, "kdeconnect.sms.messages", JSONObject().put("messages", JSONArray(named)), own)
+        if (sent) TextPrefs.dequeue(ctx, batch)
     }
 
     /** Tell the computer at [host]:[port] how reply [id] went: sent (null), or why not. */
