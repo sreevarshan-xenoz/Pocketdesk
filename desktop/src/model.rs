@@ -64,6 +64,10 @@ pub struct Snapshot {
     /// The other computers this one paired with whose link is up (2h), by
     /// id and name: files can go to them.
     pub linked_computers: Vec<(String, String)>,
+    /// Every computer this one paired with, linked or not, by id and name:
+    /// what names a row for one that is away (BD4: its id's first
+    /// characters did).
+    pub paired_computers: Vec<(String, String)>,
     /// The KDE Connect devices paired with this computer (T6), by id and
     /// name: a file can go to one connected now.
     pub kde_devices: Vec<(String, String)>,
@@ -194,6 +198,11 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
         } else {
             Vec::new()
         },
+        paired_computers: pocketdesk_core::local::computers::read(state_dir)
+            .computers
+            .into_iter()
+            .map(|c| (c.device_id, c.name))
+            .collect(),
         kde_devices: if running {
             pocketdesk_core::local::kdeconnect_devices::devices(state_dir)
                 .into_iter()
@@ -1036,10 +1045,16 @@ pub fn send_target_ids(snapshot: &Snapshot) -> Vec<String> {
         .collect()
 }
 
-/// How a send target is named: a computer or a KDE Connect device by its
-/// name, a phone by its name (U3), else by the first characters of its id.
+/// How a send target is named: a computer (linked or away, BD4) or a KDE
+/// Connect device by its name, a phone by its name (U3), else by the first
+/// characters of its id.
 pub fn target_label(snapshot: &Snapshot, id: &str) -> String {
-    if let Some((_, name)) = snapshot.linked_computers.iter().find(|(c, _)| c == id) {
+    if let Some((_, name)) = snapshot
+        .linked_computers
+        .iter()
+        .chain(&snapshot.paired_computers)
+        .find(|(c, _)| c == id)
+    {
         return format!("{name} (computer)");
     }
     if let Some((_, name)) = snapshot.kde_devices.iter().find(|(d, _)| d == id) {
@@ -2458,6 +2473,13 @@ mod tests {
             Ok("desk-b".to_string())
         );
         assert_eq!(target_label(&with_computer, "desk-b"), "Desk (computer)");
+        // BD4: one paired but away is named too, though files cannot go.
+        let away = Snapshot {
+            paired_computers: vec![("desk-c".to_string(), "Study".to_string())],
+            ..Snapshot::default()
+        };
+        assert_eq!(target_label(&away, "desk-c"), "Study (computer)");
+        assert!(target_for_send(&away, None).is_err(), "not a target");
         // T6: a paired KDE Connect device too, after phones and computers.
         let with_kde = Snapshot {
             linked_computers: vec![("desk-b".to_string(), "Desk".to_string())],
