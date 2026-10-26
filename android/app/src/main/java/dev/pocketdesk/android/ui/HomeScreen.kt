@@ -740,7 +740,14 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        // Its "also send notifications to" pick goes with it (AX3).
+                        val removedId = HostStore.pairedDesktopId(context, host.address)
                         HostStore.remove(context, host.address)
+                        dev.pocketdesk.android.notify.AlsoToPrefs.forgetRemoved(
+                            context,
+                            removedId,
+                            HostStore.hosts(context).mapNotNull { HostStore.pairedDesktopId(context, it.address) }.toSet(),
+                        )
                         // Forget its certificate too, so a new pairing code
                         // for this address can be trusted again, and close a
                         // link to it (AX1): the next own computer links then.

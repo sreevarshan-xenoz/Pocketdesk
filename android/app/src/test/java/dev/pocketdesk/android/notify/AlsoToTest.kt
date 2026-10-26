@@ -50,4 +50,20 @@ class AlsoToTest {
         // org.json is Android's, not in JVM tests: the names it drops are held here.
         assertEquals(listOf("actions", "requestReplyId", "messages", "canOpen"), AlsoTo.ANSWERS)
     }
+
+    @Test
+    fun `only the picks of computers still saved count toward the limit`() {
+        // AX3: a removed computer's pick, unlisted, held one of the four.
+        val picked = setOf("a", "b", "c", "gone")
+        assertEquals(setOf("a", "b", "c"), AlsoTo.pickedSaved(picked, setOf("a", "b", "c", "d")))
+        assertTrue(AlsoTo.mayPickMore(AlsoTo.pickedSaved(picked, setOf("a", "b", "c", "d")).size))
+    }
+
+    @Test
+    fun `a computer removed takes its pick along, unless it is saved twice`() {
+        assertEquals(setOf("a"), AlsoTo.pickedAfterRemove(setOf("a", "b"), removed = "b", stillSaved = setOf("a")))
+        // One computer saved at two addresses is one: removing one card keeps it.
+        assertEquals(setOf("a", "b"), AlsoTo.pickedAfterRemove(setOf("a", "b"), removed = "b", stillSaved = setOf("a", "b")))
+        assertEquals(setOf("a"), AlsoTo.pickedAfterRemove(setOf("a"), removed = null, stillSaved = setOf("a")))
+    }
 }

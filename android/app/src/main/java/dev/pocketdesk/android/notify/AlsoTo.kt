@@ -42,6 +42,21 @@ object AlsoTo {
 
     /** Whether one more computer may be picked, with [picked] already. */
     fun mayPickMore(picked: Int): Boolean = picked < MAX_PICKS
+
+    /**
+     * The picks of computers still saved ([savedIds], their paired ids):
+     * what counts toward the limit (AX3: a removed computer's, unlisted,
+     * held one of the four; so does an id a computer paired anew left).
+     */
+    fun pickedSaved(picked: Set<String>, savedIds: Set<String>): Set<String> = picked intersect savedIds
+
+    /**
+     * The picks once the card of the computer [removed] (its paired id) is
+     * gone, [stillSaved] the paired ids of the cards left: its pick goes,
+     * unless another card is the same computer (saved at two addresses).
+     */
+    fun pickedAfterRemove(picked: Set<String>, removed: String?, stillSaved: Set<String>): Set<String> =
+        if (removed == null || removed in stillSaved) picked else picked - removed
 }
 
 /** Which computers get the phone's notifications too (L8), by paired id, off for each by default. */
@@ -55,5 +70,12 @@ object AlsoToPrefs {
     fun set(ctx: Context, desktopId: String, on: Boolean) {
         val now = picked(ctx).let { if (on) it + desktopId else it - desktopId }
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putStringSet(KEY, now) }
+    }
+
+    /** A card removed (AX3): its computer's pick goes, as [AlsoTo.pickedAfterRemove] says. */
+    fun forgetRemoved(ctx: Context, removed: String?, stillSaved: Set<String>) {
+        val before = picked(ctx)
+        val now = AlsoTo.pickedAfterRemove(before, removed, stillSaved)
+        if (now != before) ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putStringSet(KEY, now) }
     }
 }
