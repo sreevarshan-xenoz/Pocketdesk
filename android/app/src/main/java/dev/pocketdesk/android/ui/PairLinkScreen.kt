@@ -52,6 +52,7 @@ fun PairLinkScreen(
     val parsed = remember(uri) { PairLink.parse(uri) }
     var outcome by remember(uri) { mutableStateOf<PairOutcome?>(null) }
     var confirmed by remember(uri) { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     val link = parsed.getOrNull()
     // Back cancels as Cancel does (U2: it left the app), and only when
     // Cancel shows: a pairing under way runs to its end, or the computer
@@ -62,7 +63,7 @@ fun PairLinkScreen(
 
     LaunchedEffect(uri, confirmed) {
         if (link == null || !confirmed) return@LaunchedEffect
-        val result = withContext(Dispatchers.IO) { runPairing(link, RustPairOps) }
+        val result = withContext(Dispatchers.IO) { runPairing(link, RustPairOps(context)) }
         if (result is PairOutcome.Paired) {
             onPaired(link, result.address, result.serverId)
         } else {

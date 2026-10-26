@@ -1,5 +1,7 @@
 package dev.pocketdesk.android.pair
 
+import android.content.Context
+import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.bridge.RustCore
 
 /** What pairing from a [PairLink] needs from the bridge; faked in tests. */
@@ -9,6 +11,9 @@ interface PairOps {
 
     /** Take back a pin this attempt added. */
     fun forgetCertificate(address: String)
+
+    /** Whether a computer is saved at [address] (its pin is its card's). */
+    fun hasCard(address: String): Boolean
 
     fun connect(address: String, controlPort: Int): Result<Unit>
 
@@ -53,7 +58,10 @@ fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
             }
             added = pinned.getOrDefault(false)
         }
-        val undo = { if (added) ops.forgetCertificate(address) }
+        // With no fingerprint the connection pins whatever answers: taken
+        // back too, unless it is a saved computer's (BC3: it stayed with no
+        // card, and another computer there could not be paired).
+        val undo = { if (added || (fp == null && !ops.hasCard(address))) ops.forgetCertificate(address) }
         val connected = ops.connect(address, link.controlPort)
         if (connected.isFailure) {
             lastError = connected.exceptionOrNull()?.message ?: "unreachable"
@@ -71,13 +79,15 @@ fun runPairing(link: PairLink, ops: PairOps): PairOutcome {
 }
 
 /** [PairOps] over the Rust bridge. Blocking: call off the main thread. */
-object RustPairOps : PairOps {
+class RustPairOps(private val context: Context) : PairOps {
     override fun pinCertificate(address: String, fingerprint: String) =
         RustCore.pinPeerCertificate(address, fingerprint)
 
     override fun forgetCertificate(address: String) {
         RustCore.forgetPeerCertificate(address)
     }
+
+    override fun hasCard(address: String) = HostStore.hosts(context).any { it.address == address }
 
     override fun connect(address: String, controlPort: Int): Result<Unit> =
         RustCore.connectToPeer(address, controlPort).map { }

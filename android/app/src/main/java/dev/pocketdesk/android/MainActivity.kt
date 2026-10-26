@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -32,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.pocketdesk.android.pair.SessionPins
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.ConnectScreen
 import dev.pocketdesk.android.ui.HomeScreen
@@ -521,6 +523,13 @@ class MainActivity : ComponentActivity() {
                         // (decoder, service, input) must end, not be reused
                         // with half its parts pointed at the new computer.
                         else -> key(sessionKey) {
+                            // Its pin goes as it ends with no card saved
+                            // there (BC3): a found computer that never paired.
+                            DisposableEffect(Unit) {
+                                val app = applicationContext
+                                val address = session.address
+                                onDispose { Thread { runCatching { SessionPins.afterSession(app, address) } }.start() }
+                            }
                             if (session.remote) {
                                 // The phone as a remote (T10i): no picture.
                                 Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
