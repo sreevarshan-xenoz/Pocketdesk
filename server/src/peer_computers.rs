@@ -435,6 +435,34 @@ fn shown_name(name: &str) -> String {
     }
 }
 
+/// A computer that just paired here (one of this one's devices now) and
+/// that this one still lists as one it paired with, the other way (BD1):
+/// unpaired there and paired back this way, its stale entry took every
+/// send to it by the computer road, ending "not linked now" though it was
+/// connected, and it was redialed every five minutes. Pairing is one way
+/// (a link from a computer already trusted here is refused), so it is
+/// forgotten as the app's Unpair does, by the run loop. Whether it was
+/// listed.
+pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
+    let listed = computers::read(dir)
+        .computers
+        .iter()
+        .any(|c| c.device_id == device_id);
+    if listed {
+        let ask = ComputerAsk::Forget {
+            device_id: device_id.to_string(),
+        };
+        match computers::request(dir, ask, now_unix) {
+            Ok(_) => tracing::info!(
+                device_id,
+                "A computer paired here is no longer one this computer paired with"
+            ),
+            Err(e) => tracing::warn!("Could not forget computer {device_id}: {e}"),
+        }
+    }
+    listed
+}
+
 /// Forget a computer: its entry and the pins for its addresses. It keeps
 /// this one until its own owner removes it (its Devices tab).
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
@@ -1062,6 +1090,43 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BD1: a computer paired here that this one still lists as one it
+    /// paired with (the other way) is asked forgotten, as Unpair does.
+    #[test]
+    fn a_computer_paired_here_is_no_longer_one_this_one_paired_with() {
+        let dir = std::env::temp_dir().join(format!("pd-paired-here-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "pc-b".to_string(),
+                name: "Desk".to_string(),
+                addresses: vec!["192.0.2.20".to_string()],
+                control_port: 1716,
+                fingerprint: "ab".repeat(32),
+                endpoint: None,
+                paired_unix: 1,
+                link: "refused".to_string(),
+                link_unix: 1,
+            })
+        })
+        .unwrap();
+        let now = pocketdesk_core::local::pin::now_unix();
+        assert!(!paired_here(&dir, "pc-c", now), "not listed");
+        assert!(computers::take_all(&dir, now).is_empty());
+        assert!(paired_here(&dir, "pc-b", now));
+        let asked: Vec<_> = computers::take_all(&dir, now)
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            asked,
+            [ComputerAsk::Forget {
+                device_id: "pc-b".to_string()
+            }]
+        );
+    }
 
     #[test]
     fn a_fingerprint_reads_in_either_case_and_nothing_else_does() {
