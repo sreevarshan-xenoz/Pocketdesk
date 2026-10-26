@@ -4613,6 +4613,42 @@ def alarm_now() -> bool:
     return alarm_playing(adb("shell", "dumpsys", "audio"))
 
 
+# PhoneRinger's notification id.
+RING_NOTIFICATION_ID = 7301
+
+
+def ring_posted(dump: str) -> Optional[str]:
+    """The ring's notification in `dumpsys notification`: its importance,
+    or None when it is not posted."""
+    for line in dump.splitlines():
+        if "NotificationRecord(" in line and f"pkg={APP} " in line and f" id={RING_NOTIFICATION_ID} " in line:
+            found = re.search(r"importance=(\d+)", line)
+            return found.group(1) if found else "?"
+    return None
+
+
+def focus_holder(dump: str) -> str:
+    """Who holds audio focus, from `dumpsys audio`'s focus stack (last is
+    the top): this app, another app, or none. Never a name."""
+    _, _, after = dump.partition("Audio Focus stack entries")
+    held = [line for line in after.split(chr(10) * 2, 1)[0].splitlines() if "pack:" in line]
+    if not held:
+        return "none"
+    return "this app" if f"pack: {APP} " in held[-1] + " " else "another app"
+
+
+def silent_alarm_said() -> str:
+    """The phone's state when a ring's alarm did not play (AZ5: once in ten
+    runs, the second ring of a session showed its dialog with no alarm;
+    not reproduced since): what the next one is to be read by."""
+    audio = adb("shell", "dumpsys", "audio")
+    dnd = zen_mode()
+    posted = ring_posted(adb("shell", "dumpsys", "notification"))
+    return (f"Do Not Disturb {DND_WORDS.get(dnd, dnd)}, ringer {ringer_mode(audio)}, "
+            f"alarm volume {alarm_volume()}, the ring's notification "
+            f"{'posted, importance ' + posted if posted else 'not posted'}, focus {focus_holder(audio)}")
+
+
 def alarm_volume() -> Optional[int]:
     return volume_of(adb("shell", "cmd", "media_session", "volume", "--stream", "4", "--get"))
 
@@ -4635,7 +4671,7 @@ def aq1_siren(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: siren_up(ctx), 15, 1):
             return "no siren dialog within 15 s of the ring", asked
         if not wait_for(alarm_now, 5, 0.5):
-            return "the dialog up, but no alarm playing", asked
+            return f"the dialog up, but no alarm playing ({silent_alarm_said()})", asked
         return None, asked
 
     def body(ctx: Ctx) -> tuple[str, str]:

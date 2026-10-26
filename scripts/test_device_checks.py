@@ -578,5 +578,12 @@ class SessionParts(unittest.TestCase):
             ["connect:0123456789abcdef:paired:pc-a@127.0.0.1", "wake:192.0.2.1"],
         )
 
+    def test_the_ring_s_notification_and_who_holds_focus(self):
+        """AZ5: what a silent alarm is read by, never an app's name."""
+        self.assertEqual(dc.ring_posted('    NotificationRecord(0x1: pkg=dev.pocketdesk.android user=UserHandle{0} id=7 tag=null importance=2 key=k\n    NotificationRecord(0x2: pkg=dev.pocketdesk.android user=UserHandle{0} id=7301 tag=null importance=4 key=k'), "4")
+        self.assertIsNone(dc.ring_posted("nothing"))
+        self.assertEqual(dc.focus_holder('Audio Focus stack entries (last is top of stack):\n  source:a -- pack: com.example.music -- client: c -- gain: GAIN\n  source:b -- pack: dev.pocketdesk.android -- client: d -- gain: GAIN\n\nNo external focus policy'), "this app")
+        self.assertEqual(dc.focus_holder("Audio Focus stack entries (last is top of stack):" + chr(10) * 3), "none")
+
 if __name__ == "__main__":
     unittest.main()
