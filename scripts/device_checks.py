@@ -4358,7 +4358,8 @@ def bb1_told_not_paired(ctx: Ctx) -> tuple[str, str]:
     store = json.loads(kept)
     if ctx.device not in store.get("trusted_device_ids", []):
         return "SKIP", "the phone is not paired with the throwaway"
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+    # A phone a computer refused looks at it again only every few minutes.
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 420, 2):
         return "SKIP", "the phone is not linked to the throwaway"
     told = "The computer says this phone is not paired with it"
     again = "The computer lets this phone in again"
@@ -4375,13 +4376,72 @@ def bb1_told_not_paired(ctx: Ctx) -> tuple[str, str]:
         tmp = state / "trusted_devices.json.bb1"
         tmp.write_bytes(kept)
         os.replace(tmp, state / "trusted_devices.json")
-    let_in = wait_for(lambda: again in phone_log(), 120, 2)
+    # The phone looks at a computer that refused it again every 5 min.
+    let_in = wait_for(lambda: again in phone_log(), 400, 2)
     relinked = wait_for(lambda: ctx.device in ctx.server.linked(), 60, 2)
     if not said:
         return "FAIL", "the phone was not told it is not paired within 90 s"
     if not (let_in and relinked):
         return "FAIL", f"told in {took:.0f} s, but put back it was {'not let in again' if not let_in else 'not linked again'}"
     return "PASS", f"told it is not paired {took:.0f} s after the unpair; put back, let in again and linked"
+
+
+@check("bb2-unpaired-gets-nothing", "§1")
+def bb2_unpaired_gets_nothing(ctx: Ctx) -> tuple[str, str]:
+    """A computer that told the phone it is not paired gets nothing from it
+    (§1, BB2): the linked OPPO taken out of the throwaway's trust store is
+    told so; a fixture notification then posted stays on the phone (its log
+    says so, and the computer logs no notification); put back, the next one
+    reaches the computer. The trust store is put back byte for byte, and no
+    screen is read before the log is, as a dump clears it."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off (an unpaired phone is let in)"
+    if (why := sharing(ctx)):
+        return "SKIP", why
+    state = ctx.server.root / "state"
+    try:
+        kept = (state / "trusted_devices.json").read_bytes()
+    except OSError:
+        return "SKIP", "no trust store on the throwaway"
+    store = json.loads(kept)
+    if ctx.device not in store.get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    # A phone a computer refused looks at it again only every few minutes.
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 420, 2):
+        return "SKIP", "the phone is not linked to the throwaway"
+    told = "The computer says this phone is not paired with it"
+    stayed = "Kept on the phone"
+    ctx.phone.wake()
+    adb("logcat", "-c")
+    try:
+        unpaired = {**store, "trusted_device_ids": [d for d in store["trusted_device_ids"] if d != ctx.device]}
+        tmp = state / "trusted_devices.json.bb2"
+        tmp.write_text(json.dumps(unpaired), encoding="utf-8")
+        os.replace(tmp, state / "trusted_devices.json")
+        if not wait_for(lambda: told in phone_log(), 90, 2):
+            return "FAIL", "the phone was not told it is not paired within 90 s"
+        count = ctx.server.event_count()
+        ctx.phone.notify(651, "Ann", "BB2 " + secrets.token_hex(2))
+        kept_here = wait_for(lambda: stayed in phone_log(), 30, 2)
+        reached = ctx.server.events_since(count, "notification", ctx.device, "Pocketdesk fixture")
+        ctx.phone.cancel(651)
+    finally:
+        tmp = state / "trusted_devices.json.bb2"
+        tmp.write_bytes(kept)
+        os.replace(tmp, state / "trusted_devices.json")
+    if reached:
+        return "FAIL", "a notification reached the computer after it said the phone is not paired"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 400, 2):
+        return "FAIL", "kept on the phone, but put back it did not link again within 400 s"
+    after = fixture_note(ctx, 652, "BB2 back " + secrets.token_hex(2), 90)
+    ctx.phone.cancel(652)
+    if not after:
+        return "FAIL", "kept on the phone, but once put back no notification reached the computer within 90 s"
+    # Its own computer moves on at once, so nothing may even be tried toward
+    # this one: the log's word is said only when a send got that far.
+    how = "a send to it was kept on the phone" if kept_here else "the phone's own computer moved on"
+    return "PASS", f"told, nothing reached it ({how}); put back, the next one reached the computer"
 
 
 @check("al2-unpaired-road", "§1")

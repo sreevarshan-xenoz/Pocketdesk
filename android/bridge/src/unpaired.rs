@@ -13,6 +13,10 @@ pub(crate) use pocketdesk_core::protocol::connection::NOT_PAIRED;
 
 static SAID: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
 
+/// The kinds of packet kept on the phone for each computer, said once each
+/// in the log until it lets the phone in again.
+static KEPT: LazyLock<Mutex<HashSet<(String, String)>>> = LazyLock::new(Mutex::default);
+
 fn said_set() -> std::sync::MutexGuard<'static, HashSet<String>> {
     SAID.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -27,6 +31,9 @@ pub(crate) fn said(address: &str) {
 /// The computer at `address` let this phone in (it sent something else, or
 /// they paired).
 pub(crate) fn let_in(address: &str) {
+    KEPT.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(peer, _)| peer != address);
     if said_set().remove(address) {
         tracing::info!(peer = %address, "The computer lets this phone in again");
     }
@@ -38,15 +45,44 @@ pub fn by(address: &str) -> bool {
     said_set().contains(address)
 }
 
+/// Whether `packet_type` is pairing's own (asked, or answered): the two the
+/// computer acts on before pairing, exactly (BB2 review).
+fn pairing(packet_type: &str) -> bool {
+    matches!(
+        packet_type,
+        "kdeconnect.pair" | "kdeconnect.pocketdesk.pair"
+    )
+}
+
 /// What a packet of `packet_type` from the computer at `address` says of
 /// this phone's standing there: its word that it is not paired, or, for
 /// anything but pairing's own answers, that it is let in.
 pub(crate) fn heard(address: &str, packet_type: &str) {
     if packet_type == NOT_PAIRED {
         said(address);
-    } else if !packet_type.starts_with("kdeconnect.pair") && !packet_type.ends_with(".pair") {
+    } else if !pairing(packet_type) {
         let_in(address);
     }
+}
+
+/// Why a send goes nowhere: the computer said the phone is not paired.
+pub(crate) const REFUSED: &str = "That computer unpaired this phone: pair again, or remove it";
+
+/// Whether a packet of `packet_type` stays on the phone, as the computer at
+/// `address` said this phone is not paired with it (BB2: its notifications,
+/// texts and clipboard went on, dropped there, and were counted delivered).
+/// Pairing still goes.
+pub(crate) fn refuses(address: &str, packet_type: &str) -> bool {
+    let refused = !pairing(packet_type) && by(address);
+    if refused
+        && KEPT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((address.to_string(), packet_type.to_string()))
+    {
+        tracing::info!(peer = %address, packet_type, "Kept on the phone: the computer says this phone is not paired");
+    }
+    refused
 }
 
 #[cfg(test)]
@@ -69,5 +105,52 @@ mod tests {
         let_in(address);
         assert!(!by(address), "paired again");
         assert!(!by("192.0.2.91"), "only that computer");
+    }
+
+    /// BB2 review: each way the phone sends to a computer refuses at once,
+    /// before any connection, when that computer said so.
+    #[tokio::test]
+    async fn every_send_path_keeps_it_on_the_phone() {
+        use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
+        let address = "192.0.2.94";
+        said(address);
+        let packet = NetworkPacket::new("kdeconnect.notification");
+        let refused = Err(REFUSED.to_string());
+        assert_eq!(
+            crate::api::push_packet(address, 1716, &packet).await,
+            refused
+        );
+        assert_eq!(
+            crate::api::send_on_live(address, 1716, &packet).await,
+            refused
+        );
+        assert_eq!(
+            crate::extra_links::send(address, 1716, "kdeconnect.notification", "{}").await,
+            refused
+        );
+        assert!(matches!(
+            crate::download::send_watching_replies(address, 1716, &NetworkPacket::new("kdeconnect.share.request")).await,
+            Err(e) if e == REFUSED
+        ));
+        assert!(crate::api::refused_request(address, &packet).await);
+        let_in(address);
+    }
+
+    /// BB2: nothing but pairing goes to a computer that said so.
+    #[test]
+    fn nothing_but_pairing_goes_to_a_computer_that_said_so() {
+        let address = "192.0.2.92";
+        assert!(!refuses(address, "kdeconnect.notification"));
+        said(address);
+        assert!(refuses(address, "kdeconnect.notification"));
+        assert!(refuses(address, "kdeconnect.pocketdesk.sms"));
+        assert!(!refuses(address, "kdeconnect.pair"));
+        assert!(!refuses(address, "kdeconnect.pocketdesk.pair"));
+        assert!(
+            !refuses("192.0.2.93", "kdeconnect.notification"),
+            "only that computer"
+        );
+        let_in(address);
+        assert!(!refuses(address, "kdeconnect.notification"));
     }
 }
