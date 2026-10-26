@@ -35,6 +35,9 @@ pub fn init_app() {
 /// Must be called before `connect_streaming` for cert persistence.
 pub fn set_data_dir(path: String) {
     let cert_path = PathBuf::from(&path).join("pocketdesk").join("certs");
+    // BC6: the desktops it paired with were kept there, never read, and
+    // never forgotten with a computer.
+    let _ = std::fs::remove_file(cert_path.join("paired_servers.json"));
     let mut guard = crate::CERT_DIR.lock().unwrap();
     *guard = Some(cert_path);
     tracing::info!("Data directory set to: {path}");
@@ -1084,40 +1087,6 @@ pub async fn send_findmydevice(address: String, port: u16) -> Result<(), String>
 // PIN pairing (R3 Tier-2 #11b)
 // ---------------------------------------------------------------------------
 
-fn paired_servers_path() -> Option<PathBuf> {
-    crate::CERT_DIR
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|d| d.join("paired_servers.json"))
-}
-
-fn read_paired_servers() -> Vec<String> {
-    paired_servers_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
-        .unwrap_or_default()
-}
-
-fn remember_paired_server(server_id: &str) {
-    if server_id.is_empty() {
-        return;
-    }
-    let Some(path) = paired_servers_path() else {
-        return;
-    };
-    let mut ids = read_paired_servers();
-    if !ids.iter().any(|id| id == server_id) {
-        ids.push(server_id.to_string());
-        if let Ok(json) = serde_json::to_vec_pretty(&ids)
-            && let Some(parent) = path.parent()
-        {
-            let _ = std::fs::create_dir_all(parent);
-            let _ = std::fs::write(&path, json);
-        }
-    }
-}
-
 /// What a phone that cannot reach the computer at home is told: nothing
 /// pairs over the internet road (T10a).
 const PAIR_AT_HOME: &str = "Pairing needs the same network as the computer, or Tailscale";
@@ -1222,7 +1191,6 @@ pub async fn pair_with_pin(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        remember_paired_server(&id);
         // Paired: its word that the phone was not is past (BB1).
         crate::unpaired::let_in(&address);
         Ok(Some(id))
@@ -1247,7 +1215,6 @@ pub async fn check_pair_result(wait_secs: u64) -> Option<String> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            remember_paired_server(&id);
             return Some(id);
         }
         if std::time::Instant::now() >= deadline {
@@ -1255,11 +1222,6 @@ pub async fn check_pair_result(wait_secs: u64) -> Option<String> {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-}
-
-/// JSON array of desktop device ids this phone has paired with.
-pub fn paired_servers_json() -> String {
-    serde_json::to_string(&read_paired_servers()).unwrap_or_else(|_| "[]".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -4894,6 +4856,24 @@ mod keymap_tests {
 mod pin_certificate_tests {
     use super::{forget_peer_certificate_in, pin_peer_certificate_in};
     use pocketdesk_core::streaming::transport::{CertManager, peer_label_for_ip};
+
+    /// BC6: the desktops paired with were kept in a file nothing read, and
+    /// nothing forgot with a computer; it goes as the data folder is set.
+    #[tokio::test]
+    async fn the_unread_list_of_paired_desktops_goes() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let data =
+            std::env::temp_dir().join(format!("bridge-paired-servers-{}", std::process::id()));
+        let certs = data.join("pocketdesk").join("certs");
+        std::fs::create_dir_all(&certs).unwrap();
+        std::fs::write(certs.join("paired_servers.json"), r#"["pc-a"]"#).unwrap();
+        let had = crate::CERT_DIR.lock().unwrap().clone();
+        super::set_data_dir(data.to_string_lossy().into_owned());
+        let left = certs.join("paired_servers.json").exists();
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&data);
+        assert!(!left);
+    }
 
     /// AZ3: forgetting a computer's certificate, as Remove and a move do,
     /// forgets what it said of itself at that address too (review: through

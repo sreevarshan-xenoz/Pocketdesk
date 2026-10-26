@@ -489,7 +489,7 @@ All of these are inside the app's private storage unless noted. None of it is ba
 |---|---|---|
 | `files/pocketdesk/certs/identity.key` (owner-only write), `identity.der` | The phone's TLS key and certificate | `android/bridge/src/api.rs`, `core/src/streaming/transport.rs` |
 | `files/pocketdesk/certs/known_peers.json` | Desktop certificate pins | same |
-| `files/pocketdesk/certs/device_id`, `paired_servers.json` | The phone's id, and the desktops it paired with | `android/bridge/src/api.rs` |
+| `files/pocketdesk/certs/device_id` | The phone's id | `android/bridge/src/api.rs` |
 | `files/pocketdesk/certs/iroh_device.key` | The phone's iroh key | `api.rs` (`device_wan_key`), `iroh_connection.rs` |
 | SharedPreferences `pocketdesk-host` | Saved computers: address, ports, WoL MAC, `wake_info`, wake settings, `wan_identity` (endpoint JSON), monitor, paired flag, and each computer's name: what it calls itself and the owner's rename (U3) | `android/app/.../HostStore.kt` |
 | SharedPreferences `pocketdesk-ui` | App settings, the name this phone gives computers among them | `Prefs.kt` |

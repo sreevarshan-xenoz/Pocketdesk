@@ -1950,16 +1950,6 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCheckPa
     to_jstring(&mut env, json)
 }
 
-/// JSON array of desktop device ids this phone is paired with.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePairedServers(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-) -> jstring {
-    let json = envelope(Ok(api::paired_servers_json()));
-    to_jstring(&mut env, json)
-}
-
 /// Drain queued desktop notifications as a JSON array
 /// (`[{"id","app","title","text","source"}, …]`).
 #[unsafe(no_mangle)]
