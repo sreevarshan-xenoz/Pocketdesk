@@ -962,7 +962,13 @@ async fn deliver(
     store: Option<&TrustStore>,
 ) {
     let path = PathBuf::from(&request.path);
-    if crate::peer_computers::is_paired(&request.device_id) {
+    // By the computer road, unless that link is down and the computer is
+    // connected here as a device (BD1 review: paired here since, until its
+    // stale entry is forgotten).
+    if crate::peer_computers::is_paired(&request.device_id)
+        && (crate::peer_computers::is_linked(&request.device_id)
+            || target_for(&request.device_id, clients).is_none())
+    {
         return deliver_to_computer(dir, request, path);
     }
     // T6: a paired KDE Connect device, which comes for it as KDE Connect does.

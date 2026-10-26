@@ -286,7 +286,18 @@ async fn pair_with(
             .pin_peer(label, hash)
             .map_err(|e| format!("could not pin its certificate: {e:#}"))?;
     }
-    let paired = dial_and_pair(certs, &link, &me, wan).await;
+    let paired = dial_and_pair(certs, &link, &me, wan)
+        .await
+        .and_then(|pushed| {
+            // Paired here meanwhile, the other way (BD1 review: both at
+            // once), it is one of this computer's devices, not one it
+            // paired with.
+            if crate::plugins::pair::is_paired_device(&link.device_id) {
+                Err("that computer paired with this one meanwhile".to_string())
+            } else {
+                Ok(pushed)
+            }
+        });
     if paired.is_err() {
         for label in &labels {
             let _ = match before.get(label) {
