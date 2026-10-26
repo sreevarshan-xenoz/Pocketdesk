@@ -110,6 +110,8 @@ class Screenshots(private val ctx: Context) {
     private fun settle(): Boolean {
         val ago = SystemClock.elapsedRealtime() - handedAtMs
         val failed = UploadRetry.again(handed, ago) { SendOutcomes.peek(it) } ?: return false
+        val given = UploadRetry.givenUp(handed) { SendOutcomes.peek(it) }
+        if (given > 0) Log.w(TAG, "$given screenshots did not reach the computer's Downloads, given up")
         handed.forEach { (uri, _) -> SendOutcomes.forget(uri) }
         handed = emptyList()
         again = failed
@@ -125,6 +127,8 @@ class Screenshots(private val ctx: Context) {
             .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
         handed = handed + uris
         handedAtMs = SystemClock.elapsedRealtime()
+        // Looked at again, to settle them (BB4 review: nothing else did).
+        dirty = true
     }
 
     fun tick() {
@@ -134,12 +138,13 @@ class Screenshots(private val ctx: Context) {
             // Said on Home (D1): it would otherwise stop without a word.
             if (ScreenshotPrefs.on(ctx)) ScreenshotPrefs.stopForAccess(ctx)
             stopWatching()
+            forgetWaiting()
             return
         }
         startWatching()
         if (!dirty || SystemClock.elapsedRealtime() < restUntilMs) return
         // Those sent to Downloads are settled once the service is through.
-        if (handed.isNotEmpty() && (TransferService.busy() || !settle())) return
+        if (handed.isNotEmpty() && (TransferService.busy() || !settle() || again.isNotEmpty())) return
         val own = PhoneLink.target(ctx) ?: return
         if (again.isNotEmpty()) {
             if (!Waker.answers(own.address, own.controlPort)) {
@@ -278,6 +283,14 @@ class Screenshots(private val ctx: Context) {
     fun close() {
         closed = true
         stopWatching()
+        forgetWaiting()
+    }
+
+    /** Turned off, or gone: nothing that waited goes later (BB4 review). */
+    private fun forgetWaiting() {
+        (handed + again).forEach { (uri, _) -> SendOutcomes.forget(uri) }
+        handed = emptyList()
+        again = emptyList()
     }
 
     companion object {

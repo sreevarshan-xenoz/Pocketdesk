@@ -138,8 +138,8 @@ class CameraUploads(private val ctx: Context) {
     private fun settle(): Boolean {
         val ago = SystemClock.elapsedRealtime() - handedAtMs
         val failed = UploadRetry.again(handed, ago) { SendOutcomes.peek(it.uri) } ?: return false
+        val given = UploadRetry.givenUp(handed) { SendOutcomes.peek(it.uri) }
         handed.forEach { (item, _) -> SendOutcomes.forget(item.uri) }
-        val given = handed.count { (item, sends) -> sends >= UploadRetry.MAX_SENDS && item !in failed.map { it.first } }
         if (given > 0) Log.w(TAG, "$given new camera photos did not reach the computer, given up")
         handed = emptyList()
         again = failed
@@ -153,6 +153,7 @@ class CameraUploads(private val ctx: Context) {
             // Access taken back turns it off, said on Home (as screenshots).
             if (CameraPrefs.on(ctx)) CameraPrefs.stopForAccess(ctx)
             stopWatching()
+            forgetWaiting()
             return
         }
         // Video access taken back turns "Videos too" off: given back, the
@@ -165,7 +166,7 @@ class CameraUploads(private val ctx: Context) {
         // asked (T3 review: a backlog queued at once went on over mobile
         // data when Wi-Fi went).
         if (TransferService.busy()) return
-        if (handed.isNotEmpty() && !settle()) return
+        if (handed.isNotEmpty() && (!settle() || again.isNotEmpty())) return
         if (!CameraRule.mayGo(CameraPrefs.wifiOnly(ctx), onWifi())) return
         val own = PhoneLink.target(ctx) ?: return
         // Those that failed go first, once the computer answers (BB4).
@@ -354,6 +355,14 @@ class CameraUploads(private val ctx: Context) {
     fun close() {
         closed = true
         stopWatching()
+        forgetWaiting()
+    }
+
+    /** Turned off, or gone: nothing that waited goes later (BB4 review). */
+    private fun forgetWaiting() {
+        (handed + again).forEach { (item, _) -> SendOutcomes.forget(item.uri) }
+        handed = emptyList()
+        again = emptyList()
     }
 
     companion object {

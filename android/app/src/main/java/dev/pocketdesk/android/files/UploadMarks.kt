@@ -59,4 +59,11 @@ object UploadRetry {
             .filter { (sent, how) -> how != SendOutcome.SENT && how != SendOutcome.CANCELLED && sent.second < MAX_SENDS }
             .map { (sent, _) -> sent }
     }
+
+    /** How many of [handed] failed for the last time, to be given up (review: not those sent at last). */
+    fun <T> givenUp(handed: List<Pair<T, Int>>, outcome: (T) -> SendOutcome?): Int =
+        handed.count { (item, sends) ->
+            val how = outcome(item)
+            sends >= MAX_SENDS && how != SendOutcome.SENT && how != SendOutcome.CANCELLED
+        }
 }

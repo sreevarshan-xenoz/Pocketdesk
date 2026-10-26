@@ -26,6 +26,21 @@ class UploadMarksTest {
         assertEquals("not known: again", listOf("e" to 2), UploadRetry.again(listOf("e" to 2), 1_000) { null })
     }
 
+    /** Review: only one that failed for the last time is given up. */
+    @Test
+    fun `only what failed at its last send is given up`() {
+        val how = mapOf("a" to SendOutcome.FAILED, "b" to SendOutcome.SENT, "c" to SendOutcome.FAILED)
+        val handed = listOf("a" to UploadRetry.MAX_SENDS, "b" to UploadRetry.MAX_SENDS, "c" to 1)
+        assertEquals(1, UploadRetry.givenUp(handed) { how[it] })
+    }
+
+    /** Review: one that failed waits with one still running, within the grace. */
+    @Test
+    fun `a failure waits for the rest of its batch`() {
+        val how = mapOf("a" to SendOutcome.FAILED, "b" to SendOutcome.PENDING)
+        assertNull(UploadRetry.again(listOf("a" to 1, "b" to 1), 1_000) { how[it] })
+    }
+
     @Test
     fun `one still waiting is waited for, a while`() {
         val waiting: (String) -> SendOutcome = { SendOutcome.PENDING }

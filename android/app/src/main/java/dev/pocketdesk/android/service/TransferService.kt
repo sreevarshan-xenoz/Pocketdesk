@@ -408,7 +408,11 @@ class TransferService : Service() {
             uri,
             when {
                 result.isSuccess -> dev.pocketdesk.android.files.SendOutcome.SENT
-                stopped() -> dev.pocketdesk.android.files.SendOutcome.CANCELLED
+                // A Cancel on either side, or the computer refusing it, is
+                // not undone by sending again (BB4 review).
+                stopped() || TransferRetry.isCancel(result.exceptionOrNull()?.message) ||
+                    result.exceptionOrNull() is TransferRetry.Refusal ->
+                    dev.pocketdesk.android.files.SendOutcome.CANCELLED
                 else -> dev.pocketdesk.android.files.SendOutcome.FAILED
             },
         )
