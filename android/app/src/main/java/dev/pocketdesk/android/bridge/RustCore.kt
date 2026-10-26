@@ -30,6 +30,7 @@ object RustCore {
     private external fun nativeNetworkChanged()
 
     private external fun nativeRetryInternetNow(address: String)
+    private external fun nativeUnpairedBy(address: String): Boolean
     private external fun nativeSetInternetFiles(enabled: Boolean)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
@@ -349,6 +350,12 @@ object RustCore {
     fun retryInternetNow(address: String) {
         runCatching { nativeRetryInternetNow(address) }
     }
+
+    /**
+     * Whether the computer at [address] said, when last heard, that this
+     * phone is not paired with it (BB1): what goes there is dropped.
+     */
+    fun unpairedBy(address: String): Boolean = runCatching { nativeUnpairedBy(address) }.getOrDefault(false)
 
     /** One-shot JSON snapshot of the session state machine. */
     fun sessionStatusJson(): String = nativeSessionStatus()

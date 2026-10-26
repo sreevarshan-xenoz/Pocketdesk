@@ -1605,6 +1605,16 @@ where
                                         "Blocking {packet_type} from {device_id}: not paired, \
                                          or not with this key (later packets at debug)"
                                     );
+                                    // Told once, so it stops sending what is
+                                    // dropped (BB1).
+                                    let _ = sender_ref
+                                        .send_packet(
+                                            &NetworkPacket::new(
+                                                pocketdesk_core::protocol::connection::NOT_PAIRED,
+                                            )
+                                            .with_body(serde_json::json!({})),
+                                        )
+                                        .await;
                                 }
                                 continue;
                             }
@@ -2863,8 +2873,12 @@ mod vector_tests {
             if !still_paired() {
                 continue;
             }
-            assert_eq!(
-                reply, None,
+            // Told it is not paired (BB1), never answered.
+            let answered = reply.as_deref().is_some_and(|line| {
+                !line.contains(pocketdesk_core::protocol::connection::NOT_PAIRED)
+            });
+            assert!(
+                !answered,
                 "still the stranger it opened as: a paired phone's request would be answered"
             );
             judged = true;

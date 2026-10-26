@@ -679,6 +679,11 @@ pub async fn connect_to_peer(
                             }
                             let trimmed = line.trim().to_string();
                             if !trimmed.is_empty() {
+                                // What it says of this phone's standing there
+                                // (BB1): not paired, or let in.
+                                if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
+                                    crate::unpaired::heard(&from_peer.0, &pkt.packet_type);
+                                }
                                 // Cache the server's iroh WAN identity as it is
                                 // announced, independent of Kotlin's poll loop.
                                 if trimmed.contains("pocketdesk.endpoint")
@@ -1216,6 +1221,8 @@ pub async fn pair_with_pin(
             .unwrap_or("")
             .to_string();
         remember_paired_server(&id);
+        // Paired: its word that the phone was not is past (BB1).
+        crate::unpaired::let_in(&address);
         Ok(Some(id))
     } else {
         Ok(None)
