@@ -5459,6 +5459,98 @@ def ay4_grant_end(ctx: Ctx) -> tuple[str, str]:
         write(kept)
 
 
+@check("ay5-unpaired-pages", "§41")
+def ay5_unpaired_pages(ctx: Ctx) -> tuple[str, str]:
+    """An unpaired phone's notifications, live cards and texts leave the
+    computer's pages (§41, AY5): a 20-second grant for an id no phone has,
+    with one of each written for it, keeps them while it runs and drops them
+    as it ends; a second guest's, whose grant runs on, stay. (Its replies waiting
+    are unit-tested: the server fails one at once for a phone without
+    Texts.) The trust store is put back as it was; only counts are printed."""
+    state = ctx.server.root / "state"
+    path = state / "trusted_devices.json"
+    try:
+        kept = path.read_bytes()
+        store = json.loads(kept)
+    except (OSError, ValueError):
+        return "SKIP", "no trust store on the throwaway"
+    if not wait_for(lambda: (state / "live_sessions.json").exists(), 15, 0.5):
+        return "TIMEOUT", "the server's watcher did not start within 15 s"
+    guest = f"ay5-guest-{uuid.uuid4().hex[:8]}"
+    keeper = f"ay5-keeper-{uuid.uuid4().hex[:8]}"
+    count = ctx.server.event_count()
+    ends = int(time.time()) + 20
+    files = {"notes": (state / "phone_notifications.json", "notes"),
+             "cards": (state / "phone_live.json", "cards"),
+             "texts": (state / "sms.json", "messages")}
+
+    def write(target: pathlib.Path, data: bytes) -> None:
+        tmp = target.with_suffix(".ay5tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, target)
+
+    def rows(name: str) -> list[dict]:
+        target, key = files[name]
+        try:
+            return json.loads(target.read_text(encoding="utf-8")).get(key, [])
+        except (OSError, ValueError):
+            return []
+
+    def theirs(name: str) -> tuple[int, int]:
+        """The guest's rows, and the keeper's."""
+        all_rows = rows(name)
+        return (sum(1 for r in all_rows if r.get("device_id") == guest),
+                sum(1 for r in all_rows if r.get("device_id") == keeper))
+
+    def load(name: str) -> list[dict]:
+        """For a write: a file that cannot be read stops the check rather
+        than being written over."""
+        target, key = files[name]
+        return json.loads(target.read_text(encoding="utf-8")).get(key, []) if target.exists() else []
+
+    def add(name: str, row: dict) -> None:
+        target, key = files[name]
+        write(target, json.dumps({key: load(name) + [row]}).encode("utf-8"))
+
+    def seen(kind: str) -> bool:
+        return any(e.get("event") == kind and e.get("device_id") == guest
+                   for e in ctx.server.events_after_count(count))
+
+    try:
+        grants = {**(store.get("grants") or {}), guest: ends, keeper: ends + 600}
+        write(path, json.dumps({**store, "grants": grants}).encode("utf-8"))
+        if not wait_for(lambda: seen("phone_paired"), 15, 0.5):
+            return "TIMEOUT", "no phone_paired for the grant within 15 s"
+        now = int(time.time())
+        for who in (guest, keeper):
+            add("notes", {"device_id": who, "key": "ay5", "app": "Chat", "title": "AY5", "text": "a check",
+                          "at_unix": now, "actions": ["Mark as read"], "reply": True})
+            add("cards", {"device_id": who, "tag": "ay5", "app": "Files", "title": "AY5", "text": "a check",
+                          "updated_unix": now, "live": {"progress": 1, "max": 2, "indeterminate": False}})
+            add("texts", {"device_id": who, "address": "+15550100", "body": "a check", "at_unix": now,
+                          "direction": "received"})
+        before = {name: theirs(name) for name in files}
+        if any(counts != (1, 1) for counts in before.values()):
+            return "FAIL", f"the guests' rows were not kept while they were paired: {before}"
+        if not wait_for(lambda: seen("phone_unpaired"), max(ends - time.time(), 0) + 15, 0.5):
+            return "FAIL", "no phone_unpaired within 15 s of the grant's end"
+        gone = wait_for(lambda: all(theirs(name)[0] == 0 for name in files), 10, 0.5)
+        after = {name: theirs(name) for name in files}
+        if not gone:
+            return "FAIL", f"the guest's rows stayed after its grant ended (guest's, keeper's): {after}"
+        if any(after[name][1] != 1 for name in files):
+            return "FAIL", f"the keeper's rows went with the guest's (guest's, keeper's): {after}"
+        return "PASS", ("the guest's note, live card and text went as its grant ended; "
+                        "the keeper's, its grant running on, stayed")
+    finally:
+        write(path, kept)
+        for name in files:
+            if any(theirs(name)):
+                target, key = files[name]
+                write(target, json.dumps({key: [r for r in load(name)
+                                                if r.get("device_id") not in (guest, keeper)]}).encode("utf-8"))
+
+
 def leave_to_home(ctx: Ctx) -> None:
     """Back to Home from the session a pairing opens, which waits for the
     owner's Allow: with Back, as its buttons may be hidden (no tap on it)."""
