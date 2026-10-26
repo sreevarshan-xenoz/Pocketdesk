@@ -98,6 +98,23 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Tell the phone when a command ends (BF1): run it here, its output
+    /// passing through, or wait on a process already running (--pid); then
+    /// the phones that show this computer's notifications get one saying
+    /// how it ended, how long it took and its last lines. Exits as the
+    /// command does (0 when watching a process that ended); 2 bad
+    /// arguments
+    Done {
+        /// Wait on this process instead of running a command
+        #[arg(long, conflicts_with = "command")]
+        pid: Option<u32>,
+        /// Leave the output's last lines out of the notification
+        #[arg(long)]
+        no_output: bool,
+        /// The command and its arguments, after `--`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
     /// Send a command to a phone's automation apps (L6): Tasker, Automate or
     /// MacroDroid hear it as `dev.pocketdesk.android.event.COMMAND` with its
     /// name and text. Exit codes: 0 queued, 1 failed, 2 bad arguments, 3 no

@@ -51,6 +51,13 @@ async fn main() -> Result<()> {
         Some(cli::Commands::TelHandler { remove }) => {
             return tel_handler::run_tel_handler(*remove);
         }
+        // BF1: before the log starts, so a wrapped command's output is
+        // its own.
+        Some(cli::Commands::Done {
+            pid,
+            no_output,
+            command,
+        }) => std::process::exit(done::run(*pid, command, !*no_output)),
         _ => {}
     }
 
@@ -145,6 +152,7 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Clipboard { send, to, json } => {
             std::process::exit(local_api::run_clipboard(send.zip(to.as_deref()), json))
         }
+        cli::Commands::Done { .. } => unreachable!("handled before the config is read"),
         cli::Commands::Ring { phone, json } => {
             std::process::exit(local_api::run_ring(&phone, json))
         }

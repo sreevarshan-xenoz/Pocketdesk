@@ -314,6 +314,8 @@ pub async fn run(config: Config) -> Result<()> {
 
     // F19: Start notification monitor for forwarding PC notifications to Android clients
     let notification_tx = start_notification_monitor();
+    // BF1: alerts from `pocketdesk done` go the same way.
+    tokio::spawn(crate::alerts::run(notification_tx.clone()));
     // Spawn a task that broadcasts captured notifications to all connected clients
     {
         let mut notify_rx = notification_tx.subscribe();
