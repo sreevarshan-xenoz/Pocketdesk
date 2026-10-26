@@ -29,6 +29,9 @@ object PhoneLink {
     @Volatile
     private var pausedUntilMs = 0L
 
+    /** What the bridge says of a send to a computer that unpaired this phone (BB2). */
+    const val UNPAIRED_BY = "unpaired this phone"
+
     /** The computer the phone sends to. */
     fun target(ctx: Context): HostStore.Host? {
         // A computer added, removed or paired is seen at once (N7 review).
@@ -94,6 +97,13 @@ object PhoneLink {
             }
         }
         return sent.onFailure {
+            // That computer said the phone is not paired (BB2): the next
+            // paired one is the phone's own at once, not after a pause.
+            if (it.message?.contains(UNPAIRED_BY) == true) {
+                Log.d(TAG, "${host.address} unpaired this phone; its own computer is looked for again")
+                recentTarget.forget()
+                return@onFailure
+            }
             Log.d(TAG, "not sent to ${host.address}, pausing a minute: ${it.message}")
             pausedUntilMs = SystemClock.elapsedRealtime() + PAUSE_MS
         }.isSuccess

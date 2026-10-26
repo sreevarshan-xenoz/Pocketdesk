@@ -255,6 +255,10 @@ pub(crate) async fn send_watching_replies(
     port: u16,
     request: &NetworkPacket,
 ) -> Result<Replies, String> {
+    // A file's or an image's offer stays on the phone too (BB2 review).
+    if crate::unpaired::refuses(address, &request.packet_type) {
+        return Err(crate::unpaired::REFUSED.to_string());
+    }
     let shared = {
         let guard = (*CONTROL_WRITER).lock().await;
         let peer = (*CONTROL_PEER).lock().await;

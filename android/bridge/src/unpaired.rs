@@ -38,9 +38,13 @@ pub fn by(address: &str) -> bool {
     said_set().contains(address)
 }
 
-/// Whether `packet_type` is pairing's own (asked, or answered).
+/// Whether `packet_type` is pairing's own (asked, or answered): the two the
+/// computer acts on before pairing, exactly (BB2 review).
 fn pairing(packet_type: &str) -> bool {
-    packet_type.starts_with("kdeconnect.pair") || packet_type.ends_with(".pair")
+    matches!(
+        packet_type,
+        "kdeconnect.pair" | "kdeconnect.pocketdesk.pair"
+    )
 }
 
 /// What a packet of `packet_type` from the computer at `address` says of
@@ -85,6 +89,35 @@ mod tests {
         let_in(address);
         assert!(!by(address), "paired again");
         assert!(!by("192.0.2.91"), "only that computer");
+    }
+
+    /// BB2 review: each way the phone sends to a computer refuses at once,
+    /// before any connection, when that computer said so.
+    #[tokio::test]
+    async fn every_send_path_keeps_it_on_the_phone() {
+        use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
+        let address = "192.0.2.94";
+        said(address);
+        let packet = NetworkPacket::new("kdeconnect.notification");
+        let refused = Err(REFUSED.to_string());
+        assert_eq!(
+            crate::api::push_packet(address, 1716, &packet).await,
+            refused
+        );
+        assert_eq!(
+            crate::api::send_on_live(address, 1716, &packet).await,
+            refused
+        );
+        assert_eq!(
+            crate::extra_links::send(address, 1716, "kdeconnect.notification", "{}").await,
+            refused
+        );
+        assert!(matches!(
+            crate::download::send_watching_replies(address, 1716, &NetworkPacket::new("kdeconnect.share.request")).await,
+            Err(e) if e == REFUSED
+        ));
+        assert!(crate::api::refused_request(address, &packet).await);
+        let_in(address);
     }
 
     /// BB2: nothing but pairing goes to a computer that said so.

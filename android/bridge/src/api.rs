@@ -1601,6 +1601,19 @@ async fn oneshot_request(
     .await
 }
 
+/// Whether both private request paths refuse `request` to `address` at once
+/// (BB2 review's test).
+#[cfg(test)]
+pub(crate) async fn refused_request(address: &str, request: &NetworkPacket) -> bool {
+    let answered = request_answer(address, 1716, request, "x", Duration::from_secs(1), |_| {
+        true
+    })
+    .await;
+    let oneshot = oneshot_request(address, 1716, request, "x", Duration::from_secs(1)).await;
+    matches!(answered, Err(Unanswered::NotSent))
+        && oneshot.as_ref().err().map(String::as_str) == Some(crate::unpaired::REFUSED)
+}
+
 /// [`oneshot_request`], its connection given `dial` to come up.
 async fn oneshot_request_dialing(
     dial: Duration,
