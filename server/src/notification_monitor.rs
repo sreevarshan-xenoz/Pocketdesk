@@ -21,6 +21,21 @@ impl ForwardedNotification {
         self.app_name.trim().eq_ignore_ascii_case("pocketdesk")
     }
 
+    /// The packet sent to the phones, marked as from this computer
+    /// (`own_id`). Unmarked, the connection marked it as from the phone it
+    /// goes to, and the phone dropped it as its own: the computer's
+    /// notifications reached a phone only in a session (found with BF1).
+    pub fn to_packet(
+        &self,
+        own_id: &str,
+    ) -> pocketdesk_core::error::Result<pocketdesk_core::protocol::kdeconnect::NetworkPacket> {
+        let mut packet = pocketdesk_core::protocol::kdeconnect::NetworkPacket::from_wire(
+            &self.to_kdeconnect_payload(),
+        )?;
+        packet.source = Some(own_id.to_string());
+        Ok(packet)
+    }
+
     /// Serialize to a JSON-encoded KDE Connect notification packet.
     #[allow(dead_code)]
     pub fn to_kdeconnect_payload(&self) -> String {
@@ -330,5 +345,26 @@ mod own_tests {
         assert!(from("Pocketdesk").is_own());
         assert!(from(" pocketdesk ").is_own());
         assert!(!from("Mail").is_own());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BF1: a notification relayed to the phones is marked as from this
+    /// computer, or the phone takes it for its own and drops it.
+    #[test]
+    fn a_relayed_notification_is_marked_as_this_computer_s() {
+        let shown = ForwardedNotification {
+            app_name: "Mail".to_string(),
+            summary: "New mail".to_string(),
+            body: "hello".to_string(),
+            urgency: "normal".to_string(),
+        };
+        let packet = shown.to_packet("pc-own").unwrap();
+        assert_eq!(packet.source.as_deref(), Some("pc-own"));
+        assert_eq!(packet.packet_type, "kdeconnect.notification");
+        assert_eq!(packet.body["title"], "New mail");
     }
 }

@@ -325,8 +325,9 @@ pub async fn run(config: Config) -> Result<()> {
                 match notify_rx.recv().await {
                     Ok(notification) if notification.is_own() => {}
                     Ok(notification) => {
-                        let packet_json = notification.to_kdeconnect_payload();
-                        match NetworkPacket::from_wire(&packet_json) {
+                        // Marked as this computer's (BF1): unmarked, the phone
+                        // read it as its own and dropped it.
+                        match notification.to_packet(&crate::kde::host_identity().device_id) {
                             Ok(packet) => {
                                 // Optimized: Clone the list of clients and release the lock immediately
                                 // to prevent slow clients from blocking the entire registration system.
