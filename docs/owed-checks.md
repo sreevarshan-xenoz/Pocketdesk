@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-869 open items.
+868 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 29 |
+| A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 366 |
@@ -713,10 +713,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute. (where: away)
 
 ## A second computer
-
-**1. Connect + pairing gate (Tier 1 #5, Tier-2 #11b)**
-
-- A pairing link with no fingerprint that does not pair, or a session to a found computer that ends unpaired, leaves no pin on the phone, so another computer at that address can be paired (BC3). The runner's `bc3-unsaved-pin-forgotten` covers the link; not yet run (the phone was off USB).
 
 **29. Computers on this network**
 
