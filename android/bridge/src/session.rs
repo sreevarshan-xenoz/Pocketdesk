@@ -241,6 +241,9 @@ pub(crate) fn queue_notification(body: &serde_json::Value, source: &str) {
     } else {
         &PENDING_NOTIFICATIONS
     };
+    if alert {
+        tracing::info!("An alert from the computer, kept for the phone to show");
+    }
     let mut q = queue.lock().expect("notification queue");
     if q.iter().any(|n| n.get("id") == entry.get("id")) {
         return; // desktop re-sends on reconnect; keep one per id
