@@ -291,6 +291,8 @@ class TransferService : Service() {
             if (stopped()) {
                 cancelledAny = true
                 sendCount++
+                // Not sent, and not to go again by itself (BB4).
+                dev.pocketdesk.android.files.SendOutcomes.record(uri, dev.pocketdesk.android.files.SendOutcome.CANCELLED)
                 return@forEachIndexed
             }
             sendCounted(job.address, job.port, uri, name, null, title, job.drive)
@@ -401,8 +403,15 @@ class TransferService : Service() {
             }
         }
         sendCount++
-        // For the camera's and the screenshots' marks (BB4).
-        dev.pocketdesk.android.files.SendOutcomes.record(uri, result.isSuccess)
+        // How it went, for the camera's and the screenshots' retries (BB4).
+        dev.pocketdesk.android.files.SendOutcomes.record(
+            uri,
+            when {
+                result.isSuccess -> dev.pocketdesk.android.files.SendOutcome.SENT
+                stopped() -> dev.pocketdesk.android.files.SendOutcome.CANCELLED
+                else -> dev.pocketdesk.android.files.SendOutcome.FAILED
+            },
+        )
         // A file that went before the press is sent, not cancelled.
         if (result.isFailure && stopped()) cancelledAny = true
         if (result.isSuccess) {

@@ -97,23 +97,34 @@ class Screenshots(private val ctx: Context) {
     private var restUntilMs = 0L
     private var observer: ContentObserver? = null
 
-    /** Screenshots sent to Downloads, their mark moved once they have gone (BB4). */
-    private var handed: List<Image> = emptyList()
-
     /**
-     * Move the mark past what arrived of the last ones (BB4); one that did
-     * not, and what came after it, are looked at again after a rest.
+     * Screenshots handed to the transfer service for Downloads, each with
+     * its sends so far, and when (BB4): one that fails goes again, a few
+     * times, to Downloads only.
      */
-    private fun settle() {
-        val went = handed.associate { it.id to SendOutcomes.take(it.uri) }
-        val mark = UploadMarks.after(handed.map { it.id }) { went[it] }
-        mark?.let { ScreenshotPrefs.setLastId(ctx, it) }
-        if (mark != handed.last().id) {
-            Log.w(TAG, "a screenshot did not reach the computer's Downloads; it goes again")
-            restUntilMs = SystemClock.elapsedRealtime() + REST_MS
-        }
+    private var handed: List<Pair<Uri, Int>> = emptyList()
+    private var handedAtMs = 0L
+    private var again: List<Pair<Uri, Int>> = emptyList()
+
+    /** False while the last ones are waited for. */
+    private fun settle(): Boolean {
+        val ago = SystemClock.elapsedRealtime() - handedAtMs
+        val failed = UploadRetry.again(handed, ago) { SendOutcomes.peek(it) } ?: return false
+        handed.forEach { (uri, _) -> SendOutcomes.forget(uri) }
         handed = emptyList()
+        again = failed
         dirty = true
+        if (failed.isNotEmpty()) restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+        return true
+    }
+
+    /** Hand [uris] to the transfer service for the computer's Downloads. */
+    private fun toDownloads(address: String, port: Int, uris: List<Pair<Uri, Int>>) {
+        uris.forEach { (uri, _) -> SendOutcomes.expect(uri) }
+        runCatching { TransferService.start(ctx, address, port, uris.map { it.first }) }
+            .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
+        handed = handed + uris
+        handedAtMs = SystemClock.elapsedRealtime()
     }
 
     fun tick() {
@@ -128,11 +139,18 @@ class Screenshots(private val ctx: Context) {
         startWatching()
         if (!dirty || SystemClock.elapsedRealtime() < restUntilMs) return
         // Those sent to Downloads are settled once the service is through.
-        if (handed.isNotEmpty()) {
-            if (TransferService.busy()) return
-            return settle()
-        }
+        if (handed.isNotEmpty() && (TransferService.busy() || !settle())) return
         val own = PhoneLink.target(ctx) ?: return
+        if (again.isNotEmpty()) {
+            if (!Waker.answers(own.address, own.controlPort)) {
+                restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+                return
+            }
+            val retry = again.map { (uri, sends) -> uri to sends + 1 }
+            again = emptyList()
+            toDownloads(own.address, own.controlPort, retry)
+            return
+        }
         dirty = false
         val now = System.currentTimeMillis() / 1000
         val since = ScreenshotPrefs.since(ctx)
@@ -162,8 +180,7 @@ class Screenshots(private val ctx: Context) {
                 !ScreenshotRule.due(image.addedSecs, since, now) ||
                 !ScreenshotRule.sendable(image.size)
             ) {
-                // Never past one still going (BB4): it is looked at again.
-                if (handed.isEmpty()) ScreenshotPrefs.setLastId(ctx, image.id)
+                ScreenshotPrefs.setLastId(ctx, image.id)
                 continue
             }
             // Both halves need the computer to dial back, so it must answer
@@ -173,20 +190,13 @@ class Screenshots(private val ctx: Context) {
                 dirty = true
                 break
             }
+            ScreenshotPrefs.setLastId(ctx, image.id)
             sent++
-            // To Downloads, it is marked once it has gone (BB4); to the
-            // clipboard alone, once it is put there, as before.
-            if (send(own.address, own.controlPort, image.uri)) {
-                handed = handed + image
-                dirty = true
-            } else if (handed.isEmpty()) {
-                ScreenshotPrefs.setLastId(ctx, image.id)
-            }
+            send(own.address, own.controlPort, image.uri)
         }
     }
 
-    /** Send [uri]; whether it went to the transfer service, for Downloads. */
-    private fun send(address: String, port: Int, uri: Uri): Boolean {
+    private fun send(address: String, port: Int, uri: Uri) {
         if (ScreenshotPrefs.clipboard(ctx)) {
             val png = ClipboardImages.pngOf(ctx, uri)
             // Named before it goes, so a session sync does not fetch it back.
@@ -195,12 +205,7 @@ class Screenshots(private val ctx: Context) {
                 png?.let { ClipboardImages.withStaged(ctx, it) { file -> RustCore.sendClipboardImage(address, port, file.absolutePath) } }
             if (result == null || result.isFailure) Log.w(TAG, "a screenshot did not reach the computer's clipboard: ${result?.exceptionOrNull()}")
         }
-        if (!ScreenshotPrefs.save(ctx)) return false
-        // Handed over or not, it is settled by its outcome: one never started
-        // has none, and goes again.
-        runCatching { TransferService.start(ctx, address, port, listOf(uri)) }
-            .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
-        return true
+        if (ScreenshotPrefs.save(ctx)) toDownloads(address, port, listOf(uri to 1))
     }
 
     private data class Image(val id: Long, val uri: Uri, val folder: String?, val addedSecs: Long, val size: Long, val pending: Boolean)

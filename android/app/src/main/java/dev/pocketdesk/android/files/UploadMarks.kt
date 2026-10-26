@@ -3,41 +3,60 @@ package dev.pocketdesk.android.files
 import android.net.Uri
 import java.util.concurrent.ConcurrentHashMap
 
+/** How a file an uploader handed to the transfer service went (BB4). */
+enum class SendOutcome { PENDING, SENT, FAILED, CANCELLED }
+
 /**
- * Where the camera's and the screenshots' marks go once what they handed to
- * the transfer service has gone (BB4): they were moved as it was handed
- * over, so one that failed (the computer went away mid-file, or unpaired
- * the phone) was never sent again.
+ * The camera's and the screenshots' files handed to the transfer service,
+ * and how each went (BB4): a new photo was handed over and taken for sent,
+ * so one that failed (the computer went away mid-file, or unpaired the
+ * phone) was never sent again. Only a file an uploader expects is kept,
+ * until it reads it; in memory, so a process that dies forgets.
  */
-object UploadMarks {
-    /**
-     * The mark after [handed], media ids oldest first: past the leading run
-     * that [arrived], or null when the first did not. One not yet known
-     * (still going, or its service gone with the process) stops the run, so
-     * it goes again rather than being passed unsent.
-     */
-    fun after(handed: List<Long>, arrived: (Long) -> Boolean?): Long? {
-        var mark: Long? = null
-        for (id in handed) {
-            if (arrived(id) != true) break
-            mark = id
-        }
-        return mark
+object SendOutcomes {
+    private val outcomes = ConcurrentHashMap<String, SendOutcome>()
+
+    /** An uploader hands [uri] over: its outcome is kept once known. */
+    fun expect(uri: Uri) {
+        outcomes[uri.toString()] = SendOutcome.PENDING
+    }
+
+    /** How [uri] went, kept only when an uploader expects it. */
+    fun record(uri: Uri, outcome: SendOutcome) {
+        outcomes.computeIfPresent(uri.toString()) { _, _ -> outcome }
+    }
+
+    /** How [uri] went; null when it is not expected. */
+    fun peek(uri: Uri): SendOutcome? = outcomes[uri.toString()]
+
+    fun forget(uri: Uri) {
+        outcomes.remove(uri.toString())
     }
 }
 
-/**
- * How each file handed to the transfer service last went, for the uploaders
- * to settle their marks by (BB4). In memory: a process that dies mid-send
- * forgets, and its files go again.
- */
-object SendOutcomes {
-    private val outcomes = ConcurrentHashMap<String, Boolean>()
+/** Which of the files an uploader handed over go again, and how often (BB4). */
+object UploadRetry {
+    /** Sends of one file at most, the first included: one that keeps failing is given up. */
+    const val MAX_SENDS = 3
 
-    fun record(uri: Uri, sent: Boolean) {
-        outcomes[uri.toString()] = sent
+    /**
+     * How long a file still waiting for its outcome is given while the
+     * transfer service is idle: it may not have started yet; past it, the
+     * service never ran the file, and it counts as failed.
+     */
+    const val START_GRACE_MS = 60_000L
+
+    /**
+     * Those of [handed] (each with how many times it has been sent) that go
+     * again: failed, or never run, and sent fewer than [MAX_SENDS] times.
+     * One cancelled, or sent, does not. Null while one is still waiting
+     * within [START_GRACE_MS] of [handedAgoMs].
+     */
+    fun <T> again(handed: List<Pair<T, Int>>, handedAgoMs: Long, outcome: (T) -> SendOutcome?): List<Pair<T, Int>>? {
+        val outcomes = handed.map { (item, _) -> outcome(item) }
+        if (outcomes.any { it == SendOutcome.PENDING } && handedAgoMs < START_GRACE_MS) return null
+        return handed.zip(outcomes)
+            .filter { (sent, how) -> how != SendOutcome.SENT && how != SendOutcome.CANCELLED && sent.second < MAX_SENDS }
+            .map { (sent, _) -> sent }
     }
-
-    /** How [uri] went, forgotten once read; null when not known. */
-    fun take(uri: Uri): Boolean? = outcomes.remove(uri.toString())
 }
