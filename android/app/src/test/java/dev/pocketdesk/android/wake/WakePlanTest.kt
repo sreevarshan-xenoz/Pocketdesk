@@ -141,9 +141,12 @@ class WakePlanTest {
         val through = WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.1", mac = "02:11:22:33:44:55")
         assertEquals(through.copy(relay = "192.0.2.9"), WakePlan.relayMoved(through, "192.0.2.1", "192.0.2.9"))
         assertNull(WakePlan.relayMoved(through, "192.0.2.5", "192.0.2.9"))
-        // The address is kept, not the method's choice: one not sent through
-        // the moved computer, or not through any, is left alone.
-        assertNull(WakePlan.relayMoved(WakeSettings(relay = "192.0.2.1"), "192.0.2.1", "192.0.2.9"))
+        // Kept for later while another method is on, it moves too (review);
+        // one naming no computer, or another, is left alone.
+        assertEquals(
+            WakeSettings(relay = "192.0.2.9"),
+            WakePlan.relayMoved(WakeSettings(relay = "192.0.2.1"), "192.0.2.1", "192.0.2.9"),
+        )
         assertNull(WakePlan.relayMoved(WakeSettings(), "192.0.2.1", "192.0.2.9"))
     }
 }
