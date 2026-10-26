@@ -2403,7 +2403,17 @@ mod tests {
             socket.read_exact(&mut presented).await.unwrap();
             assert_eq!(&presented, format!("{KEY}\n").as_bytes());
             let mut reader: &[u8] = &data;
-            transfer::send(&mut reader, size, &mut socket, Pace::DEFAULT, |_| {}).await
+            let sent = transfer::send(&mut reader, size, &mut socket, Pace::DEFAULT, |_| {}).await;
+            if sent.is_err() {
+                // Cut off as a phone's app is, but closed in order: dropped
+                // with the desktop's answers unread, Windows resets the
+                // connection and can lose bytes still in flight, so the
+                // desktop kept fewer than were sent (a flake on Windows CI).
+                let _ = socket.shutdown().await;
+                let mut rest = Vec::new();
+                let _ = socket.read_to_end(&mut rest).await;
+            }
+            sent
         });
         (addr, outcome)
     }
