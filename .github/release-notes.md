@@ -45,6 +45,7 @@ Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves
 - **A phone that moves between computers** no longer carries the first one's links, file offers or pairing answer to the second.
 - **Pairing from a code** works on the computer's network even when the phone's link to it came over the internet; it used to say the phone needed the same network.
 - **A wake-on-LAN MAC typed when adding a computer** is kept, and its card offers Wake; it was dropped unless "Connect to it when the app opens" was on.
+- **A computer removed on the phone** is let go: its link closes, so it can no longer ring the phone, and the next computer links; its pick for the phone's notifications goes too. A computer that moves takes along the wakes sent through it.
 
 **Smaller fixes**
 - Home shows one card when Android pauses Pocketdesk, with its Allow button.
