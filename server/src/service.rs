@@ -1594,14 +1594,7 @@ where
                                     );
                                     // Said first, so it learns now, not at its
                                     // next connection (BB1).
-                                    let _ = sender_ref
-                                        .send_packet(
-                                            &NetworkPacket::new(
-                                                pocketdesk_core::protocol::connection::NOT_PAIRED,
-                                            )
-                                            .with_body(serde_json::json!({})),
-                                        )
-                                        .await;
+                                    tell_not_paired(sender_ref).await;
                                     break;
                                 }
                                 if refusal_said {
@@ -1616,15 +1609,13 @@ where
                                          or not with this key (later packets at debug)"
                                     );
                                     // Told once, so it stops sending what is
-                                    // dropped (BB1).
-                                    let _ = sender_ref
-                                        .send_packet(
-                                            &NetworkPacket::new(
-                                                pocketdesk_core::protocol::connection::NOT_PAIRED,
-                                            )
-                                            .with_body(serde_json::json!({})),
-                                        )
-                                        .await;
+                                    // dropped (BB1); one let in on this
+                                    // connection is told only as it closes
+                                    // (review: a store read mid-replace would
+                                    // tell a paired phone it is not).
+                                    if !let_in_once {
+                                        tell_not_paired(sender_ref).await;
+                                    }
                                 }
                                 continue;
                             }
@@ -1687,6 +1678,7 @@ where
                     // Idle a minute: closed too once no longer let in (BA2).
                     if closes_now(let_in_once, &*sender).await {
                         tracing::info!("Closing {device_id}'s connection: no longer let in");
+                        tell_not_paired(sender_ref).await;
                         break;
                     }
                     tracing::debug!("Peer idle - connection still alive");
@@ -1699,6 +1691,15 @@ where
 
         Ok(())
     }
+}
+
+/// Tell the device behind `sender` it is not paired with this computer
+/// (BB1): it kept no word of it before, and a phone went on sending what
+/// was dropped.
+async fn tell_not_paired(sender: &dyn DeviceSender) {
+    let packet = NetworkPacket::new(pocketdesk_core::protocol::connection::NOT_PAIRED)
+        .with_body(serde_json::json!({}));
+    let _ = sender.send_packet(&packet).await;
 }
 
 /// Whether a connection closes: its device was let in on it (`was_let_in`:

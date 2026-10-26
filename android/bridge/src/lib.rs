@@ -1033,8 +1033,6 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWin
     to_jstring(&mut env, json)
 }
 
-/// The phone's default network changed (2b review): tell the live iroh
-/// dialing endpoints, which Android gives no such event.
 /// Whether the computer at `address` said, when last heard, that this phone
 /// is not paired with it (BB1).
 #[unsafe(no_mangle)]
@@ -1049,6 +1047,8 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeUnpaire
     unpaired::by(&address) as jboolean
 }
 
+/// The phone's default network changed (2b review): tell the live iroh
+/// dialing endpoints, which Android gives no such event.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetworkChanged(
     _env: JNIEnv<'_>,

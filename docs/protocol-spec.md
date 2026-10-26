@@ -66,7 +66,7 @@ A phone reaches a computer:
 
 The computer re-reads standing for every packet, so pairing, unpairing or a key change applies to an open connection.
 
-- **Unpaired** (or paired under another key): only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are acted on. Everything else is dropped without an answer. Pairing happens only at home. (A computer whose owner set `pairing_required = false` acts on an unpaired phone's packets with the default permissions, on the home road only; what it keeps per phone, its battery, media and folders, it still keeps for paired phones alone.)
+- **Unpaired** (or paired under another key): only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are acted on. Everything else is dropped; the first such packet on a connection is answered once with `kdeconnect.pocketdesk.not_paired {}`, so a phone knows to stop (BB1), and a connection that had been let in is told so as it closes. Pairing happens only at home. (A computer whose owner set `pairing_required = false` acts on an unpaired phone's packets with the default permissions, on the home road only; what it keeps per phone, its battery, media and folders, it still keeps for paired phones alone.)
 - **Paired:** each packet needs the permission `docs/packets.md` names for it, set per phone in the computer's Devices tab. A packet without its permission is dropped without an answer, except a folder fetch (`kdeconnect.pocketdesk.folder_fetch`), an audio request (`kdeconnect.pocketdesk.audio`) and a privacy request (`kdeconnect.pocketdesk.privacy`, which carries Lock), which are answered as refused so the phone can say why; a client should time out the rest. A packet type no plugin takes is ignored.
 - **Pairing:** a phone asks for a PIN (`kdeconnect.pocketdesk.pair {requestPin: true}`), and the computer shows it on its own screen. The phone then sends `kdeconnect.pair {pin}` and is answered `kdeconnect.pair {pair, serverId}`. A wrong PIN is answered `pair: false`. Pairing binds the certificate that paired. The QR code's link (`pocketdesk://pair`) carries the computer's certificate fingerprint, so a phone can pin it before it first connects (`docs/protocol.md` §2.6).
 
@@ -111,7 +111,7 @@ The stream is QUIC (`pocketdesk-stream`).
 - **`docs/protocol-vectors/control-v1.json`** holds the control channel's conversations, each from a new, unpaired connection:
   - TLS required;
   - the handshake and the identity's capability lists;
-  - an unpaired request unanswered;
+  - an unpaired request unanswered, told once that it is not paired;
   - a wrong PIN answered no;
   - a second identity not ending the connection;
   - a line that is not a packet skipped;

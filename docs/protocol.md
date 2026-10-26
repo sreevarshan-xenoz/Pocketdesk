@@ -181,7 +181,7 @@ Anyone who sees the code while it is valid holds everything needed to pair withi
 
 ### 3.1 Control channel packets
 
-The permission column comes from `capability_for` in `core/src/protocol/permissions.rs`. "Always" means a paired device may always send the packet. Before pairing (with `pairing_required = true`), only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are dispatched (`service.rs`). On v2, `kdeconnect.identity` is also allowed (`v2_multiplexer.rs`). Packets from the desktop to the phone are not gated by per-device permissions, except a link (`kdeconnect.pocketdesk.link`), which goes only to a phone with Links on. They go only to devices that may receive pushes (`server/src/state.rs`, `may_receive_pushes`).
+The permission column comes from `capability_for` in `core/src/protocol/permissions.rs`. "Always" means a paired device may always send the packet. Before pairing (with `pairing_required = true`), only `kdeconnect.pair` and `kdeconnect.pocketdesk.pair` are dispatched (`service.rs`). The first other packet on a connection is answered once with `kdeconnect.pocketdesk.not_paired` (BB1); nothing else goes to it. On v2, `kdeconnect.identity` is also allowed (`v2_multiplexer.rs`). Packets from the desktop to the phone are not gated by per-device permissions, except a link (`kdeconnect.pocketdesk.link`), which goes only to a phone with Links on. They go only to devices that may receive pushes (`server/src/state.rs`, `may_receive_pushes`).
 
 Defaults: every permission is on except Exec, AwayLock and PhoneSound (`Capability::default_allowed`). A phone paired as someone else's, and every new guest, gets Files and Links only, with its sessions asked first (`DevicePermissions::someone_else`, M2b).
 
