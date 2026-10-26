@@ -217,8 +217,8 @@ async fn pair(
     uri: &str,
     request: &str,
 ) -> Option<String> {
-    let name = PairLink::from_uri(uri)
-        .map(|link| link.name)
+    let (name, device_id) = PairLink::from_uri(uri)
+        .map(|link| (link.name, link.device_id))
         .unwrap_or_default();
     let (outcome, paired) = match pair_with(dir, certs, wan, uri).await {
         Ok(computer) => {
@@ -236,6 +236,7 @@ async fn pair(
             outcome,
             unix: pocketdesk_core::local::pin::now_unix(),
             request: request.to_string(),
+            device_id,
         })
     });
     if let Err(e) = saved {
@@ -478,11 +479,8 @@ pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
 /// this one until its own owner removes it (its Devices tab).
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
     let mut gone = None;
-    let saved = computers::update(dir, |file| {
-        if let Some(at) = file.computers.iter().position(|c| c.device_id == device_id) {
-            gone = Some(file.computers.remove(at));
-        }
-    });
+    // Its pairing's line goes with it (BD3).
+    let saved = computers::update(dir, |file| gone = file.remove(device_id));
     if let Err(e) = saved {
         tracing::warn!("Could not forget computer {device_id}: {e}");
         return;
