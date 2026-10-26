@@ -226,6 +226,8 @@ class PhoneNotificationListener : NotificationListenerService() {
     private fun recheckRefuser(now: Long) {
         val marked = PhoneLink.refuser(this) ?: return
         val peer = RustCore.controlPeer()
+        // Another computer's live link is never replaced for it.
+        if (peer != null && peer.first != marked.address) return
         if (peer?.first == marked.address) {
             if (now - recheckMs >= PhoneLink.RECHECK_HOLD_MS) RustCore.closeControlLinkTo(marked.address)
         } else if (peer == null && now - recheckMs >= PhoneLink.RECHECK_MS) {
@@ -994,10 +996,12 @@ class PhoneNotificationListener : NotificationListenerService() {
         // BB2: a computer that said the phone is not paired is not its own,
         // so nothing dialed it again, and a phone paired there anew without
         // pairing from here (re-trusted) never heard so. With no other own
-        // computer it is dialed every few minutes, sending nothing: once it
-        // lets the phone in, its first push says so. Still refused, the link
-        // is let go, so the next look is a fresh one.
-        if (own == null) recheckRefuser(SystemClock.elapsedRealtime())
+        // computer linked it is dialed every few minutes, sending nothing:
+        // once it lets the phone in, its first push says so. Still refused,
+        // the link is let go, so the next look is a fresh one. (Seen on the
+        // OPPO: another paired card, out of reach, became the own computer,
+        // and the one that refused was never looked at again.)
+        recheckRefuser(SystemClock.elapsedRealtime())
         // L4: numbers the computer asks to dial, offered in a notification,
         // unless a session takes them.
         if (!dev.pocketdesk.android.calls.Dials.inSession) {
