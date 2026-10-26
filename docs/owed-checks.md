@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-867 open items.
+868 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 365 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 366 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -1485,6 +1485,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Recents thumbnail blank during blackout. (where: by hand)
 - Pocket test: with overlay on, phone in pocket should not send spurious input (touch consumed by overlay). (where: by hand)
+
+**20. Saved-computers home screen (multi-host store + add-computer form)**
+
+- The doctor's "Scan code again" for a computer whose key changed forgets all that Remove does: its link, its deck widget list and its "also send to" pick (BC1). Needs a computer whose key changed at a saved address (a second throwaway with fresh certificates on the same port).
 
 **21. UI polish pass C1–C9 (design system, immersive session, error UX, settings)**
 
