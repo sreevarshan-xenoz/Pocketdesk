@@ -4969,6 +4969,17 @@ def av2_pin_sheet(ctx: Ctx) -> tuple[str, str]:
     records = phone_records(ctx)
     reveal = bool(ctx.phone.prefs("pocketdesk-ui").get("reveal_pin"))
     seen: dict[str, object] = {}
+    # At home first (AW2): the session checks before it leave the phone on
+    # the internet road with adb's reverse gone, and localhost then reaches
+    # nothing; nothing pairs over the road either (T10a).
+    for _ in range(2):
+        if not (ctx.on_road or iroh_loops(ctx.server.log())):
+            break
+        why = by_home(ctx)
+        if why and "internet road" not in why:
+            return "TIMEOUT", why
+    if ctx.on_road or iroh_loops(ctx.server.log()):
+        return "TIMEOUT", "the phone stayed on the internet road, where nothing pairs"
     code, out = ctx.server.cli("pair", "--json")
     line = next((l for l in reversed(out.splitlines()) if l.strip().startswith("{")), "")
     try:
