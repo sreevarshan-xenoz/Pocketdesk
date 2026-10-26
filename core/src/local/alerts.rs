@@ -51,6 +51,8 @@ pub fn words(what: &str, ended: Ended, took: Duration, tail: &[String]) -> (Stri
     let what = shorten(what.trim(), 60);
     let title = match ended {
         Ended::Exit(0) | Ended::Gone => format!("Done: {what}"),
+        // A Windows crash code reads as one in hex (review), not -1073741819.
+        Ended::Exit(code) if code < 0 => format!("Failed ({:#010X}): {what}", code as u32),
         Ended::Exit(code) => format!("Failed ({code}): {what}"),
         Ended::Stopped => format!("Stopped: {what}"),
         Ended::NotStarted => format!("Did not start: {what}"),
@@ -228,6 +230,10 @@ mod tests {
         assert_eq!(
             words("make", Ended::Exit(2), Duration::ZERO, &[]).0,
             "Failed (2): make"
+        );
+        assert_eq!(
+            words("app", Ended::Exit(-1073741819), Duration::ZERO, &[]).0,
+            "Failed (0xC0000005): app"
         );
         assert_eq!(
             words("make", Ended::Stopped, Duration::ZERO, &[]).0,

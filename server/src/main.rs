@@ -56,8 +56,9 @@ async fn main() -> Result<()> {
         Some(cli::Commands::Done {
             pid,
             no_output,
+            title,
             command,
-        }) => std::process::exit(done::run(*pid, command, !*no_output)),
+        }) => std::process::exit(done::run(*pid, command, !*no_output, title.as_deref())),
         _ => {}
     }
 

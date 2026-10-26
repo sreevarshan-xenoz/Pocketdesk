@@ -66,13 +66,17 @@ links. Exit codes: 0 sent, 1 failed (the phone is not in a session, or its
 Links permission is off), 2 bad arguments (a link that may not be opened),
 3 no server running.
 .TP
-.B done [\-\-pid \fIPID\fR] [\-\-no\-output] [\-\-] \fICOMMAND\fR...
+.B done [\-\-pid \fIPID\fR] [\-\-title \fINAME\fR] [\-\-no\-output] [\-\-] \fICOMMAND\fR...
 Run a command, its output passing through, or wait on a process already
 running; then tell the phones that show this computer's notifications how
 it ended, how long it took and its last lines (left out with
 .BR \-\-no\-output ).
 Exits as the command does (0 for a process waited on that ended, its own
 code on Windows); 2 bad arguments, 127 a command that could not start.
+The notification names the command line unless
+.B \-\-title
+names it, and may show on the phone's lock screen. The output goes
+through a pipe, not a terminal.
 .TP
 .B sessions [\-\-count \fIN\fR] [\-\-json]
 Show recorded streaming\-session outcomes (default: last 10); with

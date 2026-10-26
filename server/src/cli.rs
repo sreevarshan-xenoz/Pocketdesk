@@ -111,6 +111,10 @@ pub enum Commands {
         /// Leave the output's last lines out of the notification
         #[arg(long)]
         no_output: bool,
+        /// Name the notification so, instead of by the command line (which
+        /// can carry a secret, and may show on the phone's lock screen)
+        #[arg(long)]
+        title: Option<String>,
         /// The command and its arguments, after `--`
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,

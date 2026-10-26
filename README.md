@@ -546,7 +546,7 @@ The id is in the pairing QR code, on each paired phone and on every relay the de
 | `pocketdesk tel <link>` | Open the phone's dialer with a `tel:` link's number (what the link handler runs) |
 | `pocketdesk tel-handler [--remove]` | Open `tel:` and `callto:` links on the phone, or stop |
 | `pocketdesk phone-command <phone> <name> [text]` | Hand a command to the phone's Tasker, Automate or MacroDroid |
-| `pocketdesk done [--pid N] [--no-output] -- <command…>` | Run a command (or wait on a running process) and tell the phone when it ends: how it ended, how long it took and its last lines, as one of this computer's notifications; exits as the command does |
+| `pocketdesk done [--pid N] [--title NAME] [--no-output] -- <command…>` | Run a command (or wait on a running process) and tell the phone when it ends: how it ended, how long it took and its last lines, as one of this computer's notifications; exits as the command does. The notification names the command line unless `--title` names it, and can show on the phone's lock screen: keep secrets out with `--title` and `--no-output` |
 | `pocketdesk ring <phone> [--json]` | Ring a phone that keeps a link now, loudly for 30 s, at most once a minute |
 | `pocketdesk quiet <phone> [--minutes N \| --off]` | Turn on a phone's Do Not Disturb for a while (an hour by default, at most a day), or end the mute this computer asked for |
 | `pocketdesk pause [--for MINUTES \| --until-resumed \| --resume]` | Pause what the phones bring to this computer, or resume; with no flag, say whether it is paused |
