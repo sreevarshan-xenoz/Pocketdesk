@@ -255,6 +255,16 @@ pub async fn run_watcher() {
         if let Ok(dir) = crate::state::state_dir()
             && (crate::inbox::changed(pocketdesk_core::local::paths::KICKS_DIR) || sweep)
         {
+            // A device's own kick (AY3): its sessions alone.
+            for device in shared::take_device_kicks(&dir, now) {
+                for s in pocketdesk_core::streaming::sessions::kick_device(&device) {
+                    tracing::info!(
+                        device_id = s.device_id.as_deref().unwrap_or("<unannounced>"),
+                        peer = %s.peer,
+                        "Ended the device's streaming session (the desktop app)"
+                    );
+                }
+            }
             for target in shared::take_kicks(&dir, now) {
                 let kicked = pocketdesk_core::streaming::sessions::kick(&target);
                 if kicked.is_empty() {

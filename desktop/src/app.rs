@@ -948,7 +948,9 @@ impl PocketdeskApp {
         if !connected {
             return;
         }
-        if let Err(e) = sessions::request_kick(&self.state_dir, id, now_unix()) {
+        // Its sessions alone (AY3): as a kick target, an id of "all" or a
+        // prefix of another phone's would end theirs too.
+        if let Err(e) = sessions::request_kick_device(&self.state_dir, id, now_unix()) {
             self.notice = crate::notice::Notice::error(format!(
                 "Could not end {}'s session: {e}",
                 self.label(id)

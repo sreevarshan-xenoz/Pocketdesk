@@ -136,20 +136,53 @@ pub fn request_kick(state_dir: &Path, target: &str, now_unix: u64) -> io::Result
     std::fs::rename(tmp, dir.join(format!("{name}.kick")))
 }
 
-/// The targets of every fresh kick request, each taken once: the files in
-/// `kicks/` and an older CLI's single `kick` file. Every request read is
-/// removed (a stale or malformed one too).
-pub fn take_kicks(state_dir: &Path, now_unix: u64) -> Vec<String> {
-    let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(state_dir.join(KICKS_DIR))
+/// Ask the running server to end the sessions of the device `device_id`
+/// alone (AY3): unlike [`request_kick`]'s target, never `all` or an id's
+/// prefix, whatever the id is.
+pub fn request_kick_device(state_dir: &Path, device_id: &str, now_unix: u64) -> io::Result<()> {
+    if device_id.trim().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "kick device is empty",
+        ));
+    }
+    let dir = state_dir.join(KICKS_DIR);
+    std::fs::create_dir_all(&dir)?;
+    let name = uuid::Uuid::new_v4().to_string();
+    let tmp = dir.join(format!("{name}.tmp"));
+    std::fs::write(&tmp, format!("{device_id}\n{now_unix}\n"))?;
+    std::fs::rename(tmp, dir.join(format!("{name}.device")))
+}
+
+/// The devices of every fresh [`request_kick_device`], each taken once.
+pub fn take_device_kicks(state_dir: &Path, now_unix: u64) -> Vec<String> {
+    take_kick_files(kick_files(state_dir, "device"), now_unix)
+}
+
+/// The files in `kicks/` with `extension`.
+fn kick_files(state_dir: &Path, extension: &str) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(state_dir.join(KICKS_DIR))
         .map(|entries| {
             entries
                 .flatten()
                 .map(|e| e.path())
-                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("kick"))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(extension))
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The targets of every fresh kick request, each taken once: the files in
+/// `kicks/` and an older CLI's single `kick` file. Every request read is
+/// removed (a stale or malformed one too).
+pub fn take_kicks(state_dir: &Path, now_unix: u64) -> Vec<String> {
+    let mut paths = kick_files(state_dir, "kick");
     paths.push(state_dir.join(KICK_FILE));
+    take_kick_files(paths, now_unix)
+}
+
+/// Each request in `paths`, read once and removed.
+fn take_kick_files(paths: Vec<std::path::PathBuf>, now_unix: u64) -> Vec<String> {
     let mut targets = Vec::new();
     for path in paths {
         let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -362,6 +395,23 @@ mod tests {
         taken.sort();
         assert_eq!(taken, vec!["phone-a", "phone-b"]);
         assert!(take_kicks(&dir, 1_010).is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_device_s_kick_names_that_device_alone() {
+        // AY3: the desktop app's Unpair ended a phone's sessions by its id as
+        // a kick target, where "all" or a prefix of another's id named more.
+        let dir = temp_dir("kick-device");
+        request_kick_device(&dir, "all", 1_000).unwrap();
+        request_kick(&dir, "phone-a", 1_000).unwrap();
+        assert_eq!(take_device_kicks(&dir, 1_010), vec!["all"]);
+        assert_eq!(
+            take_kicks(&dir, 1_010),
+            vec!["phone-a"],
+            "each kind its own"
+        );
+        assert!(take_device_kicks(&dir, 1_010).is_empty(), "taken once");
+        assert!(request_kick_device(&dir, " ", 1).is_err());
     }
 
     #[test]
