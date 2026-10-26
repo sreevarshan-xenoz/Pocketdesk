@@ -5513,6 +5513,16 @@ mod internet_road_tests {
             pause.may_try("192.0.2.7", now + INTERNET_REST),
             "a minute again"
         );
+        // Failures one after another reach the cap.
+        for _ in 0..8 {
+            pause.failed("198.51.100.3", now);
+        }
+        assert!(!pause.may_try("198.51.100.3", now + Duration::from_secs(15 * 60)));
+        assert!(pause.may_try("198.51.100.3", now + super::INTERNET_REST_MAX));
+        // A run long over is forgotten: a minute again (review).
+        let later = now + super::INTERNET_REST_MAX * 3;
+        pause.failed("198.51.100.3", later);
+        assert!(pause.may_try("198.51.100.3", later + INTERNET_REST));
     }
 
     #[test]

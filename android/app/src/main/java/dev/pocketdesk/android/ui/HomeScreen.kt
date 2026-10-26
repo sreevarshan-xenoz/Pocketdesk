@@ -1175,6 +1175,8 @@ private suspend fun answersOverInternetWithin(
  */
 private fun answersOverInternet(context: android.content.Context, host: HostStore.Host): Boolean {
     val wan = HostStore.wanIdentity(context, host.address) ?: return false
+    // Asked for now: not held back by failures from before (BB5 review).
+    RustCore.retryInternetNow(host.address)
     RustCore.connectToPeer(host.address, host.controlPort, wan)
     return RustCore.controlPeer()?.first == host.address
 }

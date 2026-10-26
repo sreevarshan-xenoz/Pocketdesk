@@ -1044,6 +1044,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeNetwork
     api::INTERNET_PAUSE.clear();
 }
 
+/// The person asked for the computer at `address` (Home's Connect): its
+/// internet road is tried now, whatever failed before (BB5 review).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRetryInternetNow(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) {
+    let Ok(address) = env.get_string(&address).map(String::from) else {
+        return;
+    };
+    api::INTERNET_PAUSE.succeeded(&address);
+}
+
 /// Toggle server-enforced view-only mode (R4 D1): while enabled the server
 /// drops all injected input from this session; video keeps flowing.
 #[unsafe(no_mangle)]
