@@ -1990,6 +1990,67 @@ def x1_share_big(ctx: Ctx) -> tuple[str, str]:
     return road_check(ctx, body)
 
 
+@check("ba1-unpair-stops-transfer", "§31")
+def ba1_unpair_stops_transfer(ctx: Ctx) -> tuple[str, str]:
+    """A transfer under way stops when its phone is unpaired (§31, BA1): a
+    1 GB share from the phone by the internet road, once bytes move,
+    then the phone taken out of the throwaway's trust store. Its row goes
+    within 15 s and the file never lands whole. The trust store and the
+    device keys are put back byte for byte."""
+    why = needs_choosing(ctx)
+    if why:
+        return "SKIP", why
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off (an unpaired phone is let in)"
+
+    def body(ctx: Ctx) -> tuple[str, str]:
+        state = ctx.server.root / "state"
+        kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+                if (state / name).exists()}
+        if "trusted_devices.json" not in kept:
+            return "SKIP", "no trust store on the throwaway"
+        store = json.loads(kept["trusted_devices.json"])
+        if ctx.device not in store.get("trusted_device_ids", []):
+            return "SKIP", "the phone is not paired with the throwaway"
+        local = big_file(ctx, GIB + (1 << 20))
+        local = local.rename(local.with_name("ba1-" + local.name[3:]))
+        name = local.name
+        size = local.stat().st_size
+        landed = ctx.server.root / "downloads" / name
+        stage_in_fixture(local)
+        try:
+            share_to_throwaway(name)
+            moving = wait_for(lambda: (transfer_done(ctx, name) or (0, 0))[0] > 0, 120, 1)
+            if not moving:
+                return "TIMEOUT", "the share showed no bytes moving within 120 s"
+            unpaired = {**store, "trusted_device_ids": [d for d in store["trusted_device_ids"] if d != ctx.device]}
+            tmp = state / "trusted_devices.json.ba1"
+            tmp.write_text(json.dumps(unpaired), encoding="utf-8")
+            os.replace(tmp, state / "trusted_devices.json")
+            unpaired_at = time.monotonic()
+            gone = wait_for(lambda: transfer_done(ctx, name) is None, 15, 0.5)
+            took = time.monotonic() - unpaired_at
+            time.sleep(5)
+            whole = landed.exists() and landed.stat().st_size == size
+            if whole:
+                return "FAIL", "the file landed whole after its phone was unpaired"
+            if not gone:
+                return "FAIL", "the transfer still ran 15 s after its phone was unpaired"
+            return "PASS", f"its row went {took:.1f} s after the phone was unpaired; the file never landed whole"
+        finally:
+            for file, data in kept.items():
+                tmp = state / f"{file}.ba1"
+                tmp.write_bytes(data)
+                os.replace(tmp, state / file)
+            unstage(name)
+            local.unlink(missing_ok=True)
+            landed.unlink(missing_ok=True)
+            for part in (ctx.server.root / "downloads").glob(f"{name}*"):
+                part.unlink(missing_ok=True)
+    return road_check(ctx, body)
+
+
 @check("x1-file-received", "§78")
 def x1_file_received(ctx: Ctx) -> tuple[str, str]:
     """`file_received` at both detail levels: the size always, the file's
