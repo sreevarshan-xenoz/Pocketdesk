@@ -186,10 +186,16 @@ mod tests {
         record(&dir, file(1)).unwrap();
         record(&dir, file(2)).unwrap();
         update(&dir, "id-2", SentState::Sent).unwrap();
+        // Review: a row already failed, and a row's note, are kept.
+        let mut noted = file(3);
+        noted.state = SentState::Failed("no room".into());
+        noted.note = Some("2 files left out".into());
+        record(&dir, noted.clone()).unwrap();
         assert_eq!(settle_offered(&dir, "stopped").unwrap(), 1);
         let files = read(&dir);
         assert_eq!(files[0].state, SentState::Failed("stopped".into()));
         assert_eq!(files[1].state, SentState::Sent);
+        assert_eq!(files[2], noted);
         assert_eq!(settle_offered(&dir, "stopped").unwrap(), 0, "nothing left");
         assert_eq!(
             settle_offered(&temp_dir("settle-none"), "stopped").unwrap(),
