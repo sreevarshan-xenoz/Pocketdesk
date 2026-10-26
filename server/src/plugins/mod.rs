@@ -14,6 +14,7 @@ pub mod monitors;
 pub mod notification;
 pub mod notification_reply;
 pub mod pair;
+pub mod peek;
 pub mod phone_apps;
 pub mod phone_battery;
 pub mod phone_contacts;
@@ -42,6 +43,7 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     privacy::answer_denied(packet, sender).await;
     notification::answer_denied(packet, sender).await;
     tasks::answer_denied(packet, sender).await;
+    peek::answer_denied(packet, sender).await;
 }
 
 /// Packets the computer sends from outside its plugins: pushes and what a
@@ -108,5 +110,6 @@ pub fn register_all() -> PluginSet {
     registry.register(links::LinksPlugin::default());
     registry.register(tasks::TasksPlugin);
     registry.register(deck::DeckPlugin);
+    registry.register(peek::PeekPlugin);
     registry
 }

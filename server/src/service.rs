@@ -114,6 +114,7 @@ pub async fn run(config: Config) -> Result<()> {
         "POCKETDESK_DOWNLOAD_DIR",
         "POCKETDESK_LOCK_FILE",
         "POCKETDESK_MEDIA_FILE",
+        "POCKETDESK_PEEK_FILE",
     ] {
         if let Some(value) = std::env::var_os(seam) {
             let path = std::path::Path::new(&value);
