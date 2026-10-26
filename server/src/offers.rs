@@ -65,6 +65,8 @@ fn may_ask_again(device: &str, now: Instant) -> bool {
 pub const OFFER_TTL: Duration = Duration::from_secs(10 * 60);
 /// What the sent list says of an offer whose time ran out.
 const EXPIRED: &str = "the phone did not take it in time";
+/// Why a send offered when the server stopped did not go (BD2).
+const STOPPED: &str = "the server stopped before it was taken";
 /// The largest file offered, as for every transfer.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 /// How often the outbox is read.
@@ -922,6 +924,18 @@ pub async fn run_watcher() {
         tracing::warn!("No state directory: sending files to phones is off");
         return;
     };
+    // Offers live in memory: those the last run left can no longer be
+    // taken, and said "waiting" for good with no Send again (BD2).
+    {
+        let _guard = sent_lock().lock().unwrap_or_else(|e| e.into_inner());
+        match sent::settle_offered(&dir, STOPPED) {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!("{n} file(s) offered before the server stopped are marked not sent")
+            }
+            Err(e) => tracing::warn!("Could not update the sent list: {e}"),
+        }
+    }
     loop {
         crate::inbox::wait(pocketdesk_core::local::paths::OUTBOX_DIR, POLL).await;
         for id in sweep_at(Instant::now()) {
