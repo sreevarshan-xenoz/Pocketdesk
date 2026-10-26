@@ -16,15 +16,48 @@ object ShortcutPlan {
      * only by the system and the launcher, so another app cannot forge one
      * to choose a computer (N2 review).
      */
-    data class Entry(val kind: Kind, val address: String, val token: String = "") {
-        /** Stable per computer and action, so a launcher keeps a pinned one. */
+    data class Entry(val kind: Kind, val address: String, val token: String = "", val pairedId: String? = null) {
+        /**
+         * Stable per card and action, so a launcher keeps a pinned one: a
+         * paired computer's names its paired id beside the card's address
+         * (AZ1: by the address alone, a move turned it off and another
+         * computer saved there took it over; a computer may have two cards,
+         * its LAN and tailnet addresses, each with its own).
+         */
         val id: String
-            get() = if (kind == Kind.CONNECT && token.isNotEmpty()) {
-                "connect:$token:$address"
-            } else {
-                "${kind.name.lowercase()}:$address"
+            get() {
+                val target = pairedId?.let { "$PAIRED$it@$address" } ?: address
+                return if (kind == Kind.CONNECT && token.isNotEmpty()) {
+                    "connect:$token:$target"
+                } else {
+                    "${kind.name.lowercase()}:$target"
+                }
             }
     }
+
+    /** Before a paired id in a shortcut id; no address starts with it. */
+    private const val PAIRED = "paired:"
+
+    /**
+     * What a shortcut id names: a paired computer's card (AZ1), or an
+     * address (a computer never paired, or a shortcut made before AZ1).
+     */
+    sealed interface Target {
+        data class Paired(val id: String, val address: String) : Target
+
+        data class Address(val address: String) : Target
+    }
+
+    fun targetOf(id: String): Target {
+        val rest = addressOf(id)
+        if (!rest.startsWith(PAIRED)) return Target.Address(rest)
+        // No address holds an @; a paired id is all before the last one.
+        val named = rest.removePrefix(PAIRED)
+        val at = named.lastIndexOf('@')
+        return if (at < 0) Target.Paired(named, "") else Target.Paired(named.substring(0, at), named.substring(at + 1))
+    }
+
+    fun kindOf(id: String): Kind = if (id.startsWith("wake:")) Kind.WAKE else Kind.CONNECT
 
     /** A connect shortcut's token: 16 hex digits, which no address starts with before a colon. */
     private val TOKEN = Regex("^[0-9a-f]{16}:")
@@ -38,19 +71,71 @@ object ShortcutPlan {
     /** Launchers show four app shortcuts. */
     const val MAX = 4
 
-    fun plan(hosts: List<HostStore.Host>, hasWake: (String) -> Boolean, max: Int = MAX, token: String = ""): List<Entry> {
-        val connect = hosts.map { Entry(Kind.CONNECT, it.address, token) }
-        val wake = hosts.filter { hasWake(it.address) }.map { Entry(Kind.WAKE, it.address) }
-        return (connect + wake).take(max)
+    fun plan(
+        hosts: List<HostStore.Host>,
+        hasWake: (String) -> Boolean,
+        max: Int = MAX,
+        token: String = "",
+        pairedId: (String) -> String? = { null },
+    ): List<Entry> {
+        val connect = hosts.map { Entry(Kind.CONNECT, it.address, token, pairedId(it.address)) }
+        val wake = hosts.filter { hasWake(it.address) }.map { Entry(Kind.WAKE, it.address, pairedId = pairedId(it.address)) }
+        return (connect + wake).distinctBy { it.id }.take(max)
     }
 
     /**
      * The saved computer a shortcut, the tile or the widget names. Only a
      * computer already saved: the intent can come from any app, and must
-     * not add one.
+     * not add one. One made for a paired computer, [pairedFor], names its
+     * card at [address], else another of its cards (it moved), never
+     * another computer saved at that address (AZ1).
      */
-    fun savedHost(address: String?, hosts: List<HostStore.Host>): HostStore.Host? =
-        address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
+    fun savedHost(
+        address: String?,
+        hosts: List<HostStore.Host>,
+        pairedFor: String? = null,
+        pairedId: (String) -> String? = { null },
+    ): HostStore.Host? =
+        if (pairedFor != null) {
+            val its = hosts.filter { pairedId(it.address) == pairedFor }
+            its.firstOrNull { it.address == address } ?: its.firstOrNull()
+        } else {
+            address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
+        }
+
+    /** The saved computer a shortcut id names (AZ1). */
+    private fun hostFor(id: String, hosts: List<HostStore.Host>, pairedId: (String) -> String?): HostStore.Host? =
+        when (val target = targetOf(id)) {
+            is Target.Paired -> savedHost(target.address, hosts, target.id, pairedId)
+            is Target.Address -> savedHost(target.address, hosts)
+        }
+
+    /** What becomes of a pinned shortcut at a refresh (AZ1). */
+    sealed interface Pinned {
+        data object Keep : Pinned
+
+        /** Its computer moved: pointed at [host]'s address. */
+        data class Move(val host: HostStore.Host) : Pinned
+
+        /** Its computer is no longer saved. */
+        data object Off : Pinned
+    }
+
+    /**
+     * What becomes of the pinned shortcut [id], whose intent names
+     * [address]: kept while its computer is saved there, moved with it, or
+     * turned off (AZ1: one made for a removed computer must not wake for
+     * another saved at its address).
+     */
+    fun pinnedFate(
+        id: String,
+        address: String?,
+        hosts: List<HostStore.Host>,
+        pairedId: (String) -> String?,
+    ): Pinned {
+        val host = hostFor(id, hosts, pairedId) ?: return Pinned.Off
+        return if (host.address == address) Pinned.Keep else Pinned.Move(host)
+    }
 
     /**
      * Whether files shared with these URI [schemes] may be sent: only what
@@ -68,11 +153,15 @@ object ShortcutPlan {
      * install's [token], of a computer still saved, is one. Any other id
      * goes nowhere, never to another computer.
      */
-    fun shortcutHost(shortcutId: String, hosts: List<HostStore.Host>, token: String): Share {
+    fun shortcutHost(
+        shortcutId: String,
+        hosts: List<HostStore.Host>,
+        token: String,
+        pairedId: (String) -> String? = { null },
+    ): Share {
         if (token.isEmpty()) return Share.NotSaved
-        val prefix = "connect:$token:"
-        if (!shortcutId.startsWith(prefix)) return Share.NotSaved
-        return savedHost(shortcutId.removePrefix(prefix), hosts)?.let { Share.To(it) } ?: Share.NotSaved
+        if (!shortcutId.startsWith("connect:$token:")) return Share.NotSaved
+        return hostFor(shortcutId, hosts, pairedId)?.let { Share.To(it) } ?: Share.NotSaved
     }
 
     /** Where a share goes, or why it goes nowhere. */

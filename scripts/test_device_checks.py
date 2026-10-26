@@ -570,5 +570,13 @@ class SessionParts(unittest.TestCase):
             self.assertEqual(dc.kept_for(root, "ccc"), [])
 
 
+    def test_the_app_s_shortcut_ids_from_dumpsys(self):
+        """AZ1: only this app's ids, from its own package block."""
+        dump = '  Package: com.example.launcher  UID: 10001\n      ShortcutInfo {id=other, flags=0x1}\n  Package: dev.pocketdesk.android  UID: 10308\n      ShortcutInfo {id=connect:0123456789abcdef:paired:pc-a@127.0.0.1, flags=0x403}\n      ShortcutInfo {id=wake:192.0.2.1, flags=0x1}\n  Package: com.example.other  UID: 10400\n      ShortcutInfo {id=theirs, flags=0x1}'
+        self.assertEqual(
+            dc.app_shortcut_ids(dump),
+            ["connect:0123456789abcdef:paired:pc-a@127.0.0.1", "wake:192.0.2.1"],
+        )
+
 if __name__ == "__main__":
     unittest.main()

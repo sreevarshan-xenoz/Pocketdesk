@@ -5925,6 +5925,63 @@ def ay3_device_kick(ctx: Ctx) -> tuple[str, str]:
     return session_check(ctx, body)
 
 
+# ---- a shortcut made for a paired computer (AZ1) ----
+
+
+def fire_connect_shortcut(address: str, paired_id: str) -> None:
+    """Open the app as a pinned Connect shortcut does: its action, the
+    computer's address, and the paired id it was made for."""
+    am("start", "-f", "0x30000000", "-a", "dev.pocketdesk.android.action.CONNECT",
+       "-n", f"{APP}/.MainActivity", "--es", "dev.pocketdesk.android.extra.ADDRESS", address,
+       "--es", "dev.pocketdesk.android.extra.PAIRED_ID", paired_id)
+
+
+def app_shortcut_ids(dump: str) -> list[str]:
+    """The ids of this app's shortcuts in `dumpsys shortcut`."""
+    ids = []
+    package = None
+    for line in dump.splitlines():
+        found = re.search(r"Package: (\S+)", line)
+        if found:
+            package = found.group(1)
+        if package == APP:
+            ids += re.findall(r"ShortcutInfo \{id=([^,]+),", line)
+    return ids
+
+
+@check("az1-shortcut-paired-id", "§33")
+def az1_shortcut_paired_id(ctx: Ctx) -> tuple[str, str]:
+    """A shortcut made for a paired computer opens that computer alone
+    (§33, AZ1): a Connect shortcut for 127.0.0.1 made for another paired
+    id opens no session there, one made for the throwaway's opens one, and
+    the phone's own Connect shortcut for it names its paired id. The ids
+    are never printed."""
+    def body(ctx: Ctx) -> tuple[str, str]:
+        paired = ctx.phone.prefs("pocketdesk-host").get("paired_desktop:127.0.0.1")
+        if not isinstance(paired, str) or not paired:
+            return "SKIP", "the phone keeps no paired id for 127.0.0.1"
+        # The app's shortcuts are refreshed as it leaves the screen: opened
+        # and left first, so the list read is this build's (review).
+        ctx.phone.wake()
+        adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+        time.sleep(3)
+        adb("shell", "input", "keyevent", "KEYCODE_HOME")
+        time.sleep(2)
+        own = f"connect:{ctx.phone.prefs('pocketdesk-ui').get('share_shortcut_token', '')}:paired:{paired}@127.0.0.1"
+        named = own in app_shortcut_ids(adb("shell", "dumpsys", "shortcut"))
+        fire_connect_shortcut("127.0.0.1", f"az1-{uuid.uuid4().hex[:8]}")
+        if wait_for(lambda: in_session(ctx), 15, 1):
+            return "FAIL", "a shortcut made for another computer opened a session on the throwaway"
+        fire_connect_shortcut("127.0.0.1", paired)
+        if not wait_for(lambda: in_session(ctx), 30, 1):
+            return "FAIL", "a shortcut made for the throwaway opened no session within 30 s"
+        if not named:
+            return "FAIL", "the phone's Connect shortcut for the throwaway does not name its paired id"
+        return "PASS", ("one made for another paired id opened nothing; one made for the throwaway's opened "
+                        "its session; the app's own names it by its paired id")
+    return session_check(ctx, body)
+
+
 # ---- the phone's log, kept long enough (AC6) ----
 
 # The phone's main log for a run. The OPPO's is 256 KiB, a couple of
