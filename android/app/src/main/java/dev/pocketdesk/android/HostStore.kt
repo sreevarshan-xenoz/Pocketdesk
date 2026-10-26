@@ -1,6 +1,7 @@
 package dev.pocketdesk.android
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import dev.pocketdesk.android.wake.WakeInfo
 import dev.pocketdesk.android.wake.WakeMethod
@@ -84,8 +85,23 @@ object HostStore {
     /** Forget a desktop and every per-address record hanging off it. */
     fun remove(ctx: Context, address: String) {
         writeHosts(ctx, hosts(ctx).filterNot { it.address == address })
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.edit {
             for (prefix in PER_ADDRESS) remove("$prefix$address")
+        }
+        // No other card's wake is sent through it any more (BC2), as a move
+        // takes them along (AX2).
+        rewriteRelays(prefs) { WakePlan.relayRemoved(it, address) }
+    }
+
+    /** Each card's Wake settings that [change] gives new ones for, written. */
+    private fun rewriteRelays(prefs: SharedPreferences, change: (WakeSettings) -> WakeSettings?) {
+        prefs.edit(commit = true) {
+            for ((key, value) in prefs.all) {
+                if (!key.startsWith(KEY_WAKE_SETTINGS_PREFIX) || value !is String) continue
+                val changed = wakeSettingsFrom(value)?.let(change) ?: continue
+                putString(key, wakeSettingsJson(changed))
+            }
         }
     }
 
@@ -136,13 +152,7 @@ object HostStore {
         }
         // The wakes sent through it, the moved card's own too, go to the
         // new address (AX2).
-        prefs.edit(commit = true) {
-            for ((key, value) in prefs.all) {
-                if (!key.startsWith(KEY_WAKE_SETTINGS_PREFIX) || value !is String) continue
-                val moved = wakeSettingsFrom(value)?.let { WakePlan.relayMoved(it, old, new.address) } ?: continue
-                putString(key, wakeSettingsJson(moved))
-            }
-        }
+        rewriteRelays(prefs) { WakePlan.relayMoved(it, old, new.address) }
         writeHosts(ctx, list.map { if (it.address == old) new else it })
         return true
     }

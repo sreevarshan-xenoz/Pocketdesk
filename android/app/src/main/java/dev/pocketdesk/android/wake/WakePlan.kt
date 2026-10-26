@@ -42,6 +42,14 @@ object WakePlan {
     fun relayMoved(settings: WakeSettings, old: String, new: String): WakeSettings? =
         settings.takeIf { it.relay.trim() == old }?.copy(relay = new)
 
+    /**
+     * [settings] after the computer at [removed] was removed, when they name
+     * it as the one to send the wake; null when they do not (BC2: Wake
+     * showed and failed, and a computer saved later at that address would
+     * have been asked to send it). With no relay the card's Wake is hidden.
+     */
+    fun relayRemoved(settings: WakeSettings, removed: String): WakeSettings? = relayMoved(settings, removed, "")
+
     /** The port a magic packet goes to on this network. */
     const val LAN_PORT = 9
 
