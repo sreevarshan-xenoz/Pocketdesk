@@ -180,6 +180,31 @@ pub fn forget_names(state_dir: &Path, keep: usize) -> io::Result<bool> {
     Ok(forgot)
 }
 
+/// Keep only the texts of the phones `paired` names, and their replies
+/// waiting (AY5: an unpaired phone's stayed on the Messages page for good).
+/// Whether any text went; nothing is written when none did, and a history
+/// that cannot be read is left as it is. The caller serializes calls.
+pub fn keep_only(state_dir: &Path, paired: &[String], keep: usize) -> io::Result<bool> {
+    for request in pending(state_dir) {
+        if !paired.contains(&request.device_id) {
+            remove_pending(state_dir, &request.id)?;
+        }
+    }
+    let mut all = read_checked(state_dir)?;
+    let before = all.len();
+    all.retain(|m| paired.contains(&m.device_id));
+    if all.len() == before {
+        return Ok(false);
+    }
+    write(state_dir, all, keep)?;
+    Ok(true)
+}
+
+/// Whether reply `id` still waits in the outbox.
+pub fn is_pending(state_dir: &Path, id: &str) -> bool {
+    is_valid_id(id) && outbox_dir(state_dir).join(format!("{id}.json")).is_file()
+}
+
 /// Set reply `id`'s state (the server's side). An unknown id is ignored.
 pub fn set_reply_state(
     state_dir: &Path,
@@ -333,6 +358,35 @@ mod tests {
             reply: None,
             name: None,
         }
+    }
+
+    /// AY5: an unpaired phone's texts and its replies waiting go, the
+    /// others' stay; a history that cannot be read is left as it is.
+    #[test]
+    fn only_paired_phones_texts_are_kept() {
+        let dir = dir("paired");
+        record(&dir, received("a", "+1", "hi", 1), KEEP).unwrap();
+        record(&dir, received("b", "+2", "yo", 2), KEEP).unwrap();
+        let a = queue_reply(&dir, "a", "+1", "ok", 3).unwrap();
+        let b = queue_reply(&dir, "b", "+2", "ok", 3).unwrap();
+        assert!(is_pending(&dir, &b.id));
+        assert!(keep_only(&dir, &["a".to_string()], KEEP).unwrap());
+        let messages = read(&dir);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].device_id, "a");
+        assert_eq!(pending(&dir), vec![a]);
+        assert!(!is_pending(&dir, &b.id));
+        assert!(
+            !keep_only(&dir, &["a".to_string()], KEEP).unwrap(),
+            "none went"
+        );
+        std::fs::write(dir.join(SMS_FILE), "not json").unwrap();
+        assert!(keep_only(&dir, &[], KEEP).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(SMS_FILE)).unwrap(),
+            "not json"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
