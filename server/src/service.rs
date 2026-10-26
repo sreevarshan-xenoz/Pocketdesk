@@ -1582,6 +1582,14 @@ where
                                 continue;
                             }
                             if !pairing_packet && !may_act {
+                                // Let in before, and no longer (BA2): the
+                                // connection closes.
+                                if closes(seeded, state::may_receive_pushes(&*sender)) {
+                                    tracing::info!(
+                                        "Closing {device_id}'s connection: no longer paired"
+                                    );
+                                    break;
+                                }
                                 if refusal_said {
                                     tracing::debug!(
                                         "Blocking {packet_type} from {device_id}: not paired, \
@@ -1648,6 +1656,11 @@ where
                     break;
                 }
                 Err(_) => {
+                    // Idle a minute: closed too once no longer let in (BA2).
+                    if closes(seeded, state::may_receive_pushes(&*sender)) {
+                        tracing::info!("Closing {device_id}'s connection: no longer paired");
+                        break;
+                    }
                     tracing::debug!("Peer idle - connection still alive");
                 }
             }
@@ -1658,6 +1671,15 @@ where
 
         Ok(())
     }
+}
+
+/// Whether a connection closes: its device was let in on it (`was_let_in`:
+/// paired, or pairing off) and is not now (BA2: unpaired, its connection
+/// stayed open for good, iroh's keepalive holding an internet-road one, so
+/// what it had going on it went on and it never saw the unpair). A device
+/// never let in keeps its connection, to pair on it.
+fn closes(was_let_in: bool, let_in_now: bool) -> bool {
+    was_let_in && !let_in_now
 }
 
 pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
@@ -2219,6 +2241,19 @@ mod handshake_line_tests {
 #[cfg(test)]
 mod unpair_tests {
     use super::unpair_targets;
+
+    /// BA2: a connection closes once its device, let in on it, no longer
+    /// is; one never let in stays, to pair on.
+    #[test]
+    fn a_connection_closes_once_its_device_is_no_longer_let_in() {
+        assert!(super::closes(true, false));
+        assert!(!super::closes(true, true));
+        assert!(
+            !super::closes(false, false),
+            "an unpaired phone pairs on it"
+        );
+        assert!(!super::closes(false, true));
+    }
 
     #[test]
     fn unpair_names_a_paired_device_or_every_one() {
