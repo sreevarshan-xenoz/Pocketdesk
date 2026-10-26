@@ -1073,7 +1073,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                         "Paired phone {phone_id} on connection {conn} (scoped grant: {secs}s)"
                     ),
                     None if computer => {
-                        tracing::info!("Paired computer {phone_id} on connection {conn}")
+                        tracing::info!("Paired computer {phone_id} on connection {conn}");
+                        // Not one this computer paired with, too (BD1).
+                        if let Ok(dir) = state::state_dir() {
+                            crate::peer_computers::paired_here(
+                                &dir,
+                                &phone_id,
+                                pocketdesk_core::local::pin::now_unix(),
+                            );
+                        }
                     }
                     None => tracing::info!("Paired phone {phone_id} on connection {conn}"),
                 }
