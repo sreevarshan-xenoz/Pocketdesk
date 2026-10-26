@@ -232,6 +232,9 @@ pub async fn run_watcher() {
     // When the soonest guest grant then read ends: it is read again then
     // too, as the grant's end changes no file (AY4).
     let mut seen_grant_end: Option<u64> = None;
+    // Whether the paired list last read still has unpaired phones' notes,
+    // cards, texts or contacts to forget (AY5): tried each tick until done.
+    let mut forget_due = false;
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
@@ -400,16 +403,17 @@ pub async fn run_watcher() {
                     serde_json::json!({}),
                 );
             }
-            // An unpaired phone's notifications, live cards and texts go
-            // with it (AY5); with pairing off it is still let in.
-            if crate::state::pairing_required()
-                && let Ok(dir) = crate::state::state_dir()
-            {
-                forget_unpaired(&dir, &paired).await;
-            }
-            // Its contacts too, as at start (P10).
-            crate::plugins::phone_contacts::prune();
+            forget_due = true;
             seen_paired = Some(paired);
+        }
+        // An unpaired phone's notifications, live cards, texts and contacts
+        // go with it (AY5); with pairing off it is still let in.
+        if forget_due && let Some(paired) = &seen_paired {
+            forget_due = crate::state::pairing_required()
+                && match crate::state::state_dir() {
+                    Ok(dir) => !forget_unpaired(&dir, paired).await,
+                    Err(_) => false,
+                };
         }
         // What it says, without the time it was written.
         let content = render_json(&live, driver, &linked, 0);
@@ -491,18 +495,33 @@ fn changes(
 }
 
 /// Keep only the `paired` phones' notifications the computer can answer,
-/// live cards, texts and replies waiting (AY5: an unpaired phone's stayed on
-/// the Notifications and Messages pages until the server restarted, its
-/// texts for good). A file that cannot be read is left as it is.
-async fn forget_unpaired(dir: &std::path::Path, paired: &[String]) {
-    use pocketdesk_core::local::{phone_live, phone_notes};
+/// live cards, texts, replies waiting and contacts (AY5: an unpaired phone's
+/// stayed on the Notifications and Messages pages until the server
+/// restarted, its texts for good); whether all of it was done. A file that
+/// cannot be read is left as it is.
+async fn forget_unpaired(dir: &std::path::Path, paired: &[String]) -> bool {
+    use pocketdesk_core::local::{phone_contacts, phone_live, phone_notes};
+    let mut done = true;
     if let Err(e) = phone_notes::keep_only(dir, paired) {
         tracing::warn!("Could not forget the notifications of phones no longer paired: {e}");
+        done = false;
     }
     if let Err(e) = phone_live::keep_only(dir, paired) {
         tracing::warn!("Could not forget the live cards of phones no longer paired: {e}");
+        done = false;
     }
-    crate::plugins::sms::keep_only(dir, paired).await;
+    done &= crate::plugins::sms::keep_only(dir, paired).await;
+    // From this list, not the start's prune, which forgets every phone's
+    // when its own read of the store fails (review).
+    for id in phone_contacts::read(dir).into_keys() {
+        if !paired.contains(&id)
+            && let Err(e) = phone_contacts::forget(dir, &id)
+        {
+            tracing::warn!("Could not forget a phone's contacts: {e}");
+            done = false;
+        }
+    }
+    done
 }
 
 /// Whether the paired list is read again: the first look, the trust store
@@ -604,7 +623,7 @@ mod tests {
             sms::record(&dir, serde_json::from_value(text).unwrap(), sms::KEEP).unwrap();
             sms::queue_reply(&dir, phone, "+1", "ok", 1).unwrap();
         }
-        super::forget_unpaired(&dir, &["a".to_string()]).await;
+        assert!(super::forget_unpaired(&dir, &["a".to_string()]).await);
         let only_a = |ids: Vec<String>| ids == vec!["a".to_string()];
         assert!(only_a(
             phone_notes::read(&dir)

@@ -1,7 +1,7 @@
 //! The phones' ongoing updates shown here (N4), kept by the server in
 //! `<state>/phone_live.json` for the desktop app's Notifications page: one
 //! card per notification, replaced by each update, gone with its cancel or
-//! its phone's unpairing (AY5).
+//! its phone's unpairing, with pairing required (AY5).
 
 use std::io;
 use std::path::Path;

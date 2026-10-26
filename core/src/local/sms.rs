@@ -2,7 +2,7 @@
 //!
 //! `<state>/sms.json` holds the conversation: the texts a phone forwarded and
 //! the replies sent from here, the newest [`KEEP`], a phone's gone when it is
-//! unpaired (AY5). Only the server writes it.
+//! unpaired with pairing required (AY5). Only the server writes it.
 //! The desktop app asks for a reply by writing one file in
 //! `<state>/sms_outbox/`; the server takes it once the phone is connected,
 //! adds it to the conversation as sending, and records the phone's answer.
@@ -183,22 +183,27 @@ pub fn forget_names(state_dir: &Path, keep: usize) -> io::Result<bool> {
 
 /// Keep only the texts of the phones `paired` names, and their replies
 /// waiting (AY5: an unpaired phone's stayed on the Messages page for good).
-/// Whether any text went; nothing is written when none did, and a history
-/// that cannot be read is left as it is. The caller serializes calls.
-pub fn keep_only(state_dir: &Path, paired: &[String], keep: usize) -> io::Result<bool> {
-    for request in pending(state_dir) {
-        if !paired.contains(&request.device_id) {
-            remove_pending(state_dir, &request.id)?;
-        }
-    }
+/// Whether any text went; nothing is written when none did, a history that
+/// cannot be read is left as it is, and none is trimmed (review: the
+/// `sms_keep` in force may not be known yet). The caller serializes calls.
+pub fn keep_only(state_dir: &Path, paired: &[String]) -> io::Result<bool> {
     let mut all = read_checked(state_dir)?;
     let before = all.len();
     all.retain(|m| paired.contains(&m.device_id));
-    if all.len() == before {
-        return Ok(false);
+    let went = all.len() != before;
+    if went {
+        write(state_dir, all, usize::MAX)?;
     }
-    write(state_dir, all, keep)?;
-    Ok(true)
+    // Each reply tried, one that cannot be removed failing the whole.
+    let mut failed = None;
+    for request in pending(state_dir) {
+        if !paired.contains(&request.device_id)
+            && let Err(e) = remove_pending(state_dir, &request.id)
+        {
+            failed = Some(e);
+        }
+    }
+    failed.map_or(Ok(went), Err)
 }
 
 /// Whether reply `id` still waits in the outbox.
@@ -371,18 +376,22 @@ mod tests {
         let a = queue_reply(&dir, "a", "+1", "ok", 3).unwrap();
         let b = queue_reply(&dir, "b", "+2", "ok", 3).unwrap();
         assert!(is_pending(&dir, &b.id));
-        assert!(keep_only(&dir, &["a".to_string()], KEEP).unwrap());
+        assert!(keep_only(&dir, &["a".to_string()]).unwrap());
         let messages = read(&dir);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].device_id, "a");
         assert_eq!(pending(&dir), vec![a]);
         assert!(!is_pending(&dir, &b.id));
-        assert!(
-            !keep_only(&dir, &["a".to_string()], KEEP).unwrap(),
-            "none went"
-        );
+        assert!(!keep_only(&dir, &["a".to_string()]).unwrap(), "none went");
+        // Never trimmed to a keep it was not told (review).
+        for i in 0..3 {
+            record(&dir, received("a", "+1", &format!("m{i}"), i), KEEP).unwrap();
+        }
+        record(&dir, received("b", "+2", "yo", 9), KEEP).unwrap();
+        assert!(keep_only(&dir, &["a".to_string()]).unwrap());
+        assert_eq!(read(&dir).len(), 4);
         std::fs::write(dir.join(SMS_FILE), "not json").unwrap();
-        assert!(keep_only(&dir, &[], KEEP).is_err());
+        assert!(keep_only(&dir, &[]).is_err());
         assert_eq!(
             std::fs::read_to_string(dir.join(SMS_FILE)).unwrap(),
             "not json"

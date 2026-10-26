@@ -4,9 +4,10 @@
 //! The server keeps each phone notification that offers buttons or a reply
 //! in `<state>/phone_notifications.json` (owner-only, the newest
 //! [`MAX_KEPT`]), drops it when the phone closes it, and empties the file
-//! at start; a phone's go when it is unpaired (AY5). The app shows them; a
-//! press or a reply it makes is `<state>/notification_out/<id>.json`, taken
-//! by the server within [`ANSWER_TTL_SECS`].
+//! at start; a phone's go when it is unpaired, with pairing required (AY5).
+//! The app shows them; a press or a reply it makes is
+//! `<state>/notification_out/<id>.json`, taken by the server within
+//! [`ANSWER_TTL_SECS`].
 
 use std::io;
 use std::path::{Path, PathBuf};
