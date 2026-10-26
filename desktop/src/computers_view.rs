@@ -141,7 +141,7 @@ impl ComputersView {
                         .on_disabled_hover_text(STOPPED)
                         .clicked()
                     {
-                        forget = Some(computer.device_id.clone());
+                        forget = Some((computer.device_id.clone(), computer.name.clone()));
                     }
                     if ui.button("Cancel").clicked() {
                         self.forgetting = None;
@@ -158,14 +158,16 @@ impl ComputersView {
                 }
             });
         }
-        if let Some(device_id) = forget {
+        if let Some((device_id, name)) = forget {
             self.forgetting = None;
+            // Named, as the app's other notices are (BA3 review).
             self.ask(
                 state_dir,
                 ComputerAsk::Forget { device_id },
                 now_unix,
-                "Asked the server to unpair it here: it leaves the list once done. Unpair this \
-                 computer in the other one's Devices page too.",
+                &format!(
+                    "Asked the server to unpair {name} here: it leaves the list once done. Unpair this computer on {name}'s Devices page too."
+                ),
             );
         }
     }
