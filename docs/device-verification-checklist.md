@@ -769,6 +769,7 @@ Built on `feat/shortcuts`. Checked on 2026-10-13 with the Galaxy A71 against the
 - [ ] Place the widget on the home screen: it names the last computer and connects on a tap; with none saved it opens the app. (where: by hand)
 - [x] A Wake shortcut appears for a computer the phone can wake (§42), and sends the packet. (seen 2026-10-23 on the OPPO against a throwaway server (S2): "Wake Test Desk" among the launcher shortcuts; fired, it sent 12 magic packets, caught by a listener on this computer (the result is a toast uiautomator cannot read).)
 - [ ] Pin a shortcut to the home screen; it survives the computer being reconnected, and stops working once the computer is removed. (where: by hand)
+- [x] A shortcut made for a paired computer opens that computer alone, and the app's own names it by its paired id (AZ1). (2026-10-26, the runner's `az1-shortcut-paired-id` on the OPPO against a throwaway server: a Connect shortcut's intent for 127.0.0.1 made for another paired id opened no session, one made for the throwaway's opened its session, and the app's Connect shortcut for it named its paired id and address; the app before AZ1 opened a session for the other id.)
 - [ ] Android 13 or older: the tile opens the session (the older collapse path).
 
 ## 34. Desktop diagnostics (F10)
