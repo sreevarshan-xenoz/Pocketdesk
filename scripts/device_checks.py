@@ -4298,6 +4298,49 @@ def ag3_theme(ctx: Ctx) -> tuple[str, str]:
 # ---- a phone the server does not know, by the internet road (AL2) ----
 
 
+@check("ba2-unpaired-link-closes", "§1")
+def ba2_unpaired_link_closes(ctx: Ctx) -> tuple[str, str]:
+    """A phone unpaired while linked has its connection closed (§1, BA2):
+    taken out of the throwaway's trust store, its link is closed within
+    75 s (the server says so; an idle one is looked at each minute). The
+    trust store and the device keys are put back, and the phone links
+    again."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off (an unpaired phone is let in)"
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    if "trusted_devices.json" not in kept:
+        return "SKIP", "no trust store on the throwaway"
+    store = json.loads(kept["trusted_devices.json"])
+    if ctx.device not in store.get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+        return "SKIP", "the phone is not linked to the throwaway"
+    said = f"Closing {ctx.device}'s connection: no longer let in"
+    mark = len(ctx.server.log())
+    started = time.monotonic()
+    try:
+        unpaired = {**store, "trusted_device_ids": [d for d in store["trusted_device_ids"] if d != ctx.device]}
+        tmp = state / "trusted_devices.json.ba2"
+        tmp.write_text(json.dumps(unpaired), encoding="utf-8")
+        os.replace(tmp, state / "trusted_devices.json")
+        closed = wait_for(lambda: said in ctx.server.log()[mark:], 75, 1)
+        took = time.monotonic() - started
+    finally:
+        for file, data in kept.items():
+            tmp = state / f"{file}.ba2"
+            tmp.write_bytes(data)
+            os.replace(tmp, state / file)
+    relinked = wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2)
+    if not closed:
+        return "FAIL", "its connection was not closed within 75 s of the unpair"
+    if not relinked:
+        return "FAIL", f"its connection closed {took:.0f} s after the unpair, but it did not link again within 120 s of being put back"
+    return "PASS", f"its connection closed {took:.0f} s after the unpair, and it linked again once put back"
+
+
 @check("al2-unpaired-road", "§1")
 def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
     """A phone the server has not paired, dialing by the internet road, is

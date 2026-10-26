@@ -1520,6 +1520,10 @@ where
             note_claimed_name(&device_id, claimed_name.as_deref());
         }
 
+        // Let in on this connection at some point (BA2 review: one let in
+        // later, not by a pairing on it, closes too once unpaired).
+        let mut let_in_once = seeded;
+
         tracing::info!("Entering main packet loop");
         loop {
             let mut line = String::new();
@@ -1582,6 +1586,14 @@ where
                                 continue;
                             }
                             if !pairing_packet && !may_act {
+                                // Let in before, and no longer (BA2): the
+                                // connection closes.
+                                if closes_now(let_in_once, &*sender).await {
+                                    tracing::info!(
+                                        "Closing {device_id}'s connection: no longer let in"
+                                    );
+                                    break;
+                                }
                                 if refusal_said {
                                     tracing::debug!(
                                         "Blocking {packet_type} from {device_id}: not paired, \
@@ -1595,6 +1607,9 @@ where
                                     );
                                 }
                                 continue;
+                            }
+                            if !pairing_packet {
+                                let_in_once = true;
                             }
                             // F5: the owner's per-device permissions (spec P3).
                             if !pairing_packet
@@ -1629,6 +1644,7 @@ where
                                 );
                                 seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
                                 seeded = true;
+                                let_in_once = true;
                                 note_claimed_name(&device_id, claimed_name.as_deref());
                             }
                         }
@@ -1648,6 +1664,11 @@ where
                     break;
                 }
                 Err(_) => {
+                    // Idle a minute: closed too once no longer let in (BA2).
+                    if closes_now(let_in_once, &*sender).await {
+                        tracing::info!("Closing {device_id}'s connection: no longer let in");
+                        break;
+                    }
                     tracing::debug!("Peer idle - connection still alive");
                 }
             }
@@ -1658,6 +1679,29 @@ where
 
         Ok(())
     }
+}
+
+/// Whether a connection closes: its device was let in on it (`was_let_in`:
+/// paired, or pairing off) and is not now, read twice a moment apart (BA2:
+/// unpaired, its connection stayed open for good, iroh's keepalive holding
+/// an internet-road one, so what it had going on it went on and it never
+/// saw the unpair; review: a store caught mid-replace on Windows reads once
+/// as no pairing, and a good link must not drop for it). A device never let
+/// in keeps its connection, to pair on.
+fn closes(was_let_in: bool, out: bool, out_again: bool) -> bool {
+    was_let_in && out && out_again
+}
+
+/// How long before the device's standing is read again (BA2 review).
+const STANDING_AGAIN: Duration = Duration::from_millis(300);
+
+/// [`closes`] for the device behind `sender` now.
+async fn closes_now(was_let_in: bool, sender: &dyn DeviceSender) -> bool {
+    if !was_let_in || state::may_receive_pushes(sender) {
+        return false;
+    }
+    tokio::time::sleep(STANDING_AGAIN).await;
+    closes(was_let_in, true, !state::may_receive_pushes(sender))
 }
 
 pub async fn print_capabilities(json: bool, markdown: bool) -> Result<()> {
@@ -2219,6 +2263,21 @@ mod handshake_line_tests {
 #[cfg(test)]
 mod unpair_tests {
     use super::unpair_targets;
+
+    /// BA2: a connection closes once its device, let in on it, no longer
+    /// is; one never let in stays, to pair on.
+    #[test]
+    fn a_connection_closes_once_its_device_is_no_longer_let_in() {
+        assert!(super::closes(true, true, true));
+        // One bad read of the store does not close it (review).
+        assert!(!super::closes(true, true, false));
+        assert!(!super::closes(true, false, false));
+        assert!(
+            !super::closes(false, true, true),
+            "an unpaired phone pairs on it"
+        );
+        assert!(!super::closes(false, false, false));
+    }
 
     #[test]
     fn unpair_names_a_paired_device_or_every_one() {
