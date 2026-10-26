@@ -56,6 +56,22 @@ pub struct PairingOutcome {
     /// The request it answers ([`ComputerRequest::id`]).
     #[serde(default)]
     pub request: String,
+    /// The computer its link named (BD3). Absent in files written before.
+    #[serde(default)]
+    pub device_id: String,
+}
+
+impl PairingOutcome {
+    /// Whether this is the pairing of `computer` (BD3: its line, and any
+    /// address a failure named, outlived Unpair). One written before the
+    /// id was kept is matched by name.
+    pub fn is_of(&self, computer: &PeerComputer) -> bool {
+        if self.device_id.is_empty() {
+            self.name == computer.name
+        } else {
+            self.device_id == computer.device_id
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,7 +159,9 @@ pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<
 
 /// Take every waiting request (the server's side), oldest first. Each file
 /// is removed once read; one that is stale, from the future, unreadable or
-/// named for another request is dropped.
+/// named for another request is dropped, and so is one left half-written
+/// past a request's life (BD3: a crash mid-write left it for good, a Pair
+/// one with the PIN).
 pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
     let Ok(entries) = std::fs::read_dir(state_dir.join(COMPUTERS_DIR)) else {
         return Vec::new();
@@ -157,7 +175,17 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
             .and_then(|n| n.strip_suffix(".json"))
             .map(str::to_string)
         else {
-            continue; // a temp file mid-write
+            // A temp file mid-write, or left by a crash once it is stale.
+            let stale = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .is_some_and(|at| now_unix.saturating_sub(at.as_secs()) > REQUEST_TTL_SECS);
+            if stale && path.extension().is_some_and(|e| e == "tmp") {
+                let _ = std::fs::remove_file(&path);
+            }
+            continue;
         };
         let raw = std::fs::read_to_string(&path);
         let _ = std::fs::remove_file(&path);
@@ -274,6 +302,56 @@ mod tests {
         );
     }
 
+    /// BD3: the last pairing is a computer's by the id its link named, or
+    /// by name in a file written before the id was kept.
+    #[test]
+    fn the_last_pairing_is_known_by_its_computer() {
+        let outcome = |device_id: &str, name: &str| PairingOutcome {
+            name: name.to_string(),
+            outcome: "paired".to_string(),
+            unix: 1,
+            request: "a".to_string(),
+            device_id: device_id.to_string(),
+        };
+        let desk = computer("desk");
+        assert!(outcome("desk", "Other").is_of(&desk));
+        assert!(
+            !outcome("lap", &desk.name).is_of(&desk),
+            "another computer, named alike"
+        );
+        assert!(outcome("", &desk.name).is_of(&desk));
+        assert!(!outcome("", "Other").is_of(&desk));
+        let old: PairingOutcome =
+            serde_json::from_str(r#"{"name":"Desk","outcome":"paired","unix":1}"#).unwrap();
+        assert_eq!(old.device_id, "");
+    }
+
+    /// BD3: a request left half-written by a crash goes once it is stale;
+    /// one being written now stays.
+    #[test]
+    fn a_half_written_request_goes_once_stale() {
+        let dir = temp_dir("tmp");
+        let out = dir.join(COMPUTERS_DIR);
+        std::fs::create_dir_all(&out).unwrap();
+        let tmp = out.join("left.json.tmp");
+        std::fs::write(
+            &tmp,
+            r#"{"ask":"pair","link":"pocketdesk://pair?pin=123456"}"#,
+        )
+        .unwrap();
+        let written = std::fs::metadata(&tmp)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(take_all(&dir, written + 1).is_empty());
+        assert!(tmp.exists(), "being written");
+        assert!(take_all(&dir, written + REQUEST_TTL_SECS + 1).is_empty());
+        assert!(!tmp.exists(), "left by a crash");
+    }
+
     #[test]
     fn the_file_is_changed_whole_and_reads_empty_when_missing_or_bad() {
         let dir = temp_dir("file");
@@ -285,6 +363,7 @@ mod tests {
                 outcome: "paired".to_string(),
                 unix: 100,
                 request: "a".to_string(),
+                device_id: "desk".to_string(),
             })
         })
         .unwrap();
