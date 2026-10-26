@@ -20,6 +20,7 @@ class PairFlowTest {
         val accept: Boolean = true,
         val pinRefused: Set<String> = emptySet(),
         val alreadyPinned: Set<String> = emptySet(),
+        val saved: Set<String> = emptySet(),
     ) : PairOps {
         val calls = mutableListOf<String>()
         override fun pinCertificate(address: String, fingerprint: String): Result<Boolean> {
@@ -33,6 +34,7 @@ class PairFlowTest {
         override fun forgetCertificate(address: String) {
             calls += "forget $address"
         }
+        override fun hasCard(address: String) = address in saved
         override fun connect(address: String, controlPort: Int): Result<Unit> {
             calls += "connect $address"
             return if (address in reachable) Result.success(Unit) else Result.failure(Exception("timeout"))
@@ -105,5 +107,27 @@ class PairFlowTest {
         val ops = Fake(reachable = setOf("172.20.0.1"))
         runPairing(link.copy(fingerprint = null), ops)
         assertEquals(listOf("connect 172.20.0.1", "pair 172.20.0.1"), ops.calls)
+    }
+
+    /**
+     * BC3: with no fingerprint the connection pins whatever answers, and a
+     * pairing that failed kept that pin with no card to remove it, so
+     * another computer at the address could not be paired. It is taken
+     * back, unless a saved computer's pin is there.
+     */
+    @Test
+    fun withoutAFingerprintAFailedPairingLeavesNoPin() {
+        val pinless = link.copy(addresses = listOf("192.0.2.1", "192.0.2.2"), fingerprint = null)
+        val refused = Fake(reachable = setOf("192.0.2.1"), accept = false)
+        assertEquals(PairOutcome.Expired, runPairing(pinless, refused))
+        assertEquals(listOf("connect 192.0.2.1", "pair 192.0.2.1", "forget 192.0.2.1"), refused.calls)
+
+        val away = Fake(reachable = emptySet())
+        runPairing(pinless, away)
+        assertEquals(listOf("connect 192.0.2.1", "forget 192.0.2.1", "connect 192.0.2.2", "forget 192.0.2.2"), away.calls)
+
+        val saved = Fake(reachable = setOf("192.0.2.1"), accept = false, saved = setOf("192.0.2.1"))
+        runPairing(pinless, saved)
+        assertEquals(false, saved.calls.any { it.startsWith("forget") })
     }
 }
