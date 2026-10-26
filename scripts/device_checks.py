@@ -5064,6 +5064,163 @@ def av2_pin_sheet(ctx: Ctx) -> tuple[str, str]:
                 print(f"note: an AV2 cleanup step failed: {error}", file=sys.stderr)
 
 
+def link_events(log: str) -> list[tuple[str, str]]:
+    """The phone's control links in its log, in order: ("up" or "down", the
+    address it was dialed at), from the bridge's `conn{... peer=...}` lines."""
+    out = []
+    for line in log.splitlines():
+        peer = re.search(r"conn\{[^}]*peer=([^ }]+)", line)
+        if not peer:
+            continue
+        if "Connected to peer" in line:
+            out.append(("up", peer.group(1)))
+        elif "Control connection lost" in line or "Control connection replaced" in line:
+            out.append(("down", peer.group(1)))
+    return out
+
+
+def live_link(events: list[tuple[str, str]]) -> Optional[str]:
+    """The address the phone's control link is up to after `events`: the
+    last one up, unless it went down since (a replaced one going down
+    after its successor came up is not the live one)."""
+    live = None
+    for kind, peer in events:
+        if kind == "up":
+            live = peer
+        elif peer == live:
+            live = None
+    return live
+
+
+@check("ax1-remove-closes-link", "§20")
+def ax1_remove_closes_link(ctx: Ctx) -> tuple[str, str]:
+    """A card removed closes the phone's control link to that computer, and
+    the next own computer links (AX1: the link stayed up, the removed
+    computer able to ring the phone, and every background dial waited on
+    it). A card for the throwaway as localhost is paired, as AV2 does, its
+    link up, and removed: the link to localhost goes, and one to 127.0.0.1
+    comes. The phone's log is read without a screen read between (each
+    clears it). The card and the throwaway's trust store go back after."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off"
+    if OTHER_NAME in host_addresses(saved_hosts(ctx)):
+        return "SKIP", f"{OTHER_NAME} is already saved on the phone"
+    if ctx.phone_port != 1716:
+        return "SKIP", f"the phone reaches the throwaway on {ctx.phone_port}, not the form's 1716"
+    if ctx.device not in trusted_store(ctx).get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    for _ in range(2):
+        if not (ctx.on_road or iroh_loops(ctx.server.log())):
+            break
+        why = by_home(ctx)
+        if why and "internet road" not in why:
+            return "TIMEOUT", why
+    state = ctx.server.root / "state"
+    kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
+            if (state / name).exists()}
+    code, out = ctx.server.cli("pair", "--json")
+    line = next((l for l in reversed(out.splitlines()) if l.strip().startswith("{")), "")
+    try:
+        pin = str(json.loads(line)["pin"])
+    except (ValueError, KeyError, TypeError):
+        return "FAIL", f"pocketdesk pair said {code}, no PIN"
+
+    def through(sheet: str) -> bool:
+        if not tap_text("Show a PIN on the computer", sheet):
+            return False
+        if not wait_for(lambda: shows(ctx, "A PIN is showing on the computer. Type it below."), 15, 1):
+            return False
+        adb("shell", "input", "text", pin)
+        time.sleep(0.5)
+        tap_text("Pair", ctx.phone.dump())
+        return bool(wait_for(lambda: ctx.phone.prefs("pocketdesk-host").get(f"paired_desktop:{OTHER_NAME}"), 15, 1))
+
+    # Each screen read clears the phone's log: its lines are kept first.
+    logged: list[str] = []
+    plain_dump = ctx.phone.dump
+
+    def keeping_dump() -> str:
+        logged.append(adb("logcat", "-d", "-s", "PocketdeskRust:*"))
+        return plain_dump()
+
+    ctx.phone.dump = keeping_dump  # type: ignore[method-assign]
+    try:
+        why = add_second_host(ctx, on_sheet=through, address=OTHER_NAME)
+        if why:
+            return "FAIL", why
+        if not ctx.phone.prefs("pocketdesk-host").get(f"paired_desktop:{OTHER_NAME}"):
+            return "FAIL", f"{OTHER_NAME} did not pair"
+        # Its session's control link is the phone's link now.
+        logged.append(adb("logcat", "-d", "-s", "PocketdeskRust:*"))
+        before = link_events(chr(10).join(logged))
+        if live_link(before) != OTHER_NAME:
+            seen = [(kind, peer if peer in (OTHER_NAME, "127.0.0.1") else "another") for kind, peer in before]
+            return "SKIP", f"the phone's link did not go to {OTHER_NAME} (it stays with the one it has): {seen[-6:]}"
+        why = remove_second_host(ctx, cleanup=True, address=OTHER_NAME)
+        if why or OTHER_NAME in host_addresses(saved_hosts(ctx)):
+            return "FAIL", f"the card was not removed: {why or 'still there'}"
+        # From the log kept across the removal's screen reads, then the
+        # phone's own since: only what came after the link went to localhost.
+        start = time.monotonic()
+        gone = up = None
+        after = ""
+        while time.monotonic() - start < 120 and up is None:
+            after = chr(10).join(logged + [adb("logcat", "-d", "-s", "PocketdeskRust:*")])
+            events = link_events(after)[len(before):]
+            if gone is None and ("down", OTHER_NAME) in events:
+                gone = time.monotonic() - start
+            if ("up", "127.0.0.1") in events:
+                up = time.monotonic() - start
+            time.sleep(2)
+        said = (f"removed with its link up: the link to {OTHER_NAME} "
+                f"{f'closed within {gone:.0f} s' if gone is not None else 'not closed'}, one to 127.0.0.1 "
+                f"{f'up in {up:.0f} s' if up is not None else 'not within 120 s'}")
+        ok = gone is not None and gone <= 20 and up is not None
+        if not ok:
+            # The phone's own lines after the removal, kept in the
+            # throwaway's folder (never the repo) to be read.
+            try:
+                (ctx.server.root / "ax1_failure.txt").write_text(after, encoding="utf-8")
+            except OSError:
+                pass
+        return ("PASS" if ok else "FAIL"), said
+    finally:
+        ctx.phone.dump = plain_dump  # type: ignore[method-assign]
+        if OTHER_NAME in host_addresses(saved_hosts(ctx)):
+            why = remove_second_host(ctx, cleanup=True, address=OTHER_NAME)
+            if why or OTHER_NAME in host_addresses(saved_hosts(ctx)):
+                print(f"note: AX1 left {OTHER_NAME} saved on the phone: {why or 'still there'}", file=sys.stderr)
+        try:
+            ctx.server.stop()
+        except (OSError, ValueError) as error:
+            print(f"note: an AX1 cleanup step failed: {error}", file=sys.stderr)
+        missed = []
+        for name, data in kept.items():
+            for attempt in range(5):
+                try:
+                    tmp = state / f"{name}.tmp"
+                    tmp.write_bytes(data)
+                    os.replace(tmp, state / name)
+                    break
+                except OSError as error:
+                    if attempt == 4:
+                        missed.append(f"{name} ({error})")
+                    time.sleep(1)
+        if missed:
+            print(f"note: AX1 could not put back {', '.join(missed)}; the server is left stopped: "
+                  f"put them back in {state} by hand", file=sys.stderr)
+        else:
+            try:
+                why = by_home(ctx)
+                if why and "internet road" in why:
+                    why = by_home(ctx)
+                if why:
+                    print(f"note: AX1 left the phone off its home link: {why}", file=sys.stderr)
+            except (OSError, ValueError) as error:
+                print(f"note: an AX1 cleanup step failed: {error}", file=sys.stderr)
+
+
 @check("aq2-second-card", "§20")
 def aq2_second_card(ctx: Ctx) -> tuple[str, str]:
     """A second computer added through Home's form, at a documentation
