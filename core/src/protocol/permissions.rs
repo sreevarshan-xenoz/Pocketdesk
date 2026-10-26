@@ -65,10 +65,13 @@ pub enum Capability {
     /// See this computer's screen as one still with no session (BF2); off
     /// unless chosen: a session asks for a screen, a peek does not.
     Peek,
+    /// Answer the questions `pocketdesk ask` puts to the phone (BF3). About
+    /// what the computer sends, and the answers it takes back.
+    Ask,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 22] = [
+    pub const ALL: [Capability; 23] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -91,6 +94,7 @@ impl Capability {
         Capability::Command,
         Capability::PhoneActions,
         Capability::Peek,
+        Capability::Ask,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -183,6 +187,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
         // A still of the screen with no session (BF2).
         crate::protocol::peek::PEEK => Capability::Peek,
+        // An answer to the computer's question (BF3).
+        crate::protocol::ask::ASK_ANSWER => Capability::Ask,
         _ => return None,
     })
 }
@@ -234,6 +240,8 @@ pub struct DevicePermissions {
     pub phone_actions: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peek: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -264,6 +272,7 @@ impl DevicePermissions {
             Capability::Command => &mut self.command,
             Capability::PhoneActions => &mut self.phone_actions,
             Capability::Peek => &mut self.peek,
+            Capability::Ask => &mut self.ask,
         }
     }
 
@@ -291,6 +300,7 @@ impl DevicePermissions {
             Capability::Command => self.command,
             Capability::PhoneActions => self.phone_actions,
             Capability::Peek => self.peek,
+            Capability::Ask => self.ask,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -559,6 +569,19 @@ mod tests {
         );
         assert!(!DevicePermissions::someone_else().allows(Capability::Peek));
         assert!(!DevicePermissions::computer().allows(Capability::Peek));
+    }
+
+    /// BF3: the owner's phones may answer the computer's questions; someone
+    /// else's phone and a paired computer may not.
+    #[test]
+    fn answering_the_computers_questions_is_the_owners() {
+        assert_eq!(
+            capability_for(crate::protocol::ask::ASK_ANSWER),
+            Some(Capability::Ask)
+        );
+        assert!(DevicePermissions::default().allows(Capability::Ask));
+        assert!(!DevicePermissions::someone_else().allows(Capability::Ask));
+        assert!(!DevicePermissions::computer().allows(Capability::Ask));
     }
 
     #[test]
