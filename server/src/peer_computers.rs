@@ -479,20 +479,8 @@ pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
 /// this one until its own owner removes it (its Devices tab).
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
     let mut gone = None;
-    let saved = computers::update(dir, |file| {
-        if let Some(at) = file.computers.iter().position(|c| c.device_id == device_id) {
-            let computer = file.computers.remove(at);
-            // Its pairing's line goes with it (BD3).
-            if file
-                .last_pairing
-                .as_ref()
-                .is_some_and(|l| l.is_of(&computer))
-            {
-                file.last_pairing = None;
-            }
-            gone = Some(computer);
-        }
-    });
+    // Its pairing's line goes with it (BD3).
+    let saved = computers::update(dir, |file| gone = file.remove(device_id));
     if let Err(e) = saved {
         tracing::warn!("Could not forget computer {device_id}: {e}");
         return;

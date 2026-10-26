@@ -82,6 +82,26 @@ pub struct ComputersFile {
     pub last_pairing: Option<PairingOutcome>,
 }
 
+impl ComputersFile {
+    /// Take the computer `device_id` out, and its pairing's line with it
+    /// (BD3: the line, and any address a failure named, outlived Unpair).
+    pub fn remove(&mut self, device_id: &str) -> Option<PeerComputer> {
+        let at = self
+            .computers
+            .iter()
+            .position(|c| c.device_id == device_id)?;
+        let computer = self.computers.remove(at);
+        if self
+            .last_pairing
+            .as_ref()
+            .is_some_and(|l| l.is_of(&computer))
+        {
+            self.last_pairing = None;
+        }
+        Some(computer)
+    }
+}
+
 /// What the app asks of the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "ask", rename_all = "snake_case")]
@@ -153,7 +173,11 @@ pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<
     let json = serde_json::to_string(&request).map_err(io::Error::other)?;
     let tmp = file.with_extension("json.tmp");
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &file)?;
+    if let Err(e) = std::fs::rename(&tmp, &file) {
+        // Not left behind (BD3 review): a Pair request holds the PIN.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(request)
 }
 
@@ -324,6 +348,33 @@ mod tests {
         let old: PairingOutcome =
             serde_json::from_str(r#"{"name":"Desk","outcome":"paired","unix":1}"#).unwrap();
         assert_eq!(old.device_id, "");
+    }
+
+    /// BD3: a computer taken out takes its pairing's line, not another's.
+    #[test]
+    fn a_computer_removed_takes_its_pairing_line() {
+        let line = |device_id: &str| PairingOutcome {
+            name: "Desk".to_string(),
+            outcome: "failed: the computer at 192.0.2.10 is not the one".to_string(),
+            unix: 1,
+            request: "a".to_string(),
+            device_id: device_id.to_string(),
+        };
+        let mut file = ComputersFile {
+            computers: vec![computer("desk"), computer("lap")],
+            last_pairing: Some(line("lap")),
+        };
+        assert_eq!(
+            file.remove("desk").map(|c| c.device_id),
+            Some("desk".to_string())
+        );
+        assert_eq!(file.last_pairing, Some(line("lap")), "another computer's");
+        assert_eq!(
+            file.remove("lap").map(|c| c.device_id),
+            Some("lap".to_string())
+        );
+        assert_eq!(file.last_pairing, None);
+        assert_eq!(file.remove("gone"), None);
     }
 
     /// BD3: a request left half-written by a crash goes once it is stale;
