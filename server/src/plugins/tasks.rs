@@ -367,6 +367,16 @@ fn log_refused(device: &str, specs: &[TaskSpec], name: &str, reason: &str) {
 
 /// Where a run's states go: the phone connection that asked, or nowhere
 /// but the event log (a start from Home Assistant, ecosystem 1e).
+/// Where a task stands when it is about to run or say how it went (AY2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskStanding {
+    Allowed,
+    /// The phone is let in but its tasks are off: it is told so.
+    NotPermitted,
+    /// The phone is no longer let in: it is told nothing.
+    Gone,
+}
+
 enum Reply {
     Phone {
         connection: String,
@@ -388,32 +398,34 @@ impl Reply {
     }
 
     async fn send(&self, device: &str, body: Value) {
+        // Nothing to a phone no longer let in (AY2).
         if let Self::Phone { connection, id } = self
-            && self.still_allowed(device)
+            && self.standing_now(device) != TaskStanding::Gone
         {
             send_to(device, connection, &result(id, body)).await;
         }
     }
 
-    /// Whether a task for `device` may still run and say how it went, the
-    /// phone `paired` and `permitted` tasks now: a phone's (its own start or
-    /// its deck's) only then (AY2: one the owner allowed after the phone was
-    /// unpaired ran, and its output reached the phone's connection, which an
-    /// unpair blocks but does not close); Home Assistant's always.
-    fn still_for(&self, paired: bool, permitted: bool) -> bool {
+    /// Where a task for `device` stands, the phone `let_in` (paired, or
+    /// pairing not required) and `permitted` tasks now (AY2: one the owner
+    /// allowed after the phone was unpaired ran, and its output reached the
+    /// phone's connection, which an unpair blocks but does not close). Home
+    /// Assistant's is not a phone's.
+    fn standing(&self, let_in: bool, permitted: bool) -> TaskStanding {
         match self {
-            Self::Nowhere => true,
-            Self::Phone { .. } | Self::Deck => paired && permitted,
+            Self::Nowhere => TaskStanding::Allowed,
+            Self::Phone { .. } | Self::Deck if !let_in => TaskStanding::Gone,
+            Self::Phone { .. } | Self::Deck if !permitted => TaskStanding::NotPermitted,
+            Self::Phone { .. } | Self::Deck => TaskStanding::Allowed,
         }
     }
 
-    /// [Self::still_for] for `device` now, its standing read only for a
-    /// phone's task.
-    fn still_allowed(&self, device: &str) -> bool {
+    /// [Self::standing] for `device` now, read only for a phone's task.
+    fn standing_now(&self, device: &str) -> TaskStanding {
         match self {
-            Self::Nowhere => true,
-            _ => self.still_for(
-                crate::plugins::pair::is_paired_device(device),
+            Self::Nowhere => TaskStanding::Allowed,
+            _ => self.standing(
+                crate::plugins::pair::is_paired_device(device) || !crate::state::pairing_required(),
                 crate::plugins::pair::permits(device, TASK_RUN),
             ),
         }
@@ -482,15 +494,34 @@ async fn run_claimed(spec: TaskSpec, device: String, held: Claim, reply: Reply) 
             .await;
         return;
     }
-    // Allowed after its phone was unpaired, or its tasks turned off: not run.
-    if !reply.still_allowed(&device) {
-        crate::events::emit(
-            "task_refused",
-            Some(&device),
-            json!({ "task": spec.name, "reason": "no longer allowed" }),
-            json!({}),
-        );
-        return;
+    // Allowed after its phone was unpaired, or its tasks turned off: not run;
+    // the phone told why, if it is still let in (review).
+    match reply.standing_now(&device) {
+        TaskStanding::Allowed => {}
+        TaskStanding::NotPermitted => {
+            crate::events::emit(
+                "task_refused",
+                Some(&device),
+                json!({ "task": spec.name, "reason": "not_permitted" }),
+                json!({}),
+            );
+            reply
+                .send(
+                    &device,
+                    json!({ "state": "refused", "reason": "not_permitted" }),
+                )
+                .await;
+            return;
+        }
+        TaskStanding::Gone => {
+            crate::events::emit(
+                "task_refused",
+                Some(&device),
+                json!({ "task": spec.name, "reason": "unpaired" }),
+                json!({}),
+            );
+            return;
+        }
     }
     crate::events::emit(
         "task_started",
@@ -616,13 +647,14 @@ mod tests {
             connection: "c".into(),
             id: "1".into(),
         };
-        assert!(phone.still_for(true, true));
-        assert!(!phone.still_for(false, true));
-        assert!(!phone.still_for(true, false));
-        assert!(!Reply::Deck.still_for(false, true));
-        assert!(Reply::Deck.still_for(true, true));
+        assert_eq!(phone.standing(true, true), TaskStanding::Allowed);
+        assert_eq!(phone.standing(false, true), TaskStanding::Gone);
+        // Let in, its tasks off: told why (review).
+        assert_eq!(phone.standing(true, false), TaskStanding::NotPermitted);
+        assert_eq!(Reply::Deck.standing(false, true), TaskStanding::Gone);
+        assert_eq!(Reply::Deck.standing(true, true), TaskStanding::Allowed);
         // Home Assistant's is not a phone's.
-        assert!(Reply::Nowhere.still_for(false, false));
+        assert_eq!(Reply::Nowhere.standing(false, false), TaskStanding::Allowed);
     }
 
     #[test]
