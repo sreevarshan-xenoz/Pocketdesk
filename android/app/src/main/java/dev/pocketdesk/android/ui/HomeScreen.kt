@@ -56,6 +56,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import dev.pocketdesk.android.ForgetComputer
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.ComputerName
 import dev.pocketdesk.android.Prefs
@@ -654,12 +655,12 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(onClick = {
                     rescanning = null
-                    HostStore.remove(context, host.address)
+                    // All that Remove forgets (BC1), its key last, so the
+                    // code's key can be trusted for this address; then scan.
+                    val forgetting = ForgetComputer.forget(context, scope, host.address)
                     hosts = HostStore.hosts(context)
-                    // As Remove does: forget the old key, so the code's key
-                    // can be trusted for this address, then scan it.
                     scope.launch {
-                        withContext(Dispatchers.IO) { RustCore.forgetPeerCertificate(host.address) }
+                        forgetting.join()
                         onScan()
                     }
                 }) { Text(stringResource(R.string.doctor_action_pair)) }
@@ -752,28 +753,7 @@ fun HomeScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // Its "also send notifications to" pick goes with it (AX3).
-                        val removedId = HostStore.pairedDesktopId(context, host.address)
-                        HostStore.remove(context, host.address)
-                        // The deck widget's list for it goes too (AZ2 review).
-                        dev.pocketdesk.android.shortcuts.DeckWidget.forgetRemoved(
-                            context,
-                            dev.pocketdesk.android.shortcuts.DeckWidgetPlan.computerKey(host.address, removedId),
-                        )
-                        dev.pocketdesk.android.notify.AlsoToPrefs.forgetRemoved(
-                            context,
-                            removedId,
-                            HostStore.hosts(context).mapNotNull { HostStore.pairedDesktopId(context, it.address) }.toSet(),
-                        )
-                        // Close a link to it (AX1): the next own computer links
-                        // then. Then forget its certificate, so a new pairing
-                        // code for this address can be trusted again, and what
-                        // it said of itself (AZ3), after the link, so a
-                        // handshake on it cannot say it again (review).
-                        scope.launch(Dispatchers.IO) {
-                            RustCore.closeControlLinkTo(host.address)
-                            RustCore.forgetPeerCertificate(host.address)
-                        }
+                        ForgetComputer.forget(context, scope, host.address)
                         hosts = HostStore.hosts(context)
                         removing = null
                     },
