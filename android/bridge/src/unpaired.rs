@@ -134,16 +134,6 @@ mod tests {
         assert!(!by(address));
     }
 
-    /// BC5: a computer's key forgotten (removed, or paired again) takes its
-    /// word with it: a new computer saved at that address was held.
-    #[test]
-    fn forgetting_a_computer_s_key_forgets_its_word() {
-        let address = "192.0.2.96";
-        said(address);
-        let _ = crate::api::forget_peer_certificate(address.to_string());
-        assert!(!by(address));
-    }
-
     /// BB2 review: each way the phone sends to a computer refuses at once,
     /// before any connection, when that computer said so.
     #[tokio::test]

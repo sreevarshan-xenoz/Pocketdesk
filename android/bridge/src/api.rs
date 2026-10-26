@@ -4918,6 +4918,23 @@ mod pin_certificate_tests {
         assert_eq!(name, None);
     }
 
+    /// BC5: a computer's key forgotten (removed, or paired again) takes its
+    /// word that this phone is not paired with it: a new computer saved at
+    /// that address was held (review: under the lock, in its own folder).
+    #[tokio::test]
+    async fn forgetting_a_certificate_forgets_the_computer_s_word() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-forget-word-{}", std::process::id()));
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        crate::unpaired::said("192.0.2.96");
+        let forgot = super::forget_peer_certificate("192.0.2.96".to_string());
+        let held = crate::unpaired::by("192.0.2.96");
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert!(forgot.is_ok(), "{forgot:?}");
+        assert!(!held);
+    }
+
     #[test]
     fn a_pairing_code_fingerprint_is_pinned_under_the_verifiers_label() {
         let dir = std::env::temp_dir().join(format!("bridge-pin-{}", std::process::id()));
