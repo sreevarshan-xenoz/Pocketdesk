@@ -229,6 +229,9 @@ pub async fn run_watcher() {
     // When the trust store was last changed, as last read: it is read again
     // only once that moves.
     let mut seen_trust_change: Option<std::time::SystemTime> = None;
+    // When the soonest guest grant then read ends: it is read again then
+    // too, as the grant's end changes no file (AY4).
+    let mut seen_grant_end: Option<u64> = None;
     // What the phones were last told about who drives (roadmap N7).
     let mut told: Option<Told> = None;
     let mut told_at = std::time::Instant::now();
@@ -374,15 +377,21 @@ pub async fn run_watcher() {
         let trust_change = trust_path
             .as_ref()
             .and_then(|path| std::fs::metadata(path).and_then(|m| m.modified()).ok());
-        let changed = seen_paired.is_none() || trust_change != seen_trust_change;
+        let changed = paired_list_due(
+            seen_paired.is_none(),
+            trust_change != seen_trust_change,
+            seen_grant_end,
+            now,
+        );
         if changed
-            && let Some(paired) = trust_path.and_then(|path| {
+            && let Some((paired, grant_end)) = trust_path.and_then(|path| {
                 pocketdesk_core::protocol::kdeconnect::TrustStore::read(path)
                     .ok()
-                    .map(|store| store.trusted_devices())
+                    .map(|store| (store.trusted_devices(), store.next_grant_end()))
             })
         {
             seen_trust_change = trust_change;
+            seen_grant_end = grant_end;
             for (kind, device) in pairing_changes(seen_paired.as_deref(), &paired) {
                 crate::events::emit(
                     kind,
@@ -472,6 +481,13 @@ fn changes(
     out
 }
 
+/// Whether the paired list is read again: the first look, the trust store
+/// changed, or the soonest guest grant then read has ended by `now` (AY4: it
+/// ends without a write, so its phone_unpaired waited for some other one).
+fn paired_list_due(first: bool, file_changed: bool, grant_end: Option<u64>, now: u64) -> bool {
+    first || file_changed || grant_end.is_some_and(|end| now >= end)
+}
+
 /// The phones paired or unpaired since the last read (`None`: the first,
 /// which changes nothing).
 fn pairing_changes(seen: Option<&[String]>, paired: &[String]) -> Vec<(&'static str, String)> {
@@ -543,6 +559,21 @@ pub fn format_status_lines(raw: &str, now_unix: u64) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_paired_list_is_read_again_when_a_grant_ends() {
+        // AY4: an ended guest grant fired no phone_unpaired until something
+        // else wrote the trust store.
+        use super::paired_list_due;
+        assert!(paired_list_due(true, false, None, 100), "the first look");
+        assert!(paired_list_due(false, true, None, 100), "the file changed");
+        assert!(!paired_list_due(false, false, None, 100));
+        assert!(!paired_list_due(false, false, Some(150), 100), "not yet");
+        assert!(
+            paired_list_due(false, false, Some(100), 100),
+            "a grant ended"
+        );
+    }
+
     use super::*;
     use pocketdesk_core::streaming::sessions::LiveSession;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
