@@ -58,6 +58,7 @@ object RustCore {
         id: String,
         path: String,
     ): String
+    private external fun nativeFetchPeek(address: String, port: Int, path: String): String
     private external fun nativePollIncomingPackets(): String
     private external fun nativeSessionStatus(): String
     private external fun nativeIsStreamingActive(): Boolean
@@ -467,6 +468,13 @@ object RustCore {
     /** Put the PNG at [path] on the desktop's clipboard (N4). */
     fun sendClipboardImage(address: String, port: Int, path: String): Result<Unit> =
         envelope(nativeSendClipboardImage(address, port, path)).map { }
+
+    /**
+     * One still of the computer's screen into [path], a JPEG (BF2). A refusal
+     * fails with the computer's reason alone (see [dev.pocketdesk.android.ui.Peek]).
+     */
+    fun fetchPeek(address: String, port: Int, path: String): Result<Long> =
+        envelope(nativeFetchPeek(address, port, path)).mapCatching { it.toLong() }
 
     /** Download the desktop's clipboard image [id] into [path] (N4). */
     fun fetchClipboardImage(address: String, port: Int, id: String, path: String): Result<Long> =

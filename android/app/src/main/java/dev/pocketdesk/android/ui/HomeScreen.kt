@@ -177,6 +177,7 @@ fun HomeScreen(
     var historyFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var deckFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     // BB3: the computers that said the phone is not paired, read again every
@@ -540,6 +541,7 @@ fun HomeScreen(
                         onHistory = { historyFor = host },
                         onDeck = { deckFor = host },
                         onState = { stateFor = host },
+                        onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
                     )
                 }
@@ -685,6 +687,16 @@ fun HomeScreen(
             controlPort = host.controlPort,
             computer = HostStore.shownName(context, host.address),
             onDismiss = { stateFor = null },
+        )
+    }
+
+    // BF2: one still of its screen, with no session.
+    peekFor?.let { host ->
+        PeekSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            onDismiss = { peekFor = null },
         )
     }
 
@@ -866,8 +878,10 @@ private fun HostCard(
     onHistory: () -> Unit,
     onDeck: () -> Unit,
     onState: () -> Unit,
+    onPeek: () -> Unit,
     onAllowed: () -> Unit,
 ) {
+    val context = LocalContext.current
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
     var menu by remember { mutableStateOf(false) }
@@ -894,6 +908,8 @@ private fun HostCard(
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         // What it does first, then its upkeep, then Remove (E6).
                         val uses = buildList {
+                            // BF2: a glance at its screen, first: the quickest.
+                            if (Prefs.peek(context)) add(R.string.card_peek to onPeek)
                             // The phone as the computer's speaker and mic (N5).
                             add(R.string.sound_button to onSound)
                             // F1: the buttons its owner set up there.
