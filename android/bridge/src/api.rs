@@ -4836,6 +4836,29 @@ mod pin_certificate_tests {
     use super::{forget_peer_certificate_in, pin_peer_certificate_in};
     use pocketdesk_core::streaming::transport::{CertManager, peer_label_for_ip};
 
+    /// AZ3: forgetting a computer's certificate, as Remove and a move do,
+    /// forgets what it said of itself at that address too (review: through
+    /// the call the app makes, not the cache alone).
+    #[tokio::test]
+    async fn forgetting_a_certificate_forgets_the_computer_s_name() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-forget-name-{}", std::process::id()));
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        crate::peer_names::note(
+            "192.0.2.80",
+            pocketdesk_core::protocol::connection::PeerClaims {
+                name: Some("Study PC".to_string()),
+                sends: None,
+            },
+        );
+        let forgot = super::forget_peer_certificate("192.0.2.80".to_string());
+        let name = crate::peer_names::name("192.0.2.80");
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert!(forgot.is_ok(), "{forgot:?}");
+        assert_eq!(name, None);
+    }
+
     #[test]
     fn a_pairing_code_fingerprint_is_pinned_under_the_verifiers_label() {
         let dir = std::env::temp_dir().join(format!("bridge-pin-{}", std::process::id()));
