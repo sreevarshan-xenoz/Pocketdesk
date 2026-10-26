@@ -22,6 +22,7 @@ use tokio::sync::{Mutex, broadcast};
 use crate::api::{TRANSFER_SENT, TRANSFER_TOTAL, client_identity};
 use crate::{CONTROL_PEER, CONTROL_WRITER};
 use pocketdesk_core::protocol::clipboard::{CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_IMAGE};
+use pocketdesk_core::protocol::peek::{MAX_PEEK, PEEK};
 
 /// Ask the desktop for a file (F7b): `{path | offer, port, key}`.
 const FETCH: &str = "kdeconnect.pocketdesk.file_fetch";
@@ -87,6 +88,8 @@ pub enum FetchTarget {
     Path(String),
     Offer(String),
     ClipboardImage(String),
+    /// One still of the computer's screen (BF2).
+    Peek,
 }
 
 impl FetchTarget {
@@ -105,6 +108,7 @@ impl FetchTarget {
                 body["id"] = serde_json::json!(id);
                 (CLIPBOARD_IMAGE_FETCH, MAX_CLIPBOARD_IMAGE)
             }
+            FetchTarget::Peek => (PEEK, MAX_PEEK),
         }
     }
 }
@@ -158,8 +162,9 @@ async fn fetch_into<P: Partial>(
     out: &mut P,
     resume: Option<Resume>,
 ) -> Result<u64, String> {
-    // A clipboard image (N4) leaves a file transfer's progress alone.
-    let counted = !matches!(target, FetchTarget::ClipboardImage(_));
+    // A clipboard image (N4) or a peek (BF2) leaves a file transfer's
+    // progress alone.
+    let counted = !matches!(target, FetchTarget::ClipboardImage(_) | FetchTarget::Peek);
     if counted {
         TRANSFER_TOTAL.store(0, Ordering::Relaxed);
         TRANSFER_SENT.store(0, Ordering::Relaxed);
@@ -214,6 +219,49 @@ pub async fn fetch_clipboard_image(
         let _ = tokio::fs::remove_file(&path).await;
     }
     got
+}
+
+/// The reasons a computer refuses a peek with (BF2), which the phone words.
+const PEEK_REFUSALS: [&str; 6] = [
+    "off",
+    "paused",
+    "busy",
+    "too_soon",
+    "no_screen",
+    "not_allowed",
+];
+
+/// A peek's error as the phone shows it: one of [`PEEK_REFUSALS`] when the
+/// computer refused with it, else the error as it came.
+fn peek_error(error: String) -> String {
+    error
+        .rsplit_once(": ")
+        .map(|(_, reason)| reason)
+        .filter(|reason| {
+            PEEK_REFUSALS.contains(reason) && error.starts_with("The computer refused")
+        })
+        .map(str::to_string)
+        .unwrap_or(error)
+}
+
+/// One still of the computer's screen (BF2) into a new file at `path`, a
+/// JPEG; a failed peek leaves no file. A refusal is its reason alone (see
+/// [`PEEK_REFUSALS`]).
+pub async fn fetch_peek(address: String, port: u16, path: String) -> Result<u64, String> {
+    let mut out = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&path)
+        .await
+        .map_err(|e| format!("Could not create {path}: {e}"))?;
+    let got = fetch_into(&address, port, FetchTarget::Peek, &mut out, None).await;
+    drop(out);
+    if got.is_err() {
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+    got.map_err(peek_error)
 }
 
 /// The read half of a connection opened for one request.
@@ -555,6 +603,35 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
 
     const KEY: &str = "0123456789abcdef0123456789abcdef";
+
+    /// BF2: a peek's refusal reaches the phone as its reason, which it
+    /// words; any other error as it came.
+    #[test]
+    fn a_peek_refusal_is_its_reason_alone() {
+        let refused =
+            |reason: &str| super::peek_error(crate::api::refusal_text("download", reason, false));
+        assert_eq!(refused("paused"), "paused");
+        assert_eq!(refused("not_allowed"), "not_allowed");
+        assert_eq!(refused("too_soon"), "too_soon");
+        assert_eq!(
+            refused("no free transfer slot"),
+            "The computer refused the download: no free transfer slot"
+        );
+        assert_eq!(
+            super::peek_error("Timed out: paused".to_string()),
+            "Timed out: paused",
+            "only a refusal"
+        );
+    }
+
+    #[test]
+    fn a_peek_asks_for_the_peek_at_its_own_limit() {
+        let mut body = serde_json::json!({});
+        let (packet_type, limit) = super::FetchTarget::Peek.request(&mut body);
+        assert_eq!(packet_type, pocketdesk_core::protocol::peek::PEEK);
+        assert_eq!(limit, pocketdesk_core::protocol::peek::MAX_PEEK);
+        assert_eq!(body, serde_json::json!({}), "nothing but the key and port");
+    }
 
     use pocketdesk_core::streaming::transport::CertManager;
 

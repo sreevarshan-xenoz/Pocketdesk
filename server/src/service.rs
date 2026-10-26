@@ -114,6 +114,7 @@ pub async fn run(config: Config) -> Result<()> {
         "POCKETDESK_DOWNLOAD_DIR",
         "POCKETDESK_LOCK_FILE",
         "POCKETDESK_MEDIA_FILE",
+        "POCKETDESK_PEEK_FILE",
     ] {
         if let Some(value) = std::env::var_os(seam) {
             let path = std::path::Path::new(&value);
@@ -122,6 +123,9 @@ pub async fn run(config: Config) -> Result<()> {
             } else if seam == "POCKETDESK_BROWSE_HOME" {
                 // Fails closed (AD2 review): never the owner's home instead.
                 tracing::warn!("{seam} is not an absolute path: the file browser shows no folder");
+            } else if seam == "POCKETDESK_PEEK_FILE" {
+                // Fails closed too (BF2 review): never this screen instead.
+                tracing::warn!("{seam} is not an absolute path: every peek is refused");
             } else {
                 tracing::warn!("{seam} is not an absolute path; ignored");
             }

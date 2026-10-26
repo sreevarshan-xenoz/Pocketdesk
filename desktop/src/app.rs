@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 22] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -173,6 +173,11 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 21] = [
         "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
+        Capability::Peek,
+        "Peek at this screen",
+        "The phone can see this screen as one still, from its Home, with no session; each look is a new still, never a stream. Off unless you turn it on; held while this computer is paused, and by \u{201c}Phones may peek at this screen\u{201d} in Settings.",
+    ),
+    (
         Capability::PhoneSound,
         "Play its sound here",
         "With its screen shown here, what the phone's apps play comes out of this computer's speakers (when the phone's own setting sends it).",
@@ -221,6 +226,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::Dial
                 | Capability::Command
                 | Capability::PhoneActions
+                | Capability::Peek
         ))
 }
 
@@ -3974,6 +3980,7 @@ mod tests {
             Capability::Dial,
             Capability::Command,
             Capability::PhoneActions,
+            Capability::Peek,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

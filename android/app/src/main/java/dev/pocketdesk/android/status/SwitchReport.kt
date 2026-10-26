@@ -13,7 +13,7 @@ object SwitchReport {
     val FEATURES = listOf(
         "notifications", "answers", "alarms", "texts", "contacts", "clipboard", "copies", "files", "images", "folders", "photos",
         "screenshots", "camera_photos", "camera", "links", "ring", "media", "media_background", "computer_media", "mute", "control", "typing", "dial",
-        "commands", "tasks", "phone_actions", "apps",
+        "commands", "tasks", "phone_actions", "apps", "peek",
     )
 
     data class Switch(val on: Boolean, val android: Boolean?)

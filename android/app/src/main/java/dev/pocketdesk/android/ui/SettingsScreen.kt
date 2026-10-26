@@ -298,6 +298,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.computerAlerts(context),
                     { Prefs.setComputerAlerts(context, it) },
                 )
+                // BF2: a still of the computer's screen from Home.
+                SettingSwitch(
+                    stringResource(R.string.settings_peek),
+                    stringResource(R.string.settings_peek_summary),
+                    Prefs.peek(context),
+                    { Prefs.setPeek(context, it) },
+                )
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),

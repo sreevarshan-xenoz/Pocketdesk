@@ -34,6 +34,7 @@ object Prefs {
     private const val KEY_OTHERS_RUN_TASKS = "others_run_tasks"
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_COMPUTER_ALERTS = "computer_alerts"
+    private const val KEY_PEEK = "peek_on_home"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -281,6 +282,14 @@ object Prefs {
 
     fun setComputerAlerts(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_COMPUTER_ALERTS, enabled) }
+        bump()
+    }
+
+    /** Peek in each computer's menu on Home (BF2); on by default. */
+    fun peek(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_PEEK, true)
+
+    fun setPeek(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_PEEK, enabled) }
         bump()
     }
 

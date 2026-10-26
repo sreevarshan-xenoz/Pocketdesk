@@ -31,10 +31,12 @@ import secrets
 import shlex
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import time
 import uuid
+import zlib
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -468,6 +470,9 @@ class Server:
             "POCKETDESK_BROWSE_HOME": str(self.root / "home"),
             # AG1: a lock is a line in this file, never this computer's lock.
             "POCKETDESK_LOCK_FILE": str(self.root / "lock.txt"),
+            # BF2: a peek is this picture, never this computer's screen (with
+            # no file there, it is refused, not taken from the screen).
+            "POCKETDESK_PEEK_FILE": str(self.root / "peek.png"),
         }
 
     def cli(self, *args: str) -> tuple[int, str]:
@@ -4494,6 +4499,62 @@ def bb3_home_says_unpaired(ctx: Ctx) -> tuple[str, str]:
     if not back:
         return "FAIL", "let in again, but Home still did not say Paired"
     return "PASS", f"told, Home said \"{words}\"; put back and let in again, it says Paired"
+
+
+def write_png(path: pathlib.Path, width: int, height: int, rgb: tuple[int, int, int]) -> None:
+    """A plain one-colour PNG, written without an imaging library."""
+    row = bytes([0]) + bytes(rgb) * width
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    signature = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+    path.write_bytes(signature + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(row * height)) + chunk(b"IEND", b""))
+
+
+@check("bf2-peek", "§20")
+def bf2_peek(ctx: Ctx) -> tuple[str, str]:
+    """Peek from a computer's card on Home (§20, BF2): with the phone's Peek
+    permission on, the sheet shows a still (the throwaway's stand-in, never
+    this computer's screen) and says when it was seen; with it off, Look
+    again says this phone may not peek."""
+    if not home(ctx):
+        return "SKIP", "the app did not come up on Home"
+    stand_in = ctx.server.root / "peek.png"
+    write_png(stand_in, 320, 180, (40, 120, 200))
+    had = trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("peek")
+    seen = len(ctx.server.log())
+    try:
+        set_permission_live(ctx, "peek", True)
+        if not wait_for(lambda: tap_text("More for Test Desk", ctx.phone.dump()), 20, 2):
+            return "SKIP", "no Test Desk card on Home"
+        time.sleep(1)
+        if not tap_text("Peek", ctx.phone.dump()):
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            return "FAIL", "no Peek in the card's menu"
+
+        def shown() -> bool:
+            rows = dump_rows(ctx.phone.dump())
+            return any(desc == "The screen of Test Desk" for _, desc, _, _ in rows) and any(
+                text.startswith("Seen at") for text, _, _, _ in rows
+            )
+
+        if not wait_for(shown, 30, 2):
+            words = [t for t, _, _, _ in dump_rows(ctx.phone.dump()) if t][:8]
+            return "FAIL", f"no still in the sheet within 30 s; it said {words}"
+        sent = "Peek sent" in ctx.server.log()[seen:]
+        set_permission_live(ctx, "peek", None)
+        time.sleep(2.5)  # past the computer's 2 s between a phone's stills
+        if not tap_text("Look again", ctx.phone.dump()):
+            return "FAIL", "no Look again in the sheet"
+        refused = wait_for(
+            lambda: any(t.startswith("This phone may not peek") for t, _, _, _ in dump_rows(ctx.phone.dump())), 20, 2
+        )
+        said = f"a still shown{' (the computer said it sent it)' if sent else ''}; with the permission off, {'told it may not' if refused else 'not told why'}"
+        return ("PASS" if sent and refused else "FAIL"), said
+    finally:
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        set_permission_live(ctx, "peek", had)
+        stand_in.unlink(missing_ok=True)
 
 
 @check("bf1-done-tells-the-phone", "§8")

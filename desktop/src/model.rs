@@ -714,6 +714,13 @@ pub const FEATURES: &[Feature] = &[
         permission_name: "Take screenshots of it, lock it and open its apps from here",
         android: "notification access",
     },
+    Feature {
+        key: "peek",
+        what: "A still of this screen on its Home",
+        phone_switch: "Peek at the computer",
+        permission_name: "Peek at this screen",
+        android: "",
+    },
 ];
 
 /// Whether O2's screenshot and lock reach a phone now: [`linked`] to this
