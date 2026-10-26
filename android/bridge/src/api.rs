@@ -104,8 +104,10 @@ pub(crate) fn pin_peer_certificate_in(
 }
 
 /// Forget the certificate this phone trusts for `address` (the computer was
-/// removed). Returns whether one was pinned.
+/// removed, moved or is paired again), and what it said of itself there
+/// (AZ3). Returns whether one was pinned.
 pub fn forget_peer_certificate(address: String) -> Result<bool, String> {
+    crate::peer_names::forget(&address);
     let dir = crate::CERT_DIR
         .lock()
         .unwrap()
