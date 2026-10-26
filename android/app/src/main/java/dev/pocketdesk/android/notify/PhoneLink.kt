@@ -29,12 +29,6 @@ object PhoneLink {
     @Volatile
     private var pausedUntilMs = 0L
 
-    /** How often a computer that said the phone is not paired is looked at again (BB2). */
-    const val RECHECK_MS = 5 * 60_000L
-
-    /** How long that look holds the link, waiting for the computer to let the phone in. */
-    const val RECHECK_HOLD_MS = 30_000L
-
     /** The first paired computer that said the phone is not paired with it, if any. */
     fun refuser(ctx: Context): HostStore.Host? =
         HostStore.hosts(ctx).firstOrNull { HostStore.pairedDesktopId(ctx, it.address) != null && RustCore.unpairedBy(it.address) }

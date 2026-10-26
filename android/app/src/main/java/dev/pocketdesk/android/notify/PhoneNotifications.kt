@@ -223,16 +223,33 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** When a computer that said the phone is not paired was last dialed to look again (BB2). */
     private var recheckMs = 0L
 
-    private fun recheckRefuser(now: Long) {
-        val marked = PhoneLink.refuser(this) ?: return
-        val peer = RustCore.controlPeer()
-        // Another computer's live link is never replaced for it.
-        if (peer != null && peer.first != marked.address) return
-        if (peer?.first == marked.address) {
-            if (now - recheckMs >= PhoneLink.RECHECK_HOLD_MS) RustCore.closeControlLinkTo(marked.address)
-        } else if (peer == null && now - recheckMs >= PhoneLink.RECHECK_MS) {
-            recheckMs = now
-            RustCore.connectToPeer(marked.address, marked.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, marked.address))
+    /** Whether the link up is the one the last look opened (BB2 review: never close another). */
+    private var recheckOpened = false
+
+    /** When the phone's own computer last had its link; its grace counts from the start. */
+    private var ownLinkedMs = SystemClock.elapsedRealtime()
+
+    private fun recheckRefuser(now: Long, own: dev.pocketdesk.android.HostStore.Host?) {
+        val peer = RustCore.controlPeer()?.first
+        if (own != null && peer == own.address) ownLinkedMs = now
+        if (peer == null) recheckOpened = false
+        // Nothing due: the saved computers are not read at every tick (review).
+        if (peer == null && now - recheckMs < RecheckPlan.EVERY_MS) return
+        if (peer != null && !recheckOpened) return
+        val marked = PhoneLink.refuser(this)
+        val ownDown = own?.let { now - ownLinkedMs }
+        when (RecheckPlan.act(peer, marked?.address, recheckOpened, now, recheckMs, ownDown)) {
+            RecheckPlan.Act.DIAL -> {
+                val host = marked ?: return
+                recheckMs = now
+                RustCore.connectToPeer(host.address, host.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, host.address))
+                recheckOpened = RustCore.controlPeer()?.first == host.address
+            }
+            RecheckPlan.Act.CLOSE -> {
+                marked?.let { RustCore.closeControlLinkTo(it.address) }
+                recheckOpened = false
+            }
+            RecheckPlan.Act.NONE -> {}
         }
     }
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
@@ -1001,7 +1018,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         // the link is let go, so the next look is a fresh one. (Seen on the
         // OPPO: another paired card, out of reach, became the own computer,
         // and the one that refused was never looked at again.)
-        recheckRefuser(SystemClock.elapsedRealtime())
+        recheckRefuser(SystemClock.elapsedRealtime(), own)
         // L4: numbers the computer asks to dial, offered in a notification,
         // unless a session takes them.
         if (!dev.pocketdesk.android.calls.Dials.inSession) {
