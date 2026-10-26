@@ -4318,7 +4318,7 @@ def ba2_unpaired_link_closes(ctx: Ctx) -> tuple[str, str]:
         return "SKIP", "the phone is not paired with the throwaway"
     if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
         return "SKIP", "the phone is not linked to the throwaway"
-    said = f"Closing {ctx.device}'s connection: no longer paired"
+    said = f"Closing {ctx.device}'s connection: no longer let in"
     mark = len(ctx.server.log())
     started = time.monotonic()
     try:
@@ -4336,8 +4336,9 @@ def ba2_unpaired_link_closes(ctx: Ctx) -> tuple[str, str]:
     relinked = wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2)
     if not closed:
         return "FAIL", "its connection was not closed within 75 s of the unpair"
-    return "PASS", (f"its connection closed {took:.0f} s after the unpair; "
-                    + ("it linked again once put back" if relinked else "it had not linked again within 120 s"))
+    if not relinked:
+        return "FAIL", f"its connection closed {took:.0f} s after the unpair, but it did not link again within 120 s of being put back"
+    return "PASS", f"its connection closed {took:.0f} s after the unpair, and it linked again once put back"
 
 
 @check("al2-unpaired-road", "§1")
