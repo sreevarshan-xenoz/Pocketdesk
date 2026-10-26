@@ -20,6 +20,8 @@ use pocketdesk_core::local::transfers::{self as mirror, Direction, Mirror, Trans
 pub(crate) const CANCELLED_HERE: &str = "cancelled on the computer";
 /// What an offer cancelled here is settled as, in the Sent list.
 pub(crate) const OFFER_CANCELLED: &str = "cancelled on this computer";
+/// What an offer stopped as its device was unpaired is settled as (BA1).
+pub(crate) const OFFER_UNPAIRED: &str = "its device was unpaired";
 /// How long a cancelled file is refused, at most.
 const CANCELLED_FOR: Duration = Duration::from_secs(600);
 /// How many cancelled files are remembered.
@@ -227,13 +229,37 @@ pub(crate) fn cancelled_for_test(key: &str) {
     remember(&mut lock(), key.to_string(), Instant::now());
 }
 
-/// Stop the transfer `id` (the app's Cancel), and settle what it was.
-async fn cancel(id: &str) {
+/// The transfers whose device is no longer let in (BA1): a phone's, or a
+/// computer's that linked to this one, checked only as its route was set
+/// up, so one unpaired mid-file ran to the end. Never one to a computer
+/// this one links to (`computer:`): it is not in the trust store, and its
+/// Forget ends the link and the transfer with it.
+fn of_devices_gone(table: &Table, let_in: impl Fn(&str) -> bool) -> Vec<String> {
+    table
+        .rows
+        .iter()
+        .filter(|(_, row)| !row.shown.key.starts_with("computer:") && !let_in(&row.shown.device_id))
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+/// The devices paired now, or `None` when the trust store cannot be read
+/// (nothing is stopped on a bad read; the next tick reads again).
+fn paired_now() -> Option<Vec<String>> {
+    let path = crate::state::trust_store_path().ok()?;
+    pocketdesk_core::protocol::kdeconnect::TrustStore::read(path)
+        .ok()
+        .map(|store| store.trusted_devices())
+}
+
+/// Stop the transfer `id` (the app's Cancel, or its device unpaired:
+/// `why` settles an offer), and settle what it was.
+async fn cancel(id: &str, why: &str) {
     let Some(key) = cancel_at(&mut lock(), id, Instant::now()) else {
         tracing::info!("A cancel for a transfer that has ended or is ending");
         return;
     };
-    tracing::info!("Cancelling the transfer {key} for the owner");
+    tracing::info!("Cancelling the transfer {key}: {why}");
     let Some(offer) = key.strip_prefix("offer:") else {
         crate::plugins::share::running().supersede(&key).await;
         return;
@@ -249,12 +275,12 @@ async fn cancel(id: &str) {
     }
     crate::plugins::share::running().supersede(&key).await;
     // An offer's task ended before it could settle it: the Sent list says why.
-    crate::offers::fail(offer, OFFER_CANCELLED.to_string());
+    crate::offers::fail(offer, why.to_string());
     for sibling in siblings {
         crate::plugins::share::running()
             .supersede(&format!("offer:{sibling}"))
             .await;
-        crate::offers::fail(&sibling, OFFER_CANCELLED.to_string());
+        crate::offers::fail(&sibling, why.to_string());
     }
 }
 
@@ -283,7 +309,18 @@ pub async fn run() {
         }
         let now = pocketdesk_core::local::pin::now_unix();
         for request in mirror::take_cancels(&dir, now) {
-            cancel(&request.transfer).await;
+            cancel(&request.transfer, OFFER_CANCELLED).await;
+        }
+        // A device unpaired mid-transfer: its transfers stop (BA1). With
+        // pairing off, an unpaired device is still let in.
+        if moving
+            && crate::state::pairing_required()
+            && let Some(paired) = paired_now()
+        {
+            let gone = of_devices_gone(&lock(), |device| paired.iter().any(|p| p == device));
+            for id in gone {
+                cancel(&id, OFFER_UNPAIRED).await;
+            }
         }
         let rows = rows_at(&mut lock(), Instant::now());
         if rows.is_empty() {
@@ -361,7 +398,7 @@ mod tests {
                 std::future::pending::<()>().await;
             })
             .await;
-        cancel(&id).await;
+        cancel(&id, OFFER_CANCELLED).await;
         assert!(
             rows_at(&mut lock(), Instant::now())
                 .iter()
@@ -402,6 +439,34 @@ mod tests {
         done.store(300, Ordering::Relaxed);
         let rows = rows_at(&mut table, start + Duration::from_secs(1));
         assert_eq!(rows[0].rate, 0, "not negative, not a stale figure");
+    }
+
+    /// BA1: a transfer whose device is no longer let in stops; one to a
+    /// computer this one links to is its Forget's to end.
+    #[test]
+    fn a_transfer_of_a_device_unpaired_stops() {
+        let mut table = Table::default();
+        for (id, key, device) in [
+            ("r1", "share:a:film", "phone-a"),
+            ("r2", "share:b:film", "phone-b"),
+            ("r3", "computer:pc-c:film", "pc-c"),
+        ] {
+            table.rows.insert(
+                id.to_string(),
+                Row {
+                    shown: Shown {
+                        device_id: device.to_string(),
+                        ..shown(key)
+                    },
+                    done: Arc::new(AtomicU64::new(0)),
+                    started_unix: 1,
+                    samples: VecDeque::new(),
+                },
+            );
+        }
+        let gone = of_devices_gone(&table, |device| device == "phone-a");
+        assert_eq!(gone, vec!["r2".to_string()]);
+        assert!(of_devices_gone(&table, |_| true).is_empty());
     }
 
     #[test]
