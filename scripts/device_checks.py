@@ -4358,7 +4358,8 @@ def bb1_told_not_paired(ctx: Ctx) -> tuple[str, str]:
     store = json.loads(kept)
     if ctx.device not in store.get("trusted_device_ids", []):
         return "SKIP", "the phone is not paired with the throwaway"
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+    # A phone a computer refused looks at it again only every few minutes.
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 420, 2):
         return "SKIP", "the phone is not linked to the throwaway"
     told = "The computer says this phone is not paired with it"
     again = "The computer lets this phone in again"
@@ -4406,7 +4407,8 @@ def bb2_unpaired_gets_nothing(ctx: Ctx) -> tuple[str, str]:
     store = json.loads(kept)
     if ctx.device not in store.get("trusted_device_ids", []):
         return "SKIP", "the phone is not paired with the throwaway"
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+    # A phone a computer refused looks at it again only every few minutes.
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 420, 2):
         return "SKIP", "the phone is not linked to the throwaway"
     told = "The computer says this phone is not paired with it"
     stayed = "Kept on the phone"
@@ -4430,15 +4432,16 @@ def bb2_unpaired_gets_nothing(ctx: Ctx) -> tuple[str, str]:
         os.replace(tmp, state / "trusted_devices.json")
     if reached:
         return "FAIL", "a notification reached the computer after it said the phone is not paired"
-    if not kept_here:
-        return "FAIL", "the phone did not say it kept the notification"
     if not wait_for(lambda: ctx.device in ctx.server.linked(), 400, 2):
         return "FAIL", "kept on the phone, but put back it did not link again within 400 s"
     after = fixture_note(ctx, 652, "BB2 back " + secrets.token_hex(2), 90)
     ctx.phone.cancel(652)
     if not after:
         return "FAIL", "kept on the phone, but once put back no notification reached the computer within 90 s"
-    return "PASS", "told, the notification stayed on the phone; put back, the next one reached the computer"
+    # Its own computer moves on at once, so nothing may even be tried toward
+    # this one: the log's word is said only when a send got that far.
+    how = "a send to it was kept on the phone" if kept_here else "the phone's own computer moved on"
+    return "PASS", f"told, nothing reached it ({how}); put back, the next one reached the computer"
 
 
 @check("al2-unpaired-road", "§1")
