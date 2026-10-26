@@ -149,4 +149,27 @@ class WakePlanTest {
         )
         assertNull(WakePlan.relayMoved(WakeSettings(), "192.0.2.1", "192.0.2.9"))
     }
+
+    @Test
+    fun `a computer removed sends no other card's wake`() {
+        // BC2: a card waking through the computer at 192.0.2.1 kept it after
+        // it was removed, so Wake showed and failed, and a computer saved
+        // later at that address would have been asked to send the wake.
+        val through = WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.1", mac = "02:11:22:33:44:55")
+        val after = WakePlan.relayRemoved(through, "192.0.2.1")
+        assertEquals(through.copy(relay = ""), after)
+        assertEquals(WakePlan.Plan.NoRelay, WakePlan.plan(after!!, null, emptyList(), atHome = true))
+        assertNull(WakePlan.relayRemoved(through, "192.0.2.5"))
+        assertNull(WakePlan.relayRemoved(WakeSettings(), "192.0.2.1"))
+    }
+
+    @Test
+    fun `a relay removed is not shown as chosen`() {
+        // BC2 review: the settings showed the first saved computer as the
+        // one sending the wake, and Save chose it.
+        val saved = listOf("192.0.2.2", "192.0.2.3")
+        assertEquals("", WakePlan.relayShown(WakeSettings(method = WakeMethod.RELAY), saved))
+        assertEquals("192.0.2.2", WakePlan.relayShown(WakeSettings(), saved))
+        assertEquals("192.0.2.3", WakePlan.relayShown(WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.3"), saved))
+    }
 }
