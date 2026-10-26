@@ -868,6 +868,7 @@ Afterwards everything was turned off again.
 - [x] After the review fixes: a reply is handed over once, and comes back failed with "the phone has no SIM chosen for texts".
 - [x] A reply the phone never confirms is handed over at most 3 times, then fails with "the phone did not confirm it".
 - [ ] A request from a computer that is not the phone's own is ignored.
+- [x] An unpaired phone's texts leave the Messages page, and its notifications and live cards the Notifications page (AY5). (2026-10-26, the runner's `ay5-unpaired-pages` against a throwaway server on this Windows box: two guests on grants for ids no phone has, one of 20 seconds and one running on, each with a note, a live card and a text written for it; as the short grant ended, AY5's server dropped that guest's three and kept the other's; a server without AY5 kept them all. The store and the files were put back.)
 - [ ] A sixth reply within a minute fails with "the phone sends at most 5 replies a minute".
 - [ ] **With a SIM:** a text that arrives while the computer is off reaches Messages once it is back.
 - [ ] Take the computer off the network with the phone connected: within about a minute of it coming back, the phone has dialed again (keepalive).
