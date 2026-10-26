@@ -336,12 +336,16 @@ async fn ask_owner(device_id: &str, task: &str, asker: &str) -> TaskVerdict {
 /// Send `packet` to `device_id` on the connection that asked
 /// (`connection_id`) while it is up, else on its newest connection.
 async fn send_to(device_id: &str, connection_id: &str, packet: &NetworkPacket) {
+    // Only a connection the push filter lets through (AY1 review: a newer
+    // one claiming the id with another key, kept only to pair again, would
+    // else be given the command's output).
     let target: Option<Arc<dyn DeviceSender>> = {
         let clients = crate::state::ACTIVE_CLIENTS.lock().await;
         clients
             .iter()
             .find(|c| c.connection_id() == connection_id)
             .or_else(|| clients.iter().rev().find(|c| c.device_id() == device_id))
+            .filter(|c| crate::state::may_receive_pushes(c.as_ref()))
             .cloned()
     };
     if let Some(client) = target {
@@ -384,8 +388,34 @@ impl Reply {
     }
 
     async fn send(&self, device: &str, body: Value) {
-        if let Self::Phone { connection, id } = self {
+        if let Self::Phone { connection, id } = self
+            && self.still_allowed(device)
+        {
             send_to(device, connection, &result(id, body)).await;
+        }
+    }
+
+    /// Whether a task for `device` may still run and say how it went, the
+    /// phone `paired` and `permitted` tasks now: a phone's (its own start or
+    /// its deck's) only then (AY2: one the owner allowed after the phone was
+    /// unpaired ran, and its output reached the phone's connection, which an
+    /// unpair blocks but does not close); Home Assistant's always.
+    fn still_for(&self, paired: bool, permitted: bool) -> bool {
+        match self {
+            Self::Nowhere => true,
+            Self::Phone { .. } | Self::Deck => paired && permitted,
+        }
+    }
+
+    /// [Self::still_for] for `device` now, its standing read only for a
+    /// phone's task.
+    fn still_allowed(&self, device: &str) -> bool {
+        match self {
+            Self::Nowhere => true,
+            _ => self.still_for(
+                crate::plugins::pair::is_paired_device(device),
+                crate::plugins::pair::permits(device, TASK_RUN),
+            ),
         }
     }
 }
@@ -450,6 +480,16 @@ async fn run_claimed(spec: TaskSpec, device: String, held: Claim, reply: Reply) 
         reply
             .send(&device, json!({ "state": "refused", "reason": "denied" }))
             .await;
+        return;
+    }
+    // Allowed after its phone was unpaired, or its tasks turned off: not run.
+    if !reply.still_allowed(&device) {
+        crate::events::emit(
+            "task_refused",
+            Some(&device),
+            json!({ "task": spec.name, "reason": "no longer allowed" }),
+            json!({}),
+        );
         return;
     }
     crate::events::emit(
@@ -567,6 +607,23 @@ mod tests {
 
     /// Held by the tests that count the running tasks, which are shared.
     static RUNNING_TESTS: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_phone_s_task_runs_and_reports_only_while_the_phone_may_run_tasks() {
+        // AY2: one the owner allowed after the phone was unpaired ran, and
+        // its output reached the phone's connection.
+        let phone = Reply::Phone {
+            connection: "c".into(),
+            id: "1".into(),
+        };
+        assert!(phone.still_for(true, true));
+        assert!(!phone.still_for(false, true));
+        assert!(!phone.still_for(true, false));
+        assert!(!Reply::Deck.still_for(false, true));
+        assert!(Reply::Deck.still_for(true, true));
+        // Home Assistant's is not a phone's.
+        assert!(Reply::Nowhere.still_for(false, false));
+    }
 
     #[test]
     fn home_assistant_starts_a_task_as_a_phone_would() {
