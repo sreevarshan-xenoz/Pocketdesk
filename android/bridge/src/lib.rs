@@ -31,6 +31,7 @@ mod rates;
 mod session;
 mod tasks;
 mod typing;
+mod unpaired;
 
 pub(crate) use session::*;
 
@@ -1030,6 +1031,20 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendWin
         &address,
     )));
     to_jstring(&mut env, json)
+}
+
+/// Whether the computer at `address` said, when last heard, that this phone
+/// is not paired with it (BB1).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeUnpairedBy(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jboolean {
+    let Ok(address) = env.get_string(&address).map(String::from) else {
+        return 0;
+    };
+    unpaired::by(&address) as jboolean
 }
 
 /// The phone's default network changed (2b review): tell the live iroh

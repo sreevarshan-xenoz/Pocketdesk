@@ -30,9 +30,11 @@
       ]
     },
     {
-      "name": "an unpaired phone's request is not answered",
+      "name": "an unpaired phone's request is not answered; it is told once that it is not paired",
       "tls": true,
       "steps": [
+        { "send": { "type": "kdeconnect.pocketdesk.monitors", "body": { "request": true } } },
+        { "expect": { "type": "kdeconnect.pocketdesk.not_paired", "body": {} } },
         { "send": { "type": "kdeconnect.pocketdesk.monitors", "body": { "request": true } } },
         { "expect": null, "within_ms": 1000 }
       ]

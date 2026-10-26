@@ -96,6 +96,11 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
         let mut lines = tokio::io::BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let trimmed = line.trim();
+            // What it says of this phone's standing there (BB1 review: its
+            // copies went on to a computer that unpaired the phone).
+            if let Ok(packet) = NetworkPacket::from_wire(trimmed) {
+                crate::unpaired::heard(&address, &packet.packet_type);
+            }
             // Whether that computer is in use (N7), kept with it.
             if trimmed.contains("in_use_answer")
                 && let Ok(packet) = NetworkPacket::from_wire(trimmed)

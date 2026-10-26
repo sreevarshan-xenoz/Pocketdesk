@@ -53,6 +53,11 @@ pub fn keep_alive(stream: &TcpStream) -> std::io::Result<()> {
 /// keepalive takes to find a silent peer.
 pub const UNACKED_LIMIT: Duration = Duration::from_secs(60);
 
+/// What a computer tells a device it refuses on the control link because it
+/// is not paired (or not with this key), once a connection (BB1): it kept no
+/// word of it before, and a phone went on sending what it dropped.
+pub const NOT_PAIRED: &str = "kdeconnect.pocketdesk.not_paired";
+
 #[derive(Debug, Clone)]
 pub struct ConnectionManager {
     timeout: Duration,

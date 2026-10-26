@@ -4341,6 +4341,49 @@ def ba2_unpaired_link_closes(ctx: Ctx) -> tuple[str, str]:
     return "PASS", f"its connection closed {took:.0f} s after the unpair, and it linked again once put back"
 
 
+@check("bb1-told-not-paired", "§1")
+def bb1_told_not_paired(ctx: Ctx) -> tuple[str, str]:
+    """A phone unpaired while linked is told so (§1, BB1): taken out of the
+    throwaway's trust store, the phone's log says the computer says it is
+    not paired within 90 s; put back, it is let in again. The trust store
+    is put back byte for byte. No screen is read, as a dump clears the log."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off (an unpaired phone is let in)"
+    state = ctx.server.root / "state"
+    try:
+        kept = (state / "trusted_devices.json").read_bytes()
+    except OSError:
+        return "SKIP", "no trust store on the throwaway"
+    store = json.loads(kept)
+    if ctx.device not in store.get("trusted_device_ids", []):
+        return "SKIP", "the phone is not paired with the throwaway"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+        return "SKIP", "the phone is not linked to the throwaway"
+    told = "The computer says this phone is not paired with it"
+    again = "The computer lets this phone in again"
+    adb("logcat", "-c")
+    try:
+        unpaired = {**store, "trusted_device_ids": [d for d in store["trusted_device_ids"] if d != ctx.device]}
+        tmp = state / "trusted_devices.json.bb1"
+        tmp.write_text(json.dumps(unpaired), encoding="utf-8")
+        os.replace(tmp, state / "trusted_devices.json")
+        started = time.monotonic()
+        said = wait_for(lambda: told in phone_log(), 90, 2)
+        took = time.monotonic() - started
+    finally:
+        tmp = state / "trusted_devices.json.bb1"
+        tmp.write_bytes(kept)
+        os.replace(tmp, state / "trusted_devices.json")
+    let_in = wait_for(lambda: again in phone_log(), 120, 2)
+    relinked = wait_for(lambda: ctx.device in ctx.server.linked(), 60, 2)
+    if not said:
+        return "FAIL", "the phone was not told it is not paired within 90 s"
+    if not (let_in and relinked):
+        return "FAIL", f"told in {took:.0f} s, but put back it was {'not let in again' if not let_in else 'not linked again'}"
+    return "PASS", f"told it is not paired {took:.0f} s after the unpair; put back, let in again and linked"
+
+
 @check("al2-unpaired-road", "§1")
 def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
     """A phone the server has not paired, dialing by the internet road, is
