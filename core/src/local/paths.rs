@@ -46,6 +46,10 @@ pub const TYPING_DIR: &str = "typing_out";
 pub const RINGS_DIR: &str = "rings_out";
 /// Alerts `pocketdesk done` leaves for the server to show (BF1), one file an alert.
 pub const ALERTS_DIR: &str = "alerts_out";
+/// Questions `pocketdesk ask` leaves for the server to put to the phones (BF3).
+pub const ASKS_DIR: &str = "asks_out";
+/// Their answers, which the server leaves for `pocketdesk ask` (BF3).
+pub const ASK_ANSWERS_DIR: &str = "asks_in";
 /// Mutes the desktop app or the local API asks the server to send to a phone (D2).
 pub const QUIET_DIR: &str = "quiet_out";
 /// The texts that crossed between this computer and its phones (D3).
