@@ -194,6 +194,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Phones may add a screen",
         Section::Phones,
     ),
+    ("peek", "Phones may peek at this screen", Section::Phones),
     ("mic_relay_device", "Phone mic plays into", Section::Phones),
     (
         "downloads_folder",
@@ -1261,6 +1262,17 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.virtual_screens,
                         "a phone with Input can add a screen of its own shape (Sway)",
+                    );
+                });
+                // BF2: a still of the screen on a phone's Home.
+                row(ui, "peek", |ui| {
+                    ui.checkbox(
+                        &mut e.peek,
+                        "a phone with the Peek permission can see this screen as one still",
+                    );
+                    note(
+                        ui,
+                        "Each phone also needs \u{201c}Peek at this screen\u{201d} on its Devices page, off until you turn it on. Nothing is sent while this computer is paused.",
                     );
                 });
                 // A folder picked for received files (C2) fills the box.

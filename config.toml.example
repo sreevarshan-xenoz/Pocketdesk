@@ -105,6 +105,10 @@ video_quality = "balanced"
 # open_links = true
 # Let a phone with Input add a screen of its own shape (Sway only).
 # virtual_screens = true
+# Let a phone with the Peek permission (off for every phone until turned
+# on in the desktop app, Devices) see this screen as one still, from its
+# Home, with no session.
+# peek = true
 
 # A notification when a phone in a session reports a low battery (15 % or
 # less, not charging).

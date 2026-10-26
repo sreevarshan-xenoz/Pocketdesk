@@ -141,6 +141,7 @@ pub fn capability(feature: &str) -> Option<Capability> {
         "commands" => Capability::Command,
         "tasks" => Capability::Tasks,
         "phone_actions" | "apps" => Capability::PhoneActions,
+        "peek" => Capability::Peek,
         _ => return None,
     })
 }
@@ -161,6 +162,9 @@ pub fn settings_off(config: &Config) -> Vec<(&'static str, &'static str)> {
     }
     if !config.clipboard_push {
         off.push(("clipboard", "Clipboard to phones"));
+    }
+    if !config.peek {
+        off.push(("peek", "Peek at this screen"));
     }
     if !config.cast_control {
         off.push(("control", "Control phones from their screen window"));
@@ -270,6 +274,7 @@ mod tests {
         assert_eq!(capability("answers"), Some(Capability::Notifications));
         assert_eq!(capability("control"), Some(Capability::Cast));
         assert_eq!(capability("commands"), Some(Capability::Command));
+        assert_eq!(capability("peek"), Some(Capability::Peek));
         assert_eq!(capability("com.example"), None);
     }
 
@@ -281,6 +286,7 @@ mod tests {
             phone_notifications: false,
             clipboard_push: false,
             cast_control: false,
+            peek: false,
             ..on
         };
         assert_eq!(
@@ -290,6 +296,7 @@ mod tests {
                 ("answers", "Phone notifications"),
                 ("alarms", "Phone notifications"),
                 ("clipboard", "Clipboard to phones"),
+                ("peek", "Peek at this screen"),
                 ("control", "Control phones from their screen window"),
                 ("typing", "Control phones from their screen window"),
             ]

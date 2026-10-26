@@ -62,10 +62,13 @@ pub enum Capability {
     /// Have the phone take a screenshot or lock itself (O2). About what the
     /// computer sends, as Ring is.
     PhoneActions,
+    /// See this computer's screen as one still with no session (BF2); off
+    /// unless chosen: a session asks for a screen, a peek does not.
+    Peek,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 21] = [
+    pub const ALL: [Capability; 22] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -87,16 +90,17 @@ impl Capability {
         Capability::Dial,
         Capability::Command,
         Capability::PhoneActions,
+        Capability::Peek,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
     /// behaviour, except running commands, which a pairing PIN should not
     /// hand out, and locking this computer when it leaves, which only the
-    /// owner turns on (D9).
+    /// owner turns on (D9), and a glance at the screen (BF2).
     pub fn default_allowed(self) -> bool {
         !matches!(
             self,
-            Capability::Exec | Capability::AwayLock | Capability::PhoneSound
+            Capability::Exec | Capability::AwayLock | Capability::PhoneSound | Capability::Peek
         )
     }
 }
@@ -177,6 +181,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::phone_action::PHONE_CONTACTS => Capability::Texts,
         crate::protocol::phone_media::PHONE_MEDIA => Capability::Media,
         crate::protocol::quiet::QUIET_STATE => Capability::Mute,
+        // A still of the screen with no session (BF2).
+        crate::protocol::peek::PEEK => Capability::Peek,
         _ => return None,
     })
 }
@@ -226,6 +232,8 @@ pub struct DevicePermissions {
     pub command: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone_actions: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peek: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -255,6 +263,7 @@ impl DevicePermissions {
             Capability::Dial => &mut self.dial,
             Capability::Command => &mut self.command,
             Capability::PhoneActions => &mut self.phone_actions,
+            Capability::Peek => &mut self.peek,
         }
     }
 
@@ -281,6 +290,7 @@ impl DevicePermissions {
             Capability::Dial => self.dial,
             Capability::Command => self.command,
             Capability::PhoneActions => self.phone_actions,
+            Capability::Peek => self.peek,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -417,10 +427,13 @@ mod tests {
             assert_eq!(
                 none.allows(capability),
                 // Nor lock this computer when it leaves, which only the
-                // owner turns on (D9).
+                // owner turns on (D9), nor peek at its screen (BF2).
                 !matches!(
                     capability,
-                    Capability::Exec | Capability::AwayLock | Capability::PhoneSound
+                    Capability::Exec
+                        | Capability::AwayLock
+                        | Capability::PhoneSound
+                        | Capability::Peek
                 ),
                 "{capability:?}"
             );
@@ -528,6 +541,24 @@ mod tests {
         assert!(!narrowed.allows(Capability::Links), "stays off");
         assert!(!narrowed.allows(Capability::Input));
         assert!(narrowed.ask_first);
+    }
+
+    #[test]
+    fn a_peek_needs_its_own_permission_off_until_chosen() {
+        assert_eq!(
+            capability_for(crate::protocol::peek::PEEK),
+            Some(Capability::Peek)
+        );
+        let mut permissions = DevicePermissions::default();
+        assert!(!permissions.allows(Capability::Peek), "off for every phone");
+        permissions.set(Capability::Peek, true);
+        assert!(permissions.allows(Capability::Peek));
+        assert_eq!(
+            serde_json::to_value(&permissions).unwrap(),
+            serde_json::json!({ "peek": true })
+        );
+        assert!(!DevicePermissions::someone_else().allows(Capability::Peek));
+        assert!(!DevicePermissions::computer().allows(Capability::Peek));
     }
 
     #[test]

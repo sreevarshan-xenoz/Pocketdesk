@@ -12,6 +12,7 @@ pub mod link;
 pub mod live;
 pub mod notification_action;
 pub mod partials;
+pub mod peek;
 pub mod permissions;
 pub mod phone_action;
 pub mod phone_files;

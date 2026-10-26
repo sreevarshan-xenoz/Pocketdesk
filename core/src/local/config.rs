@@ -148,6 +148,11 @@ pub struct Config {
     /// Let a phone with Input add a screen of its own shape (T10j, Sway).
     #[serde(default = "default_true")]
     pub virtual_screens: bool,
+    /// Let phones with the Peek permission see this screen as one still,
+    /// with no session (BF2). On: the permission, off for every phone until
+    /// chosen, is what lets one.
+    #[serde(default = "default_true")]
+    pub peek: bool,
     /// Send what is copied on this computer to connected phones with the
     /// Clipboard permission, as it changes (T10b).
     #[serde(default = "default_true")]
@@ -438,6 +443,7 @@ impl Default for Config {
             link_rules: Vec::new(),
             share_state: true,
             virtual_screens: true,
+            peek: true,
             clipboard_push: true,
             clipboard_images: false,
             received_images_clipboard: false,
@@ -677,6 +683,7 @@ impl Config {
         "link_rules",
         "share_state",
         "virtual_screens",
+        "peek",
         "clipboard_push",
         "clipboard_images",
         "received_images_clipboard",
