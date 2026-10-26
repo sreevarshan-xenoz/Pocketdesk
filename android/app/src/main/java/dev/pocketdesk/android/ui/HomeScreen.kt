@@ -753,12 +753,14 @@ fun HomeScreen(
                             removedId,
                             HostStore.hosts(context).mapNotNull { HostStore.pairedDesktopId(context, it.address) }.toSet(),
                         )
-                        // Forget its certificate too, so a new pairing code
-                        // for this address can be trusted again, and close a
-                        // link to it (AX1): the next own computer links then.
+                        // Close a link to it (AX1): the next own computer links
+                        // then. Then forget its certificate, so a new pairing
+                        // code for this address can be trusted again, and what
+                        // it said of itself (AZ3), after the link, so a
+                        // handshake on it cannot say it again (review).
                         scope.launch(Dispatchers.IO) {
-                            RustCore.forgetPeerCertificate(host.address)
                             RustCore.closeControlLinkTo(host.address)
+                            RustCore.forgetPeerCertificate(host.address)
                         }
                         hosts = HostStore.hosts(context)
                         removing = null

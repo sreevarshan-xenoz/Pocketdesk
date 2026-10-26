@@ -47,6 +47,25 @@ pub(crate) fn note(address: &str, claims: PeerClaims) {
     }
 }
 
+/// Forget what the computer at `address` said of itself, as the phone lets
+/// it go (AZ3: removed or moved, its name stayed, and a computer saved
+/// there later that gives none was saved under it for good, with its
+/// answering flags).
+pub(crate) fn forget(address: &str) {
+    names()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(address);
+    acks()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(address);
+    lives()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(address);
+}
+
 /// Whether the computer at `address` said, when last heard, that it
 /// answers a phone notification that asks (C3).
 pub(crate) fn acks_notifications(address: &str) -> bool {
@@ -118,6 +137,30 @@ mod tests {
         assert!(acks_notifications("192.0.2.50"), "no identity, no change");
         note("192.0.2.50", says(false));
         assert!(!acks_notifications("192.0.2.50"), "an older computer now");
+    }
+
+    /// AZ3: a computer let go takes what it said along, so another saved
+    /// at its address later that gives no name is never called by its.
+    #[test]
+    fn a_computer_let_go_takes_what_it_said_along() {
+        let address = "192.0.2.70";
+        note(
+            address,
+            PeerClaims {
+                name: Some("Study PC".to_string()),
+                sends: Some(vec![
+                    "kdeconnect.notification.ack".to_string(),
+                    "kdeconnect.pocketdesk.notification_open".to_string(),
+                ]),
+            },
+        );
+        assert!(acks_notifications(address) && takes_live(address));
+        forget(address);
+        assert_eq!(name(address), None);
+        assert!(!acks_notifications(address));
+        assert!(!takes_live(address));
+        note(address, named(None));
+        assert_eq!(name(address), None, "another computer there gives none");
     }
 
     /// N4: a computer that sends N3's open takes live cards.
