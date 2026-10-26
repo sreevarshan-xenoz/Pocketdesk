@@ -19,7 +19,8 @@ pub const EVENTS_FILE: &str = "events.jsonl";
 pub const TASK_REQUESTS_FILE: &str = "task_requests.json";
 pub const TASK_ANSWERS_DIR: &str = "task_answers";
 pub const KICK_FILE: &str = "kick";
-/// One kick request per file (roadmap N7).
+/// One kick request per file (roadmap N7): `*.kick` a target, `*.device`
+/// one device's sessions alone (AY3).
 pub const KICKS_DIR: &str = "kicks";
 /// Requests from the desktop app to hand input control to a session (N7).
 pub const CONTROL_DIR: &str = "control";

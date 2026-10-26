@@ -462,7 +462,7 @@ The desktop app (`desktop/`) probes only `127.0.0.1` for its Diagnostics tab (`c
 | `<state>/computers_out/` | The desktop app's requests: pair with a pairing link (which holds a PIN), or forget a computer; one file each, taken within 120 s | Owner-only | same |
 | `<state>/sms.json`, `sms_outbox/` | Texts and replies (newest 1000 by default), with senders' contact names when the phone shares them; `sms_names` off forgets them at the next start | Owner-only | `core/src/local/sms.rs` |
 | `<state>/replies.log` | `<time>\t<notification id>\t<reply text>` for each notification reply | Default | `server/src/plugins/notification_reply.rs` |
-| `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over | Default | `core/src/local/sessions.rs`, `paths.rs` |
+| `<state>/kick`, `kicks/`, `control/` | Requests from the app and CLI to end a session or hand control over (`kicks/*.device`: one device's sessions alone) | Default | `core/src/local/sessions.rs`, `paths.rs` |
 | `pocketdesk-browser/` in the cache folder (Linux, `~/.cache`) or the temporary folder (Windows, per user) | Images from the browser waiting for the phone (a day at most) | Owner-only | `server/src/browser_host.rs` |
 | `app.ron` in `%APPDATA%\Pocketdesk\data` (Windows) or `$XDG_DATA_HOME/pocketdesk` (Linux); `<config>/app-window.ron` with `POCKETDESK_CONFIG_DIR` | The desktop app's window size and place, egui's layout and options, and the page last chosen (never Pair). No text typed in the app | Default | `desktop/src/main.rs` (eframe's persistence) |
 | `<config>/browser/` | The extension host's manifests (Windows) and `registered.json`, the browsers it was registered with | Default | `server/src/browser_host.rs` |

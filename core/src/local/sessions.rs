@@ -5,7 +5,8 @@
 //! every 2 s, and ends sessions
 //! named in kick requests: one file each in `<state>/kicks/`
 //! (`<target>\n<unix-secs>\n`), so two quick requests are both seen, or the
-//! single `<state>/kick` an older CLI writes. The CLI's `status` and
+//! single `<state>/kick` an older CLI writes. A `kicks/*.device` request
+//! names one device's sessions alone (AY3), never `all` or an id's prefix. The CLI's `status` and
 //! `kick` and the desktop app go through these files. The desktop hands input
 //! control to a session through `<state>/control/` (roadmap N7), one file per
 //! request.
