@@ -52,6 +52,24 @@ fn store_lock() -> &'static tokio::sync::Mutex<()> {
     &LOCK
 }
 
+/// Forget the texts of phones not `paired`, and their replies waiting
+/// (AY5); whether that was done.
+pub(crate) async fn keep_only(dir: &Path, paired: &[String]) -> bool {
+    let _held = store_lock().lock().await;
+    match sms::keep_only(dir, paired) {
+        Ok(went) => {
+            if went {
+                tracing::info!("Forgot the texts of phones no longer paired");
+            }
+            true
+        }
+        Err(e) => {
+            tracing::warn!("The texts of phones no longer paired could not be forgotten: {e}");
+            false
+        }
+    }
+}
+
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -303,6 +321,10 @@ async fn handle_request(
                 reason: reason.to_string(),
             };
             let _held = store_lock().lock().await;
+            // Forgotten meanwhile with its unpaired phone (AY5): not kept.
+            if !sms::is_pending(dir, &request.id) {
+                return;
+            }
             if sms::record(dir, reply_message(&request, failed, now), keep()).is_ok() {
                 forget(dir, &request.id);
             }
@@ -324,6 +346,11 @@ async fn handle_request(
                         attempts: 1,
                     };
                     let _held = store_lock().lock().await;
+                    // Forgotten while it went, its phone unpaired (AY5
+                    // review): not kept, so not handed over again.
+                    if !sms::is_pending(dir, &request.id) {
+                        return;
+                    }
                     if sms::record(dir, reply_message(&request, sending, now), keep()).is_ok() {
                         forget(dir, &request.id);
                     }

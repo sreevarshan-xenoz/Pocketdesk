@@ -4,7 +4,8 @@
 //! The server keeps each phone notification that offers buttons or a reply
 //! in `<state>/phone_notifications.json` (owner-only, the newest
 //! [`MAX_KEPT`]), drops it when the phone closes it, and empties the file
-//! at start. The app shows them; a press or a reply it makes is
+//! at start; a phone's go when it is unpaired, with pairing required (AY5).
+//! The app shows them; a press or a reply it makes is
 //! `<state>/notification_out/<id>.json`, taken by the server within
 //! [`ANSWER_TTL_SECS`].
 
@@ -110,6 +111,21 @@ pub fn forget(state_dir: &Path, device_id: &str, key: &str) -> io::Result<()> {
         return Ok(());
     }
     write(state_dir, notes)
+}
+
+/// Keep only the notifications of the phones `paired` names (AY5: an
+/// unpaired phone's stayed on the Notifications page); whether any went.
+/// Nothing is written when none did.
+pub fn keep_only(state_dir: &Path, paired: &[String]) -> io::Result<bool> {
+    let _one = writing();
+    let mut notes = read(state_dir);
+    let before = notes.len();
+    notes.retain(|n| paired.contains(&n.device_id));
+    if notes.len() == before {
+        return Ok(false);
+    }
+    write(state_dir, notes)?;
+    Ok(true)
 }
 
 /// The keys of a ringing call's note (F5), as the phone makes them.
@@ -312,6 +328,21 @@ mod tests {
             open: false,
             messages: vec![],
         }
+    }
+
+    /// AY5: an unpaired phone's notifications go; nothing is written when
+    /// none does.
+    #[test]
+    fn only_paired_phones_notes_are_kept() {
+        let dir = temp_dir("paired");
+        keep(&dir, note("a", "chat", 1)).unwrap();
+        keep(&dir, note("b", "chat", 2)).unwrap();
+        assert!(keep_only(&dir, &["a".to_string()]).unwrap());
+        let notes = read(&dir);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].device_id, "a");
+        assert!(!keep_only(&dir, &["a".to_string()]).unwrap(), "none went");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// M8 review: an ended call stays, with nothing to answer; another
