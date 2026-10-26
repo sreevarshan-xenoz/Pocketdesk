@@ -245,6 +245,39 @@ fn unpair_asks_by_name_and_only_the_answer_unpairs() {
     assert!(!store.is_trusted(PHONE), "Unpair removes it");
 }
 
+/// BA3: a computer is unpaired by the server, so with it stopped, Unpair
+/// waits for it, as Pair does.
+#[test]
+fn unpairing_a_computer_waits_for_the_server() {
+    let fixture = Fixture::new();
+    pocketdesk_core::local::computers::update(fixture.state(), |file| {
+        file.computers
+            .push(pocketdesk_core::local::computers::PeerComputer {
+                device_id: "00000000-0000-4000-8000-0000000000ba".to_string(),
+                name: "Test Desk".to_string(),
+                addresses: Vec::new(),
+                control_port: 1716,
+                fingerprint: String::new(),
+                endpoint: None,
+                paired_unix: 0,
+                link: String::new(),
+                link_unix: 0,
+            });
+    })
+    .expect("a computers file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    // Its section opened by the search, as it starts closed.
+    find(&app).focus();
+    find(&app).type_text("Other computers");
+    app.run_steps(3);
+    assert!(app.query_by_label("Test Desk").is_some());
+    use egui_kittest::kittest::NodeT;
+    assert!(
+        app.get_by_label("Unpair…").accesskit_node().is_disabled(),
+        "no server here, so no Unpair"
+    );
+}
+
 /// I3: Esc answers an open question with Cancel.
 #[test]
 fn escape_cancels_the_unpair_question() {

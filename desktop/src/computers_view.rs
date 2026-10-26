@@ -136,13 +136,24 @@ impl ComputersView {
                         "Unpair {}? It must pair again to share with this one.",
                         computer.name
                     ));
-                    if ui.button("Unpair").clicked() {
+                    if ui
+                        .add_enabled(server_running, egui::Button::new("Unpair"))
+                        .on_disabled_hover_text(STOPPED)
+                        .clicked()
+                    {
                         forget = Some(computer.device_id.clone());
                     }
                     if ui.button("Cancel").clicked() {
                         self.forgetting = None;
                     }
-                } else if ui.button("Unpair…").clicked() {
+                } else if ui
+                    // The server does the unpairing (BA3): asked with it
+                    // stopped, the request expired unread and the link came
+                    // back at its next start, while this said it was done.
+                    .add_enabled(server_running, egui::Button::new("Unpair…"))
+                    .on_disabled_hover_text(STOPPED)
+                    .clicked()
+                {
                     self.forgetting = Some(computer.device_id.clone());
                 }
             });
@@ -153,11 +164,15 @@ impl ComputersView {
                 state_dir,
                 ComputerAsk::Forget { device_id },
                 now_unix,
-                "Unpaired here. Unpair this computer in the other one's Devices page too.",
+                "Asked the server to unpair it here: it leaves the list once done. Unpair this \
+                 computer in the other one's Devices page too.",
             );
         }
     }
 }
+
+/// Why Unpair waits (BA3).
+const STOPPED: &str = "Start the server first: it does the unpairing";
 
 #[cfg(test)]
 mod tests {
