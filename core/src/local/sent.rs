@@ -80,6 +80,22 @@ pub fn update(state_dir: &Path, id: &str, state: SentState) -> io::Result<()> {
     write(state_dir, files)
 }
 
+/// Fail every send still offered, with `reason`: a server that stopped
+/// held its offers in memory, so none of them can be taken now (BD2).
+/// Returns how many. A list with none is not written.
+pub fn settle_offered(state_dir: &Path, reason: &str) -> io::Result<usize> {
+    let mut files = read(state_dir);
+    let mut settled = 0;
+    for file in files.iter_mut().filter(|f| f.state == SentState::Offered) {
+        file.state = SentState::Failed(reason.to_string());
+        settled += 1;
+    }
+    if settled > 0 {
+        write(state_dir, files)?;
+    }
+    Ok(settled)
+}
+
 fn write(state_dir: &Path, files: Vec<SentFile>) -> io::Result<()> {
     let json = serde_json::to_string(&SentList { files }).map_err(io::Error::other)?;
     let path = state_dir.join(SENT_FILE);
@@ -159,6 +175,32 @@ mod tests {
             SentState::Failed("phone not connected".into())
         );
         assert_eq!(files[1].state, SentState::Sent);
+    }
+
+    /// BD2: a send still offered when the server stopped was never taken
+    /// (offers live in memory), and stayed "waiting to be taken" for good,
+    /// with no Send again; at start it is failed, saying so.
+    #[test]
+    fn sends_left_offered_by_a_stopped_server_are_failed() {
+        let dir = temp_dir("settle");
+        record(&dir, file(1)).unwrap();
+        record(&dir, file(2)).unwrap();
+        update(&dir, "id-2", SentState::Sent).unwrap();
+        // Review: a row already failed, and a row's note, are kept.
+        let mut noted = file(3);
+        noted.state = SentState::Failed("no room".into());
+        noted.note = Some("2 files left out".into());
+        record(&dir, noted.clone()).unwrap();
+        assert_eq!(settle_offered(&dir, "stopped").unwrap(), 1);
+        let files = read(&dir);
+        assert_eq!(files[0].state, SentState::Failed("stopped".into()));
+        assert_eq!(files[1].state, SentState::Sent);
+        assert_eq!(files[2], noted);
+        assert_eq!(settle_offered(&dir, "stopped").unwrap(), 0, "nothing left");
+        assert_eq!(
+            settle_offered(&temp_dir("settle-none"), "stopped").unwrap(),
+            0
+        );
     }
 
     #[test]
