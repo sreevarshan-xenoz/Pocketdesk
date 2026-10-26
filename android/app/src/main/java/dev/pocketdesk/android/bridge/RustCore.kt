@@ -205,7 +205,6 @@ object RustCore {
     private external fun nativeCopyPeerCertificate(from: String, to: String): String
     private external fun nativePairWithPin(address: String, port: Int, pin: String): String
     private external fun nativeCheckPairResult(waitSecs: Long): String
-    private external fun nativePairedServers(): String
     private external fun nativeTakePendingNotifications(): String
     private external fun nativeDesktopPrivacy(
         address: String,
@@ -1215,12 +1214,6 @@ object RustCore {
             else -> v.toString().takeIf { it.isNotBlank() }
         }
     }.getOrNull()
-
-    /** Device ids of desktops this phone has paired with (bridge-persisted). */
-    fun pairedServers(): List<String> = runCatching {
-        val arr = org.json.JSONArray(envelope(nativePairedServers()).getOrThrow())
-        List(arr.length()) { arr.getString(it) }
-    }.getOrDefault(emptyList())
 
     /**
      * Drain desktop notifications queued by the bridge control reader
