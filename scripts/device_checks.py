@@ -4485,8 +4485,9 @@ def bb3_home_says_unpaired(ctx: Ctx) -> tuple[str, str]:
     if not said:
         return "FAIL", f"told, but Home did not say \"{words}\" within 20 s"
     adb("logcat", "-c")
-    if not wait_for(lambda: again in phone_log(), 120, 2):
-        return "FAIL", "Home said it, but put back the phone was not let in again within 120 s"
+    # The phone looks at a computer that refused it again every 5 min.
+    if not wait_for(lambda: again in phone_log(), 400, 2):
+        return "FAIL", "Home said it, but put back the phone was not let in again within 400 s"
     home(ctx)
     back = wait_for(lambda: words not in (dump := ctx.phone.dump()) and "Paired" in dump, 20, 2)
     if not back:
