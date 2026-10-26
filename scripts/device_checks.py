@@ -5931,9 +5931,9 @@ def ay3_device_kick(ctx: Ctx) -> tuple[str, str]:
 def fire_connect_shortcut(address: str, paired_id: str) -> None:
     """Open the app as a pinned Connect shortcut does: its action, the
     computer's address, and the paired id it was made for."""
-    adb("shell", "am", "start", "-f", "0x30000000", "-a", "dev.pocketdesk.android.action.CONNECT",
-        "-n", f"{APP}/.MainActivity", "--es", "dev.pocketdesk.android.extra.ADDRESS", address,
-        "--es", "dev.pocketdesk.android.extra.PAIRED_ID", paired_id)
+    am("start", "-f", "0x30000000", "-a", "dev.pocketdesk.android.action.CONNECT",
+       "-n", f"{APP}/.MainActivity", "--es", "dev.pocketdesk.android.extra.ADDRESS", address,
+       "--es", "dev.pocketdesk.android.extra.PAIRED_ID", paired_id)
 
 
 def app_shortcut_ids(dump: str) -> list[str]:
@@ -5960,14 +5960,21 @@ def az1_shortcut_paired_id(ctx: Ctx) -> tuple[str, str]:
         paired = ctx.phone.prefs("pocketdesk-host").get("paired_desktop:127.0.0.1")
         if not isinstance(paired, str) or not paired:
             return "SKIP", "the phone keeps no paired id for 127.0.0.1"
+        # The app's shortcuts are refreshed as it leaves the screen: opened
+        # and left first, so the list read is this build's (review).
         ctx.phone.wake()
+        adb("shell", "monkey", "-p", APP, "-c", "android.intent.category.LAUNCHER", "1")
+        time.sleep(3)
+        adb("shell", "input", "keyevent", "KEYCODE_HOME")
+        time.sleep(2)
+        own = f"connect:{ctx.phone.prefs('pocketdesk-ui').get('share_shortcut_token', '')}:paired:{paired}@127.0.0.1"
+        named = own in app_shortcut_ids(adb("shell", "dumpsys", "shortcut"))
         fire_connect_shortcut("127.0.0.1", f"az1-{uuid.uuid4().hex[:8]}")
-        if wait_for(lambda: in_session(ctx), 12, 1):
+        if wait_for(lambda: in_session(ctx), 15, 1):
             return "FAIL", "a shortcut made for another computer opened a session on the throwaway"
         fire_connect_shortcut("127.0.0.1", paired)
         if not wait_for(lambda: in_session(ctx), 30, 1):
             return "FAIL", "a shortcut made for the throwaway opened no session within 30 s"
-        named = any(i.endswith(f":paired:{paired}") for i in app_shortcut_ids(adb("shell", "dumpsys", "shortcut")))
         if not named:
             return "FAIL", "the phone's Connect shortcut for the throwaway does not name its paired id"
         return "PASS", ("one made for another paired id opened nothing; one made for the throwaway's opened "
