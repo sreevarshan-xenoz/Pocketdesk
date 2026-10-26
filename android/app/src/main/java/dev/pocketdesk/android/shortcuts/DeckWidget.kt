@@ -65,15 +65,19 @@ class DeckWidget : AppWidgetProvider() {
             val json = answer.getOrNull()?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
             val why = app.plainErrorText(answer.exceptionOrNull()?.message)
             // Only the newest ask keeps what it heard, checked and written at once.
-            synchronized(generation) {
+            val kept = synchronized(generation) {
                 if (generation.get() != ask) return@bounded
+                asking = null
                 if (json != null) {
                     Kept.save(app, key, json)
                 } else {
                     Kept.failed(app, key, app.getString(R.string.deck_failed, why))
                 }
-                asking = null
             }
+            // The last computer changed meanwhile (AZ2 review: paired, its key
+            // is its paired id now): its own list is asked, not left loading,
+            // by a broadcast of its own, as this receiver's async is spent.
+            if (!kept) return@bounded follow(app)
             redrawAll(app)
         }
     }
@@ -84,8 +88,8 @@ class DeckWidget : AppWidgetProvider() {
         val key = keyOf(app, host)
         // A button drawn for one computer never presses another's (G3 review),
         // one saved at its old address included (AZ2): the last computer
-        // changed since, so it is drawn anew instead.
-        if (!DeckWidgetPlan.keeps(drawnFor, key)) return redrawAll(app)
+        // changed since, so its own list is asked and drawn instead.
+        if (!DeckWidgetPlan.keeps(drawnFor, key)) return list(app, DeckWidgetPlan.Why.Follow)
         // A press still running is not sent again.
         if (index < 0 || label.isBlank() || !pressing.add(index)) return
         showAsking(app, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
@@ -137,9 +141,12 @@ class DeckWidget : AppWidgetProvider() {
                 return Kept(readable, failed, p.getString(KEY_LINE, null))
             }
 
+            /** Keep [json] for [computer] while it is the last one; whether it was. */
             @Synchronized
-            fun save(ctx: Context, computer: String, json: String) {
-                if (last(ctx, computer)) store(ctx, computer, json)
+            fun save(ctx: Context, computer: String, json: String): Boolean {
+                if (!last(ctx, computer)) return false
+                store(ctx, computer, json)
+                return true
             }
 
             private fun store(ctx: Context, computer: String, json: String) = prefs(ctx).edit {
@@ -153,9 +160,10 @@ class DeckWidget : AppWidgetProvider() {
             private fun last(ctx: Context, computer: String) =
                 HostStore.lastHost(ctx)?.let { keyOf(ctx, it) } == computer
 
+            /** Mark [computer]'s ask failed while it is the last one; whether it was. */
             @Synchronized
-            fun failed(ctx: Context, computer: String, line: String) {
-                if (!last(ctx, computer)) return
+            fun failed(ctx: Context, computer: String, line: String): Boolean {
+                if (!last(ctx, computer)) return false
                 val p = prefs(ctx)
                 p.edit {
                     if (p.getString(KEY_FOR, null) != computer) {
@@ -165,6 +173,14 @@ class DeckWidget : AppWidgetProvider() {
                     putBoolean(KEY_FAILED, true)
                     putString(KEY_LINE, line)
                 }
+                return true
+            }
+
+            /** Forget the list kept for [computer]. */
+            @Synchronized
+            fun forget(ctx: Context, computer: String) {
+                val p = prefs(ctx)
+                if (p.getString(KEY_FOR, null) == computer) p.edit { clear() }
             }
 
             @Synchronized
@@ -221,8 +237,23 @@ class DeckWidget : AppWidgetProvider() {
             val host = HostStore.lastHost(app)?.takeIf { it.address == computer } ?: return
             synchronized(generation) {
                 generation.incrementAndGet()
+                // An ask it overtakes would leave "Loading" over it (AZ2 review).
+                asking = null
                 Kept.save(app, keyOf(app, host), json)
             }
+            redrawAll(app)
+        }
+
+        /**
+         * A computer was removed: the list kept for it goes, unless another
+         * of its cards is still saved (AZ2 review: a computer never paired,
+         * saved later at its address, would show its list and its error).
+         * [removed] is its [keyOf] from before it was removed.
+         */
+        fun forgetRemoved(context: Context, removed: String) {
+            val app = context.applicationContext
+            if (HostStore.hosts(app).any { keyOf(app, it) == removed }) return
+            Kept.forget(app, removed)
             redrawAll(app)
         }
 

@@ -60,6 +60,8 @@ class DeckWidgetPlanTest {
         assertFalse(DeckWidgetPlan.keeps(a, DeckWidgetPlan.computerKey("192.0.2.1", "pc-b")))
         assertFalse(DeckWidgetPlan.keeps(a, DeckWidgetPlan.computerKey("192.0.2.1", null)))
         assertEquals("one never paired is its address", "192.0.2.1", DeckWidgetPlan.computerKey("192.0.2.1", null))
+        // Kept by address before AZ2: asked again once (review).
+        assertFalse(DeckWidgetPlan.keeps("192.0.2.1", DeckWidgetPlan.computerKey("192.0.2.1", "pc-a")))
     }
 
     /** AZ2: another computer's list goes, and so does one with no computer left. */
