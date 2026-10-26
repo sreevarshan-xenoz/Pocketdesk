@@ -4375,7 +4375,8 @@ def bb1_told_not_paired(ctx: Ctx) -> tuple[str, str]:
         tmp = state / "trusted_devices.json.bb1"
         tmp.write_bytes(kept)
         os.replace(tmp, state / "trusted_devices.json")
-    let_in = wait_for(lambda: again in phone_log(), 120, 2)
+    # The phone looks at a computer that refused it again every 5 min.
+    let_in = wait_for(lambda: again in phone_log(), 400, 2)
     relinked = wait_for(lambda: ctx.device in ctx.server.linked(), 60, 2)
     if not said:
         return "FAIL", "the phone was not told it is not paired within 90 s"
@@ -4431,8 +4432,8 @@ def bb2_unpaired_gets_nothing(ctx: Ctx) -> tuple[str, str]:
         return "FAIL", "a notification reached the computer after it said the phone is not paired"
     if not kept_here:
         return "FAIL", "the phone did not say it kept the notification"
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
-        return "FAIL", "kept on the phone, but put back it did not link again within 120 s"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 400, 2):
+        return "FAIL", "kept on the phone, but put back it did not link again within 400 s"
     after = fixture_note(ctx, 652, "BB2 back " + secrets.token_hex(2), 90)
     ctx.phone.cancel(652)
     if not after:
