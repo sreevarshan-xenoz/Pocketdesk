@@ -50,6 +50,7 @@ pub const FEATURES: &[&str] = &[
     "tasks",
     "phone_actions",
     "apps",
+    "peek",
 ];
 
 /// One feature as the phone says it stands.

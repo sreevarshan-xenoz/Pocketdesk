@@ -76,5 +76,7 @@ internal fun readSwitches(ctx: Context): Map<String, SwitchReport.Switch> {
         // P2: listed on the listener's link; an app opens at once with the
         // control service, else as "Tap to open".
         "apps" to s(Prefs.appsFromComputer(ctx), access),
+        // BF2: asked from Home, so Android needs nothing.
+        "peek" to s(Prefs.peek(ctx)),
     )
 }

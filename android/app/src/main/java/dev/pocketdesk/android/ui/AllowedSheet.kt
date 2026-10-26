@@ -169,6 +169,7 @@ private fun featureName(feature: String): Int = when (feature) {
     "tasks" -> R.string.settings_others_run_tasks
     "phone_actions" -> R.string.settings_phone_actions
     "apps" -> R.string.settings_phone_apps
+    "peek" -> R.string.settings_peek
     // Only SwitchReport.FEATURES come here (Q3 review: a new one had read
     // as Commands).
     else -> error("no label for the feature $feature")
