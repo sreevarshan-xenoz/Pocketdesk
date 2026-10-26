@@ -724,6 +724,7 @@
     <string name="card_more">More for %1$s</string>
     <string name="status_paired">Paired</string>
     <string name="status_not_paired">Not paired</string>
+    <string name="status_unpaired_by_it">No longer paired with this phone</string>
     <string name="status_auto">Connects at launch</string>
     <string name="rename_title">Rename %1$s</string>
     <string name="rename_label">Name</string>

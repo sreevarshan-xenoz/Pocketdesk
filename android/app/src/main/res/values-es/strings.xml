@@ -721,6 +721,7 @@
     <string name="card_more">Más opciones para %1$s</string>
     <string name="status_paired">Emparejado</string>
     <string name="status_not_paired">Sin emparejar</string>
+    <string name="status_unpaired_by_it">Ya no está emparejado con este teléfono</string>
     <string name="status_auto">Se conecta al abrir</string>
     <string name="rename_title">Renombrar %1$s</string>
     <string name="rename_label">Nombre</string>
