@@ -67,7 +67,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     // What an earlier run said of its links is not this run's.
     let restarted = computers::update(&dir, |file| {
         for computer in &mut file.computers {
-            computer.link = "connecting".to_string();
+            computer.link = first_link(wan.is_some()).to_string();
         }
     });
     if let Err(e) = restarted {
@@ -81,9 +81,14 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     // back-off a refused or broken one was sleeping out.
                     if let Some(paired) =
                         pair(&dir, &cert_manager, wan.as_ref(), &link, &request.id).await
-                        && let Some(stale) = links.remove(&paired)
                     {
-                        stale.task.abort();
+                        if let Some(stale) = links.remove(&paired) {
+                            stale.task.abort();
+                        }
+                        // No link is kept without the road (BD5).
+                        if wan.is_none() {
+                            set_link(&dir, &paired, first_link(false));
+                        }
                     }
                 }
                 ComputerAsk::Forget { device_id } => {
@@ -98,6 +103,17 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
             keep_links(&dir, wan, &mut links);
         }
         crate::inbox::wait(COMPUTERS_DIR, POLL).await;
+    }
+}
+
+/// What a computer's link says before it is tried: "connecting", or, with
+/// the internet road off here (iroh did not start), why none is kept (BD5:
+/// it said "connecting" for good).
+fn first_link(road: bool) -> &'static str {
+    if road {
+        "connecting"
+    } else {
+        "away: the internet road is off on this computer"
     }
 }
 
@@ -1134,6 +1150,18 @@ mod tests {
             [ComputerAsk::Forget {
                 device_id: "pc-b".to_string()
             }]
+        );
+    }
+
+    /// BD5: with the internet road off, no link is kept, and its computers
+    /// say so rather than "connecting" for good.
+    #[test]
+    fn with_the_road_off_a_computer_says_so() {
+        assert_eq!(first_link(true), "connecting");
+        assert!(
+            first_link(false).starts_with("away: "),
+            "{}",
+            first_link(false)
         );
     }
 
