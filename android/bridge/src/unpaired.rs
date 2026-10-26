@@ -54,13 +54,15 @@ fn pairing(packet_type: &str) -> bool {
     )
 }
 
-/// What a packet of `packet_type` from the computer at `address` says of
-/// this phone's standing there: its word that it is not paired, or, for
-/// anything but pairing's own answers, that it is let in.
-pub(crate) fn heard(address: &str, packet_type: &str) {
+/// What a packet of `packet_type` with `body` from the computer at
+/// `address` says of this phone's standing there: its word that it is not
+/// paired, or, for anything but pairing's own, that it is let in; and so
+/// does pairing's answer that they are paired (BC5: one paired from the
+/// computer's side was held until it sent something else).
+pub(crate) fn heard(address: &str, packet_type: &str, body: &serde_json::Value) {
     if packet_type == NOT_PAIRED {
         said(address);
-    } else if !pairing(packet_type) {
+    } else if !pairing(packet_type) || body.get("pair").and_then(|v| v.as_bool()) == Some(true) {
         let_in(address);
     }
 }
@@ -94,17 +96,42 @@ mod tests {
     fn a_computer_s_word_is_kept_until_it_lets_the_phone_in() {
         let address = "192.0.2.90";
         assert!(!by(address));
-        heard(address, NOT_PAIRED);
+        let none = serde_json::json!({});
+        heard(address, NOT_PAIRED, &none);
         assert!(by(address));
-        heard(address, "kdeconnect.pair");
-        heard(address, "kdeconnect.pocketdesk.pair");
-        assert!(by(address), "pairing's answers say nothing either way");
-        heard(address, "kdeconnect.pocketdesk.endpoint");
+        heard(
+            address,
+            "kdeconnect.pair",
+            &serde_json::json!({ "pair": false }),
+        );
+        heard(
+            address,
+            "kdeconnect.pocketdesk.pair",
+            &serde_json::json!({ "pin": "123456" }),
+        );
+        assert!(
+            by(address),
+            "pairing's asks and refusals say nothing either way"
+        );
+        heard(address, "kdeconnect.pocketdesk.endpoint", &none);
         assert!(!by(address), "a push is only for a phone let in");
         said(address);
         let_in(address);
         assert!(!by(address), "paired again");
         assert!(!by("192.0.2.91"), "only that computer");
+    }
+
+    /// BC5: paired from the computer's side, its answer lets the phone in.
+    #[test]
+    fn a_pairing_answered_yes_lets_the_phone_in() {
+        let address = "192.0.2.95";
+        said(address);
+        heard(
+            address,
+            "kdeconnect.pair",
+            &serde_json::json!({ "pair": true }),
+        );
+        assert!(!by(address));
     }
 
     /// BB2 review: each way the phone sends to a computer refuses at once,

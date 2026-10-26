@@ -105,9 +105,11 @@ pub(crate) fn pin_peer_certificate_in(
 
 /// Forget the certificate this phone trusts for `address` (the computer was
 /// removed, moved or is paired again), and what it said of itself there
-/// (AZ3). Returns whether one was pinned.
+/// (AZ3) and of this phone (BC5). Returns whether one was pinned.
 pub fn forget_peer_certificate(address: String) -> Result<bool, String> {
     crate::peer_names::forget(&address);
+    // And its word that this phone is not paired (BC5).
+    crate::unpaired::let_in(&address);
     let dir = crate::CERT_DIR
         .lock()
         .unwrap()
@@ -682,7 +684,7 @@ pub async fn connect_to_peer(
                                 // What it says of this phone's standing there
                                 // (BB1): not paired, or let in.
                                 if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
-                                    crate::unpaired::heard(&from_peer.0, &pkt.packet_type);
+                                    crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
                                 }
                                 // Cache the server's iroh WAN identity as it is
                                 // announced, independent of Kotlin's poll loop.
@@ -4914,6 +4916,23 @@ mod pin_certificate_tests {
         let _ = std::fs::remove_dir_all(&certs);
         assert!(forgot.is_ok(), "{forgot:?}");
         assert_eq!(name, None);
+    }
+
+    /// BC5: a computer's key forgotten (removed, or paired again) takes its
+    /// word that this phone is not paired with it: a new computer saved at
+    /// that address was held (review: under the lock, in its own folder).
+    #[tokio::test]
+    async fn forgetting_a_certificate_forgets_the_computer_s_word() {
+        let _globals = super::TRANSFER_TEST_LOCK.lock().await;
+        let certs = std::env::temp_dir().join(format!("bridge-forget-word-{}", std::process::id()));
+        let had = crate::CERT_DIR.lock().unwrap().replace(certs.clone());
+        crate::unpaired::said("192.0.2.96");
+        let forgot = super::forget_peer_certificate("192.0.2.96".to_string());
+        let held = crate::unpaired::by("192.0.2.96");
+        *crate::CERT_DIR.lock().unwrap() = had;
+        let _ = std::fs::remove_dir_all(&certs);
+        assert!(forgot.is_ok(), "{forgot:?}");
+        assert!(!held);
     }
 
     #[test]

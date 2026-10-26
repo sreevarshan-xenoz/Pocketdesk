@@ -99,7 +99,7 @@ pub(crate) async fn connect(address: String, port: u16) -> Result<(), String> {
             // What it says of this phone's standing there (BB1 review: its
             // copies went on to a computer that unpaired the phone).
             if let Ok(packet) = NetworkPacket::from_wire(trimmed) {
-                crate::unpaired::heard(&address, &packet.packet_type);
+                crate::unpaired::heard(&address, &packet.packet_type, &packet.body);
             }
             // Whether that computer is in use (N7), kept with it.
             if trimmed.contains("in_use_answer")
