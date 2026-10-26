@@ -5426,6 +5426,10 @@ def ay4_grant_end(ctx: Ctx) -> tuple[str, str]:
         store = json.loads(kept)
     except (OSError, ValueError):
         return "SKIP", "no trust store on the throwaway"
+    # The watcher's first look is silent (a restart pairs no one): the
+    # grant is written after it, once its mirror is (review).
+    if not wait_for(lambda: (ctx.server.root / "state" / "live_sessions.json").exists(), 15, 0.5):
+        return "TIMEOUT", "the server's watcher did not start within 15 s"
     guest = f"ay4-guest-{uuid.uuid4().hex[:8]}"
     count = ctx.server.event_count()
     ends = int(time.time()) + 20
@@ -5439,8 +5443,8 @@ def ay4_grant_end(ctx: Ctx) -> tuple[str, str]:
         return [e for e in ctx.server.events_after_count(count)
                 if e.get("event") == kind and e.get("device_id") == guest]
 
-    write(json.dumps({**store, "grants": {**(store.get("grants") or {}), guest: ends}}).encode("utf-8"))
     try:
+        write(json.dumps({**store, "grants": {**(store.get("grants") or {}), guest: ends}}).encode("utf-8"))
         if not wait_for(lambda: seen("phone_paired"), 15, 0.5):
             return "TIMEOUT", "no phone_paired for the grant within 15 s"
         if seen("phone_unpaired"):
@@ -5448,6 +5452,8 @@ def ay4_grant_end(ctx: Ctx) -> tuple[str, str]:
         if not wait_for(lambda: seen("phone_unpaired"), max(ends - time.time(), 0) + 15, 0.5):
             return "FAIL", "no phone_unpaired within 15 s of the grant's end"
         late = int(seen("phone_unpaired")[0].get("at", 0)) - ends
+        if late < 0:
+            return "FAIL", f"phone_unpaired {-late} s before the grant ended"
         return "PASS", f"phone_paired at once; phone_unpaired {late} s after the grant ended, the store unwritten"
     finally:
         write(kept)
