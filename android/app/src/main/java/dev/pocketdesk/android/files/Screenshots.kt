@@ -97,6 +97,40 @@ class Screenshots(private val ctx: Context) {
     private var restUntilMs = 0L
     private var observer: ContentObserver? = null
 
+    /**
+     * Screenshots handed to the transfer service for Downloads, each with
+     * its sends so far, and when (BB4): one that fails goes again, a few
+     * times, to Downloads only.
+     */
+    private var handed: List<Pair<Uri, Int>> = emptyList()
+    private var handedAtMs = 0L
+    private var again: List<Pair<Uri, Int>> = emptyList()
+
+    /** False while the last ones are waited for. */
+    private fun settle(): Boolean {
+        val ago = SystemClock.elapsedRealtime() - handedAtMs
+        val failed = UploadRetry.again(handed, ago) { SendOutcomes.peek(it) } ?: return false
+        val given = UploadRetry.givenUp(handed) { SendOutcomes.peek(it) }
+        if (given > 0) Log.w(TAG, "$given screenshots did not reach the computer's Downloads, given up")
+        handed.forEach { (uri, _) -> SendOutcomes.forget(uri) }
+        handed = emptyList()
+        again = failed
+        dirty = true
+        if (failed.isNotEmpty()) restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+        return true
+    }
+
+    /** Hand [uris] to the transfer service for the computer's Downloads. */
+    private fun toDownloads(address: String, port: Int, uris: List<Pair<Uri, Int>>) {
+        uris.forEach { (uri, _) -> SendOutcomes.expect(uri) }
+        runCatching { TransferService.start(ctx, address, port, uris.map { it.first }) }
+            .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
+        handed = handed + uris
+        handedAtMs = SystemClock.elapsedRealtime()
+        // Looked at again, to settle them (BB4 review: nothing else did).
+        dirty = true
+    }
+
     fun tick() {
         if (!ScreenshotPrefs.on(ctx) || !ScreenshotPrefs.granted(ctx)) {
             // Access taken back turns it off: given back, it does not start
@@ -104,11 +138,24 @@ class Screenshots(private val ctx: Context) {
             // Said on Home (D1): it would otherwise stop without a word.
             if (ScreenshotPrefs.on(ctx)) ScreenshotPrefs.stopForAccess(ctx)
             stopWatching()
+            forgetWaiting()
             return
         }
         startWatching()
         if (!dirty || SystemClock.elapsedRealtime() < restUntilMs) return
+        // Those sent to Downloads are settled once the service is through.
+        if (handed.isNotEmpty() && (TransferService.busy() || !settle() || again.isNotEmpty())) return
         val own = PhoneLink.target(ctx) ?: return
+        if (again.isNotEmpty()) {
+            if (!Waker.answers(own.address, own.controlPort)) {
+                restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+                return
+            }
+            val retry = again.map { (uri, sends) -> uri to sends + 1 }
+            again = emptyList()
+            toDownloads(own.address, own.controlPort, retry)
+            return
+        }
         dirty = false
         val now = System.currentTimeMillis() / 1000
         val since = ScreenshotPrefs.since(ctx)
@@ -163,10 +210,7 @@ class Screenshots(private val ctx: Context) {
                 png?.let { ClipboardImages.withStaged(ctx, it) { file -> RustCore.sendClipboardImage(address, port, file.absolutePath) } }
             if (result == null || result.isFailure) Log.w(TAG, "a screenshot did not reach the computer's clipboard: ${result?.exceptionOrNull()}")
         }
-        if (ScreenshotPrefs.save(ctx)) {
-            runCatching { TransferService.start(ctx, address, port, listOf(uri)) }
-                .onFailure { Log.w(TAG, "a screenshot was not sent to the computer's Downloads", it) }
-        }
+        if (ScreenshotPrefs.save(ctx)) toDownloads(address, port, listOf(uri to 1))
     }
 
     private data class Image(val id: Long, val uri: Uri, val folder: String?, val addedSecs: Long, val size: Long, val pending: Boolean)
@@ -239,6 +283,14 @@ class Screenshots(private val ctx: Context) {
     fun close() {
         closed = true
         stopWatching()
+        forgetWaiting()
+    }
+
+    /** Turned off, or gone: nothing that waited goes later (BB4 review). */
+    private fun forgetWaiting() {
+        (handed + again).forEach { (uri, _) -> SendOutcomes.forget(uri) }
+        handed = emptyList()
+        again = emptyList()
     }
 
     companion object {

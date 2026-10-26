@@ -107,11 +107,53 @@ class CameraUploads(private val ctx: Context) {
     private var restUntilMs = 0L
     private val observers = mutableListOf<ContentObserver>()
 
+    /**
+     * The last batch handed over, each with its sends so far, and when
+     * (BB4): one that fails goes again, a few times.
+     */
+    private var handed: List<Pair<Item, Int>> = emptyList()
+    private var handedAtMs = 0L
+
+    /** Files that failed, to go again before new ones, with their sends so far. */
+    private var again: List<Pair<Item, Int>> = emptyList()
+
+    /**
+     * Hand [items] (each with its sends so far, this one included) to the
+     * transfer service; whether they went to it.
+     */
+    private fun hand(address: String, port: Int, items: List<Pair<Item, Int>>): Boolean {
+        items.forEach { (item, _) -> SendOutcomes.expect(item.uri) }
+        val went = runCatching { TransferService.start(ctx, address, port, items.map { it.first.uri }) }
+            .onFailure { Log.w(TAG, "new camera photos were not sent to the computer", it) }
+            .isSuccess
+        handed = items
+        handedAtMs = SystemClock.elapsedRealtime()
+        return went
+    }
+
+    /**
+     * How the last batch went, once the service is through (BB4): those
+     * that failed go again after a rest. False while they are waited for.
+     */
+    private fun settle(): Boolean {
+        val ago = SystemClock.elapsedRealtime() - handedAtMs
+        val failed = UploadRetry.again(handed, ago) { SendOutcomes.peek(it.uri) } ?: return false
+        val given = UploadRetry.givenUp(handed) { SendOutcomes.peek(it.uri) }
+        handed.forEach { (item, _) -> SendOutcomes.forget(item.uri) }
+        if (given > 0) Log.w(TAG, "$given new camera photos did not reach the computer, given up")
+        handed = emptyList()
+        again = failed
+        dirty = true
+        if (failed.isNotEmpty()) restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+        return true
+    }
+
     fun tick() {
         if (!CameraPrefs.on(ctx) || !CameraPrefs.photosGranted(ctx)) {
             // Access taken back turns it off, said on Home (as screenshots).
             if (CameraPrefs.on(ctx)) CameraPrefs.stopForAccess(ctx)
             stopWatching()
+            forgetWaiting()
             return
         }
         // Video access taken back turns "Videos too" off: given back, the
@@ -124,8 +166,20 @@ class CameraUploads(private val ctx: Context) {
         // asked (T3 review: a backlog queued at once went on over mobile
         // data when Wi-Fi went).
         if (TransferService.busy()) return
+        if (handed.isNotEmpty() && (!settle() || again.isNotEmpty())) return
         if (!CameraRule.mayGo(CameraPrefs.wifiOnly(ctx), onWifi())) return
         val own = PhoneLink.target(ctx) ?: return
+        // Those that failed go first, once the computer answers (BB4).
+        if (again.isNotEmpty()) {
+            if (!Waker.answers(own.address, own.controlPort)) {
+                restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+                return
+            }
+            val retry = again.map { (item, sends) -> item to sends + 1 }
+            again = emptyList()
+            hand(own.address, own.controlPort, retry)
+            return
+        }
         dirty = false
         val kinds =
             buildList {
@@ -181,17 +235,17 @@ class CameraUploads(private val ctx: Context) {
         }
         // Turned off meanwhile: nothing goes.
         if (!CameraPrefs.on(ctx)) return
-        runCatching { TransferService.start(ctx, own.address, own.controlPort, ready.map { it.second.uri }) }
-            .onSuccess {
-                ready.forEach { (kind, item) -> CameraPrefs.setLastId(ctx, kind, item.id) }
-                // What waits behind them is looked at once they are through.
-                dirty = true
-            }
-            .onFailure {
-                Log.w(TAG, "new camera photos were not sent to the computer", it)
-                restUntilMs = SystemClock.elapsedRealtime() + REST_MS
-                dirty = true
-            }
+        if (hand(own.address, own.controlPort, ready.map { it.second to 1 })) {
+            // Marked as handed over: one that fails goes again by itself (BB4).
+            ready.forEach { (kind, item) -> CameraPrefs.setLastId(ctx, kind, item.id) }
+            // What waits behind them is looked at once they are through.
+            dirty = true
+        } else {
+            handed = emptyList()
+            ready.forEach { (_, item) -> SendOutcomes.forget(item.uri) }
+            restUntilMs = SystemClock.elapsedRealtime() + REST_MS
+            dirty = true
+        }
     }
 
     private fun onWifi(): Boolean {
@@ -301,6 +355,14 @@ class CameraUploads(private val ctx: Context) {
     fun close() {
         closed = true
         stopWatching()
+        forgetWaiting()
+    }
+
+    /** Turned off, or gone: nothing that waited goes later (BB4 review). */
+    private fun forgetWaiting() {
+        (handed + again).forEach { (item, _) -> SendOutcomes.forget(item.uri) }
+        handed = emptyList()
+        again = emptyList()
     }
 
     companion object {
