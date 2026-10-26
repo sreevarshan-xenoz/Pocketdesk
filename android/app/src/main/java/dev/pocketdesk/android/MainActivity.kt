@@ -528,7 +528,11 @@ class MainActivity : ComponentActivity() {
                             DisposableEffect(Unit) {
                                 val app = applicationContext
                                 val address = session.address
-                                onDispose { Thread { runCatching { SessionPins.afterSession(app, address) } }.start() }
+                                SessionPins.current = address
+                                onDispose {
+                                    if (SessionPins.current == address) SessionPins.current = null
+                                    SessionPins.afterSession(app, address)
+                                }
                             }
                             if (session.remote) {
                                 // The phone as a remote (T10i): no picture.

@@ -12,11 +12,33 @@ import dev.pocketdesk.android.bridge.RustCore
  * clearing the app's data.
  */
 object SessionPins {
-    /** Whether the pin for [address] goes, with [saved] the saved addresses. */
-    fun forgets(address: String, saved: List<String>): Boolean = address.isNotEmpty() && address !in saved
+    /**
+     * How long after a session ends its pin is looked at (review: its own
+     * teardown, still running, could otherwise pin it again on first use).
+     */
+    const val SETTLE_MS = 3_000L
 
-    /** Forget [address]'s pin when no card is saved there. Blocking: off the main thread. */
+    /** The address of the session on screen, if any. */
+    @Volatile
+    var current: String? = null
+
+    /**
+     * Whether the pin for [address] goes, with [saved] the saved addresses
+     * and [now] the session on screen (review: one opened again to the same
+     * computer keeps it).
+     */
+    fun forgets(address: String, saved: List<String>, now: String?): Boolean =
+        address.isNotEmpty() && address !in saved && address != now
+
+    /** Once the session at [address] has ended, forget its pin when no card is saved there. */
     fun afterSession(context: Context, address: String) {
-        if (forgets(address, HostStore.hosts(context).map { it.address })) RustCore.forgetPeerCertificate(address)
+        Thread {
+            Thread.sleep(SETTLE_MS)
+            runCatching {
+                if (forgets(address, HostStore.hosts(context).map { it.address }, current)) {
+                    RustCore.forgetPeerCertificate(address)
+                }
+            }
+        }.start()
     }
 }

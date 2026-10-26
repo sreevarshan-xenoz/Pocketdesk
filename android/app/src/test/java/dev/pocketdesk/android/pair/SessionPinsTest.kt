@@ -14,8 +14,15 @@ class SessionPinsTest {
     @Test
     fun `a session's pin is forgotten when no card is saved there`() {
         val saved = listOf("192.0.2.1", "192.0.2.2")
-        assertTrue(SessionPins.forgets("192.0.2.9", saved))
-        assertFalse(SessionPins.forgets("192.0.2.2", saved))
-        assertFalse("no address, nothing to forget", SessionPins.forgets("", saved))
+        assertTrue(SessionPins.forgets("192.0.2.9", saved, null))
+        assertFalse(SessionPins.forgets("192.0.2.2", saved, null))
+        assertFalse("no address, nothing to forget", SessionPins.forgets("", saved, null))
+    }
+
+    /** Review: a session opened again to the same computer keeps its pin. */
+    @Test
+    fun `the session on screen keeps its pin`() {
+        assertFalse(SessionPins.forgets("192.0.2.9", emptyList(), "192.0.2.9"))
+        assertTrue(SessionPins.forgets("192.0.2.9", emptyList(), "192.0.2.8"))
     }
 }
