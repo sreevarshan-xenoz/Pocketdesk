@@ -5153,6 +5153,8 @@ def ax1_remove_closes_link(ctx: Ctx) -> tuple[str, str]:
             return "FAIL", f"{OTHER_NAME} did not pair"
         # Its session's control link is the phone's link now.
         logged.append(adb("logcat", "-d", "-s", "PocketdeskRust:*"))
+        # Read once (review): the next screen read would keep them again.
+        adb("logcat", "-c")
         before = link_events(chr(10).join(logged))
         if live_link(before) != OTHER_NAME:
             seen = [(kind, peer if peer in (OTHER_NAME, "127.0.0.1") else "another") for kind, peer in before]

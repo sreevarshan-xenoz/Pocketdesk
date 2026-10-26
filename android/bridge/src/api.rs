@@ -303,6 +303,10 @@ fn link_goes_to(live: Option<&(String, u16)>, address: &str) -> bool {
 /// the phone, and the next own computer never linked, as every background
 /// dial waits for no link). Whether there was one to close.
 pub async fn close_control_link_to(address: &str) -> bool {
+    // Between dials (review): one in flight to this computer would else put
+    // its link up after the check, and one to another land between the
+    // peer read here and the writer shut below.
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
     let goes = link_goes_to(crate::CONTROL_PEER.lock().await.as_ref(), address);
     if goes {
         close_control_link().await;
