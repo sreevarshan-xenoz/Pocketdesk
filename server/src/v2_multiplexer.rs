@@ -83,6 +83,16 @@ pub async fn handle_v2_session(
             conn.close(0u32.into(), b"session refused");
             anyhow::bail!("v2 session refused: not the key this device proved");
         }
+        // No certificate, no key to hold the device to (AY1 review): v2
+        // never binds one, so a paired id with none bound would act by its
+        // claim alone. Pocketdesk's own clients always present one.
+        if keyless(peer_key.as_ref()) {
+            conn.close(0u32.into(), b"session refused");
+            anyhow::bail!("v2 session refused: no client certificate");
+        }
+
+        // The key, kept to judge every packet by, not only the handshake (AY1).
+        let control_key = peer_key.clone();
 
         // Wrap Stream 0 for use with existing v1 plugins (control channel)
         let sender: Arc<dyn DeviceSender> = Arc::new(QuicDeviceSender::new(
@@ -124,21 +134,28 @@ pub async fn handle_v2_session(
                                  | "kdeconnect.pair"
                                  | "kdeconnect.pocketdesk.pair"
                          );
-                         if control_pairing_required
-                             && !pairing_packet
-                             && !crate::plugins::pair::is_paired_device(&control_device_id)
+                         // As the TCP gate: pairing and the key re-read for
+                         // each packet (AY1: only "is this id paired" was
+                         // asked here, the key only at the handshake, where
+                         // an unpaired id has none to check).
+                         if !pairing_packet
+                             && !crate::plugins::pair::may_act(
+                                 &control_device_id,
+                                 control_key.as_ref(),
+                                 control_pairing_required,
+                             )
                          {
                              if refusal_said {
                                  debug!(
-                                     "Blocking {packet_type} from unpaired {} \
-                                      (set pairing_required = false to disable)",
+                                     "Blocking {packet_type} from {}: not paired, or not \
+                                      with its key",
                                      control_device_id
                                  );
                              } else {
                                  refusal_said = true;
                                  tracing::info!(
-                                     "Blocking {packet_type} from unpaired {} \
-                                      (later packets at debug)",
+                                     "Blocking {packet_type} from {}: not paired, or not \
+                                      with its key (later packets at debug)",
                                      control_device_id
                                  );
                              }
@@ -372,6 +389,11 @@ impl DeviceSender for QuicDeviceSender {
     }
 }
 
+/// Whether a v2 session came without a key to hold its device to.
+fn keyless(key: Option<&pocketdesk_core::streaming::PeerKey>) -> bool {
+    key.is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,6 +406,15 @@ mod tests {
             max_version: 2,
             capabilities: vec![],
         }
+    }
+
+    #[test]
+    fn a_session_without_a_client_certificate_is_keyless() {
+        // AY1 review: v2 never binds a key, so a session must bring one.
+        assert!(super::keyless(None));
+        assert!(!super::keyless(Some(
+            &pocketdesk_core::streaming::PeerKey::Tls([1; 32])
+        )));
     }
 
     #[test]
