@@ -247,7 +247,10 @@ fun PhoneNotificationsSection() {
     }
     if (computers.size > 1) {
         val picked = version.let { dev.pocketdesk.android.notify.AlsoToPrefs.picked(context) }
-        val more = dev.pocketdesk.android.notify.AlsoTo.mayPickMore(picked.size)
+        // Only the saved computers' picks count (AX3).
+        val more = dev.pocketdesk.android.notify.AlsoTo.mayPickMore(
+            dev.pocketdesk.android.notify.AlsoTo.pickedSaved(picked, computers.map { it.second }.toSet()).size,
+        )
         SettingRow(
             stringResource(R.string.phone_notifications_also),
             stringResource(R.string.phone_notifications_also_summary),
