@@ -133,4 +133,20 @@ class WakePlanTest {
         assertFalse(WakePlan.validPort("70000"))
         assertFalse(WakePlan.validPort("nine"))
     }
+
+    @Test
+    fun `a computer moved takes along the wakes sent through it`() {
+        // AX2: a card waking through the computer at 192.0.2.1 kept that
+        // address after the computer moved to 192.0.2.9, and its Wake failed.
+        val through = WakeSettings(method = WakeMethod.RELAY, relay = "192.0.2.1", mac = "02:11:22:33:44:55")
+        assertEquals(through.copy(relay = "192.0.2.9"), WakePlan.relayMoved(through, "192.0.2.1", "192.0.2.9"))
+        assertNull(WakePlan.relayMoved(through, "192.0.2.5", "192.0.2.9"))
+        // Kept for later while another method is on, it moves too (review);
+        // one naming no computer, or another, is left alone.
+        assertEquals(
+            WakeSettings(relay = "192.0.2.9"),
+            WakePlan.relayMoved(WakeSettings(relay = "192.0.2.1"), "192.0.2.1", "192.0.2.9"),
+        )
+        assertNull(WakePlan.relayMoved(WakeSettings(), "192.0.2.1", "192.0.2.9"))
+    }
 }

@@ -32,6 +32,16 @@ data class WakeSettings(
 
 /** Where the phone sends a wake. Pure, for JVM tests. */
 object WakePlan {
+    /**
+     * [settings] after the computer at [old] moved to [new] (O3), when they
+     * name it as the one to send the wake; null when they do not (AX2: they
+     * kept the old address, and Wake failed "no longer saved" while it
+     * showed). Whatever the method: Wake settings keep the relay chosen
+     * while another method is on, for when it is chosen again (review).
+     */
+    fun relayMoved(settings: WakeSettings, old: String, new: String): WakeSettings? =
+        settings.takeIf { it.relay.trim() == old }?.copy(relay = new)
+
     /** The port a magic packet goes to on this network. */
     const val LAN_PORT = 9
 
