@@ -178,6 +178,17 @@ fun HomeScreen(
     var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
+    // BB3: the computers that said the phone is not paired, read again every
+    // few seconds, as that word comes and goes with no change here.
+    var refusers by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(hosts) {
+        while (true) {
+            refusers = withContext(Dispatchers.IO) {
+                hosts.filter { RustCore.unpairedBy(it.address) }.map { it.address }.toSet()
+            }
+            delay(3_000)
+        }
+    }
     LaunchedEffect(hosts) {
         // The names the computers gave themselves on this run's connections.
         if (hosts.count { h -> RustCore.peerName(h.address)?.let { HostStore.saveClaimedName(context, h.address, it) } == true } > 0) {
@@ -491,6 +502,7 @@ fun HomeScreen(
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
+                        unpairedByIt = host.address in refusers,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
                         onRemote = { onRemote(host) },
                         onSound = { onSound(host) },
@@ -858,6 +870,7 @@ private fun HostCard(
     online: Boolean,
     isAuto: Boolean,
     paired: Boolean,
+    unpairedByIt: Boolean,
     hasWake: Boolean,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
@@ -889,7 +902,7 @@ private fun HostCard(
                 Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto)),
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -989,12 +1002,14 @@ private fun HostCard(
 @Composable
 private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
     val accent = MaterialTheme.colorScheme.primary
+    val error = MaterialTheme.colorScheme.error
     val words = parts.map { part ->
         when (part) {
             is HostStatus.Part.Address -> part.address
             HostStatus.Part.OnThisNetwork -> stringResource(R.string.found_on_network)
             HostStatus.Part.Paired -> stringResource(R.string.status_paired)
             HostStatus.Part.NotPaired -> stringResource(R.string.status_not_paired)
+            HostStatus.Part.UnpairedByIt -> stringResource(R.string.status_unpaired_by_it)
             HostStatus.Part.OpensAtLaunch -> stringResource(R.string.status_auto)
             is HostStatus.Part.Ports -> stringResource(R.string.host_ports, part.stream, part.control)
         }
@@ -1004,6 +1019,8 @@ private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
             if (i > 0) append(" · ")
             if (part == HostStatus.Part.OnThisNetwork) {
                 withStyle(SpanStyle(color = accent)) { append(words[i]) }
+            } else if (part == HostStatus.Part.UnpairedByIt) {
+                withStyle(SpanStyle(color = error)) { append(words[i]) }
             } else {
                 append(words[i])
             }
