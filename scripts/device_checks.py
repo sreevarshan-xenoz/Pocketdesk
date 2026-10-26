@@ -1995,8 +1995,8 @@ def ba1_unpair_stops_transfer(ctx: Ctx) -> tuple[str, str]:
     """A transfer under way stops when its phone is unpaired (§31, BA1): a
     1 GB share from the phone by the internet road, once bytes move,
     then the phone taken out of the throwaway's trust store. Its row goes
-    within 15 s and the file never lands whole. The trust store and the
-    device keys are put back byte for byte."""
+    within 15 s, the server says why, and the file never lands whole. The
+    server is stopped and the trust store put back byte for byte."""
     why = needs_choosing(ctx)
     if why:
         return "SKIP", why
@@ -2006,11 +2006,12 @@ def ba1_unpair_stops_transfer(ctx: Ctx) -> tuple[str, str]:
 
     def body(ctx: Ctx) -> tuple[str, str]:
         state = ctx.server.root / "state"
-        kept = {name: (state / name).read_bytes() for name in ("trusted_devices.json", "device_keys.json")
-                if (state / name).exists()}
-        if "trusted_devices.json" not in kept:
+        partials = state / "partials"
+        try:
+            kept = (state / "trusted_devices.json").read_bytes()
+        except OSError:
             return "SKIP", "no trust store on the throwaway"
-        store = json.loads(kept["trusted_devices.json"])
+        store = json.loads(kept)
         if ctx.device not in store.get("trusted_device_ids", []):
             return "SKIP", "the phone is not paired with the throwaway"
         local = big_file(ctx, GIB + (1 << 20))
@@ -2029,7 +2030,11 @@ def ba1_unpair_stops_transfer(ctx: Ctx) -> tuple[str, str]:
             tmp.write_text(json.dumps(unpaired), encoding="utf-8")
             os.replace(tmp, state / "trusted_devices.json")
             unpaired_at = time.monotonic()
-            gone = wait_for(lambda: transfer_done(ctx, name) is None, 15, 0.5)
+            mark = len(ctx.server.log())
+            # Gone from the record, and by the server's word (review: an
+            # unreadable record reads as gone too).
+            gone = wait_for(lambda: transfer_done(ctx, name) is None
+                            and "its device was unpaired" in ctx.server.log()[mark:], 15, 0.5)
             took = time.monotonic() - unpaired_at
             time.sleep(5)
             whole = landed.exists() and landed.stat().st_size == size
@@ -2039,16 +2044,24 @@ def ba1_unpair_stops_transfer(ctx: Ctx) -> tuple[str, str]:
                 return "FAIL", "the transfer still ran 15 s after its phone was unpaired"
             return "PASS", f"its row went {took:.1f} s after the phone was unpaired; the file never landed whole"
         finally:
-            for file, data in kept.items():
-                tmp = state / f"{file}.ba1"
-                tmp.write_bytes(data)
-                os.replace(tmp, state / file)
+            # The phone retries the send: the server stops first, so nothing
+            # lands after the cleanup, and the road is set up again by the
+            # next check (review, as AC1 does).
+            ctx.server.stop()
+            ctx.on_road = False
+            tmp = state / "trusted_devices.json.ba1"
+            tmp.write_bytes(kept)
+            os.replace(tmp, state / "trusted_devices.json")
             unstage(name)
             local.unlink(missing_ok=True)
             landed.unlink(missing_ok=True)
+            forget_partials(partials, name)
             for part in (ctx.server.root / "downloads").glob(f"{name}*"):
                 part.unlink(missing_ok=True)
     return road_check(ctx, body)
+
+
+LONG.add("ba1-unpair-stops-transfer")
 
 
 @check("x1-file-received", "§78")
