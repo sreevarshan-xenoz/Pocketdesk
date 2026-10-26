@@ -136,28 +136,45 @@ impl ComputersView {
                         "Unpair {}? It must pair again to share with this one.",
                         computer.name
                     ));
-                    if ui.button("Unpair").clicked() {
-                        forget = Some(computer.device_id.clone());
+                    if ui
+                        .add_enabled(server_running, egui::Button::new("Unpair"))
+                        .on_disabled_hover_text(STOPPED)
+                        .clicked()
+                    {
+                        forget = Some((computer.device_id.clone(), computer.name.clone()));
                     }
                     if ui.button("Cancel").clicked() {
                         self.forgetting = None;
                     }
-                } else if ui.button("Unpair…").clicked() {
+                } else if ui
+                    // The server does the unpairing (BA3): asked with it
+                    // stopped, the request expired unread and the link came
+                    // back at its next start, while this said it was done.
+                    .add_enabled(server_running, egui::Button::new("Unpair…"))
+                    .on_disabled_hover_text(STOPPED)
+                    .clicked()
+                {
                     self.forgetting = Some(computer.device_id.clone());
                 }
             });
         }
-        if let Some(device_id) = forget {
+        if let Some((device_id, name)) = forget {
             self.forgetting = None;
+            // Named, as the app's other notices are (BA3 review).
             self.ask(
                 state_dir,
                 ComputerAsk::Forget { device_id },
                 now_unix,
-                "Unpaired here. Unpair this computer in the other one's Devices page too.",
+                &format!(
+                    "Asked the server to unpair {name} here: it leaves the list once done. Unpair this computer on {name}'s Devices page too."
+                ),
             );
         }
     }
 }
+
+/// Why Unpair waits (BA3).
+const STOPPED: &str = "Start the server first: it does the unpairing";
 
 #[cfg(test)]
 mod tests {
