@@ -165,6 +165,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSetDevi
     }
 }
 
+/// Close the live control link if it goes to the computer at `address`
+/// (AX1, a card removed); whether it did.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeCloseControlLinkTo(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jboolean {
+    let address = jstring_to_string(&mut env, &address);
+    RUNTIME.block_on(api::close_control_link_to(&address)) as jboolean
+}
+
 /// Pin a desktop's certificate for `address` from a scanned pairing code.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePinPeerCertificate(

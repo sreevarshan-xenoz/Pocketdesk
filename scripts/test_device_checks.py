@@ -450,6 +450,20 @@ class SessionParts(unittest.TestCase):
         self.assertEqual(dc.pin_sheet_facts(eye.format(d="Show PIN")), (None, False))
         self.assertEqual(dc.pin_sheet_facts(""), (None, None))
 
+    def test_the_phone_s_control_links_from_its_log(self):
+        log = "\n".join([
+            "I PocketdeskRust: INFO conn{id=a session=b peer=localhost transport=\"tcp\" proto=1}: x: Connected to peer",
+            "W PocketdeskRust: WARN conn{id=a session=b peer=localhost transport=\"tcp\" proto=1}:control_reader: x: Control connection lost",
+            "E PocketdeskRust: ERROR conn{id=c session=d peer=192.0.2.10 transport=\"tcp\" proto=1}: x: Connection failed",
+            "I PocketdeskRust: INFO conn{id=e session=f peer=127.0.0.1 transport=\"tcp\" proto=1}: x: Connected to peer",
+        ])
+        self.assertEqual(dc.link_events(log), [("up", "localhost"), ("down", "localhost"), ("up", "127.0.0.1")])
+        self.assertEqual(dc.link_events(""), [])
+        # The replaced link going down after its successor is up.
+        self.assertEqual(dc.live_link([("up", "127.0.0.1"), ("up", "localhost"), ("down", "127.0.0.1")]), "localhost")
+        self.assertIsNone(dc.live_link([("up", "localhost"), ("down", "localhost")]))
+        self.assertIsNone(dc.live_link([]))
+
     def test_the_saved_computers_addresses(self):
         raw = '[{"address":"192.0.2.10","port":4716,"control_port":1716},{"address":"127.0.0.1"}]'
         self.assertEqual(dc.host_addresses(raw), ["192.0.2.10", "127.0.0.1"])

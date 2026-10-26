@@ -292,6 +292,28 @@ pub async fn close_control_link() {
     }
 }
 
+/// Whether the live control link, made to `live`, goes to the computer at
+/// `address` (by host: a card's address, whatever its port).
+fn link_goes_to(live: Option<&(String, u16)>, address: &str) -> bool {
+    live.is_some_and(|(host, _)| host == address)
+}
+
+/// Close the live control link when it goes to the computer at `address`
+/// (AX1: a card removed left it up, the removed computer still able to ring
+/// the phone, and the next own computer never linked, as every background
+/// dial waits for no link). Whether there was one to close.
+pub async fn close_control_link_to(address: &str) -> bool {
+    // Between dials (review): one in flight to this computer would else put
+    // its link up after the check, and one to another land between the
+    // peer read here and the writer shut below.
+    let _one_at_a_time = crate::session::CONNECT_LOCK.lock().await;
+    let goes = link_goes_to(crate::CONTROL_PEER.lock().await.as_ref(), address);
+    if goes {
+        close_control_link().await;
+    }
+    goes
+}
+
 /// Get or create the persistent device identity for this Android client.
 pub(crate) fn client_identity() -> pocketdesk_core::protocol::kdeconnect::DeviceIdentity {
     let mut guard = crate::DEVICE_IDENTITY.lock().unwrap();
@@ -5274,6 +5296,15 @@ mod wake_tests {
         assert_eq!(super::get_wan_identity("127.0.0.1", 1717).await, None);
         *crate::WAN_IDENTITY.lock().await = None;
         assert_eq!(super::get_wan_identity("127.0.0.1", 1716).await, None);
+    }
+
+    #[test]
+    fn a_removed_computer_s_link_is_the_one_to_its_address() {
+        // AX1: only the link to the computer removed is closed.
+        let live = ("192.0.2.10".to_string(), 1716);
+        assert!(super::link_goes_to(Some(&live), "192.0.2.10"));
+        assert!(!super::link_goes_to(Some(&live), "192.0.2.11"));
+        assert!(!super::link_goes_to(None, "192.0.2.10"));
     }
 
     #[test]
