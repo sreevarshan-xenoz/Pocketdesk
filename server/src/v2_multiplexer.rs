@@ -84,6 +84,9 @@ pub async fn handle_v2_session(
             anyhow::bail!("v2 session refused: not the key this device proved");
         }
 
+        // The key, kept to judge every packet by, not only the handshake (AY1).
+        let control_key = peer_key.clone();
+
         // Wrap Stream 0 for use with existing v1 plugins (control channel)
         let sender: Arc<dyn DeviceSender> = Arc::new(QuicDeviceSender::new(
             send0,
@@ -124,21 +127,28 @@ pub async fn handle_v2_session(
                                  | "kdeconnect.pair"
                                  | "kdeconnect.pocketdesk.pair"
                          );
-                         if control_pairing_required
-                             && !pairing_packet
-                             && !crate::plugins::pair::is_paired_device(&control_device_id)
+                         // As the TCP gate: pairing and the key re-read for
+                         // each packet (AY1: only "is this id paired" was
+                         // asked here, the key only at the handshake, where
+                         // an unpaired id has none to check).
+                         if !pairing_packet
+                             && !crate::plugins::pair::may_act(
+                                 &control_device_id,
+                                 control_key.as_ref(),
+                                 control_pairing_required,
+                             )
                          {
                              if refusal_said {
                                  debug!(
-                                     "Blocking {packet_type} from unpaired {} \
-                                      (set pairing_required = false to disable)",
+                                     "Blocking {packet_type} from {}: not paired, or not \
+                                      with its key",
                                      control_device_id
                                  );
                              } else {
                                  refusal_said = true;
                                  tracing::info!(
-                                     "Blocking {packet_type} from unpaired {} \
-                                      (later packets at debug)",
+                                     "Blocking {packet_type} from {}: not paired, or not \
+                                      with its key (later packets at debug)",
                                      control_device_id
                                  );
                              }

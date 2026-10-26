@@ -408,6 +408,37 @@ pub(crate) enum Standing {
     WrongKey(pocketdesk_core::local::device_keys::Refusal),
 }
 
+impl Standing {
+    /// Whether a connection of this standing may act on this computer: a
+    /// paired device with its key, or an unpaired one while pairing is not
+    /// required; one with the wrong key never (it may only pair again).
+    pub(crate) fn may_act(&self, pairing_required: bool) -> bool {
+        match self {
+            Standing::Paired => true,
+            Standing::Unpaired => !pairing_required,
+            Standing::WrongKey(_) => false,
+        }
+    }
+}
+
+/// Whether a packet from a connection that goes by `device_id` and proved
+/// `key` may act on this computer now, re-read for each packet so pairing,
+/// unpairing or a key change applies to a connection already open (AY1:
+/// the v2 control stream judged the key only as it opened, and a session
+/// opened while the device was unpaired, with another key, acted once the
+/// real one paired again). A connection that proved an iroh key is held to
+/// the internet road's rule, never to the LAN's TLS key.
+pub(crate) fn may_act(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    pairing_required: bool,
+) -> bool {
+    if let Some(key @ pocketdesk_core::streaming::PeerKey::Iroh(_)) = key {
+        return internet_standing(device_id, Some(key)).is_ok();
+    }
+    standing(device_id, key).may_act(pairing_required)
+}
+
 /// The standing of a connection that goes by `device_id` and proved `key`.
 pub(crate) fn standing(
     device_id: &str,
@@ -1331,6 +1362,20 @@ mod tests {
             internet_standing_in(&dir, "stranger", Some(&iroh), true),
             Err(Refusal::NotRegistered)
         );
+    }
+
+    #[test]
+    fn only_a_paired_device_with_its_key_acts_and_an_unpaired_one_with_pairing_off() {
+        // AY1: the v2 control stream asked only "is this id paired", so a
+        // session opened while it was not, with another key, acted once
+        // the real phone paired again; the standing is what decides.
+        let wrong =
+            Standing::WrongKey(pocketdesk_core::local::device_keys::Refusal::StoreUnreadable);
+        assert!(Standing::Paired.may_act(true));
+        assert!(!Standing::Unpaired.may_act(true));
+        assert!(Standing::Unpaired.may_act(false));
+        assert!(!wrong.may_act(true));
+        assert!(!wrong.may_act(false));
     }
 
     #[test]

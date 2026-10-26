@@ -1561,16 +1561,11 @@ where
                             );
                             // Re-read per packet: pairing, unpairing or a key
                             // change applies to a connection already open.
-                            use crate::plugins::pair::Standing;
                             let may_act = match road {
-                                Road::Local { .. } => match crate::plugins::pair::standing(
-                                    &device_id,
-                                    peer_key.as_ref(),
-                                ) {
-                                    Standing::Paired => true,
-                                    Standing::Unpaired => !pairing_required,
-                                    Standing::WrongKey(_) => false,
-                                },
+                                Road::Local { .. } => {
+                                    crate::plugins::pair::standing(&device_id, peer_key.as_ref())
+                                        .may_act(pairing_required)
+                                }
                                 Road::Internet => crate::plugins::pair::internet_standing(
                                     &device_id,
                                     peer_key.as_ref(),
