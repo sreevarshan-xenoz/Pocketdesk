@@ -31,6 +31,7 @@ object RustCore {
     private external fun nativeSetInternetFiles(enabled: Boolean)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
+    private external fun nativeCloseControlLinkTo(address: String): Boolean
     private external fun nativeIsDiscoveryActive(): Boolean
     private external fun nativeCheckTailscaleStatus(): String
     private external fun nativeGetPeers(): String
@@ -351,6 +352,13 @@ object RustCore {
     /** Forget the certificate trusted for [address] (the computer was removed). */
     fun forgetPeerCertificate(address: String): Result<Unit> =
         envelope(nativeForgetPeerCertificate(address)).map { }
+
+    /**
+     * Close the live control link if it goes to the computer at [address]
+     * (AX1: one removed kept its link, still able to ring the phone, and the
+     * next own computer was never linked); whether it did.
+     */
+    fun closeControlLinkTo(address: String): Boolean = runCatching { nativeCloseControlLinkTo(address) }.getOrDefault(false)
 
     fun sendClipboard(address: String, port: Int, content: String): Result<Unit> =
         envelope(nativeSendClipboard(address, port, content)).map { }

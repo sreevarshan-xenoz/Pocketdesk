@@ -742,8 +742,12 @@ fun HomeScreen(
                     onClick = {
                         HostStore.remove(context, host.address)
                         // Forget its certificate too, so a new pairing code
-                        // for this address can be trusted again.
-                        scope.launch(Dispatchers.IO) { RustCore.forgetPeerCertificate(host.address) }
+                        // for this address can be trusted again, and close a
+                        // link to it (AX1): the next own computer links then.
+                        scope.launch(Dispatchers.IO) {
+                            RustCore.forgetPeerCertificate(host.address)
+                            RustCore.closeControlLinkTo(host.address)
+                        }
                         hosts = HostStore.hosts(context)
                         removing = null
                     },
