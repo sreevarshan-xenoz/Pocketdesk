@@ -13,6 +13,10 @@ pub(crate) use pocketdesk_core::protocol::connection::NOT_PAIRED;
 
 static SAID: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
 
+/// The kinds of packet kept on the phone for each computer, said once each
+/// in the log until it lets the phone in again.
+static KEPT: LazyLock<Mutex<HashSet<(String, String)>>> = LazyLock::new(Mutex::default);
+
 fn said_set() -> std::sync::MutexGuard<'static, HashSet<String>> {
     SAID.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -27,6 +31,9 @@ pub(crate) fn said(address: &str) {
 /// The computer at `address` let this phone in (it sent something else, or
 /// they paired).
 pub(crate) fn let_in(address: &str) {
+    KEPT.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|(peer, _)| peer != address);
     if said_set().remove(address) {
         tracing::info!(peer = %address, "The computer lets this phone in again");
     }
@@ -66,7 +73,16 @@ pub(crate) const REFUSED: &str = "That computer unpaired this phone: pair again,
 /// texts and clipboard went on, dropped there, and were counted delivered).
 /// Pairing still goes.
 pub(crate) fn refuses(address: &str, packet_type: &str) -> bool {
-    !pairing(packet_type) && by(address)
+    let refused = !pairing(packet_type) && by(address);
+    if refused
+        && KEPT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((address.to_string(), packet_type.to_string()))
+    {
+        tracing::info!(peer = %address, packet_type, "Kept on the phone: the computer says this phone is not paired");
+    }
+    refused
 }
 
 #[cfg(test)]
