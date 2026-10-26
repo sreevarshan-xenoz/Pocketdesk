@@ -28,6 +28,8 @@ object RustCore {
     private external fun nativeSetDataDir(path: String)
     private external fun nativeSetDeviceName(name: String)
     private external fun nativeNetworkChanged()
+
+    private external fun nativeRetryInternetNow(address: String)
     private external fun nativeSetInternetFiles(enabled: Boolean)
     private external fun nativePinPeerCertificate(address: String, fingerprintHex: String): String
     private external fun nativeForgetPeerCertificate(address: String): String
@@ -296,10 +298,17 @@ object RustCore {
             cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
                 private var current: Network? = null
 
+                /** The first report is where the phone already is. */
+                private var seen = false
+
                 override fun onAvailable(network: Network) {
                     val was = current
                     current = network
-                    if (was != null && was != network) nativeNetworkChanged()
+                    // Any later new network is a change, one back after a
+                    // loss included (BB5 review: the loss alone cleared the
+                    // internet road's rest while nothing could be reached).
+                    if (seen && was != network) nativeNetworkChanged()
+                    seen = true
                 }
 
                 override fun onLost(network: Network) {
@@ -331,6 +340,15 @@ object RustCore {
      */
     fun connectToPeer(address: String, port: Int, wanIdentity: String? = null): Result<String> =
         envelope(nativeConnectToPeer(address, port, wanIdentity ?: ""))
+
+    /**
+     * The person asked for [address] (Home's Connect): the internet road's
+     * rest after failures is let go for it, so a computer that woke is
+     * reached at once (BB5 review).
+     */
+    fun retryInternetNow(address: String) {
+        runCatching { nativeRetryInternetNow(address) }
+    }
 
     /** One-shot JSON snapshot of the session state machine. */
     fun sessionStatusJson(): String = nativeSessionStatus()

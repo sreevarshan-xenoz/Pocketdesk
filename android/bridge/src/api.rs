@@ -2491,19 +2491,37 @@ pub async fn connect_streaming(
 /// is off.
 const INTERNET_REST: Duration = Duration::from_secs(60);
 
-/// When each computer's internet road may be tried again.
-pub(crate) struct InternetPause(std::sync::Mutex<std::collections::HashMap<String, Instant>>);
+/// The longest rest: each failure in a row doubles it up to this (BB5: a
+/// computer off for days, or one that unpaired the phone, was dialed every
+/// minute for good, an endpoint and relays each time).
+const INTERNET_REST_MAX: Duration = Duration::from_secs(16 * 60);
+
+/// The rest after `fails` failures in a row: a minute, doubled each time,
+/// at most [`INTERNET_REST_MAX`].
+fn internet_rest(fails: u32) -> Duration {
+    let doubled = INTERNET_REST.saturating_mul(1u32 << fails.saturating_sub(1).min(16));
+    doubled.min(INTERNET_REST_MAX)
+}
+
+/// When each computer's internet road may be tried again, and how many
+/// times in a row it failed.
+pub(crate) struct InternetPause(
+    std::sync::Mutex<std::collections::HashMap<String, (Instant, u32)>>,
+);
 
 impl InternetPause {
     pub(crate) fn may_try(&self, address: &str, now: Instant) -> bool {
         let rests = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        rests.get(address).is_none_or(|until| now >= *until)
+        rests.get(address).is_none_or(|(until, _)| now >= *until)
     }
 
     pub(crate) fn failed(&self, address: &str, now: Instant) {
         let mut rests = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        rests.retain(|_, until| *until > now);
-        rests.insert(address.to_string(), now + INTERNET_REST);
+        // A run of failures is kept past its rest, to grow the next one;
+        // one long over is forgotten.
+        rests.retain(|_, (until, _)| *until + INTERNET_REST_MAX > now);
+        let fails = rests.get(address).map_or(0, |(_, fails)| *fails) + 1;
+        rests.insert(address.to_string(), (now + internet_rest(fails), fails));
     }
 
     pub(crate) fn succeeded(&self, address: &str) {
@@ -2511,6 +2529,12 @@ impl InternetPause {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(address);
+    }
+
+    /// The phone's network changed: each computer may be tried at once
+    /// again, its run of failures forgotten (BB5).
+    pub(crate) fn clear(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -5457,6 +5481,48 @@ mod internet_road_tests {
         assert!(!super::home_did_not_answer(
             "Connection failed: TLS handshake: certificate changed"
         ));
+    }
+
+    /// BB5: each failure in a row doubles the rest, to a cap; a link that
+    /// comes up, or a network that changes, starts again at a minute.
+    #[test]
+    fn failures_in_a_row_rest_longer() {
+        assert_eq!(super::internet_rest(1), Duration::from_secs(60));
+        assert_eq!(super::internet_rest(2), Duration::from_secs(120));
+        assert_eq!(super::internet_rest(4), Duration::from_secs(480));
+        assert_eq!(super::internet_rest(6), super::INTERNET_REST_MAX);
+        assert_eq!(super::internet_rest(40), super::INTERNET_REST_MAX);
+        let pause = InternetPause(std::sync::Mutex::default());
+        let mut now = Instant::now();
+        pause.failed("192.0.2.7", now);
+        now += Duration::from_secs(61);
+        assert!(pause.may_try("192.0.2.7", now));
+        pause.failed("192.0.2.7", now);
+        assert!(
+            !pause.may_try("192.0.2.7", now + Duration::from_secs(90)),
+            "two minutes now"
+        );
+        assert!(pause.may_try("192.0.2.7", now + Duration::from_secs(120)));
+        pause.clear();
+        assert!(
+            pause.may_try("192.0.2.7", now),
+            "a new network tries at once"
+        );
+        pause.failed("192.0.2.7", now);
+        assert!(
+            pause.may_try("192.0.2.7", now + INTERNET_REST),
+            "a minute again"
+        );
+        // Failures one after another reach the cap.
+        for _ in 0..8 {
+            pause.failed("198.51.100.3", now);
+        }
+        assert!(!pause.may_try("198.51.100.3", now + Duration::from_secs(15 * 60)));
+        assert!(pause.may_try("198.51.100.3", now + super::INTERNET_REST_MAX));
+        // A run long over is forgotten: a minute again (review).
+        let later = now + super::INTERNET_REST_MAX * 3;
+        pause.failed("198.51.100.3", later);
+        assert!(pause.may_try("198.51.100.3", later + INTERNET_REST));
     }
 
     #[test]
