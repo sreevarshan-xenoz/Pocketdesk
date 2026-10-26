@@ -194,9 +194,10 @@ fn remember(table: &mut Table, key: String, now: Instant) {
     table.cancelled.insert(key, now);
 }
 
-/// Mark the transfer `id` cancelled: the key it runs under, for the caller
-/// to stop it; `None` when it has ended already.
-fn cancel_at(table: &mut Table, id: &str, now: Instant) -> Option<String> {
+/// Mark the transfer `id` cancelled, remembered as such when `remembered`:
+/// the key it runs under, for the caller to stop it; `None` when it has
+/// ended already.
+fn cancel_at(table: &mut Table, id: &str, now: Instant, remembered: bool) -> Option<String> {
     let row = table.rows.get(id)?;
     // All of it is there: the other end may have kept it already, so it is
     // left to finish (C1 review).
@@ -205,7 +206,9 @@ fn cancel_at(table: &mut Table, id: &str, now: Instant) -> Option<String> {
         return None;
     }
     let key = row.shown.key.clone();
-    remember(table, key.clone(), now);
+    if remembered {
+        remember(table, key.clone(), now);
+    }
     Some(key)
 }
 
@@ -238,7 +241,10 @@ fn of_devices_gone(table: &Table, let_in: impl Fn(&str) -> bool) -> Vec<String> 
     table
         .rows
         .iter()
-        .filter(|(_, row)| !row.shown.key.starts_with("computer:") && !let_in(&row.shown.device_id))
+        .filter(|(_, row)| {
+            let whole = row.shown.size > 0 && row.done.load(Ordering::Relaxed) >= row.shown.size;
+            !whole && !row.shown.key.starts_with("computer:") && !let_in(&row.shown.device_id)
+        })
         .map(|(id, _)| id.clone())
         .collect()
 }
@@ -255,7 +261,10 @@ fn paired_now() -> Option<Vec<String>> {
 /// Stop the transfer `id` (the app's Cancel, or its device unpaired:
 /// `why` settles an offer), and settle what it was.
 async fn cancel(id: &str, why: &str) {
-    let Some(key) = cancel_at(&mut lock(), id, Instant::now()) else {
+    // The owner's Cancel is remembered, so the phone's next attempt is told
+    // why; an unpair is not (review: the phone, paired again, sends anew).
+    let owner = why == OFFER_CANCELLED;
+    let Some(key) = cancel_at(&mut lock(), id, Instant::now(), owner) else {
         tracing::info!("A cancel for a transfer that has ended or is ending");
         return;
     };
@@ -267,7 +276,7 @@ async fn cancel(id: &str, why: &str) {
     // The rest of its folder send goes too (C1 review): each refused with
     // why when the phone asks for it, and settled.
     let siblings = crate::offers::folder_siblings(offer);
-    {
+    if owner {
         let mut table = lock();
         for sibling in &siblings {
             remember(&mut table, format!("offer:{sibling}"), Instant::now());
@@ -506,7 +515,7 @@ mod tests {
                 samples: VecDeque::new(),
             },
         );
-        assert_eq!(cancel_at(&mut table, "unknown", now), None);
+        assert_eq!(cancel_at(&mut table, "unknown", now, true), None);
         // All of it there: left to finish, and nothing remembered.
         table
             .rows
@@ -514,7 +523,7 @@ mod tests {
             .unwrap()
             .done
             .store(1_000, Ordering::Relaxed);
-        assert_eq!(cancel_at(&mut table, "r1", now), None);
+        assert_eq!(cancel_at(&mut table, "r1", now, true), None);
         assert!(!take_cancelled_at(&mut table, "offer:abc", now));
         table
             .rows
@@ -523,7 +532,7 @@ mod tests {
             .done
             .store(10, Ordering::Relaxed);
         assert_eq!(
-            cancel_at(&mut table, "r1", now).as_deref(),
+            cancel_at(&mut table, "r1", now, true).as_deref(),
             Some("offer:abc")
         );
         assert!(take_cancelled_at(&mut table, "offer:abc", now));
