@@ -342,11 +342,23 @@ async fn pair_with(
         link: "connecting".to_string(),
         link_unix: now,
     };
+    let mut was = None;
     computers::update(dir, |file| {
-        file.computers.retain(|c| c.device_id != computer.device_id);
+        if let Some(at) = file
+            .computers
+            .iter()
+            .position(|c| c.device_id == computer.device_id)
+        {
+            was = Some(file.computers.remove(at));
+        }
         file.computers.push(computer.clone());
     })
     .map_err(|e| format!("paired, but could not record it: {e}"))?;
+    // Paired again at new addresses, the old ones' pins go (BD6: they
+    // stayed for good, and read as a changed certificate to a dial there).
+    if let Some(was) = was {
+        drop_pins(certs, &was, &labels);
+    }
     Ok(computer)
 }
 
@@ -504,19 +516,26 @@ fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
     let Some(computer) = gone else {
         return;
     };
+    drop_pins(certs, &computer, &[]);
+    tracing::info!(device_id, "Forgot another computer");
+}
+
+/// Remove the pins `computer` set for its addresses, but those under
+/// `keep`: only the pin it set, as another computer may have that address
+/// now.
+fn drop_pins(certs: &CertManager, computer: &PeerComputer, keep: &[String]) {
     let pinned = parse_fingerprint(&computer.fingerprint);
     let pins: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
     for label in computer
         .addresses
         .iter()
         .filter_map(|a| peer_label_for_address(a))
+        .filter(|label| !keep.contains(label))
     {
-        // Only the pin it set: another computer may have that address now.
         if pinned.is_some() && pins.get(&label) == pinned.as_ref() {
             let _ = certs.remove_peer(&label);
         }
     }
-    tracing::info!(device_id, "Forgot another computer");
 }
 
 /// The other computer's iroh endpoint, as its endpoint packet names it.
@@ -1162,6 +1181,43 @@ mod tests {
             first_link(false).starts_with("away: "),
             "{}",
             first_link(false)
+        );
+    }
+
+    /// BD6: a computer paired again at new addresses drops the pins it set
+    /// for the old ones; the new ones, and another computer's, stay.
+    #[test]
+    fn the_pins_a_computer_set_go_but_those_kept() {
+        let dir = std::env::temp_dir().join(format!("pd-drop-pins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        let label = |a: &str| peer_label_for_address(a).unwrap();
+        for address in ["192.0.2.30", "192.0.2.31"] {
+            certs.pin_peer(&label(address), [0xab; 32]).unwrap();
+        }
+        certs.pin_peer(&label("192.0.2.32"), [0xcd; 32]).unwrap();
+        let was = PeerComputer {
+            device_id: "pc-b".to_string(),
+            name: "Desk".to_string(),
+            addresses: ["192.0.2.30", "192.0.2.31", "192.0.2.32"]
+                .map(str::to_string)
+                .to_vec(),
+            control_port: 1716,
+            fingerprint: "ab".repeat(32),
+            endpoint: None,
+            paired_unix: 1,
+            link: String::new(),
+            link_unix: 1,
+        };
+        drop_pins(&certs, &was, &[label("192.0.2.31")]);
+        let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!left.contains_key(&label("192.0.2.30")), "an old address");
+        assert_eq!(left.get(&label("192.0.2.31")), Some(&[0xab; 32]), "kept");
+        assert_eq!(
+            left.get(&label("192.0.2.32")),
+            Some(&[0xcd; 32]),
+            "another's"
         );
     }
 
