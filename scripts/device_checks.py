@@ -5467,6 +5467,9 @@ def ay5_unpaired_pages(ctx: Ctx) -> tuple[str, str]:
     as it ends; a second guest's, whose grant runs on, stay. (Its replies waiting
     are unit-tested: the server fails one at once for a phone without
     Texts.) The trust store is put back as it was; only counts are printed."""
+    config = ctx.server.root / "config" / "config.toml"
+    if re.search(r"(?m)^\s*pairing_required\s*=\s*false", config.read_text(encoding="utf-8") if config.exists() else ""):
+        return "SKIP", "the throwaway's config turns pairing_required off (an unpaired phone is let in)"
     state = ctx.server.root / "state"
     path = state / "trusted_devices.json"
     try:
@@ -5547,8 +5550,11 @@ def ay5_unpaired_pages(ctx: Ctx) -> tuple[str, str]:
         for name in files:
             if any(theirs(name)):
                 target, key = files[name]
-                write(target, json.dumps({key: [r for r in load(name)
-                                                if r.get("device_id") not in (guest, keeper)]}).encode("utf-8"))
+                try:
+                    left = [r for r in load(name) if r.get("device_id") not in (guest, keeper)]
+                except (OSError, ValueError):
+                    continue  # unreadable now: left as it is, never written over
+                write(target, json.dumps({key: left}).encode("utf-8"))
 
 
 def leave_to_home(ctx: Ctx) -> None:
