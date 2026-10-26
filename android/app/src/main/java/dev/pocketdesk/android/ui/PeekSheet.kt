@@ -40,8 +40,9 @@ import kotlinx.coroutines.withContext
 /**
  * One still of the computer's screen (BF2), with no session: taken when the
  * sheet opens and again at each tap, never on its own. The still is read
- * from a file in the app's cache and the file deleted at once, so no
- * picture of the computer's screen stays on the phone.
+ * from a file of its own in the app's cache and the file deleted at once,
+ * so no picture of the computer's screen stays on the phone; one left by an
+ * app stopped mid-peek goes the next time the sheet opens.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,10 +57,12 @@ fun PeekSheet(address: String, controlPort: Int, computer: String, onDismiss: ()
     LaunchedEffect(address, controlPort, asks) {
         looking = true
         val got = withContext(Dispatchers.IO) {
-            val file = File(context.cacheDir, "peek.jpg")
+            if (asks == 0) Peek.leftovers(context.cacheDir.listFiles().orEmpty().toList()).forEach { it.delete() }
+            // Its own file (BF2 review): a peek still running from a sheet
+            // closed and opened again must not delete this one's.
+            val file = File.createTempFile(Peek.FILE_PREFIX, ".jpg", context.cacheDir)
             try {
-                RustCore.fetchPeek(address, controlPort, file.path)
-                    .mapCatching { BitmapFactory.decodeFile(file.path) ?: error("not a picture") }
+                RustCore.fetchPeek(address, controlPort, file.path).mapCatching { decode(file) }
             } finally {
                 file.delete()
             }
@@ -112,6 +115,14 @@ fun PeekSheet(address: String, controlPort: Int, computer: String, onDismiss: ()
             OutlinedButton(onClick = { asks++ }, enabled = !looking) { Text(again) }
         }
     }
+}
+
+/** The still in [file], refused when it is larger than a computer sends. */
+private fun decode(file: File): android.graphics.Bitmap {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.path, bounds)
+    check(Peek.fits(bounds.outWidth, bounds.outHeight)) { "not a picture of a screen" }
+    return BitmapFactory.decodeFile(file.path) ?: error("not a picture")
 }
 
 /** Why a peek brought no still, in words. */
