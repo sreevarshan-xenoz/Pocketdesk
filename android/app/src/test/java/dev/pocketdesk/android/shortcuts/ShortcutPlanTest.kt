@@ -120,18 +120,18 @@ class ShortcutPlanTest {
     @Test
     fun aComputersTwoCardsKeepTheirOwnShortcuts() {
         val token = "0123456789abcdef"
-        val paired = mapOf("192.0.2.1" to "pc-a", "100.64.0.1" to "pc-a")
-        val hosts = listOf(host("100.64.0.1"), host("192.0.2.1"))
+        val paired = mapOf("192.0.2.1" to "pc-a", "198.51.100.7" to "pc-a")
+        val hosts = listOf(host("198.51.100.7"), host("192.0.2.1"))
         val plan = ShortcutPlan.plan(hosts, hasWake = { it == "192.0.2.1" }, token = token, pairedId = paired::get)
         assertEquals(3, plan.map { it.id }.distinct().size)
         val wake = plan.single { it.kind == ShortcutPlan.Kind.WAKE }
         assertEquals("the LAN card's wake wakes by it", host("192.0.2.1"), ShortcutPlan.savedHost(wake.address, hosts, "pc-a", paired::get))
         fun fate(id: String, address: String) = ShortcutPlan.pinnedFate(id, address, hosts, paired::get)
         assertEquals(ShortcutPlan.Pinned.Keep, fate(wake.id, "192.0.2.1"))
-        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-a@100.64.0.1", "100.64.0.1"))
+        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-a@198.51.100.7", "198.51.100.7"))
         // Two cards of one computer never collide on one id.
         assertEquals(
-            listOf("connect:$token:paired:pc-a@100.64.0.1", "connect:$token:paired:pc-a@192.0.2.1"),
+            listOf("connect:$token:paired:pc-a@198.51.100.7", "connect:$token:paired:pc-a@192.0.2.1"),
             plan.filter { it.kind == ShortcutPlan.Kind.CONNECT }.map { it.id },
         )
     }
