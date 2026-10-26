@@ -4462,7 +4462,8 @@ def bb3_home_says_unpaired(ctx: Ctx) -> tuple[str, str]:
     store = json.loads(kept)
     if ctx.device not in store.get("trusted_device_ids", []):
         return "SKIP", "the phone is not paired with the throwaway"
-    if not wait_for(lambda: ctx.device in ctx.server.linked(), 90, 2):
+    # A phone a computer refused looks at it again only every few minutes.
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 420, 2):
         return "SKIP", "the phone is not linked to the throwaway"
     told = "The computer says this phone is not paired with it"
     again = "The computer lets this phone in again"
