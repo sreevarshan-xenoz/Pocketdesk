@@ -219,6 +219,20 @@ class PhoneNotificationListener : NotificationListenerService() {
     /** Clears from the computer (L1), thirty a minute. */
     private val clearBudget = NotificationActionRule.Budget(ClearRule.PER_MINUTE)
     private var answerConnectMs = 0L
+
+    /** When a computer that said the phone is not paired was last dialed to look again (BB2). */
+    private var recheckMs = 0L
+
+    private fun recheckRefuser(now: Long) {
+        val marked = PhoneLink.refuser(this) ?: return
+        val peer = RustCore.controlPeer()
+        if (peer?.first == marked.address) {
+            if (now - recheckMs >= PhoneLink.RECHECK_HOLD_MS) RustCore.closeControlLinkTo(marked.address)
+        } else if (peer == null && now - recheckMs >= PhoneLink.RECHECK_MS) {
+            recheckMs = now
+            RustCore.connectToPeer(marked.address, marked.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, marked.address))
+        }
+    }
     private val answerTicker = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
 
     /**
@@ -977,6 +991,13 @@ class PhoneNotificationListener : NotificationListenerService() {
                 RustCore.connectToPeer(own.address, own.controlPort, dev.pocketdesk.android.HostStore.wanIdentity(this, own.address))
             }
         }
+        // BB2: a computer that said the phone is not paired is not its own,
+        // so nothing dialed it again, and a phone paired there anew without
+        // pairing from here (re-trusted) never heard so. With no other own
+        // computer it is dialed every few minutes, sending nothing: once it
+        // lets the phone in, its first push says so. Still refused, the link
+        // is let go, so the next look is a fresh one.
+        if (own == null) recheckRefuser(SystemClock.elapsedRealtime())
         // L4: numbers the computer asks to dial, offered in a notification,
         // unless a session takes them.
         if (!dev.pocketdesk.android.calls.Dials.inSession) {
