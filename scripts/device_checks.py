@@ -5414,6 +5414,51 @@ def grant_seconds(store: dict, device: str, started: float) -> Optional[float]:
     return ends - started if isinstance(ends, (int, float)) and not isinstance(ends, bool) else None
 
 
+@check("ay4-grant-end", "§79")
+def ay4_grant_end(ctx: Ctx) -> tuple[str, str]:
+    """A guest grant's end is an unpair (§79, AY4): a 20-second grant
+    written into the throwaway's trust store, for an id no phone has, is a
+    phone_paired at once and a phone_unpaired once it ends, though nothing
+    writes the store again. The store is put back as it was."""
+    path = ctx.server.root / "state" / "trusted_devices.json"
+    try:
+        kept = path.read_bytes()
+        store = json.loads(kept)
+    except (OSError, ValueError):
+        return "SKIP", "no trust store on the throwaway"
+    # The watcher's first look is silent (a restart pairs no one): the
+    # grant is written after it, once its mirror is (review).
+    if not wait_for(lambda: (ctx.server.root / "state" / "live_sessions.json").exists(), 15, 0.5):
+        return "TIMEOUT", "the server's watcher did not start within 15 s"
+    guest = f"ay4-guest-{uuid.uuid4().hex[:8]}"
+    count = ctx.server.event_count()
+    ends = int(time.time()) + 20
+
+    def write(data: bytes) -> None:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+
+    def seen(kind: str) -> list[dict]:
+        return [e for e in ctx.server.events_after_count(count)
+                if e.get("event") == kind and e.get("device_id") == guest]
+
+    try:
+        write(json.dumps({**store, "grants": {**(store.get("grants") or {}), guest: ends}}).encode("utf-8"))
+        if not wait_for(lambda: seen("phone_paired"), 15, 0.5):
+            return "TIMEOUT", "no phone_paired for the grant within 15 s"
+        if seen("phone_unpaired"):
+            return "FAIL", "a phone_unpaired before the grant ended"
+        if not wait_for(lambda: seen("phone_unpaired"), max(ends - time.time(), 0) + 15, 0.5):
+            return "FAIL", "no phone_unpaired within 15 s of the grant's end"
+        late = int(seen("phone_unpaired")[0].get("at", 0)) - ends
+        if late < 0:
+            return "FAIL", f"phone_unpaired {-late} s before the grant ended"
+        return "PASS", f"phone_paired at once; phone_unpaired {late} s after the grant ended, the store unwritten"
+    finally:
+        write(kept)
+
+
 def leave_to_home(ctx: Ctx) -> None:
     """Back to Home from the session a pairing opens, which waits for the
     owner's Allow: with Back, as its buttons may be hidden (no tap on it)."""

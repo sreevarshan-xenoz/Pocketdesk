@@ -1418,6 +1418,7 @@ A71 → this Windows box, LAN, debug server, 2026-10-16:
 Owed:
 - [ ] The Activity tab itself on screen (its rows, filters, Show in folder): a click posted to the window did not reach egui, and real input into this box's desktop is not used for tests.
 - [ ] Pairing and unpairing a phone showing as rows; a folder's Show in folder after it finished arriving. (where: by hand)
+- [x] A guest grant's end logged as `phone_unpaired` though nothing writes the trust store (AY4). (2026-10-26, the runner's `ay4-grant-end` against a throwaway server on this Windows box: a 20-second grant written into its trust store, for an id no phone has, was logged as `phone_paired` at once and as `phone_unpaired` as it ended, 0 s late; main's server logged no `phone_unpaired` within 15 s of the end. The store was put back byte for byte.)
 
 ## 80. Named tasks (ecosystem 1c)
 

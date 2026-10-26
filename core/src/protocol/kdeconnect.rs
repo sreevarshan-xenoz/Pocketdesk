@@ -825,6 +825,13 @@ impl TrustStore {
             .map(|expires| expires.saturating_sub(unix_now_secs()))
     }
 
+    /// When the soonest time-boxed grant ends (unix secs), `None` without
+    /// one: past it, [`Self::trusted_devices`] read afresh is shorter, though
+    /// the file did not change (AY4).
+    pub fn next_grant_end(&self) -> Option<u64> {
+        self.grants.values().copied().min()
+    }
+
     fn persist(&self) -> Result<()> {
         let mut permanent: Vec<String> = self.trusted_device_ids.iter().cloned().collect();
         permanent.sort();
@@ -1307,6 +1314,30 @@ mod tests {
             .unwrap();
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(!raw.contains("permissions"), "{raw}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_next_grant_to_end_is_the_soonest() {
+        // AY4: the server reads the paired list again once it passes.
+        let path = temp_store_path("grant-next");
+        let mut store = TrustStore::load_or_create(&path).expect("create");
+        assert_eq!(store.next_grant_end(), None);
+        store.trust_device("phone-p").expect("trust");
+        assert_eq!(
+            store.next_grant_end(),
+            None,
+            "a pairing for good ends never"
+        );
+        store
+            .trust_device_with_ttl("phone-x", std::time::Duration::from_secs(600))
+            .expect("grant");
+        store
+            .trust_device_with_ttl("phone-y", std::time::Duration::from_secs(60))
+            .expect("grant");
+        let end = store.next_grant_end().expect("an end");
+        let now = unix_now_secs();
+        assert!((now + 55..=now + 60).contains(&end), "{end} vs {now}");
         let _ = std::fs::remove_file(path);
     }
 
