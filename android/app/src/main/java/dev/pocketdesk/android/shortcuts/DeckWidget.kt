@@ -44,7 +44,8 @@ class DeckWidget : AppWidgetProvider() {
     private fun list(context: Context, why: DeckWidgetPlan.Why) {
         val app = context.applicationContext
         val host = HostStore.lastHost(app) ?: return redrawAll(app)
-        val kept = Kept.read(app, host.address)
+        val key = keyOf(app, host)
+        val kept = Kept.read(app, key)
         if (!DeckWidgetPlan.askList(why, kept.json != null || kept.failed)) return redrawAll(app)
         val ask = generation.incrementAndGet()
         showAsking(app, app.getString(R.string.deck_loading))
@@ -52,7 +53,7 @@ class DeckWidget : AppWidgetProvider() {
             val newest = synchronized(generation) {
                 (generation.get() == ask).also { newest ->
                     if (newest) {
-                        Kept.failed(app, host.address, app.getString(R.string.deck_failed, app.getString(R.string.deck_widget_no_answer)))
+                        Kept.failed(app, key, app.getString(R.string.deck_failed, app.getString(R.string.deck_widget_no_answer)))
                         asking = null
                     }
                 }
@@ -64,15 +65,19 @@ class DeckWidget : AppWidgetProvider() {
             val json = answer.getOrNull()?.takeIf { runCatching { Deck.parse(it) }.isSuccess }
             val why = app.plainErrorText(answer.exceptionOrNull()?.message)
             // Only the newest ask keeps what it heard, checked and written at once.
-            synchronized(generation) {
+            val kept = synchronized(generation) {
                 if (generation.get() != ask) return@bounded
-                if (json != null) {
-                    Kept.save(app, host.address, json)
-                } else {
-                    Kept.failed(app, host.address, app.getString(R.string.deck_failed, why))
-                }
                 asking = null
+                if (json != null) {
+                    Kept.save(app, key, json)
+                } else {
+                    Kept.failed(app, key, app.getString(R.string.deck_failed, why))
+                }
             }
+            // The last computer changed meanwhile (AZ2 review: paired, its key
+            // is its paired id now): its own list is asked, not left loading,
+            // by a broadcast of its own, as this receiver's async is spent.
+            if (!kept) return@bounded follow(app)
             redrawAll(app)
         }
     }
@@ -80,16 +85,18 @@ class DeckWidget : AppWidgetProvider() {
     private fun press(context: Context, drawnFor: String?, index: Int, label: String) {
         val app = context.applicationContext
         val host = HostStore.lastHost(app) ?: return redrawAll(app)
-        // A button drawn for one computer never presses another's (G3 review):
-        // the last computer changed since, so it is drawn anew instead.
-        if (!DeckWidgetPlan.keeps(drawnFor, host.address)) return redrawAll(app)
+        val key = keyOf(app, host)
+        // A button drawn for one computer never presses another's (G3 review),
+        // one saved at its old address included (AZ2): the last computer
+        // changed since, so its own list is asked and drawn instead.
+        if (!DeckWidgetPlan.keeps(drawnFor, key)) return list(app, DeckWidgetPlan.Why.Follow)
         // A press still running is not sent again.
         if (index < 0 || label.isBlank() || !pressing.add(index)) return
         showAsking(app, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_loading)))
         val noAnswer = {
             if (index in pressing) {
                 asking = null
-                line(app, host.address, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_widget_no_answer)))
+                line(app, key, app.getString(R.string.deck_widget_said, label, app.getString(R.string.deck_widget_no_answer)))
             }
         }
         WidgetAsk.bounded(this, "deck-widget-press", onEnd = { pressing.remove(index) }, onTimeout = noAnswer) {
@@ -102,7 +109,7 @@ class DeckWidget : AppWidgetProvider() {
                 DeckWidgetPlan.Said.Failed -> app.plainErrorText(answer.exceptionOrNull()?.message)
             }
             asking = null
-            line(app, host.address, app.getString(R.string.deck_widget_said, label, words))
+            line(app, key, app.getString(R.string.deck_widget_said, label, words))
         }
     }
 
@@ -122,8 +129,9 @@ class DeckWidget : AppWidgetProvider() {
                 val p = prefs(ctx)
                 val listFor = p.getString(KEY_FOR, null)
                 if (!DeckWidgetPlan.keeps(listFor, lastComputer)) {
-                    // Another computer's list goes, so its buttons never press this one's.
-                    if (listFor != null && lastComputer != null) p.edit { clear() }
+                    // Another computer's list goes, so its buttons never press
+                    // this one's; with none left, it goes too (AZ2).
+                    if (DeckWidgetPlan.forgets(listFor, lastComputer)) p.edit { clear() }
                     return Kept(null, false, null)
                 }
                 // A list that no longer reads counts as a failure, so it is asked again.
@@ -133,9 +141,12 @@ class DeckWidget : AppWidgetProvider() {
                 return Kept(readable, failed, p.getString(KEY_LINE, null))
             }
 
+            /** Keep [json] for [computer] while it is the last one; whether it was. */
             @Synchronized
-            fun save(ctx: Context, computer: String, json: String) {
-                if (last(ctx, computer)) store(ctx, computer, json)
+            fun save(ctx: Context, computer: String, json: String): Boolean {
+                if (!last(ctx, computer)) return false
+                store(ctx, computer, json)
+                return true
             }
 
             private fun store(ctx: Context, computer: String, json: String) = prefs(ctx).edit {
@@ -146,11 +157,13 @@ class DeckWidget : AppWidgetProvider() {
             }
 
             /** Whether [computer] is still the last one: a late answer for another never writes. */
-            private fun last(ctx: Context, computer: String) = HostStore.lastHost(ctx)?.address == computer
+            private fun last(ctx: Context, computer: String) =
+                HostStore.lastHost(ctx)?.let { keyOf(ctx, it) } == computer
 
+            /** Mark [computer]'s ask failed while it is the last one; whether it was. */
             @Synchronized
-            fun failed(ctx: Context, computer: String, line: String) {
-                if (!last(ctx, computer)) return
+            fun failed(ctx: Context, computer: String, line: String): Boolean {
+                if (!last(ctx, computer)) return false
                 val p = prefs(ctx)
                 p.edit {
                     if (p.getString(KEY_FOR, null) != computer) {
@@ -160,6 +173,14 @@ class DeckWidget : AppWidgetProvider() {
                     putBoolean(KEY_FAILED, true)
                     putString(KEY_LINE, line)
                 }
+                return true
+            }
+
+            /** Forget the list kept for [computer]. */
+            @Synchronized
+            fun forget(ctx: Context, computer: String) {
+                val p = prefs(ctx)
+                if (p.getString(KEY_FOR, null) == computer) p.edit { clear() }
             }
 
             @Synchronized
@@ -213,13 +234,32 @@ class DeckWidget : AppWidgetProvider() {
         /** The deck sheet's list (F1), kept for the widget too. */
         fun keep(context: Context, computer: String, json: String) {
             val app = context.applicationContext
-            if (HostStore.lastHost(app)?.address != computer) return
+            val host = HostStore.lastHost(app)?.takeIf { it.address == computer } ?: return
             synchronized(generation) {
                 generation.incrementAndGet()
-                Kept.save(app, computer, json)
+                // An ask it overtakes would leave "Loading" over it (AZ2 review).
+                asking = null
+                Kept.save(app, keyOf(app, host), json)
             }
             redrawAll(app)
         }
+
+        /**
+         * A computer was removed: the list kept for it goes, unless another
+         * of its cards is still saved (AZ2 review: a computer never paired,
+         * saved later at its address, would show its list and its error).
+         * [removed] is its [keyOf] from before it was removed.
+         */
+        fun forgetRemoved(context: Context, removed: String) {
+            val app = context.applicationContext
+            if (HostStore.hosts(app).any { keyOf(app, it) == removed }) return
+            Kept.forget(app, removed)
+            redrawAll(app)
+        }
+
+        /** Whose list the widget keeps for [host] (AZ2): its paired id once paired. */
+        private fun keyOf(ctx: Context, host: HostStore.Host): String =
+            DeckWidgetPlan.computerKey(host.address, HostStore.pairedDesktopId(ctx, host.address))
 
         /** The last computer may have changed: ask once when it was never asked. */
         fun follow(context: Context) {
@@ -253,7 +293,8 @@ class DeckWidget : AppWidgetProvider() {
         /** Draw every deck widget from what is kept, asking nothing. */
         fun redraw(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val host = HostStore.lastHost(context)
-            val kept = Kept.read(context, host?.address)
+            val key = host?.let { keyOf(context, it) }
+            val kept = Kept.read(context, key)
             val buttons = kept.json?.let { runCatching { Deck.parse(it) }.getOrNull() }
             val views = RemoteViews(context.packageName, R.layout.widget_deck)
             views.setTextViewText(
@@ -284,7 +325,7 @@ class DeckWidget : AppWidgetProvider() {
                             context,
                             1 + slot,
                             Intent(ACTION_PRESS)
-                                .putExtra(EXTRA_COMPUTER, host.address)
+                                .putExtra(EXTRA_COMPUTER, key)
                                 .putExtra(EXTRA_INDEX, button.index)
                                 .putExtra(EXTRA_LABEL, button.label),
                         ),

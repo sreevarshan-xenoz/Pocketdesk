@@ -39,4 +39,16 @@ object DeckWidgetPlan {
     /** A kept list is shown only while its computer is still the last one. */
     fun keeps(listFor: String?, lastComputer: String?): Boolean =
         listFor != null && listFor == lastComputer
+
+    /**
+     * Whose list a widget keeps, and whose buttons it draws: a paired
+     * computer by its paired id, so its list follows a move and another
+     * computer saved at its old address never shows or presses it (AZ2: by
+     * address it did both); one never paired by its address.
+     */
+    fun computerKey(address: String, pairedId: String?): String = pairedId?.let { "paired:$it" } ?: address
+
+    /** Whether a kept list goes: another computer's, or any with none left (AZ2). */
+    fun forgets(listFor: String?, lastComputer: String?): Boolean =
+        listFor != null && !keeps(listFor, lastComputer)
 }

@@ -47,4 +47,29 @@ class DeckWidgetPlanTest {
         assertFalse(DeckWidgetPlan.keeps(listFor = null, lastComputer = "a"))
         assertFalse(DeckWidgetPlan.keeps(listFor = "a", lastComputer = null))
     }
+
+    /**
+     * AZ2: a paired computer's list is kept across its move, and never
+     * shown for another computer saved at its old address.
+     */
+    @Test
+    fun aListFollowsItsPairedComputerAlone() {
+        val a = DeckWidgetPlan.computerKey("192.0.2.1", "pc-a")
+        assertEquals(a, DeckWidgetPlan.computerKey("192.0.2.9", "pc-a"))
+        assertTrue(DeckWidgetPlan.keeps(a, DeckWidgetPlan.computerKey("192.0.2.9", "pc-a")))
+        assertFalse(DeckWidgetPlan.keeps(a, DeckWidgetPlan.computerKey("192.0.2.1", "pc-b")))
+        assertFalse(DeckWidgetPlan.keeps(a, DeckWidgetPlan.computerKey("192.0.2.1", null)))
+        assertEquals("one never paired is its address", "192.0.2.1", DeckWidgetPlan.computerKey("192.0.2.1", null))
+        // Kept by address before AZ2: asked again once (review).
+        assertFalse(DeckWidgetPlan.keeps("192.0.2.1", DeckWidgetPlan.computerKey("192.0.2.1", "pc-a")))
+    }
+
+    /** AZ2: another computer's list goes, and so does one with no computer left. */
+    @Test
+    fun aListNoLongerShownIsForgotten() {
+        assertTrue(DeckWidgetPlan.forgets(listFor = "a", lastComputer = "b"))
+        assertTrue(DeckWidgetPlan.forgets(listFor = "a", lastComputer = null))
+        assertFalse(DeckWidgetPlan.forgets(listFor = "a", lastComputer = "a"))
+        assertFalse(DeckWidgetPlan.forgets(listFor = null, lastComputer = "a"))
+    }
 }

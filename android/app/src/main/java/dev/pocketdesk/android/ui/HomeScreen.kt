@@ -743,6 +743,11 @@ fun HomeScreen(
                         // Its "also send notifications to" pick goes with it (AX3).
                         val removedId = HostStore.pairedDesktopId(context, host.address)
                         HostStore.remove(context, host.address)
+                        // The deck widget's list for it goes too (AZ2 review).
+                        dev.pocketdesk.android.shortcuts.DeckWidget.forgetRemoved(
+                            context,
+                            dev.pocketdesk.android.shortcuts.DeckWidgetPlan.computerKey(host.address, removedId),
+                        )
                         dev.pocketdesk.android.notify.AlsoToPrefs.forgetRemoved(
                             context,
                             removedId,
