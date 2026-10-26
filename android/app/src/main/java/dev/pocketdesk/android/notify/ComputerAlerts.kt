@@ -1,6 +1,7 @@
 package dev.pocketdesk.android.notify
 
 import android.content.Context
+import android.util.Log
 import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.ui.postDesktopNotification
@@ -11,12 +12,19 @@ import dev.pocketdesk.android.ui.postDesktopNotification
  * session open, from the background link; with the switch off, dropped.
  */
 object ComputerAlerts {
+    private const val TAG = "ComputerAlerts"
+
     /** Show the alerts waiting from the computer at [address]. Blocking: off the main thread. */
     fun take(context: Context, address: String, controlPort: Int) {
         val alerts = RustCore.takePendingAlerts()
-        if (alerts.isEmpty() || !Prefs.computerAlerts(context)) return
+        if (alerts.isEmpty()) return
+        if (!Prefs.computerAlerts(context)) {
+            Log.i(TAG, "${alerts.size} alert(s) from the computer dropped: the switch is off")
+            return
+        }
+        Log.i(TAG, "Showing ${alerts.size} alert(s) from the computer")
         for (alert in alerts) {
-            postDesktopNotification(context, address, controlPort, alert)
+            postDesktopNotification(context, address, controlPort, alert, replyable = false)
         }
     }
 }

@@ -74,6 +74,8 @@ internal fun postDesktopNotification(
     address: String,
     controlPort: Int,
     note: DesktopNotification,
+    /** With a Reply action; an alert (BF1) has nothing to answer. */
+    replyable: Boolean = true,
 ) {
     // Posted from the background link too (BF1), before any session made it.
     ensureDesktopNotificationChannel(context)
@@ -86,11 +88,16 @@ internal fun postDesktopNotification(
         .putExtra(EXTRA_REPLY_PORT, controlPort)
         .putExtra(EXTRA_REPLY_ID, note.id)
         .putExtra(EXTRA_REPLY_TAG, TAG_DESKTOP_NOTIFICATION)
+    // Mutable, as the reply is written into it: Android 14 refuses a
+    // notification whose reply action's intent is immutable (found with BF1
+    // on the OPPO: no computer notification was ever shown). It names its
+    // receiver, so nothing else can be sent through it.
+    val mutable = if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
     val replyIntent = PendingIntent.getBroadcast(
         context,
         replyRequestCounter.incrementAndGet(),
         reply,
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        mutable or PendingIntent.FLAG_UPDATE_CURRENT,
     )
     val remoteInput = RemoteInput.Builder(KEY_REPLY)
         .setLabel(context.getString(R.string.reply_to, note.source))
@@ -111,7 +118,7 @@ internal fun postDesktopNotification(
         .setStyle(Notification.BigTextStyle().bigText(note.text))
         .setTicker(note.text)
         .setAutoCancel(true)
-        .addAction(action)
+        .apply { if (replyable) addAction(action) }
         .build()
 
     context.getSystemService(NotificationManager::class.java)
