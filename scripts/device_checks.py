@@ -4496,6 +4496,56 @@ def bb3_home_says_unpaired(ctx: Ctx) -> tuple[str, str]:
     return "PASS", f"told, Home said \"{words}\"; put back and let in again, it says Paired"
 
 
+@check("bc3-unsaved-pin-forgotten", "§1")
+def bc3_unsaved_pin_forgotten(ctx: Ctx) -> tuple[str, str]:
+    """A pairing link with no fingerprint that does not pair leaves no pin
+    on the phone (§1, BC3): its connection to the throwaway as localhost,
+    not saved on the phone, pins that computer on first use, and a code
+    refused used to keep it with no card to remove it, so another computer
+    there could not be paired. A wrong PIN is sent; the phone's pins are
+    read from its files after. Nothing is saved, and the trust store is not
+    written."""
+    if OTHER_NAME in host_addresses(saved_hosts(ctx)):
+        return "SKIP", f"{OTHER_NAME} is saved on the phone (its pin is its card's)"
+    peers = "files/pocketdesk/certs/known_peers.json"
+
+    def pinned() -> Optional[list[str]]:
+        out = adb("shell", f"run-as {APP} cat {peers}")
+        try:
+            return list(json.loads(out))
+        except ValueError:
+            return [] if "No such file" in out else None
+
+    if pinned() is None:
+        return "SKIP", "the phone's pins could not be read (run-as)"
+    try:
+        device_id = (ctx.server.root / "state" / "device_id").read_text(encoding="utf-8").strip()
+    except OSError as error:
+        return "SKIP", f"the throwaway's id could not be read: {error}"
+    card = next((h for h in json.loads(ctx.phone.prefs("pocketdesk-host").get("hosts") or "[]")
+                 if h.get("address") == "127.0.0.1"), {})
+    uri = pair_uri("Pocketdesk", device_id, [OTHER_NAME], ctx.phone_port, int(card.get("port", 4716)), "000000", None)
+    ctx.phone.wake()
+    am("start", "-a", "android.intent.action.VIEW", "-d", uri, APP)
+    try:
+        if not wait_for(lambda: shows(ctx, "Pair"), 15, 1):
+            return "SKIP", "the link did not open the pairing screen"
+        tap_text("Pair", ctx.phone.dump())
+        expired = "This code has expired: show a new one on the computer and scan again."
+        if not wait_for(lambda: node_box(ctx.phone.dump(), expired) is not None or unreachable(ctx), 40, 2):
+            return "TIMEOUT", "the pairing screen said nothing within 40 s"
+        if unreachable(ctx):
+            return "SKIP", f"the phone did not reach the throwaway as {OTHER_NAME}"
+        left = pinned()
+        if left is None:
+            return "SKIP", "the phone's pins could not be read after"
+        if OTHER_NAME in left:
+            return "FAIL", f"the code was refused, and {OTHER_NAME} stayed pinned with no card"
+        return "PASS", f"the code was refused, and {OTHER_NAME} is not pinned"
+    finally:
+        home(ctx)
+
+
 @check("al2-unpaired-road", "§1")
 def al2_unpaired_road(ctx: Ctx) -> tuple[str, str]:
     """A phone the server has not paired, dialing by the internet road, is
