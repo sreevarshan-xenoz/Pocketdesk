@@ -58,16 +58,25 @@ class ShortcutPlanTest {
     fun aPairedComputersShortcutIsNamedByItsPairedId() {
         val token = "0123456789abcdef"
         assertEquals(
-            "connect:$token:paired:pc-a",
+            "connect:$token:paired:pc-a@192.0.2.1",
             ShortcutPlan.Entry(ShortcutPlan.Kind.CONNECT, "192.0.2.1", token, "pc-a").id,
         )
-        assertEquals("wake:paired:pc-a", ShortcutPlan.Entry(ShortcutPlan.Kind.WAKE, "192.0.2.1", pairedId = "pc-a").id)
-        assertEquals(ShortcutPlan.Target.Paired("pc-a"), ShortcutPlan.targetOf("connect:$token:paired:pc-a"))
-        assertEquals(ShortcutPlan.Target.Paired("pc-a"), ShortcutPlan.targetOf("wake:paired:pc-a"))
+        assertEquals(
+            "wake:paired:pc-a@2001:db8::7",
+            ShortcutPlan.Entry(ShortcutPlan.Kind.WAKE, "2001:db8::7", pairedId = "pc-a").id,
+        )
+        assertEquals(
+            ShortcutPlan.Target.Paired("pc-a", "192.0.2.1"),
+            ShortcutPlan.targetOf("connect:$token:paired:pc-a@192.0.2.1"),
+        )
+        assertEquals(
+            ShortcutPlan.Target.Paired("pc-a", "2001:db8::7"),
+            ShortcutPlan.targetOf("wake:paired:pc-a@2001:db8::7"),
+        )
         assertEquals(ShortcutPlan.Target.Address("2001:db8::7"), ShortcutPlan.targetOf("connect:$token:2001:db8::7"))
         assertEquals(ShortcutPlan.Target.Address("192.0.2.1"), ShortcutPlan.targetOf("wake:192.0.2.1"))
-        assertEquals(ShortcutPlan.Kind.WAKE, ShortcutPlan.kindOf("wake:paired:pc-a"))
-        assertEquals(ShortcutPlan.Kind.CONNECT, ShortcutPlan.kindOf("connect:$token:paired:pc-a"))
+        assertEquals(ShortcutPlan.Kind.WAKE, ShortcutPlan.kindOf("wake:paired:pc-a@192.0.2.1"))
+        assertEquals(ShortcutPlan.Kind.CONNECT, ShortcutPlan.kindOf("connect:$token:paired:pc-a@192.0.2.1"))
         val plan = ShortcutPlan.plan(
             listOf(host("192.0.2.1"), host("192.0.2.2")),
             hasWake = { it == "192.0.2.1" },
@@ -75,7 +84,7 @@ class ShortcutPlanTest {
             pairedId = { if (it == "192.0.2.1") "pc-a" else null },
         )
         assertEquals(
-            listOf("connect:$token:paired:pc-a", "connect:$token:192.0.2.2", "wake:paired:pc-a"),
+            listOf("connect:$token:paired:pc-a@192.0.2.1", "connect:$token:192.0.2.2", "wake:paired:pc-a@192.0.2.1"),
             plan.map { it.id },
         )
     }
@@ -98,10 +107,33 @@ class ShortcutPlanTest {
             ShortcutPlan.savedHost("192.0.2.1", hosts, null, paired::get),
         )
         fun share(id: String) = ShortcutPlan.shortcutHost(id, hosts, token, paired::get)
-        assertEquals(ShortcutPlan.Share.To(host("192.0.2.9")), share("connect:$token:paired:pc-a"))
-        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:$token:paired:pc-gone"))
-        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:fedcba9876543210:paired:pc-a"))
-        assertEquals(ShortcutPlan.Share.NotSaved, share("wake:paired:pc-a"))
+        assertEquals(ShortcutPlan.Share.To(host("192.0.2.9")), share("connect:$token:paired:pc-a@192.0.2.1"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:$token:paired:pc-gone@192.0.2.1"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("connect:fedcba9876543210:paired:pc-a@192.0.2.9"))
+        assertEquals(ShortcutPlan.Share.NotSaved, share("wake:paired:pc-a@192.0.2.9"))
+    }
+
+    /**
+     * AZ1 review: a computer with two cards (its LAN and tailnet addresses)
+     * has a shortcut for each, and each goes to its own card.
+     */
+    @Test
+    fun aComputersTwoCardsKeepTheirOwnShortcuts() {
+        val token = "0123456789abcdef"
+        val paired = mapOf("192.0.2.1" to "pc-a", "100.64.0.1" to "pc-a")
+        val hosts = listOf(host("100.64.0.1"), host("192.0.2.1"))
+        val plan = ShortcutPlan.plan(hosts, hasWake = { it == "192.0.2.1" }, token = token, pairedId = paired::get)
+        assertEquals(3, plan.map { it.id }.distinct().size)
+        val wake = plan.single { it.kind == ShortcutPlan.Kind.WAKE }
+        assertEquals("the LAN card's wake wakes by it", host("192.0.2.1"), ShortcutPlan.savedHost(wake.address, hosts, "pc-a", paired::get))
+        fun fate(id: String, address: String) = ShortcutPlan.pinnedFate(id, address, hosts, paired::get)
+        assertEquals(ShortcutPlan.Pinned.Keep, fate(wake.id, "192.0.2.1"))
+        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-a@100.64.0.1", "100.64.0.1"))
+        // Two cards of one computer never collide on one id.
+        assertEquals(
+            listOf("connect:$token:paired:pc-a@100.64.0.1", "connect:$token:paired:pc-a@192.0.2.1"),
+            plan.filter { it.kind == ShortcutPlan.Kind.CONNECT }.map { it.id },
+        )
     }
 
     /** AZ1: at a refresh, a pinned shortcut is kept, pointed at its computer's new address, or turned off. */
@@ -111,10 +143,11 @@ class ShortcutPlanTest {
         val paired = mapOf("192.0.2.9" to "pc-a", "192.0.2.1" to "pc-b")
         val hosts = listOf(host("192.0.2.1"), host("192.0.2.9"))
         fun fate(id: String, address: String?) = ShortcutPlan.pinnedFate(id, address, hosts, paired::get)
-        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-b", "192.0.2.1"))
-        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("connect:$token:paired:pc-a", "192.0.2.1"))
-        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("wake:paired:pc-a", null))
-        assertEquals(ShortcutPlan.Pinned.Off, fate("wake:paired:pc-gone", "192.0.2.5"))
+        assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:paired:pc-b@192.0.2.1", "192.0.2.1"))
+        // A at .1 moved to .9; B is paired at .1 now.
+        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("connect:$token:paired:pc-a@192.0.2.1", "192.0.2.1"))
+        assertEquals(ShortcutPlan.Pinned.Move(host("192.0.2.9")), fate("wake:paired:pc-a@192.0.2.1", null))
+        assertEquals(ShortcutPlan.Pinned.Off, fate("wake:paired:pc-gone@192.0.2.5", "192.0.2.5"))
         // Made before AZ1: by its address, as before.
         assertEquals(ShortcutPlan.Pinned.Keep, fate("connect:$token:192.0.2.9", "192.0.2.9"))
         assertEquals(ShortcutPlan.Pinned.Off, fate("connect:$token:192.0.2.5", "192.0.2.5"))

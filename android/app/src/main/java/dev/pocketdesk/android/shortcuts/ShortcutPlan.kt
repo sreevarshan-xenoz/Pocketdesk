@@ -18,13 +18,15 @@ object ShortcutPlan {
      */
     data class Entry(val kind: Kind, val address: String, val token: String = "", val pairedId: String? = null) {
         /**
-         * Stable per computer and action, so a launcher keeps a pinned one:
-         * a paired computer's names its paired id (AZ1: by its address, a
-         * move turned it off and another computer saved there took it over).
+         * Stable per card and action, so a launcher keeps a pinned one: a
+         * paired computer's names its paired id beside the card's address
+         * (AZ1: by the address alone, a move turned it off and another
+         * computer saved there took it over; a computer may have two cards,
+         * its LAN and tailnet addresses, each with its own).
          */
         val id: String
             get() {
-                val target = pairedId?.let { "$PAIRED$it" } ?: address
+                val target = pairedId?.let { "$PAIRED$it@$address" } ?: address
                 return if (kind == Kind.CONNECT && token.isNotEmpty()) {
                     "connect:$token:$target"
                 } else {
@@ -37,18 +39,22 @@ object ShortcutPlan {
     private const val PAIRED = "paired:"
 
     /**
-     * What a shortcut id names: a paired computer (AZ1), or an address (a
-     * computer never paired, or a shortcut made before AZ1).
+     * What a shortcut id names: a paired computer's card (AZ1), or an
+     * address (a computer never paired, or a shortcut made before AZ1).
      */
     sealed interface Target {
-        data class Paired(val id: String) : Target
+        data class Paired(val id: String, val address: String) : Target
 
         data class Address(val address: String) : Target
     }
 
     fun targetOf(id: String): Target {
         val rest = addressOf(id)
-        return if (rest.startsWith(PAIRED)) Target.Paired(rest.removePrefix(PAIRED)) else Target.Address(rest)
+        if (!rest.startsWith(PAIRED)) return Target.Address(rest)
+        // No address holds an @; a paired id is all before the last one.
+        val named = rest.removePrefix(PAIRED)
+        val at = named.lastIndexOf('@')
+        return if (at < 0) Target.Paired(named, "") else Target.Paired(named.substring(0, at), named.substring(at + 1))
     }
 
     fun kindOf(id: String): Kind = if (id.startsWith("wake:")) Kind.WAKE else Kind.CONNECT
@@ -74,15 +80,15 @@ object ShortcutPlan {
     ): List<Entry> {
         val connect = hosts.map { Entry(Kind.CONNECT, it.address, token, pairedId(it.address)) }
         val wake = hosts.filter { hasWake(it.address) }.map { Entry(Kind.WAKE, it.address, pairedId = pairedId(it.address)) }
-        return (connect + wake).take(max)
+        return (connect + wake).distinctBy { it.id }.take(max)
     }
 
     /**
      * The saved computer a shortcut, the tile or the widget names. Only a
      * computer already saved: the intent can come from any app, and must
-     * not add one. One made for a paired computer, [pairedFor], names it
-     * wherever it is now, never another computer saved at its old address
-     * (AZ1).
+     * not add one. One made for a paired computer, [pairedFor], names its
+     * card at [address], else another of its cards (it moved), never
+     * another computer saved at that address (AZ1).
      */
     fun savedHost(
         address: String?,
@@ -91,7 +97,8 @@ object ShortcutPlan {
         pairedId: (String) -> String? = { null },
     ): HostStore.Host? =
         if (pairedFor != null) {
-            hosts.firstOrNull { pairedId(it.address) == pairedFor }
+            val its = hosts.filter { pairedId(it.address) == pairedFor }
+            its.firstOrNull { it.address == address } ?: its.firstOrNull()
         } else {
             address?.let { wanted -> hosts.firstOrNull { it.address == wanted } }
         }
@@ -99,7 +106,7 @@ object ShortcutPlan {
     /** The saved computer a shortcut id names (AZ1). */
     private fun hostFor(id: String, hosts: List<HostStore.Host>, pairedId: (String) -> String?): HostStore.Host? =
         when (val target = targetOf(id)) {
-            is Target.Paired -> savedHost(null, hosts, target.id, pairedId)
+            is Target.Paired -> savedHost(target.address, hosts, target.id, pairedId)
             is Target.Address -> savedHost(target.address, hosts)
         }
 
