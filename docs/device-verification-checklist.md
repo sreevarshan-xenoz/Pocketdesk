@@ -740,6 +740,7 @@ Checked on 2026-10-13 with the Galaxy A71 against the Windows host over LAN:
 - [ ] A download from the phone cut halfway (Wi-Fi off).
 - [ ] Android 8 or 9: the file lands in the app's own Downloads/Pocketdesk.
 - [ ] The Linux host: browse `/home/<user>`, a download, and a send from the app's path field.
+- [x] A share under way stops when its phone is unpaired (BA1). (2026-10-26, the runner's `ba1-unpair-stops-transfer` on the OPPO against a throwaway server: 1 GB shared by the internet road, the phone taken out of the trust store once bytes moved; the transfer's row went 0.5 s later, the server said why, and the file never landed whole; main's server let it run on.)
 
 ## 32. Switching screens
 
