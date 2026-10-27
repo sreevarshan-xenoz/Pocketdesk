@@ -131,6 +131,13 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    // BG: a pattern, not the screen, in every session.
+    if pocketdesk_core::streaming::test_pattern::wanted() {
+        tracing::warn!(
+            "{} is set: sessions show a test pattern, not the screen (a test seam)",
+            pocketdesk_core::streaming::test_pattern::VAR
+        );
+    }
     if let Some(list) = std::env::var_os("POCKETDESK_FAIL_ENCODERS") {
         tracing::warn!(
             "POCKETDESK_FAIL_ENCODERS is set: {} fail as they open (a test seam)",
