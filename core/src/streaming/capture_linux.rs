@@ -651,6 +651,7 @@ fn on_process(stream: &pipewire::stream::Stream, user_data: &StreamUserData) {
         height,
         stride: stride as u32,
         timestamp: Instant::now(),
+        gpu: None,
     };
     // Send the frame through the channel.
     // Use try_send to implement Latest-Frame-Wins by dropping the newest frame if full.
@@ -858,6 +859,7 @@ fn run_x11_capture_loop(
                             height: region.height,
                             stride,
                             timestamp: Instant::now(),
+                            gpu: None,
                         };
                         // Send frame to pipeline. prev_frame only advances when
                         // the frame actually reached the pipeline — if the

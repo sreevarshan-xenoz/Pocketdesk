@@ -503,6 +503,9 @@ mod tests {
                 .await
                 .expect("a frame within 3 s")
                 .expect("channel open");
+            // On an NVIDIA adapter with `inproc-windows` the frame is still on
+            // the GPU (BG10): its pixels, read back.
+            let frame = frame.downloaded().unwrap().unwrap_or(frame);
             let (_, rect) = enumerate_monitors()[0];
             assert_eq!(frame.width, (rect.right - rect.left) as u32);
             assert_eq!(frame.height, (rect.bottom - rect.top) as u32);
