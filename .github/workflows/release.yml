@@ -163,6 +163,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem release\*-setup.exe
 
+      # Install it on the runner, check what it made, uninstall it, check it
+      # all went: packaging/windows/smoke-test.ps1.
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release/*-setup.exe | Select-Object -First 1).FullName
+          & ./packaging/windows/smoke-test.ps1 -Setup $setup
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows

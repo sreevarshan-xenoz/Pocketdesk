@@ -33,6 +33,8 @@ The APK is signed with the release key. Its certificate's SHA-256, for AppVerifi
 
 **Admin account:** the per-user parts follow the user who started setup: the logon task, Send To, the browser host, and the folders the uninstaller asks about. If a standard user enters another administrator's credentials, the uninstaller's per-user clean-up applies to that administrator instead.
 
+`packaging/windows/smoke-test.ps1 <setup.exe>` installs it silently, checks the files, Start menu entry, Apps & features entry, PATH, logon task and firewall rules, then uninstalls it and checks that each went. The release workflow runs it on its runner after every build. Run it only on a throwaway machine.
+
 To build it locally, run this from the repository root after `cargo build --release`:
 
 ```
