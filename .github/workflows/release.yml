@@ -104,6 +104,11 @@ jobs:
           dpkg-deb --info release/pocketdesk-*.deb
           dpkg-deb --contents release/pocketdesk-*.deb
 
+      # Install it on the runner with apt, check what it put in place, remove
+      # it, check it all went: packaging/linux/smoke-test.sh.
+      - name: Smoke-test the .deb
+        run: sh packaging/linux/smoke-test.sh release/pocketdesk-*.deb
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux

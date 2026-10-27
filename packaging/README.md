@@ -27,6 +27,8 @@ What its scripts do:
 - **Remove:** stops them and disables the unit.
 - **Home folders:** nothing in them is touched.
 
+`packaging/linux/smoke-test.sh <the .deb>` installs it with apt, checks the programs, unit, menu entry, icon and man page, removes it, and checks that each went. The release workflow runs it on its runner after every build.
+
 ## winget (Windows)
 
 `packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/<version>/` holds the three manifests for a release, in the layout of [winget-pkgs](https://github.com/microsoft/winget-pkgs). They install the release's Windows zip as two portable commands, `pocketdesk` and `pocketdesk-app`, with FFmpeg (`Gyan.FFmpeg`) as a dependency, since the server encodes video with it. The server then wants `pocketdesk install` (logon start and firewall rules), and again after every upgrade, with `pocketdesk stop` first: the logon task and firewall rules name the version's folder, and a running server holds its file.
