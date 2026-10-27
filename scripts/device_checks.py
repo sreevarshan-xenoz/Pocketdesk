@@ -4567,6 +4567,8 @@ def bf3_ask(ctx: Ctx) -> tuple[str, str]:
         return "SKIP", "turn on Questions from the computer in the phone's Settings"
     if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
         return "SKIP", "the phone is not linked to the throwaway"
+    had = trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("ask")
+    set_permission_live(ctx, "ask", True)  # off for every phone until chosen
     token = secrets.token_hex(3)
     question = f"BF3 check {token}"
     env = dict(os.environ) | ctx.server.env() | {"MSYS_NO_PATHCONV": "1"}
@@ -4602,6 +4604,7 @@ def bf3_ask(ctx: Ctx) -> tuple[str, str]:
         if asking.poll() is None:
             asking.kill()
         adb("shell", "cmd", "statusbar", "collapse")
+        set_permission_live(ctx, "ask", had)
 
 
 @check("bf1-done-tells-the-phone", "§8")

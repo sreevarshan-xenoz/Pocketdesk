@@ -66,7 +66,9 @@ pub enum Capability {
     /// unless chosen: a session asks for a screen, a peek does not.
     Peek,
     /// Answer the questions `pocketdesk ask` puts to the phone (BF3). About
-    /// what the computer sends, and the answers it takes back.
+    /// what the computer sends, and the answers it takes back; off unless
+    /// chosen: a Yes can let a deploy through, and a device paired before
+    /// this (a guest, someone else's phone, a computer) must not gain it.
     Ask,
 }
 
@@ -100,11 +102,16 @@ impl Capability {
     /// What a device may do when its owner never chose (spec P1): today's
     /// behaviour, except running commands, which a pairing PIN should not
     /// hand out, and locking this computer when it leaves, which only the
-    /// owner turns on (D9), and a glance at the screen (BF2).
+    /// owner turns on (D9), a glance at the screen (BF2), and answering its
+    /// questions (BF3).
     pub fn default_allowed(self) -> bool {
         !matches!(
             self,
-            Capability::Exec | Capability::AwayLock | Capability::PhoneSound | Capability::Peek
+            Capability::Exec
+                | Capability::AwayLock
+                | Capability::PhoneSound
+                | Capability::Peek
+                | Capability::Ask
         )
     }
 }
@@ -444,6 +451,7 @@ mod tests {
                         | Capability::AwayLock
                         | Capability::PhoneSound
                         | Capability::Peek
+                        | Capability::Ask
                 ),
                 "{capability:?}"
             );
@@ -571,17 +579,27 @@ mod tests {
         assert!(!DevicePermissions::computer().allows(Capability::Peek));
     }
 
-    /// BF3: the owner's phones may answer the computer's questions; someone
-    /// else's phone and a paired computer may not.
+    /// BF3: answering the computer's questions is off until the owner turns
+    /// it on, for a device paired before it was there too (BF3 review: a
+    /// guest's stored entry has no `ask`, and would have read as allowed).
     #[test]
-    fn answering_the_computers_questions_is_the_owners() {
+    fn answering_the_computers_questions_is_off_until_chosen() {
         assert_eq!(
             capability_for(crate::protocol::ask::ASK_ANSWER),
             Some(Capability::Ask)
         );
-        assert!(DevicePermissions::default().allows(Capability::Ask));
+        assert!(!DevicePermissions::default().allows(Capability::Ask));
         assert!(!DevicePermissions::someone_else().allows(Capability::Ask));
         assert!(!DevicePermissions::computer().allows(Capability::Ask));
+        let stored: DevicePermissions =
+            serde_json::from_str(r#"{"input": false, "ask_first": true}"#).unwrap();
+        assert!(!stored.allows(Capability::Ask), "an entry from before Ask");
+        let mut chosen = DevicePermissions::default();
+        chosen.set(Capability::Ask, true);
+        assert_eq!(
+            serde_json::to_value(&chosen).unwrap(),
+            serde_json::json!({ "ask": true })
+        );
     }
 
     #[test]

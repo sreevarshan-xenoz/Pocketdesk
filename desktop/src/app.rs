@@ -175,7 +175,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 23] = [
     (
         Capability::Ask,
         "Answer my questions",
-        "A script here can ask a Yes or No with pocketdesk ask, and wait for the answer from the phone: No is one tap there, Yes takes its fingerprint or screen lock. The phone takes questions with \u{201c}Questions from the computer\u{201d} on.",
+        "A script here can ask a Yes or No with pocketdesk ask, and wait for the answer from the phone: No is one tap there, Yes takes its fingerprint or screen lock. Off unless you turn it on: a Yes can let a deploy through. The phone takes questions with \u{201c}Questions from the computer\u{201d} on.",
     ),
     (
         Capability::Peek,
