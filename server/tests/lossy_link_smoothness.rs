@@ -116,11 +116,15 @@ async fn how_smoothly_frames_arrive_on_a_lossy_link() {
             .expect("rejected")
             .await
             .expect("handshake");
-        let mut server = StreamingServer::new(
-            StreamingConfig::default(),
-            StreamTransportConfig::default(),
-            cert_for_session,
-        );
+        // The session's size (`POCKETDESK_LOSSY_WIDTH`/`_HEIGHT`), 1080p
+        // unless told.
+        let config = StreamingConfig {
+            width: env_u64("POCKETDESK_LOSSY_WIDTH", 1920) as u32,
+            height: env_u64("POCKETDESK_LOSSY_HEIGHT", 1080) as u32,
+            ..StreamingConfig::default()
+        };
+        let mut server =
+            StreamingServer::new(config, StreamTransportConfig::default(), cert_for_session);
         // Its record, for the freezes and the e2e tail.
         server.set_session_telemetry(true);
         server
@@ -218,6 +222,8 @@ async fn how_smoothly_frames_arrive_on_a_lossy_link() {
             "freeze_n=",
             "freeze_p50=",
             "freeze_max=",
+            "enc_p50=",
+            "enc_p95=",
             "e2e_p50=",
             "e2e_p95=",
             "e2e_p99=",
