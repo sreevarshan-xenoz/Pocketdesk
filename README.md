@@ -372,7 +372,20 @@ fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
 - privacy mode: local input blocked, plus a ring that does not appear in the stream;
 - battery, power, exec, siren and the window HUD.
 
-Unzip `pocketdesk-<version>-windows-x86_64.zip` from the releases page
+**The installer** (from the release after 0.7.0): run
+`pocketdesk-<version>-windows-x86_64-setup.exe` from the releases page. It
+installs Pocketdesk to Program Files and adds it to the Start menu and to
+Apps & features. Its checkboxes, all on by default:
+- start it at sign-in and open its firewall ports;
+- put `pocketdesk` on `PATH`;
+- install FFmpeg with winget, when FFmpeg is missing.
+
+Then pair from the desktop app's Pair page. Upgrading is running the new one.
+Uninstall it from Settings → Apps: it stops Pocketdesk, removes the logon task,
+the firewall rules and the shortcuts, and asks before deleting your pairings
+and settings. `packaging/windows/pocketdesk.iss` is its script.
+
+**Or by hand:** unzip `pocketdesk-<version>-windows-x86_64.zip` from the releases page
 (the server `pocketdesk.exe` and the desktop app `pocketdesk-app.exe`), install FFmpeg (`winget install Gyan.FFmpeg`, which
 puts `ffmpeg.exe` on `PATH`), then:
 
