@@ -805,6 +805,14 @@ pub async fn connect_to_peer(
                                 {
                                     crate::dials::receive(&pkt.body, &from_peer.0, from_peer.1);
                                 }
+                                // A question the computer puts to its
+                                // owner (BF3), kept with its computer.
+                                if trimmed.contains("pocketdesk.ask")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type == pocketdesk_core::protocol::ask::ASK
+                                {
+                                    crate::asks::receive(&pkt.body, &from_peer.0, from_peer.1);
+                                }
                                 // A screenshot or a lock the computer asks
                                 // of this phone (O2), kept with its computer.
                                 if trimmed.contains("pocketdesk.phone_action")
@@ -1046,6 +1054,7 @@ async fn forget_link(from: &(String, u16)) {
     crate::links::forget();
     crate::commands::forget();
     crate::dials::forget();
+    crate::asks::forget();
     crate::phone_actions::forget();
     crate::typing::forget();
     crate::media_presses::forget();
@@ -1275,7 +1284,7 @@ pub fn take_sms_requests() -> String {
 /// and the results of the replies it sent (N5b), its battery (T8b), and
 /// what it plays (T8d), its folders' listings (T10g), its recent photos
 /// (C7) and which of its features are on (L7).
-const PHONE_PACKETS: [&str; 13] = [
+const PHONE_PACKETS: [&str; 14] = [
     // P2: its apps that open, answering the computer's ask; P10: its contacts.
     pocketdesk_core::protocol::phone_action::PHONE_APPS,
     pocketdesk_core::protocol::phone_action::PHONE_CONTACTS,
@@ -1295,6 +1304,8 @@ const PHONE_PACKETS: [&str; 13] = [
     pocketdesk_core::protocol::phone_photos::PHOTOS,
     // L7: which of its features are on, beside the battery.
     "kdeconnect.pocketdesk.switches",
+    // BF3: the owner's answer to the computer's question.
+    pocketdesk_core::protocol::ask::ASK_ANSWER,
 ];
 
 /// Send one of [`PHONE_PACKETS`] with `body` (a JSON object) to the desktop.
