@@ -1,25 +1,29 @@
 //! A note from the phone to the computer (BF4): text or a link shared to
 //! "Note to computer" is appended, with the time, to a Markdown file the
-//! owner picks on the computer. Under the Files permission.
+//! owner picks on the computer. Under the Notes permission, off until the
+//! owner turns it on for a phone.
 
 /// Phone → computer: `{text}`.
 pub const NOTE: &str = "kdeconnect.pocketdesk.note";
 /// Computer → phone: `{saved: true}`, or `{saved: false, reason}` with
-/// `no_file` (none picked in Settings), `empty` or `not_written`.
+/// `no_file` (none picked in Settings), `empty`, `not_written`, or
+/// `not_allowed` (the phone's Notes permission is off).
 pub const NOTE_SAVED: &str = "kdeconnect.pocketdesk.note_saved";
 
 /// The most characters a note keeps.
 pub const MAX_NOTE: usize = 4000;
 
 /// `text` as it is kept: line ends made `\n`, control characters other than
-/// line ends and tabs dropped, blank lines at either end trimmed, at most
-/// [`MAX_NOTE`] characters (cut with `…`). `None` when nothing is left.
+/// line ends and tabs dropped, and the marks that turn text around (bidi
+/// overrides and isolates, BF4 review), blank lines at either end trimmed,
+/// at most [`MAX_NOTE`] characters (cut with `…`). `None` when nothing is
+/// left.
 pub fn clean_note(text: &str) -> Option<String> {
     let kept: String = text
         .replace("\r\n", "\n")
         .replace('\r', "\n")
         .chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .filter(|c| (!c.is_control() || *c == '\n' || *c == '\t') && !is_bidi_mark(*c))
         .collect();
     let trimmed = kept.trim();
     if trimmed.is_empty() {
@@ -30,6 +34,12 @@ pub fn clean_note(text: &str) -> Option<String> {
     }
     let cut: String = trimmed.chars().take(MAX_NOTE - 1).collect();
     Some(format!("{}…", cut.trim_end()))
+}
+
+/// Whether `c` turns the text around it: an embedding, override or
+/// isolate, or a line or paragraph separator.
+fn is_bidi_mark(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{2028}' | '\u{2029}')
 }
 
 /// The answer's body: saved, or why not.
@@ -63,6 +73,10 @@ mod tests {
             Some("Buy milk\n\tand bread")
         );
         assert_eq!(clean_note(" \n\t "), None);
+        assert_eq!(
+            clean_note("pay \u{202E}cod.exe\u{2066}x\u{2069}").as_deref(),
+            Some("pay cod.exex")
+        );
         let long = "a".repeat(MAX_NOTE + 10);
         let cut = clean_note(&long).unwrap();
         assert_eq!(cut.chars().count(), MAX_NOTE);

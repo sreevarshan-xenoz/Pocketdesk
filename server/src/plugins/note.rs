@@ -1,7 +1,8 @@
 //! Notes from the phone (BF4): `note {text}` is appended, with the time, to
 //! the Markdown file picked in Settings (`notes_file`), and answered
-//! `note_saved`. With no file picked, the phone hears so. Under the Files
-//! permission; a note's words are never logged.
+//! `note_saved`. With no file picked, the phone hears so. Under the Notes
+//! permission, and a phone without it hears that too, at once; a note's
+//! words are never logged.
 
 use std::path::Path;
 
@@ -16,10 +17,9 @@ fn keep(
     notes_file: &str,
     stamp: &str,
 ) -> std::result::Result<(), &'static str> {
-    let notes_file = notes_file.trim();
-    if notes_file.is_empty() {
+    let Some(notes_file) = notes::notes_path(notes_file) else {
         return Err("no_file");
-    }
+    };
     let Some(note) = body
         .get("text")
         .and_then(|v| v.as_str())
@@ -31,6 +31,15 @@ fn keep(
         tracing::warn!("A note from a phone was not written: {e}");
         "not_written"
     })
+}
+
+/// A phone without the Notes permission hears so, rather than waiting.
+pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if packet.packet_type == NOTE {
+        let _ = sender
+            .send_packet(&NetworkPacket::new(NOTE_SAVED).with_body(saved_body(Some("not_allowed"))))
+            .await;
+    }
 }
 
 /// The plugin keeping the phones' notes.

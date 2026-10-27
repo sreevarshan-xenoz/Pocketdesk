@@ -91,7 +91,7 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-pub(crate) const PERMISSIONS: [(Capability, &str, &str); 23] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 24] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
@@ -173,6 +173,11 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 23] = [
         "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
+        Capability::Notes,
+        "Add to my notes",
+        "Text or a link shared to Note to computer on the phone is added, with the time, to the notes file picked in Settings (Phones). Off unless you turn it on.",
+    ),
+    (
         Capability::Ask,
         "Answer my questions",
         "A script here can ask a Yes or No with pocketdesk ask, and wait for the answer from the phone: No is one tap there, Yes takes its fingerprint or screen lock. Off unless you turn it on: a Yes can let a deploy through. The phone takes questions with \u{201c}Questions from the computer\u{201d} on.",
@@ -233,6 +238,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
                 | Capability::PhoneActions
                 | Capability::Peek
                 | Capability::Ask
+                | Capability::Notes
         ))
 }
 
@@ -3988,6 +3994,7 @@ mod tests {
             Capability::PhoneActions,
             Capability::Peek,
             Capability::Ask,
+            Capability::Notes,
         ] {
             assert!(!shown_for(capability, true), "{capability:?}");
             assert!(shown_for(capability, false), "{capability:?}");

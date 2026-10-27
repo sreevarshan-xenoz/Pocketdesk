@@ -110,7 +110,8 @@ video_quality = "balanced"
 # Home, with no session.
 # peek = true
 # The Markdown file notes from phones are added to, with the time ('Note
-# to computer' in the phone's share sheet); empty: notes are refused.
+# to computer' in the phone's share sheet), from phones with 'Add to my
+# notes' on in the desktop app (Devices); empty: notes are refused.
 # notes_file = ""
 
 # A notification when a phone in a session reports a low battery (15 % or

@@ -70,10 +70,14 @@ pub enum Capability {
     /// chosen: a Yes can let a deploy through, and a device paired before
     /// this (a guest, someone else's phone, a computer) must not gain it.
     Ask,
+    /// Add notes to the owner's notes file here (BF4); off unless chosen:
+    /// someone else's phone may send files, but not write in the owner's
+    /// own notes.
+    Notes,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 23] = [
+    pub const ALL: [Capability; 24] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -97,6 +101,7 @@ impl Capability {
         Capability::PhoneActions,
         Capability::Peek,
         Capability::Ask,
+        Capability::Notes,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
@@ -112,6 +117,7 @@ impl Capability {
                 | Capability::PhoneSound
                 | Capability::Peek
                 | Capability::Ask
+                | Capability::Notes
         )
     }
 }
@@ -196,8 +202,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::peek::PEEK => Capability::Peek,
         // An answer to the computer's question (BF3).
         crate::protocol::ask::ASK_ANSWER => Capability::Ask,
-        // A note appended to the owner's file here (BF4), as a file sent.
-        crate::protocol::note::NOTE => Capability::Files,
+        // A note added to the owner's notes file here (BF4).
+        crate::protocol::note::NOTE => Capability::Notes,
         _ => return None,
     })
 }
@@ -251,6 +257,8 @@ pub struct DevicePermissions {
     pub peek: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -282,6 +290,7 @@ impl DevicePermissions {
             Capability::PhoneActions => &mut self.phone_actions,
             Capability::Peek => &mut self.peek,
             Capability::Ask => &mut self.ask,
+            Capability::Notes => &mut self.notes,
         }
     }
 
@@ -310,6 +319,7 @@ impl DevicePermissions {
             Capability::PhoneActions => self.phone_actions,
             Capability::Peek => self.peek,
             Capability::Ask => self.ask,
+            Capability::Notes => self.notes,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -454,6 +464,7 @@ mod tests {
                         | Capability::PhoneSound
                         | Capability::Peek
                         | Capability::Ask
+                        | Capability::Notes
                 ),
                 "{capability:?}"
             );
@@ -602,6 +613,22 @@ mod tests {
             serde_json::to_value(&chosen).unwrap(),
             serde_json::json!({ "ask": true })
         );
+    }
+
+    /// BF4 review: a guest or someone else's phone may send files, but not
+    /// write in the owner's notes, for an entry from before notes too.
+    #[test]
+    fn adding_to_the_owners_notes_is_off_until_chosen() {
+        assert_eq!(
+            capability_for(crate::protocol::note::NOTE),
+            Some(Capability::Notes)
+        );
+        assert!(!DevicePermissions::default().allows(Capability::Notes));
+        assert!(!DevicePermissions::someone_else().allows(Capability::Notes));
+        let stored: DevicePermissions =
+            serde_json::from_str(r#"{"input": false, "ask_first": true}"#).unwrap();
+        assert!(!stored.allows(Capability::Notes));
+        assert!(stored.allows(Capability::Files), "files still go");
     }
 
     #[test]

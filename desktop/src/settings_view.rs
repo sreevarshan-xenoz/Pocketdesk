@@ -1336,7 +1336,7 @@ impl SettingsForm {
                     }
                     note(
                         ui,
-                        "A Markdown file (made if it is not there, in a folder that is): each note shared to \u{201c}Note to computer\u{201d} on a phone with the Files permission is added at its end, with the time. Empty: phones are told to pick one here.",
+                        "A Markdown file (made if it is not there, in a folder that is): each note shared to \u{201c}Note to computer\u{201d} on a phone with \u{201c}Add to my notes\u{201d} on (Devices) is added at its end, with the time. Empty: phones are told to pick one here.",
                     );
                 });
                 row(ui, "cast_control", |ui| {

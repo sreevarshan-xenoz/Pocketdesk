@@ -45,6 +45,7 @@ pub async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
     notification::answer_denied(packet, sender).await;
     tasks::answer_denied(packet, sender).await;
     peek::answer_denied(packet, sender).await;
+    note::answer_denied(packet, sender).await;
 }
 
 /// Packets the computer sends from outside its plugins: pushes and what a
