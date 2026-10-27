@@ -275,10 +275,24 @@ impl InProcessEncoder {
         self.frames_since_keyframe = self.keyframe_interval;
     }
 
-    /// Change the bitrate in place (BG8): the encoder reconfigures on its
-    /// next frame (libx264 and NVENC both do), with no rebuild. Always
-    /// `true` here.
+    /// Its name for the session's record: the software path, or NVENC (BG8).
+    pub fn backend_name(&self) -> &'static str {
+        if self.scaler.is_some() {
+            "in-process"
+        } else {
+            "in-process-nvenc"
+        }
+    }
+
+    /// Change the bitrate in place (BG8): NVENC reconfigures on its next
+    /// frame, with no rebuild. `false` for the software path, which is
+    /// rebuilt as before: libx265 reads the rate only when it opens (BG8
+    /// review), and libx264's reconfiguring is not checked on Linux from
+    /// here.
     pub fn set_bitrate(&mut self, bitrate_bps: u32) -> bool {
+        if self.scaler.is_some() {
+            return false;
+        }
         let (maxrate_kbps, bufsize_kbits) =
             super::encoder::vbv_kbit_bounds(bitrate_bps, self.config.fps);
         // SAFETY: the context is open and only touched through `&mut self`;
@@ -449,6 +463,7 @@ mod tests {
             ..software_config(VideoCodec::H264)
         };
         let mut encoder = InProcessEncoder::new_hardware(config).expect("h264_nvenc opens");
+        assert_eq!(encoder.backend_name(), "in-process-nvenc");
         let mut sizes = Vec::new();
         for i in 0..90 {
             if i == 40 {
@@ -480,6 +495,9 @@ mod tests {
     #[ignore]
     fn test_inprocess_request_keyframe() {
         let mut encoder = InProcessEncoder::new(software_config(VideoCodec::H264)).unwrap();
+        // BG8 review: the software path is rebuilt for a new rate, as before.
+        assert!(!encoder.set_bitrate(500_000));
+        assert_eq!(encoder.backend_name(), "in-process");
         for i in 0..5 {
             let _ = encoder.encode_frame(&gradient_frame(320, 240, i)).unwrap();
         }

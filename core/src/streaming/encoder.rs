@@ -223,7 +223,7 @@ impl VideoEncoder {
         match self {
             Self::Sidecar(e) => e.backend_name(),
             #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
-            Self::InProcess(_) => "in-process",
+            Self::InProcess(e) => e.backend_name(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(_) => "in-process-vaapi",
         }
@@ -252,7 +252,6 @@ impl VideoEncoder {
         }
     }
 
-    /// Request a keyframe on the next encode.
     /// Change the bitrate in place, without rebuilding the encoder (BG8);
     /// `false` when this backend cannot, and the caller rebuilds.
     // Off the in-process builds only the sidecar exists, which cannot.
@@ -268,6 +267,7 @@ impl VideoEncoder {
         }
     }
 
+    /// Request a keyframe on the next encode.
     pub fn request_keyframe(&mut self) {
         match self {
             Self::Sidecar(e) => e.request_keyframe(),
