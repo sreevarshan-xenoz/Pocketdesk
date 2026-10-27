@@ -3,7 +3,8 @@
 //! phone's fingerprint or screen lock. Under the Ask permission, on for the
 //! owner's phones and off for someone else's or a paired computer.
 
-/// Computer → phone: `{id, question, expires_unix}`.
+/// Computer → phone: `{id, question, expires_unix, wait_secs}`: the phone
+/// counts `wait_secs` from when it hears it, as the two clocks may differ.
 pub const ASK: &str = "kdeconnect.pocketdesk.ask";
 /// Phone → computer: `{id, answer: "yes" | "no"}`.
 pub const ASK_ANSWER: &str = "kdeconnect.pocketdesk.ask_answer";
@@ -56,9 +57,19 @@ pub fn is_ask_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
-/// The question's packet body.
-pub fn ask_body(id: &str, question: &str, expires_unix: u64) -> serde_json::Value {
-    serde_json::json!({ "id": id, "question": question, "expires_unix": expires_unix })
+/// The question's packet body, sent at `now_unix`.
+pub fn ask_body(id: &str, question: &str, expires_unix: u64, now_unix: u64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "question": question,
+        "expires_unix": expires_unix,
+        "wait_secs": expires_unix.saturating_sub(now_unix),
+    })
+}
+
+/// How long the question in `body` still waits, if it says.
+pub fn wait_secs_of(body: &serde_json::Value) -> Option<u64> {
+    body.get("wait_secs")?.as_u64()
 }
 
 /// The question an `ask` body carries: its id, its words (cleaned) and when
@@ -106,10 +117,15 @@ mod tests {
 
     #[test]
     fn a_question_and_its_answer_go_both_ways() {
-        let body = ask_body("q-1", "Deploy?", 1_120);
+        let body = ask_body("q-1", "Deploy?", 1_120, 1_000);
         assert_eq!(
             question_of(&body),
             Some(("q-1".to_string(), "Deploy?".to_string(), 1_120))
+        );
+        assert_eq!(wait_secs_of(&body), Some(120));
+        assert_eq!(
+            wait_secs_of(&ask_body("q-1", "Deploy?", 1_120, 1_200)),
+            Some(0)
         );
         assert_eq!(
             answer_of(&answer_body("q-1", Answer::Yes)),

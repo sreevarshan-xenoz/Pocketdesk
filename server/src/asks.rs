@@ -1,6 +1,6 @@
 //! Questions for the owner's phones (BF3). `pocketdesk ask` leaves one in
 //! `asks_out/` and waits; [`run`] puts it to every connected phone with the
-//! Ask permission, and to one that connects while it waits; the first
+//! Ask permission, and again on each link a phone makes while it waits; the first
 //! answer from a phone it was put to is kept in `asks_in/` for
 //! `pocketdesk ask`, and a later one is dropped. The question's words are
 //! never logged.
@@ -22,7 +22,14 @@ const POLL: Duration = Duration::from_millis(250);
 /// A question put to the phones, and which it was put to.
 struct Pending {
     request: AskRequest,
+    /// The phones it was put to, which may answer it.
     asked: HashSet<String>,
+    /// The connections it was sent on: a phone that links again is asked
+    /// again on its new one (BF3 review: a write into a link already dead
+    /// had counted as asked, and it was never put to the phone).
+    sent_on: HashSet<String>,
+    /// The connections a send failed on, said once.
+    failed_on: HashSet<String>,
 }
 
 static PENDING: LazyLock<Mutex<HashMap<String, Pending>>> = LazyLock::new(Default::default);
@@ -55,7 +62,8 @@ pub fn run_cli(question: &str, wait_secs: u64) -> i32 {
         }
     };
     eprintln!("Waiting up to {wait_secs} s for an answer on your phone…");
-    match wait_for_answer(&dir, &asked, std::thread::sleep) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(wait_secs);
+    match wait_for_answer(&dir, &asked, deadline, std::thread::sleep) {
         Some(Answer::Yes) => {
             println!("yes");
             0
@@ -71,14 +79,20 @@ pub fn run_cli(question: &str, wait_secs: u64) -> i32 {
     }
 }
 
-/// The answer to `asked`, looked for until it expires; `None` (the
+/// The answer to `asked`, looked for until `deadline` (on the monotonic
+/// clock, so a clock set back does not stretch the wait); `None` (the
 /// question withdrawn) when none came.
-fn wait_for_answer(dir: &Path, asked: &AskRequest, sleep: impl Fn(Duration)) -> Option<Answer> {
+fn wait_for_answer(
+    dir: &Path,
+    asked: &AskRequest,
+    deadline: std::time::Instant,
+    sleep: impl Fn(Duration),
+) -> Option<Answer> {
     loop {
         if let Some(answer) = asks::take_answer(dir, &asked.id) {
             return Some(answer.answer);
         }
-        if now_unix() >= asked.expires_unix {
+        if std::time::Instant::now() >= deadline {
             asks::withdraw(dir, &asked.id);
             return None;
         }
@@ -115,6 +129,8 @@ pub async fn run() {
                     Pending {
                         request,
                         asked: HashSet::new(),
+                        sent_on: HashSet::new(),
+                        failed_on: HashSet::new(),
                     },
                 );
             }
@@ -122,7 +138,7 @@ pub async fn run() {
             for (id, p) in pending.iter() {
                 for client in &clients {
                     let device = client.device_id().to_string();
-                    if !p.asked.contains(&device)
+                    if !p.sent_on.contains(client.connection_id())
                         && crate::plugins::pair::allows(&device, Capability::Ask)
                     {
                         sends.push((id.clone(), client.clone(), p.request.clone()));
@@ -135,19 +151,24 @@ pub async fn run() {
                 &request.id,
                 &request.question,
                 request.expires_unix,
+                now_unix(),
             ));
-            match client.send_packet(&packet).await {
+            let sent = client.send_packet(&packet).await;
+            let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(p) = pending.get_mut(&id) else {
+                continue;
+            };
+            match sent {
                 Ok(()) => {
                     tracing::info!("A question was put to a phone");
-                    if let Some(p) = PENDING
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .get_mut(&id)
-                    {
-                        p.asked.insert(client.device_id().to_string());
-                    }
+                    p.asked.insert(client.device_id().to_string());
+                    p.sent_on.insert(client.connection_id().to_string());
                 }
-                Err(e) => tracing::warn!("A question was not put to a phone: {e}"),
+                // Tried again each turn while it waits, said once.
+                Err(e) if p.failed_on.insert(client.connection_id().to_string()) => {
+                    tracing::warn!("A question was not put to a phone: {e}");
+                }
+                Err(_) => {}
             }
         }
     }
@@ -227,6 +248,8 @@ mod tests {
             Pending {
                 request: request.clone(),
                 asked: to.iter().map(|d| d.to_string()).collect(),
+                sent_on: HashSet::new(),
+                failed_on: HashSet::new(),
             },
         );
     }
@@ -283,11 +306,16 @@ mod tests {
         let asked = asks::request(&dir, "Deploy?", 1, now).unwrap();
         asks::take_all(&dir, now); // the server took it
         asks::answer(&dir, &asked.id, Answer::Yes, "phone-a").unwrap();
-        assert_eq!(wait_for_answer(&dir, &asked, |_| {}), Some(Answer::Yes));
+        let soon = std::time::Instant::now() + Duration::from_secs(1);
+        assert_eq!(
+            wait_for_answer(&dir, &asked, soon, |_| {}),
+            Some(Answer::Yes)
+        );
         // No answer: it waits out its time, then takes the question back.
         let late = asks::request(&dir, "Deploy?", 1, now).unwrap();
         let slept = std::cell::Cell::new(0);
-        let gave_up = wait_for_answer(&dir, &late, |d| {
+        let soon = std::time::Instant::now() + Duration::from_secs(1);
+        let gave_up = wait_for_answer(&dir, &late, soon, |d| {
             slept.set(slept.get() + 1);
             std::thread::sleep(d);
         });

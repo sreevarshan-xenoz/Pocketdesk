@@ -6,19 +6,31 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use pocketdesk_core::protocol::ask::question_of;
+use pocketdesk_core::protocol::ask::{question_of, wait_secs_of};
 
 /// How many questions wait for the app at most.
 const MAX_WAITING: usize = 8;
 
 static WAITING: Mutex<VecDeque<serde_json::Value>> = Mutex::new(VecDeque::new());
 
-/// Keep a question the computer at `host:port` asked, if it is one.
+/// Keep a question the computer at `host:port` asked, if it is one. Its
+/// end is counted on this phone's clock from its wait, when it says one
+/// (BF3 review: a phone's clock ahead of the computer's had dropped it on
+/// arrival as expired).
 pub(crate) fn receive(body: &serde_json::Value, host: &str, port: u16) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    receive_at(body, host, port, now);
+}
+
+fn receive_at(body: &serde_json::Value, host: &str, port: u16, now_unix: u64) {
     let Some((id, question, expires_unix)) = question_of(body) else {
         tracing::warn!("A question from the computer was dropped: not a question");
         return;
     };
+    let expires_unix = wait_secs_of(body).map_or(expires_unix, |wait| now_unix + wait);
     let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
     // The computer puts a question again to a phone that links again.
     if waiting.iter().any(|w| w["id"] == id.as_str()) {
@@ -80,5 +92,14 @@ mod tests {
             }])
         );
         assert_eq!(take_json(), "[]");
+        // Its wait counted from now on this phone's clock.
+        receive_at(
+            &serde_json::json!({ "id": "q-2", "question": "Go?", "expires_unix": 1_120, "wait_secs": 90 }),
+            "192.0.2.7",
+            1716,
+            5_000,
+        );
+        let waiting: serde_json::Value = serde_json::from_str(&take_json()).unwrap();
+        assert_eq!(waiting[0]["expires_unix"], 5_090);
     }
 }

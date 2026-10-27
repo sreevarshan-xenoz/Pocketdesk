@@ -108,7 +108,8 @@ pub enum Commands {
         /// How long to wait for an answer, in seconds (1 to 3600)
         #[arg(long, default_value_t = pocketdesk_core::protocol::ask::DEFAULT_WAIT_SECS)]
         wait: u64,
-        /// The question; its words are joined with spaces
+        /// The question; its words are joined with spaces. Options go
+        /// before it: after it, they are words of the question
         #[arg(required = true, trailing_var_arg = true)]
         question: Vec<String>,
     },
