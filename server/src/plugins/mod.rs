@@ -11,6 +11,7 @@ pub mod input;
 pub mod link_role;
 pub mod links;
 pub mod monitors;
+pub mod note;
 pub mod notification;
 pub mod notification_reply;
 pub mod pair;
@@ -112,5 +113,6 @@ pub fn register_all() -> PluginSet {
     registry.register(deck::DeckPlugin);
     registry.register(peek::PeekPlugin);
     registry.register(crate::asks::AskPlugin);
+    registry.register(note::NotePlugin);
     registry
 }
