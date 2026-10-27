@@ -324,6 +324,23 @@ fn relay_set_name(announced: &[iroh::RelayUrl], use_relays: bool) -> String {
     }
 }
 
+/// The congestion controller for an iroh endpoint (BG4): the home road's
+/// choice ([`super::transport::configured_congestion`]), BBR unless
+/// `POCKETDESK_CC` names another.
+pub fn congestion_factory()
+-> std::sync::Arc<dyn iroh::endpoint::ControllerFactory + Send + Sync + 'static> {
+    use super::transport::CongestionChoice;
+    match super::transport::configured_congestion() {
+        CongestionChoice::Bbr => std::sync::Arc::new(noq_proto::congestion::Bbr3Config::default()),
+        CongestionChoice::Cubic => {
+            std::sync::Arc::new(noq_proto::congestion::CubicConfig::default())
+        }
+        CongestionChoice::NewReno => {
+            std::sync::Arc::new(noq_proto::congestion::NewRenoConfig::default())
+        }
+    }
+}
+
 /// The endpoint to dial from: the live one for this key and relays, or a
 /// new one.
 async fn dial_endpoint(
@@ -339,6 +356,12 @@ async fn dial_endpoint(
             builder = builder.secret_key(key);
         }
         let endpoint = builder
+            // The home road's congestion controller (BG4).
+            .transport_config(
+                iroh::endpoint::QuicTransportConfig::builder()
+                    .congestion_controller_factory(congestion_factory())
+                    .build(),
+            )
             .relay_mode(dial_relay_mode(relay_urls, use_relays))
             .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
             .context("iroh bind_addr rejected wildcard socket addr")?

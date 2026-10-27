@@ -44,9 +44,9 @@ impl Default for StreamTransportConfig {
 ///
 /// Tuned for real-time A/V: large datagram buffers and high stream
 /// concurrency (video opens one unidirectional stream per frame). The
-/// congestion controller is selectable for A/B testing via the
-/// `POCKETDESK_CC` environment variable: `bbr`, `cubic`, or `new_reno`
-/// (the default, matching quinn's own default).
+/// congestion controller is BBR ([`congestion_choice`]), selectable for A/B
+/// testing via the `POCKETDESK_CC` environment variable: `bbr`, `cubic`, or
+/// `new_reno`.
 ///
 /// Roaming hardening (Tier-3 #13): a bounded idle timeout makes dead peers
 /// detectable instead of lingering forever, and a keepalive well below half
@@ -72,30 +72,65 @@ pub fn configured_transport() -> quinn::TransportConfig {
     transport
 }
 
-fn apply_congestion_controller(transport: &mut quinn::TransportConfig) {
-    let requested = std::env::var("POCKETDESK_CC")
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-    let reno: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync + 'static> =
-        Arc::new(quinn::congestion::NewRenoConfig::default());
-    let (label, factory): (
-        &str,
-        Arc<dyn quinn::congestion::ControllerFactory + Send + Sync + 'static>,
-    ) = match requested.as_str() {
-        "bbr" => ("BBR", Arc::new(quinn::congestion::BbrConfig::default())),
-        "cubic" => ("CUBIC", Arc::new(quinn::congestion::CubicConfig::default())),
-        "" | "new_reno" | "reno" => ("NewReno", reno),
-        other => {
-            warn!(
-                "POCKETDESK_CC='{other}' is not one of bbr|cubic|new_reno — falling back to NewReno"
-            );
-            ("NewReno", reno)
+/// A QUIC congestion controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CongestionChoice {
+    Bbr,
+    Cubic,
+    NewReno,
+}
+
+impl CongestionChoice {
+    pub fn label(self) -> &'static str {
+        match self {
+            CongestionChoice::Bbr => "BBR",
+            CongestionChoice::Cubic => "CUBIC",
+            CongestionChoice::NewReno => "NewReno",
         }
-    };
-    transport.congestion_controller_factory(factory);
+    }
+}
+
+/// The controller `requested` names (`POCKETDESK_CC`): BBR unless it names
+/// another (BG4). On a link that loses packets at random, as Wi-Fi does,
+/// NewReno halves its window at each loss, and the video queues behind it:
+/// on the lossy-link bench at 2 % loss its e2e p95 was 350-435 ms, BBR's 32
+/// ms, the same as a clean link's. The second value is a warning for a
+/// name it does not know.
+pub fn congestion_choice(requested: &str) -> (CongestionChoice, Option<String>) {
+    match requested.trim().to_ascii_lowercase().as_str() {
+        "" | "bbr" => (CongestionChoice::Bbr, None),
+        "cubic" => (CongestionChoice::Cubic, None),
+        "new_reno" | "reno" | "newreno" => (CongestionChoice::NewReno, None),
+        other => (
+            CongestionChoice::Bbr,
+            Some(format!(
+                "POCKETDESK_CC='{other}' is not one of bbr|cubic|new_reno: BBR"
+            )),
+        ),
+    }
+}
+
+/// [`congestion_choice`] for this process's `POCKETDESK_CC`, said once.
+pub fn configured_congestion() -> CongestionChoice {
+    let (choice, warning) = congestion_choice(&std::env::var("POCKETDESK_CC").unwrap_or_default());
     static LOGGED: std::sync::Once = std::sync::Once::new();
-    LOGGED.call_once(|| info!("QUIC congestion controller: {label}"));
+    LOGGED.call_once(|| {
+        if let Some(warning) = warning {
+            warn!("{warning}");
+        }
+        info!("QUIC congestion controller: {}", choice.label());
+    });
+    choice
+}
+
+fn apply_congestion_controller(transport: &mut quinn::TransportConfig) {
+    let factory: Arc<dyn quinn::congestion::ControllerFactory + Send + Sync + 'static> =
+        match configured_congestion() {
+            CongestionChoice::Bbr => Arc::new(quinn::congestion::BbrConfig::default()),
+            CongestionChoice::Cubic => Arc::new(quinn::congestion::CubicConfig::default()),
+            CongestionChoice::NewReno => Arc::new(quinn::congestion::NewRenoConfig::default()),
+        };
+    transport.congestion_controller_factory(factory);
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,6 +1225,23 @@ impl PacketHeader {
 
 #[cfg(test)]
 mod tests {
+    /// BG4: BBR unless another is named; an unknown name is BBR, said.
+    #[test]
+    fn the_congestion_controller_is_bbr_unless_named() {
+        use super::{CongestionChoice, congestion_choice};
+        assert_eq!(congestion_choice(""), (CongestionChoice::Bbr, None));
+        assert_eq!(congestion_choice(" BBR "), (CongestionChoice::Bbr, None));
+        assert_eq!(congestion_choice("cubic"), (CongestionChoice::Cubic, None));
+        assert_eq!(
+            congestion_choice("new_reno"),
+            (CongestionChoice::NewReno, None)
+        );
+        assert_eq!(congestion_choice("Reno").0, CongestionChoice::NewReno);
+        let (choice, warning) = congestion_choice("vegas");
+        assert_eq!(choice, CongestionChoice::Bbr);
+        assert!(warning.unwrap().contains("vegas"));
+    }
+
     use super::*;
 
     /// A server that presents `cert` but signs the handshake with `signing_key`.
