@@ -50,7 +50,7 @@ const ACQUIRE_TIMEOUT_MS: u32 = 100;
 /// Returns once the first frame has been copied.
 pub fn start_dxgi_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     _window_rx: watch::Receiver<u64>,
     _window_mode: Arc<AtomicBool>,
@@ -138,7 +138,7 @@ fn open_duplication(monitor: HMONITOR) -> Result<Duplication> {
 
 fn run_capture_loop(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     ready_tx: &std_mpsc::Sender<Result<()>>,
 ) -> Result<()> {
@@ -266,7 +266,7 @@ mod tests {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let (tx, mut rx) = mpsc::channel(4);
+            let (tx, mut rx) = crate::streaming::latest_frame::channel();
             let cancel = CancellationToken::new();
             let (_window_tx, window_rx) = watch::channel(0u64);
             let _session = start_dxgi_capture(

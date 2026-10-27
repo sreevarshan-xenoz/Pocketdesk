@@ -420,7 +420,7 @@ mod tests {
     fn shield_is_visible_in_screencopy() {
         use super::super::capture_screencopy::start_screencopy_capture;
         use crate::streaming::{StreamingConfig, VideoFrame};
-        use tokio::sync::{mpsc as tokio_mpsc, watch};
+        use tokio::sync::watch;
         use tokio_util::sync::CancellationToken;
 
         let Some(_shield) = show() else {
@@ -430,7 +430,7 @@ mod tests {
         // Give the compositor a beat to map + paint the layer.
         std::thread::sleep(Duration::from_millis(400));
 
-        let (tx, mut rx) = tokio_mpsc::channel::<VideoFrame>(2);
+        let (tx, mut rx) = crate::streaming::latest_frame::channel::<VideoFrame>();
         let cancel = CancellationToken::new();
         let (_wtx, wrx) = watch::channel(0u64);
         let window_mode = Arc::new(std::sync::atomic::AtomicBool::new(false));

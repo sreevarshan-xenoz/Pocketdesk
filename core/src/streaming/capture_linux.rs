@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use ashpd::desktop::PersistMode;
 use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 use pipewire::stream::StreamFlags;
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
@@ -22,7 +21,7 @@ const SPA_PARAM_FORMAT: u32 = 0;
 
 /// Shared state between the PipeWire thread and stream callbacks.
 struct StreamUserData {
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     /// Actual negotiated width (updated by param_changed callback).
     width: AtomicU32,
@@ -54,14 +53,14 @@ fn pick_stream_node(
 /// 1. Creates an XDG Portal screencast session
 /// 2. Extracts the PipeWire node ID from the portal response
 /// 3. Spawns a background PipeWire client thread that receives frames
-/// 4. Sends frames through the provided `mpsc::Sender<VideoFrame>` channel
+/// 4. Sends frames through the provided newest-frame slot
 /// 5. Returns a [`CaptureSession`] that manages the capture lifetime
 ///
 /// The capture runs continuously until `cancel` is triggered or the portal
 /// session ends.
 pub async fn start_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
 ) -> Result<CaptureSession> {
@@ -220,7 +219,7 @@ pub async fn start_capture(
 fn spawn_pipewire_capture(
     node_id: u32,
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
 ) -> Result<()> {
     std::thread::Builder::new()
@@ -268,7 +267,7 @@ fn persist_mode(persist: crate::portal_grant::Persist) -> PersistMode {
 /// takes the injector's events ([`crate::streaming::portal_input`]).
 async fn start_remote_desktop_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     screen_grant: Option<std::path::PathBuf>,
 ) -> Result<CaptureSession> {
@@ -466,7 +465,7 @@ async fn apply_portal_event(
 fn run_pipewire_capture(
     node_id: u32,
     config: &StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
 ) -> Result<()> {
     info!("PipeWire capture thread started, connecting to node {node_id}");
@@ -710,7 +709,7 @@ pub(super) fn check_x11_available() -> bool {
 /// `start_capture()`.
 pub(super) async fn start_x11_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
 ) -> Result<CaptureSession> {
     use x11rb::connection::Connection;
@@ -798,7 +797,7 @@ fn run_x11_capture_loop(
     root: u32,
     region: CaptureRegion,
     fps: u32,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
 ) -> Result<()> {
     use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat};

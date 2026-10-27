@@ -310,7 +310,7 @@ impl Dispatch<HyprlandToplevelExportFrameV1, FrameSlot> for WlState {
 /// encode task to skip its own software crop.
 pub fn start_screencopy_capture(
     config: StreamingConfig,
-    frame_tx: tokio_mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
@@ -387,7 +387,7 @@ impl Capture {
 
 fn run_capture_loop(
     config: StreamingConfig,
-    frame_tx: tokio_mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     ready_tx: Sender<Result<()>>,
     mut window_rx: watch::Receiver<u64>,
@@ -657,11 +657,11 @@ fn run_capture_loop(
     Ok(())
 }
 
-/// Hand one frame to the encoder. A full channel drops it (the encoder is
-/// behind; the next capture has newer pixels). Returns false once the
-/// encoder side is gone.
+/// Hand one frame to the encoder. It replaces one still waiting (the
+/// encoder is behind; this one has newer pixels, BG2). Returns false once
+/// the encoder side is gone.
 fn send_frame(
-    frame_tx: &tokio_mpsc::Sender<VideoFrame>,
+    frame_tx: &crate::streaming::latest_frame::FrameSender<VideoFrame>,
     data: Vec<u8>,
     width: u32,
     height: u32,
@@ -984,7 +984,7 @@ mod tests {
     /// IPC tests' pattern.
     #[test]
     fn screencopy_grabs_a_real_frame() {
-        let (tx, mut rx) = tokio_mpsc::channel::<VideoFrame>(2);
+        let (tx, mut rx) = crate::streaming::latest_frame::channel::<VideoFrame>();
         let cancel = CancellationToken::new();
         let config = StreamingConfig::default();
         let (_window_tx, window_rx) = watch::channel(0u64);
@@ -1008,10 +1008,7 @@ mod tests {
         // the Wayland connection, which drops the sender -> Disconnected.
         std::thread::sleep(Duration::from_millis(1200));
         assert!(
-            !matches!(
-                rx.try_recv(),
-                Err(tokio_mpsc::error::TryRecvError::Disconnected)
-            ),
+            !rx.is_closed(),
             "capture thread died after the first frame (per-frame buffer lifecycle?)"
         );
         drop(session); // cancels via Drop
@@ -1046,7 +1043,7 @@ mod tests {
             eprintln!("skipping: no Hyprland activewindow address here");
             return;
         };
-        let (tx, mut rx) = tokio_mpsc::channel::<VideoFrame>(2);
+        let (tx, mut rx) = crate::streaming::latest_frame::channel::<VideoFrame>();
         let cancel = CancellationToken::new();
         let (window_tx, window_rx) = watch::channel(0u64);
         let window_mode = Arc::new(AtomicBool::new(false));
@@ -1069,7 +1066,7 @@ mod tests {
         assert!(full.width > 0 && full.height > 0);
 
         // Drain what the output loop already queued, then ask for the window.
-        while rx.try_recv().is_ok() {}
+        while rx.try_recv().is_some() {}
         window_tx.send(addr).unwrap();
         let win = loop {
             match rx.blocking_recv() {

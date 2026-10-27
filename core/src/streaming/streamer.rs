@@ -737,7 +737,7 @@ impl StreamingServer {
         let live_id = _live_session.id();
 
         let cancel = self.cancel.clone();
-        let (frame_tx, mut frame_rx) = mpsc::channel::<VideoFrame>(2);
+        let (frame_tx, mut frame_rx) = crate::streaming::latest_frame::channel::<VideoFrame>();
         let (packet_tx, mut packet_rx) = mpsc::channel::<EncodedPacket>(8);
 
         // IDR requests: raised by the monitor task when the client reports a
