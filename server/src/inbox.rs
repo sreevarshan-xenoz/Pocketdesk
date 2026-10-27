@@ -13,7 +13,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
 
 use pocketdesk_core::local::paths::{
-    ALERTS_DIR, CLIPBOARD_OUT_DIR, COMMANDS_DIR, COMPUTERS_DIR, CONTROL_DIR, DIALS_DIR,
+    ALERTS_DIR, ASKS_DIR, CLIPBOARD_OUT_DIR, COMMANDS_DIR, COMPUTERS_DIR, CONTROL_DIR, DIALS_DIR,
     KDECONNECT_OUT_DIR, KICKS_DIR, LINKS_DIR, NOTIFICATION_CLEARS_DIR, NOTIFICATION_OUT_DIR,
     OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR, PHONE_PHOTOS_OUT_DIR, QUIET_DIR, RINGS_DIR,
     TRANSFER_CANCELS_DIR, TYPING_DIR,
@@ -30,6 +30,8 @@ pub const FOLDERS: &[&str] = &[
     RINGS_DIR,
     // Alerts from `pocketdesk done` (BF1).
     ALERTS_DIR,
+    // Questions from `pocketdesk ask` (BF3).
+    ASKS_DIR,
     QUIET_DIR,
     CLIPBOARD_OUT_DIR,
     PHONE_MEDIA_DIR,

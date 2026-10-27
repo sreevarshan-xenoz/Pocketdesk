@@ -59,6 +59,10 @@ async fn main() -> Result<()> {
             title,
             command,
         }) => std::process::exit(done::run(*pid, command, !*no_output, title.as_deref())),
+        // BF3: before the log starts too, so a script reads only the answer.
+        Some(cli::Commands::Ask { wait, question }) => {
+            std::process::exit(pocketdesk_server::asks::run_cli(&question.join(" "), *wait))
+        }
         _ => {}
     }
 
@@ -153,7 +157,9 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
         cli::Commands::Clipboard { send, to, json } => {
             std::process::exit(local_api::run_clipboard(send.zip(to.as_deref()), json))
         }
-        cli::Commands::Done { .. } => unreachable!("handled before the config is read"),
+        cli::Commands::Done { .. } | cli::Commands::Ask { .. } => {
+            unreachable!("handled before the config is read")
+        }
         cli::Commands::Ring { phone, json } => {
             std::process::exit(local_api::run_ring(&phone, json))
         }
