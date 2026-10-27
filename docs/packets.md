@@ -51,6 +51,8 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.link` | yes | yes | Links | links |
 | `kdeconnect.pocketdesk.link_role` | yes |  | none (any paired phone) | link_role |
 | `kdeconnect.pocketdesk.monitors` | yes | yes | none (any paired phone) | monitors |
+| `kdeconnect.pocketdesk.note` | yes |  | Notes | note |
+| `kdeconnect.pocketdesk.note_saved` |  | yes |  | note |
 | `kdeconnect.pocketdesk.notification_answered` | yes |  | Notifications | notification |
 | `kdeconnect.pocketdesk.notification_open` |  | yes |  | notification |
 | `kdeconnect.pocketdesk.notification_reply` | yes |  | Clipboard | notification_reply |

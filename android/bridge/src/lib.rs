@@ -22,6 +22,7 @@ mod link_quiet;
 mod links;
 mod logcat;
 mod media_presses;
+mod notes;
 mod notification_answers;
 mod peer_names;
 mod phone_actions;
@@ -1476,6 +1477,22 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendLin
     let address = jstring_to_string(&mut env, &address);
     let url = jstring_to_string(&mut env, &url);
     let json = envelope_unit(RUNTIME.block_on(links::send_link(address, port as u16, url)));
+    to_jstring(&mut env, json)
+}
+
+/// Add a note to the computer's notes file (BF4): `{"ok": null}`, or
+/// `{"error": reason}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSendNote(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    text: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let text = jstring_to_string(&mut env, &text);
+    let json = envelope_unit(RUNTIME.block_on(notes::send_note(address, port as u16, text)));
     to_jstring(&mut env, json)
 }
 

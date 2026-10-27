@@ -24,7 +24,8 @@ import dev.pocketdesk.android.shortcuts.Shortcuts
  * the last computer used.
  *
  * Shared through its "Open on computer" entry (T8a), text is not copied: its
- * first web link opens in the computer's browser.
+ * first web link opens in the computer's browser. Through "Note to computer"
+ * (BF4), it is added to the computer's notes file.
  */
 class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,6 +82,11 @@ class ShareActivity : ComponentActivity() {
         val uris = sharedUris(intent)
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
+        if (intent.component?.className == NoteShare.ALIAS) {
+            // Styled text too (BF4 review): it is no String extra.
+            val note = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            return if (note.isNullOrBlank()) done(getString(R.string.share_nothing)) else sendNote(host, note)
+        }
         if (intent.component?.className == OPEN_ON_COMPUTER) {
             // N9: every link it holds, as KDE Connect sends them.
             val urls = text?.let { LinkRule.findAll(it) }.orEmpty()
@@ -133,6 +139,15 @@ class ShareActivity : ComponentActivity() {
                         getString(R.string.share_failed, plainErrorText(result.exceptionOrNull()?.message))
                     },
                 )
+            }
+        }.start()
+    }
+
+    private fun sendNote(host: HostStore.Host, text: String) {
+        Thread {
+            val result = RustCore.sendNote(host.address, host.controlPort, text)
+            runOnUiThread {
+                done(NoteShare.words(this, HostStore.shownName(this, host.address), result.exceptionOrNull()?.message))
             }
         }.start()
     }

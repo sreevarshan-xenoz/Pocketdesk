@@ -106,6 +106,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::PhoneActions => "phone_actions",
         Capability::Peek => "peek",
         Capability::Ask => "ask",
+        Capability::Notes => "notes",
     }
 }
 

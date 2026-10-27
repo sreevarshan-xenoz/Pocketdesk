@@ -153,6 +153,10 @@ pub struct Config {
     /// chosen, is what lets one.
     #[serde(default = "default_true")]
     pub peek: bool,
+    /// The Markdown file notes from phones are appended to (BF4); empty: no
+    /// notes, each refused with why.
+    #[serde(default)]
+    pub notes_file: String,
     /// Send what is copied on this computer to connected phones with the
     /// Clipboard permission, as it changes (T10b).
     #[serde(default = "default_true")]
@@ -444,6 +448,7 @@ impl Default for Config {
             share_state: true,
             virtual_screens: true,
             peek: true,
+            notes_file: String::new(),
             clipboard_push: true,
             clipboard_images: false,
             received_images_clipboard: false,
@@ -684,6 +689,7 @@ impl Config {
         "share_state",
         "virtual_screens",
         "peek",
+        "notes_file",
         "clipboard_push",
         "clipboard_images",
         "received_images_clipboard",

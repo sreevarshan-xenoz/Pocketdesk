@@ -35,6 +35,7 @@ pub mod listening;
 pub mod muted_apps;
 pub mod network;
 pub mod note_clears;
+pub mod notes;
 pub mod notification_icons;
 pub mod outbox;
 pub mod pair_link;
