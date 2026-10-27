@@ -51,7 +51,10 @@ pub mod capture_wgc;
 pub mod capture_x11;
 #[cfg(feature = "encode")]
 pub mod encoder;
-#[cfg(all(feature = "encode", target_os = "linux"))]
+#[cfg(all(
+    feature = "encode",
+    any(target_os = "linux", all(windows, feature = "inproc-windows"))
+))]
 pub mod encoder_inproc;
 #[cfg(all(feature = "encode", target_os = "linux"))]
 pub mod encoder_vaapi;

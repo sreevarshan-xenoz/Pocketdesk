@@ -100,3 +100,8 @@ sha2 = "0.10"
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 # `dup2` in the uinput rebuild test, to fault a live device's descriptor.
 libc.workspace = true
+
+[features]
+# BG8: the in-process Windows encoder (needs FFmpeg's development files to
+# build and its DLLs to run; docs/development-setup.md).
+inproc-windows = ["pocketdesk-core/inproc-windows"]

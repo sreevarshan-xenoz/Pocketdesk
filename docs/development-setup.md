@@ -98,7 +98,7 @@ no SDK, so GNU is the one that is exercised.
 - **ffmpeg on `PATH`**: the encoder runs as a sidecar (`ffmpeg.exe`), and
   hardware encoders are runtime-verified against it (NVENC, AMF, Quick Sync,
   Media Foundation). A "full" build such as `winget install Gyan.FFmpeg` has
-  all of them. In-process FFmpeg (`ffmpeg-next`) is Linux-only for now.
+  all of them. In-process FFmpeg on Windows is opt-in: see §4a.
 - **cmake** (ships with WinLibs) builds the vendored Opus; `.cargo/config.toml`
   sets `CMAKE_POLICY_VERSION_MINIMUM` so CMake 4 accepts it, and passes
   `--exclude-libs,ALL` to the MinGW linker (see the comment there).
@@ -119,6 +119,46 @@ cargo test -p pocketdesk-server --lib -- --ignored --nocapture the_current_media
 Run it with `cargo run --bin pocketdesk -- start`, or register it at logon
 with `pocketdesk install`. Config lives in `%APPDATA%\pocketdesk\config.toml`,
 state (pairing, trust store, certs, logs) in `%LOCALAPPDATA%\pocketdesk\`.
+
+### 4a. The in-process encoder on Windows (`inproc-windows`, BG8)
+
+With the `inproc-windows` feature, NVENC runs inside the server instead of an
+FFmpeg child process:
+- a keyframe comes on the frame asked for, not up to 2 s later;
+- the bitrate changes in place instead of restarting the encoder (about
+  500 ms without frames each time);
+- there is no pipe in the way.
+
+It is off by default, because it needs FFmpeg's development files to build
+and its DLLs to run. AMF and Quick Sync stay on the sidecar.
+
+1. **FFmpeg 8 development files.** A shared build with `include\`, `lib\`
+   (MinGW `lib*.dll.a`) and `bin\*.dll`, such as BtbN's
+   `ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip`, unpacked to e.g.
+   `C:\dev\ffmpeg-8`. Use an LGPL build for anything you hand to others: the
+   server links it dynamically, and the project is MIT or Apache-2.0.
+2. **libclang**, for the bindings: `winget install LLVM.LLVM`.
+3. **The build environment**, with `<llvm>` for LLVM's folder,
+   `<mingw64>` for WinLibs' `mingw64` folder and `<n>` for clang's version
+   folder under `<llvm>\lib\clang`:
+
+```sh
+export FFMPEG_DIR="C:/dev/ffmpeg-8"
+export LIBCLANG_PATH="<llvm>/bin"
+# MinGW's headers for bindgen. The two defines skip the x86 intrinsics
+# headers, whose AMX tile type bindgen cannot lay out.
+export BINDGEN_EXTRA_CLANG_ARGS="--target=x86_64-w64-mingw32 -D__IMMINTRIN_H -D__X86INTRIN_H -isystem <llvm>/lib/clang/<n>/include -isystem <mingw64>/x86_64-w64-mingw32/include"
+cargo build -p pocketdesk-server --features inproc-windows
+```
+
+4. **At run time**, FFmpeg's `bin\*.dll` go beside `pocketdesk.exe` or on
+   `PATH`. Without them the server does not start.
+5. **The live test**, which needs an NVIDIA GPU:
+   `cargo test -p pocketdesk-core --features inproc-windows --lib -- --ignored nvenc`
+
+The feature's `ffmpeg-next` comes through `ffmpeg-shim/` (`pocketdesk-ffmpeg`),
+outside the workspace, since Cargo will not let core name `ffmpeg-next` twice.
+A plain `cargo build --workspace` never builds it.
 
 ## 5. Android Client (Kotlin + Rust JNI bridge)
 

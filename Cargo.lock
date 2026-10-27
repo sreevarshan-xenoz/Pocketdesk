@@ -5624,6 +5624,7 @@ dependencies = [
  "noq-proto",
  "opus",
  "pipewire",
+ "pocketdesk-ffmpeg",
  "quinn",
  "rand 0.8.6",
  "rcgen",
@@ -5673,6 +5674,13 @@ dependencies = [
  "windows 0.62.2",
  "windows-future 0.3.2",
  "zbus",
+]
+
+[[package]]
+name = "pocketdesk-ffmpeg"
+version = "0.7.0"
+dependencies = [
+ "ffmpeg-next",
 ]
 
 [[package]]

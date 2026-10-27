@@ -964,7 +964,21 @@ impl StreamingServer {
                     // keep the current frame resolution — only the rate moves.
                     Ok(()) = encoder_bitrate_rx.changed() => {
                         let new_bitrate = *encoder_bitrate_rx.borrow_and_update();
-                        if new_bitrate != encoder.config().bitrate_bps {
+                        // BG8: an encoder that changes its rate in place needs
+                        // no rebuild, no keyframe and no pause; a frame rate
+                        // sent with it still rebuilds.
+                        let same_fps = *encoder_fps_rx.borrow() == encoder.config().fps;
+                        if new_bitrate != encoder.config().bitrate_bps
+                            && same_fps
+                            && encoder.set_bitrate(new_bitrate)
+                        {
+                            encoder_preferred.bitrate_bps = new_bitrate;
+                            info!(
+                                bitrate_bps = new_bitrate,
+                                backend = encoder.backend_name(),
+                                "Encoder bitrate changed in place"
+                            );
+                        } else if new_bitrate != encoder.config().bitrate_bps {
                             let mut cfg = encoder_preferred.clone();
                             cfg.bitrate_bps = new_bitrate;
                             // A frame rate sent with it is taken in the same

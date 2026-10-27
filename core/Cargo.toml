@@ -25,6 +25,11 @@ capture = [
     "wayland-portal",
 ]
 encode = ["dep:ffmpeg-sidecar", "dep:ffmpeg-next"]
+# BG8: the in-process encoder on Windows too (NVENC with keyframes on request
+# and bitrate changes in place, no FFmpeg child). Off unless asked for: it
+# needs FFmpeg's development files to build and its DLLs to run
+# (docs/development-setup.md).
+inproc-windows = ["encode", "dep:pocketdesk-ffmpeg"]
 injection = [
     "dep:evdev",
     "dep:wayland-client",
@@ -145,6 +150,10 @@ wayland-protocols-misc = { version = "0.3", features = ["client"], optional = tr
 # Windows build.
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+# BG8 (feature inproc-windows): the same ffmpeg-next the Linux build uses,
+# through a crate of its own (Cargo refuses one crate under two names), so
+# `encode` alone never pulls it in on Windows.
+pocketdesk-ffmpeg = { path = "../ffmpeg-shim", optional = true }
 
 # Adapter enumeration for get_local_ips() off Linux (no `hostname -I`); already
 # in the graph through mdns-sd.

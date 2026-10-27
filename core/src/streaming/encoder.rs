@@ -29,7 +29,7 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use tracing::{debug, error, info, trace, warn};
 
 use super::encoder_detect::HardwareEncoder;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
 use super::encoder_inproc::InProcessEncoder;
 #[cfg(target_os = "linux")]
 use super::encoder_vaapi::VaapiEncoder;
@@ -119,25 +119,26 @@ fn spawn_stderr_logger(stderr: ChildStderr, tail: Arc<StderrTail>) -> io::Result
 
 /// Magic bytes for H.264 NAL unit start codes. The sidecar's output is
 /// framed by FLV; these NAL scanners serve the in-process encoders.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 const START_CODE_4: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 const START_CODE_3: [u8; 3] = [0x00, 0x00, 0x01];
 
 /// NAL unit type for IDR (instantaneous decoder refresh / keyframe).
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 const NAL_TYPE_IDR: u8 = 5;
 
 /// Mask to extract NAL unit type from the first byte.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 const NAL_TYPE_MASK: u8 = 0x1F;
 
 /// Video encoder facade over the FFmpeg backends.
 pub enum VideoEncoder {
     /// Persistent FFmpeg child process over stdio pipes (VAAPI/NVENC).
     Sidecar(SidecarEncoder),
-    /// In-process libx264/libx265 via `ffmpeg-next` (software path).
-    #[cfg(target_os = "linux")]
+    /// In-process via `ffmpeg-next`: libx264/libx265 (software path), and
+    /// NVENC on Windows with `inproc-windows` (BG8).
+    #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
     InProcess(InProcessEncoder),
     /// In-process VAAPI (`h264_vaapi`/`hevc_vaapi`) via raw FFmpeg FFI (C4).
     #[cfg(target_os = "linux")]
@@ -165,6 +166,19 @@ impl VideoEncoder {
         if hw_config.codec == VideoCodec::H265 && !resolved.supports_hevc() {
             info!("{resolved:?} cannot encode HEVC; using H.264 on this rung");
             hw_config.codec = VideoCodec::H264;
+        }
+
+        // BG8: NVENC in-process first on Windows (keyframes on request,
+        // bitrate in place), then the verified sidecar.
+        #[cfg(all(windows, feature = "inproc-windows"))]
+        if matches!(resolved, HardwareEncoder::Nvenc) && fail_by_seam(resolved).is_ok() {
+            match InProcessEncoder::new_hardware(hw_config.clone()) {
+                Ok(encoder) => {
+                    info!("Video encoder: in-process FFmpeg ({resolved:?})");
+                    return Ok(Self::InProcess(encoder));
+                }
+                Err(e) => warn!("In-process {resolved:?} unavailable ({e:#}); trying the sidecar"),
+            }
         }
 
         // C4: VAAPI prefers the in-process hardware path (no child process, no
@@ -208,8 +222,8 @@ impl VideoEncoder {
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Sidecar(e) => e.backend_name(),
-            #[cfg(target_os = "linux")]
-            Self::InProcess(_) => "in-process",
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            Self::InProcess(e) => e.backend_name(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(_) => "in-process-vaapi",
         }
@@ -220,7 +234,7 @@ impl VideoEncoder {
     pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.encode_frame(frame),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
@@ -231,10 +245,25 @@ impl VideoEncoder {
     pub fn drain(&mut self) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
             Self::Sidecar(e) => e.drain(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => e.drain(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.drain(),
+        }
+    }
+
+    /// Change the bitrate in place, without rebuilding the encoder (BG8);
+    /// `false` when this backend cannot, and the caller rebuilds.
+    // Off the in-process builds only the sidecar exists, which cannot.
+    #[cfg_attr(
+        not(any(target_os = "linux", all(windows, feature = "inproc-windows"))),
+        allow(unused_variables)
+    )]
+    pub fn set_bitrate(&mut self, bitrate_bps: u32) -> bool {
+        match self {
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
+            Self::InProcess(e) => e.set_bitrate(bitrate_bps),
+            _ => false,
         }
     }
 
@@ -242,7 +271,7 @@ impl VideoEncoder {
     pub fn request_keyframe(&mut self) {
         match self {
             Self::Sidecar(e) => e.request_keyframe(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => e.request_keyframe(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.request_keyframe(),
@@ -253,7 +282,7 @@ impl VideoEncoder {
     pub fn sequence(&self) -> u64 {
         match self {
             Self::Sidecar(e) => e.sequence(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => e.sequence(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.sequence(),
@@ -264,7 +293,7 @@ impl VideoEncoder {
     pub fn config(&self) -> &StreamingConfig {
         match self {
             Self::Sidecar(e) => e.config(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => e.config(),
             #[cfg(target_os = "linux")]
             Self::VaapiInProcess(e) => e.config(),
@@ -846,7 +875,7 @@ impl Drop for SidecarEncoder {
 /// Detect if the encoded data contains an IDR (keyframe) NAL unit.
 ///
 /// Scans for start codes and checks if any following NAL unit has type 5.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
     let mut pos = 0;
     while pos < data.len() {
@@ -873,7 +902,7 @@ pub(crate) fn detect_keyframe(data: &[u8]) -> bool {
 /// Returns `Some((position, length))` where position is the offset of the start
 /// code and length is either 4 (for 00 00 00 01) or 3 (for 00 00 01).
 /// Returns `None` if no start code is found.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows"), test))]
 pub(crate) fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
     if from >= data.len() || from + 2 >= data.len() {
         return None;
