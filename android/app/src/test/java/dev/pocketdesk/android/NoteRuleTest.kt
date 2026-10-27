@@ -10,6 +10,7 @@ class NoteRuleTest {
         assertEquals(NoteRule.Outcome.NoFile, NoteRule.outcome("no_file"))
         assertEquals(NoteRule.Outcome.Empty, NoteRule.outcome("empty"))
         assertEquals(NoteRule.Outcome.NotWritten, NoteRule.outcome("not_written"))
+        assertEquals(NoteRule.Outcome.NotAllowed, NoteRule.outcome("not_allowed"))
     }
 
     @Test

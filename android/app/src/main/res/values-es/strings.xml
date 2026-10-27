@@ -910,6 +910,7 @@
     <string name="note_to_computer_label">Nota al ordenador</string>
     <string name="note_saved">Nota añadida en %1$s</string>
     <string name="note_no_file">Elige primero un archivo para las notas en Pocketdesk de %1$s (Ajustes, Teléfonos).</string>
+    <string name="note_not_allowed">Este teléfono no puede añadir notas en %1$s. Activa Añadir a mis notas para él en Pocketdesk del ordenador (Dispositivos).</string>
     <string name="note_not_written">%1$s no pudo escribir la nota en su archivo de notas.</string>
     <string name="settings_note_to_computer">Nota al ordenador</string>
     <string name="settings_note_to_computer_summary">En el menú de compartir: un texto o un enlace se añade, con la hora, al archivo de notas elegido en Pocketdesk de tu ordenador</string>

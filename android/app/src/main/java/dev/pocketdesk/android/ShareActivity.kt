@@ -83,7 +83,9 @@ class ShareActivity : ComponentActivity() {
         val text =
             if (intent.type == "text/plain") intent.getStringExtra(Intent.EXTRA_TEXT) else null
         if (intent.component?.className == NoteShare.ALIAS) {
-            return if (text.isNullOrBlank()) done(getString(R.string.share_nothing)) else sendNote(host, text)
+            // Styled text too (BF4 review): it is no String extra.
+            val note = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+            return if (note.isNullOrBlank()) done(getString(R.string.share_nothing)) else sendNote(host, note)
         }
         if (intent.component?.className == OPEN_ON_COMPUTER) {
             // N9: every link it holds, as KDE Connect sends them.

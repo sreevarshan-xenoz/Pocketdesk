@@ -903,6 +903,7 @@
     <string name="note_to_computer_label">கணினிக்குக் குறிப்பு</string>
     <string name="note_saved">%1$s இல் குறிப்பு சேர்க்கப்பட்டது</string>
     <string name="note_no_file">முதலில் %1$s இல் உள்ள Pocketdesk இல் குறிப்புகளுக்கு ஒரு கோப்பைத் தேர்ந்தெடுக்கவும் (அமைப்புகள், ஃபோன்கள்).</string>
+    <string name="note_not_allowed">இந்த ஃபோன் %1$s இல் குறிப்புகளைச் சேர்க்க அனுமதி இல்லை. கணினியில் உள்ள Pocketdesk இல் (சாதனங்கள்) இதற்கு என் குறிப்புகளில் சேர் என்பதை இயக்கவும்.</string>
     <string name="note_not_written">%1$s ஆல் குறிப்பை அதன் குறிப்புக் கோப்பில் எழுத முடியவில்லை.</string>
     <string name="settings_note_to_computer">கணினிக்குக் குறிப்பு</string>
     <string name="settings_note_to_computer_summary">பகிர்வுப் பட்டியலில்: உரை அல்லது இணைப்பு, நேரத்துடன், உங்கள் கணினியில் உள்ள Pocketdesk இல் தேர்ந்தெடுத்த குறிப்புக் கோப்பில் சேர்க்கப்படும்</string>

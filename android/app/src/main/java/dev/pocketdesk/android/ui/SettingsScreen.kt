@@ -291,12 +291,18 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.linksFromComputer(context),
                     { Prefs.setLinksFromComputer(context, it) },
                 )
-                // BF4: "Note to computer" in the share sheet.
+                // BF4: "Note to computer" in the share sheet. Held here: the
+                // share sheet's entry is no pref, so nothing else redraws the
+                // switch (BF4 review).
+                var noteShown by remember { mutableStateOf(dev.pocketdesk.android.NoteShare.shown(context)) }
                 SettingSwitch(
                     stringResource(R.string.settings_note_to_computer),
                     stringResource(R.string.settings_note_to_computer_summary),
-                    dev.pocketdesk.android.NoteShare.shown(context),
-                    { dev.pocketdesk.android.NoteShare.setShown(context, it) },
+                    noteShown,
+                    {
+                        dev.pocketdesk.android.NoteShare.setShown(context, it)
+                        noteShown = it
+                    },
                 )
                 // BF1: `pocketdesk done` saying a command on the computer ended.
                 SettingSwitch(
