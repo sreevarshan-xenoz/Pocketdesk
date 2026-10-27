@@ -65,6 +65,8 @@ pub mod nvenc_power;
 pub mod shield;
 #[cfg(feature = "server")]
 pub mod streamer;
+#[cfg(feature = "capture")]
+pub mod test_pattern;
 
 pub use audio::{AudioConfig, AudioPacket};
 #[cfg(feature = "opus")]

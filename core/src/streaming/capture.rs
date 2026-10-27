@@ -192,6 +192,10 @@ pub async fn start_capture_auto(
     // Only the portal asks anyone; the other backends need no grant.
     #[cfg(not(target_os = "linux"))]
     let _ = &screen_grant;
+    // A moving pattern instead of the screen (benches, throwaways).
+    if super::test_pattern::wanted() {
+        return Ok(super::test_pattern::start(config, frame_tx, cancel));
+    }
     let attempts = capture_attempts(backend, detect_display_server())?;
     let mut last_err: Option<anyhow::Error> = None;
     for backend_tried in attempts {
