@@ -89,26 +89,26 @@ class H264Decoder(
      * and the wire; these two are the phone's half of the chain, and the bridge
      * ships them back for the session record.
      */
-    private val fedAtUs = ArrayDeque<Long>()
+    private val pending = PendingOutputs(staleUs = STALE_FEED_US, max = MAX_PENDING_FEEDS)
     private var lastRenderAtUs = 0L
 
     /** Forget a run's timings: its feeds can no longer produce outputs. */
     private fun resetTimings() {
-        fedAtUs.clear()
+        pending.clear()
         lastRenderAtUs = 0L
     }
 
     /**
-     * One frame reached the panel. Pair it with the feed that produced it
-     * (decode time) and with the frame before it (render cadence). Feeds and
-     * outputs line up because the stream is B-frame-free (R2#1); anything
-     * unmatched — the frame that straddles a reconfigure, say — goes
+     * One frame reached the panel. Pair it with the feed that produced it,
+     * [fedAt] (decode time), and with the frame before it (render cadence).
+     * Feeds and outputs line up because the stream is B-frame-free (R2#1);
+     * anything unmatched — the frame that straddles a reconfigure, say — goes
      * unmeasured rather than being reported against the wrong feed.
      */
-    private fun reportTimings() {
+    private fun reportTimings(fedAt: Long?) {
         val now = nowMicros()
-        if (fedAtUs.isNotEmpty()) {
-            RustCore.recordSample(RustCore.SAMPLE_DECODE, now - fedAtUs.removeFirst())
+        if (fedAt != null) {
+            RustCore.recordSample(RustCore.SAMPLE_DECODE, now - fedAt)
         }
         val sinceRender = now - lastRenderAtUs
         // A longer gap than this is the link sitting idle between frames, not
@@ -168,7 +168,12 @@ class H264Decoder(
             // a slow link takes longer than the stall limit to arrive.
             val watch = StallWatch(STALL_MS, FIRST_FRAME_MS, SystemClock.elapsedRealtime())
             while (gate.isOpen) {
-                val frames = RustCore.receiveFrames(timeoutMs = POLL_TIMEOUT_MS)
+                // While a picture is still being decoded the bridge is polled
+                // briefly, so it is drawn within a few ms of coming out; the
+                // feed never waits on the decoder, which keeps decoding the
+                // next frames meanwhile.
+                val due = pending.due(nowMicros())
+                val frames = RustCore.receiveFrames(timeoutMs = if (due) DUE_POLL_TIMEOUT_MS else POLL_TIMEOUT_MS)
                 if (frames.isEmpty()) {
                     // The desktop closed the stream (refused the session,
                     // ended it): say so now rather than after the watchdog.
@@ -182,6 +187,10 @@ class H264Decoder(
                         onStalled?.invoke()
                         break
                     }
+                    // A picture decoded since the last batch is drawn now,
+                    // not when the next frame comes (a second later on a
+                    // still desktop).
+                    mediaCodec?.let { drain(it, bufferInfo) }
                     continue
                 }
                 watch.frame(SystemClock.elapsedRealtime())
@@ -275,13 +284,7 @@ class H264Decoder(
         if (isKeyframe) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
         codec.queueInputBuffer(inIndex, 0, data.size, System.nanoTime() / 1000, flags)
         // Only a frame that actually went into the codec can come out of it.
-        if (fedAtUs.size >= MAX_PENDING_FEEDS) {
-            // A real-time decoder never holds this many frames, so the queue has
-            // lost sync with the output run. Keep the recent feeds and drop the
-            // stale one instead of growing without bound.
-            fedAtUs.removeFirst()
-        }
-        fedAtUs.addLast(nowMicros())
+        pending.fed(nowMicros())
 
         drain(codec, info)
     }
@@ -314,20 +317,43 @@ class H264Decoder(
         return -1
     }
 
+    /**
+     * Draw what the decoder has ready. When several pictures are ready at
+     * once the phone is behind: only the newest is drawn, the older ones
+     * released unseen.
+     */
     private fun drain(
         codec: MediaCodec,
         info: MediaCodec.BufferInfo,
     ) {
-        var outIndex = codec.dequeueOutputBuffer(info, 0)
-        while (outIndex >= 0) {
-            // Render to the surface as soon as a frame is available.
-            codec.releaseOutputBuffer(outIndex, true)
-            reportTimings()
-            outIndex = codec.dequeueOutputBuffer(info, 0)
+        var newest = -1
+        var newestFedAt: Long? = null
+        while (true) {
+            val index = codec.dequeueOutputBuffer(info, 0)
+            if (index >= 0) {
+                if (newest >= 0) codec.releaseOutputBuffer(newest, false)
+                newest = index
+                newestFedAt = pending.out()
+            } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                // A picture from before the change is drawn first.
+                if (newest >= 0) render(codec, newest, newestFedAt)
+                newest = -1
+                // A reconfigure re-fed the stream; draining resumes next frame.
+                if (maybeReconfigure(codec)) return
+            } else {
+                break
+            }
         }
-        if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED && maybeReconfigure(codec)) {
-            return // reconfigure re-fed the stream; resume draining next frame
-        }
+        if (newest >= 0) render(codec, newest, newestFedAt)
+    }
+
+    private fun render(
+        codec: MediaCodec,
+        index: Int,
+        fedAt: Long?,
+    ) {
+        codec.releaseOutputBuffer(index, true)
+        reportTimings(fedAt)
     }
 
     /**
@@ -426,6 +452,12 @@ class H264Decoder(
 
         /** Pending feeds before the feed↔output pairing is considered lost. */
         private const val MAX_PENDING_FEEDS = 8
+
+        /** The bridge's poll while a picture is being decoded. */
+        private const val DUE_POLL_TIMEOUT_MS = 4
+
+        /** A feed this old without a picture was dropped by the decoder. */
+        private const val STALE_FEED_US = 100_000L
 
         /** A longer gap between rendered frames is an idle desktop, not a slow panel. */
         private const val RENDER_GAP_MAX_US = 1_000_000L
