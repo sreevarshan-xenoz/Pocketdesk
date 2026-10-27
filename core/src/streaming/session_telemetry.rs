@@ -110,6 +110,19 @@ pub struct SessionReport {
     pub decode_tail: Option<Summary>,
     pub render_tail: Option<Summary>,
     pub e2e_tail: Option<Summary>,
+    /// Freezes (BG1): each one the time from the client asking for a
+    /// keyframe after a lost frame to that keyframe arriving, when the
+    /// picture on the phone was wrong or stuck. Its count is how many there
+    /// were; `None` when there was none, or the client does not measure them.
+    /// A lower bound: a freeze still running when the session ends (left
+    /// while frozen) is not in it.
+    pub recovery_tail: Option<Summary>,
+    /// Frames the server sent no more because a newer keyframe made them
+    /// moot (the transport's backlog cut back to it), BG1.
+    pub frames_trimmed: u64,
+    /// Captured frames a newer one replaced before the encoder took them
+    /// (BG2's slot): the encoder was busier than the screen changed. BG1.
+    pub capture_replaced: u64,
     /// What the transport itself said about the link, or `None` for a session
     /// that never got far enough to sample one.
     pub link: Option<LinkReport>,
@@ -264,11 +277,18 @@ impl SessionReport {
             (self.decode_tail.as_ref(), "dec"),
             (self.render_tail.as_ref(), "rnd"),
             (self.e2e_tail.as_ref(), "e2e"),
+            (self.recovery_tail.as_ref(), "freeze"),
         ] {
             if let Some(tail) = tail {
                 write!(line, "\t{}", tail.format_tail(key)).expect("infallible");
             }
         }
+        write!(
+            line,
+            "\ttrimmed={}\treplaced={}",
+            self.frames_trimmed, self.capture_replaced
+        )
+        .expect("infallible");
         if let Some(link) = &self.link {
             write!(line, "{}", link.format()).expect("infallible");
         }
@@ -374,6 +394,9 @@ pub struct SessionRecorder {
     decode_tail: Samples,
     render_tail: Samples,
     e2e_tail: Samples,
+    recovery_tail: Samples,
+    frames_trimmed: std::sync::atomic::AtomicU64,
+    capture_replaced: std::sync::atomic::AtomicU64,
     /// The client's last link-feedback frame, if one ever arrived.
     client_link: Mutex<Option<ClientLink>>,
     observed: Mutex<PathObserver>,
@@ -396,6 +419,9 @@ impl SessionRecorder {
             decode_tail: Samples::new(),
             render_tail: Samples::new(),
             e2e_tail: Samples::new(),
+            recovery_tail: Samples::new(),
+            frames_trimmed: std::sync::atomic::AtomicU64::new(0),
+            capture_replaced: std::sync::atomic::AtomicU64::new(0),
             client_link: Mutex::new(None),
             observed: Mutex::new(PathObserver::default()),
             family,
@@ -454,12 +480,27 @@ impl SessionRecorder {
             super::input_packet::SAMPLE_DECODE => &self.decode_tail,
             super::input_packet::SAMPLE_RENDER => &self.render_tail,
             super::input_packet::SAMPLE_E2E => &self.e2e_tail,
+            super::input_packet::SAMPLE_RECOVERY => &self.recovery_tail,
             _ => return false,
         };
         for &micros in values {
             tail.push_micros(u64::from(micros));
         }
         true
+    }
+
+    /// Count frames the transport cut from its backlog back to a keyframe
+    /// (BG1).
+    pub fn record_trimmed(&self, frames: u64) {
+        self.frames_trimmed
+            .fetch_add(frames, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How many captured frames a newer one replaced before the encoder took
+    /// them, over the session (BG1, from BG2's slot): the latest count.
+    pub fn set_capture_replaced(&self, frames: u64) {
+        self.capture_replaced
+            .store(frames, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Take the client's own reading of the link: the far end's measurement of
@@ -529,6 +570,13 @@ impl SessionRecorder {
             decode_tail: self.decode_tail.summary_ms(),
             render_tail: self.render_tail.summary_ms(),
             e2e_tail: self.e2e_tail.summary_ms(),
+            recovery_tail: self.recovery_tail.summary_ms(),
+            frames_trimmed: self
+                .frames_trimmed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            capture_replaced: self
+                .capture_replaced
+                .load(std::sync::atomic::Ordering::Relaxed),
             link: self.link_report(),
             encoder: self
                 .encoder
@@ -697,6 +745,9 @@ mod tests {
             decode_tail: None,
             render_tail: None,
             e2e_tail: None,
+            recovery_tail: None,
+            frames_trimmed: 0,
+            capture_replaced: 0,
             link: None,
             encoder: None,
         }
@@ -782,6 +833,32 @@ mod tests {
         assert_eq!(tail.p95_ms, 120, "a one-in-ten stall has to be visible");
         assert_eq!(tail.p99_ms, 120);
         assert_eq!(tail.max_ms, 120);
+    }
+
+    /// BG1: freezes, frames trimmed and captures replaced reach the record
+    /// and its line.
+    #[test]
+    fn freezes_and_dropped_frames_reach_the_record() {
+        let rec = SessionRecorder::new(TransportFamily::Quinn, None);
+        assert!(rec.record_client_samples(
+            super::super::input_packet::SAMPLE_RECOVERY,
+            &[180_000, 420_000]
+        ));
+        rec.record_trimmed(3);
+        rec.record_trimmed(2);
+        rec.set_capture_replaced(40);
+        let report = rec.finish(SessionOutcome::Completed, 0);
+        let freezes = report.recovery_tail.as_ref().expect("two freezes");
+        assert_eq!(freezes.count, 2);
+        assert_eq!(freezes.max_ms, 420);
+        assert_eq!(report.frames_trimmed, 5);
+        assert_eq!(report.capture_replaced, 40);
+        let line = report.format();
+        assert!(line.contains("\tfreeze_"), "{line}");
+        assert!(line.contains("\ttrimmed=5\treplaced=40"), "{line}");
+        let quiet =
+            SessionRecorder::new(TransportFamily::Quinn, None).finish(SessionOutcome::Completed, 0);
+        assert!(quiet.recovery_tail.is_none(), "no freeze is not a zero one");
     }
 
     #[test]
