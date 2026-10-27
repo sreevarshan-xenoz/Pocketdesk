@@ -193,6 +193,20 @@ struct ClientBatches {
     recovery: SampleBatch,
 }
 
+/// Send what the client measured since the last flush, in frame-sized
+/// chunks: a stalled flush loop must not lose the samples it already holds,
+/// only delay them.
+async fn flush_samples(connection: &SharedConnection, samples: &ClientBatches) {
+    for (kind, batch) in [
+        (SAMPLE_E2E, &samples.e2e),
+        (SAMPLE_RECOVERY, &samples.recovery),
+    ] {
+        while let Some(values) = batch.take_chunk() {
+            send_frame(connection, &InputPacket::ClientSamples { kind, values }).await;
+        }
+    }
+}
+
 /// A freeze's length (BG1): from the first lost frame the client noticed (a
 /// gap before a delta) to the next keyframe, which restarts the picture.
 /// Gaps while a freeze runs belong to it; a keyframe with no freeze running
@@ -1427,6 +1441,9 @@ async fn send_stats_loop(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
+                // What was measured since the last tick goes too (BG1
+                // review: a freeze that ended in the last second was lost).
+                flush_samples(connection, samples).await;
                 debug!("Stats feedback cancelled");
                 break;
             }
@@ -1442,28 +1459,7 @@ async fn send_stats_loop(
                 )
                 .await;
 
-                // Drain in frame-sized chunks: a stalled flush loop must not
-                // lose the samples it already holds, only delay them.
-                while let Some(values) = samples.e2e.take_chunk() {
-                    send_frame(
-                        connection,
-                        &InputPacket::ClientSamples {
-                            kind: SAMPLE_E2E,
-                            values,
-                        },
-                    )
-                    .await;
-                }
-                while let Some(values) = samples.recovery.take_chunk() {
-                    send_frame(
-                        connection,
-                        &InputPacket::ClientSamples {
-                            kind: SAMPLE_RECOVERY,
-                            values,
-                        },
-                    )
-                    .await;
-                }
+                flush_samples(connection, samples).await;
             }
         }
     }

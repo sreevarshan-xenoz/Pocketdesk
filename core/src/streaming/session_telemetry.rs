@@ -114,6 +114,8 @@ pub struct SessionReport {
     /// keyframe after a lost frame to that keyframe arriving, when the
     /// picture on the phone was wrong or stuck. Its count is how many there
     /// were; `None` when there was none, or the client does not measure them.
+    /// A lower bound: a freeze still running when the session ends (left
+    /// while frozen) is not in it.
     pub recovery_tail: Option<Summary>,
     /// Frames the server sent no more because a newer keyframe made them
     /// moot (the transport's backlog cut back to it), BG1.
