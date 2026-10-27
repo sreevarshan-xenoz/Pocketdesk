@@ -672,6 +672,7 @@ fn send_frame(
         height,
         stride: width * 4,
         timestamp: Instant::now(),
+        gpu: None,
     };
     !matches!(
         frame_tx.try_send(frame),

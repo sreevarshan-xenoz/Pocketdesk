@@ -74,6 +74,7 @@ pub fn scene_frame(width: u32, height: u32, index: u32) -> VideoFrame {
         height,
         stride: stride as u32,
         timestamp: Instant::now(),
+        gpu: None,
     }
 }
 

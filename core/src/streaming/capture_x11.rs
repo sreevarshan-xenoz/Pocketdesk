@@ -43,6 +43,7 @@ fn capture_frame(monitor_idx: usize) -> Result<VideoFrame> {
         height,
         stride,
         timestamp: Instant::now(),
+        gpu: None,
     })
 }
 

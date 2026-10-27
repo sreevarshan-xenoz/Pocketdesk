@@ -14,6 +14,10 @@ pub mod connection;
 pub mod dht;
 pub mod encoder_detect;
 mod frame_pool;
+#[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
+mod gpu_frame;
+#[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
+pub use gpu_frame::GpuFrame;
 pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
@@ -335,6 +339,26 @@ pub struct VideoFrame {
     pub stride: u32,
     /// Frame timestamp (monotonic clock)
     pub timestamp: std::time::Instant,
+    /// The frame still on the GPU, `data` empty (BG10): Windows captures on
+    /// an NVIDIA adapter with `inproc-windows`. Read back with
+    /// [`VideoFrame::downloaded`] where the pixels are needed.
+    pub gpu: Option<GpuFrame>,
+}
+
+/// Without zero-copy (BG10) no frame is on the GPU.
+#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+#[derive(Debug, Clone)]
+pub enum GpuFrame {}
+
+#[cfg(not(all(windows, feature = "capture", feature = "inproc-windows")))]
+impl GpuFrame {
+    fn offset(&mut self, _x: u32, _y: u32) {
+        match *self {}
+    }
+
+    fn download(&self, _width: u32, _height: u32) -> anyhow::Result<Vec<u8>> {
+        match *self {}
+    }
 }
 
 /// A frame's buffer goes back to the pool for the next capture (BG9).
@@ -345,6 +369,22 @@ impl Drop for VideoFrame {
 }
 
 impl VideoFrame {
+    /// This frame read back to the CPU when it is on the GPU (BG10), for an
+    /// encoder that needs its pixels; `None` when it already holds them.
+    pub fn downloaded(&self) -> anyhow::Result<Option<VideoFrame>> {
+        let Some(gpu) = &self.gpu else {
+            return Ok(None);
+        };
+        Ok(Some(VideoFrame {
+            data: gpu.download(self.width, self.height)?,
+            width: self.width,
+            height: self.height,
+            stride: self.width * 4,
+            timestamp: self.timestamp,
+            gpu: None,
+        }))
+    }
+
     /// Trim an odd width or height down to even (AI1), the last column or
     /// row dropped: `true` when it trimmed. A window captured whole can be
     /// odd-sized, which H.264's 4:2:0 cannot carry, and a crop's first frames
@@ -369,6 +409,15 @@ impl VideoFrame {
         let h = height.min(self.height - y) & !1;
         if w == 0 || h == 0 {
             return false;
+        }
+        // A frame on the GPU (BG10) is cropped by narrowing its region; the
+        // encoder copies only that.
+        if let Some(gpu) = &mut self.gpu {
+            gpu.offset(x, y);
+            self.width = w;
+            self.height = h;
+            self.stride = w * 4;
+            return true;
         }
 
         let bpp = 4usize; // BGRA from PipeWire/X11 capture
@@ -430,6 +479,7 @@ mod tests {
             height: h,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         }
     }
 
