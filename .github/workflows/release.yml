@@ -95,10 +95,21 @@ jobs:
           cp -r man "release/$name/"
           tar -C release -czf "release/$name.tar.gz" "$name"
 
+      # The Debian/Ubuntu package (BH2): packaging/linux/build-deb.sh, its
+      # Depends worked out from the libraries these binaries link to.
+      - name: Build the .deb
+        run: |
+          sudo apt-get install -y --no-install-recommends dpkg-dev
+          sh packaging/linux/build-deb.sh "${{ needs.version.outputs.name }}" target/release release
+          dpkg-deb --info release/pocketdesk-*.deb
+          dpkg-deb --contents release/pocketdesk-*.deb
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux
-          path: release/pocketdesk-*.tar.gz
+          path: |
+            release/pocketdesk-*.tar.gz
+            release/pocketdesk-*.deb
 
   # The Windows server and the desktop app are self-contained exes importing
   # only system DLLs and the Windows 10+ UCRT. FFmpeg is not bundled (the
