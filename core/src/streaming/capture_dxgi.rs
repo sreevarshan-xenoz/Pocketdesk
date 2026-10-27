@@ -32,7 +32,7 @@ use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::core::Interface;
 
 use super::capture::CaptureSession;
-use super::capture_d3d::{StagingCopy, clone_frame, pick_monitor, wait_before_sending};
+use super::capture_d3d::{StagingCopy, pick_monitor, wait_before_sending};
 use super::{StreamingConfig, VideoFrame};
 
 /// How long [`start_dxgi_capture`] waits for the first frame.
@@ -146,7 +146,6 @@ fn run_capture_loop(
     let mut duplication = open_duplication(monitor)?;
     let frame_period = Duration::from_micros(1_000_000 / u64::from(config.fps.max(1)));
     let mut last_sent: Option<Instant> = None;
-    let mut last_frame: Option<VideoFrame> = None;
     let mut ready_sent = false;
 
     while !cancel.is_cancelled() {
@@ -200,18 +199,24 @@ fn run_capture_loop(
                             // A timeout keeps the copy in hand; a lost access
                             // shows at the next acquire, as before.
                         }
-                        last_frame = Some(clone_frame(&video));
                         video
                     }
                     None => continue,
                 }
             }
-            Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => match &last_frame {
-                Some(frame) if last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) => {
-                    clone_frame(frame)
+            // The heartbeat reads the last frame again from the copier's
+            // staging texture (BG9); a rebuilt duplication has none until its
+            // first frame, which is the whole desktop.
+            Err(e)
+                if e.code() == DXGI_ERROR_WAIT_TIMEOUT
+                    && last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) =>
+            {
+                match duplication.copier.copy_again() {
+                    Some(frame) => frame?,
+                    None => continue,
                 }
-                _ => continue,
-            },
+            }
+            Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
             Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
                 // Secure desktop, mode change or fullscreen switch: the old
                 // duplication is dead. Retry until the desktop comes back.
