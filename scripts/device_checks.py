@@ -4607,7 +4607,8 @@ def bf3_ask(ctx: Ctx) -> tuple[str, str]:
         set_permission_live(ctx, "ask", had)
 @check("bf4-note-to-computer", "§7")
 def bf4_note_to_computer(ctx: Ctx) -> tuple[str, str]:
-    """A note shared to "Note to computer" (§7, BF4): with no notes file
+    """A note shared to "Note to computer" (§7, BF4): with the phone's
+    "Add to my notes" off, it is told so at once; with no notes file
     picked, the phone says to pick one; with the throwaway's own file
     picked, the note is added at its end with the time, and the phone says
     so. The note is a made-up line; the file is the throwaway's."""
@@ -4625,8 +4626,17 @@ def bf4_note_to_computer(ctx: Ctx) -> tuple[str, str]:
         said = wait_for(lambda: re.search(r"share: (.*)", adb("logcat", "-d", "-s", "ShareActivity:I")), 30, 2)
         return said.group(1).strip() if said else ""
 
-    before = ctx.server.configure({"notes_file": '""'})
+    had = trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("notes")
+    set_permission_live(ctx, "notes", None)  # off for every phone until chosen
+    before = ctx.server.configure({"notes_file": json.dumps(str(notes))})
     try:
+        # BF4 review: refused at once, not after the phone's 10 s wait.
+        asked_at = time.monotonic()
+        refused = share()
+        refused_in = time.monotonic() - asked_at
+        set_permission_live(ctx, "notes", True)
+        ctx.server.configure({"notes_file": '""'})
+        time.sleep(1)
         unpicked = share()
         if not unpicked:
             return "FAIL", "the share said nothing within 30 s"
@@ -4636,12 +4646,19 @@ def bf4_note_to_computer(ctx: Ctx) -> tuple[str, str]:
         kept = notes.read_text(encoding="utf-8") if notes.exists() else ""
         added = bool(re.search(r"^- \*\*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\*\* " + re.escape(line) + "$", kept, re.M))
         asked_to_pick = unpicked.startswith("Pick a file for notes")
-        said = f"no file: {'asked to pick one' if asked_to_pick else repr(unpicked)}; picked: {'added with the time' if added else 'not added'}, the phone said {picked!r}"
-        return ("PASS" if asked_to_pick and added and picked.startswith("Note added on") else "FAIL"), said
+        not_allowed = refused.startswith("This phone may not add notes") and refused_in < 8
+        said = (
+            f"permission off: {'told so at once' if not_allowed else repr(refused)} ({refused_in:.0f} s); "
+            f"no file: {'asked to pick one' if asked_to_pick else repr(unpicked)}; "
+            f"picked: {'added with the time' if added else 'not added'}, the phone said {picked!r}"
+        )
+        ok = not_allowed and asked_to_pick and added and picked.startswith("Note added on")
+        return ("PASS" if ok else "FAIL"), said
     finally:
         path = ctx.server.root / "config" / "config.toml"
         path.write_text(before, encoding="utf-8")
         notes.unlink(missing_ok=True)
+        set_permission_live(ctx, "notes", had)
 
 
 @check("bf1-done-tells-the-phone", "§8")
