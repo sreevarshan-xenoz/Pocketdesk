@@ -111,5 +111,6 @@ pub fn register_all() -> PluginSet {
     registry.register(tasks::TasksPlugin);
     registry.register(deck::DeckPlugin);
     registry.register(peek::PeekPlugin);
+    registry.register(crate::asks::AskPlugin);
     registry
 }

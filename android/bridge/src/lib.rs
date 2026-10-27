@@ -6,6 +6,7 @@
 //! polls; there is no callback channel yet.
 
 mod api;
+mod asks;
 mod cancel;
 mod cast;
 mod clipboard_push;
@@ -1703,6 +1704,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeDia
     _class: JClass<'_>,
 ) -> jstring {
     let json = envelope(Ok(dials::take_json()));
+    to_jstring(&mut env, json)
+}
+
+/// The questions the computer put to this phone (BF3), each with its
+/// computer, as a JSON array; taken.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeAsks(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let json = envelope(Ok(asks::take_json()));
     to_jstring(&mut env, json)
 }
 

@@ -4557,6 +4557,56 @@ def bf2_peek(ctx: Ctx) -> tuple[str, str]:
         stand_in.unlink(missing_ok=True)
 
 
+@check("bf3-ask", "§8")
+def bf3_ask(ctx: Ctx) -> tuple[str, str]:
+    """`pocketdesk ask` waits on the phone's answer (§8, BF3): the question
+    comes as a notification with no session open; on this phone, which has
+    no screen lock, Yes is refused and says why, and No at a tap ends the
+    command with 1 and `no`. Nothing plays."""
+    if ctx.phone.prefs("pocketdesk-ui").get("questions_from_computer") is False:
+        return "SKIP", "turn on Questions from the computer in the phone's Settings"
+    if not wait_for(lambda: ctx.device in ctx.server.linked(), 120, 2):
+        return "SKIP", "the phone is not linked to the throwaway"
+    had = trusted_store(ctx).get("permissions", {}).get(ctx.device, {}).get("ask")
+    set_permission_live(ctx, "ask", True)  # off for every phone until chosen
+    token = secrets.token_hex(3)
+    question = f"BF3 check {token}"
+    env = dict(os.environ) | ctx.server.env() | {"MSYS_NO_PATHCONV": "1"}
+    asking = subprocess.Popen(
+        [str(ctx.server.exe), "ask", "--wait", "90", question],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+    try:
+        def offered() -> bool:
+            return question in adb("shell", "dumpsys", "notification", "--noredact")
+
+        if not wait_for(offered, 30, 2):
+            return "FAIL", "no question on the phone within 30 s"
+        ctx.phone.wake()
+        adb("shell", "cmd", "statusbar", "expand-notifications")
+        time.sleep(1.5)
+        if not wait_for(lambda: tap_text(question, ctx.phone.dump()), 10, 1):
+            return "FAIL", "the question's notification was not found in the shade"
+        if not wait_for(lambda: shows(ctx, "Yes") and shows(ctx, "No"), 15, 1):
+            return "FAIL", "the question did not open with Yes and No"
+        tap_text("Yes", ctx.phone.dump())
+        needs_lock = wait_for(
+            lambda: any(t.startswith("Yes takes the screen lock") for t, _, _ in dump_nodes(ctx.phone.dump())), 10, 1
+        )
+        tap_text("No", ctx.phone.dump())
+        try:
+            out, _ = asking.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            return "FAIL", "pocketdesk ask did not end after No"
+        said = f"asked on the phone; Yes {'refused for want of a lock' if needs_lock else 'not refused'}; No made it exit {asking.returncode} printing {out.strip()!r}"
+        return ("PASS" if needs_lock and asking.returncode == 1 and out.strip() == "no" else "FAIL"), said
+    finally:
+        if asking.poll() is None:
+            asking.kill()
+        adb("shell", "cmd", "statusbar", "collapse")
+        set_permission_live(ctx, "ask", had)
+
+
 @check("bf1-done-tells-the-phone", "§8")
 def bf1_done_tells_the_phone(ctx: Ctx) -> tuple[str, str]:
     """`pocketdesk done` tells the phone when a command ends, with no session

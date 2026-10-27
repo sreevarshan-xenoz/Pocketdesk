@@ -76,6 +76,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- BF3: Yes to the computer's question takes the fingerprint or screen lock. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!-- R4 E2 mic-share needs a mic but the app is fully usable without one. -->
     <uses-feature
@@ -220,6 +222,13 @@
 
         <!-- T10b: reads the clipboard once in focus, sends it, closes; never shown. -->
         <!-- F3: the camera, for a photo the computer asked for. -->
+        <!-- BF3: a question from the computer, opened from its notification. -->
+        <activity
+            android:name=".ask.AskActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="" />
         <activity
             android:name=".files.CameraActivity"
             android:excludeFromRecents="true"

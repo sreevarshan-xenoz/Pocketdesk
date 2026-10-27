@@ -98,6 +98,21 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Ask the owner's phone a Yes or No question and wait for the answer
+    /// (BF3): it comes as a notification on each linked phone with the Ask
+    /// permission; No is one tap there, Yes takes the phone's fingerprint or
+    /// screen lock. Prints yes or no. Exit codes: 0 yes, 1 no, 2 no answer
+    /// in time (or bad arguments), 3 the question could not be left for the
+    /// server
+    Ask {
+        /// How long to wait for an answer, in seconds (1 to 3600)
+        #[arg(long, default_value_t = pocketdesk_core::protocol::ask::DEFAULT_WAIT_SECS)]
+        wait: u64,
+        /// The question; its words are joined with spaces. Options go
+        /// before it: after it, they are words of the question
+        #[arg(required = true, trailing_var_arg = true)]
+        question: Vec<String>,
+    },
     /// Tell the phone when a command ends (BF1): run it here, its output
     /// passing through, or wait on a process already running (--pid); then
     /// the phones that show this computer's notifications get one saying

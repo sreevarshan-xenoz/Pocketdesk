@@ -4,6 +4,7 @@
 
 pub mod alerts;
 pub mod approvals;
+pub mod asks;
 pub mod audio_control;
 pub(crate) mod away_lock;
 pub mod bench;

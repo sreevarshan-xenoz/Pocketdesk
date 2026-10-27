@@ -250,6 +250,8 @@ pub async fn run(config: Config) -> Result<()> {
     tokio::spawn(crate::plugins::links::run_commands());
     // L4: numbers for phones to dial.
     tokio::spawn(crate::plugins::links::run_dials());
+    // BF3: questions from `pocketdesk ask` for the owner's phones.
+    tokio::spawn(crate::asks::run());
     // O2: screenshots and locks asked of phones.
     tokio::spawn(crate::plugins::links::run_phone_actions());
     // M4: what the typing window types on a phone.

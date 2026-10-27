@@ -30,7 +30,12 @@ fun DialsEffect(address: String) {
         while (isActive) {
             val own = HostStore.hosts(context).firstOrNull { it.address == address }
             val inFront = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-            withContext(Dispatchers.IO) { Dials.take(context, own, inFront) }
+            withContext(Dispatchers.IO) {
+                Dials.take(context, own, inFront)
+                // BF3: questions, judged as outside a session against the
+                // phone's own computer, not this session's (BF3 review).
+                dev.pocketdesk.android.ask.Asks.take(context, dev.pocketdesk.android.notify.PhoneLink.target(context))
+            }
             delay(1_000)
         }
     }

@@ -78,6 +78,17 @@ The notification names the command line unless
 names it, and may show on the phone's lock screen. The output goes
 through a pipe, not a terminal.
 .TP
+.B ask [\-\-wait \fISECS\fR] \fIQUESTION\fR...
+Ask the owner's phone a Yes or No question and wait up to
+\fISECS\fR (120 unless told, at most 3600) for the answer. It comes as a
+notification on each linked phone with the Ask permission; No is one tap
+there, Yes takes the phone's fingerprint or screen lock. Prints
+.B yes
+or
+.BR no ;
+exits 0 for yes, 1 for no, 2 for no answer in time or bad arguments, 3 when
+the question could not be left for the server.
+.TP
 .B sessions [\-\-count \fIN\fR] [\-\-json]
 Show recorded streaming\-session outcomes (default: last 10); with
 .BR \-\-json ,

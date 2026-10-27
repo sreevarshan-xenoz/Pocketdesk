@@ -180,6 +180,7 @@ object RustCore {
     private external fun nativeTakeLinks(): String
     private external fun nativeTakeCommands(): String
     private external fun nativeTakeDials(): String
+    private external fun nativeTakeAsks(): String
     private external fun nativeTakePhoneActions(): String
     private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeTakeMediaPresses(): String
@@ -1090,6 +1091,19 @@ object RustCore {
             (0 until array.length()).map { i ->
                 val d = array.getJSONObject(i)
                 Dial(d.getString("host"), d.getInt("port"), d.getString("number"))
+            }
+        }.getOrDefault(emptyList())
+
+    /** A question the computer at [host]:[port] put to this phone (BF3). */
+    data class AskQuestion(val host: String, val port: Int, val id: String, val question: String, val expiresUnix: Long)
+
+    /** The questions waiting (BF3), taken. */
+    fun takeAsks(): List<AskQuestion> =
+        runCatching {
+            val array = org.json.JSONArray(envelope(nativeTakeAsks()).getOrDefault("[]"))
+            (0 until array.length()).map { i ->
+                val a = array.getJSONObject(i)
+                AskQuestion(a.getString("host"), a.getInt("port"), a.getString("id"), a.getString("question"), a.getLong("expires_unix"))
             }
         }.getOrDefault(emptyList())
 
