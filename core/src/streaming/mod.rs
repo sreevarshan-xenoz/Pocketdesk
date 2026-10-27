@@ -13,6 +13,7 @@ pub mod connection;
 #[cfg(feature = "wan")]
 pub mod dht;
 pub mod encoder_detect;
+mod frame_pool;
 pub mod in_flight;
 pub mod input_packet;
 #[cfg(feature = "wan")]
@@ -336,6 +337,13 @@ pub struct VideoFrame {
     pub timestamp: std::time::Instant,
 }
 
+/// A frame's buffer goes back to the pool for the next capture (BG9).
+impl Drop for VideoFrame {
+    fn drop(&mut self) {
+        frame_pool::give_back(std::mem::take(&mut self.data));
+    }
+}
+
 impl VideoFrame {
     /// Trim an odd width or height down to even (AI1), the last column or
     /// row dropped: `true` when it trimmed. A window captured whole can be
@@ -366,17 +374,18 @@ impl VideoFrame {
         let bpp = 4usize; // BGRA from PipeWire/X11 capture
         let src_stride = self.stride as usize;
         let dst_stride = (w as usize) * bpp;
-        let mut data = Vec::with_capacity(dst_stride * h as usize);
-        for row in 0..h as usize {
-            let start = (y as usize + row) * src_stride + (x as usize) * bpp;
-            let end = start + dst_stride;
-            if end > self.data.len() {
-                return false;
-            }
-            data.extend_from_slice(&self.data[start..end]);
+        let start = |row: usize| (y as usize + row) * src_stride + (x as usize) * bpp;
+        if dst_stride > src_stride || start(h as usize - 1) + dst_stride > self.data.len() {
+            return false;
         }
+        // Each row moves to or before where it was, so the rows are packed in
+        // place, first to last, with no second buffer (BG9).
+        for row in 0..h as usize {
+            self.data
+                .copy_within(start(row)..start(row) + dst_stride, row * dst_stride);
+        }
+        self.data.truncate(dst_stride * h as usize);
 
-        self.data = data;
         self.width = w;
         self.height = h;
         self.stride = w * 4;
@@ -490,6 +499,22 @@ mod tests {
         let mut f2 = pattern_frame();
         assert!(!f2.crop_region(0, 0, 0, 0));
         assert_eq!((f2.width, f2.height), (8, 6));
+    }
+
+    #[test]
+    fn a_crop_keeps_the_frame_in_its_own_buffer() {
+        // BG9: a window crop runs on every frame of a session; it packs the
+        // rows in place instead of into a new buffer.
+        let mut f = pattern_frame();
+        let ptr = f.data.as_ptr();
+        assert!(f.crop_region(2, 1, 4, 4));
+        assert_eq!(f.data.as_ptr(), ptr);
+        assert_eq!(f.data.len(), 4 * 4 * 4);
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(px(&f, x, y), (x as u8 + 2, y as u8 + 1), "at {x},{y}");
+            }
+        }
     }
 
     #[test]
