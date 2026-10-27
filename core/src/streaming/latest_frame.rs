@@ -106,6 +106,31 @@ impl<T> FrameReceiver<T> {
         self.take()
     }
 
+    /// [`recv`](Self::recv) from a thread with no runtime (the capture
+    /// backends' tests): looks every millisecond.
+    pub fn blocking_recv(&mut self) -> Option<T> {
+        loop {
+            if let Some(frame) = self.take() {
+                return Some(frame);
+            }
+            if self.0.senders.load(Ordering::Acquire) == 0 {
+                return self.take();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    /// Whether every sender is gone and nothing waits: no frame will come.
+    pub fn is_closed(&self) -> bool {
+        self.0.senders.load(Ordering::Acquire) == 0
+            && self
+                .0
+                .waiting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_none()
+    }
+
     fn take(&self) -> Option<T> {
         self.0
             .waiting
@@ -178,6 +203,22 @@ mod tests {
         drop(tx);
         let got = tokio::time::timeout(Duration::from_secs(5), waiting).await;
         assert_eq!(got.unwrap().unwrap(), None);
+    }
+
+    #[test]
+    fn a_thread_with_no_runtime_waits_for_a_frame_and_sees_the_slot_close() {
+        let (tx, mut rx) = channel();
+        let other = tx.clone();
+        let put = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            other.try_send(8).unwrap();
+        });
+        assert_eq!(rx.blocking_recv(), Some(8));
+        put.join().unwrap();
+        assert!(!rx.is_closed(), "a sender is left");
+        drop(tx);
+        assert!(rx.is_closed());
+        assert_eq!(rx.blocking_recv(), None);
     }
 
     #[test]

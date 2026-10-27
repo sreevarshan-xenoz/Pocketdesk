@@ -420,7 +420,7 @@ mod tests {
     fn shield_is_visible_in_screencopy() {
         use super::super::capture_screencopy::start_screencopy_capture;
         use crate::streaming::{StreamingConfig, VideoFrame};
-        use tokio::sync::{mpsc as tokio_mpsc, watch};
+        use tokio::sync::watch;
         use tokio_util::sync::CancellationToken;
 
         let Some(_shield) = show() else {

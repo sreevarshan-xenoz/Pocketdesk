@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use ashpd::desktop::PersistMode;
 use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 use pipewire::stream::StreamFlags;
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
