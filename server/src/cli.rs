@@ -28,6 +28,10 @@ pub enum Commands {
         /// Run the server elevated so input reaches elevated windows too
         #[arg(long)]
         elevated: bool,
+        /// Leave the firewall rules alone: the Windows installer adds them
+        /// itself, already elevated, and runs this as the signed-in user
+        #[arg(long, hide = true)]
+        no_firewall: bool,
     },
     /// Remove the logon task, the firewall rules and the notification identity
     #[cfg(windows)]
@@ -491,6 +495,31 @@ mod tests {
         let err = super::Cli::try_parse_from(["pocketdesk", "--version"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
         assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")), "{err}");
+    }
+
+    /// The Windows installer opens the firewall itself, already elevated,
+    /// then registers the logon task as the user who ran it (BH1).
+    #[cfg(windows)]
+    #[test]
+    fn install_can_leave_the_firewall_to_the_installer() {
+        use clap::Parser;
+        let parsed =
+            super::Cli::try_parse_from(["pocketdesk", "install", "--no-firewall"]).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Some(super::Commands::Install {
+                elevated: false,
+                no_firewall: true
+            })
+        ));
+        let parsed = super::Cli::try_parse_from(["pocketdesk", "install"]).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Some(super::Commands::Install {
+                no_firewall: false,
+                ..
+            })
+        ));
     }
 
     #[test]

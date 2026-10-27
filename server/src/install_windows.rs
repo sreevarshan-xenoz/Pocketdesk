@@ -308,8 +308,9 @@ fn task_service() -> Result<ITaskService> {
     Ok(service)
 }
 
-/// Register the logon task, start it, and open the firewall.
-pub fn install(elevated: bool) -> Result<()> {
+/// Register the logon task, start it, and open the firewall unless
+/// `firewall` is false (the installer opens it itself).
+pub fn install(elevated: bool, firewall: bool) -> Result<()> {
     let exe = std::env::current_exe()?.canonicalize()?;
     if elevated {
         if !unsafe { IsUserAnAdmin() }.as_bool() {
@@ -345,16 +346,17 @@ pub fn install(elevated: bool) -> Result<()> {
         println!("Removed the \"{LEGACY_NAME}\" logon task an earlier version registered");
     }
 
-    match run_elevated("firewall-add") {
-        Ok(0) => {
+    match firewall.then(|| run_elevated("firewall-add")) {
+        None => {}
+        Some(Ok(0)) => {
             println!(
                 "Opened TCP 1716-1725, UDP 4716 and TCP 1739-1764 to this program (local subnet + tailnet)"
             )
         }
-        Ok(code) => println!(
+        Some(Ok(code)) => println!(
             "Firewall rules were not added (helper exited {code}); add them from an administrator terminal with `pocketdesk firewall-add`"
         ),
-        Err(e) => {
+        Some(Err(e)) => {
             println!("Firewall rules were not added ({e:#}); the phone may not reach this PC")
         }
     }
