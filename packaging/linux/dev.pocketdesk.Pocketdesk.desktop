@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Pocketdesk
+GenericName=Remote desktop
+Comment=Your computer, on your Android phone
+Exec=pocketdesk-app
+Icon=pocketdesk
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;phone;android;clipboard;kde connect;
+StartupWMClass=pocketdesk-app

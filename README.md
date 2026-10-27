@@ -297,6 +297,26 @@ curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/s
 curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh | bash -s -- --dry-run
 ```
 
+### Debian and Ubuntu: the .deb
+
+From the release after 0.7.0, each release has `pocketdesk-<version>-linux-amd64.deb`, built on Ubuntu. Install it with:
+
+```bash
+sudo apt install ./pocketdesk-<version>-linux-amd64.deb
+```
+
+apt pulls in the libraries it needs. It also recommends FFmpeg, PipeWire, the desktop portal and `wl-clipboard` or `xclip`.
+
+The package installs:
+- `pocketdesk`, the desktop app `pocketdesk-app` and the tray;
+- an app-menu entry with the icon;
+- the man page;
+- the systemd user unit, turned on for every user, so the server starts at each sign-in.
+
+`systemctl --user disable pocketdesk` turns the unit off for you, and `systemctl --user start pocketdesk` starts the server now. Then open Pocketdesk from the menu and pair from its Pair page.
+
+`sudo apt remove pocketdesk` stops the running servers and removes it all. It leaves alone the pairings, keys and settings in your home folder.
+
 ### The phone app, and Windows through winget
 
 - **Android, kept up to date with Obtainium:** add `https://github.com/sreevarshan-xenoz/Pocketdesk`; each release since 0.4.0 has one APK (`pocketdesk-vX.Y.Z-android-arm64.apk`), signed with the release key, whose certificate's SHA-256 is `3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f` (for AppVerifier or `apksigner verify --print-certs`). Or download the APK from the release page.

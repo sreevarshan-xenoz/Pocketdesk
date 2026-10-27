@@ -43,6 +43,25 @@ ISCC packaging\windows\pocketdesk.iss /DAppVersion=v0.7.0 /DNumericVersion=0.7.0
 
 The output goes to `release\`. `/DSourceDir=` takes the executables from another folder. The wizard's images (`wizard-*.bmp`) are rendered from `assets/brand/pocketdesk-mark-512.png`, and the icon from `pocketdesk-icon-1024.png`.
 
+## The Debian/Ubuntu package
+
+`packaging/linux/build-deb.sh <release> <binaries> <output>` builds `pocketdesk-<release>-linux-amd64.deb`. The release workflow runs it on Ubuntu after the release build. Its `Depends` come from `dpkg-shlibdeps`, so they are the libraries the binaries were linked to, and the package fits that Ubuntu release and newer ones that keep those libraries.
+
+What it holds:
+- `/usr/bin`: `pocketdesk`, `pocketdesk-app` and `pocketdesk-tray`.
+- The systemd user unit, at `/usr/lib/systemd/user/pocketdesk.service` and pointed at `/usr/bin`.
+- The menu entry, `dev.pocketdesk.Pocketdesk.desktop`.
+- The icon, at 512 px and scalable.
+- The man page, the docs and `copyright`.
+
+What its scripts do:
+- **Install:** `systemctl --global enable`s the unit, so the server starts at every user's sign-in, as Windows' logon task does.
+- **Upgrade:** stops the servers of signed-in users and starts them again.
+- **Remove:** stops them and disables the unit.
+- **Home folders:** nothing in them is touched.
+
+`packaging/linux/smoke-test.sh <the .deb>` installs it with apt, checks the programs, unit, menu entry, icon and man page, removes it, and checks that each went. The release workflow runs it on its runner after every build.
+
 ## winget (Windows)
 
 `packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/<version>/` holds the three manifests for a release, in the layout of [winget-pkgs](https://github.com/microsoft/winget-pkgs). They install the release's Windows zip as two portable commands, `pocketdesk` and `pocketdesk-app`, with FFmpeg (`Gyan.FFmpeg`) as a dependency, since the server encodes video with it. The server then wants `pocketdesk install` (logon start and firewall rules), and again after every upgrade, with `pocketdesk stop` first: the logon task and firewall rules name the version's folder, and a running server holds its file.
