@@ -27,6 +27,12 @@ The APK is signed with the release key. Its certificate's SHA-256, for AppVerifi
 - Takes `pocketdesk` back off `PATH`.
 - Asks before deleting `%APPDATA%\pocketdesk` and `%LOCALAPPDATA%\pocketdesk`. A silent uninstall keeps them.
 
+**Failures:** a failed step is reported in a message box and in the setup log. A silent install only logs it.
+
+**Silent installs:** `/VERYSILENT` runs every task unless `/TASKS=` names some.
+
+**Admin account:** the per-user parts follow the user who started setup: the logon task, Send To, the browser host, and the folders the uninstaller asks about. If a standard user enters another administrator's credentials, the uninstaller's per-user clean-up applies to that administrator instead.
+
 To build it locally, run this from the repository root after `cargo build --release`:
 
 ```

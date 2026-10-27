@@ -72,6 +72,9 @@ OpenApp=Open Pocketdesk
 FirewallStatus=Opening Pocketdesk's firewall ports...
 AutostartStatus=Registering Pocketdesk to start at sign-in...
 FFmpegStatus=Installing FFmpeg with winget (this can take a minute)...
+FirewallFailed=Pocketdesk's firewall ports could not be opened, so phones on your network may not reach it.%n%nOpen them later from an administrator terminal: pocketdesk firewall-add
+AutostartFailed=Pocketdesk could not be set to start at sign-in.%n%nTry again later from a terminal: pocketdesk install
+FFmpegFailed=FFmpeg could not be installed with winget. Hardware video encoding needs it.%n%nInstall it later: winget install Gyan.FFmpeg
 RemoveData=Also delete your pairings, keys and settings?%n%nKeep them to pair nothing again when you reinstall Pocketdesk.
 
 [Tasks]
@@ -101,19 +104,15 @@ Name: "{autodesktop}\Pocketdesk"; Filename: "{app}\pocketdesk-app.exe"; IconFile
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "Path"; ValueData: "{olddata};{app}"; Tasks: addtopath; Check: NotOnPath(ExpandConstant('{app}'))
 
 [Run]
-; FFmpeg first, so the server the logon task starts finds it on PATH.
-Filename: "{cmd}"; Parameters: "/c winget install --id Gyan.FFmpeg -e --silent --accept-package-agreements --accept-source-agreements"; StatusMsg: "{cm:FFmpegStatus}"; Tasks: ffmpeg; Flags: runhidden waituntilterminated runasoriginaluser
-; The firewall from here, already elevated; the logon task as the user who
-; ran the installer, whose sign-in it starts at.
-Filename: "{app}\pocketdesk.exe"; Parameters: "firewall-add"; StatusMsg: "{cm:FirewallStatus}"; Tasks: autostart; Flags: runhidden waituntilterminated
-Filename: "{app}\pocketdesk.exe"; Parameters: "install --no-firewall"; StatusMsg: "{cm:AutostartStatus}"; Tasks: autostart; Flags: runhidden waituntilterminated runasoriginaluser
+; FFmpeg, the firewall and the logon task run from [Code] (ssPostInstall),
+; where a failure is told rather than lost.
 Filename: "{app}\pocketdesk-app.exe"; Description: "{cm:OpenApp}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-Filename: "{app}\pocketdesk.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated; RunOnceId: "StopServer"
+Filename: "{app}\pocketdesk.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopServer"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM pocketdesk-tray.exe"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM pocketdesk-app.exe"; Flags: runhidden waituntilterminated; RunOnceId: "StopApp"
-Filename: "{app}\pocketdesk.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "Unregister"
+Filename: "{app}\pocketdesk.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "Unregister"
 
 [Code]
 const
@@ -158,7 +157,9 @@ begin
 end;
 
 { An upgrade stops the running server, the tray and the app first, so their
-  files can be replaced; the logon task starts the new server afterwards. }
+  files can be replaced. The logon task is disabled first: a server that had
+  to be killed would otherwise be restarted by it a minute later, mid-copy.
+  `install` registers it again, enabled, when the start-up task is chosen. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Code: Integer;
@@ -166,9 +167,51 @@ begin
   Result := '';
   if FileExists(ExpandConstant('{app}\pocketdesk.exe')) then
   begin
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Change /TN "Pocketdesk" /DISABLE', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{app}\pocketdesk.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM pocketdesk-tray.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM pocketdesk-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
+end;
+
+{ Run one step after the files are in, as the elevated installer or as the
+  user who started it; a failure is logged and told (a silent install only
+  logs it), and the install goes on. }
+procedure RunStep(Status, Exe, Params: String; AsUser: Boolean; Failure: String);
+var
+  Code: Integer;
+  Started: Boolean;
+begin
+  WizardForm.StatusLabel.Caption := Status;
+  if AsUser then
+    Started := ExecAsOriginalUser(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, Code)
+  else
+    Started := Exec(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not Started or (Code <> 0) then
+  begin
+    Log(Format('%s %s failed (started: %d, exit code %d)', [Exe, Params, Ord(Started), Code]));
+    SuppressibleMsgBox(Failure, mbError, MB_OK, IDOK);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Exe: String;
+begin
+  if CurStep <> ssPostInstall then
+    exit;
+  Exe := ExpandConstant('{app}\pocketdesk.exe');
+  { FFmpeg first, so the server the logon task starts finds it on PATH. }
+  if WizardIsTaskSelected('ffmpeg') then
+    RunStep(CustomMessage('FFmpegStatus'), ExpandConstant('{cmd}'),
+      '/c winget install --id Gyan.FFmpeg -e --silent --accept-package-agreements --accept-source-agreements',
+      True, CustomMessage('FFmpegFailed'));
+  { The firewall from here, already elevated; the logon task as the user who
+    ran the installer, whose sign-in it starts at. }
+  if WizardIsTaskSelected('autostart') then
+  begin
+    RunStep(CustomMessage('FirewallStatus'), Exe, 'firewall-add', False, CustomMessage('FirewallFailed'));
+    RunStep(CustomMessage('AutostartStatus'), Exe, 'install --no-firewall', True, CustomMessage('AutostartFailed'));
   end;
 end;
 

@@ -372,7 +372,7 @@ fallback), NVENC/AMF/Quick Sync/Media Foundation through `ffmpeg.exe`,
 - privacy mode: local input blocked, plus a ring that does not appear in the stream;
 - battery, power, exec, siren and the window HUD.
 
-**The installer** (from the release after 0.7.0): run
+**The installer** (releases built from 2026-10-27 on): run
 `pocketdesk-<version>-windows-x86_64-setup.exe` from the releases page. It
 installs Pocketdesk to Program Files and adds it to the Start menu and to
 Apps & features. Its checkboxes, all on by default:
