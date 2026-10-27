@@ -73,7 +73,7 @@ const RESIZE_SETTLE: Duration = Duration::from_millis(250);
 /// fall back to DXGI duplication on any setup failure.
 pub fn start_wgc_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     window_rx: watch::Receiver<u64>,
     window_mode: Arc<AtomicBool>,
@@ -183,7 +183,7 @@ struct Gpu {
 
 fn run_capture_loop(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     ready_tx: &std_mpsc::Sender<Result<()>>,
     mut window_rx: watch::Receiver<u64>,
@@ -489,7 +489,7 @@ mod tests {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let (tx, mut rx) = mpsc::channel(4);
+            let (tx, mut rx) = crate::streaming::latest_frame::channel();
             let cancel = CancellationToken::new();
             let (_window_tx, window_rx) = watch::channel(0u64);
             let window_mode = Arc::new(AtomicBool::new(false));
@@ -634,7 +634,7 @@ mod tests {
 
     /// The next frame from `rx` within `within` that `wanted` accepts.
     async fn frame_where(
-        rx: &mut mpsc::Receiver<VideoFrame>,
+        rx: &mut crate::streaming::latest_frame::FrameReceiver<VideoFrame>,
         within: Duration,
         wanted: impl Fn(&VideoFrame) -> bool,
     ) -> Option<VideoFrame> {
@@ -667,7 +667,7 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             let window = OwnWindow::open(480, 360);
-            let (tx, mut rx) = mpsc::channel(4);
+            let (tx, mut rx) = crate::streaming::latest_frame::channel();
             let cancel = CancellationToken::new();
             let (window_tx, window_rx) = watch::channel(0u64);
             let window_mode = Arc::new(AtomicBool::new(false));
@@ -690,7 +690,7 @@ mod tests {
             // Let the window settle: whatever its first frames were, none is
             // still to come once a heartbeat repeats it.
             tokio::time::sleep(Duration::from_millis(1500)).await;
-            while rx.try_recv().is_ok() {}
+            while rx.try_recv().is_some() {}
 
             window.resize(720, 540);
             let resized = frame_where(&mut rx, Duration::from_secs(5), |f| {

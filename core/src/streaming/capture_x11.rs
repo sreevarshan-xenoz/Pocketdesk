@@ -5,7 +5,6 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
@@ -54,7 +53,7 @@ fn capture_frame(monitor_idx: usize) -> Result<VideoFrame> {
 /// Returns a join handle that can be aborted via `cancel`.
 pub async fn start_x11_capture(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
 ) -> Result<()> {
     info!(

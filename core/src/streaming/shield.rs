@@ -430,7 +430,7 @@ mod tests {
         // Give the compositor a beat to map + paint the layer.
         std::thread::sleep(Duration::from_millis(400));
 
-        let (tx, mut rx) = tokio_mpsc::channel::<VideoFrame>(2);
+        let (tx, mut rx) = crate::streaming::latest_frame::channel::<VideoFrame>();
         let cancel = CancellationToken::new();
         let (_wtx, wrx) = watch::channel(0u64);
         let window_mode = Arc::new(std::sync::atomic::AtomicBool::new(false));

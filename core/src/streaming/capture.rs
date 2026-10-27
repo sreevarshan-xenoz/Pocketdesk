@@ -7,7 +7,6 @@
 //! `capture_screencopy.rs` (wlroots).
 
 use anyhow::{Result, bail};
-use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -183,7 +182,7 @@ pub use super::capture_backend::CaptureBackend;
 #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 pub async fn start_capture_auto(
     config: StreamingConfig,
-    frame_tx: mpsc::Sender<VideoFrame>,
+    frame_tx: crate::streaming::latest_frame::FrameSender<VideoFrame>,
     cancel: CancellationToken,
     window_rx: tokio::sync::watch::Receiver<u64>,
     window_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
