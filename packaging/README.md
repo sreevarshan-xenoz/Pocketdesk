@@ -10,6 +10,39 @@ The APK is signed with the release key. Its certificate's SHA-256, for AppVerifi
 
 `3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f`
 
+## The Windows installer
+
+`packaging/windows/pocketdesk.iss` is the Inno Setup 6 script for `pocketdesk-<version>-windows-x86_64-setup.exe`. The release workflow builds it beside the zip.
+
+**What it does:**
+- Installs to Program Files and adds Pocketdesk to the Start menu and to Apps & features.
+- Offers three tasks:
+  - start at sign-in: `firewall-add` elevated, then `install --no-firewall` as the user who ran it;
+  - `pocketdesk` on the system `PATH`;
+  - FFmpeg through winget, offered only when it is missing.
+- On an upgrade, stops the running server, the tray and the app first.
+
+**The uninstaller:**
+- Stops them, then runs `pocketdesk uninstall` (the logon task, the firewall rules, Send To and the browser host).
+- Takes `pocketdesk` back off `PATH`.
+- Asks before deleting `%APPDATA%\pocketdesk` and `%LOCALAPPDATA%\pocketdesk`. A silent uninstall keeps them.
+
+**Failures:** a failed step is reported in a message box and in the setup log. A silent install only logs it.
+
+**Silent installs:** `/VERYSILENT` runs every task unless `/TASKS=` names some.
+
+**Admin account:** the per-user parts follow the user who started setup: the logon task, Send To, the browser host, and the folders the uninstaller asks about. If a standard user enters another administrator's credentials, the uninstaller's per-user clean-up applies to that administrator instead.
+
+`packaging/windows/smoke-test.ps1 <setup.exe>` installs it silently, checks the files, Start menu entry, Apps & features entry, PATH, logon task and firewall rules, then uninstalls it and checks that each went. The release workflow runs it on its runner after every build. Run it only on a throwaway machine.
+
+To build it locally, run this from the repository root after `cargo build --release`:
+
+```
+ISCC packaging\windows\pocketdesk.iss /DAppVersion=v0.7.0 /DNumericVersion=0.7.0
+```
+
+The output goes to `release\`. `/DSourceDir=` takes the executables from another folder. The wizard's images (`wizard-*.bmp`) are rendered from `assets/brand/pocketdesk-mark-512.png`, and the icon from `pocketdesk-icon-1024.png`.
+
 ## winget (Windows)
 
 `packaging/winget/manifests/s/SreevarshanXenoz/Pocketdesk/<version>/` holds the three manifests for a release, in the layout of [winget-pkgs](https://github.com/microsoft/winget-pkgs). They install the release's Windows zip as two portable commands, `pocketdesk` and `pocketdesk-app`, with FFmpeg (`Gyan.FFmpeg`) as a dependency, since the server encodes video with it. The server then wants `pocketdesk install` (logon start and firewall rules), and again after every upgrade, with `pocketdesk stop` first: the logon task and firewall rules name the version's folder, and a running server holds its file.
