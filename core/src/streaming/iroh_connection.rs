@@ -341,6 +341,29 @@ pub fn congestion_factory()
     }
 }
 
+/// The QUIC tuning of every iroh endpoint, the phone's dial and the
+/// desktop's alike (BG5): the home road's ([`super::transport::configured_transport`])
+/// as far as iroh takes it. The video opens one stream per frame, so each
+/// end lets the other open 1024 at once; the default, 100, ran out on a
+/// lossy link while frames waited on lost packets, and the video stalled
+/// behind it. The connection outlives 45 s of silence, as on the home road;
+/// iroh's own keepalive (every 5 s) holds the paths open meanwhile.
+pub fn iroh_transport() -> iroh::endpoint::QuicTransportConfig {
+    const IDLE_TIMEOUT_SECS: u64 = 45;
+    iroh::endpoint::QuicTransportConfig::builder()
+        .max_concurrent_uni_streams(1024u32.into())
+        .max_concurrent_bidi_streams(128u32.into())
+        .datagram_send_buffer_size(16 * 1024 * 1024)
+        .datagram_receive_buffer_size(Some(16 * 1024 * 1024))
+        .max_idle_timeout(Some(
+            Duration::from_secs(IDLE_TIMEOUT_SECS)
+                .try_into()
+                .expect("idle timeout fits IdleTimeout"),
+        ))
+        .congestion_controller_factory(congestion_factory())
+        .build()
+}
+
 /// The endpoint to dial from: the live one for this key and relays, or a
 /// new one.
 async fn dial_endpoint(
@@ -356,12 +379,8 @@ async fn dial_endpoint(
             builder = builder.secret_key(key);
         }
         let endpoint = builder
-            // The home road's congestion controller (BG4).
-            .transport_config(
-                iroh::endpoint::QuicTransportConfig::builder()
-                    .congestion_controller_factory(congestion_factory())
-                    .build(),
-            )
+            // The home road's tuning (BG4, BG5).
+            .transport_config(iroh_transport())
             .relay_mode(dial_relay_mode(relay_urls, use_relays))
             .bind_addr(SocketAddr::from(([0, 0, 0, 0], 0)))
             .context("iroh bind_addr rejected wildcard socket addr")?
@@ -922,6 +941,42 @@ mod tests {
             .expect("the connection closes with the stream")
             .unwrap();
         desktop.close().await;
+    }
+
+    /// BG5: the phone's endpoint lets the desktop open far more than QUIC's
+    /// default 100 streams at once, as the video opens one per frame and
+    /// frames wait on lost packets on a lossy link.
+    #[tokio::test]
+    async fn the_phones_endpoint_takes_a_stream_per_frame_by_the_hundred() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let alpn = StreamTransportConfig::default().alpn;
+        let (desktop, desktop_addr) = bind_loopback_endpoint(&alpn).await;
+        let phone = dial_endpoint(None, &[], false)
+            .await
+            .expect("the phone's endpoint");
+        let addr = EndpointAddr::new(desktop.id()).with_ip_addr(desktop_addr);
+        let (dialed, accepted) = tokio::join!(phone.endpoint.connect(addr, &alpn), async {
+            desktop
+                .accept()
+                .await
+                .unwrap()
+                .accept()
+                .unwrap()
+                .await
+                .unwrap()
+        });
+        let _phone_side = dialed.expect("the phone dials");
+        // 300 frames in flight, none read yet: each needs its own stream.
+        for frame in 0..300 {
+            let mut stream = tokio::time::timeout(Duration::from_secs(2), accepted.open_uni())
+                .await
+                .unwrap_or_else(|_| panic!("stream {frame} held back by the phone's limit"))
+                .unwrap();
+            stream.write_all(&[1]).await.unwrap();
+        }
+        accepted.close(0u32.into(), b"done");
+        desktop.close().await;
+        phone.endpoint.close().await;
     }
 
     /// 2b: a session and a control dial with one device key and the same

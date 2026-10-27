@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use iroh::address_lookup::{AddrFilter, AddressLookup as _};
-use iroh::endpoint::QuicTransportConfig;
 use iroh::endpoint::presets::Minimal;
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
 use iroh_mainline_address_lookup::DhtAddressLookup;
@@ -591,18 +590,12 @@ pub async fn spawn_wan_endpoint(
     let secret_key =
         load_or_create_secret_key(&key_path()?).context("failed to load iroh identity key")?;
 
-    // Mirror the LAN stream budget: the pipeline opens one uni stream per
-    // video frame. Relays (n0 defaults) are for hole punching only — dialing
-    // rides the EndpointAddr announced over the control channel.
-    // The home road's congestion controller (BG4): the video is sent from
-    // here, so this end's controller is the one that paces it.
-    let transport = QuicTransportConfig::builder()
-        .max_concurrent_uni_streams(1024u32.into())
-        .max_concurrent_bidi_streams(128u32.into())
-        .congestion_controller_factory(
-            pocketdesk_core::streaming::iroh_connection::congestion_factory(),
-        )
-        .build();
+    // The home road's tuning, as the phone's dial has it (BG4, BG5): the
+    // stream budget for one uni stream per video frame, the idle timeout,
+    // and the congestion controller that paces the video sent from here.
+    // Relays (n0 defaults) are for hole punching only — dialing rides the
+    // EndpointAddr announced over the control channel.
+    let transport = pocketdesk_core::streaming::iroh_connection::iroh_transport();
     let endpoint = Endpoint::builder(Minimal)
         .dns_resolver(pocketdesk_core::streaming::iroh_connection::dns_resolver())
         .alpns(alpns(control.is_some()))
