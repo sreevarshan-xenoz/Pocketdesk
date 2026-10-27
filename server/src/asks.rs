@@ -13,7 +13,7 @@ use std::time::Duration;
 use pocketdesk_core::error::Result;
 use pocketdesk_core::local::asks::{self, AskRequest};
 use pocketdesk_core::protocol::ask::{ASK, ASK_ANSWER, Answer, answer_of, ask_body};
-use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin};
+use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket, Plugin, TrustStore};
 use pocketdesk_core::protocol::permissions::Capability;
 
 /// How often `pocketdesk ask` looks for its answer.
@@ -40,8 +40,8 @@ fn now_unix() -> u64 {
 
 /// `pocketdesk ask`: put `question` to the phones and wait up to
 /// `wait_secs` for an answer. Exits 0 for Yes, 1 for No, 2 for no answer in
-/// time (or bad arguments), 3 when the question could not be left for the
-/// server.
+/// time (or bad arguments, or no phone that may answer), 3 when the
+/// question could not be left for the server.
 pub fn run_cli(question: &str, wait_secs: u64) -> i32 {
     let dir = match crate::state::state_dir() {
         Ok(dir) => dir,
@@ -50,6 +50,17 @@ pub fn run_cli(question: &str, wait_secs: u64) -> i32 {
             return 3;
         }
     };
+    // Said at once rather than after the whole wait (BF3 follow-up): Ask is
+    // off for every phone until the owner turns it on.
+    let store = crate::state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::read(path).ok());
+    if !anyone_may_answer(store.as_ref()) {
+        eprintln!(
+            "pocketdesk ask: no paired phone may answer. Turn on \"Answer my questions\" for your phone in Pocketdesk (Devices)."
+        );
+        return 2;
+    }
     let asked = match asks::request(&dir, question, wait_secs, now_unix()) {
         Ok(asked) => asked,
         Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
@@ -77,6 +88,17 @@ pub fn run_cli(question: &str, wait_secs: u64) -> i32 {
             2
         }
     }
+}
+
+/// Whether any paired device may answer: has the Ask permission. A store
+/// that does not read is not taken as "none" (the server decides).
+fn anyone_may_answer(store: Option<&TrustStore>) -> bool {
+    store.is_none_or(|store| {
+        store
+            .trusted_devices()
+            .iter()
+            .any(|device| store.permissions(device).allows(Capability::Ask))
+    })
 }
 
 /// The answer to `asked`, looked for until `deadline` (on the monotonic
@@ -252,6 +274,22 @@ mod tests {
                 failed_on: HashSet::new(),
             },
         );
+    }
+
+    #[test]
+    fn the_cli_says_at_once_when_no_paired_phone_may_answer() {
+        let dir = dir("anyone");
+        let path = dir.join("trusted_devices.json");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        assert!(!anyone_may_answer(Some(&store)), "nobody paired");
+        store.trust_device("phone-a").unwrap();
+        assert!(!anyone_may_answer(Some(&store)), "paired, Ask off");
+        let mut allowed = store.permissions("phone-a");
+        allowed.set(Capability::Ask, true);
+        store.set_permissions("phone-a", allowed).unwrap();
+        assert!(anyone_may_answer(Some(&store)));
+        assert!(anyone_may_answer(None), "an unread store is not none");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

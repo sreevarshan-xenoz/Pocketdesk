@@ -102,8 +102,9 @@ pub enum Commands {
     /// (BF3): it comes as a notification on each linked phone with the Ask
     /// permission; No is one tap there, Yes takes the phone's fingerprint or
     /// screen lock. Prints yes or no. Exit codes: 0 yes, 1 no, 2 no answer
-    /// in time (or bad arguments), 3 the question could not be left for the
-    /// server
+    /// in time (or bad arguments, or no paired phone with "Answer my
+    /// questions" on, said at once), 3 the question could not be left for
+    /// the server
     Ask {
         /// How long to wait for an answer, in seconds (1 to 3600)
         #[arg(long, default_value_t = pocketdesk_core::protocol::ask::DEFAULT_WAIT_SECS)]
