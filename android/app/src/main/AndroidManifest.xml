@@ -167,6 +167,19 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- BF4: text or a link added to the computer's notes file. -->
+        <activity-alias
+            android:name=".NoteToComputer"
+            android:exported="true"
+            android:label="@string/note_to_computer_label"
+            android:targetActivity=".ShareActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- M1: keeps the link to the paired computer through the screen off. -->
         <service
             android:name=".service.LinkKeeperService"

@@ -909,6 +909,12 @@
     <string name="peek_failed">Could not peek: %1$s</string>
     <string name="settings_peek">Peek at the computer</string>
     <string name="settings_peek_summary">Peek in each computer menu on Home shows its screen as one still, with no session. Each computer allows it for this phone first. The still is not saved on the phone</string>
+    <string name="note_to_computer_label">Note to computer</string>
+    <string name="note_saved">Note added on %1$s</string>
+    <string name="note_no_file">Pick a file for notes in Pocketdesk on %1$s first (Settings, Phones).</string>
+    <string name="note_not_written">%1$s could not write the note to its notes file.</string>
+    <string name="settings_note_to_computer">Note to computer</string>
+    <string name="settings_note_to_computer_summary">In the share sheet: text or a link is added, with the time, to the notes file picked in Pocketdesk on your computer</string>
     <string name="card_state">How it is doing</string>
     <string name="card_allowed">What this computer allows</string>
     <string name="allowed_title">What %1$s allows</string>

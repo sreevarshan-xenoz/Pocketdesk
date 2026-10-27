@@ -291,6 +291,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.linksFromComputer(context),
                     { Prefs.setLinksFromComputer(context, it) },
                 )
+                // BF4: "Note to computer" in the share sheet.
+                SettingSwitch(
+                    stringResource(R.string.settings_note_to_computer),
+                    stringResource(R.string.settings_note_to_computer_summary),
+                    dev.pocketdesk.android.NoteShare.shown(context),
+                    { dev.pocketdesk.android.NoteShare.setShown(context, it) },
+                )
                 // BF1: `pocketdesk done` saying a command on the computer ended.
                 SettingSwitch(
                     stringResource(R.string.settings_computer_alerts),

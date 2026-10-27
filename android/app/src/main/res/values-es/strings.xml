@@ -907,6 +907,12 @@
     <string name="peek_failed">No se pudo echar un vistazo: %1$s</string>
     <string name="settings_peek">Echar un vistazo al ordenador</string>
     <string name="settings_peek_summary">Echar un vistazo, en el menú de cada ordenador en Inicio, muestra su pantalla como una sola imagen, sin sesión. Cada ordenador debe permitirlo antes para este teléfono. La imagen no se guarda en el teléfono</string>
+    <string name="note_to_computer_label">Nota al ordenador</string>
+    <string name="note_saved">Nota añadida en %1$s</string>
+    <string name="note_no_file">Elige primero un archivo para las notas en Pocketdesk de %1$s (Ajustes, Teléfonos).</string>
+    <string name="note_not_written">%1$s no pudo escribir la nota en su archivo de notas.</string>
+    <string name="settings_note_to_computer">Nota al ordenador</string>
+    <string name="settings_note_to_computer_summary">En el menú de compartir: un texto o un enlace se añade, con la hora, al archivo de notas elegido en Pocketdesk de tu ordenador</string>
     <string name="card_state">Cómo está</string>
     <string name="card_allowed">Qué permite este equipo</string>
     <string name="allowed_title">Qué permite %1$s</string>
