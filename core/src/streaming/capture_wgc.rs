@@ -50,7 +50,7 @@ use windows::core::{IInspectable, Interface};
 use super::capture::CaptureSession;
 #[cfg(test)]
 use super::capture_d3d::enumerate_monitors;
-use super::capture_d3d::{StagingCopy, clone_frame, pick_monitor, wait_before_sending};
+use super::capture_d3d::{StagingCopy, pick_monitor, wait_before_sending};
 use super::{StreamingConfig, VideoFrame};
 
 /// How long [`start_wgc_capture`] waits for the first frame before reporting
@@ -203,7 +203,9 @@ fn run_capture_loop(
     let mut refused_window: Option<u64> = None;
     let frame_period = Duration::from_micros(1_000_000 / u64::from(config.fps.max(1)));
     let mut last_sent: Option<Instant> = None;
-    let mut last_frame: Option<VideoFrame> = None;
+    // Whether the copier's staging texture holds this source's last frame,
+    // which the heartbeat repeats (BG9).
+    let mut have_last = false;
     // When the pool was last recreated for a new size with no frame at that
     // size since.
     let mut resized_at: Option<Instant> = None;
@@ -228,7 +230,7 @@ fn run_capture_loop(
                     capture = next;
                     source = want_source;
                     window_mode.store(matches!(source, Source::Window(_)), Ordering::Relaxed);
-                    last_frame = None;
+                    have_last = false;
                     resized_at = None;
                     restarted = false;
                     info!(?source, "WGC capture source switched");
@@ -254,7 +256,7 @@ fn run_capture_loop(
             source = Source::Monitor;
             window_mode.store(false, Ordering::Relaxed);
             refused_window = Some(wanted);
-            last_frame = None;
+            have_last = false;
             resized_at = None;
             restarted = false;
         }
@@ -316,15 +318,16 @@ fn run_capture_loop(
                         }
                     }
                 }
-                last_frame = Some(clone_frame(&video));
+                have_last = true;
                 video
             }
-            None => match &last_frame {
-                Some(frame) if last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) => {
-                    clone_frame(frame)
+            None if have_last && last_sent.is_some_and(|t| t.elapsed() >= IDLE_HEARTBEAT) => {
+                match gpu.copier.copy_again() {
+                    Some(frame) => frame?,
+                    None => continue,
                 }
-                _ => continue,
-            },
+            }
+            None => continue,
         };
 
         last_sent = Some(Instant::now());

@@ -69,12 +69,28 @@ impl StagingCopy {
         };
 
         unsafe { self.context.CopyResource(&staging, texture) };
+        Self::read(&self.context, &staging, width, height)
+    }
+
+    /// The last frame [`copy`](Self::copy) made, read again from the staging
+    /// texture with a fresh timestamp, for the idle heartbeat (BG9): keeping
+    /// a clone of every frame for it cost a full copy of each (1.7 ms at
+    /// 2560x1080), where this costs one a second. `None` before any copy.
+    pub(super) fn copy_again(&mut self) -> Option<Result<VideoFrame>> {
+        let (staging, width, height) = self.staging.as_ref()?;
+        Some(Self::read(&self.context, staging, *width, *height))
+    }
+
+    /// Map `staging` and copy its rows into a tightly strided frame.
+    fn read(
+        context: &ID3D11DeviceContext,
+        staging: &ID3D11Texture2D,
+        width: u32,
+        height: u32,
+    ) -> Result<VideoFrame> {
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        unsafe {
-            self.context
-                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-        }
-        .context("Map (staging)")?;
+        unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }
+            .context("Map (staging)")?;
         let row = width as usize * 4;
         let mut data = vec![0u8; row * height as usize];
         let src = mapped.pData as *const u8;
@@ -89,7 +105,7 @@ impl StagingCopy {
                 );
             }
         }
-        unsafe { self.context.Unmap(&staging, 0) };
+        unsafe { context.Unmap(staging, 0) };
 
         Ok(VideoFrame {
             data,
@@ -113,17 +129,6 @@ pub(super) fn wait_before_sending(
 ) -> Option<Duration> {
     let since = now.saturating_duration_since(last_sent?);
     (since < period).then(|| period - since)
-}
-
-/// A fresh-timestamped copy of `frame`, for the idle heartbeat.
-pub(super) fn clone_frame(frame: &VideoFrame) -> VideoFrame {
-    VideoFrame {
-        data: frame.data.clone(),
-        width: frame.width,
-        height: frame.height,
-        stride: frame.stride,
-        timestamp: Instant::now(),
-    }
 }
 
 /// All monitors in `EnumDisplayMonitors` order, with their desktop rects.
@@ -216,5 +221,84 @@ mod tests {
     #[test]
     fn an_out_of_range_index_still_picks_a_monitor() {
         assert!(!pick_monitor(u32::MAX).is_invalid());
+    }
+
+    /// A 4x2 BGRA texture on a software (WARP) device, filled with `fill`.
+    fn warp_texture(fill: u8) -> (ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D) {
+        use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
+        use windows::Win32::Graphics::Direct3D11::{
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11_SUBRESOURCE_DATA,
+            D3D11_USAGE_DEFAULT, D3D11CreateDevice,
+        };
+        use windows::Win32::Graphics::Dxgi::Common::{
+            DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+        };
+        let (mut device, mut context) = (None, None);
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                Default::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )
+        }
+        .expect("a WARP device");
+        let (device, context) = (device.unwrap(), context.unwrap());
+        let pixels = [fill; 4 * 2 * 4];
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: 4,
+            Height: 2,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: 0,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+        let initial = D3D11_SUBRESOURCE_DATA {
+            pSysMem: pixels.as_ptr().cast(),
+            SysMemPitch: 4 * 4,
+            SysMemSlicePitch: 0,
+        };
+        let mut texture = None;
+        unsafe { device.CreateTexture2D(&desc, Some(&initial), Some(&mut texture)) }
+            .expect("a texture");
+        (device, context, texture.unwrap())
+    }
+
+    #[test]
+    fn the_heartbeat_reads_the_last_copy_again_instead_of_keeping_a_clone() {
+        // BG9: each frame was cloned (11 MB at 2560x1080, 1.7 ms) only so the
+        // once-a-second heartbeat could repeat it; the staging texture
+        // already holds it.
+        let (device, context, texture) = warp_texture(7);
+        let mut copier = StagingCopy::new(device, context.clone());
+        assert!(copier.copy_again().is_none(), "nothing copied yet");
+        let first = copier.copy(&texture).unwrap();
+        assert_eq!((first.width, first.height, first.stride), (4, 2, 16));
+        assert!(first.data.iter().all(|&b| b == 7));
+
+        // The source moves on without a new copy: the heartbeat repeats what
+        // was sent, not the source's new content.
+        let newer = [9u8; 4 * 2 * 4];
+        unsafe { context.UpdateSubresource(&texture, 0, None, newer.as_ptr().cast(), 16, 0) };
+        let again = copier.copy_again().expect("the last copy").unwrap();
+        assert_eq!(again.data, first.data);
+        assert_eq!((again.width, again.height, again.stride), (4, 2, 16));
+        assert!(again.timestamp >= first.timestamp, "a fresh timestamp");
+
+        let next = copier.copy(&texture).unwrap();
+        assert!(next.data.iter().all(|&b| b == 9));
+        assert_eq!(copier.copy_again().unwrap().unwrap().data, next.data);
     }
 }
