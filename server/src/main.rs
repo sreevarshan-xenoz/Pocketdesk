@@ -290,7 +290,10 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             Ok(())
         }
         #[cfg(windows)]
-        cli::Commands::Install { elevated } => install_windows::install(elevated),
+        cli::Commands::Install {
+            elevated,
+            no_firewall,
+        } => install_windows::install(elevated, !no_firewall),
         #[cfg(windows)]
         cli::Commands::Uninstall => install_windows::uninstall(),
         #[cfg(windows)]

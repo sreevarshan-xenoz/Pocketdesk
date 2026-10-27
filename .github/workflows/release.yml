@@ -166,10 +166,33 @@ jobs:
           Copy-Item target/release/pocketdesk.exe, target/release/pocketdesk-app.exe, target/release/pocketdesk-tray.exe, config.toml.example, README.md, SECURITY.md, LICENSE-MIT, LICENSE-APACHE "release/$name/"
           Compress-Archive -Path "release/$name" -DestinationPath "release/$name.zip"
 
+      # The installer, setup.exe (BH1): packaging/windows/pocketdesk.iss.
+      # GitHub's Windows images carry Inno Setup 6; it is installed if not.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $name = "${{ needs.version.outputs.name }}"
+          $numeric = ($name.TrimStart('v') -split '-')[0]
+          & $iscc /Qp packaging\windows\pocketdesk.iss "/DAppVersion=$name" "/DNumericVersion=$numeric"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem release\*-setup.exe
+
+      # Install it on the runner, check what it made, uninstall it, check it
+      # all went: packaging/windows/smoke-test.ps1.
+      - name: Smoke-test the installer
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem release/*-setup.exe | Select-Object -First 1).FullName
+          & ./packaging/windows/smoke-test.ps1 -Setup $setup
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: release/pocketdesk-*.zip
+          path: |
+            release/pocketdesk-*.zip
+            release/pocketdesk-*-setup.exe
 
   # The phone app. With signing secrets set (ANDROID_KEYSTORE_BASE64,
   # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) it is a
