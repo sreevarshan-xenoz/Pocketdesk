@@ -29,13 +29,16 @@ const COUNT_BITS: u32 = 16;
 const COUNT_BLOCK: u32 = 16;
 
 /// Whether the pattern stands in for the screen: the variable set to
-/// anything but empty or `0`.
+/// anything but empty, `0`, `false`, `off` or `no`.
 pub fn wanted() -> bool {
     wanted_by(std::env::var_os(VAR))
 }
 
 fn wanted_by(value: Option<std::ffi::OsString>) -> bool {
-    value.is_some_and(|v| !v.is_empty() && v != "0")
+    value.is_some_and(|v| {
+        let v = v.to_string_lossy().trim().to_ascii_lowercase();
+        !matches!(v.as_str(), "" | "0" | "false" | "off" | "no")
+    })
 }
 
 /// Frame `n` of a `width` x `height` pattern, BGRA (sides made even, at
@@ -155,6 +158,9 @@ mod tests {
         assert!(wanted_by(Some("yes".into())));
         assert!(!wanted_by(Some("".into())));
         assert!(!wanted_by(Some("0".into())));
+        assert!(!wanted_by(Some("false".into())));
+        assert!(!wanted_by(Some(" Off ".into())));
+        assert!(!wanted_by(Some("no".into())));
         assert!(!wanted_by(None));
     }
 

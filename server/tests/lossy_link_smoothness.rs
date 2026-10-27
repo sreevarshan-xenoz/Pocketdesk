@@ -48,12 +48,20 @@ fn quantile(sorted: &[u64], q: f64) -> u64 {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "runs a real encoder for a minute; a measuring stick, run by hand"]
 async fn how_smoothly_frames_arrive_on_a_lossy_link() {
-    // SAFETY: this test binary has this one test, and sets these before any
-    // thread reads them.
+    // SAFETY: this test binary has this one test, so nothing else reads the
+    // environment while it is set (the runtime's workers are idle here).
     unsafe { std::env::set_var(pocketdesk_core::streaming::test_pattern::VAR, "1") };
     let state = std::env::temp_dir().join(format!("pd-lossy-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&state);
     std::fs::create_dir_all(&state).unwrap();
+    // Gone however the bench ends, a panic too.
+    struct Remove(std::path::PathBuf);
+    impl Drop for Remove {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _remove = Remove(state.clone());
     pocketdesk_core::local::paths::use_state_dir(state.clone());
     pocketdesk_server::session_telemetry::init();
     let _ = tracing_subscriber::fmt()
@@ -178,7 +186,7 @@ async fn how_smoothly_frames_arrive_on_a_lossy_link() {
     println!(
         "{kbps} kbit/s, {permille} per mille lost, {delay_ms} ms each way, {:.0} s: {total} frames, {:.1} fps after settling",
         run_for.as_secs_f64(),
-        (gaps_ms.len() + 1) as f64 / secs,
+        gaps_ms.len() as f64 / secs,
     );
     println!(
         "gap between frames: p50 {} ms, p95 {} ms, p99 {} ms, max {} ms; stalls of 200 ms or more: {stalls}",
@@ -225,6 +233,5 @@ async fn how_smoothly_frames_arrive_on_a_lossy_link() {
     } else {
         println!("record: none written");
     }
-    let _ = std::fs::remove_dir_all(&state);
     assert!(total > 0, "no frame arrived");
 }
