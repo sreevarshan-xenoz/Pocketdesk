@@ -1,0 +1,14 @@
+[package]
+name = "pocketdesk-ffmpeg"
+version = "0.7.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "ffmpeg-next for the in-process Windows encoder (BG8), under a name of its own"
+
+# Not a workspace member: built only when core's `inproc-windows` asks for it,
+# since it needs FFmpeg's development files (docs/development-setup.md).
+[workspace]
+
+[dependencies]
+ffmpeg-next = "9"

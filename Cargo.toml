@@ -7,6 +7,9 @@ members = [
     "android/bridge",
     "spike/iroh",
 ]
+# BG8: built only through core's `inproc-windows` (it needs FFmpeg's
+# development files).
+exclude = ["ffmpeg-shim"]
 
 [workspace.package]
 version = "0.7.0"

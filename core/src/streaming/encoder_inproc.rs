@@ -5,9 +5,12 @@
 //! removing a process hop, two pipe buffers, and the NAL re-framing heuristics
 //! from the hot path.
 //!
-//! VAAPI/NVENC still route through the sidecar backend: hw-accelerated
-//! encoding needs a full `AVHWDeviceContext`/`AVHWFramesContext` pipeline
-//! (hwupload equivalent), which is a follow-up on top of this module.
+//! On Linux, VAAPI has its own in-process path (`encoder_vaapi`) and NVENC
+//! routes through the sidecar. On Windows with the `inproc-windows` feature
+//! (BG8), NVENC runs here: BGRA goes straight to `h264_nvenc`/`hevc_nvenc`
+//! (NVENC converts on the GPU), a keyframe comes on the frame asked for
+//! (`forced-idr`), and the bitrate changes in place ([`InProcessEncoder::set_bitrate`])
+//! instead of rebuilding a child process.
 
 use std::collections::VecDeque;
 use std::sync::Once;
@@ -17,9 +20,34 @@ use tracing::{trace, warn};
 
 use super::encoder::detect_keyframe;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
+#[cfg(target_os = "linux")]
 use ffmpeg_next as ffmpeg;
+#[cfg(windows)]
+use pocketdesk_ffmpeg::ffmpeg_next as ffmpeg;
 
 static FFMPEG_INIT: Once = Once::new();
+
+fn init_ffmpeg() {
+    FFMPEG_INIT.call_once(|| {
+        if let Err(e) = ffmpeg::init() {
+            warn!("FFmpeg init failed (continuing): {}", e);
+        }
+        ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
+    });
+}
+
+/// NVENC's preset for the session's (`p1` fastest to `p7` best), as the
+/// sidecar maps it.
+#[cfg(windows)]
+fn nvenc_preset(preset: &EncoderPreset) -> &'static str {
+    match preset {
+        EncoderPreset::UltraFast | EncoderPreset::SuperFast => "p1",
+        EncoderPreset::VeryFast => "p3",
+        EncoderPreset::Faster | EncoderPreset::Fast => "p4",
+        EncoderPreset::Medium => "p5",
+        EncoderPreset::Slow => "p7",
+    }
+}
 
 /// One FFmpeg encode context, fed from the capture side and drained of
 /// codec packets on the streamer side. Zero-latency by construction:
@@ -28,9 +56,10 @@ static FFMPEG_INIT: Once = Once::new();
 pub struct InProcessEncoder {
     config: StreamingConfig,
     encoder: ffmpeg::encoder::Video,
-    scaler: ffmpeg::software::scaling::Context,
+    /// BGRA to YUV 4:2:0 on the CPU, for the software encoders; `None` for a
+    /// hardware encoder that takes BGRA itself.
+    scaler: Option<(ffmpeg::software::scaling::Context, ffmpeg::frame::Video)>,
     bgra: ffmpeg::frame::Video,
-    scaled: ffmpeg::frame::Video,
     /// (sequence, timestamp) of frames submitted but not yet emitted.
     queue: VecDeque<(u64, Instant)>,
     /// Packets received early relative to `encode_frame` calls.
@@ -67,13 +96,7 @@ fn profile_name(profile: &H264Profile) -> &'static str {
 
 impl InProcessEncoder {
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
-        FFMPEG_INIT.call_once(|| {
-            if let Err(e) = ffmpeg::init() {
-                warn!("FFmpeg init failed (continuing): {}", e);
-            }
-            ffmpeg::log::set_level(ffmpeg::log::Level::Warning);
-        });
-
+        init_ffmpeg();
         let is_hevc = matches!(config.codec, VideoCodec::H265);
         let codec = ffmpeg::encoder::find_by_name(if is_hevc { "libx265" } else { "libx264" })
             .or_else(|| {
@@ -128,7 +151,7 @@ impl InProcessEncoder {
             ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
         let scaled =
             ffmpeg::frame::Video::new(ffmpeg::format::Pixel::YUV420P, config.width, config.height);
-        let scaler = ffmpeg::software::scaling::Context::get(
+        let scaling = ffmpeg::software::scaling::Context::get(
             ffmpeg::format::Pixel::BGRA,
             config.width,
             config.height,
@@ -141,9 +164,65 @@ impl InProcessEncoder {
         Ok(Self {
             config,
             encoder,
-            scaler,
+            scaler: Some((scaling, scaled)),
             bgra,
-            scaled,
+            queue: VecDeque::new(),
+            pending: VecDeque::new(),
+            sequence: 0,
+            keyframe_interval,
+            frames_since_keyframe: 0,
+        })
+    }
+
+    /// NVENC in-process (BG8): BGRA straight to `h264_nvenc`/`hevc_nvenc`,
+    /// zero delay, constant bitrate in a small VBV, a keyframe on the frame
+    /// asked for (`forced-idr`).
+    #[cfg(windows)]
+    pub fn new_hardware(config: StreamingConfig) -> anyhow::Result<Self> {
+        init_ffmpeg();
+        let is_hevc = matches!(config.codec, VideoCodec::H265);
+        let name = if is_hevc { "hevc_nvenc" } else { "h264_nvenc" };
+        let codec = ffmpeg::encoder::find_by_name(name)
+            .ok_or_else(|| anyhow::anyhow!("FFmpeg has no {name}"))?;
+        let keyframe_interval = (config.fps as u64) * 2;
+        let (maxrate_kbps, bufsize_kbits) =
+            super::encoder::vbv_kbit_bounds(config.bitrate_bps, config.fps);
+
+        let context = ffmpeg::codec::context::Context::new_with_codec(codec);
+        let mut video = context.encoder().video()?;
+        video.set_width(config.width);
+        video.set_height(config.height);
+        video.set_format(ffmpeg::format::Pixel::BGRA);
+        video.set_frame_rate(Some(ffmpeg::Rational::new(config.fps as i32, 1)));
+        video.set_time_base(ffmpeg::Rational(1, config.fps as i32));
+        video.set_gop(keyframe_interval.min(u32::MAX as u64) as u32);
+        video.set_max_b_frames(0);
+        video.set_bit_rate(config.bitrate_bps as usize);
+        video.set_max_bit_rate(maxrate_kbps as usize * 1000);
+        // SAFETY: an encoder context not yet opened, set before open.
+        unsafe {
+            (*video.as_mut_ptr()).rc_buffer_size =
+                i32::try_from(bufsize_kbits * 1000).unwrap_or(i32::MAX);
+        }
+
+        let mut options = ffmpeg::Dictionary::new();
+        options.set("preset", nvenc_preset(&config.preset));
+        options.set("tune", "ll");
+        options.set("zerolatency", "1");
+        options.set("delay", "0");
+        options.set("rc", "cbr");
+        options.set("forced-idr", "1");
+        if !is_hevc {
+            options.set("profile", profile_name(&config.profile));
+        }
+        let encoder = video.open_with(options)?;
+        let bgra =
+            ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
+        Ok(Self {
+            config,
+            encoder,
+            scaler: None,
+            bgra,
             queue: VecDeque::new(),
             pending: VecDeque::new(),
             sequence: 0,
@@ -160,18 +239,25 @@ impl InProcessEncoder {
         }
 
         self.copy_frame(frame);
-        self.scaler.run(&self.bgra, &mut self.scaled)?;
         let sequence = self.sequence;
-        self.scaled.set_pts(Some(sequence as i64));
-        // libx264/x265 honor AVFrame.pict_type=I as "force IDR on this frame".
+        let input = match &mut self.scaler {
+            Some((scaling, scaled)) => {
+                scaling.run(&self.bgra, scaled)?;
+                scaled
+            }
+            None => &mut self.bgra,
+        };
+        input.set_pts(Some(sequence as i64));
+        // libx264/x265, and NVENC with `forced-idr`, honor AVFrame.pict_type=I
+        // as "force IDR on this frame".
         unsafe {
-            (*self.scaled.as_mut_ptr()).pict_type = if force_key {
+            (*input.as_mut_ptr()).pict_type = if force_key {
                 ffmpeg::ffi::AVPictureType::AV_PICTURE_TYPE_I
             } else {
                 ffmpeg::ffi::AVPictureType::AV_PICTURE_TYPE_NONE
             };
         }
-        self.encoder.send_frame(&self.scaled)?;
+        self.encoder.send_frame(input)?;
         self.queue.push_back((sequence, frame.timestamp));
         self.sequence += 1;
 
@@ -187,6 +273,24 @@ impl InProcessEncoder {
 
     pub fn request_keyframe(&mut self) {
         self.frames_since_keyframe = self.keyframe_interval;
+    }
+
+    /// Change the bitrate in place (BG8): the encoder reconfigures on its
+    /// next frame (libx264 and NVENC both do), with no rebuild. Always
+    /// `true` here.
+    pub fn set_bitrate(&mut self, bitrate_bps: u32) -> bool {
+        let (maxrate_kbps, bufsize_kbits) =
+            super::encoder::vbv_kbit_bounds(bitrate_bps, self.config.fps);
+        // SAFETY: the context is open and only touched through `&mut self`;
+        // libavcodec reads these fields again at each frame it encodes.
+        unsafe {
+            let context = self.encoder.as_mut_ptr();
+            (*context).bit_rate = i64::from(bitrate_bps);
+            (*context).rc_max_rate = (maxrate_kbps * 1000) as i64;
+            (*context).rc_buffer_size = i32::try_from(bufsize_kbits * 1000).unwrap_or(i32::MAX);
+        }
+        self.config.bitrate_bps = bitrate_bps;
+        true
     }
 
     pub fn sequence(&self) -> u64 {
@@ -324,6 +428,51 @@ mod tests {
         assert!(
             packets.iter().any(|p| p.is_keyframe && p.sequence >= 59),
             "expected a periodic keyframe at the 60-frame interval"
+        );
+    }
+
+    /// BG8: NVENC in-process on Windows: a packet per frame with no delay, a
+    /// keyframe on the frame asked for, and a lower bitrate in place shows
+    /// at once in the frames' size. Needs an NVIDIA GPU and FFmpeg's DLLs on
+    /// PATH: cargo test -p pocketdesk-core --features inproc-windows -- --ignored nvenc
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn test_inprocess_nvenc_keyframe_on_ask_and_bitrate_in_place() {
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 60,
+            bitrate_bps: 8_000_000,
+            hardware_encoder: HardwareEncoder::Nvenc,
+            preset: EncoderPreset::VeryFast,
+            ..software_config(VideoCodec::H264)
+        };
+        let mut encoder = InProcessEncoder::new_hardware(config).expect("h264_nvenc opens");
+        let mut sizes = Vec::new();
+        for i in 0..90 {
+            if i == 40 {
+                encoder.request_keyframe();
+            }
+            if i == 60 {
+                assert!(encoder.set_bitrate(1_000_000));
+                assert_eq!(encoder.config().bitrate_bps, 1_000_000);
+            }
+            let packet = encoder
+                .encode_frame(&gradient_frame(1280, 720, i))
+                .unwrap()
+                .expect("zero delay: a packet for each frame");
+            assert_eq!(packet.sequence, i as u64, "out in order, no lag");
+            if i == 40 {
+                assert!(packet.is_keyframe, "the keyframe asked for, on its frame");
+            }
+            sizes.push(packet.data.len());
+        }
+        let before: usize = sizes[45..60].iter().sum::<usize>() / 15;
+        let after: usize = sizes[70..90].iter().sum::<usize>() / 20;
+        assert!(
+            after * 3 < before,
+            "1 Mbit/s frames ({after} B) well under 8 Mbit/s ones ({before} B)"
         );
     }
 
