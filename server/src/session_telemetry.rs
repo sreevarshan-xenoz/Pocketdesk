@@ -6,7 +6,9 @@
 //! own account of loss, congestion window, path MTU and path changes) to a
 //! size-capped log under the state dir. Percentile tails ride the same line:
 //! `rtt_*`/`enc_*` measured here, `dec_*`/`rnd_*`/`e2e_*` reported back by the
-//! device doing the decoding, plus its own reading of the path as `phone_*`.
+//! device doing the decoding, plus its own reading of the path as `phone_*`,
+//! and its freezes as `freeze_*` (BG1) beside the frames trimmed and the
+//! captures replaced here (`trimmed`, `replaced`).
 //! The production counterpart of the
 //! research finding that hole punching succeeds ~70% of the time even after
 //! prerequisites — the relayed share is a number we must measure, not
@@ -213,12 +215,26 @@ pub fn print_sessions(count: usize, json: bool) -> Result<()> {
         if moved > 0 {
             println!("paths moved mid-session: {moved} of {}", all.len());
         }
+        // BG1: sessions whose picture froze at least once.
+        let froze = all.iter().filter(|line| froze(line)).count();
+        if froze > 0 {
+            println!("sessions with a freeze: {froze} of {}", all.len());
+        }
     }
     println!("last {}:", count);
     for line in &lines {
         println!("  {line}");
     }
     Ok(())
+}
+
+/// Whether a log line's session froze at least once (BG1): a `freeze_n`
+/// over zero.
+fn froze(line: &str) -> bool {
+    line.split('\t')
+        .find_map(|field| field.strip_prefix("freeze_n="))
+        .and_then(|n| n.parse::<u64>().ok())
+        .is_some_and(|n| n > 0)
 }
 
 #[cfg(test)]
@@ -250,6 +266,9 @@ mod tests {
             decode_tail: None,
             render_tail: None,
             e2e_tail: None,
+            recovery_tail: None,
+            frames_trimmed: 0,
+            capture_replaced: 0,
             link: None,
             encoder: None,
         }
@@ -396,6 +415,15 @@ mod tests {
         assert_eq!(link["client_rtt_ms"], 28);
         assert!(link["path_mtu"].is_null(), "{link}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_session_with_a_freeze_is_told_from_one_without() {
+        assert!(froze(
+            "ts=1\toutcome=lan_direct\tfreeze_n=2\tfreeze_p50=180"
+        ));
+        assert!(!froze("ts=1\toutcome=lan_direct\ttrimmed=0\treplaced=0"));
+        assert!(!froze("ts=1\tfreeze_n=0"));
     }
 
     #[test]

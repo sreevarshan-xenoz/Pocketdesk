@@ -97,7 +97,12 @@ including the p50/p90/p95/p99/max tails) instead of the human tally.
 The tails name who measured them: \fIrtt_*\fR and \fIenc_*\fR are the desktop's
 own readings, \fIdec_*\fR, \fIrnd_*\fR and \fIe2e_*\fR are reported back by the
 device doing the decoding, and \fIphone_rtt\fR/\fIphone_lost\fR are that
-device's view of the link. \fIenc_*\fR appears as soon as frames are encoded,
+device's view of the link. \fIfreeze_*\fR (from that device too) times each freeze,
+from a lost frame to the keyframe that restarts the picture, and is absent when
+there was none; \fItrimmed\fR counts the frames the desktop dropped because a
+newer keyframe made them moot, and \fIreplaced\fR the captured frames a newer
+one replaced before the encoder took them. The tally says how many sessions
+froze. \fIenc_*\fR appears as soon as frames are encoded,
 but \fIrtt_*\fR, the link block and the device's \fIphone_*\fR reading all hang
 off the server's five\-second sampling period, so a connect\-and\-drop shorter
 than that reports none of them.

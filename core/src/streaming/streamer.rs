@@ -1288,9 +1288,13 @@ impl StreamingServer {
                 }
             }
 
+            if let Some(recorder) = &encode_recorder {
+                recorder.set_capture_replaced(frame_rx.replaced());
+            }
             info!(
                 packets_encoded,
                 frames_dropped,
+                capture_replaced = frame_rx.replaced(),
                 "Encoding task complete"
             );
         }.instrument(encode_span));
@@ -1302,6 +1306,7 @@ impl StreamingServer {
             let transport_bytes = delivery_bytes.clone();
             let transport_cancel = cancel.clone();
             let transport_fps_rx = self.fps_tx.subscribe();
+            let transport_recorder = telemetry.as_ref().map(|t| t.0.clone());
             let transport_span = tracing::info_span!("video_transport");
             tasks.spawn(async move {
             info!("Transport task started");
@@ -1348,6 +1353,9 @@ impl StreamingServer {
                         if start > 0 {
                             // We're trimming to a keyframe boundary — fine.
                             packets_dropped += start as u64;
+                            if let Some(recorder) = &transport_recorder {
+                                recorder.record_trimmed(start as u64);
+                            }
                             debug!(
                                 dropped = start,
                                 backlog = batch.len(),

@@ -77,6 +77,9 @@ impl PenSample {
 pub const SAMPLE_DECODE: u8 = 0;
 pub const SAMPLE_RENDER: u8 = 1;
 pub const SAMPLE_E2E: u8 = 2;
+/// A freeze (BG1): from the client asking for a keyframe after a lost frame
+/// to that keyframe arriving, so the time the picture was wrong.
+pub const SAMPLE_RECOVERY: u8 = 3;
 
 /// Longest sample batch one frame can carry: the count is a `u8`, so a client
 /// producing more than this flushes in chunks.

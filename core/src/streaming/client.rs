@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use super::connection::{ConnectionError, QuinnConnection, SharedConnection};
-use super::input_packet::{InputPacket, SAMPLE_E2E, SampleBatch};
+use super::input_packet::{InputPacket, SAMPLE_E2E, SAMPLE_RECOVERY, SampleBatch};
 use super::transport::{self, CertManager, StreamTransportConfig};
 use super::{AudioPacket, EncodedPacket};
 
@@ -182,6 +182,38 @@ static E2E_EWMA_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// number divided down for the HUD.
 pub fn e2e_sample_us(capture_age_us: u64, rtt: Duration) -> u64 {
     capture_age_us + (rtt.as_micros() as u64) / 2
+}
+
+/// What the client measures for the server's record, between flushes: the
+/// receiver measures, the feedback loop reports.
+#[derive(Default)]
+struct ClientBatches {
+    e2e: SampleBatch,
+    /// Freezes (BG1): how long each took to recover.
+    recovery: SampleBatch,
+}
+
+/// A freeze's length (BG1): from the first lost frame the client noticed (a
+/// gap before a delta) to the next keyframe, which restarts the picture.
+/// Gaps while a freeze runs belong to it; a keyframe with no freeze running
+/// is a scheduled one and times nothing.
+#[derive(Debug, Default)]
+struct FreezeClock {
+    since: Option<std::time::Instant>,
+}
+
+impl FreezeClock {
+    /// A lost frame noticed at `now`.
+    fn gap(&mut self, now: std::time::Instant) {
+        self.since.get_or_insert(now);
+    }
+
+    /// A keyframe arrived at `now`: how long the freeze it ends lasted.
+    fn keyframe(&mut self, now: std::time::Instant) -> Option<Duration> {
+        self.since
+            .take()
+            .map(|since| now.saturating_duration_since(since))
+    }
 }
 
 /// One probe sample in ms (see [`E2E_EWMA_MS`] docs for semantics/limits).
@@ -708,11 +740,11 @@ impl StreamingClient {
 
             // Samples taken between flushes, shared by the receiver (which
             // measures) and the feedback loop (which reports).
-            let e2e_samples = Arc::<SampleBatch>::default();
+            let samples = Arc::<ClientBatches>::default();
 
             // Clone connection for the stats task before it gets moved into recv task
             let stats_connection = connection.clone();
-            let stats_samples = e2e_samples.clone();
+            let stats_samples = samples.clone();
 
             // Spawn the receive loop using our cancel-aware receiver
             let recv_cancel = cancel.clone();
@@ -724,7 +756,7 @@ impl StreamingClient {
                         frame_tx,
                         audio_tx,
                         recv_cancel,
-                        e2e_samples,
+                        samples,
                         video_bytes,
                         remote,
                     )
@@ -1088,7 +1120,7 @@ async fn recv_with_cancel(
     frame_tx: mpsc::Sender<EncodedPacket>,
     audio_tx: mpsc::Sender<AudioPacket>,
     cancel: CancellationToken,
-    e2e_samples: Arc<SampleBatch>,
+    samples: Arc<ClientBatches>,
     video_bytes: Arc<std::sync::atomic::AtomicU64>,
     remote: RemoteFlags,
 ) -> Result<()> {
@@ -1102,6 +1134,7 @@ async fn recv_with_cancel(
     // it (a broken delta chain), and rate-limit so we don't spam the server.
     let mut last_video_seq: Option<u64> = None;
     let mut last_idr_request: Option<std::time::Instant> = None;
+    let mut freeze = FreezeClock::default();
     const IDR_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
 
     let mut audio_dropped = 0u64;
@@ -1261,6 +1294,7 @@ async fn recv_with_cancel(
                                     .is_some_and(|last| header.sequence > last + 1);
                             if gap {
                                 let now = std::time::Instant::now();
+                                freeze.gap(now);
                                 let throttled = last_idr_request
                                     .is_some_and(|t| now.duration_since(t) < IDR_REQUEST_INTERVAL);
                                 if !throttled {
@@ -1273,6 +1307,12 @@ async fn recv_with_cancel(
                                     send_keyframe_request(connection).await;
                                 }
                             }
+                            if header.is_keyframe
+                                && let Some(took) = freeze.keyframe(std::time::Instant::now())
+                            {
+                                debug!(ms = took.as_millis() as u64, "Recovered from a freeze");
+                                samples.recovery.push(took.as_micros() as u64);
+                            }
                             last_video_seq = Some(header.sequence);
                             record_video_sequence(header.sequence);
 
@@ -1284,7 +1324,7 @@ async fn recv_with_cancel(
                             // the session's e2e tail.
                             let rtt = connection.stats().rtt;
                             record_e2e_sample(e2e_sample_ms(header.timestamp_us, rtt));
-                            e2e_samples.push(e2e_sample_us(header.timestamp_us, rtt));
+                            samples.e2e.push(e2e_sample_us(header.timestamp_us, rtt));
 
                             // Route to video channel
                             let packet = EncodedPacket {
@@ -1378,7 +1418,7 @@ pub async fn report_samples(connection: &SharedConnection, kind: u8, batch: &Sam
 async fn send_stats_loop(
     connection: &SharedConnection,
     cancel: CancellationToken,
-    e2e_samples: &SampleBatch,
+    samples: &ClientBatches,
     every: Duration,
 ) {
     let mut interval = tokio::time::interval(every);
@@ -1404,11 +1444,21 @@ async fn send_stats_loop(
 
                 // Drain in frame-sized chunks: a stalled flush loop must not
                 // lose the samples it already holds, only delay them.
-                while let Some(values) = e2e_samples.take_chunk() {
+                while let Some(values) = samples.e2e.take_chunk() {
                     send_frame(
                         connection,
                         &InputPacket::ClientSamples {
                             kind: SAMPLE_E2E,
+                            values,
+                        },
+                    )
+                    .await;
+                }
+                while let Some(values) = samples.recovery.take_chunk() {
+                    send_frame(
+                        connection,
+                        &InputPacket::ClientSamples {
+                            kind: SAMPLE_RECOVERY,
                             values,
                         },
                     )
@@ -1422,6 +1472,22 @@ async fn send_stats_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BG1: a freeze runs from the first lost frame to the next keyframe;
+    /// later gaps belong to it, and a scheduled keyframe times nothing.
+    #[test]
+    fn a_freeze_is_timed_from_its_first_gap_to_the_next_keyframe() {
+        let start = std::time::Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut freeze = FreezeClock::default();
+        assert_eq!(freeze.keyframe(at(10)), None, "a scheduled keyframe");
+        freeze.gap(at(100));
+        freeze.gap(at(250));
+        assert_eq!(freeze.keyframe(at(400)), Some(Duration::from_millis(300)));
+        assert_eq!(freeze.keyframe(at(450)), None, "over");
+        freeze.gap(at(500));
+        assert_eq!(freeze.keyframe(at(520)), Some(Duration::from_millis(20)));
+    }
 
     fn audio_packet(sequence: u64) -> AudioPacket {
         AudioPacket {
