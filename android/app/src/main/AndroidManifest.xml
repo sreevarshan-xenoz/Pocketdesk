@@ -225,6 +225,7 @@
         <!-- BF3: a question from the computer, opened from its notification. -->
         <activity
             android:name=".ask.AskActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
             android:taskAffinity="" />

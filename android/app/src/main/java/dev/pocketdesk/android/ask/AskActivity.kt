@@ -27,6 +27,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.R
@@ -49,7 +52,10 @@ import kotlinx.coroutines.withContext
 class AskActivity : ComponentActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var said by mutableStateOf<String?>(null)
+    // Asking for the lock or sending: the buttons wait (BF3 review: a
+    // double tap on Yes opened two prompts).
     private var sending by mutableStateOf(false)
+    private var prompt: CancellationSignal? = null
 
     private lateinit var host: String
     private var port = 0
@@ -59,7 +65,12 @@ class AskActivity : ComponentActivity() {
 
     /** The screen lock's own screen, below Android 11. */
     private val confirm = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) send(yes = true) else said = getString(R.string.ask_not_confirmed)
+        if (it.resultCode == RESULT_OK) {
+            send(yes = true)
+        } else {
+            sending = false
+            said = getString(R.string.ask_not_confirmed)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,7 +96,13 @@ class AskActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        said?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        said?.let {
+                            Text(
+                                it,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(onClick = { answer(yes = false) }, enabled = !sending) {
                                 Text(stringResource(R.string.ask_no))
@@ -101,12 +118,16 @@ class AskActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        prompt?.cancel()
         scope.cancel()
         super.onDestroy()
     }
 
+    private fun expired(): Boolean = System.currentTimeMillis() / 1000 >= expiresUnix
+
     private fun answer(yes: Boolean) {
-        if (System.currentTimeMillis() / 1000 >= expiresUnix) {
+        if (sending) return
+        if (expired()) {
             said = getString(R.string.ask_expired)
             return
         }
@@ -118,7 +139,9 @@ class AskActivity : ComponentActivity() {
             return
         }
         val title = getString(R.string.ask_confirm_title)
+        sending = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val signal = CancellationSignal().also { prompt = it }
             BiometricPrompt.Builder(this)
                 .setTitle(title)
                 .setDescription(question)
@@ -127,7 +150,7 @@ class AskActivity : ComponentActivity() {
                 )
                 .build()
                 .authenticate(
-                    CancellationSignal(),
+                    signal,
                     mainExecutor,
                     object : BiometricPrompt.AuthenticationCallback() {
                         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
@@ -135,6 +158,7 @@ class AskActivity : ComponentActivity() {
                         }
 
                         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            sending = false
                             said = getString(R.string.ask_not_confirmed)
                         }
                     },
@@ -142,12 +166,23 @@ class AskActivity : ComponentActivity() {
         } else {
             @Suppress("DEPRECATION")
             val unlock = keyguard.createConfirmDeviceCredentialIntent(title, question)
-            if (unlock == null) said = getString(R.string.ask_needs_lock) else confirm.launch(unlock)
+            if (unlock == null) {
+                sending = false
+                said = getString(R.string.ask_needs_lock)
+            } else {
+                confirm.launch(unlock)
+            }
         }
     }
 
     private fun send(yes: Boolean) {
         val body = AskRule.body(id, yes) ?: return finish()
+        // A prompt can outlive the question (BF3 review).
+        if (expired()) {
+            sending = false
+            said = getString(R.string.ask_expired)
+            return
+        }
         sending = true
         scope.launch {
             val sent = withContext(Dispatchers.IO) { RustCore.sendPhonePacket(host, port, AskRule.ANSWER, body) }
