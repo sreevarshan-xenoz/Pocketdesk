@@ -4605,6 +4605,43 @@ def bf3_ask(ctx: Ctx) -> tuple[str, str]:
             asking.kill()
         adb("shell", "cmd", "statusbar", "collapse")
         set_permission_live(ctx, "ask", had)
+@check("bf4-note-to-computer", "§7")
+def bf4_note_to_computer(ctx: Ctx) -> tuple[str, str]:
+    """A note shared to "Note to computer" (§7, BF4): with no notes file
+    picked, the phone says to pick one; with the throwaway's own file
+    picked, the note is added at its end with the time, and the phone says
+    so. The note is a made-up line; the file is the throwaway's."""
+    notes = ctx.server.root / "notes.md"
+    notes.unlink(missing_ok=True)
+    token = secrets.token_hex(3)
+    line = f"BF4 check {token}"
+
+    def share() -> str:
+        adb("logcat", "-c")
+        adb(
+            "shell", "am", "start", "-a", "android.intent.action.SEND", "-t", "text/plain",
+            "--es", "android.intent.extra.TEXT", shlex.quote(line), "-n", f"{APP}/.NoteToComputer",
+        )
+        said = wait_for(lambda: re.search(r"share: (.*)", adb("logcat", "-d", "-s", "ShareActivity:I")), 30, 2)
+        return said.group(1).strip() if said else ""
+
+    before = ctx.server.configure({"notes_file": '""'})
+    try:
+        unpicked = share()
+        if not unpicked:
+            return "FAIL", "the share said nothing within 30 s"
+        ctx.server.configure({"notes_file": json.dumps(str(notes))})
+        time.sleep(1)
+        picked = share()
+        kept = notes.read_text(encoding="utf-8") if notes.exists() else ""
+        added = bool(re.search(r"^- \*\*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\*\* " + re.escape(line) + "$", kept, re.M))
+        asked_to_pick = unpicked.startswith("Pick a file for notes")
+        said = f"no file: {'asked to pick one' if asked_to_pick else repr(unpicked)}; picked: {'added with the time' if added else 'not added'}, the phone said {picked!r}"
+        return ("PASS" if asked_to_pick and added and picked.startswith("Note added on") else "FAIL"), said
+    finally:
+        path = ctx.server.root / "config" / "config.toml"
+        path.write_text(before, encoding="utf-8")
+        notes.unlink(missing_ok=True)
 
 
 @check("bf1-done-tells-the-phone", "§8")
