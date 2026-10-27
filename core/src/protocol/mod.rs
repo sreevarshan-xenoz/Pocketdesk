@@ -11,6 +11,7 @@ pub mod in_use;
 pub mod kdeconnect;
 pub mod link;
 pub mod live;
+pub mod note;
 pub mod notification_action;
 pub mod partials;
 pub mod peek;

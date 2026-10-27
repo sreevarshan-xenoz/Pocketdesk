@@ -196,6 +196,8 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         crate::protocol::peek::PEEK => Capability::Peek,
         // An answer to the computer's question (BF3).
         crate::protocol::ask::ASK_ANSWER => Capability::Ask,
+        // A note appended to the owner's file here (BF4), as a file sent.
+        crate::protocol::note::NOTE => Capability::Files,
         _ => return None,
     })
 }

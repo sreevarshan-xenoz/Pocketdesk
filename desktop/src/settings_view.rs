@@ -201,6 +201,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Received files land in",
         Section::Phones,
     ),
+    ("notes_file", "Notes from phones go in", Section::Phones),
     (
         "cast_control",
         "Control phones from their screen window",
@@ -558,6 +559,8 @@ pub struct SettingsForm {
     home_assistant: Option<(std::time::Instant, Option<ha::Status>)>,
     /// A folder being picked for received files (C2).
     picking_downloads: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
+    /// A file being picked for notes from phones (BF4).
+    picking_notes: Option<std::thread::JoinHandle<Option<std::path::PathBuf>>>,
     /// The paired phones, id and name, for the phone commands' pickers
     /// (M9); the window sets it each frame.
     pub phones: Vec<(String, String)>,
@@ -590,6 +593,7 @@ impl SettingsForm {
             wake: pocketdesk_core::local::wake::wake_facts(None),
             home_assistant: None,
             picking_downloads: None,
+            picking_notes: None,
             phones: Vec::new(),
         }
     }
@@ -1305,6 +1309,34 @@ impl SettingsForm {
                     note(
                         ui,
                         "Files from phones, other computers and KDE Connect devices. A folder that is gone means Downloads.",
+                    );
+                });
+                // BF4: a file picked for notes from phones fills the box.
+                if self.picking_notes.as_ref().is_some_and(|h| h.is_finished())
+                    && let Some(Ok(Some(path))) = self.picking_notes.take().map(|h| h.join())
+                {
+                    e.notes_file = path.display().to_string();
+                }
+                let picking = &mut self.picking_notes;
+                row(ui, "notes_file", |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut e.notes_file)
+                            .hint_text("no file: notes are refused")
+                            .desired_width(320.0),
+                    );
+                    if crate::pick_file::AVAILABLE
+                        && ui
+                            .add_enabled(picking.is_none(), egui::Button::new("Choose file…"))
+                            .clicked()
+                    {
+                        *picking = Some(crate::pick_file::spawn(false));
+                    }
+                    if !e.notes_file.trim().is_empty() && ui.button("No notes").clicked() {
+                        e.notes_file.clear();
+                    }
+                    note(
+                        ui,
+                        "A Markdown file (made if it is not there, in a folder that is): each note shared to \u{201c}Note to computer\u{201d} on a phone with the Files permission is added at its end, with the time. Empty: phones are told to pick one here.",
                     );
                 });
                 row(ui, "cast_control", |ui| {
