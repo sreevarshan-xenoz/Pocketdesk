@@ -18,12 +18,15 @@ use windows::core::BOOL;
 
 use super::VideoFrame;
 use super::capture::monitor_rect;
+use super::frame_pool;
 
 /// Copies GPU textures to the CPU through one reused staging texture.
 pub(super) struct StagingCopy {
     pub(super) device: ID3D11Device,
     pub(super) context: ID3D11DeviceContext,
     staging: Option<(ID3D11Texture2D, u32, u32)>,
+    /// Frames' buffers come back for the next copy while this runs (BG9).
+    _pool: frame_pool::Lease,
 }
 
 impl StagingCopy {
@@ -32,6 +35,7 @@ impl StagingCopy {
             device,
             context,
             staging: None,
+            _pool: frame_pool::Lease::new(),
         }
     }
 
@@ -81,7 +85,8 @@ impl StagingCopy {
         Some(Self::read(&self.context, staging, *width, *height))
     }
 
-    /// Map `staging` and copy its rows into a tightly strided frame.
+    /// Map `staging` and copy its rows into a tightly strided frame, its
+    /// buffer a dropped frame's when there is one (BG9).
     fn read(
         context: &ID3D11DeviceContext,
         staging: &ID3D11Texture2D,
@@ -92,7 +97,7 @@ impl StagingCopy {
         unsafe { context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }
             .context("Map (staging)")?;
         let row = width as usize * 4;
-        let mut data = vec![0u8; row * height as usize];
+        let mut data = frame_pool::take(row * height as usize);
         let src = mapped.pData as *const u8;
         for y in 0..height as usize {
             // SAFETY: the mapped staging texture holds `height` rows of
@@ -300,5 +305,20 @@ mod tests {
         let next = copier.copy(&texture).unwrap();
         assert!(next.data.iter().all(|&b| b == 9));
         assert_eq!(copier.copy_again().unwrap().unwrap().data, next.data);
+    }
+
+    #[test]
+    fn a_reused_buffer_holds_only_the_new_frame() {
+        // BG9: a copy takes a dropped frame's buffer instead of a new one, so
+        // every byte of the old frame must be written over.
+        let (device, context, texture) = warp_texture(3);
+        let mut copier = StagingCopy::new(device, context.clone());
+        drop(copier.copy(&texture).unwrap());
+
+        let newer = [5u8; 4 * 2 * 4];
+        unsafe { context.UpdateSubresource(&texture, 0, None, newer.as_ptr().cast(), 16, 0) };
+        let next = copier.copy(&texture).unwrap();
+        assert_eq!(next.data.len(), 4 * 2 * 4);
+        assert!(next.data.iter().all(|&b| b == 5));
     }
 }
