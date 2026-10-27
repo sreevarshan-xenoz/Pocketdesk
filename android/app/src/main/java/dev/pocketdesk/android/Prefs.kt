@@ -35,6 +35,7 @@ object Prefs {
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_COMPUTER_ALERTS = "computer_alerts"
     private const val KEY_PEEK = "peek_on_home"
+    private const val KEY_QUESTIONS = "questions_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
     private const val KEY_PHONE_MEDIA = "phone_media_on_computer"
@@ -290,6 +291,14 @@ object Prefs {
 
     fun setPeek(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PEEK, enabled) }
+        bump()
+    }
+
+    /** Questions from `pocketdesk ask` offered with no session open (BF3); on by default. */
+    fun questionsFromComputer(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_QUESTIONS, true)
+
+    fun setQuestionsFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_QUESTIONS, enabled) }
         bump()
     }
 

@@ -305,6 +305,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.peek(context),
                     { Prefs.setPeek(context, it) },
                 )
+                // BF3: `pocketdesk ask` waiting on this phone's Yes or No.
+                SettingSwitch(
+                    stringResource(R.string.settings_questions),
+                    stringResource(R.string.settings_questions_summary),
+                    Prefs.questionsFromComputer(context),
+                    { Prefs.setQuestionsFromComputer(context, it) },
+                )
                 // L4: the dialer opens with a number the computer sends.
                 SettingSwitch(
                     stringResource(R.string.settings_calls_from_computer),
