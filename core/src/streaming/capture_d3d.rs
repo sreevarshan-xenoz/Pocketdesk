@@ -19,19 +19,29 @@ use windows::core::BOOL;
 use super::VideoFrame;
 use super::capture::monitor_rect;
 use super::frame_pool;
+#[cfg(feature = "inproc-windows")]
+use super::gpu_frame::GpuRing;
 
-/// Copies GPU textures to the CPU through one reused staging texture.
+/// Copies GPU textures to the CPU through one reused staging texture, or,
+/// with `inproc-windows` on an NVIDIA adapter, keeps them on the GPU for
+/// NVENC (BG10).
 pub(super) struct StagingCopy {
     pub(super) device: ID3D11Device,
     pub(super) context: ID3D11DeviceContext,
     staging: Option<(ID3D11Texture2D, u32, u32)>,
     /// Frames' buffers come back for the next copy while this runs (BG9).
     _pool: frame_pool::Lease,
+    /// Frames kept on the GPU instead of read back, for in-process NVENC
+    /// (BG10); `None` off an NVIDIA adapter.
+    #[cfg(feature = "inproc-windows")]
+    ring: Option<GpuRing>,
 }
 
 impl StagingCopy {
     pub(super) fn new(device: ID3D11Device, context: ID3D11DeviceContext) -> Self {
         Self {
+            #[cfg(feature = "inproc-windows")]
+            ring: GpuRing::new(&device, &context),
             device,
             context,
             staging: None,
@@ -41,6 +51,10 @@ impl StagingCopy {
 
     /// Copy a BGRA texture into a tightly strided [`VideoFrame`].
     pub(super) fn copy(&mut self, texture: &ID3D11Texture2D) -> Result<VideoFrame> {
+        #[cfg(feature = "inproc-windows")]
+        if let Some(ring) = &mut self.ring {
+            return ring.copy(texture);
+        }
         let mut desc = D3D11_TEXTURE2D_DESC::default();
         unsafe { texture.GetDesc(&mut desc) };
         let (width, height) = (desc.Width, desc.Height);
@@ -81,6 +95,10 @@ impl StagingCopy {
     /// a clone of every frame for it cost a full copy of each (1.7 ms at
     /// 2560x1080), where this costs one a second. `None` before any copy.
     pub(super) fn copy_again(&mut self) -> Option<Result<VideoFrame>> {
+        #[cfg(feature = "inproc-windows")]
+        if let Some(ring) = &self.ring {
+            return ring.copy_again().map(Ok);
+        }
         let (staging, width, height) = self.staging.as_ref()?;
         Some(Self::read(&self.context, staging, *width, *height))
     }
@@ -118,6 +136,7 @@ impl StagingCopy {
             height,
             stride: width * 4,
             timestamp: Instant::now(),
+            gpu: None,
         })
     }
 }

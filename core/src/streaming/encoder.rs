@@ -233,7 +233,12 @@ impl VideoEncoder {
     /// first; empty means the encoder has no output yet.
     pub fn encode_frame(&mut self, frame: &VideoFrame) -> anyhow::Result<Vec<EncodedPacket>> {
         match self {
-            Self::Sidecar(e) => e.encode_frame(frame),
+            // A frame on the GPU (BG10) is read back for the sidecar's pipe.
+            Self::Sidecar(e) => match frame.downloaded()? {
+                Some(cpu) => e.encode_frame(&cpu),
+                None => e.encode_frame(frame),
+            },
+            // The in-process encoder takes a frame on the GPU itself.
             #[cfg(any(target_os = "linux", all(windows, feature = "inproc-windows")))]
             Self::InProcess(e) => Ok(e.encode_frame(frame)?.into_iter().collect()),
             #[cfg(target_os = "linux")]
@@ -1567,6 +1572,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
 
         // Encode several frames — first few may be empty due to encoder latency
@@ -1632,6 +1638,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
 
         for _ in 0..10 {
@@ -1670,6 +1677,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
 
         // Encode enough frames to trigger the keyframe interval (2 seconds = 60 frames)
@@ -1715,6 +1723,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
 
         // Encode a few frames then request a keyframe
@@ -1767,6 +1776,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
         let _ = encoder.encode_frame(&frame);
 
@@ -1902,6 +1912,7 @@ mod tests {
                 height: config.height,
                 stride,
                 timestamp: Instant::now(),
+                gpu: None,
             };
             packets.extend(sidecar.encode_frame(&frame).expect("encode"));
         }
@@ -2010,6 +2021,7 @@ mod tests {
             height: 240,
             stride,
             timestamp: Instant::now(),
+            gpu: None,
         };
 
         for _ in 0..60 {

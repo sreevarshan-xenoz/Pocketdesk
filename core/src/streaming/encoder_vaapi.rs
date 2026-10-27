@@ -653,6 +653,7 @@ mod tests {
             height: h,
             stride: stride as u32,
             timestamp: Instant::now(),
+            gpu: None,
         }
     }
 }

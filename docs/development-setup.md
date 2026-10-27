@@ -155,6 +155,12 @@ cargo build -p pocketdesk-server --features inproc-windows
    `PATH`. Without them the server does not start.
 5. **The live test**, which needs an NVIDIA GPU:
    `cargo test -p pocketdesk-core --features inproc-windows --lib -- --ignored nvenc`
+6. **Frames on the GPU (BG10).** With this feature, a screen on an NVIDIA
+   adapter is not read back to the CPU: each captured frame is copied into a
+   texture of the capture's own and NVENC encodes it there, a window crop
+   included. A screen on another vendor's adapter (a laptop's integrated
+   GPU), or any encoder other than in-process NVENC, gets its frames read
+   back as before. `POCKETDESK_ZERO_COPY=0` turns it off, for comparing.
 
 The feature's `ffmpeg-next` comes through `ffmpeg-shim/` (`pocketdesk-ffmpeg`),
 outside the workspace, since Cargo will not let core name `ffmpeg-next` twice.

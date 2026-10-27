@@ -16,14 +16,22 @@ use std::collections::VecDeque;
 use std::sync::Once;
 use std::time::Instant;
 
+#[cfg(all(windows, feature = "capture"))]
+use tracing::info;
 use tracing::{trace, warn};
 
+#[cfg(all(windows, feature = "capture"))]
+use super::GpuFrame;
 use super::encoder::detect_keyframe;
 use super::{EncodedPacket, EncoderPreset, H264Profile, StreamingConfig, VideoCodec, VideoFrame};
 #[cfg(target_os = "linux")]
 use ffmpeg_next as ffmpeg;
 #[cfg(windows)]
 use pocketdesk_ffmpeg::ffmpeg_next as ffmpeg;
+#[cfg(all(windows, feature = "capture"))]
+use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
+#[cfg(all(windows, feature = "capture"))]
+use windows::core::Interface;
 
 static FFMPEG_INIT: Once = Once::new();
 
@@ -67,6 +75,134 @@ pub struct InProcessEncoder {
     sequence: u64,
     keyframe_interval: u64,
     frames_since_keyframe: u64,
+    /// NVENC fed textures from the capture's device (BG10).
+    #[cfg(all(windows, feature = "capture"))]
+    gpu: GpuInput,
+}
+
+/// Whether NVENC takes frames on the GPU (BG10).
+#[cfg(all(windows, feature = "capture"))]
+enum GpuInput {
+    /// No frame on the GPU yet.
+    Untried,
+    /// Open on a D3D11 frames context of the capture's device.
+    On(D3d11Frames),
+    /// It could not open on the capture's device (another vendor's adapter):
+    /// frames are read back, as before.
+    Off,
+}
+
+/// FFmpeg's D3D11 frames context on one device: NVENC's input textures.
+#[cfg(all(windows, feature = "capture"))]
+struct D3d11Frames {
+    device: ID3D11Device,
+    frames: *mut ffmpeg::ffi::AVBufferRef,
+}
+
+#[cfg(all(windows, feature = "capture"))]
+impl Drop for D3d11Frames {
+    fn drop(&mut self) {
+        // SAFETY: our own reference, taken in `d3d11_frames`.
+        unsafe { ffmpeg::ffi::av_buffer_unref(&mut self.frames) };
+    }
+}
+
+/// A D3D11 frames context of `width`x`height` BGRA on `device`, for NVENC's
+/// input (BG10).
+#[cfg(all(windows, feature = "capture"))]
+fn d3d11_frames(device: &ID3D11Device, width: u32, height: u32) -> anyhow::Result<D3d11Frames> {
+    use ffmpeg::ffi;
+    // SAFETY: each context is allocated, filled and initialised as
+    // libavutil documents; a failure unrefs what was made.
+    unsafe {
+        let mut device_ref =
+            ffi::av_hwdevice_ctx_alloc(ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_D3D11VA);
+        if device_ref.is_null() {
+            anyhow::bail!("av_hwdevice_ctx_alloc (D3D11VA)");
+        }
+        let hw = (*device_ref).data as *mut ffi::AVHWDeviceContext;
+        let d3d = (*hw).hwctx as *mut ffi::AVD3D11VADeviceContext;
+        // FFmpeg releases the device with the context: it gets a reference.
+        (*d3d).device = device.clone().into_raw().cast();
+        let r = ffi::av_hwdevice_ctx_init(device_ref);
+        if r < 0 {
+            ffi::av_buffer_unref(&mut device_ref);
+            anyhow::bail!("av_hwdevice_ctx_init: {}", ffmpeg::Error::from(r));
+        }
+
+        let mut frames_ref = ffi::av_hwframe_ctx_alloc(device_ref);
+        // The frames context holds its own reference to the device's.
+        ffi::av_buffer_unref(&mut device_ref);
+        if frames_ref.is_null() {
+            anyhow::bail!("av_hwframe_ctx_alloc");
+        }
+        let frames = (*frames_ref).data as *mut ffi::AVHWFramesContext;
+        (*frames).format = ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
+        (*frames).sw_format = ffi::AVPixelFormat::AV_PIX_FMT_BGRA;
+        (*frames).width = width as i32;
+        (*frames).height = height as i32;
+        (*frames).initial_pool_size = 4;
+        let r = ffi::av_hwframe_ctx_init(frames_ref);
+        if r < 0 {
+            ffi::av_buffer_unref(&mut frames_ref);
+            anyhow::bail!("av_hwframe_ctx_init: {}", ffmpeg::Error::from(r));
+        }
+        Ok(D3d11Frames {
+            device: device.clone(),
+            frames: frames_ref,
+        })
+    }
+}
+
+/// Open NVENC for `config`: on BGRA from the CPU, or on `frames`' textures
+/// (BG10). Zero delay, constant bitrate in a small VBV, a keyframe on the
+/// frame asked for (`forced-idr`).
+#[cfg(windows)]
+fn open_nvenc(
+    config: &StreamingConfig,
+    frames: Option<*mut ffmpeg::ffi::AVBufferRef>,
+) -> anyhow::Result<ffmpeg::encoder::Video> {
+    let is_hevc = matches!(config.codec, VideoCodec::H265);
+    let name = if is_hevc { "hevc_nvenc" } else { "h264_nvenc" };
+    let codec = ffmpeg::encoder::find_by_name(name)
+        .ok_or_else(|| anyhow::anyhow!("FFmpeg has no {name}"))?;
+    let keyframe_interval = (config.fps as u64) * 2;
+    let (maxrate_kbps, bufsize_kbits) =
+        super::encoder::vbv_kbit_bounds(config.bitrate_bps, config.fps);
+
+    let context = ffmpeg::codec::context::Context::new_with_codec(codec);
+    let mut video = context.encoder().video()?;
+    video.set_width(config.width);
+    video.set_height(config.height);
+    video.set_format(ffmpeg::format::Pixel::BGRA);
+    video.set_frame_rate(Some(ffmpeg::Rational::new(config.fps as i32, 1)));
+    video.set_time_base(ffmpeg::Rational(1, config.fps as i32));
+    video.set_gop(keyframe_interval.min(u32::MAX as u64) as u32);
+    video.set_max_b_frames(0);
+    video.set_bit_rate(config.bitrate_bps as usize);
+    video.set_max_bit_rate(maxrate_kbps as usize * 1000);
+    // SAFETY: an encoder context not yet opened, set before open; the
+    // frames context gets a reference of its own.
+    unsafe {
+        let raw = video.as_mut_ptr();
+        (*raw).rc_buffer_size = i32::try_from(bufsize_kbits * 1000).unwrap_or(i32::MAX);
+        if let Some(frames) = frames {
+            (*raw).pix_fmt = ffmpeg::ffi::AVPixelFormat::AV_PIX_FMT_D3D11;
+            (*raw).hw_frames_ctx = ffmpeg::ffi::av_buffer_ref(frames);
+        }
+    }
+
+    let mut options = ffmpeg::Dictionary::new();
+    options.set("preset", nvenc_preset(&config.preset));
+    options.set("tune", "ll");
+    options.set("zerolatency", "1");
+    options.set("delay", "0");
+    options.set("rc", "cbr");
+    options.set("forced-idr", "1");
+    if !is_hevc {
+        options.set("profile", profile_name(&config.profile));
+    }
+    Ok(video.open_with(options)?)
 }
 
 // SAFETY: the AVCodecContext is only ever touched through `&mut self`, and
@@ -171,6 +307,8 @@ impl InProcessEncoder {
             sequence: 0,
             keyframe_interval,
             frames_since_keyframe: 0,
+            #[cfg(all(windows, feature = "capture"))]
+            gpu: GpuInput::Off,
         })
     }
 
@@ -180,42 +318,8 @@ impl InProcessEncoder {
     #[cfg(windows)]
     pub fn new_hardware(config: StreamingConfig) -> anyhow::Result<Self> {
         init_ffmpeg();
-        let is_hevc = matches!(config.codec, VideoCodec::H265);
-        let name = if is_hevc { "hevc_nvenc" } else { "h264_nvenc" };
-        let codec = ffmpeg::encoder::find_by_name(name)
-            .ok_or_else(|| anyhow::anyhow!("FFmpeg has no {name}"))?;
         let keyframe_interval = (config.fps as u64) * 2;
-        let (maxrate_kbps, bufsize_kbits) =
-            super::encoder::vbv_kbit_bounds(config.bitrate_bps, config.fps);
-
-        let context = ffmpeg::codec::context::Context::new_with_codec(codec);
-        let mut video = context.encoder().video()?;
-        video.set_width(config.width);
-        video.set_height(config.height);
-        video.set_format(ffmpeg::format::Pixel::BGRA);
-        video.set_frame_rate(Some(ffmpeg::Rational::new(config.fps as i32, 1)));
-        video.set_time_base(ffmpeg::Rational(1, config.fps as i32));
-        video.set_gop(keyframe_interval.min(u32::MAX as u64) as u32);
-        video.set_max_b_frames(0);
-        video.set_bit_rate(config.bitrate_bps as usize);
-        video.set_max_bit_rate(maxrate_kbps as usize * 1000);
-        // SAFETY: an encoder context not yet opened, set before open.
-        unsafe {
-            (*video.as_mut_ptr()).rc_buffer_size =
-                i32::try_from(bufsize_kbits * 1000).unwrap_or(i32::MAX);
-        }
-
-        let mut options = ffmpeg::Dictionary::new();
-        options.set("preset", nvenc_preset(&config.preset));
-        options.set("tune", "ll");
-        options.set("zerolatency", "1");
-        options.set("delay", "0");
-        options.set("rc", "cbr");
-        options.set("forced-idr", "1");
-        if !is_hevc {
-            options.set("profile", profile_name(&config.profile));
-        }
-        let encoder = video.open_with(options)?;
+        let encoder = open_nvenc(&config, None)?;
         let bgra =
             ffmpeg::frame::Video::new(ffmpeg::format::Pixel::BGRA, config.width, config.height);
         Ok(Self {
@@ -228,6 +332,8 @@ impl InProcessEncoder {
             sequence: 0,
             keyframe_interval,
             frames_since_keyframe: 0,
+            #[cfg(all(windows, feature = "capture"))]
+            gpu: GpuInput::Untried,
         })
     }
 
@@ -238,14 +344,30 @@ impl InProcessEncoder {
             self.frames_since_keyframe = 0;
         }
 
-        self.copy_frame(frame);
         let sequence = self.sequence;
-        let input = match &mut self.scaler {
-            Some((scaling, scaled)) => {
-                scaling.run(&self.bgra, scaled)?;
-                scaled
+        // BG10: a frame on the GPU goes to NVENC as a texture.
+        #[cfg(all(windows, feature = "capture"))]
+        let mut on_gpu = match &frame.gpu {
+            Some(gpu) => self.gpu_input(gpu, frame.width, frame.height),
+            None => None,
+        };
+        #[cfg(not(all(windows, feature = "capture")))]
+        let mut on_gpu: Option<ffmpeg::frame::Video> = None;
+        let input = match on_gpu.as_mut() {
+            Some(texture) => texture,
+            None => {
+                match frame.downloaded()? {
+                    Some(cpu) => self.copy_frame(&cpu),
+                    None => self.copy_frame(frame),
+                }
+                match &mut self.scaler {
+                    Some((scaling, scaled)) => {
+                        scaling.run(&self.bgra, scaled)?;
+                        scaled
+                    }
+                    None => &mut self.bgra,
+                }
             }
-            None => &mut self.bgra,
         };
         input.set_pts(Some(sequence as i64));
         // libx264/x265, and NVENC with `forced-idr`, honor AVFrame.pict_type=I
@@ -275,13 +397,89 @@ impl InProcessEncoder {
         self.frames_since_keyframe = self.keyframe_interval;
     }
 
-    /// Its name for the session's record: the software path, or NVENC (BG8).
+    /// Its name for the session's record: the software path, or NVENC (BG8),
+    /// fed textures (BG10) or BGRA.
     pub fn backend_name(&self) -> &'static str {
+        #[cfg(all(windows, feature = "capture"))]
+        if matches!(self.gpu, GpuInput::On(_)) {
+            return "in-process-nvenc-zero-copy";
+        }
         if self.scaler.is_some() {
             "in-process"
         } else {
             "in-process-nvenc"
         }
+    }
+
+    /// NVENC's input texture holding `gpu`'s region (BG10), opening NVENC on
+    /// the frame's device first if it is not yet; `None` to read the frame
+    /// back instead (the software path, a size the encoder was not opened
+    /// at, or a device NVENC cannot open on).
+    #[cfg(all(windows, feature = "capture"))]
+    fn gpu_input(
+        &mut self,
+        gpu: &GpuFrame,
+        width: u32,
+        height: u32,
+    ) -> Option<ffmpeg::frame::Video> {
+        if self.scaler.is_some() || (width, height) != (self.config.width, self.config.height) {
+            return None;
+        }
+        let on_device = matches!(&self.gpu, GpuInput::On(f) if f.device == *gpu.device());
+        if !on_device {
+            if matches!(self.gpu, GpuInput::Off) {
+                return None;
+            }
+            if let Err(e) = self.open_on_gpu(gpu.device()) {
+                warn!("NVENC cannot take the capture's textures ({e:#}); reading frames back");
+                self.gpu = GpuInput::Off;
+                return None;
+            }
+            info!("NVENC takes captured frames on the GPU (BG10)");
+        }
+        let GpuInput::On(frames) = &self.gpu else {
+            return None;
+        };
+        let mut texture = ffmpeg::frame::Video::empty();
+        // SAFETY: a frame from the frames context holds an ID3D11Texture2D
+        // array in data[0] and its slice in data[1] (hwcontext_d3d11va.h);
+        // the copy is ordered before NVENC reads it on the same context.
+        unsafe {
+            let r = ffmpeg::ffi::av_hwframe_get_buffer(frames.frames, texture.as_mut_ptr(), 0);
+            if r < 0 {
+                warn!("av_hwframe_get_buffer: {}", ffmpeg::Error::from(r));
+                return None;
+            }
+            let raw = (*texture.as_ptr()).data[0] as *mut std::ffi::c_void;
+            let slice = (*texture.as_ptr()).data[1] as usize as u32;
+            let target = ID3D11Texture2D::from_raw_borrowed(&raw)?;
+            gpu.context().CopySubresourceRegion(
+                target,
+                slice,
+                0,
+                0,
+                0,
+                gpu.texture(),
+                0,
+                Some(&gpu.region(width, height)),
+            );
+        }
+        Some(texture)
+    }
+
+    /// Reopen NVENC on a frames context of `device` (BG10), at the current
+    /// size and bitrate. The new encoder starts with a keyframe.
+    #[cfg(all(windows, feature = "capture"))]
+    fn open_on_gpu(&mut self, device: &ID3D11Device) -> anyhow::Result<()> {
+        let frames = d3d11_frames(device, self.config.width, self.config.height)?;
+        let encoder = open_nvenc(&self.config, Some(frames.frames))?;
+        // Whatever the old encoder still holds goes out first.
+        self.encoder.send_eof()?;
+        self.receive_packets()?;
+        self.encoder = encoder;
+        self.gpu = GpuInput::On(frames);
+        self.frames_since_keyframe = 0;
+        Ok(())
     }
 
     /// Change the bitrate in place (BG8): NVENC reconfigures on its next
@@ -386,6 +584,7 @@ mod tests {
             height: h,
             stride: stride as u32,
             timestamp: Instant::now(),
+            gpu: None,
         }
     }
 
@@ -489,6 +688,55 @@ mod tests {
             after * 3 < before,
             "1 Mbit/s frames ({after} B) well under 8 Mbit/s ones ({before} B)"
         );
+    }
+
+    /// BG10: frames captured on an NVIDIA adapter reach NVENC as textures,
+    /// window crops included, with a keyframe still on the frame asked for
+    /// and the bitrate still changed in place. Needs an NVIDIA GPU and
+    /// FFmpeg's DLLs on PATH:
+    /// cargo test -p pocketdesk-core --features inproc-windows -- --ignored nvenc
+    #[cfg(all(windows, feature = "capture"))]
+    #[test]
+    #[ignore]
+    fn test_inprocess_nvenc_takes_frames_on_the_gpu() {
+        use crate::streaming::gpu_frame::tests::{device, ring, texture};
+
+        let (device, context) = device(true).expect("an NVIDIA adapter");
+        let mut ring = ring(&device, &context);
+        // A larger screen, cropped to the encoder's size each frame, as a
+        // window's crop is.
+        let (screen_w, screen_h) = (1600, 900);
+        let config = StreamingConfig {
+            width: 1280,
+            height: 720,
+            fps: 60,
+            bitrate_bps: 8_000_000,
+            hardware_encoder: HardwareEncoder::Nvenc,
+            preset: EncoderPreset::VeryFast,
+            ..software_config(VideoCodec::H264)
+        };
+        let mut encoder = InProcessEncoder::new_hardware(config).expect("h264_nvenc opens");
+        for i in 0..60usize {
+            let pixels = gradient_frame(screen_w, screen_h, i);
+            let source = texture(&device, screen_w, screen_h, &pixels.data);
+            let mut frame = ring.copy(&source).unwrap();
+            assert!(frame.crop_region(100, 80, 1280, 720));
+            if i == 30 {
+                encoder.request_keyframe();
+            }
+            if i == 40 {
+                assert!(encoder.set_bitrate(2_000_000), "still in place");
+            }
+            let packet = encoder
+                .encode_frame(&frame)
+                .unwrap()
+                .expect("zero delay: a packet for each frame");
+            assert_eq!(encoder.backend_name(), "in-process-nvenc-zero-copy");
+            assert_eq!(packet.sequence, i as u64);
+            if i == 0 || i == 30 {
+                assert!(packet.is_keyframe, "a keyframe on frame {i}");
+            }
+        }
     }
 
     #[test]

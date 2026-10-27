@@ -69,6 +69,7 @@ fn background(width: u32, height: u32) -> VideoFrame {
         height,
         stride,
         timestamp: Instant::now(),
+        gpu: None,
     }
 }
 
@@ -128,6 +129,7 @@ pub fn start(
                 let mut current = VideoFrame {
                     data: base.data.clone(),
                     timestamp: Instant::now(),
+                    gpu: None,
                     ..base
                 };
                 draw(&mut current, n);
