@@ -287,6 +287,8 @@ is still filling in is dimmed. What to confirm on a real phone:
 - [ ] "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio). (where: by hand)
 - [x] Desktop pushes findmydevice ring → phone alarm loops at max volume 30 s (phone in alarm-volume >0; check DoNotDisturb doesn't block USAGE_ALARM). (2026-10-23 (P11, Q1's `p11-ring`): `pocketdesk ring` rang the OPPO 30 s at its alarm volume (no longer the maximum since N4), with the alarm vibration and the torch.)
 - [x] `pocketdesk done -- <command>` tells the phone when the command ends, with no session open: a notification with how it ended, how long it took and its last lines, under "Alerts from the computer" (BF1). (2026-10-27, the runner's `bf1-done-tells-the-phone` on the OPPO against a throwaway, BF1's build: a command that exited 3 kept its code, and the phone showed "Failed (3)" with the title given and the command's last line. It found the computer's notifications were dropped by the phone outside a session and refused on Android 14; both fixed in BF1.)
+- [x] `pocketdesk ask` puts a question to the phone with no session open, and waits on its answer: No at a tap, Yes only behind the phone's lock (BF3). (2026-10-27, the runner's `bf3-ask` on the OPPO against a throwaway, BF3's build, the phone's Ask permission turned on for it: the question came as a notification, Yes was refused for want of a screen lock and said why, and No ended the command with exit 1 and `no`.)
+- [ ] Yes to `pocketdesk ask` behind a real fingerprint or screen lock ends the command with 0 and `yes`; a cancelled prompt sends nothing; a question turned on its side mid-prompt keeps its Yes (BF3). (where: by hand)
 
 ## 8a. Control-channel versioning (R4 D4)
 

@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-869 open items.
+870 open items.
 
 | Where | Items |
 |---|---|
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 28 |
 | A Linux desktop (the Azure VM serves for some) | 169 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 367 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 368 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -1472,6 +1472,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
 
 - "Ring PC" → desktop plays sound 30 s (pw-play/paplay path; silent no-op is FAIL here since desktop has audio). (where: by hand)
+- Yes to `pocketdesk ask` behind a real fingerprint or screen lock ends the command with 0 and `yes`; a cancelled prompt sends nothing; a question turned on its side mid-prompt keeps its Yes (BF3). (where: by hand)
 
 **11. WAN over iroh (R1)**
 
