@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-919 open items.
+927 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 142 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 150 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -491,6 +491,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Move slowly across the phone and drag a slider, and fast across a list: the pointer and the finger keep up without a visible lag or stall; a press held still for 3 s on an icon opens its menu and a drag after it goes on. (where: owner)
 - Hold Backspace and an arrow in a field on the phone: after half a second they repeat until let go of; Enter and Esc never repeat. (where: owner)
 - With the phone away from home (its link on the internet road, direct and then through a relay), hold a drag on it for a few seconds and move about: note the lag, and whether the watchdog brings the mouse home by itself (a pong late by a second); the phone is reachable that way, unlike a computer. (where: owner)
+
+**218. Sound follows the mouse (BK6)**
+
+- Play music or a video on Linux, push the pointer onto it: within a moment its sound plays on Windows' speakers; push back home and it stops at once (no tail over a fifth of a second), and it plays on Linux's own speakers throughout. (where: owner)
+- By ear with headphones on Windows: no crackle or gaps over a few minutes of music on Linux, and the lag against a video playing on Linux's screen is small enough not to notice for speech (about 40 to 60 ms plus the link's). (where: owner)
+- The switch key from Linux to a second computer and back: the sound follows the pointer, never both at once; quick crossings back and forth for ten seconds leave no sound playing at home and nothing captured on Linux once the pointer is home (`pw-top` shows no `pocketdesk-audio-capture` stream). (where: owner)
+- A Bluetooth or USB headset as Windows' default output: the sound plays in it. Switch Windows' default output mid-visit: note whether the sound moves at once (unplugging the one playing moves it; one merely no longer the default may keep it until the next crossing, which opens the new default). (where: owner)
+- Linux with no sound playing for a minute while the pointer is there, then a sound: it is heard on Windows (an idle sink suspended does not end it), and the keyboard and mouse were never slower meanwhile. (where: owner)
+- Linux's sound is the music itself, not noise: the format PipeWire is now offered (16-bit stereo at 48 kHz) is what it sends, on a sink that runs in float (most do). (where: owner)
+- With PipeWire stopped on Linux (`systemctl --user stop pipewire`), push onto it: "No sound from <laptop>" flashes on Windows once, and the keyboard and mouse work as before. (where: owner)
+- The setting turned off mid-visit: the sound stops within about two seconds (the driver reads its settings every 2 s); turned on again mid-visit, it starts within about two seconds. (where: owner)
 
 ## A phone with a SIM
 

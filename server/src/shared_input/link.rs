@@ -400,8 +400,10 @@ async fn hand_on(device_id: &str, msg: Msg, at_us: u64, link: usize) {
 
 /// What the link itself does with `msg` from `device_id`: a ping is
 /// answered at once (with this computer's clock), a pong goes to the
-/// channel that sent its ping and timings to the one that asked for them. Whether it is handed on too (all but
-/// those two).
+/// channel that sent its ping and timings to the one that asked for them,
+/// and sound, or a computer's word that it has none, to whatever plays
+/// that computer's sound here ([`super::sound`]). Whether it is handed on
+/// too (all but those).
 fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
     match msg {
         Msg::Ping { t_us } => {
@@ -429,6 +431,14 @@ fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
             if let Some(waiting) = lock(&TIMINGS).get(device_id) {
                 let _ = waiting.send(timings.clone());
             }
+            false
+        }
+        Msg::Sound { seq, opus } => {
+            super::sound::heard(device_id, *seq, opus);
+            false
+        }
+        Msg::SoundUnavailable { why } => {
+            super::sound::said_unavailable(device_id, why);
             false
         }
         _ => true,
@@ -460,11 +470,16 @@ impl Pong {
 }
 
 /// Whether `msg` goes as a datagram: the newest of each matters, and a lost
-/// one is not worth the wait for its resend.
+/// one is not worth the wait for its resend (a sound packet late is
+/// dropped where it plays).
 fn rides_datagram(msg: &Msg) -> bool {
     matches!(
         msg,
-        Msg::Move { .. } | Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. }
+        Msg::Move { .. }
+            | Msg::Active { .. }
+            | Msg::Ping { .. }
+            | Msg::Pong { .. }
+            | Msg::Sound { .. }
     )
 }
 
@@ -679,7 +694,7 @@ async fn write_stream(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use pocketdesk_core::protocol::ALPN_CONTROL;
 
@@ -698,7 +713,7 @@ mod tests {
 
     /// Two computers' ends of one connection on this machine: the dialing
     /// one's, then the dialed one's.
-    async fn linked_pair() -> (iroh::Endpoint, iroh::Endpoint, Connection, Connection) {
+    pub(crate) async fn linked_pair() -> (iroh::Endpoint, iroh::Endpoint, Connection, Connection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let dialed = endpoint().await;
         let dialing = endpoint().await;
@@ -959,5 +974,14 @@ mod tests {
         assert!(!rides_datagram(&Msg::Enter { x: 0, y: 0 }));
         assert!(!rides_datagram(&Msg::Leave));
         assert!(!rides_datagram(&Msg::ReleaseAll));
+        // BK6: sound is a datagram, the ask and its answer go in order.
+        assert!(rides_datagram(&Msg::Sound {
+            seq: 1,
+            opus: vec![1]
+        }));
+        assert!(!rides_datagram(&Msg::SoundWanted { on: true }));
+        assert!(!rides_datagram(&Msg::SoundUnavailable {
+            why: String::new()
+        }));
     }
 }

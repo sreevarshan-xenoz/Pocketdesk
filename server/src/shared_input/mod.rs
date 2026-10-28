@@ -18,7 +18,8 @@
 //! says so ([`wire::Msg::Refuse`]); how things stand is written for the
 //! desktop app ([`status`]), and its requests are taken ([`asks`]). Each
 //! switch, and Identify, flashes a computer's name on its screens
-//! ([`badge`], drawn by [`crate::overlay`]).
+//! ([`badge`], drawn by [`crate::overlay`]). The sound of the computer
+//! driven can play on the computer driving it ([`sound`]).
 
 pub mod asks;
 pub mod awake;
@@ -39,5 +40,6 @@ pub mod phone_test;
 pub mod receive;
 pub mod screens;
 pub mod share_test;
+pub mod sound;
 pub mod status;
 pub mod wire;

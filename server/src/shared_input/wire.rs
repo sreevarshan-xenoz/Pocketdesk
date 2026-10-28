@@ -44,6 +44,15 @@ const TAG_PONG: u8 = 12;
 const TAG_REFUSE: u8 = 13;
 const TAG_ASK_TIMINGS: u8 = 14;
 const TAG_TIMINGS: u8 = 15;
+const TAG_SOUND_WANTED: u8 = 16;
+const TAG_SOUND_UNAVAILABLE: u8 = 17;
+const TAG_SOUND: u8 = 18;
+
+/// The longest Opus packet a [`Msg::Sound`] carries, in bytes (a longer
+/// one is cut short when encoded; the sender never makes one): with its
+/// tag, count and length it fits a datagram on any link, whose least is
+/// about 1200 bytes.
+pub const MAX_SOUND_BYTES: usize = 1000;
 
 /// The most timings one [`Msg::Timings`] carries (the rest are left off
 /// when encoded), so it fits a frame.
@@ -154,6 +163,24 @@ pub enum Msg {
     /// How long each key and move from the asking computer took here since
     /// its cursor last arrived, at most [`MAX_TIMINGS`].
     Timings(Vec<Timing>),
+    /// The driving computer asks the computer its cursor is on for that
+    /// computer's sound (`on`), or no longer (BK6). Sent after the
+    /// [`Msg::Enter`] of each visit; the visit ending ends it too.
+    SoundWanted {
+        on: bool,
+    },
+    /// The computer asked for its sound has none to give (`why`, for the
+    /// owner): said once to each ask.
+    SoundUnavailable {
+        why: String,
+    },
+    /// 20 ms of the sound of the computer driven, as Opus (48 kHz stereo),
+    /// to the computer that asked for it. `seq` counts up by one a packet,
+    /// so a late one is told from the next. At most [`MAX_SOUND_BYTES`].
+    Sound {
+        seq: u32,
+        opus: Vec<u8>,
+    },
 }
 
 /// Why bytes are not a message.
@@ -264,6 +291,22 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
                 out.extend_from_slice(&t.took_us.to_be_bytes());
             }
         }
+        Msg::SoundWanted { on } => {
+            out.push(TAG_SOUND_WANTED);
+            out.push(u8::from(*on));
+        }
+        Msg::SoundUnavailable { why } => {
+            out.push(TAG_SOUND_UNAVAILABLE);
+            put_str(&mut out, why);
+        }
+        Msg::Sound { seq, opus } => {
+            out.push(TAG_SOUND);
+            out.extend_from_slice(&seq.to_be_bytes());
+            let opus = &opus[..opus.len().min(MAX_SOUND_BYTES)];
+            // At most `MAX_SOUND_BYTES`, well inside a `u16`.
+            out.extend_from_slice(&(opus.len() as u16).to_be_bytes());
+            out.extend_from_slice(opus);
+        }
     }
     out
 }
@@ -311,6 +354,12 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
         TAG_REFUSE => Msg::Refuse { reason: r.u8()? },
         TAG_ASK_TIMINGS => Msg::AskTimings,
         TAG_TIMINGS => Msg::Timings(r.timings()?),
+        TAG_SOUND_WANTED => Msg::SoundWanted { on: r.flag()? },
+        TAG_SOUND_UNAVAILABLE => Msg::SoundUnavailable { why: r.string()? },
+        TAG_SOUND => Msg::Sound {
+            seq: r.u32()?,
+            opus: r.bytes()?,
+        },
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -334,18 +383,29 @@ pub fn frame(msg: &Msg) -> Vec<u8> {
 
 /// The next frame off a stream. `Ok(None)` is the peer closing between frames;
 /// closing in the middle of one, or sending bytes that are no message, is an
-/// error.
+/// error. A whole frame whose tag this build does not know (a newer build's
+/// message) is skipped, and the next read (BK6): its length says where it
+/// ends, so it never ends the stream.
 pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Option<Msg>> {
-    let mut len = [0u8; 2];
-    if reader.read(&mut len[..1]).await? == 0 {
-        return Ok(None);
+    loop {
+        let mut len = [0u8; 2];
+        if reader.read(&mut len[..1]).await? == 0 {
+            return Ok(None);
+        }
+        reader.read_exact(&mut len[1..]).await?;
+        let mut body = vec![0u8; usize::from(u16::from_be_bytes(len))];
+        reader.read_exact(&mut body).await?;
+        match decode(&body) {
+            Ok(msg) => return Ok(Some(msg)),
+            Err(WireError::UnknownTag(tag)) => {
+                tracing::debug!(
+                    tag,
+                    "A shared-input message of a kind not known here; skipped"
+                );
+            }
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+        }
     }
-    reader.read_exact(&mut len[1..]).await?;
-    let mut body = vec![0u8; usize::from(u16::from_be_bytes(len))];
-    reader.read_exact(&mut body).await?;
-    decode(&body)
-        .map(Some)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 fn put_str(out: &mut Vec<u8>, s: &str) {
@@ -424,6 +484,17 @@ impl Reader<'_> {
         let (head, rest) = self.rest.split_at(len);
         self.rest = rest;
         String::from_utf8(head.to_vec()).map_err(|_| WireError::InvalidUtf8)
+    }
+
+    /// A `u16` length and that many bytes.
+    fn bytes(&mut self) -> Result<Vec<u8>, WireError> {
+        let len = usize::from(self.u16()?);
+        if self.rest.len() < len {
+            return Err(WireError::Truncated);
+        }
+        let (head, rest) = self.rest.split_at(len);
+        self.rest = rest;
+        Ok(head.to_vec())
     }
 
     fn screens(&mut self) -> Result<Vec<Screen>, WireError> {
@@ -554,7 +625,68 @@ mod tests {
                 },
             ]),
             Msg::Timings(Vec::new()),
+            Msg::SoundWanted { on: true },
+            Msg::SoundWanted { on: false },
+            Msg::SoundUnavailable {
+                why: "no sound to give here".to_string(),
+            },
+            Msg::SoundUnavailable { why: String::new() },
+            Msg::Sound {
+                seq: u32::MAX,
+                opus: vec![0xfc, 0xff, 0xfe],
+            },
+            Msg::Sound {
+                seq: 0,
+                opus: Vec::new(),
+            },
         ]
+    }
+
+    /// BK6: the sound messages' bytes, as protocol.md gives them: a sound
+    /// packet is its tag, its count and its Opus with a `u16` length.
+    #[test]
+    fn the_sound_messages_are_their_tag_and_fields() {
+        assert_eq!(encode(&Msg::SoundWanted { on: true }), [16, 1]);
+        assert_eq!(encode(&Msg::SoundWanted { on: false }), [16, 0]);
+        assert_eq!(
+            encode(&Msg::SoundUnavailable {
+                why: "no".to_string()
+            }),
+            [17, 0, 2, b'n', b'o']
+        );
+        assert_eq!(
+            encode(&Msg::Sound {
+                seq: 0x0102_0304,
+                opus: vec![9, 8, 7],
+            }),
+            [18, 1, 2, 3, 4, 0, 3, 9, 8, 7]
+        );
+        assert_eq!(decode(&[16, 2]), Err(WireError::InvalidBool(2)));
+        // A length past the bytes there is cut short.
+        assert_eq!(
+            decode(&[18, 0, 0, 0, 1, 0, 4, 1]),
+            Err(WireError::Truncated)
+        );
+    }
+
+    /// BK6: the largest sound packet, with its header, fits the smallest
+    /// datagram a link has (QUIC's least, 1200 bytes, less its own
+    /// headers); a longer one is cut to it.
+    #[test]
+    fn a_sound_packet_fits_a_datagram() {
+        let largest = encode(&Msg::Sound {
+            seq: u32::MAX,
+            opus: vec![1; MAX_SOUND_BYTES],
+        });
+        assert!(largest.len() <= 1100, "{}", largest.len());
+        let longer = encode(&Msg::Sound {
+            seq: 1,
+            opus: vec![2; MAX_SOUND_BYTES + 500],
+        });
+        let Ok(Msg::Sound { opus, .. }) = decode(&longer) else {
+            panic!("the clipped packet decodes");
+        };
+        assert_eq!(opus.len(), MAX_SOUND_BYTES);
     }
 
     #[test]
@@ -669,14 +801,32 @@ mod tests {
             let err = read_frame(&mut r).await.unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof, "{n}");
         }
-        // A frame whose body is not a message.
-        let mut r = &[0u8, 1, 200][..];
+        // A frame whose body is not a message: a key cut short.
+        let mut r = &[0u8, 2, 7, 0][..];
         let err = read_frame(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         // An empty frame is not a message either.
         let mut r = &[0u8, 0][..];
         let err = read_frame(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// BK6: a frame whose tag this build does not know (a newer build's
+    /// message) is skipped whole, and the stream reads on: a newer
+    /// computer's message never ends an older one's stream.
+    #[tokio::test]
+    async fn a_frame_of_an_unknown_kind_is_skipped_and_the_stream_reads_on() {
+        let key = Msg::Key {
+            code: 30,
+            pressed: true,
+        };
+        let mut bytes = vec![0u8, 4, 200, 1, 2, 3];
+        bytes.extend(frame(&key));
+        bytes.extend([0u8, 1, 250]);
+        let mut r = &bytes[..];
+        assert_eq!(read_frame(&mut r).await.unwrap(), Some(key));
+        // An unknown frame last, then the end: a clean end.
+        assert_eq!(read_frame(&mut r).await.unwrap(), None);
     }
 
     #[test]

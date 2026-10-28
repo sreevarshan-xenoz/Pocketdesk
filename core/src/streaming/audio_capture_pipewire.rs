@@ -105,9 +105,14 @@ fn run_pipewire_audio_capture(
         .register()
         .context("Failed to register audio stream listener")?;
 
-    // Let PipeWire auto-negotiate the audio format (defaults to S16LE @ 48kHz).
-    // Stream will adapt to the system's audio pipeline.
-    let mut params: [&libspa::pod::Pod; 0] = [];
+    // The format the process callback reads: interleaved S16LE at the
+    // caller's rate and channels, which PipeWire converts the sink's sound
+    // to. With no format offered, nothing tells PipeWire what this stream
+    // takes, and a sink running in float would be read as noise.
+    let format = s16_format(sample_rate, channels)?;
+    let mut params = [
+        libspa::pod::Pod::from_bytes(&format).context("The audio capture format is not a pod")?
+    ];
     stream
         .connect(
             libspa::utils::Direction::Input,
@@ -138,6 +143,32 @@ fn run_pipewire_audio_capture(
 
     info!("PipeWire audio capture thread shut down");
     Ok(())
+}
+
+/// An `EnumFormat` pod of one format: raw interleaved S16LE at
+/// `sample_rate` Hz, `channels` of them (two: front left and right).
+fn s16_format(sample_rate: u32, channels: u16) -> Result<Vec<u8>> {
+    let mut info = libspa::param::audio::AudioInfoRaw::new();
+    info.set_format(libspa::param::audio::AudioFormat::S16LE);
+    info.set_rate(sample_rate);
+    info.set_channels(u32::from(channels));
+    if channels == 2 {
+        let mut position = [0u32; libspa::param::audio::MAX_CHANNELS];
+        position[0] = libspa::sys::SPA_AUDIO_CHANNEL_FL;
+        position[1] = libspa::sys::SPA_AUDIO_CHANNEL_FR;
+        info.set_position(position);
+    }
+    let object = libspa::pod::Object {
+        type_: libspa::utils::SpaTypes::ObjectParamFormat.as_raw(),
+        id: libspa::param::ParamType::EnumFormat.as_raw(),
+        properties: info.into(),
+    };
+    let (cursor, _) = libspa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::new()),
+        &libspa::pod::Value::Object(object),
+    )
+    .map_err(|e| anyhow::anyhow!("The audio capture format did not serialize: {e:?}"))?;
+    Ok(cursor.into_inner())
 }
 
 /// User data for the PipeWire audio stream callbacks.

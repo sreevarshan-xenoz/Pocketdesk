@@ -159,6 +159,9 @@ video_quality = "balanced"
 # Windows: files dragged in Explorer and let go on another computer are sent
 # to it ("Files over the internet" on on both).
 # shared_input_files = true
+# Windows: the sound of the computer the mouse is on plays here, while it is
+# there (off until chosen).
+# shared_input_sound = true
 
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
