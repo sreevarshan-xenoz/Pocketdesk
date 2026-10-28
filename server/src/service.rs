@@ -60,19 +60,27 @@ pub async fn run(config: Config) -> Result<()> {
     state::set_pairing_required(config.pairing_required);
 
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
-    let tailscale_ready = match tailscale.wait_for_ready(Duration::from_secs(5)).await {
-        Ok(_) => true,
-        Err(e) => {
-            tracing::warn!("Tailscale not ready: {e}");
-            false
+    // Where Tailscale is not installed this takes many seconds (each probe
+    // waits out its timeout), and a stop asked meanwhile must not wait for it.
+    let probed = unless_stopped(&mut shutdown, async {
+        let tailscale_ready = match tailscale.wait_for_ready(Duration::from_secs(5)).await {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::warn!("Tailscale not ready: {e}");
+                false
+            }
+        };
+        // For the LAN announcement only, which leaves the tailnet's addresses out.
+        let local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
+        if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
+            tracing::info!("Tailscale online at {}", ip);
         }
+        local_ips
+    })
+    .await;
+    let Some(local_ips) = probed else {
+        return Ok(());
     };
-
-    // For the LAN announcement only, which leaves the tailnet's addresses out.
-    let local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
-    if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
-        tracing::info!("Tailscale online at {}", ip);
-    }
 
     let kde_service = kde::build_default_service().context("failed to initialize KDE service")?;
     let plugin_count = kde_service.registry.plugin_names().len();
@@ -480,25 +488,34 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::info!("Not reachable from the internet (internet_path = false)");
         None
     } else {
-        match iroh_endpoint::spawn_wan_endpoint(
-            streaming_config.clone(),
-            input_tx.clone(),
-            Arc::clone(&cert_manager),
-            iroh_endpoint::WanSettings {
-                pairing_required: config.pairing_required,
-                allow_hevc: config.allow_hevc,
-                slow_link_frame_rate: config.slow_link_frame_rate,
-                laser: config.laser_pointer && crate::laser::available(),
-                capture_backend: config.capture_backend,
-                mic_relay_device: config.mic_relay_device.clone(),
-                cast: cast_tx.clone(),
-                relay_urls: config.relay_urls.clone(),
-                dht_publish: config.dht_publish,
-                control: Some(internet_control_tx),
-            },
+        // The bind talks to the network, so a stop is not left waiting on it
+        // either.
+        let bound = unless_stopped(
+            &mut shutdown,
+            iroh_endpoint::spawn_wan_endpoint(
+                streaming_config.clone(),
+                input_tx.clone(),
+                Arc::clone(&cert_manager),
+                iroh_endpoint::WanSettings {
+                    pairing_required: config.pairing_required,
+                    allow_hevc: config.allow_hevc,
+                    slow_link_frame_rate: config.slow_link_frame_rate,
+                    laser: config.laser_pointer && crate::laser::available(),
+                    capture_backend: config.capture_backend,
+                    mic_relay_device: config.mic_relay_device.clone(),
+                    cast: cast_tx.clone(),
+                    relay_urls: config.relay_urls.clone(),
+                    dht_publish: config.dht_publish,
+                    control: Some(internet_control_tx),
+                },
+            ),
         )
-        .await
-        {
+        .await;
+        let Some(bound) = bound else {
+            withdraw_announcement(&announcement).await;
+            return Ok(());
+        };
+        match bound {
             Ok(endpoint) => Some(endpoint),
             Err(e) if !config.relay_urls.is_empty() => {
                 // Most likely the user's own relay_urls; say so loudly.
@@ -808,17 +825,7 @@ pub async fn run(config: Config) -> Result<()> {
             }
             Some(reason) = shutdown.recv() => {
                 tracing::info!("Shutdown requested ({reason})");
-                // Tell phones on the network this computer is going away.
-                // Taken off the loop: an announcement under way holds the
-                // lock (P1 review).
-                let held = announcement.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    let current = held.lock().unwrap_or_else(|e| e.into_inner()).take();
-                    if let Some(announcement) = current {
-                        announcement.withdraw();
-                    }
-                })
-                .await;
+                withdraw_announcement(&announcement).await;
                 break;
             }
             event = discovery_rx.recv() => {
@@ -850,6 +857,41 @@ pub async fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
+/// `work`, unless a request to stop comes first (then `None`). For the
+/// steps before the main loop, which can take many seconds: `pocketdesk
+/// stop` (and the uninstaller after it) waits only so long.
+async fn unless_stopped<T>(
+    shutdown: &mut tokio::sync::mpsc::Receiver<crate::platform::ShutdownReason>,
+    work: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        Some(reason) = shutdown.recv() => {
+            tracing::info!("Shutdown requested while starting ({reason})");
+            None
+        }
+        done = work => Some(done),
+    }
+}
+
+/// Tell phones on the network this computer is going away. Taken off the
+/// runtime: an announcement under way holds the lock (P1 review).
+async fn withdraw_announcement(
+    announcement: &Arc<std::sync::Mutex<Option<pocketdesk_core::tailscale::lan::Announcement>>>,
+) {
+    let held = announcement.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let current = held.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(announcement) = current {
+            announcement.withdraw();
+        }
+    })
+    .await;
+}
+
+/// How long `pocketdesk stop` waits for the server to exit.
+const STOP_WAIT: Duration = Duration::from_secs(10);
+
 pub async fn stop() -> Result<()> {
     let pid_file = state::pid_file_path()?;
     if !pid_file.exists() {
@@ -868,13 +910,21 @@ pub async fn stop() -> Result<()> {
         .await
         .context("failed to ask the server to stop")?;
     if asked {
-        // A graceful exit removes the PID file itself.
-        for _ in 0..100 {
-            if !pid_file.exists() {
-                println!("Pocketdesk server (pid {pid}) stopped");
-                return Ok(());
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // A graceful exit removes the PID file itself, as the server's loop
+        // ends; the process goes a moment later, and only then is its
+        // executable free (an uninstaller deletes it next).
+        let deadline = std::time::Instant::now() + STOP_WAIT;
+        while pid_file.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if !pid_file.exists()
+            && tokio::task::spawn_blocking(move || crate::platform::wait_for_exit(pid, left))
+                .await
+                .unwrap_or(false)
+        {
+            println!("Pocketdesk server (pid {pid}) stopped");
+            return Ok(());
         }
         println!("Stop requested from pid {pid}; it has not exited yet");
         return Ok(());
