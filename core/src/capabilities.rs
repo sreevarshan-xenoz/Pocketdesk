@@ -4,7 +4,7 @@
 //! Every value here is *read* from the constants and decision tables the wire
 //! actually uses — [`crate::protocol`], [`crate::streaming::capture`]'s ordering
 //! function, [`VideoCodec`], [`AudioConfig`] — never restated. That is the whole
-//! point: `pocketdesk capabilities`, `docs/capabilities.md` and the README's
+//! point: `pocketdesk capabilities`, `docs/capabilities.md` and docs/guide.md's
 //! capability prose are generated from this output, so a backend, codec or
 //! version that changes in code changes in the docs by being regenerated, and
 //! the drift test fails if it was not.

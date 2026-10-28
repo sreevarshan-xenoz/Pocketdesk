@@ -11,7 +11,7 @@ What has to be true before a `vX.Y.Z` (or `vX.Y.Z-beta.N`) tag is pushed. The ta
 
 ## 2. The docs
 
-- [ ] README's "What works where" table matches this release: a new platform difference, or a row that is now device-checked, is in it.
+- [ ] The "What works where" table in docs/guide.md (and the README's status line) matches this release: a new platform difference, or a row that is now device-checked, is in it.
 - [ ] SECURITY.md's "Known limits" are still true, and any new one is there.
 - [ ] `docs/status-history.md` has this release's milestones, and AGENTS.md's Current Status names the release.
 - [ ] Every checklist section the release's features add has its owed items listed, not silently skipped.
