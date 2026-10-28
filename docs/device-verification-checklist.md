@@ -2998,6 +2998,7 @@ Owed (Windows with `shared_input` and driving on, the phone paired with "Let my 
 - [ ] A drag held while the phone's Wi-Fi is turned off: within about a second the mouse is home and the finger on the phone lifted (no stuck press when the phone comes back). (where: owner)
 - [ ] Move slowly across the phone and drag a slider, and fast across a list: the pointer and the finger keep up without a visible lag or stall; a press held still for 3 s on an icon opens its menu and a drag after it goes on. (where: owner)
 - [ ] Hold Backspace and an arrow in a field on the phone: after half a second they repeat until let go of; Enter and Esc never repeat. (where: owner)
+- [ ] With the phone away from home (its link on the internet road, direct and then through a relay), hold a drag on it for a few seconds and move about: note the lag, and whether the watchdog brings the mouse home by itself (a pong late by a second); the phone is reachable that way, unlike a computer. (where: owner)
 
 ## Recording results
 
