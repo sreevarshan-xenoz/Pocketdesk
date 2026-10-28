@@ -642,9 +642,9 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
     let written = tokio::task::spawn_blocking(move || {
         let me = own.as_ref().map(|_| crate::kde::host_identity());
         let now = pocketdesk_core::local::pin::now_unix();
-        // Only the computers paired now are kept (none dropped on a
-        // reading that failed).
-        let paired = status::paired_computers(&dir);
+        // Only the computers and phones paired now are kept (none dropped
+        // on a reading that failed).
+        let paired = status::kept_devices(&dir);
         shared_input::update(&dir, |file| {
             if let Some(paired) = &paired {
                 file.keep_only(paired);
@@ -795,7 +795,7 @@ pub async fn run() {
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut last_status = None;
+    let mut last_status: Option<shared_input::StatusFile> = None;
     // The link the driving computer's cursor arrived on.
     let mut driver_link: Option<usize> = None;
     // Whether sharing was on when the status was last kept, and when.
@@ -1003,8 +1003,24 @@ pub async fn run() {
                 let mut last = last_status.take();
                 last_status = tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
-                    let now = status::now(paired.as_ref().unwrap_or(&BTreeSet::new()));
-                    status::write_if_changed(&dir, now, paired.as_ref(), sharing_on, &mut last);
+                    let mut now = status::now(paired.as_ref().unwrap_or(&BTreeSet::new()));
+                    // BK5: each phone said as a screen, and whether it
+                    // may be driven now.
+                    let trust = crate::state::trust_store_path().ok();
+                    let phones = status::paired_phones_at(trust.as_deref());
+                    if let Some(phones) = &phones {
+                        now.phones = status::phones_from(
+                            &shared_input::read(&dir),
+                            phones,
+                            super::phone::standing_now,
+                        );
+                    } else if let Some(last) = &last {
+                        now.phones = last.phones.clone();
+                    }
+                    let kept = paired.as_ref().zip(phones.as_ref()).map(|(c, p)| {
+                        c.union(p).cloned().collect::<BTreeSet<String>>()
+                    });
+                    status::write_if_changed(&dir, now, kept.as_ref(), sharing_on, &mut last);
                     last
                 })
                 .await

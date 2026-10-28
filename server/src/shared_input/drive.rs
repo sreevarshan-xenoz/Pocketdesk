@@ -1897,6 +1897,90 @@ mod tests {
         assert_eq!(page[1], (1920 + 1600, 0));
     }
 
+    /// BK5: the owner's phone, said as a phone (its block 80% of its size
+    /// in dp), placed to the right of the laptop's screen. The driver
+    /// crosses onto it as onto a computer, its positions fractions of its
+    /// screen; a press held there is let go as the cursor leaves it, by
+    /// the edge and by the phone stopping answering.
+    #[test]
+    fn a_phone_is_crossed_onto_as_a_computer_and_let_go_of_on_leaving() {
+        use pocketdesk_core::local::shared_input::{PhoneScreen, phone_block};
+        let phone = PhoneScreen {
+            width_px: 1080,
+            height_px: 2400,
+            width_dp: 400,
+            height_dp: 900,
+            rotation: 0,
+        };
+        let mut file = ScreensFile::default();
+        file.set_own("W", "W computer", &[], 0);
+        file.heard_phone("P", "Phone", &phone, 0);
+        let own = vec![screen(0, 0, 1920, 1080), screen(1920, 0, 1536, 960)];
+        let layout = layout_for("W", "W computer", own, &file, &["P".to_string()], None);
+        assert_eq!(layout.computers[1].device_id, "P");
+        assert_eq!(layout.computers[1].screens, vec![phone_block(&phone)]);
+        assert_eq!(layout.computers[1].origin, (3456, 0));
+        let mut d = driver(layout.clone(), &["P"]);
+        d.start();
+        d.on(moved(3440, 300));
+        let crossed = d.on(moved(3455, 300));
+        assert_eq!(d.away_on(), Some("P"));
+        // At its left edge, a third of the way down its 720-high block.
+        let (x, y) = layout.normalized("P", (0, 300));
+        assert_eq!(x, 0);
+        assert!(u32::from(y).abs_diff(65535 * 300 / 719) <= 1, "{y}");
+        assert_eq!(sends(&crossed), vec![sent("P", Msg::Enter { x, y })]);
+        // Across it, a press, a drag, and off its left edge home again.
+        let step = d.on(moved(PARK.0 + 160, PARK.1));
+        let (x, y) = layout.normalized("P", (160, 300));
+        assert_eq!(sends(&step), vec![sent("P", Msg::Move { seq: 1, x, y })]);
+        d.on(Captured::Button {
+            button: 0,
+            down: true,
+        });
+        d.on(moved(PARK.0 - 100, PARK.1));
+        let home = d.on(moved(PARK.0 - 100, PARK.1));
+        assert_eq!(d.away_on(), None, "{home:?}");
+        assert_eq!(
+            sends(&home),
+            vec![
+                sent(
+                    "P",
+                    Msg::Button {
+                        button: 0,
+                        pressed: false
+                    }
+                ),
+                sent("P", Msg::Leave)
+            ]
+        );
+        // Back on it with the button down, and it stops answering: home,
+        // its finger let go of.
+        d.on(moved(3440, 300));
+        d.on(moved(3455, 300));
+        d.on(Captured::Button {
+            button: 0,
+            down: true,
+        });
+        let t0 = Instant::now();
+        d.tick(t0);
+        let silent = d.tick(t0 + ANSWER_WITHIN);
+        assert_eq!(d.away_on(), None);
+        assert_eq!(
+            sends(&silent),
+            vec![
+                sent(
+                    "P",
+                    Msg::Button {
+                        button: 0,
+                        pressed: false
+                    }
+                ),
+                sent("P", Msg::Leave)
+            ]
+        );
+    }
+
     #[test]
     fn the_owners_arrangement_is_used_when_there_is_one() {
         let file = ScreensFile {

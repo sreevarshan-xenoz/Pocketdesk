@@ -1867,6 +1867,11 @@ forged log line"
             // Which of its features a phone has on (L7): status about the
             // phone itself, as its battery is, booleans only.
             "kdeconnect.pocketdesk.switches",
+            // The phone as a screen (BK5): what the phone says of itself,
+            // and its answers to pings; this computer's SharedInput gates
+            // what it sends the phone.
+            "kdeconnect.pocketdesk.shared_input.screen",
+            "kdeconnect.pocketdesk.shared_input.pong",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(

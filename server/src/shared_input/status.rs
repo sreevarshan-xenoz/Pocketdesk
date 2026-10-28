@@ -139,6 +139,44 @@ pub fn paired_at(state_dir: &Path, trust: Option<&Path>) -> Option<BTreeSet<Stri
     Some(paired)
 }
 
+/// The owner's phones paired now (BK5): the trust store's devices that
+/// are not computers. `None` when it could not be read.
+pub fn paired_phones_at(trust: Option<&Path>) -> Option<BTreeSet<String>> {
+    let store = TrustStore::read(trust?)
+        .inspect_err(|e| tracing::debug!("Shared input: the trust store did not read: {e:#}"))
+        .ok()?;
+    Some(
+        store
+            .paired_devices()
+            .into_iter()
+            .filter(|id| !store.is_computer(id))
+            .collect(),
+    )
+}
+
+/// What `shared_screens.json` keeps: the computers paired now and the
+/// phones (BK5). `None` when either could not be read. Blocking file work.
+pub fn kept_devices(state_dir: &Path) -> Option<BTreeSet<String>> {
+    let trust = crate::state::trust_store_path().ok();
+    let mut kept = paired_at(state_dir, trust.as_deref())?;
+    kept.extend(paired_phones_at(trust.as_deref())?);
+    Some(kept)
+}
+
+/// Each phone in `file` that is still `paired`, and its standing
+/// (`standing`, as [`super::phone::standing_now`] says it).
+pub fn phones_from(
+    file: &shared_input::ScreensFile,
+    paired: &BTreeSet<String>,
+    standing: impl Fn(&str) -> &'static str,
+) -> BTreeMap<String, String> {
+    file.computers
+        .iter()
+        .filter(|c| c.phone.is_some() && paired.contains(&c.device_id))
+        .map(|c| (c.device_id.clone(), standing(&c.device_id).to_string()))
+        .collect()
+}
+
 /// Write `status` to `shared_input_status.json` (with whether sharing is
 /// on, `sharing_on`) unless it is what was last written (`last`), and,
 /// with sharing on and the file there, keep
@@ -279,6 +317,45 @@ mod tests {
         );
         // C answered on a link that has gone since: not now.
         assert_eq!(status.answered, BTreeSet::from(["A".to_string()]));
+    }
+
+    /// BK5: each paired phone said as a screen has its standing; a
+    /// computer, and a phone unpaired since, have none.
+    #[test]
+    fn each_paired_phone_said_as_a_screen_has_its_standing() {
+        use pocketdesk_core::local::shared_input::{
+            PHONE_OFF, PHONE_READY, PhoneScreen, Screen, ScreensFile,
+        };
+        let phone = PhoneScreen {
+            width_px: 1080,
+            height_px: 2400,
+            width_dp: 411,
+            height_dp: 914,
+            rotation: 0,
+        };
+        let mut file = ScreensFile::default();
+        file.set_own("me", "Desk", &[], 1);
+        file.heard(
+            "laptop",
+            Some("Laptop"),
+            &[Screen {
+                x: 0,
+                y: 0,
+                width: 1600,
+                height: 1000,
+            }],
+            1,
+        );
+        file.heard_phone("oppo", "OPPO", &phone, 1);
+        file.heard_phone("old", "Old", &phone, 1);
+        let paired = BTreeSet::from(["oppo".to_string(), "laptop".to_string()]);
+        let phones = phones_from(&file, &paired, |id| {
+            if id == "oppo" { PHONE_READY } else { PHONE_OFF }
+        });
+        assert_eq!(
+            phones,
+            BTreeMap::from([("oppo".to_string(), PHONE_READY.to_string())])
+        );
     }
 
     fn temp(name: &str) -> std::path::PathBuf {

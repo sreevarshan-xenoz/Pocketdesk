@@ -543,6 +543,8 @@ pub async fn run(config: Config) -> Result<()> {
     // POCKETDESK_SHARE_TEST set to a file, recorded there instead: what
     // arrives has one taker.
     tokio::spawn(crate::shared_input::share_test::run_requests());
+    // The hidden `phone-screen-test`'s requests (BK5).
+    tokio::spawn(crate::shared_input::phone_test::run_requests());
     // The Keyboard and mouse page's requests (Identify).
     tokio::spawn(crate::shared_input::asks::run());
     if let Some(file) = std::env::var_os(crate::shared_input::share_test::RECORD_ENV) {
@@ -550,6 +552,9 @@ pub async fn run(config: Config) -> Result<()> {
     } else {
         tokio::spawn(crate::shared_input::receive::run());
     }
+    // Which devices have a link now, for the owner's phone as a screen
+    // (BK5): the driver's thread and the status read it without waiting.
+    tokio::spawn(crate::shared_input::phone::keep_linked());
     // This computer's own keyboard and mouse carried onto the others, on
     // Windows while shared input and driving are on (Linux drives nothing
     // yet).

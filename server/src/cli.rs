@@ -359,6 +359,19 @@ pub enum Commands {
         #[arg(long, default_value_t = 100)]
         moves: u32,
     },
+    /// Send the owner's phone a script of what a keyboard and mouse would
+    /// do on it as a screen (BK5), and print how many pings it answered.
+    /// Steps with ';' between: enter X Y, move X Y, glide X Y N, down, up,
+    /// click, right, middle, wheel N, type TEXT, key NAME, wait MS, leave.
+    /// Exit codes: 0 sent, 1 failed, 2 a script that does not read, 3 no
+    /// server running, 4 no answer from it in time
+    #[command(hide = true)]
+    PhoneScreenTest {
+        /// The phone: its id, or its name
+        phone: String,
+        /// The script
+        script: String,
+    },
     /// List peers currently visible on the tailnet
     List {
         /// Print the local API's JSON (see docs/local-api.md)
