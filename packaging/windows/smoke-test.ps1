@@ -42,6 +42,21 @@ function ShowProcesses([string]$when) {
     Write-Output "      $when`: $($running.Count) Pocketdesk process(es) running from $app"
     foreach ($proc in $running) { Write-Output "        $($proc.Name) (pid $($proc.Id), started $($proc.StartTime.ToString('HH:mm:ss')))" }
 }
+ShowProcesses 'before upgrading'
+
+# Upgrade: the same setup again, over the running server the logon task
+# started. Every file must be replaced now, none left for a restart.
+$upgradeLog = Join-Path $env:TEMP 'pocketdesk-upgrade.log'
+$p = Start-Process $Setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=autostart,addtopath', "/LOG=$upgradeLog" -Wait -PassThru
+Check ($p.ExitCode -eq 0) "upgrade exited 0 (it exited $($p.ExitCode))"
+$upgradeText = if (Test-Path $upgradeLog) { Get-Content $upgradeLog -Raw } else { '' }
+$inUse = @(Select-String -Path $upgradeLog -Pattern 'in use|replace on restart|RestartReplace' -ErrorAction SilentlyContinue)
+Check ($inUse.Count -eq 0) "upgrade replaced every file at once ($($inUse.Count) left for a restart)"
+foreach ($line in $inUse) { Write-Output "      | $($line.Line)" }
+Check ($upgradeText -match 'Need to restart Windows\? No') 'upgrade needs no restart'
+$version = & (Join-Path $app 'pocketdesk.exe') --version
+Check ($LASTEXITCODE -eq 0) "pocketdesk --version runs after the upgrade ($version)"
+
 ShowProcesses 'before uninstalling'
 
 # Uninstall. The uninstaller copies itself to TEMP and exits at once, so wait
