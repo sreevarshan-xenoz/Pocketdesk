@@ -1079,12 +1079,11 @@ struct Glue {
     motion: Motion,
     awake: KeepAwake,
     /// Files dragged across the edge (BK4): the setting, the catcher's
-    /// state, its window's thread once a drag first needs it (or that it
-    /// would not start), and where its drops come in.
+    /// state, its window's thread (running while the setting is on), and
+    /// where its drops come in.
     files_on: bool,
     catcher: Catcher,
     drop_catcher: Option<DropCatcher>,
-    catcher_failed: bool,
     drops: (Sender<Caught>, Receiver<Caught>),
 }
 
@@ -1257,25 +1256,33 @@ impl Glue {
         }
     }
 
-    /// Put the catcher up or down, starting its thread the first time it
-    /// is wanted (once: one that would not start is not tried again).
+    /// "Drag files across the edge" is `on` now: the catcher's thread
+    /// starts as it turns on (never in the middle of a crossing) and ends
+    /// as it turns off, the catcher taken down first.
+    fn files_setting(&mut self, on: bool) {
+        self.files_on = on;
+        if on && self.drop_catcher.is_none() {
+            self.drop_catcher = DropCatcher::start(self.drops.0.clone());
+        } else if !on {
+            let catch = self.catcher.home();
+            self.catch(catch);
+            self.drop_catcher = None;
+        }
+    }
+
+    /// Put the catcher up or down. With no thread for it (it would not
+    /// start), nothing goes up and the drag ends as it did before BK4.
     fn catch(&mut self, catch: Option<Catch>) {
         // The computer a drop goes to, as the catcher has it now: none once
         // it is going down (before it is down).
         drop_windows::set_target(self.catcher.target());
         match catch {
-            Some(Catch::Show(at)) => {
-                if self.drop_catcher.is_none() && !self.catcher_failed {
-                    self.drop_catcher = DropCatcher::start(self.drops.0.clone());
-                    self.catcher_failed = self.drop_catcher.is_none();
+            Some(Catch::Show(at)) => match self.drop_catcher.as_mut() {
+                Some(catcher) => catcher.show(at),
+                None => {
+                    self.catcher.home();
                 }
-                match self.drop_catcher.as_mut() {
-                    Some(catcher) => catcher.show(at),
-                    None => {
-                        self.catcher.home();
-                    }
-                }
-            }
+            },
             Some(Catch::Hide) => {
                 if let Some(catcher) = self.drop_catcher.as_mut() {
                     catcher.hide();
@@ -1562,18 +1569,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         parking: None,
         motion: Motion::default(),
         awake: KeepAwake::default(),
-        files_on: config.shared_input_files,
+        files_on: false,
         catcher: Catcher::default(),
         drop_catcher: None,
-        catcher_failed: false,
         drops: mpsc::channel(),
     };
-    // The catcher's thread ready before a drag first needs it, so the
-    // first drag carried away does not wait for it to start.
-    if glue.files_on {
-        glue.drop_catcher = DropCatcher::start(glue.drops.0.clone());
-        glue.catcher_failed = glue.drop_catcher.is_none();
-    }
+    // The catcher's thread ready before a drag first needs it.
+    glue.files_setting(config.shared_input_files);
     // The owner's arrangement, read again when its file changes.
     let mut saved = SavedLayout::default();
     let mut read_layout = |glue: &Glue| {
@@ -1732,7 +1734,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
-            glue.files_on = config.shared_input_files;
+            if config.shared_input_files != glue.files_on {
+                glue.files_setting(config.shared_input_files);
+            }
             let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
             let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
