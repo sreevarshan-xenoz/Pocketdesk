@@ -31,6 +31,16 @@ impl HeldInput {
         }
     }
 
+    /// Whether the key with this evdev code is down.
+    pub fn holds_key(&self, code: u16) -> bool {
+        self.keys.contains(&code)
+    }
+
+    /// Whether this button is down.
+    pub fn holds_button(&self, button: u8) -> bool {
+        self.buttons.contains(&button)
+    }
+
     /// The messages that let go of everything held, keys first, and then
     /// nothing is held. Each group is released last pressed first, so a
     /// modifier comes up after the key it was modifying.
@@ -89,7 +99,10 @@ mod tests {
             held.note(&button(1, true));
             held.note(&button(1, true));
         }
+        assert!(held.holds_key(30) && held.holds_button(1));
+        assert!(!held.holds_key(31) && !held.holds_button(0));
         assert_eq!(held.releases(), vec![key(30, false), button(1, false)]);
+        assert!(!held.holds_key(30) && !held.holds_button(1));
     }
 
     #[test]

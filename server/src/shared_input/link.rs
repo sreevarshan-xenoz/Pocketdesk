@@ -92,6 +92,25 @@ pub(crate) fn linked() -> Vec<String> {
     lock(&LINKS).keys().cloned().collect()
 }
 
+/// When each computer last sent its screens ([`Msg::Screens`], which a
+/// computer sends only to one it lets drive it: in answer to its `Hello`,
+/// and when its screens change). The driving side takes a computer that
+/// answered this way since its channel opened as one it may cross onto
+/// (`drive::reachable`); a `Hello` from that computer's own driver is no
+/// answer.
+static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+    LazyLock::new(Default::default);
+
+/// Note that `device_id` just sent its screens.
+pub fn note_screens(device_id: &str) {
+    lock(&SCREENS_HEARD).insert(device_id.to_string(), std::time::Instant::now());
+}
+
+/// When each computer last sent its screens.
+pub fn screens_heard() -> HashMap<String, std::time::Instant> {
+    lock(&SCREENS_HEARD).clone()
+}
+
 /// Whether `conn`'s traffic rides a direct path now: its selected path is
 /// not a relay's, as `IrohConnection::stats` reads it. iroh keeps trying to
 /// punch a direct path while the traffic rides a relay, so this can turn

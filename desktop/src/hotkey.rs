@@ -115,61 +115,12 @@ fn status_words_saying(
     }
 }
 
-/// `RegisterHotKey`'s modifier bits (MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN).
-pub const MOD_ALT: u32 = 0x1;
-pub const MOD_CONTROL: u32 = 0x2;
-pub const MOD_SHIFT: u32 = 0x4;
-pub const MOD_WIN: u32 = 0x8;
-/// Held down, the key repeats nothing (MOD_NOREPEAT).
-pub const MOD_NOREPEAT: u32 = 0x4000;
-
-/// A key combination as `RegisterHotKey` takes it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Hotkey {
-    pub modifiers: u32,
-    pub key: u32,
-}
-
-/// Parse "ctrl+alt+p": one or more of ctrl, alt, shift and win, then one
-/// letter, digit or F1 to F12. None for an empty text or anything else, and
-/// for a key without a modifier (it would take that key from every app).
-pub fn parse(text: &str) -> Option<Hotkey> {
-    let parts: Vec<String> = text
-        .split('+')
-        .map(|p| p.trim().to_ascii_lowercase())
-        .collect();
-    let (last, mods) = parts.split_last()?;
-    let mut modifiers = 0;
-    for m in mods {
-        modifiers |= match m.as_str() {
-            "ctrl" | "control" => MOD_CONTROL,
-            "alt" => MOD_ALT,
-            "shift" => MOD_SHIFT,
-            "win" | "super" | "meta" => MOD_WIN,
-            _ => return None,
-        };
-    }
-    // Shift alone with a letter is typing a capital.
-    if modifiers & (MOD_CONTROL | MOD_ALT | MOD_WIN) == 0 {
-        return None;
-    }
-    let key = match last.as_bytes() {
-        [c] if c.is_ascii_alphanumeric() => u32::from(c.to_ascii_uppercase()),
-        [b'f', rest @ ..] => {
-            let n: u32 = std::str::from_utf8(rest).ok()?.parse().ok()?;
-            if (1..=12).contains(&n) {
-                0x70 + n - 1 // VK_F1..VK_F12
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
-    };
-    Some(Hotkey {
-        modifiers: modifiers | MOD_NOREPEAT,
-        key,
-    })
-}
+/// The key combination as `RegisterHotKey` takes it, and how Settings' text
+/// reads as one: core's, which the server's shared keyboard and mouse reads
+/// its key with too.
+pub use pocketdesk_core::local::hotkey::{
+    Hotkey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN, parse,
+};
 
 /// The key as the GlobalShortcuts portal's preferred trigger reads it (R4):
 /// "win+shift+c" is "LOGO+SHIFT+c". None where [`parse`] takes none.
@@ -192,7 +143,12 @@ pub fn portal_trigger(text: &str) -> Option<String> {
             .to_string()
         })
         .collect();
-    out.push(if last.len() > 1 {
+    // Keysym names: "F5", "Right"; a letter or digit as it is.
+    out.push(if pocketdesk_core::local::hotkey::is_arrow(last) {
+        let mut name = last.clone();
+        name[..1].make_ascii_uppercase();
+        name
+    } else if last.len() > 1 {
         last.to_ascii_uppercase()
     } else {
         last.clone()
@@ -257,6 +213,10 @@ mod tests {
             Some("CTRL+ALT+F5")
         );
         assert_eq!(super::portal_trigger("super+7").as_deref(), Some("LOGO+7"));
+        assert_eq!(
+            super::portal_trigger("ctrl+alt+right").as_deref(),
+            Some("CTRL+ALT+Right")
+        );
         assert_eq!(super::portal_trigger("shift+a"), None);
         assert_eq!(super::portal_trigger(""), None);
     }
