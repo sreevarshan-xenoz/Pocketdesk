@@ -1160,6 +1160,12 @@ impl Glue {
         while let Some(action) = queue.pop_front() {
             match action {
                 Action::Send(to, msg) => {
+                    // A drag carried along drops on this computer now
+                    // (BK4), each hop on.
+                    if matches!(msg, Msg::Enter { .. }) {
+                        self.catcher.entered(&to);
+                        drop_windows::set_target(self.catcher.target());
+                    }
                     // The computer driven is never greeted anew mid-visit:
                     // a new channel's leave would end the visit there.
                     let channel = if may_open(driver.away_on(), &to) {
@@ -1254,6 +1260,9 @@ impl Glue {
     /// Put the catcher up or down, starting its thread the first time it
     /// is wanted (once: one that would not start is not tried again).
     fn catch(&mut self, catch: Option<Catch>) {
+        // The computer a drop goes to, as the catcher has it now: none once
+        // it is going down (before it is down).
+        drop_windows::set_target(self.catcher.target());
         match catch {
             Some(Catch::Show(at)) => {
                 if self.drop_catcher.is_none() && !self.catcher_failed {
@@ -1288,15 +1297,9 @@ impl Glue {
             );
             self.catch(catch);
         }
-        while let Ok(Caught { items, total }) = self.drops.1.try_recv() {
+        while let Ok(Caught { items, total, to }) = self.drops.1.try_recv() {
             let internet_files = crate::events::current_config().internet_files;
-            match drag_files::on_drop(
-                items,
-                total,
-                self.files_on,
-                internet_files,
-                driver.away_on(),
-            ) {
+            match drag_files::on_drop(items, total, self.files_on, internet_files, to.as_deref()) {
                 Dropped::Send {
                     to,
                     items,

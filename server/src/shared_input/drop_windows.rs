@@ -13,6 +13,7 @@
 
 use std::cell::Cell;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
@@ -69,10 +70,26 @@ const MOST_PATH: usize = 32_767;
 static FILES_OVER: AtomicBool = AtomicBool::new(false);
 
 /// Files dropped on the catcher: the first [`drag_files::MOST_ITEMS`]
-/// paths, and how many the drop held.
+/// paths, how many the drop held, and the computer the drag was on as it
+/// was let go.
 pub struct Caught {
     pub items: Vec<PathBuf>,
     pub total: usize,
+    pub to: Option<String>,
+}
+
+/// The computer a drop on the catcher goes to now ([`set_target`]).
+static TARGET: Mutex<Option<String>> = Mutex::new(None);
+
+/// The computer a drop on the catcher goes to from now on: the one the
+/// drag was carried to, or none once it came home. Read at the drop
+/// itself, not when the driver's loop gets to it.
+pub fn set_target(to: Option<&str>) {
+    *TARGET.lock().unwrap_or_else(|e| e.into_inner()) = to.map(str::to_string);
+}
+
+fn target() -> Option<String> {
+    TARGET.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Whether a drag of files is over the catcher now.
@@ -464,6 +481,8 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _at: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
+        // Where the drag is as it is let go, before anything else.
+        let to = target();
         let (files, count) = data.as_ref().map(files_of).unwrap_or_default();
         self.has_files.set(false);
         FILES_OVER.store(false, Ordering::SeqCst);
@@ -474,6 +493,7 @@ impl IDropTarget_Impl for DropTarget_Impl {
             let _ = self.dropped.send(Caught {
                 items: files,
                 total: count,
+                to,
             });
         }
         Ok(())

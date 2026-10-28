@@ -49,6 +49,9 @@ pub const EFFECT_COPY: u32 = 1;
 pub const FILES_OFF_HERE: &str =
     "Not sent: \"Files over the internet\" is off on this computer (Settings)";
 
+/// The owner's words for files let go after the drag came back here.
+pub const CAME_HOME: &str = "Not sent: the drag came back here before it was let go";
+
 /// What to do with the catcher's window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Catch {
@@ -70,11 +73,12 @@ pub fn rect(at: (i32, i32)) -> (i32, i32, i32, i32) {
     )
 }
 
-/// Where the catcher is, and since when the button that carried the drag
-/// has been up.
+/// Where the catcher is, the computer the drag was carried to, and since
+/// when the button that carried it has been up.
 #[derive(Debug, Default)]
 pub struct Catcher {
     at: Option<(i32, i32)>,
+    to: Option<String>,
     up_since: Option<Instant>,
 }
 
@@ -97,10 +101,25 @@ impl Catcher {
         Some(Catch::Show(park))
     }
 
+    /// The cursor went onto the computer `to` (its `Enter`): while the
+    /// catcher is up, a drop on it goes there.
+    pub fn entered(&mut self, to: &str) {
+        if self.at.is_some() {
+            self.to = Some(to.to_string());
+        }
+    }
+
+    /// The computer a drop on the catcher goes to now: the one the drag
+    /// was carried to last, while the catcher is up.
+    pub fn target(&self) -> Option<&str> {
+        self.to.as_deref()
+    }
+
     /// The keyboard and mouse are coming home: the catcher goes first, so
     /// a drag carried back drops on Windows' own.
     pub fn home(&mut self) -> Option<Catch> {
         self.up_since = None;
+        self.to = None;
         self.at.take().map(|_| Catch::Hide)
     }
 
@@ -165,18 +184,23 @@ pub enum Dropped {
 
 /// `items` dropped on the catcher (read of the `total` the drop held),
 /// with the setting (`files_on`), this computer's "Files over the
-/// internet", and the computer driven now: sent to that computer, at most
-/// [`MOST_ITEMS`] of them, the rest counted. Nothing goes at home (the drag
-/// came back before the button came up) or with the setting off.
+/// internet", and the computer the drag was on as it was let go
+/// ([`Catcher::target`], taken at the drop): sent to that computer, at
+/// most [`MOST_ITEMS`] of them, the rest counted. Nothing goes with the
+/// setting off, or once the drag came back here before it was let go (and
+/// that is said).
 pub fn on_drop(
     mut items: Vec<PathBuf>,
     total: usize,
     files_on: bool,
     internet_files: bool,
-    away_on: Option<&str>,
+    target: Option<&str>,
 ) -> Dropped {
-    let Some(to) = away_on.filter(|_| files_on && !items.is_empty()) else {
+    if !files_on || items.is_empty() {
         return Dropped::Keep(None);
+    }
+    let Some(to) = target else {
+        return Dropped::Keep(Some(CAME_HOME));
     };
     if !internet_files {
         return Dropped::Keep(Some(FILES_OFF_HERE));
@@ -395,6 +419,31 @@ mod tests {
         assert_eq!(effect(false, EFFECT_COPY | MOVE), EFFECT_NONE);
     }
 
+    /// The catcher keeps the computer the drag was carried to, each hop
+    /// on, and forgets it as it comes home: a drop goes where the drag was
+    /// as it was let go, never where the driver is when it reads the drop.
+    #[test]
+    fn the_catcher_keeps_the_computer_the_drag_went_to() {
+        let mut c = Catcher::default();
+        c.entered("L");
+        assert_eq!(c.target(), None, "no catcher up: no drag carried");
+        c.parking(PARK, true, true);
+        assert_eq!(c.target(), None, "up a moment before the cursor lands");
+        c.entered("L");
+        assert_eq!(c.target(), Some("L"));
+        c.entered("M");
+        assert_eq!(c.target(), Some("M"), "a hop on to a third computer");
+        c.home();
+        assert_eq!(c.target(), None);
+        // Down after the button came up: the target goes with it.
+        let start = Instant::now();
+        c.parking(PARK, true, true);
+        c.entered("L");
+        c.look(true, false, false, start);
+        c.look(true, false, false, at(start, 500));
+        assert_eq!(c.target(), None);
+    }
+
     /// Esc is Windows' own only going down while files are over the
     /// catcher; otherwise it goes to the computer driven as any key.
     #[test]
@@ -412,9 +461,9 @@ mod tests {
     }
 
     /// The decision table: what was dropped × the setting × this computer's
-    /// "Files over the internet" × where the keyboard and mouse are.
+    /// "Files over the internet" × where the drag was as it was let go.
     #[test]
-    fn a_drop_goes_to_the_computer_driven_only() {
+    fn a_drop_goes_to_the_computer_the_drag_was_on() {
         assert_eq!(
             on_drop(items(2), 2, true, true, Some("L")),
             Dropped::Send {
@@ -423,9 +472,15 @@ mod tests {
                 left_out: 0
             }
         );
-        // Come home before the button came up: Windows' own.
-        assert_eq!(on_drop(items(2), 2, true, true, None), Dropped::Keep(None));
-        assert_eq!(on_drop(items(2), 2, true, false, None), Dropped::Keep(None));
+        // Come home before it was let go: nothing goes, and it is said.
+        assert_eq!(
+            on_drop(items(2), 2, true, true, None),
+            Dropped::Keep(Some(CAME_HOME))
+        );
+        assert_eq!(
+            on_drop(items(2), 2, true, false, None),
+            Dropped::Keep(Some(CAME_HOME))
+        );
         // The setting off (turned off mid-drag).
         assert_eq!(
             on_drop(items(2), 2, false, true, Some("L")),
@@ -449,7 +504,7 @@ mod tests {
 
     /// A hop on to a third computer before letting go sends to that one.
     #[test]
-    fn a_drop_goes_to_whichever_computer_is_driven_as_it_lands() {
+    fn a_drop_goes_to_whichever_computer_the_drag_was_on() {
         assert!(matches!(
             on_drop(items(1), 1, true, true, Some("M")),
             Dropped::Send { to, .. } if to == "M"
