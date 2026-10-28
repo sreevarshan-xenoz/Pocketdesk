@@ -12,7 +12,7 @@ body:
       label: Your Interests
       placeholder: |
         What area are you interested in contributing to?
-        - Android client (Flutter + Rust FFI)
+        - Android client (Kotlin, with the Rust core over JNI)
         - Wayland/screen capture
         - KDE Connect plugins
         - Performance optimization
