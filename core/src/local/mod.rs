@@ -62,6 +62,7 @@ pub mod send_menu;
 pub mod sent;
 pub mod server;
 pub mod sessions;
+pub mod shared_input;
 pub mod sms;
 pub mod tasks;
 pub mod tel_ask;

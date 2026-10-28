@@ -70,6 +70,9 @@ pub const KDECONNECT_OUT_DIR: &str = "kdeconnect_out";
 pub const COMPUTERS_FILE: &str = "computers.json";
 /// The desktop app's requests about them, one file each.
 pub const COMPUTERS_DIR: &str = "computers_out";
+/// What the shared keyboard and mouse knows of each computer's screens,
+/// this one's first, written by the server.
+pub const SHARED_SCREENS_FILE: &str = "shared_screens.json";
 pub const SENT_FILE: &str = "sent.json";
 /// The transfers under way (C1), written by the server for the desktop app.
 pub const TRANSFERS_FILE: &str = "transfers.json";

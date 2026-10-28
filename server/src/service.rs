@@ -538,11 +538,15 @@ pub async fn run(config: Config) -> Result<()> {
         wan_endpoint.clone(),
     ));
     // Shared input between the owner's computers rides those links: the
-    // hidden `share-test`'s requests, and, with POCKETDESK_SHARE_TEST set
-    // to a file, what other computers send recorded there instead of used.
+    // hidden `share-test`'s requests, and what other computers send, used
+    // here (typed and moved, when one of them may) or, with
+    // POCKETDESK_SHARE_TEST set to a file, recorded there instead: what
+    // arrives has one taker.
     tokio::spawn(crate::shared_input::share_test::run_requests());
     if let Some(file) = std::env::var_os(crate::shared_input::share_test::RECORD_ENV) {
         tokio::spawn(crate::shared_input::share_test::record(file.into()));
+    } else {
+        tokio::spawn(crate::shared_input::receive::run());
     }
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and

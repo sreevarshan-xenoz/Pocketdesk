@@ -2,7 +2,9 @@
 //! shared input over the link, and print how long its pings took to come
 //! back; and its other end, a server started with `POCKETDESK_SHARE_TEST`
 //! set to a file, which records each message that arrives there, with when
-//! it arrived, instead of using it. Nothing is injected on either side.
+//! it arrived, instead of using it (the receiver, [`super::receive`], does
+//! not start then). The command injects nothing itself; a receiving server
+//! that lets the sending computer drive it types and moves what it sends.
 //!
 //! The command asks the running server, which holds the link: a request in
 //! `share_test_out/`, its outcome in `share_test_in/`, one file each under
@@ -80,7 +82,8 @@ struct Outcome {
 
 /// What `share-test` sends after its `Hello` (pings aside): the cursor
 /// coming onto the other computer, `keys` key events (each key pressed, then
-/// let go) and `moves` pointer moves taken in turn, and the cursor leaving.
+/// let go) and `moves` pointer moves taken in turn, everything let go of
+/// (an odd `keys` ends on a press), and the cursor leaving.
 pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
     let mut out = vec![Msg::Enter { x: 32768, y: 32768 }];
     for i in 0..keys.max(moves) {
@@ -100,6 +103,7 @@ pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
             });
         }
     }
+    out.push(Msg::ReleaseAll);
     out.push(Msg::Leave);
     out
 }
@@ -472,7 +476,9 @@ mod tests {
     fn the_script_enters_types_moves_and_leaves() {
         let script = script(5, 3);
         assert_eq!(script.first(), Some(&Msg::Enter { x: 32768, y: 32768 }));
-        assert_eq!(script.last(), Some(&Msg::Leave));
+        // The last key is left down (an odd count): everything is let go
+        // of before the cursor leaves.
+        assert_eq!(script[script.len() - 2..], [Msg::ReleaseAll, Msg::Leave]);
         let keys: Vec<(u16, bool)> = script
             .iter()
             .filter_map(|m| match m {

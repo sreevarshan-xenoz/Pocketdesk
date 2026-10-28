@@ -103,10 +103,22 @@ pub struct HyprMonitor {
     pub x: i32,
     #[serde(default)]
     pub y: i32,
+    /// Its mode, in the pixels it has (not the logical ones it shows).
     #[serde(default)]
     pub width: i32,
     #[serde(default)]
     pub height: i32,
+    /// How much it is scaled: its logical size is its mode divided by this.
+    #[serde(default = "unit_scale")]
+    pub scale: f64,
+    /// Its rotation (wl_output's transform): an odd one turns it on its
+    /// side, swapping its width and height.
+    #[serde(default)]
+    pub transform: i32,
+}
+
+fn unit_scale() -> f64 {
+    1.0
 }
 
 /// A workspace as reported by `j/workspaces`.

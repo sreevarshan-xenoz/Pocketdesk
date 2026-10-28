@@ -142,6 +142,8 @@ mod tests {
             y,
             width: w,
             height: h,
+            scale: 1.0,
+            transform: 0,
         }
     }
 
