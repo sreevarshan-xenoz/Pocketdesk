@@ -246,6 +246,11 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
                 tolerance_pct,
             ))
         }
+        cli::Commands::ShareTest {
+            computer,
+            keys,
+            moves,
+        } => std::process::exit(shared_input::share_test::run_cli(&computer, keys, moves)),
         cli::Commands::List { json } => service::list_peers(json).await,
         cli::Commands::Watch { interval } => service::watch_peers(interval).await,
         cli::Commands::Capabilities { packets: true, .. } => {

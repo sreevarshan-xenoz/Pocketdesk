@@ -50,6 +50,8 @@ pub const FOLDERS: &[&str] = &[
     DIALS_DIR,
     // What the computer types on a phone (M4).
     TYPING_DIR,
+    // `pocketdesk share-test`'s requests (shared input between computers).
+    crate::shared_input::share_test::REQUESTS_DIR,
 ];
 
 /// One wake-up per folder; a change while its consumer is busy is kept for

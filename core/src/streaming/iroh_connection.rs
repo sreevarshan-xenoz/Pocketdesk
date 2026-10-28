@@ -165,7 +165,7 @@ impl Connection for IrohConnection {
         // path (mid-handshake, or a path that closed between snapshots); a zero
         // here would read as an uncongested link.
         let mut path_stats = None;
-        if let Some(path) = paths.iter().find(|path| path.is_selected()) {
+        if let Some(path) = selected_path(&paths) {
             relayed = path.is_relay();
             path_stats = Some(path.stats());
         }
@@ -339,6 +339,17 @@ pub fn congestion_factory()
             std::sync::Arc::new(noq_proto::congestion::NewRenoConfig::default())
         }
     }
+}
+
+/// The path carrying a connection's traffic in `paths`: the one iroh
+/// selected, a relay's until a direct one is punched (what
+/// [`IrohConnection::stats`] reports, and whether shared input between
+/// computers may ride it). `None` mid-handshake, or when it closed between
+/// snapshots.
+pub fn selected_path<'a>(
+    paths: &'a iroh::endpoint::PathList<'_>,
+) -> Option<iroh::endpoint::Path<'a>> {
+    paths.iter().find(|path| path.is_selected())
 }
 
 /// The QUIC tuning of every iroh endpoint, the phone's dial and the
@@ -608,6 +619,14 @@ impl IrohControlStream {
     /// (2c, 2d), to be accepted beside the control stream.
     pub fn link_acceptor(&self) -> Option<LinkAcceptor> {
         Some(LinkAcceptor(self.conn.clone()))
+    }
+
+    /// The connection this stream rides, for what goes beside the control
+    /// stream on it (shared input between computers: datagrams and a uni
+    /// stream). A clone: the connection still closes when this stream is
+    /// dropped.
+    pub fn connection(&self) -> iroh::endpoint::Connection {
+        self.conn.clone()
     }
 
     /// Dial the control channel from `endpoint`, one this process already

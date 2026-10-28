@@ -981,6 +981,9 @@ async fn run_link(
         Err(_) => return LinkEnd::Failed("no handshake in time".to_string()),
     };
     tracing::info!(device_id = %computer.device_id, "Linked to another computer");
+    // Shared input rides the link's connection too (its datagrams and uni
+    // streams) while the link is up, however it ends.
+    let _shared_input = crate::shared_input::link::hold(&computer.device_id, stream.connection());
     set_link(dir, &computer.device_id, "linked");
     let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
