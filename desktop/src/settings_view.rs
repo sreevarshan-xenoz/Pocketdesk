@@ -344,6 +344,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::SharedInput,
     ),
     (
+        "shared_input_sound",
+        "Hear the computer you're driving here",
+        Section::SharedInput,
+    ),
+    (
         "kdeconnect_compat",
         "KDE Connect devices",
         Section::KdeConnect,
@@ -457,8 +462,9 @@ fn drawn_here(key: &str) -> bool {
         | "shared_input_game_lock"
         | "shared_input_lock_programs"
         | "shared_input_clipboard" => cfg!(any(windows, target_os = "linux")),
-        // BK4: only Windows drives with Explorer's drag.
-        "shared_input_files" => cfg!(windows),
+        // BK4: only Windows drives with Explorer's drag. BK6: the sound
+        // follows the mouse to the computer driving, Windows.
+        "shared_input_files" | "shared_input_sound" => cfg!(windows),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
@@ -570,6 +576,7 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_lock_programs"
             | "shared_input_clipboard"
             | "shared_input_files"
+            | "shared_input_sound"
     )
 }
 
@@ -2037,6 +2044,19 @@ impl SettingsForm {
                         "They land in its received files folder. \"Files over the internet\" must be on on both computers.",
                     );
                 });
+                row(ui, "shared_input_sound", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_sound,
+                            "the sound of the computer the mouse is on plays here, while it is there",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "In this computer's speakers or headphones. It stops as the mouse comes home.",
+                    );
+                });
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2758,9 +2778,16 @@ mod tests {
                 ),
                 ("shared_input_clipboard", "Clipboard follows the mouse"),
                 ("shared_input_files", "Drag files across the edge"),
+                (
+                    "shared_input_sound",
+                    "Hear the computer you're driving here"
+                ),
             ]
         );
-        for (key, _) in rows.iter().filter(|(key, _)| *key != "shared_input_files") {
+        for (key, _) in rows
+            .iter()
+            .filter(|(key, _)| !["shared_input_files", "shared_input_sound"].contains(key))
+        {
             assert_eq!(
                 drawn_here(key),
                 cfg!(any(windows, target_os = "linux")),
@@ -2768,6 +2795,7 @@ mod tests {
             );
         }
         assert_eq!(drawn_here("shared_input_files"), cfg!(windows));
+        assert_eq!(drawn_here("shared_input_sound"), cfg!(windows));
     }
 
     /// Everything but the key is read again by the running server; the key
@@ -2781,6 +2809,7 @@ mod tests {
             "shared_input_lock_programs",
             "shared_input_clipboard",
             "shared_input_files",
+            "shared_input_sound",
         ] {
             assert!(applies_live(key), "{key}");
         }
