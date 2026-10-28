@@ -1039,6 +1039,14 @@ async fn fetch_clipboard_image(device_id: String, id: String, size: u64, follows
         );
         return;
     }
+    // A transfer slot, as a phone's image takes one (BK3 review).
+    let _slot = match crate::plugins::share::transfer_slots().take(&device_id) {
+        Ok(slot) => slot,
+        Err(reason) => {
+            tracing::debug!("Another computer's clipboard image not fetched: {reason}");
+            return;
+        }
+    };
     let landing = follows.then(|| crate::clipboard_push::Landing::begin(&device_id));
     let Some(outgoing) = live(&device_id) else {
         return;
