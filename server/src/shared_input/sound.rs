@@ -382,19 +382,40 @@ pub fn desktop_source() -> Source {
         );
         return tone_source(hz);
     }
-    Arc::new(|pcm: mpsc::Sender<PcmBuffer>, cancel: CancellationToken| {
-        Box::pin(async move {
-            let session = audio_capture::start_audio_capture(
-                remote_sound::RATE,
-                remote_sound::CHANNELS,
-                FRAME_MS,
-                pcm,
-                cancel,
-            )
-            .await?;
-            Ok(Box::new(session) as Started)
-        }) as Starting
+    // Its start waits on the capture's thread (WASAPI's device opening):
+    // off the runtime's threads.
+    blocking_source(|pcm, cancel| {
+        let session = futures_lite::future::block_on(audio_capture::start_audio_capture(
+            remote_sound::RATE,
+            remote_sound::CHANNELS,
+            FRAME_MS,
+            pcm,
+            cancel,
+        ))?;
+        Ok(Box::new(session) as Started)
     })
+}
+
+/// A source whose start blocks (`start`: WASAPI waits up to 3 s for its
+/// device to open), started on a blocking thread so the runtime's own
+/// threads, and the input they carry, go on meanwhile (review M4).
+pub fn blocking_source(
+    start: impl Fn(mpsc::Sender<PcmBuffer>, CancellationToken) -> anyhow::Result<Started>
+    + Send
+    + Sync
+    + 'static,
+) -> Source {
+    let start = Arc::new(start);
+    Arc::new(
+        move |pcm: mpsc::Sender<PcmBuffer>, cancel: CancellationToken| {
+            let start = Arc::clone(&start);
+            Box::pin(async move {
+                tokio::task::spawn_blocking(move || start(pcm, cancel))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("the capture did not start: {e}"))?
+            }) as Starting
+        },
+    )
 }
 
 /// The tone [`TONE_SEAM`]'s value asks for, in Hz: none when it is not
@@ -1016,6 +1037,34 @@ mod tests {
         assert!(!lock(&LISTENING).contains_key("test-snd-l"));
         heard("test-snd-l", 1, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review M4: a capture whose start blocks (WASAPI waits up to 3 s
+    /// for its device) starts off the runtime's threads, so the rest of
+    /// the runtime (the computer driven's input) goes on meanwhile, even
+    /// on a runtime of one thread.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_capture_that_blocks_as_it_starts_holds_up_nothing_else() {
+        let source = blocking_source(|_pcm, _cancel| {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(Box::new(()) as Started)
+        });
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let ticker = tokio::spawn({
+            let ticks = Arc::clone(&ticks);
+            async move {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        });
+        let (pcm, _rx) = mpsc::channel(1);
+        let started = source(pcm, CancellationToken::new()).await;
+        assert!(started.is_ok());
+        let ticked = ticks.load(Ordering::SeqCst);
+        ticker.abort();
+        assert!(ticked >= 5, "the runtime went on meanwhile: {ticked} ticks");
     }
 
     /// Review M3: a computer's reason is kept short, cut at a character,
