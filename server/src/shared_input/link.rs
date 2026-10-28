@@ -540,6 +540,12 @@ impl Channel {
             .flatten()
     }
 
+    /// An answer to one of this channel's pings that has come, if any,
+    /// without waiting.
+    pub fn try_pong(&mut self) -> Option<Pong> {
+        self.pongs.try_recv().ok()
+    }
+
     /// The timings the other computer sent back after a
     /// [`Msg::AskTimings`], waited for at most `within`.
     pub async fn timings(&mut self, within: Duration) -> Option<Vec<wire::Timing>> {

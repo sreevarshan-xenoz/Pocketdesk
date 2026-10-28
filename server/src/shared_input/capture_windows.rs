@@ -1094,6 +1094,14 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
+                // Sent as any message is, so a ping that cannot go brings
+                // the keyboard and mouse home as a failed send does.
+                Action::Ping(to) => queue.push_front(Action::Send(
+                    to,
+                    Msg::Ping {
+                        t_us: link::now_us(),
+                    },
+                )),
                 Action::PushClipboard(to) => {
                     // Read and sent off this thread: a clipboard another
                     // program holds open must not hold the mouse.
@@ -1255,6 +1263,25 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        // The computer driven answering its pings, or not: one silent for
+        // a second brings the keyboard and mouse home.
+        let now = Instant::now();
+        let answered: Vec<String> = glue
+            .channels
+            .iter_mut()
+            .filter_map(|(id, channel)| {
+                let mut any = false;
+                while channel.try_pong().is_some() {
+                    any = true;
+                }
+                any.then(|| id.clone())
+            })
+            .collect();
+        for id in answered {
+            driver.answered(&id, now);
+        }
+        let actions = driver.tick(now);
+        glue.apply(&mut driver, actions);
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
         let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
