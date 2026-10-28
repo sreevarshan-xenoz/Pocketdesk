@@ -50,6 +50,10 @@ const GAP: Duration = Duration::from_millis(1);
 /// A ping goes with every this many events.
 const PING_EVERY: usize = 20;
 
+/// How often an activity note goes while the script runs, as a driving
+/// computer sends one: the receiver lets go of a driver silent for a second.
+const ACTIVE_EVERY: Duration = Duration::from_millis(200);
+
 /// How long the last pings' answers are waited for.
 const PONG_WAIT: Duration = Duration::from_secs(2);
 
@@ -80,7 +84,8 @@ struct Outcome {
     round_trips_us: Vec<u64>,
 }
 
-/// What `share-test` sends after its `Hello` (pings aside): the cursor
+/// What `share-test` sends after its `Hello` (pings and activity notes,
+/// every 200 ms, aside): the cursor
 /// coming onto the other computer, `keys` key events (each key pressed, then
 /// let go) and `moves` pointer moves taken in turn, everything let go of
 /// (an odd `keys` ends on a press), and the cursor leaving.
@@ -328,11 +333,18 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         channel.send(&hello)?;
         outcome.sent += 1;
         let started = tokio::time::Instant::now();
+        let mut active_due = started;
         for (i, msg) in script(request.keys, request.moves).iter().enumerate() {
             let due = started + GAP * u32::try_from(i).unwrap_or(u32::MAX);
             tokio::time::sleep_until(due).await;
             if i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
+            }
+            let now = tokio::time::Instant::now();
+            if now >= active_due {
+                channel.send(&Msg::Active { idle_ms: 0 })?;
+                outcome.sent += 1;
+                active_due = now + ACTIVE_EVERY;
             }
             channel.send(msg)?;
             outcome.sent += 1;

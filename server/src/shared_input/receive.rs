@@ -89,6 +89,9 @@ const AWAKE_FOR: Duration = Duration::from_secs(10);
 /// Someone idle this long at the driving computer does not.
 const IDLE_MS_AWAKE: u32 = 60_000;
 
+/// The driving computer silent this long is taken to have gone.
+pub const SILENCE_RELEASE: Duration = Duration::from_secs(1);
+
 /// What this computer does with what other computers send it.
 pub struct Receiver {
     inject: Box<dyn Inject>,
@@ -100,6 +103,8 @@ pub struct Receiver {
     last_seq: Option<u32>,
     /// When the last note came that someone is at a driving computer.
     active_at: Option<Instant>,
+    /// When anything last came from the driving computer.
+    heard_at: Option<Instant>,
 }
 
 impl Receiver {
@@ -110,6 +115,7 @@ impl Receiver {
             held: HeldInput::default(),
             last_seq: None,
             active_at: None,
+            heard_at: None,
         }
     }
 
@@ -122,14 +128,23 @@ impl Receiver {
     /// drive this one (shared input on, one of the owner's computers, with
     /// the permission).
     pub fn handle(&mut self, from: &str, msg: Msg, allowed: bool) {
+        self.handle_at(from, msg, allowed, Instant::now());
+    }
+
+    /// [`Receiver::handle`], with `now` the time it arrived.
+    pub fn handle_at(&mut self, from: &str, msg: Msg, allowed: bool, now: Instant) {
         if !allowed {
             // Its permission went (or the feature did) while it drove.
             self.link_lost(from);
             return;
         }
+        // Anything at all from the driving computer says it is still there.
+        if self.driver.as_deref() == Some(from) {
+            self.heard_at = Some(now);
+        }
         if let Msg::Active { idle_ms } = msg {
             if idle_ms < IDLE_MS_AWAKE {
-                self.active_at = Some(Instant::now());
+                self.active_at = Some(now);
             }
             return;
         }
@@ -138,6 +153,7 @@ impl Receiver {
             // down is let go of first.
             self.release_held();
             self.driver = Some(from.to_string());
+            self.heard_at = Some(now);
             self.last_seq = None;
             self.inject.move_abs(x, y);
             return;
@@ -179,9 +195,27 @@ impl Receiver {
         }
     }
 
+    /// The driving computer has sent nothing at all for
+    /// [`SILENCE_RELEASE`] by `now` (it sends an activity note several
+    /// times a second while it drives): it is taken to have gone, as if it
+    /// left. Everything it held down is let go of, and this computer is no
+    /// longer kept awake for it; what it sends later is ignored until it
+    /// enters again. A link that goes without a word is noticed here long
+    /// before the connection times out.
+    pub fn check_silence(&mut self, now: Instant) {
+        let silent = self
+            .heard_at
+            .is_some_and(|at| now.saturating_duration_since(at) >= SILENCE_RELEASE);
+        if self.driver.is_some() && silent {
+            self.stop();
+            self.active_at = None;
+        }
+    }
+
     fn stop(&mut self) {
         self.release_held();
         self.driver = None;
+        self.heard_at = None;
         self.last_seq = None;
     }
 
@@ -260,9 +294,11 @@ impl Inject for LazyInjector {
     }
 }
 
-/// How often the driver's link and permission, and the keep-awake, are
-/// looked at, and what was heard of other computers' screens is written.
-const TICK: Duration = Duration::from_millis(250);
+/// How often the driver's silence, link and permission, and the
+/// keep-awake, are looked at, and what was heard of other computers'
+/// screens is written: a silent driver is let go of within a tick of
+/// [`SILENCE_RELEASE`].
+const TICK: Duration = Duration::from_millis(100);
 
 /// How often this computer's own screens are looked at.
 const SCREENS_EVERY: Duration = Duration::from_secs(5);
@@ -445,6 +481,15 @@ pub async fn run() {
                 receiver.handle(&from, msg, standing.allowed);
             }
             _ = tick.tick() => {
+                if let Some(driver) = receiver.driver().map(str::to_string) {
+                    receiver.check_silence(Instant::now());
+                    if receiver.driver().is_none() {
+                        tracing::info!(
+                            driver,
+                            "Shared input: the driving computer went silent; what it held is let go of"
+                        );
+                    }
+                }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     let linked = link::linked().contains(&driver);
                     if !linked || !gate.standing(&driver).await.allowed {
@@ -738,6 +783,56 @@ mod tests {
         assert_eq!(r.driver(), Some("b"));
         r.handle("a", key(30, true), true);
         assert_eq!(fake.take(), vec![]);
+    }
+
+    #[test]
+    fn silent_sender_is_released_after_a_second() {
+        let (mut r, fake) = receiver();
+        let t0 = Instant::now();
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        r.handle_at("pc", key(42, true), true, t0);
+        r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, t0);
+        fake.take();
+        // Not yet: a little short of a second of silence.
+        r.check_silence(t0 + SILENCE_RELEASE - Duration::from_millis(1));
+        assert_eq!(fake.take(), vec![]);
+        assert_eq!(r.driver(), Some("pc"));
+        // A second of nothing: let go of once, as a Leave, and no longer
+        // kept awake for it.
+        r.check_silence(t0 + SILENCE_RELEASE);
+        assert_eq!(fake.take(), vec![Call::Key(42, false)]);
+        assert_eq!(r.driver(), None);
+        assert!(!r.wants_awake(t0 + SILENCE_RELEASE));
+        r.check_silence(t0 + SILENCE_RELEASE * 5);
+        assert_eq!(fake.take(), vec![]);
+        // What it sends later is ignored until it enters again.
+        let later = t0 + SILENCE_RELEASE * 6;
+        r.handle_at("pc", Msg::Move { seq: 9, x: 1, y: 1 }, true, later);
+        r.handle_at("pc", key(30, true), true, later);
+        assert_eq!(fake.take(), vec![]);
+        r.handle_at("pc", Msg::Enter { x: 2, y: 2 }, true, later);
+        r.handle_at("pc", key(30, true), true, later);
+        assert_eq!(fake.take(), vec![Call::Move(2, 2), Call::Key(30, true)]);
+    }
+
+    #[test]
+    fn steady_active_keeps_the_session() {
+        let (mut r, fake) = receiver();
+        let t0 = Instant::now();
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        r.handle_at("pc", key(42, true), true, t0);
+        fake.take();
+        let step = Duration::from_millis(100);
+        for i in 1..=30u32 {
+            let now = t0 + step * i;
+            if i % 2 == 0 {
+                r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, now);
+            }
+            r.check_silence(now);
+        }
+        assert_eq!(fake.take(), vec![]);
+        assert_eq!(r.driver(), Some("pc"));
+        assert!(r.wants_awake(t0 + step * 30));
     }
 
     #[test]
