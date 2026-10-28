@@ -1,4 +1,4 @@
-# Maintainer: sreevarshan <sreevarshan@example.com>
+# Maintainer: xenoz <https://github.com/sreevarshan-xenoz>
 pkgname=pocketdesk
 pkgver=0.7.0
 pkgrel=1
@@ -22,7 +22,7 @@ install=pocketdesk.install
 # link cannot read (undefined ring_core_* symbols).
 options=('!lto')
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('24dce4ee714642df6aae121a830f1fe9849c63c298acbd9fcfb2e81a923770ad')
 
 # GitHub names the unpacked folder after the repository, not the package.
 _src="Pocketdesk-${pkgver}"
