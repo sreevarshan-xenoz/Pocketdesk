@@ -334,18 +334,29 @@ pub fn frame(msg: &Msg) -> Vec<u8> {
 
 /// The next frame off a stream. `Ok(None)` is the peer closing between frames;
 /// closing in the middle of one, or sending bytes that are no message, is an
-/// error.
+/// error. A whole frame whose tag this build does not know (a newer build's
+/// message) is skipped, and the next read (BK6): its length says where it
+/// ends, so it never ends the stream.
 pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<Option<Msg>> {
-    let mut len = [0u8; 2];
-    if reader.read(&mut len[..1]).await? == 0 {
-        return Ok(None);
+    loop {
+        let mut len = [0u8; 2];
+        if reader.read(&mut len[..1]).await? == 0 {
+            return Ok(None);
+        }
+        reader.read_exact(&mut len[1..]).await?;
+        let mut body = vec![0u8; usize::from(u16::from_be_bytes(len))];
+        reader.read_exact(&mut body).await?;
+        match decode(&body) {
+            Ok(msg) => return Ok(Some(msg)),
+            Err(WireError::UnknownTag(tag)) => {
+                tracing::debug!(
+                    tag,
+                    "A shared-input message of a kind not known here; skipped"
+                );
+            }
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+        }
     }
-    reader.read_exact(&mut len[1..]).await?;
-    let mut body = vec![0u8; usize::from(u16::from_be_bytes(len))];
-    reader.read_exact(&mut body).await?;
-    decode(&body)
-        .map(Some)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 fn put_str(out: &mut Vec<u8>, s: &str) {
@@ -669,14 +680,32 @@ mod tests {
             let err = read_frame(&mut r).await.unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof, "{n}");
         }
-        // A frame whose body is not a message.
-        let mut r = &[0u8, 1, 200][..];
+        // A frame whose body is not a message: a key cut short.
+        let mut r = &[0u8, 2, 7, 0][..];
         let err = read_frame(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         // An empty frame is not a message either.
         let mut r = &[0u8, 0][..];
         let err = read_frame(&mut r).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// BK6: a frame whose tag this build does not know (a newer build's
+    /// message) is skipped whole, and the stream reads on: a newer
+    /// computer's message never ends an older one's stream.
+    #[tokio::test]
+    async fn a_frame_of_an_unknown_kind_is_skipped_and_the_stream_reads_on() {
+        let key = Msg::Key {
+            code: 30,
+            pressed: true,
+        };
+        let mut bytes = vec![0u8, 4, 200, 1, 2, 3];
+        bytes.extend(frame(&key));
+        bytes.extend([0u8, 1, 250]);
+        let mut r = &bytes[..];
+        assert_eq!(read_frame(&mut r).await.unwrap(), Some(key));
+        // An unknown frame last, then the end: a clean end.
+        assert_eq!(read_frame(&mut r).await.unwrap(), None);
     }
 
     #[test]
