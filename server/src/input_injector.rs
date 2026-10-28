@@ -631,12 +631,13 @@ impl InputInjector {
             InputBackend::Enigo(enigo) => {
                 let e = enigo.get_mut().unwrap();
                 let (w, h) = e.main_display().context("enigo main_display failed")?;
-                e.move_mouse(
-                    x_norm as i32 * w / ABS_MAX_COORD,
-                    y_norm as i32 * h / ABS_MAX_COORD,
-                    Coordinate::Abs,
-                )
-                .context("enigo absolute mouse move failed")?;
+                // Over one past the largest value, so 65535 is the last
+                // pixel, not one past it.
+                let span = |norm: u16, len: i32| {
+                    (i64::from(norm) * i64::from(len) / (i64::from(ABS_MAX_COORD) + 1)) as i32
+                };
+                e.move_mouse(span(x_norm, w), span(y_norm, h), Coordinate::Abs)
+                    .context("enigo absolute mouse move failed")?;
                 Ok(())
             }
             #[cfg(target_os = "linux")]

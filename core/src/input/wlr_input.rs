@@ -257,12 +257,14 @@ impl WlrInput {
     }
 
     /// Move to (`x`, `y`) of 0..=65535 over the whole output layout, as
-    /// the uinput absolute pointer does.
+    /// the uinput absolute pointer does. The extent is one past the largest
+    /// value, as libinput scales the uinput axis, so 65535 lands on the last
+    /// pixel rather than one past it.
     pub fn motion_absolute(&mut self, x: u16, y: u16) -> std::io::Result<()> {
         let time = monotonic_ms();
         self.send(|l| {
             l.pointer
-                .motion_absolute(time, x.into(), y.into(), 65_535, 65_535);
+                .motion_absolute(time, x.into(), y.into(), 65_536, 65_536);
             l.pointer.frame();
         })
     }
