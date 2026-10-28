@@ -85,6 +85,7 @@ pub fn status_from(
         link,
         answered,
         sharing_on: false,
+        phones: BTreeMap::new(),
     }
 }
 
@@ -317,6 +318,7 @@ mod tests {
             link: BTreeMap::from([("peer".to_string(), LINK_DIRECT.to_string())]),
             answered: BTreeSet::new(),
             sharing_on: true,
+            ..StatusFile::default()
         };
         let mut last = Some(before.clone());
         let now = StatusFile {

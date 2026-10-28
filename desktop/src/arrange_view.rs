@@ -719,6 +719,7 @@ mod tests {
             }],
             changed_unix: 0,
             this_computer: this,
+            phone: None,
         };
         let long = "x".repeat(200);
         let view = ArrangeView {

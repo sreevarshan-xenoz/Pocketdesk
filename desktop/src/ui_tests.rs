@@ -319,6 +319,7 @@ fn keyboard_mouse_computers(state: &Path) {
         link: [(LAPTOP.to_string(), "direct".to_string())].into(),
         answered: [LAPTOP.to_string()].into(),
         sharing_on: true,
+        ..StatusFile::default()
     };
     shared_input::write_status(state, &status).expect("a status file");
 }

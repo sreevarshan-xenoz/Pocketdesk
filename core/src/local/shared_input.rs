@@ -119,7 +119,26 @@ pub fn clean_screens(screens: &[Screen]) -> Vec<Screen> {
         .collect()
 }
 
-/// One computer's screens.
+/// A phone's screen (BK5), as its packet says it.
+pub use crate::protocol::phone_screen::{MAX_PHONE_SIDE, PhoneScreen};
+
+/// A phone's block on the desk is its size in dp times this, in percent:
+/// about the size a phone is beside a laptop's screen.
+pub const PHONE_SCALE_PERCENT: u32 = 80;
+
+/// A phone's block in the layout: one screen at its own origin, its size
+/// in dp times [`PHONE_SCALE_PERCENT`] (at least a pixel each way).
+pub fn phone_block(phone: &PhoneScreen) -> Screen {
+    let scaled = |dp: u32| (u64::from(dp) * u64::from(PHONE_SCALE_PERCENT) / 100).max(1) as u32;
+    Screen {
+        x: 0,
+        y: 0,
+        width: scaled(phone.width_dp),
+        height: scaled(phone.height_dp),
+    }
+}
+
+/// One computer's screens, or a phone's block.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComputerScreens {
     pub device_id: String,
@@ -130,6 +149,10 @@ pub struct ComputerScreens {
     /// Whether this is this computer's own entry (the first).
     #[serde(default)]
     pub this_computer: bool,
+    /// A phone's own screen (BK5): this entry is a phone, and its one
+    /// screen its block ([`phone_block`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<PhoneScreen>,
 }
 
 /// This computer's screens first, then the other computers' in the order
@@ -169,6 +192,7 @@ impl ScreensFile {
                 screens: clean_screens(screens),
                 changed_unix: now_unix,
                 this_computer: true,
+                phone: None,
             },
         );
     }
@@ -201,6 +225,36 @@ impl ScreensFile {
                 screens,
                 changed_unix: now_unix,
                 this_computer: false,
+                phone: None,
+            }),
+        }
+    }
+
+    /// Keep what the phone `device_id` said of its screen (BK5), and its
+    /// `name`: its block is worked out from it. An unsound screen, or one
+    /// naming this computer's own id, changes nothing.
+    pub fn heard_phone(&mut self, device_id: &str, name: &str, phone: &PhoneScreen, now_unix: u64) {
+        if !phone.is_sound() {
+            return;
+        }
+        let (name, screens) = (clean_name(name), vec![phone_block(phone)]);
+        match self.computers.iter_mut().find(|c| c.device_id == device_id) {
+            Some(own) if own.this_computer => {}
+            Some(known) => {
+                if known.name != name || known.screens != screens || known.phone != Some(*phone) {
+                    known.name = name;
+                    known.screens = screens;
+                    known.phone = Some(*phone);
+                    known.changed_unix = now_unix;
+                }
+            }
+            None => self.computers.push(ComputerScreens {
+                device_id: device_id.to_string(),
+                name,
+                screens,
+                changed_unix: now_unix,
+                this_computer: false,
+                phone: Some(*phone),
             }),
         }
     }
@@ -444,6 +498,18 @@ pub const REFUSED_SHARING_OFF: &str = "refused: sharing off";
 /// It answered by refusing: it does not let this computer drive it.
 pub const REFUSED_NOT_ALLOWED: &str = "refused: not allowed";
 
+/// A phone's standing as a screen (BK5), as [`StatusFile::phones`] says
+/// it: the keyboard and mouse may go onto it now.
+pub const PHONE_READY: &str = "ready";
+/// Its owner has "Let my computer's keyboard and mouse use this phone" off.
+pub const PHONE_OFF: &str = "off on the phone";
+/// The phone's Accessibility service, which touches and types, is off.
+pub const PHONE_NEEDS_SERVICE: &str = "needs the accessibility service";
+/// This computer's Keyboard and mouse permission for it is off.
+pub const PHONE_NOT_ALLOWED: &str = "not allowed here";
+/// It is not linked now, or has not said its screen since it linked.
+pub const PHONE_AWAY: &str = "not linked";
+
 /// How the shared keyboard and mouse stand now, for the desktop app.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusFile {
@@ -464,6 +530,11 @@ pub struct StatusFile {
     /// server last read it: the tray's line shows only then.
     #[serde(default)]
     pub sharing_on: bool,
+    /// Each phone that said its screen (BK5), and whether the keyboard and
+    /// mouse may go onto it: [`PHONE_READY`], or why not ([`PHONE_OFF`],
+    /// [`PHONE_NEEDS_SERVICE`], [`PHONE_NOT_ALLOWED`], [`PHONE_AWAY`]).
+    #[serde(default)]
+    pub phones: BTreeMap<String, String>,
 }
 
 /// How things stand, as the server last wrote. A missing or unreadable file
@@ -692,6 +763,103 @@ mod tests {
         assert_eq!(ids, ["me", "peer"]);
     }
 
+    fn phone(width_dp: u32, height_dp: u32) -> PhoneScreen {
+        PhoneScreen {
+            width_px: width_dp * 3,
+            height_px: height_dp * 3,
+            width_dp,
+            height_dp,
+            rotation: 0,
+        }
+    }
+
+    #[test]
+    fn a_phone_is_a_block_at_desk_scale() {
+        assert_eq!(phone_block(&phone(400, 900)), screen(0, 0, 320, 720));
+        // Turned: its block turns with it.
+        let turned = PhoneScreen {
+            rotation: 1,
+            ..phone(900, 400)
+        };
+        assert_eq!(phone_block(&turned), screen(0, 0, 720, 320));
+        // Never less than a pixel.
+        assert_eq!(phone_block(&phone(1, 1)), screen(0, 0, 1, 1));
+        assert!(phone(400, 900).is_sound());
+        assert!(!phone(0, 900).is_sound());
+        assert!(!phone(MAX_PHONE_SIDE + 1, 900).is_sound());
+        let mut spun = phone(400, 900);
+        spun.rotation = 4;
+        assert!(!spun.is_sound());
+    }
+
+    #[test]
+    fn a_phone_is_kept_with_its_block_and_changed_in_place() {
+        let mut file = ScreensFile::default();
+        file.set_own("me", "Desk", &[screen(0, 0, 1920, 1080)], 1);
+        file.heard("peer", Some("Laptop"), &[screen(0, 0, 1600, 1000)], 2);
+        file.heard_phone("oppo", "OPPO", &phone(400, 900), 3);
+        let kept = file.get("oppo").unwrap();
+        assert_eq!(kept.screens, vec![screen(0, 0, 320, 720)]);
+        assert_eq!(kept.phone, Some(phone(400, 900)));
+        assert_eq!(kept.name, "OPPO");
+        assert!(!kept.this_computer);
+        // The same again is no change; turned, it is.
+        file.heard_phone("oppo", "OPPO", &phone(400, 900), 4);
+        assert_eq!(file.get("oppo").unwrap().changed_unix, 3);
+        file.heard_phone("oppo", "OPPO", &phone(900, 400), 5);
+        let turned = file.get("oppo").unwrap();
+        assert_eq!(turned.screens, vec![screen(0, 0, 720, 320)]);
+        assert_eq!(turned.changed_unix, 5);
+        // An unsound screen changes nothing, nor one naming this computer.
+        file.heard_phone("oppo", "OPPO", &phone(0, 0), 6);
+        assert_eq!(file.get("oppo").unwrap().changed_unix, 5);
+        file.heard_phone("me", "Impostor", &phone(400, 900), 7);
+        assert_eq!(file.computers[0].name, "Desk");
+        assert_eq!(file.computers[0].phone, None);
+        // Its name is clipped as a computer's is.
+        file.heard_phone(
+            "other",
+            "A
+phone",
+            &phone(400, 900),
+            8,
+        );
+        assert_eq!(file.get("other").unwrap().name, "Aphone");
+        // Unpaired, it goes as a computer does.
+        file.keep_only(&BTreeSet::from(["peer".to_string()]));
+        assert!(file.get("oppo").is_none());
+    }
+
+    #[test]
+    fn a_file_from_before_phones_reads() {
+        let raw = r#"{"computers":[{"device_id":"me","name":"Desk","screens":[],
+            "changed_unix":1,"this_computer":true}]}"#;
+        let file: ScreensFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(file.computers[0].phone, None);
+        // And a computer's entry is written without a phone.
+        let json = serde_json::to_string(&file).unwrap();
+        assert!(!json.contains("phone"), "{json}");
+    }
+
+    #[test]
+    fn a_phone_sits_in_the_default_row_beside_the_computers() {
+        let this = [screen(0, 0, 1920, 1080)];
+        let others = vec![
+            ("L".to_string(), vec![screen(0, 0, 1600, 1000)]),
+            ("P".to_string(), vec![phone_block(&phone(400, 900))]),
+        ];
+        assert_eq!(arrange(&this, &others, None), vec![(1920, 0), (3520, 0)]);
+        // Where the owner put it, when it fits.
+        let saved = LayoutFile {
+            origins: BTreeMap::from([("P".to_string(), (-320, 200))]),
+            rev: 1,
+        };
+        assert_eq!(
+            arrange(&this, &others, Some(&saved)),
+            vec![(1920, 0), (-320, 200)]
+        );
+    }
+
     fn temp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-shared-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -779,6 +947,7 @@ mod tests {
             ]),
             answered: BTreeSet::from(["peer".to_string()]),
             sharing_on: true,
+            phones: BTreeMap::from([("phone".to_string(), PHONE_READY.to_string())]),
         };
         write_status(&dir, &status).unwrap();
         assert_eq!(read_status(&dir), status);

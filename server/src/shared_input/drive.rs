@@ -1864,11 +1864,13 @@ mod tests {
             screens,
             changed_unix: 0,
             this_computer: false,
+            phone: None,
         };
         let file = ScreensFile {
             computers: vec![
                 ComputerScreens {
                     this_computer: true,
+                    phone: None,
                     ..other("W", Vec::new())
                 },
                 other("L", vec![screen(0, 0, 1600, 1000)]),
@@ -1905,6 +1907,7 @@ mod tests {
                     screens: Vec::new(),
                     changed_unix: 0,
                     this_computer: true,
+                    phone: None,
                 },
                 ComputerScreens {
                     device_id: "L".to_string(),
@@ -1912,6 +1915,7 @@ mod tests {
                     screens: vec![screen(0, 0, 1600, 1000)],
                     changed_unix: 0,
                     this_computer: false,
+                    phone: None,
                 },
             ],
         };
@@ -2243,11 +2247,13 @@ mod tests {
             screens,
             changed_unix: 0,
             this_computer: false,
+            phone: None,
         };
         let file = ScreensFile {
             computers: vec![
                 ComputerScreens {
                     this_computer: true,
+                    phone: None,
                     ..other("W", vec![screen(0, 0, 10, 10)])
                 },
                 other("gone", vec![screen(0, 0, 800, 600)]),
