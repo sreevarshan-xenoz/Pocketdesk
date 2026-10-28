@@ -76,6 +76,15 @@ pub struct Config {
     /// Off, the portal asks at every session.
     #[serde(default)]
     pub remember_screen_grant: bool,
+    /// Reachable from the internet (the WAN endpoint): phones away from home
+    /// and your other computers connect through a relay, and this computer
+    /// keeps a record on the Mainline DHT (`dht_publish`). Off, no relay or
+    /// DHT is contacted and no router port is mapped: phones reach this
+    /// computer on the same network or through Tailscale only, and your
+    /// other computers do not link with it (their link rides this road).
+    /// Read at server start.
+    #[serde(default = "default_true")]
+    pub internet_path: bool,
     /// Your own relays for phones away from home (`pocketdesk relay`), as
     /// URLs (`https://relay.example.org`, or `http://<address>:3340`). Empty
     /// uses n0's public relays. Read at server start.
@@ -429,6 +438,7 @@ impl Default for Config {
             mic_relay_device: None,
             lan_discovery: true,
             remember_screen_grant: false,
+            internet_path: true,
             relay_urls: Vec::new(),
             dht_publish: DhtPublish::Relay,
             phone_notifications: true,
@@ -672,6 +682,7 @@ impl Config {
         "mic_relay_device",
         "lan_discovery",
         "remember_screen_grant",
+        "internet_path",
         "relay_urls",
         "dht_publish",
         "phone_notifications",
@@ -1196,6 +1207,10 @@ phone_battery = \"x\"
         assert_eq!(config.control_port, 1716);
         assert!(config.pairing_required);
         assert!(config.lan_discovery, "announced on the network by default");
+        assert!(
+            config.internet_path,
+            "reachable from the internet by default"
+        );
     }
 
     #[test]
@@ -1234,6 +1249,20 @@ future_key = \"x\"
                 .contains("lan_discovery = false")
         );
         assert!(!Config::load_from(&path).unwrap().lan_discovery);
+    }
+
+    #[test]
+    fn turning_the_internet_path_off_is_saved_and_read_back() {
+        let path = temp("internet");
+        let mut config = Config::load_from(&path).unwrap();
+        config.internet_path = false;
+        config.save_to(&path).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("internet_path = false")
+        );
+        assert!(!Config::load_from(&path).unwrap().internet_path);
     }
 
     #[test]

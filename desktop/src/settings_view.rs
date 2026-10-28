@@ -60,7 +60,7 @@ impl Section {
     /// What is in it, in a line beside the title.
     pub fn summary(self) -> &'static str {
         match self {
-            Section::Connection => "ports, pairing, this network, files",
+            Section::Connection => "ports, pairing, this network, the internet, files",
             Section::Phones => "video, control, clipboard, drive, locking, links, batteries",
             Section::Notifications => "phones' notifications and texts here",
             Section::Wake => "waking this computer from a phone",
@@ -91,6 +91,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     (
         "lan_discovery",
         "Visible on this network",
+        Section::Connection,
+    ),
+    (
+        "internet_path",
+        "Reachable from the internet",
         Section::Connection,
     ),
     (
@@ -833,6 +838,16 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.lan_discovery,
                         "phones on the same network list this computer",
+                    );
+                });
+                row(ui, "internet_path", |ui| {
+                    ui.checkbox(
+                        &mut e.internet_path,
+                        "phones away from home and your other computers reach this computer",
+                    );
+                    note(
+                        ui,
+                        "Off, phones reach it only on the same network or through Tailscale, your other computers do not link with it, and no relay or DHT is contacted.",
                     );
                 });
                 // GNOME and KDE only: nothing to remember elsewhere.
@@ -2583,6 +2598,21 @@ mod tests {
         form.edited.lan_discovery = !form.edited.lan_discovery;
         form.save_to(&path).unwrap();
         assert!(!form.restart_needed());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_internet_path_waits_for_a_restart() {
+        let dir = std::env::temp_dir().join(format!("pd-settings-internet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let mut form = SettingsForm::from_config(Config::default());
+        form.edited.internet_path = false;
+        form.save_to(&path).unwrap();
+        assert!(form.restart_needed(), "the server binds it at start");
+        assert_eq!(form.restart_names(), ["Reachable from the internet"]);
+        assert!(!Config::load_from(&path).unwrap().internet_path);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

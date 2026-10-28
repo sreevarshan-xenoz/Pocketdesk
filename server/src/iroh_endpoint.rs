@@ -550,6 +550,20 @@ pub type ControlHandoff = (
     tokio::sync::OwnedSemaphorePermit,
 );
 
+/// What an earlier run recorded about its internet path is not this run's:
+/// its measurements, and the endpoint a pairing code would carry. Dropped
+/// at each start, and kept away when the internet path is off.
+pub fn forget_last_run() {
+    if let Ok(dir) = crate::state::state_dir() {
+        for stale in [
+            pocketdesk_core::local::paths::WAN_STATUS_FILE,
+            pocketdesk_core::local::paths::ENDPOINT_FILE,
+        ] {
+            let _ = std::fs::remove_file(dir.join(stale));
+        }
+    }
+}
+
 /// Bind the WAN endpoint and spawn its accept loop.
 ///
 /// Each accepted connection runs one v1 streaming session — identical to the
@@ -576,17 +590,9 @@ pub async fn spawn_wan_endpoint(
         dht_publish,
         control,
     } = settings;
-    // What an earlier run recorded about its internet path is not this
-    // run's: dropped before anything can fail, so a run whose endpoint never
-    // binds shows nothing measured rather than the last network's facts.
-    if let Ok(dir) = crate::state::state_dir() {
-        for stale in [
-            pocketdesk_core::local::paths::WAN_STATUS_FILE,
-            pocketdesk_core::local::paths::ENDPOINT_FILE,
-        ] {
-            let _ = std::fs::remove_file(dir.join(stale));
-        }
-    }
+    // Dropped before anything can fail, so a run whose endpoint never binds
+    // shows nothing measured rather than the last network's facts.
+    forget_last_run();
     let secret_key =
         load_or_create_secret_key(&key_path()?).context("failed to load iroh identity key")?;
 
