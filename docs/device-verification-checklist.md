@@ -2983,6 +2983,8 @@ Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and 
 - [ ] Over 100 files at once (select 120 in a folder) dragged across: the first 100 land, "20 more left out: at most 100 go at once" flashes, and the drop is quick (only the first 100 paths are read). (where: owner)
 - [ ] "Files over the internet" off on Windows: "Not sent" with the reason flashes and nothing goes; off on Linux, or Files not allowed there: the refusal's reason flashes within a few seconds. (where: owner)
 - [ ] The catcher is never seen or felt: no box in the middle of the screen while away, the window typed in keeps the focus; with "Drag files across the edge" off no catcher is put up, and a drag carried across ends as before BK4. (where: owner)
+- [ ] Files dragged out of a zip opened in Explorer, carried across and let go on Linux: note whether they land, or the drag is refused (no "Sending" badge, nothing dropped elsewhere). (where: owner)
+- [ ] Photos dragged from the phone shown in Explorer (MTP, "This PC" > the phone), carried across and let go on Linux: note whether they land, or the drag is refused as above. (where: owner)
 - [ ] With the server installed `--elevated`, note what a drag across does (Windows is expected to refuse the drop: nothing sent, nothing dropped elsewhere). (where: owner)
 
 ## Recording results
