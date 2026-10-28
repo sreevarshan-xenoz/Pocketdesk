@@ -1592,10 +1592,16 @@ mod tests {
         );
     }
 
+    /// The tests that move the process-wide switch counter ([`SWITCHES`])
+    /// take turns: one moving it between another's steps would read as a
+    /// later switch. Any test that moves it holds this.
+    static SWITCH_TESTS: Mutex<()> = Mutex::new(());
+
     /// BK3: a later switch drops an image on its way, and while one from a
     /// computer lands, nothing goes back to it.
     #[test]
     fn a_later_switch_drops_an_image_on_its_way() {
+        let _turn = SWITCH_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let at = switch();
         assert!(still(at));
         let landing = Landing::begin("bk3-desk");
