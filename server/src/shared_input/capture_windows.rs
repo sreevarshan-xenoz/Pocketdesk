@@ -24,7 +24,7 @@
 //! must not hook, hide the cursor or move it on the owner's computer.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -294,15 +294,50 @@ struct ThreadState {
     asleep: bool,
     /// Where the cursor is parked while away (physical).
     park: Option<(i32, i32)>,
+    /// Which input thread this is: each started counts on.
+    generation: u64,
 }
 
 // SAFETY: the hook and module handles are plain values, used only on the
 // input thread (the hooks run on the thread that installed them); there is
-// one input thread at a time.
+// one input thread at a time in STATE (by its generation).
 unsafe impl Send for ThreadState {}
 
 /// The input thread's state, while it runs.
 static STATE: Mutex<Option<ThreadState>> = Mutex::new(None);
+
+/// The input threads started so far: each takes the next as its
+/// generation.
+static GENERATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Put `state` in `slot`, unless a newer input thread's is there: one left
+/// behind, stuck as it started, may get going after a newer one did.
+fn install_state(slot: &mut Option<ThreadState>, state: ThreadState) {
+    if slot
+        .as_ref()
+        .is_none_or(|s| s.generation < state.generation)
+    {
+        *slot = Some(state);
+    }
+}
+
+/// Clear `slot` if it is the input thread `generation`'s, never a newer
+/// one's.
+fn clear_own(slot: &mut Option<ThreadState>, generation: u64) {
+    if slot.as_ref().is_some_and(|s| s.generation == generation) {
+        *slot = None;
+    }
+}
+
+/// `f` on the input thread `generation`'s state, if it is the one in place.
+fn with_own_state<T>(generation: u64, f: impl FnOnce(&mut ThreadState) -> T) -> Option<T> {
+    STATE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .filter(|s| s.generation == generation)
+        .map(f)
+}
 
 /// `f` on the input thread's state; `None` when it is not running. Never
 /// held across a call that runs a hook or the window (those run only while
@@ -630,6 +665,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
     // and tears down, even if the WM_QUIT sent to it was lost (no queue yet).
     let abandoned = Arc::new(AtomicBool::new(false));
     let abandoned_thread = Arc::clone(&abandoned);
+    let generation = GENERATIONS.fetch_add(1, Ordering::SeqCst) + 1;
     let spawned = std::thread::Builder::new()
         .name("pd-shared-input".into())
         .spawn(move || {
@@ -688,7 +724,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                     None
                 }
             };
-            *STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(ThreadState {
+            let state = ThreadState {
                 events,
                 hotkey,
                 mode: Mode::Off,
@@ -702,7 +738,9 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 locked: false,
                 asleep: false,
                 park: None,
-            });
+                generation,
+            };
+            install_state(&mut STATE.lock().unwrap_or_else(|e| e.into_inner()), state);
             let registered = hotkey.is_some_and(|key| {
                 // SAFETY: a key for this thread's queue.
                 let taken = unsafe {
@@ -754,7 +792,9 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                     },
                 }
             }
-            with_state(|s| apply_mode(s, Mode::Off));
+            // Only its own state: a thread left behind that gets here late
+            // must not take a newer one's hooks out or clear its state.
+            with_own_state(generation, |s| apply_mode(s, Mode::Off));
             if registered {
                 // SAFETY: the key registered above.
                 let _ = unsafe { UnregisterHotKey(None, HOTKEY_ID) };
@@ -764,7 +804,10 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 let _ = unsafe { WTSUnRegisterSessionNotification(window) };
                 let _ = unsafe { DestroyWindow(window) };
             }
-            *STATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            clear_own(
+                &mut STATE.lock().unwrap_or_else(|e| e.into_inner()),
+                generation,
+            );
         });
     let thread = match spawned {
         Ok(thread) => thread,
@@ -1656,6 +1699,48 @@ mod tests {
         assert!(hooks_missing(Mode::Away, false, true));
         assert!(!hooks_missing(Mode::Watch, false, false));
         assert!(!hooks_missing(Mode::Off, false, false));
+    }
+
+    fn state(generation: u64) -> ThreadState {
+        let (events, _) = mpsc::channel();
+        ThreadState {
+            events,
+            hotkey: None,
+            mode: Mode::Off,
+            mouse: None,
+            keyboard: None,
+            foreground: None,
+            instance: HINSTANCE::default(),
+            mods: 0,
+            hotkey_down: false,
+            wheel: (0, 0),
+            locked: false,
+            asleep: false,
+            park: None,
+            generation,
+        }
+    }
+
+    fn generation(slot: &Option<ThreadState>) -> Option<u64> {
+        slot.as_ref().map(|s| s.generation)
+    }
+
+    /// An input thread left behind (stuck as it started) that gets going
+    /// later neither takes a newer thread's state nor clears it as it ends.
+    #[test]
+    fn an_older_input_thread_leaves_a_newer_ones_state_alone() {
+        let mut slot = None;
+        install_state(&mut slot, state(2));
+        install_state(&mut slot, state(1));
+        assert_eq!(generation(&slot), Some(2), "not taken by the older");
+        clear_own(&mut slot, 1);
+        assert_eq!(generation(&slot), Some(2), "not cleared by the older");
+        clear_own(&mut slot, 2);
+        assert_eq!(generation(&slot), None, "cleared by its own");
+        // A newer thread takes over from an older one left in place.
+        install_state(&mut slot, state(3));
+        install_state(&mut slot, state(4));
+        assert_eq!(generation(&slot), Some(4));
     }
 
     #[test]
