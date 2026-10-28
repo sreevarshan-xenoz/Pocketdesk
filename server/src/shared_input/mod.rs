@@ -34,6 +34,8 @@ pub mod held;
 pub mod keys_windows;
 pub mod layout;
 pub mod link;
+pub mod phone;
+pub mod phone_test;
 pub mod receive;
 pub mod screens;
 pub mod share_test;

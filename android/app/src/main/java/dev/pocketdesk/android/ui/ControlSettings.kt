@@ -22,7 +22,7 @@ import dev.pocketdesk.android.notify.PhoneNotificationPrefs
  */
 object AccessibilityLink {
     /** The switches that need the service, in their order on the page. */
-    enum class Switch { CONTROL, TYPING, PHONE_ACTIONS, COPIES }
+    enum class Switch { CONTROL, TYPING, KEYBOARD_MOUSE, PHONE_ACTIONS, COPIES }
 
     fun shownUnder(on: Map<Switch, Boolean>, serviceOn: Boolean): Switch? =
         if (serviceOn) null else Switch.entries.firstOrNull { on[it] == true }
@@ -39,6 +39,7 @@ private fun accessibilityLinkUnder(): AccessibilityLink.Switch? {
             mapOf(
                 AccessibilityLink.Switch.CONTROL to Prefs.controlFromComputer(context),
                 AccessibilityLink.Switch.TYPING to Prefs.typingFromComputer(context),
+                AccessibilityLink.Switch.KEYBOARD_MOUSE to Prefs.keyboardMouseFromComputer(context),
                 AccessibilityLink.Switch.PHONE_ACTIONS to Prefs.phoneActionsFromComputer(context),
                 AccessibilityLink.Switch.COPIES to Prefs.copiesByThemselves(context),
             ),
@@ -133,6 +134,57 @@ fun TypingSetting() {
     )
     if (on && !serviceOn) {
         if (accessibilityLinkUnder() == AccessibilityLink.Switch.TYPING) {
+            SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
+        }
+    } else if (on && !listening) {
+        AllowNotificationAccess()
+    }
+}
+
+/**
+ * BK5: the phone as another screen for its own computer's keyboard and
+ * mouse. Its own switch, needing C8's Accessibility service, which touches
+ * and types, and the notification listener, which says the phone's screen
+ * to the computer and waits for what it sends.
+ */
+@Composable
+fun KeyboardMouseSetting() {
+    val context = LocalContext.current
+    val resumes = rememberResumes()
+    var on by remember { mutableStateOf(Prefs.keyboardMouseFromComputer(context)) }
+    val serviceOn = remember(resumes, on) { ControlRunner.serviceEnabled(context) }
+    val listening = remember(resumes, on) { PhoneNotificationPrefs.accessGranted(context) }
+    val openAccessibility = {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+    SettingSwitch(
+        title = stringResource(R.string.settings_keyboard_mouse),
+        summary = stringResource(
+            when {
+                !on -> R.string.settings_keyboard_mouse_summary_off
+                !serviceOn -> R.string.settings_control_summary_needs_service
+                !listening -> R.string.settings_keyboard_mouse_summary_needs_access
+                else -> R.string.settings_keyboard_mouse_summary_on
+            },
+        ),
+        checked = on,
+        warning = on && (!serviceOn || !listening),
+        onChange = { want ->
+            on = want
+            Prefs.setKeyboardMouseFromComputer(context, want)
+            if (want && !ControlRunner.serviceEnabled(context)) {
+                openAccessibility()
+            } else if (want && !PhoneNotificationPrefs.accessGranted(context)) {
+                runCatching { context.startActivity(PhoneNotificationPrefs.accessSettingsIntent()) }
+            }
+        },
+    )
+    if (on && !serviceOn) {
+        if (accessibilityLinkUnder() == AccessibilityLink.Switch.KEYBOARD_MOUSE) {
             SettingLink(stringResource(R.string.settings_control_open_accessibility), null) { openAccessibility() }
         }
     } else if (on && !listening) {

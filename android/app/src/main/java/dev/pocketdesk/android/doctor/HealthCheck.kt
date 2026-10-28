@@ -54,6 +54,8 @@ object HealthCheck {
             dev.pocketdesk.android.notify.QuietPrefs.letComputerMute(ctx) ||
             Prefs.filesInBackground(ctx) ||
             Prefs.typingFromComputer(ctx) ||
+            // BK5: the phone as a screen reports and takes on the listener's ticks.
+            Prefs.keyboardMouseFromComputer(ctx) ||
             // O2: the computer's screenshots and locks wait on the listener (O2 review).
             Prefs.phoneActionsFromComputer(ctx) ||
             // P2: so do its asks for the apps, and P10's for the contacts.
@@ -96,7 +98,7 @@ object HealthCheck {
         }
         // M4: typing needs the same Accessibility service.
         val control = Prefs.controlFromComputer(ctx) || Prefs.typingFromComputer(ctx) ||
-            Prefs.phoneActionsFromComputer(ctx) ||
+            Prefs.phoneActionsFromComputer(ctx) || Prefs.keyboardMouseFromComputer(ctx) ||
             (Prefs.copiesByThemselves(ctx) && dev.pocketdesk.android.clip.CopyWatchRule.supported(Build.VERSION.SDK_INT))
         return HealthSnapshot(
             listenerFeatures = listenerFeatures(ctx),

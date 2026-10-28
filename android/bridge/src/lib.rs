@@ -27,6 +27,7 @@ mod notification_answers;
 mod peer_names;
 mod phone_actions;
 mod phone_file_requests;
+mod phone_screen;
 mod photo_requests;
 mod quiet_requests;
 mod rates;
@@ -1520,6 +1521,70 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTypeTak
 ) -> jstring {
     let wait = std::time::Duration::from_millis(wait_ms.clamp(0, 5_000) as u64);
     let json = envelope(Ok(typing::take_json(wait)));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's keyboard and mouse on this phone as a screen (BK5): the
+/// oldest batch as `{"ok": "{\"host\", \"port\", \"events\"}"}`, waiting
+/// up to `wait_ms` for one; `{"ok": ""}` when none came. Taking keeps the
+/// input coming and its pings answered.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputTake(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    wait_ms: jint,
+) -> jstring {
+    let wait = std::time::Duration::from_millis(wait_ms.clamp(0, 1_000) as u64);
+    let json = envelope(Ok(phone_screen::take_json(wait)));
+    to_jstring(&mut env, json)
+}
+
+/// How many control links this process has opened (BK5): a new one is
+/// when the phone says its screen again.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlLinkCount(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jlong {
+    crate::session::CONTROL_LINKS.load(std::sync::atomic::Ordering::SeqCst) as jlong
+}
+
+/// The app refuses the computer's keyboard and mouse now (BK5): for two
+/// seconds nothing is kept and no ping answered, so the computer brings
+/// its mouse home.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputRefuse(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    phone_screen::refuse();
+}
+
+/// Tell the computer at `address`:`port`, on the live link, what this phone
+/// says of itself as a screen (BK5): `report` is the packet's body.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputScreen(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    report: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let report = jstring_to_string(&mut env, &report);
+    let sent = phone_screen::screen_packet(&report).and_then(|packet| {
+        // Bounded: a half-open link's writer could hold it for good (the
+        // review's M3).
+        RUNTIME.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                crate::api::send_on_live(&address, port as u16, &packet),
+            )
+            .await
+            .unwrap_or_else(|_| Err("the computer did not take it in time".to_string()))
+        })
+    });
+    let json = envelope(sent.map(|()| String::new()));
     to_jstring(&mut env, json)
 }
 

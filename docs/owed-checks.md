@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-911 open items.
+919 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 134 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 142 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -480,6 +480,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Files dragged out of a zip opened in Explorer, carried across and let go on Linux: note whether they land, or the drag is refused (no "Sending" badge, nothing dropped elsewhere). (where: owner)
 - Photos dragged from the phone shown in Explorer (MTP, "This PC" > the phone), carried across and let go on Linux: note whether they land, or the drag is refused as above. (where: owner)
 - With the server installed `--elevated`, note what a drag across does (Windows is expected to refuse the drop: nothing sent, nothing dropped elsewhere). (where: owner)
+
+**217. The phone as another screen (BK5)**
+
+- The phone shows on the Keyboard and mouse page as a block shaped like a phone, Your phones says "Ready"; drag it beside a screen, push the real mouse off that edge, and a pointer shows on the phone at the same height; push back and the mouse is home where it left. (where: owner)
+- With the real mouse on the phone: a click taps, a drag swipes a list, the wheel scrolls where the pointer is, the right button is Back and the middle Home; typed keys go into a field there, Enter sends, Esc is Back. The Windows cursor stays hidden meanwhile, and nothing typed lands on Windows. (where: owner)
+- The switch key's cycle reaches the phone as it reaches a computer, landing in the middle of its screen. (where: owner)
+- Turn the phone, then push onto it again: its block on the page has turned within a few seconds and the pointer lands on the edge that now faces the computer. (where: owner)
+- A drag held while the phone's Wi-Fi is turned off: within about a second the mouse is home and the finger on the phone lifted (no stuck press when the phone comes back). (where: owner)
+- Move slowly across the phone and drag a slider, and fast across a list: the pointer and the finger keep up without a visible lag or stall; a press held still for 3 s on an icon opens its menu and a drag after it goes on. (where: owner)
+- Hold Backspace and an arrow in a field on the phone: after half a second they repeat until let go of; Enter and Esc never repeat. (where: owner)
+- With the phone away from home (its link on the internet road, direct and then through a relay), hold a drag on it for a few seconds and move about: note the lag, and whether the watchdog brings the mouse home by itself (a pong late by a second); the phone is reachable that way, unlike a computer. (where: owner)
 
 ## A phone with a SIM
 

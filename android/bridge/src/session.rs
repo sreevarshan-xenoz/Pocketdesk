@@ -48,6 +48,12 @@ pub(crate) static CONTROL_PEER: LazyLock<TokioMutex<Option<(String, u16)>>> =
 /// (T10a), where nothing pairs.
 pub(crate) static CONTROL_OVER_INTERNET: AtomicBool = AtomicBool::new(false);
 
+/// How many control links this process has opened (BK5): the app says
+/// the phone's screen again on each new one, as the computer forgets what
+/// it heard when the link or its server restarts.
+pub(crate) static CONTROL_LINKS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 /// Global handle for the active control connection state.
 pub(crate) static CONNECTION_STATE: LazyLock<TokioMutex<api::ConnectionState>> =
     LazyLock::new(|| TokioMutex::new(api::ConnectionState::Disconnected));
@@ -461,6 +467,7 @@ pub(crate) fn kept_from_pollers(packet_type: &str) -> bool {
         || packet_type == pocketdesk_core::protocol::dial::DIAL
         || packet_type == pocketdesk_core::protocol::phone_action::PHONE_ACTION
         || packet_type == pocketdesk_core::protocol::typing::TYPE
+        || packet_type == pocketdesk_core::protocol::phone_screen::INPUT
         || packet_type == pocketdesk_core::protocol::phone_media::PHONE_MEDIA_CONTROL
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_ACTION
         || packet_type == pocketdesk_core::protocol::notification_action::NOTIFICATION_REPLY

@@ -4,8 +4,11 @@
 //! of its edges touches another's (this computer stays put), kept in
 //! `shared_layout.json`; Identify; where the keyboard and mouse are now; and
 //! for each paired computer, its link and the Keyboard and mouse permission
-//! both ways. The server writes what this reads (`shared_screens.json`,
-//! `shared_input_status.json`) and takes its requests.
+//! both ways. A phone that said its screen (BK5) is a block shaped like it,
+//! placed as a computer is, and listed with whether it may be driven and
+//! this computer's Keyboard and mouse permission for it. The server writes
+//! what this reads (`shared_screens.json`, `shared_input_status.json`) and
+//! takes its requests.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -14,7 +17,8 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile};
 use pocketdesk_core::local::shared_input::{
-    self, Bounds, LINK_AWAY, LINK_DIRECT, LINK_RELAYED, LayoutFile, REFUSED_NOT_ALLOWED,
+    self, Bounds, LINK_AWAY, LINK_DIRECT, LINK_RELAYED, LayoutFile, PHONE_AWAY,
+    PHONE_NEEDS_SERVICE, PHONE_NOT_ALLOWED, PHONE_OFF, PHONE_READY, REFUSED_NOT_ALLOWED,
     REFUSED_SHARING_OFF, Screen, ScreensFile, ShareAsk, StatusFile, bounds,
 };
 use pocketdesk_core::protocol::permissions::Capability;
@@ -44,7 +48,7 @@ pub enum Action {
     Sharing(bool),
     /// Let the paired computer `device_id` drive this one, or not: its
     /// Keyboard and mouse permission in the trust store (a computer that
-    /// paired with this one).
+    /// paired with this one). For a phone (BK5), this one driving it.
     Allow { device_id: String, allow: bool },
 }
 
@@ -96,6 +100,8 @@ struct Shown {
     screens: Vec<Screen>,
     origin: (i32, i32),
     this: bool,
+    /// The owner's phone (BK5): drawn as one.
+    phone: bool,
 }
 
 #[derive(Default)]
@@ -157,6 +163,37 @@ pub fn overlaps(a: &Bounds, b: &Bounds) -> bool {
     a.overlaps(b)
 }
 
+/// A phone's standing (BK5) as the page says it, and whether it is a
+/// warning.
+fn phone_words(standing: &str, name: &str, this_name: &str) -> (String, bool) {
+    match standing {
+        PHONE_READY => (
+            format!("Ready: push the pointer off the edge {name} is on to use it"),
+            false,
+        ),
+        PHONE_OFF => (
+            format!(
+                "Off on {name}: turn on \"Let my computer's keyboard and mouse use this phone\" \
+                 in its Settings"
+            ),
+            true,
+        ),
+        PHONE_NEEDS_SERVICE => (
+            format!(
+                "Needs the accessibility service on {name}: turn on Pocketdesk control in \
+                 Android's Accessibility settings"
+            ),
+            true,
+        ),
+        PHONE_NOT_ALLOWED => (
+            format!("Turn on \"{this_name} may drive {name}\" to use it"),
+            false,
+        ),
+        PHONE_AWAY | "" => (format!("Not linked now: open Pocketdesk on {name}"), false),
+        _ => (format!("Not linked now: open Pocketdesk on {name}"), false),
+    }
+}
+
 /// A link as the page says it.
 fn link_words(link: &str) -> &'static str {
     match link {
@@ -197,6 +234,23 @@ impl ArrangeView {
             .collect()
     }
 
+    /// The phones paired now that said their screen (BK5).
+    fn phones(&self, devices: &[Device]) -> BTreeSet<String> {
+        devices
+            .iter()
+            .filter(|d| !d.computer)
+            .filter(|d| self.screens.get(&d.id).is_some_and(|c| c.phone.is_some()))
+            .map(|d| d.id.clone())
+            .collect()
+    }
+
+    /// What is placed on the desk: the computers and the phones paired now.
+    fn placeable(&self, devices: &[Device]) -> BTreeSet<String> {
+        let mut all = self.paired(devices);
+        all.extend(self.phones(devices));
+        all
+    }
+
     fn name_of(&self, devices: &[Device], id: &str) -> String {
         if let Some(c) = self.screens.get(id).filter(|c| !c.name.is_empty()) {
             return shown_name(&c.name);
@@ -213,7 +267,7 @@ impl ArrangeView {
         let Some(me) = self.screens.this_computer() else {
             return Vec::new();
         };
-        let paired = self.paired(devices);
+        let paired = self.placeable(devices);
         let others: Vec<(String, Vec<Screen>)> = self
             .screens
             .computers
@@ -228,6 +282,7 @@ impl ArrangeView {
             screens: me.screens.clone(),
             origin: (0, 0),
             this: true,
+            phone: false,
         }];
         shown.extend(
             others
@@ -235,6 +290,7 @@ impl ArrangeView {
                 .zip(origins)
                 .map(|((id, screens), origin)| Shown {
                     name: self.name_of(devices, &id),
+                    phone: self.screens.get(&id).is_some_and(|c| c.phone.is_some()),
                     device_id: id,
                     screens,
                     origin,
@@ -340,7 +396,11 @@ impl ArrangeView {
             let edge = Stroke::new(1.0, ui.visuals().widgets.noninteractive.fg_stroke.color);
             for s in &c.screens {
                 let r = view.rect(&Bounds::of(s).shifted(shift));
-                painter.rect(r, 2.0, fill, edge, StrokeKind::Inside);
+                if c.phone {
+                    phone_glyph(&painter, r, fill, edge);
+                } else {
+                    painter.rect(r, 2.0, fill, edge, StrokeKind::Inside);
+                }
             }
             let rect = view.rect(block);
             painter.text(
@@ -452,7 +512,7 @@ impl ArrangeView {
                 .color(muted),
             );
         } else {
-            let paired = self.paired(devices);
+            let paired = self.placeable(devices);
             self.canvas(ui, state_dir, &shown, &paired);
             ui.label(
                 RichText::new(
@@ -514,6 +574,9 @@ impl ArrangeView {
                 )
                 .color(muted),
             );
+            if let Some(phones) = self.phones_section(ui, devices, &this_name) {
+                action = Some(phones);
+            }
             return action;
         }
         let mut ask: Option<(String, bool)> = None;
@@ -611,6 +674,82 @@ impl ArrangeView {
             // Read again soon, for the server's answer.
             self.read_at = None;
         }
+        if let Some(phones) = self.phones_section(ui, devices, &this_name) {
+            action = Some(phones);
+        }
+        action
+    }
+
+    /// Each phone that said its screen (BK5): whether the keyboard and
+    /// mouse may go onto it now, and this computer's Keyboard and mouse
+    /// permission for it.
+    fn phones_section(
+        &self,
+        ui: &mut egui::Ui,
+        devices: &[Device],
+        this_name: &str,
+    ) -> Option<Action> {
+        let phones = self.phones(devices);
+        if phones.is_empty() {
+            return None;
+        }
+        let muted = crate::theme::muted(ui);
+        let mut action = None;
+        ui.add_space(8.0);
+        ui.heading("Your phones");
+        egui::Grid::new("keyboard_mouse_phones")
+            .num_columns(2)
+            .spacing([16.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                for id in &phones {
+                    let name = self.name_of(devices, id);
+                    let standing = self.status.phones.get(id).map_or("", String::as_str);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&name).strong());
+                        let (words, warn) = phone_words(standing, &name, this_name);
+                        let words = RichText::new(words);
+                        ui.label(if standing == PHONE_READY {
+                            words.color(crate::theme::good(ui))
+                        } else if warn {
+                            words.color(crate::theme::warn(ui))
+                        } else {
+                            words.color(muted)
+                        });
+                        if !cfg!(windows) {
+                            ui.label(
+                                RichText::new(
+                                    "Driving a phone from here comes later; a Windows computer \
+                                     can drive it",
+                                )
+                                .color(muted),
+                            );
+                        }
+                    });
+                    ui.vertical(|ui| {
+                        let Some(device) = devices.iter().find(|d| !d.computer && d.id == *id)
+                        else {
+                            return;
+                        };
+                        let mut allowed = device.permissions.allows(Capability::SharedInput);
+                        if ui
+                            .checkbox(&mut allowed, format!("{this_name} may drive {name}"))
+                            .on_hover_text(
+                                "This computer's keyboard and mouse may move onto the phone, \
+                                 used as another screen (its Keyboard and mouse permission). \
+                                 The phone must allow it too.",
+                            )
+                            .changed()
+                        {
+                            action = Some(Action::Allow {
+                                device_id: id.clone(),
+                                allow: allowed,
+                            });
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
         action
     }
 
@@ -653,6 +792,29 @@ impl ArrangeView {
             _ => (format!("Not known until {name} is linked"), false),
         }
     }
+}
+
+/// A phone's outline in `r`: rounded, with its earpiece's slot near the
+/// top edge of its longer side (BK5).
+fn phone_glyph(painter: &egui::Painter, r: Rect, fill: egui::Color32, edge: Stroke) {
+    let radius = (r.width().min(r.height()) * 0.18).clamp(2.0, 10.0);
+    painter.rect(r, radius, fill, edge, StrokeKind::Inside);
+    let slot = (r.width().min(r.height()) * 0.3).clamp(3.0, 16.0);
+    let inset = (radius * 0.6).max(2.0);
+    let (a, b) = if r.height() >= r.width() {
+        let y = r.top() + inset;
+        (
+            Pos2::new(r.center().x - slot / 2.0, y),
+            Pos2::new(r.center().x + slot / 2.0, y),
+        )
+    } else {
+        let x = r.left() + inset;
+        (
+            Pos2::new(x, r.center().y - slot / 2.0),
+            Pos2::new(x, r.center().y + slot / 2.0),
+        )
+    };
+    painter.line_segment([a, b], Stroke::new(1.5, edge.color));
 }
 
 /// Why a computer this one paired with cannot be let drive it now.
@@ -719,6 +881,7 @@ mod tests {
             }],
             changed_unix: 0,
             this_computer: this,
+            phone: None,
         };
         let long = "x".repeat(200);
         let view = ArrangeView {
@@ -813,6 +976,68 @@ mod tests {
         assert_eq!(
             origins_to_save(&placed, None, &paired),
             BTreeMap::from(placed.clone())
+        );
+    }
+
+    /// BK5: a paired phone that said its screen is placed with the
+    /// computers, drawn as a phone; one not paired is not.
+    #[test]
+    fn a_paired_phone_is_placed_as_a_phone() {
+        use pocketdesk_core::local::shared_input::PhoneScreen;
+        let phone = PhoneScreen {
+            width_px: 1080,
+            height_px: 2400,
+            width_dp: 400,
+            height_dp: 900,
+            rotation: 0,
+        };
+        let mut screens = ScreensFile::default();
+        screens.set_own(
+            "me",
+            "Desk",
+            &[Screen {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            }],
+            1,
+        );
+        screens.heard_phone("oppo", "OPPO", &phone, 1);
+        screens.heard_phone("stranger", "Other", &phone, 1);
+        let view = ArrangeView {
+            screens,
+            ..Default::default()
+        };
+        let devices = [Device {
+            id: "oppo".to_string(),
+            computer: false,
+            ..Default::default()
+        }];
+        let shown = view.shown(&devices);
+        assert_eq!(shown.len(), 2);
+        assert!(shown[1].phone && shown[1].device_id == "oppo");
+        assert_eq!(shown[1].origin, (1920, 0));
+        assert_eq!(view.phones(&devices), BTreeSet::from(["oppo".to_string()]));
+        // Its place is kept with the computers'.
+        assert!(view.placeable(&devices).contains("oppo"));
+    }
+
+    #[test]
+    fn a_phones_standing_reads_in_words() {
+        let (ready, warn) = phone_words(PHONE_READY, "OPPO", "Desk");
+        assert!(ready.starts_with("Ready") && !warn);
+        assert!(phone_words(PHONE_OFF, "OPPO", "Desk").1);
+        let (service, warn) = phone_words(PHONE_NEEDS_SERVICE, "OPPO", "Desk");
+        assert!(service.contains("accessibility service") && warn);
+        let (here, warn) = phone_words(PHONE_NOT_ALLOWED, "OPPO", "Desk");
+        assert_eq!(here, "Turn on \"Desk may drive OPPO\" to use it");
+        assert!(!warn);
+        assert!(phone_words("", "OPPO", "Desk").0.starts_with("Not linked"));
+        assert!(
+            phone_words(PHONE_AWAY, "OPPO", "Desk")
+                .0
+                .starts_with("Not linked")
         );
     }
 

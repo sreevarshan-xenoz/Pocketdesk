@@ -1056,6 +1056,10 @@
     <string name="settings_typing_summary_off">\"Type on the phone\" on the computer types into the field in front here, with no screen shown. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
     <string name="settings_typing_summary_needs_access">Almost: Pocketdesk needs notification access to wait for what the computer types</string>
     <string name="settings_typing_summary_on">On: \"Type on the phone\" on this phone\'s own computer types into the field in front here, with a notification while it does</string>
+    <string name="settings_keyboard_mouse">Let my computer\'s keyboard and mouse use this phone</string>
+    <string name="settings_keyboard_mouse_summary_off">Use this phone as another screen beside its own computer: push the mouse off the edge it sits on there, and a pointer shows here. A click taps, a drag swipes, the wheel scrolls and keys type. Never into a password field, and not while the phone is locked. Uses the \"Pocketdesk control\" Accessibility service</string>
+    <string name="settings_keyboard_mouse_summary_needs_access">Almost: Pocketdesk needs notification access to tell the computer this phone\'s screen and wait for its mouse</string>
+    <string name="settings_keyboard_mouse_summary_on">On: this phone\'s own computer can move its mouse and keys onto it, with \"Keyboard and mouse\" allowed for this phone in its Devices page</string>
     <string name="card_phone_sound">Play this phone\'s sound there</string>
     <string name="phone_sound_consent">Android calls this screen sharing; only the sound is sent</string>
     <string name="phone_sound_needs_mic">Android asks for the microphone permission to let Pocketdesk capture what apps play</string>

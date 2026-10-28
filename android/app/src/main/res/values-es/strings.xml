@@ -1041,6 +1041,10 @@
     <string name="settings_typing_summary_off">\"Escribir en el teléfono\" en el equipo escribe en el campo de delante, sin mostrar la pantalla. Nunca en un campo de contraseña ni con el teléfono bloqueado. Usa el servicio de accesibilidad \"Pocketdesk control\"</string>
     <string name="settings_typing_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para esperar lo que escribe el equipo</string>
     <string name="settings_typing_summary_on">Activado: \"Escribir en el teléfono\" en el equipo propio de este teléfono escribe en el campo de delante, con una notificación mientras lo hace</string>
+    <string name="settings_keyboard_mouse">Dejar que el teclado y el ratón de mi equipo usen este teléfono</string>
+    <string name="settings_keyboard_mouse_summary_off">Usa este teléfono como otra pantalla junto a su equipo: lleva el ratón fuera del borde junto al que está allí y aparece un puntero aquí. Un clic toca, arrastrar desliza, la rueda desplaza y las teclas escriben. Nunca en un campo de contraseña ni con el teléfono bloqueado. Usa el servicio de accesibilidad \"Pocketdesk control\"</string>
+    <string name="settings_keyboard_mouse_summary_needs_access">Casi: Pocketdesk necesita acceso a las notificaciones para decirle al equipo la pantalla de este teléfono y esperar su ratón</string>
+    <string name="settings_keyboard_mouse_summary_on">Activado: el equipo propio de este teléfono puede llevar su ratón y sus teclas a él, con \"Teclado y ratón\" permitido para este teléfono en su página Dispositivos</string>
     <string name="card_phone_sound">Reproducir allí el sonido de este teléfono</string>
     <string name="phone_sound_consent">Android lo llama compartir pantalla; solo se envía el sonido</string>
     <string name="phone_sound_needs_mic">Android pide el permiso del micrófono para que Pocketdesk capture lo que reproducen las apps</string>

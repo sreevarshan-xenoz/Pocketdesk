@@ -575,6 +575,18 @@ object Prefs {
     }
 
     /**
+     * BK5: the phone's own computer may carry its keyboard and mouse onto
+     * this phone, used as another screen (off by default). Needs C8's
+     * Accessibility service, never C8's switch.
+     */
+    fun keyboardMouseFromComputer(ctx: Context): Boolean = prefs(ctx).getBoolean("keyboard_mouse_from_computer", false)
+
+    fun setKeyboardMouseFromComputer(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean("keyboard_mouse_from_computer", enabled) }
+        bump()
+    }
+
+    /**
      * M10: copies made on the phone go to its computer by themselves (off
      * by default). Needs C8's Accessibility service, never C8's switch.
      */

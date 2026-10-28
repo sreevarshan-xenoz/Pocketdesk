@@ -52,6 +52,8 @@ pub const FOLDERS: &[&str] = &[
     TYPING_DIR,
     // `pocketdesk share-test`'s requests (shared input between computers).
     crate::shared_input::share_test::REQUESTS_DIR,
+    // `pocketdesk phone-screen-test`'s requests (BK5).
+    crate::shared_input::phone_test::REQUESTS_DIR,
     // The Keyboard and mouse page's requests (Identify).
     SHARED_INPUT_DIR,
 ];

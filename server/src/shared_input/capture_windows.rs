@@ -27,7 +27,7 @@
 //! ([`Desktop`]), as the layout does. Nothing here is run by the tests: they
 //! must not hook, hide the cursor or move it on the owner's computer.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -79,9 +79,11 @@ pub use super::drive::{Captured, Mode};
 use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
+use super::phone::{self, PhoneChannel};
 use super::screens::{Desktop, Motion};
 use super::status;
 use super::wire::{self, Msg};
+use pocketdesk_core::local::shared_input::PHONE_READY;
 
 /// The thread message that sets the mode (its `WPARAM`: 0 off, 1 watch,
 /// 2 away).
@@ -1085,6 +1087,11 @@ struct Glue {
     catcher: Catcher,
     drop_catcher: Option<DropCatcher>,
     drops: (Sender<Caught>, Receiver<Caught>),
+    /// The owner's phones in the layout (BK5), their channels, and how
+    /// many pings each had answered when last looked at.
+    phone_ids: HashSet<String>,
+    phones: HashMap<String, PhoneChannel>,
+    pongs_seen: HashMap<String, u64>,
 }
 
 /// Whether Windows has a mouse button down that a drag could be carried
@@ -1158,6 +1165,29 @@ impl Glue {
         let mut queue = std::collections::VecDeque::from(actions);
         while let Some(action) = queue.pop_front() {
             match action {
+                // The owner's phone (BK5): on its own channel, in its
+                // words; a drag carried onto it drops nowhere.
+                Action::Send(to, msg) if self.phone_ids.contains(&to) => {
+                    if matches!(msg, Msg::Enter { .. }) {
+                        let catch = self.catcher.home();
+                        self.catch(catch);
+                    }
+                    let channel = self
+                        .phones
+                        .entry(to.clone())
+                        .or_insert_with(|| PhoneChannel::open(&to));
+                    if let Err(e) = channel.send(&msg) {
+                        tracing::debug!("Shared input: not sent to the phone: {e}");
+                        self.phones.remove(&to);
+                        if driver.away_on() == Some(to.as_str()) {
+                            queue.retain(|a| match a {
+                                Action::Send(t, _) | Action::PushClipboard(t) => *t != to,
+                                _ => true,
+                            });
+                            queue.extend(driver.on_send_error());
+                        }
+                    }
+                }
                 Action::Send(to, msg) => {
                     // A drag carried along drops on this computer now
                     // (BK4), each hop on.
@@ -1201,8 +1231,14 @@ impl Glue {
                         self.park = Some(((x, y), physical, self.desktop.scale_at(physical)));
                         self.parking = Some(Instant::now());
                         // A drag held here goes with the cursor: the
-                        // catcher is under it before it lands (BK4).
-                        let catch = self.catcher.parking(physical, self.files_on, drag_held());
+                        // catcher is under it before it lands (BK4); not
+                        // onto a phone.
+                        let to_phone = driver
+                            .away_on()
+                            .is_some_and(|to| self.phone_ids.contains(to));
+                        let catch =
+                            self.catcher
+                                .parking(physical, self.files_on && !to_phone, drag_held());
                         self.catch(catch);
                         self.input.put_cursor(physical, true);
                     }
@@ -1237,6 +1273,8 @@ impl Glue {
                         t_us: link::now_us(),
                     },
                 )),
+                // A phone takes no clipboard this way (BK5).
+                Action::PushClipboard(to) if self.phone_ids.contains(&to) => {}
                 Action::PushClipboard(to) => {
                     // Read and sent off this thread: a clipboard another
                     // program holds open must not hold the mouse.
@@ -1573,22 +1611,40 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         catcher: Catcher::default(),
         drop_catcher: None,
         drops: mpsc::channel(),
+        phone_ids: HashSet::new(),
+        phones: HashMap::new(),
+        pongs_seen: HashMap::new(),
     };
     // The catcher's thread ready before a drag first needs it.
     glue.files_setting(config.shared_input_files);
     // The owner's arrangement, read again when its file changes.
     let mut saved = SavedLayout::default();
-    let mut read_layout = |glue: &Glue| {
+    // The owner's phones said as screens (BK5) are placed as computers
+    // are, while linked.
+    let mut read_layout = |glue: &mut Glue| {
         let file = state_dir
             .as_deref()
             .map(pocketdesk_core::local::shared_input::read)
             .unwrap_or_default();
+        glue.phone_ids = file
+            .computers
+            .iter()
+            .filter(|c| c.phone.is_some() && !c.this_computer)
+            .map(|c| c.device_id.clone())
+            .collect();
+        let mut linked = link::linked();
+        linked.extend(
+            glue.phone_ids
+                .iter()
+                .filter(|id| phone::is_linked(id))
+                .cloned(),
+        );
         layout_for(
             &me.device_id,
             &me.device_name,
             glue.own.clone(),
             &file,
-            &link::linked(),
+            &linked,
             state_dir.as_deref().and_then(|dir| saved.get(dir)),
         )
     };
@@ -1596,7 +1652,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // there never sees a hook.
     let mut game_lock_on = config.shared_input_game_lock;
     let mut lock_programs = config.shared_input_lock_programs.clone();
-    let mut driver = Driver::new(&me.device_id, read_layout(&glue))
+    let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
         .with_game_lock(game_lock_on, lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
@@ -1670,6 +1726,18 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         for id in answered {
             driver.answered(&id, now);
         }
+        // A key held on the phone driven repeats there (BK5 review M1).
+        if let Some(phone) = driver.away_on().and_then(|to| glue.phones.get_mut(to)) {
+            phone.repeat(now);
+        }
+        // A phone's answers come on its control link (BK5).
+        for id in &glue.phone_ids {
+            if let Some((_, count)) = phone::pongs(id)
+                && glue.pongs_seen.insert(id.clone(), count) != Some(count)
+            {
+                driver.answered(id, now);
+            }
+        }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
         // A game in front keeps the keyboard and mouse here with no hooks;
@@ -1712,6 +1780,10 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 glue.apply(&mut driver, actions);
             }
             let why = match link::connection(&to) {
+                // A phone's link is its control link (BK5).
+                _ if glue.phone_ids.contains(&to) => {
+                    (!phone::is_linked(&to)).then_some("The link to the phone closed")
+                }
                 None => Some("The link to that computer closed"),
                 Some(conn) if !link::is_direct(&conn) => Some(
                     "The link to that computer went through a relay: the keyboard and mouse are \
@@ -1768,14 +1840,16 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 }
                 // A computer driven whose link went comes home with it.
                 if let Some(to) = driver.away_on().map(str::to_string)
+                    && !glue.phone_ids.contains(&to)
                     && link::connection(&to).is_none()
                 {
                     let actions = driver.link_gone(&to, "The link to that computer closed");
                     glue.apply(&mut driver, actions);
                 }
                 glue.channels.retain(|id, _| link::connection(id).is_some());
+                glue.phones.retain(|_, channel| !channel.is_closed());
             }
-            let layout = read_layout(&glue);
+            let layout = read_layout(&mut glue);
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
             // A computer that refused since its channel opened is left, and
@@ -1795,7 +1869,15 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                     })
                 })
                 .collect();
-            let reachable = reachable(&open, &link::screens_heard());
+            let mut reachable = reachable(&open, &link::screens_heard());
+            // A phone may be crossed onto while it is linked and both it
+            // and this computer allow it (BK5).
+            reachable.extend(
+                glue.phone_ids
+                    .iter()
+                    .filter(|id| phone::standing_now(id) == PHONE_READY)
+                    .cloned(),
+            );
             // One that answers takes input: its next refusal starts the
             // wait over.
             for id in &reachable {

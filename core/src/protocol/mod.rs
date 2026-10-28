@@ -20,6 +20,7 @@ pub mod phone_action;
 pub mod phone_files;
 pub mod phone_media;
 pub mod phone_photos;
+pub mod phone_screen;
 pub mod quiet;
 pub mod relpath;
 pub mod transfer;

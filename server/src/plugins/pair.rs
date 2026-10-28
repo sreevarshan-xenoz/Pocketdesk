@@ -141,10 +141,16 @@ fn preset_permissions(
     if !narrow {
         return None;
     }
-    // P9: a profile's permissions in place of someone else's.
-    let preset = profile
+    // P9: a profile's permissions in place of someone else's; never this
+    // computer's keyboard and mouse onto the phone (BK5), which only its
+    // own page sets.
+    let mut preset = profile
         .cloned()
         .unwrap_or_else(DevicePermissions::someone_else);
+    preset.set(
+        pocketdesk_core::protocol::permissions::Capability::SharedInput,
+        false,
+    );
     Some(match current {
         Some(current) => current.narrowed_to(&preset),
         None => preset,
@@ -1867,6 +1873,11 @@ forged log line"
             // Which of its features a phone has on (L7): status about the
             // phone itself, as its battery is, booleans only.
             "kdeconnect.pocketdesk.switches",
+            // The phone as a screen (BK5): what the phone says of itself,
+            // and its answers to pings; this computer's SharedInput gates
+            // what it sends the phone.
+            "kdeconnect.pocketdesk.shared_input.screen",
+            "kdeconnect.pocketdesk.shared_input.pong",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(
@@ -1960,5 +1971,11 @@ forged log line"
             preset_permissions(false, true, true, None, Some(&kids)),
             None
         );
+        // BK5: a profile never lets this computer drive a phone; that is
+        // set on the phone's own page alone.
+        let mut drives = DevicePermissions::someone_else();
+        drives.set(Capability::SharedInput, true);
+        let preset = preset_permissions(false, true, false, None, Some(&drives)).unwrap();
+        assert!(!preset.allows(Capability::SharedInput));
     }
 }

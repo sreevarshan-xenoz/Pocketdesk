@@ -88,6 +88,37 @@ class ControlPlanTest {
         assertFalse(strokes.active)
     }
 
+    /**
+     * BK5 review I2: a button held still on the phone as a screen stays
+     * down while the computer is still there (its pings keep it); a press
+     * nothing keeps is still lifted after C8's two seconds, and keeping
+     * nothing down, or a finger already let go, starts nothing.
+     */
+    @Test
+    fun aFingerKeptDownOutlastsTheIdleLift() {
+        val strokes = ControlPlan.Strokes()
+        strokes.down(Point(3f, 3f), 0)
+        strokes.next(ControlPlan.START_WAIT_MS)
+        for (t in 200L..4_000L step 200L) {
+            strokes.keep(t)
+            strokes.liftIfIdle(t)
+            assertNull("held at $t", strokes.next(t))
+        }
+        assertTrue(strokes.active)
+        // The computer gone quiet: the idle lift still comes.
+        strokes.liftIfIdle(4_000 + ControlPlan.IDLE_LIFT_MS)
+        assertFalse(strokes.next(4_000 + ControlPlan.IDLE_LIFT_MS)!!.willContinue)
+        assertFalse(strokes.active)
+        // Kept with no finger down, or after the release: nothing.
+        strokes.keep(7_000)
+        assertNull(strokes.next(7_000))
+        strokes.down(Point(1f, 1f), 7_000)
+        strokes.up(Point(1f, 1f), 7_010)
+        strokes.keep(7_020)
+        assertFalse(strokes.next(7_020)!!.willContinue)
+        assertFalse(strokes.active)
+    }
+
     @Test
     fun aFingerDownIsLiftedWhereItIs() {
         val strokes = ControlPlan.Strokes()

@@ -22,6 +22,7 @@ pub mod phone_contacts;
 pub mod phone_files;
 pub mod phone_media;
 pub mod phone_photos;
+pub mod phone_screen;
 pub mod phone_switches;
 pub mod power;
 pub mod privacy;
@@ -90,6 +91,7 @@ pub fn register_all() -> PluginSet {
     registry.register(in_use::InUsePlugin);
     registry.register(phone_files::PhoneFilesPlugin);
     registry.register(phone_photos::PhonePhotosPlugin);
+    registry.register(phone_screen::PhoneScreenPlugin);
     registry.register(crate::quiet_phone::PhoneQuietPlugin);
     registry.register(crate::virtual_screen::VirtualScreenPlugin);
     registry.register(crate::system_state::SystemPlugin);
