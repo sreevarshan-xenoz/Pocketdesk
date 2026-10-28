@@ -339,6 +339,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::SharedInput,
     ),
     (
+        "shared_input_files",
+        "Drag files across the edge",
+        Section::SharedInput,
+    ),
+    (
         "kdeconnect_compat",
         "KDE Connect devices",
         Section::KdeConnect,
@@ -452,6 +457,8 @@ fn drawn_here(key: &str) -> bool {
         | "shared_input_game_lock"
         | "shared_input_lock_programs"
         | "shared_input_clipboard" => cfg!(any(windows, target_os = "linux")),
+        // BK4: only Windows drives with Explorer's drag.
+        "shared_input_files" => cfg!(windows),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
@@ -562,6 +569,7 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_game_lock"
             | "shared_input_lock_programs"
             | "shared_input_clipboard"
+            | "shared_input_files"
     )
 }
 
@@ -2016,6 +2024,19 @@ impl SettingsForm {
                         ),
                     );
                 });
+                row(ui, "shared_input_files", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_files,
+                            "files dragged in Explorer and let go on another computer are sent to it",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "They land in its received files folder. \"Files over the internet\" must be on on both computers.",
+                    );
+                });
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2697,10 +2718,10 @@ mod tests {
     }
 
     /// The shared keyboard and mouse has a section of its own, right after
-    /// the other computers', with its six settings; Windows and Linux draw
-    /// them all.
+    /// the other computers', with its seven settings; Windows and Linux draw
+    /// them all but the files dragged across, which only Windows drives.
     #[test]
-    fn the_keyboard_and_mouse_section_holds_its_six_settings() {
+    fn the_keyboard_and_mouse_section_holds_its_seven_settings() {
         assert_eq!(Section::SharedInput.title(), "Keyboard and mouse");
         assert!(!Section::SharedInput.summary().is_empty());
         assert!(!Section::SharedInput.opens(), "closed until looked for");
@@ -2736,15 +2757,17 @@ mod tests {
                     "Always stay while these programs are in front"
                 ),
                 ("shared_input_clipboard", "Clipboard follows the mouse"),
+                ("shared_input_files", "Drag files across the edge"),
             ]
         );
-        for (key, _) in rows {
+        for (key, _) in rows.iter().filter(|(key, _)| *key != "shared_input_files") {
             assert_eq!(
                 drawn_here(key),
                 cfg!(any(windows, target_os = "linux")),
                 "{key}"
             );
         }
+        assert_eq!(drawn_here("shared_input_files"), cfg!(windows));
     }
 
     /// Everything but the key is read again by the running server; the key
@@ -2757,6 +2780,7 @@ mod tests {
             "shared_input_game_lock",
             "shared_input_lock_programs",
             "shared_input_clipboard",
+            "shared_input_files",
         ] {
             assert!(applies_live(key), "{key}");
         }

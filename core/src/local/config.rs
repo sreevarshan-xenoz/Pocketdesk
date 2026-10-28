@@ -352,6 +352,10 @@ pub struct Config {
     /// on one computer is on the next when the pointer crosses to it.
     #[serde(default = "default_true")]
     pub shared_input_clipboard: bool,
+    /// With `shared_input`, files dragged in Explorer and let go on
+    /// another computer are sent to it (Windows driving; BK4).
+    #[serde(default = "default_true")]
+    pub shared_input_files: bool,
 }
 
 fn default_shared_input_hotkey() -> String {
@@ -538,6 +542,7 @@ impl Default for Config {
             shared_input_game_lock: true,
             shared_input_lock_programs: Vec::new(),
             shared_input_clipboard: true,
+            shared_input_files: true,
         }
     }
 }
@@ -788,6 +793,7 @@ impl Config {
         "shared_input_game_lock",
         "shared_input_lock_programs",
         "shared_input_clipboard",
+        "shared_input_files",
     ];
 }
 
@@ -1158,6 +1164,7 @@ phone_battery = \"x\"
             assert!(config.shared_input_game_lock);
             assert!(config.shared_input_lock_programs.is_empty());
             assert!(config.shared_input_clipboard);
+            assert!(config.shared_input_files, "BK4: on by default");
         }
     }
 
@@ -1171,6 +1178,7 @@ phone_battery = \"x\"
         config.shared_input_game_lock = false;
         config.shared_input_lock_programs = vec!["Blender.exe".to_string(), "gimp".to_string()];
         config.shared_input_clipboard = false;
+        config.shared_input_files = false;
         config.save_to(&path).unwrap();
         let back = Config::load_from(&path).unwrap();
         assert!(back.shared_input);
@@ -1179,6 +1187,7 @@ phone_battery = \"x\"
         assert!(!back.shared_input_game_lock);
         assert_eq!(back.shared_input_lock_programs, ["Blender.exe", "gimp"]);
         assert!(!back.shared_input_clipboard);
+        assert!(!back.shared_input_files);
         // An empty key (the switch by key off) saves too, rather than
         // reading back as the default.
         let mut off = back.clone();
@@ -1193,6 +1202,7 @@ phone_battery = \"x\"
             "shared_input_game_lock",
             "shared_input_lock_programs",
             "shared_input_clipboard",
+            "shared_input_files",
         ] {
             assert!(Config::KNOWN_KEYS.contains(&key), "{key}");
         }
@@ -1205,6 +1215,7 @@ phone_battery = \"x\"
                 "shared_input_game_lock",
                 "shared_input_lock_programs",
                 "shared_input_clipboard",
+                "shared_input_files",
             ]
         );
     }

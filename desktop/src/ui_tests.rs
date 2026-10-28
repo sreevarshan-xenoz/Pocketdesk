@@ -742,7 +742,8 @@ fn settings_search_shows_what_it_finds() {
 }
 
 /// The shared keyboard and mouse's section starts closed, and its title
-/// opens it with its six rows (Windows and Linux).
+/// opens it with its rows (Windows and Linux; files dragged across the
+/// edge on Windows only).
 #[test]
 fn the_keyboard_and_mouse_section_opens_by_its_title() {
     const ROWS: [&str; 6] = [
@@ -769,6 +770,10 @@ fn the_keyboard_and_mouse_section_opens_by_its_title() {
             "{row}"
         );
     }
+    assert_eq!(
+        app.query_by_label("Drag files across the edge").is_some(),
+        cfg!(windows)
+    );
     assert!(app.query_by_label("Control port (TCP)").is_none());
 }
 

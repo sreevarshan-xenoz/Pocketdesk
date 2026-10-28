@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-899 open items.
+911 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 122 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 134 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -465,6 +465,21 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A large image (a full-screen screenshot of a 4K screen) does not hold up the pointer as it crosses; push the pointer across and straight back before it lands: the image does not land late on the computer left, and nothing older comes back. (where: owner)
 - The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
 - The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
+
+**216. Files dragged across the edge (BK4)**
+
+- Drag one file in Explorer across the edge onto Linux and let go: it lands in Linux's Downloads, "Sending 1 file to <laptop>" flashes on Windows, Linux shows its usual received notice, and the file is still in its Windows folder. This is the check of the design: that Windows' drag finds the catcher under the parked cursor and drops on it. (where: owner)
+- Several files and a folder at once: all land, the folder as a folder with its files; the sent list shows each. (where: owner)
+- Carry a drag across and back before letting go, then let go on a Windows folder: nothing is sent, and Windows copies or moves it there as usual. (where: owner)
+- Esc while the drag is on Linux: the drag ends, nothing is sent, no Esc reaches Linux; let go afterwards and nothing is dropped anywhere. (where: owner)
+- A window dragged by its title bar across and let go, and text dragged from a browser across: nothing is sent and nothing is dropped into the window under the parked cursor. (where: owner)
+- A drag with the right button across: the files land on Linux too. (where: owner)
+- Over 100 files at once (select 120 in a folder) dragged across: the first 100 land, "20 more left out: at most 100 go at once" flashes, and the drop is quick (only the first 100 paths are read). (where: owner)
+- "Files over the internet" off on Windows: "Not sent" with the reason flashes and nothing goes; off on Linux, or Files not allowed there: the refusal's reason flashes within a few seconds. (where: owner)
+- The catcher is never seen or felt: no box in the middle of the screen while away, the window typed in keeps the focus; with "Drag files across the edge" off no catcher is put up, and a drag carried across ends as before BK4. (where: owner)
+- Files dragged out of a zip opened in Explorer, carried across and let go on Linux: note whether they land, or the drag is refused (no "Sending" badge, nothing dropped elsewhere). (where: owner)
+- Photos dragged from the phone shown in Explorer (MTP, "This PC" > the phone), carried across and let go on Linux: note whether they land, or the drag is refused as above. (where: owner)
+- With the server installed `--elevated`, note what a drag across does (Windows is expected to refuse the drop: nothing sent, nothing dropped elsewhere). (where: owner)
 
 ## A phone with a SIM
 

@@ -156,6 +156,9 @@ video_quality = "balanced"
 # shared_input_lock_programs = ["Blender.exe"]
 # What is copied on one computer is ready to paste on the one the mouse goes to.
 # shared_input_clipboard = true
+# Windows: files dragged in Explorer and let go on another computer are sent
+# to it ("Files over the internet" on on both).
+# shared_input_files = true
 
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
