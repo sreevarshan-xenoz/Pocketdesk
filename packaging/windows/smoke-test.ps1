@@ -67,6 +67,11 @@ Check ((RuleCount) -eq 0) 'removed the firewall rules'
 if ($failures.Count -gt 0) {
     Write-Output "--- setup log ---"
     if (Test-Path $log) { Get-Content $log -Tail 80 }
-    Write-Error "$($failures.Count) check(s) failed"
+    Write-Output "$($failures.Count) check(s) failed"
+    exit 1
 }
 Write-Output 'The installer installs and uninstalls cleanly.'
+# Exit with our own verdict: the last native command (schtasks /Query, for a
+# task that is rightly gone) leaves LASTEXITCODE at 1, and the CI step would
+# report that.
+exit 0
