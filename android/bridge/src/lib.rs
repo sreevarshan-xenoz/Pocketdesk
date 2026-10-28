@@ -1539,6 +1539,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedI
     to_jstring(&mut env, json)
 }
 
+/// The app refuses the computer's keyboard and mouse now (BK5): for two
+/// seconds nothing is kept and no ping answered, so the computer brings
+/// its mouse home.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputRefuse(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    phone_screen::refuse();
+}
+
 /// Tell the computer at `address`:`port`, on the live link, what this phone
 /// says of itself as a screen (BK5): `report` is the packet's body.
 #[unsafe(no_mangle)]

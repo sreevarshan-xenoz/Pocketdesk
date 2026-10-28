@@ -185,6 +185,7 @@ object RustCore {
     private external fun nativeTakePhoneActions(): String
     private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeSharedInputTake(waitMs: Int): String
+    private external fun nativeSharedInputRefuse()
     private external fun nativeSharedInputScreen(address: String, port: Int, report: String): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeComputerMedia(): String
@@ -1103,6 +1104,11 @@ object RustCore {
                 TypedBatch(o.getString("host"), o.getInt("port"), o.getJSONArray("events").toString())
             }.getOrNull()
         }
+
+    /** The phone refuses the computer's keyboard and mouse now (BK5): for two seconds its pings go unanswered. */
+    fun sharedInputRefuse() {
+        runCatching { nativeSharedInputRefuse() }
+    }
 
     /** Tell the computer at [address] what this phone says of itself as a screen (BK5), on the live link. */
     fun sharedInputScreen(address: String, port: Int, report: String): Result<Unit> =

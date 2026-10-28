@@ -77,27 +77,37 @@ object PointerRunner {
         val pointer = PointerPlan.Pointer()
         val pacer = PointerPlan.Pacer()
         try {
+            var said: PointerPlan.Decision? = null
             while (generation == mine) {
+                val on = Prefs.keyboardMouseFromComputer(ctx)
+                // Refused before anything comes, so no ping is answered for
+                // a phone that does nothing (the review's M2).
+                if (!on || ControlService.instance == null) RustCore.sharedInputRefuse()
                 val busy = ControlService.instance?.waiting() == true
                 val batch = runCatching { RustCore.sharedInputTake(if (busy) BUSY_WAIT_MS else WAIT_MS) }.getOrNull()
                 if (generation != mine) break
                 val service = ControlService.instance
                 val now = SystemClock.uptimeMillis()
-                if (batch != null && service != null) {
+                if (batch != null) {
                     val own = PhoneLink.target(ctx)
                     val decision = PointerPlan.decide(
-                        on = Prefs.keyboardMouseFromComputer(ctx),
-                        service = true,
+                        on = on,
+                        service = service != null,
                         own = own != null && own.address == batch.host && own.controlPort == batch.port,
                     )
-                    if (decision == PointerPlan.Decision.TAKE) {
+                    // Said once a change, not once a batch (the review's M5).
+                    if (decision != said) {
+                        Log.i(TAG, "Input from the computer: $decision")
+                        said = decision
+                    }
+                    if (decision == PointerPlan.Decision.TAKE && service != null) {
                         for (event in events(batch.events)) perform(service, pacer.admit(pointer.take(event, now), now))
                         // A button held still stays down while the computer
                         // sends (its pings, five a second): the review's I2.
                         if (pointer.fingerDown) service.keepPressed()
                     } else {
-                        Log.i(TAG, "Not taken: $decision")
-                        perform(service, pointer.release())
+                        RustCore.sharedInputRefuse()
+                        service?.let { perform(it, pointer.release()) }
                     }
                 }
                 service?.let {
