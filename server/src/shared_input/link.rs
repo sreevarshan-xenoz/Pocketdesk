@@ -454,6 +454,8 @@ pub struct Channel {
     /// The frames for the stream, to the task writing them; that task and
     /// the stream start with the first.
     stream: Option<mpsc::Sender<Vec<u8>>>,
+    /// The task writing the stream, once it started.
+    writer: Option<tokio::task::JoinHandle<()>>,
     /// Why the stream stopped, once it did.
     broken: Arc<Mutex<Option<String>>>,
     pongs: mpsc::UnboundedReceiver<Pong>,
@@ -494,6 +496,7 @@ impl Channel {
             conn,
             runtime,
             stream: None,
+            writer: None,
             broken: Arc::default(),
             pongs,
             pongs_in,
@@ -539,11 +542,11 @@ impl Channel {
             Some(frames) => frames,
             None => {
                 let (frames, waiting) = mpsc::channel(OUTGOING_DEPTH);
-                self.runtime.spawn(write_stream(
+                self.writer = Some(self.runtime.spawn(write_stream(
                     self.conn.clone(),
                     waiting,
                     Arc::clone(&self.broken),
-                ));
+                )));
                 self.stream.insert(frames)
             }
         };
@@ -564,6 +567,20 @@ impl Channel {
             .await
             .ok()
             .flatten()
+    }
+
+    /// Close the channel, waiting at most `within` for what was sent on its
+    /// stream to be written to the link (the stream finished). Blocking:
+    /// for a thread of its own, never the runtime's.
+    pub fn finish_within(mut self, within: Duration) {
+        drop(self.stream.take());
+        let Some(writer) = self.writer.take() else {
+            return;
+        };
+        let deadline = std::time::Instant::now() + within;
+        while !writer.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     /// An answer to one of this channel's pings that has come, if any,

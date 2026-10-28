@@ -1154,9 +1154,76 @@ impl Glue {
     }
 }
 
+/// Set once the server is stopping: no driver starts again, and the one
+/// running brings the keyboard and mouse home and ends ([`stop`]).
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+/// Set while a driver's thread runs.
+static DRIVING: AtomicBool = AtomicBool::new(false);
+
+/// How long, as a driver ends, what it just sent (the releases and the
+/// leave) may take to be written to the link before its channels go.
+const FLUSH_WAIT: Duration = Duration::from_millis(300);
+
+/// `flag` set while this is held, and cleared when it is dropped however
+/// its holder ends (a panic too).
+struct Raised(&'static AtomicBool);
+
+impl Raised {
+    fn raise(flag: &'static AtomicBool) -> Raised {
+        flag.store(true, Ordering::SeqCst);
+        Raised(flag)
+    }
+}
+
+impl Drop for Raised {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Wait until `flag` is clear, at most `within`; whether it cleared.
+async fn wait_lowered(flag: &AtomicBool, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
+    while flag.load(Ordering::SeqCst) {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    true
+}
+
+/// Runs `restore` (the owner's cursors back) when dropped: held by the
+/// supervisor, so the cursors come back however it ends, the runtime
+/// dropping it as the server exits too.
+struct RestoreCursors(fn());
+
+impl RestoreCursors {
+    fn with(restore: fn()) -> RestoreCursors {
+        RestoreCursors(restore)
+    }
+}
+
+impl Drop for RestoreCursors {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
+/// The server is stopping: the driver running brings the keyboard and
+/// mouse home (releases and a leave to the computer driven, while the link
+/// is still up) and ends, and none starts again. Waits at most `within`;
+/// whether it ended in time.
+pub async fn stop(within: Duration) -> bool {
+    STOPPING.store(true, Ordering::SeqCst);
+    wait_lowered(&DRIVING, within).await
+}
+
 /// The driver while `stop` is not set: capture, carry, and on stopping
 /// bring everything home. Run on a thread of its own, inside `runtime`.
 fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
+    let _driving = Raised::raise(&DRIVING);
     let _runtime = runtime.enter();
     let config = crate::events::current_config();
     let hotkey = pocketdesk_core::local::hotkey::parse(&config.shared_input_hotkey);
@@ -1229,7 +1296,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // Until when what is in front is looked at every 50 ms, after a window
     // came to the front.
     let mut settle_until: Option<Instant> = None;
-    while !stop.load(Ordering::SeqCst) {
+    while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
             tracing::warn!(
                 "Shared input: the input thread stopped; the keyboard and mouse come home"
@@ -1407,18 +1474,27 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
     status::set_keyboard_on(None);
+    // What was just sent goes out before the channels do, for a moment at
+    // most: the computer driven hears the leave now, not a second later.
+    let deadline = Instant::now() + FLUSH_WAIT;
+    for (_, channel) in glue.channels.drain() {
+        channel.finish_within(deadline.saturating_duration_since(Instant::now()));
+    }
     tracing::info!("Shared input: this computer's keyboard and mouse stay here");
     // Dropping the glue stops the input thread, restores the cursors and
     // lets the computer idle.
 }
 
 /// The driver on Windows for the server's life: running while shared input
-/// and driving are both on (read again every second); turning either off
-/// brings the keyboard and mouse home and stops it.
+/// and driving are both on (read again every second); turning either off,
+/// or the server stopping ([`stop`]), brings the keyboard and mouse home
+/// and stops it.
 pub async fn supervise() {
     // Once at every start: a crash while away must not leave the owner
-    // without a cursor.
+    // without a cursor. And once as it ends, however that is (the server
+    // stopping drops it with the runtime, a driver still running or not).
     restore_cursors();
+    let _cursors = RestoreCursors::with(restore_cursors);
     let runtime = tokio::runtime::Handle::current();
     let mut running: Option<(Arc<AtomicBool>, JoinHandle<()>)> = None;
     let mut retry_at: Option<Instant> = None;
@@ -1441,7 +1517,7 @@ pub async fn supervise() {
             retry_at = Some(Instant::now() + RESTART_AFTER);
             continue;
         }
-        match (&running, want) {
+        match (&running, want && !STOPPING.load(Ordering::SeqCst)) {
             (None, true) if retry_at.is_none_or(|at| Instant::now() >= at) => {
                 retry_at = None;
                 let stop = Arc::new(AtomicBool::new(false));
@@ -1497,6 +1573,39 @@ mod tests {
         thread.set_mode(Mode::Away);
         drop(thread);
         assert_eq!(RESTORED.load(Ordering::SeqCst), 2, "restored on drop");
+    }
+
+    static GUARDED: AtomicUsize = AtomicUsize::new(0);
+
+    /// The cursors come back however the supervisor ends: its guard runs
+    /// them back when dropped (counted by a stand-in).
+    #[test]
+    fn the_cursor_guard_restores_when_dropped() {
+        let guard = RestoreCursors::with(|| {
+            GUARDED.fetch_add(1, Ordering::SeqCst);
+        });
+        assert_eq!(GUARDED.load(Ordering::SeqCst), 0);
+        drop(guard);
+        assert_eq!(GUARDED.load(Ordering::SeqCst), 1);
+    }
+
+    /// The server stopping waits for the driver to end, but only so long.
+    #[tokio::test]
+    async fn a_stop_waits_for_the_driver_within_its_bound() {
+        static RUNNING: AtomicBool = AtomicBool::new(false);
+        let raised = Raised::raise(&RUNNING);
+        assert!(RUNNING.load(Ordering::SeqCst));
+        let ending = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(raised);
+        });
+        assert!(wait_lowered(&RUNNING, Duration::from_secs(5)).await);
+        ending.join().unwrap();
+        // One that does not end in time is left.
+        let _stuck = Raised::raise(&RUNNING);
+        let started = Instant::now();
+        assert!(!wait_lowered(&RUNNING, Duration::from_millis(100)).await);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

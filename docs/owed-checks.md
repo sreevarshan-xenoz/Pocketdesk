@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-893 open items.
+894 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 117 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 118 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -444,8 +444,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Typing in a terminal on Linux while away: letters, Shift and capitals, Ctrl+C, the arrows, AltGr, and nothing typed on Windows meanwhile. (where: owner)
 - The switch key (Ctrl+Alt+Right) goes over and back, from the edge's side and from the middle of a screen; no Ctrl or Alt left down on either side. (where: owner)
 - Win+L while away: Windows locks, the keyboard and mouse come home, the Super key is not left down on Linux; after unlocking, the edge works again. (where: owner)
-- The network unplugged while typing on Linux: the Windows cursor comes home and shows; Linux lets go of the held key within about a second. (where: owner)
+- The network unplugged while typing on Linux: the Windows cursor comes home and shows within about a second, its keys typing on Windows again; Linux lets go of the held key within about a second. Plugged back in, the pointer crosses onto Linux again once the link is back. (where: owner)
 - The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
+- The server stopped while away (`pocketdesk stop`, then again by an uninstall): the Windows cursor shows again at once, Linux lets go of a held key at once (it hears the leave, not a second's silence), and the server exits within a couple of seconds. (where: owner)
 - Mixed scales: a monitor at 100% beside the laptop at 125%; the pointer crosses between Windows' own screens as before, and onto Linux from the laptop's edge at the height it left. (where: owner)
 - The gaming lock: a full-screen game in front keeps the pointer on Windows at the edge (the log says so, and no hook is installed meanwhile); Alt+Tab out and within a second the edge crosses again; a game started while the pointer is on Linux brings it home; a game that scrolls at the screen's edge, brought to the front with the pointer there, does not cross. (where: owner)
 - The switch key mid-game goes to Linux and back, the game getting its mouse again; a program on the always-stay list locks only while it is in front. (where: owner)
