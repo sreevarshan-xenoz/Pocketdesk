@@ -324,6 +324,38 @@ pub struct Config {
     pub mqtt_user: String,
     #[serde(default)]
     pub mqtt_password: String,
+    /// Share this computer's keyboard and mouse with the owner's other
+    /// paired computers (the shared input): a pointer that leaves one
+    /// screen's edge arrives on the next computer. Off by default: each
+    /// computer must also have the Keyboard and mouse permission on the
+    /// other.
+    #[serde(default)]
+    pub shared_input: bool,
+    /// With `shared_input`, this computer's own keyboard and mouse may move
+    /// onto the others (the one that drives). Off, it only takes input.
+    #[serde(default = "default_true")]
+    pub shared_input_drive: bool,
+    /// With `shared_input`, a key that switches to the next computer,
+    /// `ctrl+alt+right` and the like, through the tray program. Empty is
+    /// off (the pointer's edge still switches). Read at start.
+    #[serde(default = "default_shared_input_hotkey")]
+    pub shared_input_hotkey: String,
+    /// With `shared_input`, the pointer stays on this computer while a game
+    /// runs on it, so a game's mouse is never carried off by a flick.
+    #[serde(default = "default_true")]
+    pub shared_input_game_lock: bool,
+    /// With `shared_input`, the pointer stays on this computer while one of
+    /// these programs is in front, by file name (`Blender.exe`, `gimp`).
+    #[serde(default)]
+    pub shared_input_lock_programs: Vec<String>,
+    /// With `shared_input`, the clipboard follows the mouse: what is copied
+    /// on one computer is on the next when the pointer crosses to it.
+    #[serde(default = "default_true")]
+    pub shared_input_clipboard: bool,
+}
+
+fn default_shared_input_hotkey() -> String {
+    "ctrl+alt+right".to_string()
 }
 
 fn default_transfer_keep_hours() -> u32 {
@@ -500,6 +532,12 @@ impl Default for Config {
             mqtt_broker: String::new(),
             mqtt_user: String::new(),
             mqtt_password: String::new(),
+            shared_input: false,
+            shared_input_drive: true,
+            shared_input_hotkey: default_shared_input_hotkey(),
+            shared_input_game_lock: true,
+            shared_input_lock_programs: Vec::new(),
+            shared_input_clipboard: true,
         }
     }
 }
@@ -744,6 +782,12 @@ impl Config {
         "mqtt_broker",
         "mqtt_user",
         "mqtt_password",
+        "shared_input",
+        "shared_input_drive",
+        "shared_input_hotkey",
+        "shared_input_game_lock",
+        "shared_input_lock_programs",
+        "shared_input_clipboard",
     ];
 }
 
@@ -1095,6 +1139,74 @@ phone_battery = \"x\"
         let back = Config::load_from(&path).unwrap();
         assert!(!back.wake_announce);
         assert_eq!(back.wake_port, 40009);
+    }
+
+    /// Sharing a keyboard and mouse across the owner's computers is off
+    /// until chosen, and everything about it is on once it is.
+    #[test]
+    fn shared_input_defaults() {
+        let from_default = Config::default();
+        // A file that never names the keys reads the same defaults as the
+        // struct's own (the serde defaults and `Default` are two places).
+        let path = temp("shared-input-defaults");
+        std::fs::write(&path, "").unwrap();
+        let from_file = Config::load_from(&path).unwrap();
+        for config in [from_default, from_file] {
+            assert!(!config.shared_input, "off until the owner turns it on");
+            assert!(config.shared_input_drive);
+            assert_eq!(config.shared_input_hotkey, "ctrl+alt+right");
+            assert!(config.shared_input_game_lock);
+            assert!(config.shared_input_lock_programs.is_empty());
+            assert!(config.shared_input_clipboard);
+        }
+    }
+
+    #[test]
+    fn shared_input_keys_save_and_read_back() {
+        let path = temp("shared-input-keys");
+        let mut config = Config::load_from(&path).unwrap();
+        config.shared_input = true;
+        config.shared_input_drive = false;
+        config.shared_input_hotkey = "ctrl+alt+left".to_string();
+        config.shared_input_game_lock = false;
+        config.shared_input_lock_programs = vec!["Blender.exe".to_string(), "gimp".to_string()];
+        config.shared_input_clipboard = false;
+        config.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert!(back.shared_input);
+        assert!(!back.shared_input_drive);
+        assert_eq!(back.shared_input_hotkey, "ctrl+alt+left");
+        assert!(!back.shared_input_game_lock);
+        assert_eq!(back.shared_input_lock_programs, ["Blender.exe", "gimp"]);
+        assert!(!back.shared_input_clipboard);
+        // An empty key (the switch by key off) saves too, rather than
+        // reading back as the default.
+        let mut off = back.clone();
+        off.shared_input_hotkey = String::new();
+        off.save_to(&path).unwrap();
+        assert_eq!(Config::load_from(&path).unwrap().shared_input_hotkey, "");
+        // Each key is one the page and `changed_keys` know.
+        for key in [
+            "shared_input",
+            "shared_input_drive",
+            "shared_input_hotkey",
+            "shared_input_game_lock",
+            "shared_input_lock_programs",
+            "shared_input_clipboard",
+        ] {
+            assert!(Config::KNOWN_KEYS.contains(&key), "{key}");
+        }
+        assert_eq!(
+            Config::default().changed_keys(&back),
+            [
+                "shared_input",
+                "shared_input_drive",
+                "shared_input_hotkey",
+                "shared_input_game_lock",
+                "shared_input_lock_programs",
+                "shared_input_clipboard",
+            ]
+        );
     }
 
     #[test]
