@@ -627,6 +627,37 @@ fn settings_search_shows_what_it_finds() {
     assert!(app.query_by_label("Control port (TCP)").is_some());
 }
 
+/// The shared keyboard and mouse's section starts closed, and its title
+/// opens it with its six rows (Windows and Linux).
+#[test]
+fn the_keyboard_and_mouse_section_opens_by_its_title() {
+    const ROWS: [&str; 6] = [
+        "Share my keyboard and mouse with my computers",
+        "This computer's keyboard and mouse can move to the others",
+        "Switch computer with a key",
+        "Stay on this computer while a game runs",
+        "Always stay while these programs are in front",
+        "Clipboard follows the mouse",
+    ];
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    assert!(
+        app.query_by_label(ROWS[0]).is_none(),
+        "closed until looked for"
+    );
+    find(&app).focus();
+    find(&app).type_text("keyboard and mouse");
+    app.run_steps(3);
+    for row in ROWS {
+        assert_eq!(
+            app.query_by_label(row).is_some(),
+            cfg!(any(windows, target_os = "linux")),
+            "{row}"
+        );
+    }
+    assert!(app.query_by_label("Control port (TCP)").is_none());
+}
+
 /// J2 review: a section held open by a problem stays, whole, under a
 /// search that does not find it, so the field the save bar names is there.
 #[test]

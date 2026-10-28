@@ -239,8 +239,10 @@ mod tests {
         let start = tokio::time::Instant::now();
         wait_at_most(FOLDER, Duration::from_secs(3), Duration::from_secs(3)).await;
         if watching() {
+            // Well under the 3 s deadline, with room for a slow CI runner
+            // (500 ms failed once on GitHub's Windows runner).
             assert!(
-                start.elapsed() < Duration::from_millis(500),
+                start.elapsed() < Duration::from_millis(1500),
                 "the change ends it"
             );
         }

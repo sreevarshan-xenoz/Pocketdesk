@@ -91,11 +91,16 @@ fn switches_table(
 }
 
 /// The Devices tab's switches, in the order a person thinks of them.
-pub(crate) const PERMISSIONS: [(Capability, &str, &str); 24] = [
+pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     (
         Capability::Input,
         "Control the mouse and keyboard",
         "Off: the phone can watch the screen but not touch it.",
+    ),
+    (
+        Capability::SharedInput,
+        "Keyboard and mouse",
+        "This computer may move its mouse and keyboard onto this one",
     ),
     (
         Capability::Clipboard,
@@ -225,6 +230,10 @@ fn profile_touches(capability: Capability, computer: bool) -> bool {
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.
 fn shown_for(capability: Capability, computer: bool) -> bool {
+    // Between computers only: a phone drives through Input.
+    if capability == Capability::SharedInput {
+        return computer;
+    }
     !(computer
         && matches!(
             capability,
@@ -4001,6 +4010,27 @@ mod tests {
         }
         assert!(shown_for(Capability::Clipboard, true));
         assert!(shown_for(Capability::Files, true));
+    }
+
+    /// The shared keyboard and mouse is between computers: a paired
+    /// computer's page has its switch, and a phone's page never does.
+    #[test]
+    fn the_keyboard_and_mouse_switch_is_for_a_paired_computer_only() {
+        assert!(shown_for(Capability::SharedInput, true));
+        assert!(!shown_for(Capability::SharedInput, false));
+        // A profile saved from a computer's page keeps it; one applied to a
+        // phone never turns it on or off there.
+        assert!(profile_touches(Capability::SharedInput, true));
+        assert!(!profile_touches(Capability::SharedInput, false));
+        let row = PERMISSIONS
+            .iter()
+            .find(|(c, _, _)| *c == Capability::SharedInput)
+            .expect("a switch for it");
+        assert_eq!(row.1, "Keyboard and mouse");
+        assert_eq!(
+            row.2,
+            "This computer may move its mouse and keyboard onto this one"
+        );
     }
 
     #[test]

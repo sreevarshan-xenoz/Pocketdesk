@@ -74,10 +74,16 @@ pub enum Capability {
     /// someone else's phone may send files, but not write in the owner's
     /// own notes.
     Notes,
+    /// Let this computer move its keyboard and mouse onto this one, as one
+    /// shared pair across the owner's computers. Only for a paired computer,
+    /// never a phone; off unless chosen, as a computer's mouse and keys here
+    /// are the owner's own. Tied to no packet type: the shared input has
+    /// its own stream.
+    SharedInput,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 24] = [
+    pub const ALL: [Capability; 25] = [
         Capability::Input,
         Capability::Clipboard,
         Capability::Files,
@@ -102,13 +108,15 @@ impl Capability {
         Capability::Peek,
         Capability::Ask,
         Capability::Notes,
+        Capability::SharedInput,
     ];
 
     /// What a device may do when its owner never chose (spec P1): today's
     /// behaviour, except running commands, which a pairing PIN should not
     /// hand out, and locking this computer when it leaves, which only the
     /// owner turns on (D9), a glance at the screen (BF2), and answering its
-    /// questions (BF3).
+    /// questions (BF3), and another computer's keyboard and mouse moving
+    /// onto this one.
     pub fn default_allowed(self) -> bool {
         !matches!(
             self,
@@ -118,6 +126,7 @@ impl Capability {
                 | Capability::Peek
                 | Capability::Ask
                 | Capability::Notes
+                | Capability::SharedInput
         )
     }
 }
@@ -259,6 +268,8 @@ pub struct DevicePermissions {
     pub ask: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_input: Option<bool>,
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
@@ -291,6 +302,7 @@ impl DevicePermissions {
             Capability::Peek => &mut self.peek,
             Capability::Ask => &mut self.ask,
             Capability::Notes => &mut self.notes,
+            Capability::SharedInput => &mut self.shared_input,
         }
     }
 
@@ -320,6 +332,7 @@ impl DevicePermissions {
             Capability::Peek => self.peek,
             Capability::Ask => self.ask,
             Capability::Notes => self.notes,
+            Capability::SharedInput => self.shared_input,
         };
         value.unwrap_or(capability.default_allowed())
     }
@@ -456,7 +469,8 @@ mod tests {
             assert_eq!(
                 none.allows(capability),
                 // Nor lock this computer when it leaves, which only the
-                // owner turns on (D9), nor peek at its screen (BF2).
+                // owner turns on (D9), nor peek at its screen (BF2), nor let
+                // another computer move its keyboard and mouse here.
                 !matches!(
                     capability,
                     Capability::Exec
@@ -465,11 +479,52 @@ mod tests {
                         | Capability::Peek
                         | Capability::Ask
                         | Capability::Notes
+                        | Capability::SharedInput
                 ),
                 "{capability:?}"
             );
         }
         assert!(!none.ask_first);
+    }
+
+    /// Sharing a keyboard and mouse across the owner's computers: a computer
+    /// that pairs (and a phone, and an entry stored before it) must not gain
+    /// it; the owner turns it on for each computer.
+    #[test]
+    fn computer_starts_without_keyboard_and_mouse() {
+        assert!(!Capability::SharedInput.default_allowed());
+        assert!(!DevicePermissions::computer().allows(Capability::SharedInput));
+        assert!(!DevicePermissions::default().allows(Capability::SharedInput));
+        assert!(!DevicePermissions::someone_else().allows(Capability::SharedInput));
+        let stored: DevicePermissions =
+            serde_json::from_str(r#"{"input": false, "ask_first": true}"#).unwrap();
+        assert!(
+            !stored.allows(Capability::SharedInput),
+            "an entry from before it"
+        );
+        // Not tied to a packet type: the shared input has its own stream.
+        assert!(
+            [
+                "kdeconnect.mousepad.request",
+                "kdeconnect.pocketdesk.shared_input"
+            ]
+            .into_iter()
+            .all(|t| capability_for(t) != Some(Capability::SharedInput))
+        );
+        let mut chosen = DevicePermissions::computer();
+        chosen.set(Capability::SharedInput, true);
+        assert!(chosen.allows(Capability::SharedInput));
+        assert!(chosen.allows(Capability::Clipboard), "the rest stays");
+        assert!(chosen.ask_first);
+        let mut only = DevicePermissions::default();
+        only.set(Capability::SharedInput, true);
+        assert_eq!(
+            serde_json::to_value(&only).unwrap(),
+            serde_json::json!({ "shared_input": true })
+        );
+        // Turned off again, it is stored as the default.
+        chosen.set(Capability::SharedInput, false);
+        assert_eq!(chosen, DevicePermissions::computer());
     }
 
     #[test]
