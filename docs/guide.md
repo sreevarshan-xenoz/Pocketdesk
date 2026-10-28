@@ -16,7 +16,7 @@ Three things worth knowing before you pair a phone. [SECURITY.md](../SECURITY.md
 |---|---|---|
 | The same network | nothing | no |
 | Anywhere, through Tailscale | both on one tailnet | no |
-| Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). It is always on | no |
+| Anywhere, over the internet | one session at home first (same network or Tailscale), where the phone learns the computer and registers its key. After that, iroh punches a direct path, or falls back to a relay (n0's free ones, or [your own](#away-from-home-your-own-relay)). On by default; "Reachable from the internet" in the desktop's Settings turns it off (`internet_path = false`) | no |
 | Your own relay | a machine the internet can reach | on the relay's machine: one port (plain, 3340), or 80 and 443 (HTTPS) |
 | Waking a sleeping computer from outside | Wake-on-LAN set up on the computer | yes, one UDP port to the computer; or none, waking through another always-on computer the phone can reach ([Wake from the phone](#kde-connect-integration)) |
 
@@ -32,6 +32,7 @@ Tailscale is not required. It carries everything, adds a second encrypted layer 
 ### What the internet path shows
 
 - **Relays** (n0's or yours) carry encrypted traffic. They see both ends' IP addresses, which endpoints talk, when, and how much, never the content.
+- **Turned off** (`internet_path = false`), the computer contacts no relay and no DHT node, and maps no port on the router. Phones then reach it on the same network or through Tailscale only, and your other computers do not link with it, since that link rides the internet path.
 - **The Mainline DHT** (on by default, `dht_publish = "relay"`) holds a signed record that lets the phone find the computer again after its relay (or, with `"addresses"`, its address) changes. Its nodes see the home IP it was published from, linked to the computer's WAN id, and, each time the phone connects from away, the phone's IP and the id it looks for. `dht_publish = "off"` turns it off; the phone then uses what it learned at home until that goes stale.
 
 ## What works where
@@ -423,7 +424,7 @@ There is no `--config` flag: the server reads `$XDG_CONFIG_HOME/pocketdesk/confi
 - **Files**: send a file or folder to a connected phone or computer, or several at once ("Also to…", "Every one") (at home, or by the internet path with "Files over the internet" on), in a session or not: pick the phone, then a path, "Choose file…" on Windows, or drop files on the window (with several phones or computers to take them, it asks which). Below, the transfers under way, the files sent and whether each was saved, and files received, newest first, with Show in folder. A send that failed has Send again; a received picture, PDF, text, video or audio file has Open.
 - **Messages**, **Notifications**, **Phone files** and **Clipboard**: the phone's texts, its notifications and their answers, its shared folders and recent photos, and the clipboard's history (see [KDE Connect Integration](#kde-connect-integration)).
 - **Activity**: one timeline of what happened (see above).
-- **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Find a setting" (Ctrl+F) shows only the settings whose names hold the words typed. "Visible on this network" turns the LAN announcement off (`lan_discovery`).
+- **Settings**: edits `config.toml`, keeping your comments and unknown keys. "Find a setting" (Ctrl+F) shows only the settings whose names hold the words typed. "Visible on this network" turns the LAN announcement off (`lan_discovery`), and "Reachable from the internet" the internet path (`internet_path`).
 - **Diagnostics**: why a phone might not connect. It checks the server, its ports, the firewall, the addresses phones can use and the internet path, shows the last session (encoder and latency), and copies a debug report for an issue. The checks run as the page opens.
 - **Logs**: the server's newest log, its last 400 lines, read again only when the file changes; filter by words or show only warnings and errors, Copy, Open log folder.
 
@@ -460,6 +461,7 @@ video_quality = "balanced" # low/balanced/high
 pairing_required = true    # PIN-pair devices before the control channel or streaming serves requests
 # allow_hevc = false       # let phones that decode it ask for an H.265/HEVC stream
 # lan_discovery = true     # announce this computer so phones on the network list it
+# internet_path = true     # reachable from the internet; off keeps phones to this network and Tailscale
 # relay_urls = ["https://relay.example.org"]  # your own relay instead of n0's (see below)
 # transfer_keep_hours = 24 # keep a phone's unfinished file this long so a retry continues it; 0 keeps none
 # home_assistant = false   # publish this computer and its phones to Home Assistant over MQTT

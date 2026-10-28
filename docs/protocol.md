@@ -348,6 +348,8 @@ The DHT publication is controlled by `dht_publish` (default `relay`) in `core/sr
 
 ### 4.3 Relays
 
+With `internet_path = false` the desktop binds no WAN endpoint, so none of this section's desktop traffic happens: no relay, probe, port mapping or DHT. Phones then reach it on the same network or through Tailscale only, and no link to or from another computer is kept (it rides this road, §1.2a).
+
 - **Which relays.**
   - With `relay_urls` empty, the desktop uses iroh's default (n0) relays: `use1-1`, `usw1-1`, `euc1-1` and `aps1-1.relay.n0.iroh.link` over HTTPS. This comes from iroh 1.3 `defaults.rs` and `RelayMode::Default` in `server/src/iroh_endpoint.rs` `relay_mode`.
   - Otherwise the desktop uses only your relays (`RelayMode::Custom`).
@@ -372,10 +374,10 @@ The DHT publication is controlled by `dht_publish` (default `relay`) in `core/sr
 
 | Destination | When | What is sent | Source |
 |---|---|---|---|
-| n0 relays, or yours (§4.3) | Always while the server runs: the WAN endpoint cannot be turned off in config | iroh relay traffic and probes | `server/src/service.rs` (`spawn_wan_endpoint` is unconditional), `iroh_endpoint.rs` |
-| Home router (UPnP, NAT-PMP, PCP) | iroh's port mapper | A mapping request for the iroh UDP port | iroh 1.3 `endpoint.rs` (`portmapper_config` default) |
+| n0 relays, or yours (§4.3) | While the server runs, unless `internet_path = false` (desktop Settings "Reachable from the internet"): then the WAN endpoint is never bound | iroh relay traffic and probes | `server/src/service.rs` (`spawn_wan_endpoint` only with `internet_path`), `iroh_endpoint.rs` |
+| Home router (UPnP, NAT-PMP, PCP) | iroh's port mapper, unless `internet_path = false` | A mapping request for the iroh UDP port | iroh 1.3 `endpoint.rs` (`portmapper_config` default) |
 | The MQTT broker in `mqtt_broker` | Only with `home_assistant = true` | Discovery configs naming this computer (its host name, the first 12 letters and digits of its device id), each paired phone by the first 8 of its id, each task by name, and each phone command by its label (M9); retained states: the server's availability (also the last will), the number of sessions, a cast running, each phone's battery %, charging and whether it is connected; and each event's kind and phone, never its content (`events_detail` does not change it). The task commands, and the phone commands' names and texts, are never sent | `server/src/home_assistant.rs` |
-| DHT bootstrap hosts and DHT nodes (§4.2) | Unless `dht_publish = "off"` | DHT traffic and the signed record | `core/src/streaming/dht.rs` |
+| DHT bootstrap hosts and DHT nodes (§4.2) | Unless `dht_publish = "off"` or `internet_path = false` | DHT traffic and the signed record | `core/src/streaming/dht.rs` |
 | DNS: the system resolver | Resolving relay hosts and DHT bootstrap names | Those host names | `dht.rs` (`to_socket_addrs`); iroh's endpoints use `iroh_connection::dns_resolver`. iroh-dns 1.3 would otherwise ask a tier of public resolvers (Cloudflare 1.1.1.1 among them) once every system nameserver failed; Pocketdesk sets `FallbackMode::Never` on the phone, which installs Android's own servers, and `IfSystemEmpty` on a computer, so the public tier is asked only when the system's configuration yields no nameserver (none listed or none readable). A computer whose listed nameservers fail is not rescued by it, as it was before |
 | The `tailscale` CLI: `status --json`, `ip -4` | At start, and every 10 s for peer discovery (`DiscoveryService::run(10 s)`) | Local calls | `core/src/tailscale/mod.rs`, `core/src/tailscale/discovery.rs`, `core/src/local/network.rs` |
 | Tailscale LocalAPI over HTTP: `127.0.0.1:52552`, `127.0.0.1:50502`, `100.100.100.100:1053` (`/localapi/v0/status`, `/api/status`) | When the CLI fails | A GET with no body | `core/src/tailscale/mod.rs` |

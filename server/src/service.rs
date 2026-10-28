@@ -471,35 +471,44 @@ pub async fn run(config: Config) -> Result<()> {
     // experience down, so the endpoint is optional at runtime.
     // Control connections over the internet road (T10a) come from the WAN
     // listener to the loop below, which owns the plugins.
+    // With `internet_path` off there is no endpoint at all: no relay, DHT
+    // or port mapping is contacted, and everything below runs as it does
+    // when the endpoint could not bind.
     let (internet_control_tx, mut internet_control) = tokio::sync::mpsc::channel(16);
-    let wan_endpoint = match iroh_endpoint::spawn_wan_endpoint(
-        streaming_config.clone(),
-        input_tx.clone(),
-        Arc::clone(&cert_manager),
-        iroh_endpoint::WanSettings {
-            pairing_required: config.pairing_required,
-            allow_hevc: config.allow_hevc,
-            slow_link_frame_rate: config.slow_link_frame_rate,
-            laser: config.laser_pointer && crate::laser::available(),
-            capture_backend: config.capture_backend,
-            mic_relay_device: config.mic_relay_device.clone(),
-            cast: cast_tx.clone(),
-            relay_urls: config.relay_urls.clone(),
-            dht_publish: config.dht_publish,
-            control: Some(internet_control_tx),
-        },
-    )
-    .await
-    {
-        Ok(endpoint) => Some(endpoint),
-        Err(e) if !config.relay_urls.is_empty() => {
-            // Most likely the user's own relay_urls; say so loudly.
-            tracing::error!("WAN (iroh) endpoint unavailable, away from home is off: {e:#}");
-            None
-        }
-        Err(e) => {
-            tracing::warn!("WAN (iroh) endpoint unavailable: {e:#}");
-            None
+    let wan_endpoint = if !config.internet_path {
+        iroh_endpoint::forget_last_run();
+        tracing::info!("Not reachable from the internet (internet_path = false)");
+        None
+    } else {
+        match iroh_endpoint::spawn_wan_endpoint(
+            streaming_config.clone(),
+            input_tx.clone(),
+            Arc::clone(&cert_manager),
+            iroh_endpoint::WanSettings {
+                pairing_required: config.pairing_required,
+                allow_hevc: config.allow_hevc,
+                slow_link_frame_rate: config.slow_link_frame_rate,
+                laser: config.laser_pointer && crate::laser::available(),
+                capture_backend: config.capture_backend,
+                mic_relay_device: config.mic_relay_device.clone(),
+                cast: cast_tx.clone(),
+                relay_urls: config.relay_urls.clone(),
+                dht_publish: config.dht_publish,
+                control: Some(internet_control_tx),
+            },
+        )
+        .await
+        {
+            Ok(endpoint) => Some(endpoint),
+            Err(e) if !config.relay_urls.is_empty() => {
+                // Most likely the user's own relay_urls; say so loudly.
+                tracing::error!("WAN (iroh) endpoint unavailable, away from home is off: {e:#}");
+                None
+            }
+            Err(e) => {
+                tracing::warn!("WAN (iroh) endpoint unavailable: {e:#}");
+                None
+            }
         }
     };
     // The owner's other computers (2f): pairing with one, and a link to

@@ -112,7 +112,13 @@ Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environmen
 Filename: "{app}\pocketdesk-app.exe"; Description: "{cm:OpenApp}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
+; As before an upgrade: the logon task off first, so its restart-on-failure
+; cannot start a killed server again; then a stop, and a kill for a server
+; that has not exited by then (`stop` waits 10 s), since a running server
+; holds pocketdesk.exe and the uninstaller could not delete it.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Change /TN ""Pocketdesk"" /DISABLE"; Flags: runhidden waituntilterminated; RunOnceId: "DisableTask"
 Filename: "{app}\pocketdesk.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopServer"
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM pocketdesk.exe"; Flags: runhidden waituntilterminated; RunOnceId: "KillServer"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM pocketdesk-tray.exe"; Flags: runhidden waituntilterminated; RunOnceId: "StopTray"
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM pocketdesk-app.exe"; Flags: runhidden waituntilterminated; RunOnceId: "StopApp"
 Filename: "{app}\pocketdesk.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "Unregister"
