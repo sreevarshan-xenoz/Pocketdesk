@@ -26,6 +26,7 @@ pub mod drive;
 pub mod events;
 pub mod hold_words;
 pub mod home_assistant;
+pub mod hotkey;
 pub mod identity;
 pub mod kdeconnect;
 pub mod kdeconnect_devices;

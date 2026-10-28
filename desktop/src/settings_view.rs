@@ -1129,7 +1129,7 @@ impl SettingsForm {
                         if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
                             ui.label(
                                 egui::RichText::new(
-                                    "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                                    "Ctrl, Alt or Win, then a letter, a digit, F1 to F12 or an arrow, joined by +.",
                                 )
                                 .color(crate::theme::bad(ui)),
                             );
@@ -1176,7 +1176,7 @@ impl SettingsForm {
                         if !text.is_empty() && pocketdesk_desktop::hotkey::parse(text).is_none() {
                             ui.label(
                                 egui::RichText::new(
-                                    "Ctrl, Alt or Win, then a letter, a digit or F1 to F12, joined by +.",
+                                    "Ctrl, Alt or Win, then a letter, a digit, F1 to F12 or an arrow, joined by +.",
                                 )
                                 .color(crate::theme::bad(ui)),
                             );
