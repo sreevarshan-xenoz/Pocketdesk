@@ -239,7 +239,7 @@ fn profile_carries(capability: Capability, computer: bool) -> bool {
 /// Keyboard and mouse is this computer's onto the phone (BK5).
 fn hint_for(capability: Capability, computer: bool, hint: &'static str) -> &'static str {
     if capability == Capability::SharedInput && !computer {
-        "This computer may move its keyboard and mouse onto this phone, used as another screen          beside it (the phone must allow it too)"
+        "This computer may move its keyboard and mouse onto this phone, used as another screen beside it (the phone must allow it too)"
     } else {
         hint
     }
