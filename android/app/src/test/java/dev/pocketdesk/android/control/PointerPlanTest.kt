@@ -118,6 +118,28 @@ class PointerPlanTest {
         assertEquals(listOf(Act.Touch("up", 5, 6), Act.Hide), p.release())
     }
 
+    /**
+     * The review's I1: a drag at the pump's most (a batch every 8 ms, one
+     * move each) for 3 s is never held back, the finger nor the pointer.
+     */
+    @Test
+    fun `a drag at 125 moves a second is never held back`() {
+        val p = PointerPlan.Pointer()
+        val pacer = PointerPlan.Pacer()
+        pacer.admit(p.take(enter(0, 0), 0), 0)
+        pacer.admit(p.take(button("left", "down"), 1), 1)
+        var dropped = 0
+        for (i in 1..375) {
+            val now = i * 8L
+            val acts = p.take(pointer(i, i), now)
+            if (pacer.admit(acts, now) != acts) dropped++
+        }
+        assertEquals(0, dropped)
+        // A press or release is never held back, however busy.
+        val up = p.take(button("left", "up"), 3_001)
+        assertEquals(up, pacer.admit(up, 3_001))
+    }
+
     @Test
     fun `delete takes the character after the cursor, or the selection`() {
         assertEquals(ControlPlan.Edited("ac", 1), PointerPlan.deleteForward("abc", 1, 1))

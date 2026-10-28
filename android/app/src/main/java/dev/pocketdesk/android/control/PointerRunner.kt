@@ -75,7 +75,7 @@ object PointerRunner {
 
     private fun loop(ctx: Context, mine: Int) {
         val pointer = PointerPlan.Pointer()
-        val rate = ControlPlan.Rate()
+        val pacer = PointerPlan.Pacer()
         try {
             while (generation == mine) {
                 val busy = ControlService.instance?.waiting() == true
@@ -91,14 +91,14 @@ object PointerRunner {
                         own = own != null && own.address == batch.host && own.controlPort == batch.port,
                     )
                     if (decision == PointerPlan.Decision.TAKE) {
-                        for (event in events(batch.events)) perform(service, pointer.take(event, now), rate, now)
+                        for (event in events(batch.events)) perform(service, pacer.admit(pointer.take(event, now), now))
                     } else {
                         Log.i(TAG, "Not taken: $decision")
-                        perform(service, pointer.release(), rate, now)
+                        perform(service, pointer.release())
                     }
                 }
                 service?.let {
-                    perform(it, pointer.tick(now), rate, now)
+                    perform(it, pointer.tick(now))
                     // A press held still starts, a forgotten finger lifts.
                     it.tick()
                 }
@@ -106,7 +106,7 @@ object PointerRunner {
         } catch (e: RuntimeException) {
             Log.w(TAG, "The pointer stopped", e)
         } finally {
-            ControlService.instance?.let { perform(it, pointer.release(), rate, SystemClock.uptimeMillis()) }
+            ControlService.instance?.let { perform(it, pointer.release()) }
             synchronized(this) {
                 if (generation == mine) running = false
             }
@@ -132,12 +132,10 @@ object PointerRunner {
         }
     }
 
-    /** Do [acts] through the service. A pointer's moves are limited; presses, releases, keys and text always go. */
-    private fun perform(service: ControlService, acts: List<PointerPlan.Act>, rate: ControlPlan.Rate, nowMs: Long) {
+    /** Do [acts] through the service ([PointerPlan.Pacer] has limited a pointer's moves). */
+    private fun perform(service: ControlService, acts: List<PointerPlan.Act>) {
         val refused = { Log.i(TAG, "Not typed: a password field"); Unit }
         for (act in acts) {
-            val limited = act is PointerPlan.Act.Pointer || (act is PointerPlan.Act.Touch && act.action == "move")
-            if (limited && !rate.take(nowMs)) continue
             when (act) {
                 is PointerPlan.Act.Pointer -> service.pointerAt(act.x, act.y)
                 PointerPlan.Act.Hide -> service.hidePointer()

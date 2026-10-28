@@ -146,6 +146,23 @@ object PointerPlan {
         }
     }
 
+    /**
+     * What of one event's acts goes now: a pointer's move (the arrow, and
+     * the finger with it while one is down) is limited to
+     * [ControlPlan.MAX_EVENTS_PER_SECOND] moves, one charge per event (the
+     * review's I1: two charges a move held a drag back); presses, releases,
+     * keys and text always go.
+     */
+    class Pacer {
+        private val rate = ControlPlan.Rate()
+
+        fun admit(acts: List<Act>, nowMs: Long): List<Act> {
+            fun limited(act: Act) = act is Act.Pointer || (act is Act.Touch && act.action == "move")
+            if (acts.none(::limited) || rate.take(nowMs)) return acts
+            return acts.filterNot(::limited)
+        }
+    }
+
     /** The keys that act in the field in front. */
     private val KEYS = setOf("enter", "backspace", "delete", "left", "right", "up", "down")
 
