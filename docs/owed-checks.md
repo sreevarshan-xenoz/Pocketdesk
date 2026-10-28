@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-917 open items.
+918 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 140 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 141 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -488,7 +488,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The switch key's cycle reaches the phone as it reaches a computer, landing in the middle of its screen. (where: owner)
 - Turn the phone, then push onto it again: its block on the page has turned within a few seconds and the pointer lands on the edge that now faces the computer. (where: owner)
 - A drag held while the phone's Wi-Fi is turned off: within about a second the mouse is home and the finger on the phone lifted (no stuck press when the phone comes back). (where: owner)
-- Move slowly across the phone and drag a slider: the pointer and the finger keep up without a visible lag; note what a press held still for more than 2 s does (C8 lifts a finger with no event for 2 s). (where: owner)
+- Move slowly across the phone and drag a slider, and fast across a list: the pointer and the finger keep up without a visible lag or stall; a press held still for 3 s on an icon opens its menu and a drag after it goes on. (where: owner)
+- Hold Backspace and an arrow in a field on the phone: after half a second they repeat until let go of; Enter and Esc never repeat. (where: owner)
 
 ## A phone with a SIM
 
