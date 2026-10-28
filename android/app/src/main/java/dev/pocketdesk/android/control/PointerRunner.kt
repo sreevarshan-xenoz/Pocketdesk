@@ -92,6 +92,9 @@ object PointerRunner {
                     )
                     if (decision == PointerPlan.Decision.TAKE) {
                         for (event in events(batch.events)) perform(service, pacer.admit(pointer.take(event, now), now))
+                        // A button held still stays down while the computer
+                        // sends (its pings, five a second): the review's I2.
+                        if (pointer.fingerDown) service.keepPressed()
                     } else {
                         Log.i(TAG, "Not taken: $decision")
                         perform(service, pointer.release())

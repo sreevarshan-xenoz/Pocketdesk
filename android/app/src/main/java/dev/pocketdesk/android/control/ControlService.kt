@@ -239,6 +239,15 @@ class ControlService : AccessibilityService() {
         pump()
     }
 
+    /**
+     * BK5: the computer holding the button down is still there: a finger
+     * down stays (C8's idle lift is for a cast that stopped sending). A
+     * press that landed after its own release (the down re-posted while a
+     * segment ran) is never kept: the runner keeps only while its own
+     * button is down, so the idle lift still takes that one.
+     */
+    fun keepPressed() = main.post { strokes.keep(SystemClock.uptimeMillis()) }
+
     /** Whether a finger is down, so the runner looks again soon (a press to start, a finger to lift). */
     fun waiting(): Boolean = fingerDown
 

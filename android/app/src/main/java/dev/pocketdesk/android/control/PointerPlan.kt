@@ -70,7 +70,9 @@ object PointerPlan {
             private set
         private var x = 0
         private var y = 0
-        private var fingerDown = false
+        /** The left button is down here: a finger on the screen. */
+        var fingerDown = false
+            private set
         private var shown = false
         private var heardMs = 0L
         private var movedMs = 0L

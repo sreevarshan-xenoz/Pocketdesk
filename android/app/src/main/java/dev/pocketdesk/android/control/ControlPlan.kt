@@ -94,6 +94,14 @@ object ControlPlan {
             if (down != null && !up) up(pending.lastOrNull() ?: last ?: down!!, nowMs)
         }
 
+        /**
+         * BK5: the computer is still there with the button held (its pings
+         * come): a finger down and not let go of is not idle.
+         */
+        fun keep(nowMs: Long) {
+            if (down != null && !up) lastEvent = nowMs
+        }
+
         /** Lift a finger left down with nothing from the computer for [IDLE_LIFT_MS]. */
         fun liftIfIdle(nowMs: Long) {
             if (down != null && !up && nowMs - lastEvent >= IDLE_LIFT_MS) {
