@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-898 open items.
+899 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 28 |
+| A second computer | 29 |
 | A Linux desktop (the Azure VM serves for some) | 173 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
@@ -759,6 +759,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The same from the desktop app: the link pasted in Settings → Other computers, the outcome shown, B's Devices tab. (where: second computer)
 - The link comes back after the network drops ("linked" again within a minute). (where: second computer)
 - Off on one, nothing crosses either way; a password manager's copy stays. (where: second computer)
+- An image both ways with "Clipboard with my computers" on on both (BK3): a screenshot copied on one is on the other's clipboard within a few seconds, pastes there as a picture, and does not come back; with "Files over the internet" off on either, it stays where it was copied. (where: second computer)
 - A 500 MB file each way from the Files tab, broken (the network off for 15 s) and continued, MD5 matching; `pocketdesk send <name> <file> --wait`. (where: second computer)
 - Unpair on A (Settings → Other computers): the link goes, and B's Devices page still lists A until unpaired there; after that, a pairing again works. (where: second computer)
 

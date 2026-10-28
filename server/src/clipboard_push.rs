@@ -10,8 +10,10 @@
 //!
 //! The owner's other computers (2g) get it the same way when
 //! `computer_clipboard` is on: those linked to this one as its clients, and
-//! those this one keeps a link to (`peer_computers`). Never back to the
-//! device it came from.
+//! those this one keeps a link to (`peer_computers`). Its image too (BK3),
+//! without the phones' switch: told to the first, which fetch it, and sent
+//! on a stream each of the others opens. Never back to the device it came
+//! from.
 //!
 //! With the shared keyboard and mouse, the clipboard also follows the
 //! mouse ([`push_now`]): its text, or with no text its image (BK3), goes to
@@ -244,10 +246,22 @@ pub(crate) fn image_packet(id: &str, size: u64) -> NetworkPacket {
         .with_body(serde_json::json!({ "image": { "id": id, "size": size } }))
 }
 
-/// Whether a connection is told of an image (M3): a phone, never another
-/// computer (they share text only), that may be pushed the clipboard.
-fn may_push_image(device_id: &str) -> bool {
-    !crate::plugins::pair::is_computer_device(device_id) && may_push(device_id)
+/// Whether a connection is told of an image (M3), with "Images to phones'
+/// clipboards" on or not (`phone_images`): [`tells_image`].
+fn may_push_image(device_id: &str, phone_images: bool) -> bool {
+    tells_image(
+        crate::plugins::pair::is_computer_device(device_id),
+        phone_images,
+        || may_push(device_id),
+    )
+}
+
+/// Whether a connection is told of the clipboard's image: a phone while
+/// "Images to phones' clipboards" is on (`phone_images`, M3), or another
+/// computer (BK3), and either only if it may be pushed the clipboard now
+/// (`may`: a computer while it is shared with computers), asked last.
+fn tells_image(computer: bool, phone_images: bool, may: impl FnOnce() -> bool) -> bool {
+    (computer || phone_images) && may()
 }
 
 /// The packet a push sends: what the phone's own request is answered with.
@@ -881,7 +895,7 @@ pub(crate) async fn run() {
             // review): a read that failed (another app held it) is tried
             // again next tick.
             match crate::plugins::clipboard::read_text().await {
-                Ok(text) => match image_now(text.is_none(), &clients).await {
+                Ok(text) => match image_now(text.is_none(), &clients, &linked).await {
                     Ok(image) => {
                         sequence = now;
                         push_change(&mut watch, text, image, clients, linked).await;
@@ -937,7 +951,7 @@ pub(crate) async fn run() {
                 }
                 image_read_at = Some(tokio::time::Instant::now());
             }
-            let Ok(image) = image_now(text.is_none(), &clients).await else {
+            let Ok(image) = image_now(text.is_none(), &clients, &linked).await else {
                 continue;
             };
             push_change(&mut watch, text, image, clients, linked).await;
@@ -950,27 +964,39 @@ pub(crate) async fn run() {
 #[cfg(not(windows))]
 const IMAGE_FALLBACK: Duration = Duration::from_secs(30);
 
-/// The clipboard's image to tell phones of (M3), when it holds no text,
-/// "Images to phones' clipboards" is on (read live from the config) and a
-/// phone among `clients` may have it: never read and encoded for no one
+/// The clipboard's image to tell of, when it holds no text and a phone or
+/// computer among `clients` may have it ([`may_push_image`]: a phone with
+/// "Images to phones' clipboards" on, M3; a computer while the clipboard is
+/// shared with computers, BK3), or a computer this one keeps a link to is
+/// up (`linked`, only while it is shared): never read and encoded for no one
 /// (M3 review). An error says the clipboard could not be read now.
 async fn image_now(
     no_text: bool,
     clients: &[Arc<dyn DeviceSender>],
+    linked: &[crate::peer_computers::LinkedComputer],
 ) -> pocketdesk_core::error::Result<Option<(String, u64)>> {
-    if !no_text
-        || !crate::events::current_config().clipboard_images
-        || !TO_PHONES.load(Ordering::Relaxed)
-        || !clients.iter().any(|c| may_push_image(c.device_id()))
+    if !no_text {
+        return Ok(None);
+    }
+    let phone_images = phone_images();
+    if linked.is_empty()
+        && !clients
+            .iter()
+            .any(|c| may_push_image(c.device_id(), phone_images))
     {
         return Ok(None);
     }
     crate::plugins::clipboard::image_for_push().await
 }
 
+/// Whether phones are told of an image: pushing to phones, with "Images to
+/// phones' clipboards" on (M3; read live from the config).
+fn phone_images() -> bool {
+    TO_PHONES.load(Ordering::Relaxed) && crate::events::current_config().clipboard_images
+}
+
 /// Push `text` to `clients`, and to the computers this one keeps a link to
-/// (`linked`), if it is a change; or, with no text, tell the phones of
-/// `image` (M3).
+/// (`linked`), if it is a change; or, with no text, `image` (M3, BK3).
 async fn push_change(
     watch: &mut Watch,
     text: Option<String>,
@@ -986,7 +1012,7 @@ async fn push_change(
     };
     if text.is_none() {
         if let Some((id, size)) = image.filter(|(id, _)| image_key(id) == changed) {
-            push_image(&id, size, clients).await;
+            push_image(&id, size, clients, linked).await;
         }
         return;
     }
@@ -1021,16 +1047,20 @@ async fn push_change(
         match target.send_packet(&packet).await {
             // Z1: who and how long, never the text: a copy sent once, and
             // never back to the phone it came from, can be seen.
-            Ok(()) => tracing::info!(
-                "Clipboard sent to {} ({} chars)",
-                target.device_id(),
-                text.chars().count()
-            ),
+            Ok(()) => {
+                forget_image_sent(target.device_id());
+                tracing::info!(
+                    "Clipboard sent to {} ({} chars)",
+                    target.device_id(),
+                    text.chars().count()
+                )
+            }
             Err(e) => tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id()),
         }
     }
     for computer in linked {
         if !came_from(from_phone.as_ref(), &computer.device_id, &text) {
+            forget_image_sent(&computer.device_id);
             computer.send(packet.clone());
         }
     }
@@ -1042,12 +1072,26 @@ async fn push_change(
     }
 }
 
-/// Tell the phones that may have it of the clipboard's image (M3).
-async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
+/// Whether the image `id` goes to `device_id`: not back to where it came
+/// from, nor to a computer that was sent it last.
+fn image_goes_to(device_id: &str, id: &str) -> bool {
+    !image_came_from(device_id, id) && image_sent_last(device_id).as_deref() != Some(id)
+}
+
+/// Tell the phones and computers that may have it of the clipboard's image
+/// (M3), each then fetching it; and send it to the computers this one keeps
+/// a link to (`linked`, BK3), each on a stream it opens for it.
+async fn push_image(
+    id: &str,
+    size: u64,
+    clients: Vec<Arc<dyn DeviceSender>>,
+    linked: Vec<crate::peer_computers::LinkedComputer>,
+) {
     let packet = image_packet(id, size);
+    let phone_images = phone_images();
     for target in clients
         .into_iter()
-        .filter(|c| may_push_image(c.device_id()) && !image_came_from(c.device_id(), id))
+        .filter(|c| may_push_image(c.device_id(), phone_images) && image_goes_to(c.device_id(), id))
     {
         match target.send_packet(&packet).await {
             // AD1: who and how large, never the image: a phone's switch or
@@ -1058,6 +1102,33 @@ async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
             ),
             Err(e) => tracing::debug!("Clipboard image not told to {}: {e}", target.device_id()),
         }
+    }
+    let linked: Vec<String> = linked
+        .into_iter()
+        .map(|c| c.device_id)
+        .filter(|device_id| image_goes_to(device_id, id))
+        .collect();
+    if linked.is_empty() {
+        return;
+    }
+    // Kept as the clipboard was read; gone if it changed since.
+    let Some(image) = crate::plugins::clipboard::kept_image(id) else {
+        return;
+    };
+    for device_id in linked {
+        let (image, id) = (image.clone(), id.to_string());
+        // Its own task: one computer slow to open its stream holds up none.
+        tokio::spawn(async move {
+            match crate::peer_computers::send_clipboard_image(&device_id, image, false, || true)
+                .await
+            {
+                Ok(()) => {
+                    note_image_sent(&device_id, &id);
+                    tracing::info!("Clipboard image sent to {device_id} ({size} bytes)");
+                }
+                Err(e) => tracing::debug!("Clipboard image not sent to {device_id}: {e}"),
+            }
+        });
     }
 }
 
@@ -1446,6 +1517,22 @@ mod tests {
         let before = switch();
         came_home();
         assert!(!still(before), "coming home is a switch");
+    }
+
+    /// BK3: another computer is told of an image as a phone is, without
+    /// the phones' switch; neither without leave to be pushed the clipboard.
+    #[test]
+    fn computers_are_told_of_an_image_as_phones_are_without_their_switch() {
+        let yes = || true;
+        let no = || false;
+        assert!(tells_image(true, false, yes), "a computer");
+        assert!(tells_image(true, true, yes));
+        assert!(tells_image(false, true, yes), "a phone, images on");
+        assert!(!tells_image(false, false, yes), "a phone, images off");
+        assert!(!tells_image(true, true, no), "not shared with computers");
+        assert!(!tells_image(false, true, no), "no Clipboard permission");
+        let unread = || -> bool { panic!("asked for nothing") };
+        assert!(!tells_image(false, false, unread));
     }
 
     #[test]
