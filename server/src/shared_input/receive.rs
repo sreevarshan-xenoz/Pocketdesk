@@ -125,7 +125,7 @@ pub struct Receiver {
     last_seq: Option<u32>,
     /// When the last note came that someone is at a driving computer.
     active_at: Option<Instant>,
-    /// When anything last came from the driving computer.
+    /// When anything last came off the link from the driving computer.
     heard_at: Option<Instant>,
     /// This computer's name, for its badge.
     name: String,
@@ -205,9 +205,11 @@ impl Receiver {
     }
 
     /// [`Receiver::handle`] for what came off the link at `arrived_us`
-    /// ([`link::now_us`]): each key and move is timed.
+    /// ([`link::now_us`]): it counts as heard from then, not from when it
+    /// is handled, and each key and move is timed.
     pub fn handle_arrived(&mut self, from: &str, msg: Msg, allowed: bool, arrived_us: u64) {
-        self.handle_timed(from, msg, allowed, Instant::now(), Some(arrived_us));
+        let arrived = arrived_at(arrived_us, Instant::now(), link::now_us());
+        self.handle_timed(from, msg, allowed, arrived, Some(arrived_us));
     }
 
     fn handle_timed(
@@ -225,7 +227,7 @@ impl Receiver {
         }
         // Anything at all from the driving computer says it is still there.
         if self.driver.as_deref() == Some(from) {
-            self.heard_at = Some(now);
+            self.heard_at = self.heard_at.max(Some(now));
         }
         if let Msg::Hello { .. } = msg {
             // A computer that may drive this one is there: be ready.
@@ -317,11 +319,15 @@ impl Receiver {
     /// left. Everything it held down is let go of, and this computer is no
     /// longer kept awake for it; what it sends later is ignored until it
     /// enters again. A link that goes without a word is noticed here long
-    /// before the connection times out.
-    pub fn check_silence(&mut self, now: Instant) {
-        let silent = self
+    /// before the connection times out. Silence is counted from when its
+    /// messages came off the link: what it handled last, or `newest`, the
+    /// last thing from it to come off the link, handled or not (a loop
+    /// held up a moment does not end a session that is still going).
+    pub fn check_silence(&mut self, now: Instant, newest: Option<Instant>) {
+        let heard = self
             .heard_at
-            .is_some_and(|at| now.saturating_duration_since(at) >= SILENCE_RELEASE);
+            .max(newest.filter(|_| self.heard_at.is_some()));
+        let silent = heard.is_some_and(|at| now.saturating_duration_since(at) >= SILENCE_RELEASE);
         if self.driver.is_some() && silent {
             self.stop();
             self.active_at = None;
@@ -352,6 +358,13 @@ impl Receiver {
         self.active_at
             .is_some_and(|at| now.saturating_duration_since(at) < AWAKE_FOR)
     }
+}
+
+/// When something that came off the link at `arrived_us` ([`link::now_us`])
+/// came, on the monotonic clock: `now` is `now_us`. Never later than now.
+fn arrived_at(arrived_us: u64, now: Instant, now_us: u64) -> Instant {
+    now.checked_sub(Duration::from_micros(now_us.saturating_sub(arrived_us)))
+        .unwrap_or(now)
 }
 
 /// A receiver going away (the server stopping or upgrading mid-session)
@@ -696,11 +709,33 @@ fn refuses(msg: &Msg, driving: bool) -> bool {
     driving || matches!(msg, Msg::Hello { .. } | Msg::Enter { .. })
 }
 
+/// Whether `msg` is a cursor arriving over a link that is not direct now
+/// (`direct`, looked at only for an arrival: what else a computer sends is
+/// taken only once its arrival was).
+fn arrives_relayed(msg: &Msg, direct: impl FnOnce() -> bool) -> bool {
+    matches!(msg, Msg::Enter { .. }) && !direct()
+}
+
+/// Why the computer driving this one is refused now: `refusal`, its
+/// permission's or the setting's word, or its link, still up (`linked`),
+/// riding a relay (not `direct`).
+fn refusal_now(refusal: Option<u8>, linked: bool, direct: bool) -> Option<u8> {
+    refusal.or((linked && !direct).then_some(wire::REFUSE_RELAYED))
+}
+
+/// Whether the link to `device_id` is up and direct now.
+fn direct_now(device_id: &str) -> bool {
+    link::connection(device_id).is_some_and(|conn| link::is_direct(&conn))
+}
+
 /// Tell the computer `to` that this one will not be driven by it
 /// (`reason`), on a channel of its own, dropped once sent; said in the log
-/// at info only when `told` has not said it already.
+/// at info only when `told` has not said it already. A refusal goes over a
+/// relay too (it carries no input), so a computer refused for its relayed
+/// link hears why.
 fn refuse(to: &str, reason: u8, told: &mut status::RefusalLog) {
-    let sent = Channel::open(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
+    let sent =
+        Channel::open_for_refusal(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
     match sent {
         Ok(()) => say_refused(told, to, reason),
         Err(e) => tracing::debug!(to, "Shared input: the refusal was not sent: {e}"),
@@ -722,8 +757,21 @@ fn say_refused(told: &mut status::RefusalLog, to: &str, reason: u8) {
 }
 
 /// How often `shared_input_status.json` is brought up to date (and
-/// `shared_screens.json` kept to the computers paired now).
+/// `shared_screens.json` kept to the computers paired now) while sharing is
+/// on ([`STATUS_IDLE_EVERY`] while it is off).
 const STATUS_EVERY: Duration = Duration::from_secs(1);
+
+/// How often the status is kept while sharing is off here: the page still
+/// shows each paired computer's link then, but reading the computers and
+/// the trust store every second for the server's life is not worth it.
+const STATUS_IDLE_EVERY: Duration = Duration::from_secs(30);
+
+/// Whether the status is kept now: sharing on (`on`) or just turned off
+/// (`was_on`, as it was last kept; none yet), or `since` it was last kept
+/// is [`STATUS_IDLE_EVERY`].
+fn status_due(on: bool, was_on: Option<bool>, since: Option<Duration>) -> bool {
+    on || was_on != Some(false) || since.is_none_or(|since| since >= STATUS_IDLE_EVERY)
+}
 
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
@@ -748,6 +796,10 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status = None;
+    // The link the driving computer's cursor arrived on.
+    let mut driver_link: Option<usize> = None;
+    // Whether sharing was on when the status was last kept, and when.
+    let mut status_kept: Option<(bool, Instant)> = None;
     // The refusals heard from other computers, and told to them, for the
     // log to say each once.
     let mut heard_refusals = status::RefusalLog::default();
@@ -778,6 +830,17 @@ pub async fn run() {
                 }
                 if standing.allowed {
                     told_refusals.clear(&from);
+                }
+                // Its cursor arriving over a relay is refused, and it comes
+                // home: the keyboard and mouse go over a direct link only.
+                if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
+                    tracing::info!(
+                        from,
+                        "Shared input: another computer's cursor came over a relay; refused"
+                    );
+                    refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
+                    receiver.link_lost(&from);
+                    continue;
                 }
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
@@ -814,6 +877,7 @@ pub async fn run() {
                 }
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
+                    driver_link = Some(link_id);
                 }
                 if standing.allowed && matches!(msg, Msg::AskTimings) {
                     let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
@@ -848,7 +912,7 @@ pub async fn run() {
                     }
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
-                    receiver.check_silence(Instant::now());
+                    receiver.check_silence(Instant::now(), link::last_heard(&driver));
                     if receiver.driver().is_none() {
                         tracing::info!(
                             driver,
@@ -858,7 +922,12 @@ pub async fn run() {
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     let linked = link::linked().contains(&driver);
-                    let refusal = gate.refusal(&driver).await;
+                    // The link its cursor came on while it is still read,
+                    // else the one up now.
+                    let direct = driver_link
+                        .and_then(link::direct_on)
+                        .unwrap_or_else(|| direct_now(&driver));
+                    let refusal = refusal_now(gate.refusal(&driver).await, linked, direct);
                     if linked
                         && let Some(reason) = refusal
                         && !refused_now.contains(&driver)
@@ -869,8 +938,8 @@ pub async fn run() {
                         tracing::info!(
                             driver,
                             linked,
-                            "Shared input: the driving computer's link or permission went; \
-                             what it held is let go of"
+                            "Shared input: the driving computer's link or permission went, or \
+                             its link turned relayed; what it held is let go of"
                         );
                         receiver.link_lost(&driver);
                     }
@@ -922,6 +991,15 @@ pub async fn run() {
                 told_refusals.keep_linked(&linked);
                 let Some(dir) = state_dir.clone() else { continue };
                 let sharing_on = gate.on().await;
+                let due = status_due(
+                    sharing_on,
+                    status_kept.map(|(on, _)| on),
+                    status_kept.map(|(_, at)| at.elapsed()),
+                );
+                if !due {
+                    continue;
+                }
+                status_kept = Some((sharing_on, Instant::now()));
                 let mut last = last_status.take();
                 last_status = tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
@@ -1320,16 +1398,16 @@ mod tests {
         r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, t0);
         fake.take();
         // Not yet: a little short of a second of silence.
-        r.check_silence(t0 + SILENCE_RELEASE - Duration::from_millis(1));
+        r.check_silence(t0 + SILENCE_RELEASE - Duration::from_millis(1), None);
         assert_eq!(fake.take(), vec![]);
         assert_eq!(r.driver(), Some("pc"));
         // A second of nothing: let go of once, as a Leave, and no longer
         // kept awake for it.
-        r.check_silence(t0 + SILENCE_RELEASE);
+        r.check_silence(t0 + SILENCE_RELEASE, None);
         assert_eq!(fake.take(), vec![Call::Key(42, false)]);
         assert_eq!(r.driver(), None);
         assert!(!r.wants_awake(t0 + SILENCE_RELEASE));
-        r.check_silence(t0 + SILENCE_RELEASE * 5);
+        r.check_silence(t0 + SILENCE_RELEASE * 5, None);
         assert_eq!(fake.take(), vec![]);
         // What it sends later is ignored until it enters again.
         let later = t0 + SILENCE_RELEASE * 6;
@@ -1339,6 +1417,48 @@ mod tests {
         r.handle_at("pc", Msg::Enter { x: 2, y: 2 }, true, later);
         r.handle_at("pc", key(30, true), true, later);
         assert_eq!(fake.take(), vec![Call::Move(2, 2), Call::Key(30, true)]);
+    }
+
+    /// Silence is counted from when the driving computer's messages came
+    /// off the link, not from when this loop got to them: one that came
+    /// while the loop was busy keeps the session, and one handled late
+    /// counts from when it came.
+    #[test]
+    fn silence_is_counted_from_arrival() {
+        let (mut r, fake) = receiver();
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        r.handle_at("pc", key(42, true), true, t0);
+        fake.take();
+        // The loop stalled; a note came off the link at 0.9 s and waits.
+        r.check_silence(ms(1500), Some(ms(900)));
+        assert_eq!(fake.take(), vec![]);
+        assert_eq!(r.driver(), Some("pc"));
+        r.check_silence(ms(1900), Some(ms(900)));
+        assert_eq!(fake.take(), vec![Call::Key(42, false)]);
+        assert_eq!(r.driver(), None);
+
+        // A note handled now that came off the link 1.5 s ago, and nothing
+        // since: a second and more of silence already.
+        let (mut r, fake) = receiver();
+        let now_us = link::now_us();
+        r.handle_arrived("pc", Msg::Enter { x: 0, y: 0 }, true, now_us - 1_600_000);
+        r.handle_arrived("pc", key(42, true), true, now_us - 1_600_000);
+        r.handle_arrived("pc", Msg::Active { idle_ms: 0 }, true, now_us - 1_500_000);
+        fake.take();
+        r.check_silence(Instant::now(), None);
+        assert_eq!(fake.take(), vec![Call::Key(42, false)]);
+        assert_eq!(r.driver(), None);
+    }
+
+    #[test]
+    fn an_arrival_is_put_on_the_monotonic_clock() {
+        let now = Instant::now();
+        let at = arrived_at(1_000_300_000, now, 1_000_600_000);
+        assert_eq!(now - at, Duration::from_millis(300));
+        // A wall clock stepped back: never later than now.
+        assert_eq!(arrived_at(1_000_600_000, now, 1_000_300_000), now);
     }
 
     #[test]
@@ -1354,7 +1474,7 @@ mod tests {
             if i % 2 == 0 {
                 r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, now);
             }
-            r.check_silence(now);
+            r.check_silence(now, None);
         }
         assert_eq!(fake.take(), vec![]);
         assert_eq!(r.driver(), Some("pc"));
@@ -1460,6 +1580,54 @@ mod tests {
         assert!(!refuses(&key(30, true), false));
         // While it drives, anything is: its permission just went.
         assert!(refuses(&Msg::Move { seq: 1, x: 0, y: 0 }, true));
+    }
+
+    /// A cursor arriving over a relay is refused (the keyboard and mouse
+    /// go over a direct link only); whether the link is direct is looked at
+    /// only for an arrival.
+    #[test]
+    fn an_arrival_over_a_relay_is_refused() {
+        let enter = Msg::Enter { x: 0, y: 0 };
+        assert!(arrives_relayed(&enter, || false));
+        assert!(!arrives_relayed(&enter, || true));
+        let key = key(30, true);
+        assert!(!arrives_relayed(&key, || panic!("not looked at for a key")));
+    }
+
+    /// The computer driving this one is let go of, and told why, when its
+    /// link turns relayed, as when its permission or the setting goes.
+    #[test]
+    fn a_driver_whose_link_turned_relayed_is_refused() {
+        assert_eq!(refusal_now(None, true, true), None);
+        assert_eq!(refusal_now(None, true, false), Some(wire::REFUSE_RELAYED));
+        // Its permission's word comes first.
+        assert_eq!(
+            refusal_now(Some(wire::REFUSE_NOT_ALLOWED), true, false),
+            Some(wire::REFUSE_NOT_ALLOWED)
+        );
+        // No link at all is no refusal: it is let go of as gone.
+        assert_eq!(refusal_now(None, false, false), None);
+    }
+
+    /// The status (computers.json and the trust store read, the file
+    /// written) is kept each second while sharing is on, once as it turns
+    /// off, and then only every half minute.
+    #[test]
+    fn the_status_is_kept_rarely_while_sharing_is_off() {
+        let s = Duration::from_secs;
+        // The first time, whatever the setting.
+        assert!(status_due(false, None, None));
+        assert!(status_due(true, None, None));
+        // On: each second.
+        assert!(status_due(true, Some(true), Some(s(1))));
+        // Turned off: at once, to say so.
+        assert!(status_due(false, Some(true), Some(s(1))));
+        // Off: every half minute.
+        assert!(!status_due(false, Some(false), Some(s(1))));
+        assert!(!status_due(false, Some(false), Some(s(29))));
+        assert!(status_due(false, Some(false), Some(STATUS_IDLE_EVERY)));
+        // Turned on: at once.
+        assert!(status_due(true, Some(false), Some(s(1))));
     }
 
     #[test]

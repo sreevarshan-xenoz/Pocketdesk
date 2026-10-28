@@ -874,9 +874,21 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    // The keyboard and mouse come home from another computer before the
+    // server goes: everything held there let go of and a leave sent while
+    // the link is still up, and this computer's cursor shown again.
+    #[cfg(windows)]
+    if !crate::shared_input::capture_windows::stop(SHARED_INPUT_STOP).await {
+        tracing::warn!("Shared input: the driver did not end in time");
+    }
 
     Ok(())
 }
+
+/// How long the server's stop waits for the shared keyboard and mouse to
+/// come home (it is bounded again by the process's own exit grace).
+#[cfg(windows)]
+const SHARED_INPUT_STOP: Duration = Duration::from_secs(1);
 
 /// `work`, unless a request to stop comes first (then `None`). For the
 /// steps before the main loop, which can take many seconds: `pocketdesk

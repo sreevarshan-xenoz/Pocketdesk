@@ -15,7 +15,8 @@
 //! at the centre of the screen it left and hidden; each move is how far the
 //! mouse went from there, carried onto a virtual cursor on the other
 //! computer's screens. Crossing back, the switch key, Windows locking or
-//! going to sleep, the link turning relayed or failing all bring it home,
+//! going to sleep, the link turning relayed or failing, and the other
+//! computer not answering its pings for a second all bring it home,
 //! and everything sent as down is let go of first (except after a failed
 //! send: nothing stale is sent again, the other computer lets go of what it
 //! held by itself when it stops hearing from this one).
@@ -29,14 +30,22 @@
 //! as they come home.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::badge;
 use super::game_lock::{self, Foreground, Lock};
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
 use super::layout::{Layout, Placed};
-use super::wire::{Msg, REFUSE_SHARING_OFF, Screen};
+use super::wire::{Msg, REFUSE_RELAYED, REFUSE_SHARING_OFF, Screen};
+
+/// How often, away, the computer driven is pinged ([`Driver::tick`]).
+pub const PING_EVERY: Duration = Duration::from_millis(200);
+
+/// The computer driven not answering this long has stopped answering: the
+/// keyboard and mouse come home (as the computer driven lets go after a
+/// second without a word, `receive::SILENCE_RELEASE`).
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(1);
 
 /// What the input thread does with this computer's keyboard and mouse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +100,12 @@ pub enum Captured {
     /// Another window came to the front (heard while the hooks are in): no
     /// edge crosses until what is in front has been looked at again.
     ForegroundChanged,
+    /// Win+L was pressed while away (its L swallowed, never sent): this
+    /// computer is to lock.
+    LockKey,
+    /// The hooks [`Mode::Away`] needs could not be installed: this
+    /// computer's keyboard and mouse would act here and there at once.
+    HookFailed,
 }
 
 /// What the driver wants done.
@@ -113,6 +128,10 @@ pub enum Action {
     /// Push this computer's clipboard to that computer: the cursor just
     /// went there, and the clipboard follows it.
     PushClipboard(String),
+    /// Ping that computer (its link answers at once): see [`Driver::tick`].
+    Ping(String),
+    /// Lock this computer (Win+L while away, home first).
+    LockHere,
 }
 
 /// Where the keyboard and mouse are while away.
@@ -171,6 +190,13 @@ pub struct Driver {
     reseed: bool,
     /// The clipboard follows the mouse (`shared_input_clipboard`).
     clipboard: bool,
+    /// Away: when the computer driven last answered a ping (or the first
+    /// tick of the visit), and when it was last pinged.
+    heard: Option<Instant>,
+    pinged: Option<Instant>,
+    /// The computers that stopped answering: no edge leads to them until
+    /// they answer again.
+    silent: HashSet<String>,
 }
 
 impl Driver {
@@ -194,6 +220,9 @@ impl Driver {
             foreground_pending: false,
             reseed: false,
             clipboard: false,
+            heard: None,
+            pinged: None,
+            silent: HashSet::new(),
         }
     }
 
@@ -300,6 +329,27 @@ impl Driver {
                 self.weigh_game(&mut out);
             }
             Captured::ForegroundChanged => self.foreground_pending = true,
+            Captured::LockKey => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("Win+L: locking this computer"),
+                    );
+                    out.push(Action::LockHere);
+                }
+            }
+            Captured::HookFailed => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("The keyboard and mouse could not be taken from this computer"),
+                    );
+                }
+            }
             _ if self.locked => {}
             Captured::Moved { x, y } => match &self.away {
                 None => self.watch((x, y), &mut out),
@@ -347,6 +397,69 @@ impl Driver {
         out
     }
 
+    /// The time is `now` (called several times a second): away, the
+    /// computer driven is pinged every [`PING_EVERY`], and one that has not
+    /// answered for [`ANSWER_WITHIN`] since the crossing or its last answer
+    /// has stopped answering: home, letting go of what was sent down (it
+    /// lets go by itself too, hearing nothing). Its edge is a wall until it
+    /// answers again; meanwhile it is pinged from home.
+    pub fn tick(&mut self, now: Instant) -> Vec<Action> {
+        let mut out = Vec::new();
+        if let Some(away) = self.away.clone() {
+            let heard = *self.heard.get_or_insert(now);
+            if now.saturating_duration_since(heard) >= ANSWER_WITHIN {
+                self.silent.insert(away.to.clone());
+                let to = self.name_of(&away.to);
+                self.go_home(
+                    &mut out,
+                    away.park,
+                    true,
+                    Some(&format!("{to} stopped answering")),
+                );
+                return out;
+            }
+            if self.ping_due(now) {
+                out.push(Action::Ping(away.to));
+            }
+            return out;
+        }
+        let silent: BTreeSet<String> = self
+            .silent
+            .iter()
+            .filter(|id| self.reachable.contains(*id))
+            .cloned()
+            .collect();
+        if !silent.is_empty() && self.ping_due(now) {
+            out.extend(silent.into_iter().map(Action::Ping));
+        }
+        out
+    }
+
+    /// Whether a ping is due at `now`, noting that one goes.
+    fn ping_due(&mut self, now: Instant) -> bool {
+        let due = self
+            .pinged
+            .is_none_or(|at| now.saturating_duration_since(at) >= PING_EVERY);
+        if due {
+            self.pinged = Some(now);
+        }
+        due
+    }
+
+    /// The computer `device_id` answered a ping at `now`: it is still
+    /// there, and one that had stopped answering may be crossed onto again.
+    pub fn answered(&mut self, device_id: &str, now: Instant) {
+        self.silent.remove(device_id);
+        if self.away.as_ref().is_some_and(|a| a.to == device_id) {
+            self.heard = Some(now);
+        }
+    }
+
+    /// Whether the cursor may cross onto `device_id` now.
+    fn can_cross(&self, device_id: &str) -> bool {
+        self.reachable.contains(device_id) && !self.silent.contains(device_id)
+    }
+
     /// Sending to the computer driven failed: home at once, with nothing
     /// sent (the link is gone or broken) and nothing kept to send again.
     /// The other computer lets go of what it held when it stops hearing
@@ -391,6 +504,7 @@ impl Driver {
             let park = away.park;
             let why = match reason {
                 REFUSE_SHARING_OFF => "the keyboard and mouse are turned off there",
+                REFUSE_RELAYED => "its link to this computer goes through a relay there",
                 _ => "it does not allow this computer (its Keyboard and mouse page)",
             };
             let why = format!("{} won't take input: {why}", self.name_of(device_id));
@@ -553,7 +667,7 @@ impl Driver {
             && !self.foreground_pending
             && let Some(crossing) = self.layout.crossing(&self.this, at, dx, dy)
             && crossing.to != self.this
-            && self.reachable.contains(&crossing.to)
+            && self.can_cross(&crossing.to)
         {
             let park = self.park_for(at);
             self.go_away(out, &crossing.to, crossing.at, park, at);
@@ -579,7 +693,7 @@ impl Driver {
             Some(crossing) if crossing.to == self.this => {
                 self.go_home(out, crossing.at, true, None);
             }
-            Some(crossing) if self.reachable.contains(&crossing.to) => {
+            Some(crossing) if self.can_cross(&crossing.to) => {
                 self.leave(out);
                 self.go_away(out, &crossing.to, crossing.at, away.park, away.park);
             }
@@ -628,7 +742,7 @@ impl Driver {
         let targets: Vec<String> = self
             .targets()
             .iter()
-            .filter(|c| self.reachable.contains(&c.device_id))
+            .filter(|c| self.can_cross(&c.device_id))
             .map(|c| c.device_id.clone())
             .collect();
         let next = match &self.away {
@@ -698,6 +812,9 @@ impl Driver {
         from: (i32, i32),
     ) {
         let was_away = self.away.is_some();
+        // Each visit counts its own silence, from its first tick.
+        self.heard = None;
+        self.pinged = None;
         let (x, y) = self.layout.normalized(to, at);
         self.away = Some(Away {
             to: to.to_string(),
@@ -1361,6 +1478,62 @@ mod tests {
         assert_eq!(d.on(Captured::Locked), vec![Action::SetMode(Mode::Off)]);
     }
 
+    /// The hooks that take the keyboard and mouse could not be put in as
+    /// they went away: home the usual way, with what was sent let go of.
+    #[test]
+    fn a_hook_that_did_not_go_in_brings_them_home() {
+        let mut d = away_on_linux(false);
+        d.on(key(0x1E, true));
+        let back = d.on(Captured::HookFailed);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
+        );
+        for wanted in [
+            Action::WarpHome(PARK.0, PARK.1),
+            Action::HideCursor(false),
+            Action::SetMode(Mode::Watch),
+            home_badge(Some(
+                "The keyboard and mouse could not be taken from this computer",
+            )),
+        ] {
+            assert!(back.contains(&wanted), "{wanted:?} in {back:?}");
+        }
+        assert_eq!(d.away_on(), None);
+        // At home it changes nothing.
+        assert_eq!(d.on(Captured::HookFailed), vec![]);
+    }
+
+    /// Win+L while away: home the usual way (the Win key already sent is
+    /// let go of there, then the leave), and then this computer locks;
+    /// nothing is sent for the L. At home the hook passes it to Windows, so
+    /// the driver hears nothing and does nothing.
+    #[test]
+    fn win_l_while_away_comes_home_then_locks() {
+        let mut d = away_on_linux(false);
+        d.on(Captured::Key {
+            scan: 0x5B,
+            extended: true,
+            down: true,
+        });
+        let locking = d.on(Captured::LockKey);
+        assert_eq!(
+            sends(&locking),
+            vec![sent("L", evdev(125, false)), sent("L", Msg::Leave)]
+        );
+        for wanted in [
+            Action::WarpHome(PARK.0, PARK.1),
+            Action::HideCursor(false),
+            home_badge(Some("Win+L: locking this computer")),
+        ] {
+            assert!(locking.contains(&wanted), "{wanted:?} in {locking:?}");
+        }
+        assert_eq!(locking.last(), Some(&Action::LockHere), "{locking:?}");
+        assert_eq!(d.away_on(), None);
+        // At home it is not the driver's.
+        assert_eq!(d.on(Captured::LockKey), vec![]);
+    }
+
     #[test]
     fn send_error_goes_home_without_replay() {
         let mut d = away_on_linux(false);
@@ -1593,6 +1766,70 @@ mod tests {
             d.set_layout(desk(false)),
             vec![Action::SetMode(Mode::Watch)]
         );
+    }
+
+    fn pings(actions: &[Action]) -> Vec<String> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Ping(to) => Some(to.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Away, the computer driven is pinged five times a second; with no
+    /// answer for a second the keyboard and mouse come home the usual way
+    /// (let go of, left, the cursor back), and its edge is a wall until it
+    /// answers again (it is pinged from home meanwhile).
+    #[test]
+    fn a_computer_that_stops_answering_brings_them_home() {
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        let mut d = away_on_linux(false);
+        d.on(key(0x1E, true));
+        assert_eq!(pings(&d.tick(ms(0))), ["L"]);
+        assert_eq!(pings(&d.tick(ms(100))), Vec::<String>::new());
+        assert_eq!(pings(&d.tick(ms(200))), ["L"]);
+        // Another computer's answer is not this one's.
+        d.answered("M", ms(250));
+        d.answered("L", ms(300));
+        // A second since its answer, not since the crossing.
+        let still = d.tick(ms(1250));
+        assert_eq!(sends(&still), vec![], "{still:?}");
+        assert_eq!(d.away_on(), Some("L"));
+        let gone = d.tick(ms(1300));
+        assert_eq!(
+            sends(&gone),
+            vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
+        );
+        for wanted in [
+            Action::WarpHome(PARK.0, PARK.1),
+            Action::HideCursor(false),
+            Action::SetMode(Mode::Watch),
+            home_badge(Some("L computer stopped answering")),
+        ] {
+            assert!(gone.contains(&wanted), "{wanted:?} in {gone:?}");
+        }
+        assert_eq!(d.away_on(), None);
+        // Its edge is a wall while it is silent, and it is pinged from home.
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        assert_eq!(pings(&d.tick(ms(1500))), ["L"]);
+        assert_eq!(pings(&d.tick(ms(1550))), Vec::<String>::new());
+        // It answers: the edge leads to it again.
+        d.answered("L", ms(1600));
+        assert_eq!(pings(&d.tick(ms(1800))), Vec::<String>::new());
+        d.on(moved(3440, 480));
+        d.on(moved(3455, 480));
+        assert_eq!(d.away_on(), Some("L"));
+        // A new visit starts its own count: no answer yet is no silence.
+        assert_eq!(pings(&d.tick(ms(5000))), ["L"]);
+        assert_eq!(d.away_on(), Some("L"));
+        assert_eq!(sends(&d.tick(ms(5999))), vec![]);
+        assert_eq!(d.away_on(), Some("L"));
+        assert_eq!(sends(&d.tick(ms(6000))), vec![sent("L", Msg::Leave)]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use pocketdesk_core::local::shared_input::{
 use pocketdesk_core::protocol::kdeconnect::TrustStore;
 
 use super::link;
-use super::wire::REFUSE_SHARING_OFF;
+use super::wire::{REFUSE_RELAYED, REFUSE_SHARING_OFF};
 
 /// The computer this one's keyboard and mouse are on now (the driver's
 /// word); empty while they are here.
@@ -48,6 +48,8 @@ pub fn link_word(direct: Option<bool>, refused: Option<u8>) -> &'static str {
     match (direct, refused) {
         (None, _) => LINK_AWAY,
         (Some(_), Some(REFUSE_SHARING_OFF)) => REFUSED_SHARING_OFF,
+        // Refused for a link it sees relayed: said as a relayed link.
+        (Some(_), Some(REFUSE_RELAYED)) => LINK_RELAYED,
         (Some(_), Some(_)) => REFUSED_NOT_ALLOWED,
         (Some(true), None) => LINK_DIRECT,
         (Some(false), None) => LINK_RELAYED,
@@ -251,6 +253,7 @@ mod tests {
         );
         // A reason this version does not know is still a refusal.
         assert_eq!(link_word(Some(true), Some(200)), REFUSED_NOT_ALLOWED);
+        assert_eq!(link_word(Some(true), Some(REFUSE_RELAYED)), LINK_RELAYED);
     }
 
     #[test]

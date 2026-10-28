@@ -10,8 +10,10 @@
 //! spots it instead). A hidden window of its own hears the session lock
 //! (WTS session notifications) and sleep (`WM_POWERBROADCAST`). Injected
 //! input always passes: what another computer sends this one is never
-//! carried off again. Ctrl+Alt+Del and Win+L are Windows' own; no hook sees
-//! them, and the lock that follows brings the keyboard and mouse home. The
+//! carried off again. Ctrl+Alt+Del is Windows' own, which no hook sees,
+//! and the lock that follows brings the keyboard and mouse home; Win+L
+//! while away is swallowed, brings them home, and then locks this computer
+//! ([`locks_here`]). The
 //! loop looks at what is in front every half second for the gaming lock
 //! ([`game_lock`]), and at once when a window comes to the front (an
 //! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
@@ -23,7 +25,7 @@
 //! must not hook, hide the cursor or move it on the owner's computer.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -293,15 +295,50 @@ struct ThreadState {
     asleep: bool,
     /// Where the cursor is parked while away (physical).
     park: Option<(i32, i32)>,
+    /// Which input thread this is: each started counts on.
+    generation: u64,
 }
 
 // SAFETY: the hook and module handles are plain values, used only on the
 // input thread (the hooks run on the thread that installed them); there is
-// one input thread at a time.
+// one input thread at a time in STATE (by its generation).
 unsafe impl Send for ThreadState {}
 
 /// The input thread's state, while it runs.
 static STATE: Mutex<Option<ThreadState>> = Mutex::new(None);
+
+/// The input threads started so far: each takes the next as its
+/// generation.
+static GENERATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Put `state` in `slot`, unless a newer input thread's is there: one left
+/// behind, stuck as it started, may get going after a newer one did.
+fn install_state(slot: &mut Option<ThreadState>, state: ThreadState) {
+    if slot
+        .as_ref()
+        .is_none_or(|s| s.generation < state.generation)
+    {
+        *slot = Some(state);
+    }
+}
+
+/// Clear `slot` if it is the input thread `generation`'s, never a newer
+/// one's.
+fn clear_own(slot: &mut Option<ThreadState>, generation: u64) {
+    if slot.as_ref().is_some_and(|s| s.generation == generation) {
+        *slot = None;
+    }
+}
+
+/// `f` on the input thread `generation`'s state, if it is the one in place.
+fn with_own_state<T>(generation: u64, f: impl FnOnce(&mut ThreadState) -> T) -> Option<T> {
+    STATE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+        .filter(|s| s.generation == generation)
+        .map(f)
+}
 
 /// `f` on the input thread's state; `None` when it is not running. Never
 /// held across a call that runs a hook or the window (those run only while
@@ -462,6 +499,15 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
     }
+    // Win+L: swallowed like any key (Windows never saw the Win key go
+    // down, so passed on it would type an "l"), never sent; the driver
+    // brings the keyboard and mouse home and locks this computer. Its
+    // key-up is swallowed below if the hook is still in then; once home
+    // the hook is out, and the key-up reaches Windows on its own.
+    if down && locks_here(modifiers_down(s.mods), info.vkCode) {
+        let _ = s.events.send(Captured::LockKey);
+        return true;
+    }
     let _ = s.events.send(Captured::Key {
         scan: info.scanCode as u16,
         extended: info.flags.0 & LLKHF_EXTENDED.0 != 0,
@@ -470,6 +516,22 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     // A key pressed here before the keyboard went away (Ctrl and Alt of
     // the switch key, say) comes up here too, or Windows would hold it.
     down || !windows_holds(info.vkCode)
+}
+
+/// Whether a send to `to` may open (and greet) a channel for it, with the
+/// keyboard and mouse on `away_on`: never for the computer driven, where a
+/// missing channel is a failed send and brings them home (a new channel's
+/// hello and leave would end the visit there, and its pongs would keep the
+/// watchdog quiet while nothing reached it).
+fn may_open(away_on: Option<&str>, to: &str) -> bool {
+    away_on != Some(to)
+}
+
+/// Whether the key `vk` going down with modifiers `mods` held while away
+/// is Win+L, which locks this computer: the driver brings the keyboard and
+/// mouse home and then locks it ([`Captured::LockKey`]).
+pub(crate) fn locks_here(mods: u32, vk: u32) -> bool {
+    vk == u32::from(b'L') && mods & MOD_WIN != 0
 }
 
 /// Whether Windows has the key or button `vk` down: pressed before the
@@ -495,6 +557,13 @@ unsafe extern "system" fn foreground_changed(
     with_state(|s| {
         let _ = s.events.send(Captured::ForegroundChanged);
     });
+}
+
+/// Whether `mode` lacks a hook it needs, with the mouse's and the
+/// keyboard's in or not: away takes both, so without either this
+/// computer's own input would act here and on the other computer at once.
+fn hooks_missing(mode: Mode, mouse: bool, keyboard: bool) -> bool {
+    mode == Mode::Away && !(mouse && keyboard)
 }
 
 /// Put the hooks `mode` wants in place, on the input thread.
@@ -557,6 +626,10 @@ fn apply_mode(s: &mut ThreadState, mode: Mode) {
     if mode != Mode::Away {
         s.wheel = (0, 0);
     }
+    // The driver brings the keyboard and mouse home, the cursor shown.
+    if hooks_missing(mode, s.mouse.is_some(), s.keyboard.is_some()) {
+        let _ = s.events.send(Captured::HookFailed);
+    }
 }
 
 /// The hidden window: the session's lock and the computer's sleep.
@@ -604,6 +677,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
     // and tears down, even if the WM_QUIT sent to it was lost (no queue yet).
     let abandoned = Arc::new(AtomicBool::new(false));
     let abandoned_thread = Arc::clone(&abandoned);
+    let generation = GENERATIONS.fetch_add(1, Ordering::SeqCst) + 1;
     let spawned = std::thread::Builder::new()
         .name("pd-shared-input".into())
         .spawn(move || {
@@ -662,7 +736,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                     None
                 }
             };
-            *STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(ThreadState {
+            let state = ThreadState {
                 events,
                 hotkey,
                 mode: Mode::Off,
@@ -676,7 +750,9 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 locked: false,
                 asleep: false,
                 park: None,
-            });
+                generation,
+            };
+            install_state(&mut STATE.lock().unwrap_or_else(|e| e.into_inner()), state);
             let registered = hotkey.is_some_and(|key| {
                 // SAFETY: a key for this thread's queue.
                 let taken = unsafe {
@@ -728,7 +804,9 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                     },
                 }
             }
-            with_state(|s| apply_mode(s, Mode::Off));
+            // Only its own state: a thread left behind that gets here late
+            // must not take a newer one's hooks out or clear its state.
+            with_own_state(generation, |s| apply_mode(s, Mode::Off));
             if registered {
                 // SAFETY: the key registered above.
                 let _ = unsafe { UnregisterHotKey(None, HOTKEY_ID) };
@@ -738,7 +816,10 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 let _ = unsafe { WTSUnRegisterSessionNotification(window) };
                 let _ = unsafe { DestroyWindow(window) };
             }
-            *STATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            clear_own(
+                &mut STATE.lock().unwrap_or_else(|e| e.into_inner()),
+                generation,
+            );
         });
     let thread = match spawned {
         Ok(thread) => thread,
@@ -1052,8 +1133,14 @@ impl Glue {
         while let Some(action) = queue.pop_front() {
             match action {
                 Action::Send(to, msg) => {
-                    let sent = self
-                        .channel(&to)
+                    // The computer driven is never greeted anew mid-visit:
+                    // a new channel's leave would end the visit there.
+                    let channel = if may_open(driver.away_on(), &to) {
+                        self.channel(&to)
+                    } else {
+                        self.channels.get_mut(&to)
+                    };
+                    let sent = channel
                         .map(|channel| channel.send(&msg))
                         .unwrap_or_else(|| Err("no channel".to_string()));
                     if let Err(e) = sent {
@@ -1094,6 +1181,20 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
+                // Only ever after the keyboard and mouse came home.
+                Action::LockHere => {
+                    if let Err(e) = crate::privacy::lock_screen() {
+                        tracing::warn!("Shared input: Win+L did not lock this computer: {e}");
+                    }
+                }
+                // Sent as any message is, so a ping that cannot go brings
+                // the keyboard and mouse home as a failed send does.
+                Action::Ping(to) => queue.push_front(Action::Send(
+                    to,
+                    Msg::Ping {
+                        t_us: link::now_us(),
+                    },
+                )),
                 Action::PushClipboard(to) => {
                     // Read and sent off this thread: a clipboard another
                     // program holds open must not hold the mouse.
@@ -1146,9 +1247,76 @@ impl Glue {
     }
 }
 
+/// Set once the server is stopping: no driver starts again, and the one
+/// running brings the keyboard and mouse home and ends ([`stop`]).
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+/// Set while a driver's thread runs.
+static DRIVING: AtomicBool = AtomicBool::new(false);
+
+/// How long, as a driver ends, what it just sent (the releases and the
+/// leave) may take to be written to the link before its channels go.
+const FLUSH_WAIT: Duration = Duration::from_millis(300);
+
+/// `flag` set while this is held, and cleared when it is dropped however
+/// its holder ends (a panic too).
+struct Raised(&'static AtomicBool);
+
+impl Raised {
+    fn raise(flag: &'static AtomicBool) -> Raised {
+        flag.store(true, Ordering::SeqCst);
+        Raised(flag)
+    }
+}
+
+impl Drop for Raised {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Wait until `flag` is clear, at most `within`; whether it cleared.
+async fn wait_lowered(flag: &AtomicBool, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
+    while flag.load(Ordering::SeqCst) {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    true
+}
+
+/// Runs `restore` (the owner's cursors back) when dropped: held by the
+/// supervisor, so the cursors come back however it ends, the runtime
+/// dropping it as the server exits too.
+struct RestoreCursors(fn());
+
+impl RestoreCursors {
+    fn with(restore: fn()) -> RestoreCursors {
+        RestoreCursors(restore)
+    }
+}
+
+impl Drop for RestoreCursors {
+    fn drop(&mut self) {
+        (self.0)();
+    }
+}
+
+/// The server is stopping: the driver running brings the keyboard and
+/// mouse home (releases and a leave to the computer driven, while the link
+/// is still up) and ends, and none starts again. Waits at most `within`;
+/// whether it ended in time.
+pub async fn stop(within: Duration) -> bool {
+    STOPPING.store(true, Ordering::SeqCst);
+    wait_lowered(&DRIVING, within).await
+}
+
 /// The driver while `stop` is not set: capture, carry, and on stopping
 /// bring everything home. Run on a thread of its own, inside `runtime`.
 fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
+    let _driving = Raised::raise(&DRIVING);
     let _runtime = runtime.enter();
     let config = crate::events::current_config();
     let hotkey = pocketdesk_core::local::hotkey::parse(&config.shared_input_hotkey);
@@ -1221,7 +1389,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // Until when what is in front is looked at every 50 ms, after a window
     // came to the front.
     let mut settle_until: Option<Instant> = None;
-    while !stop.load(Ordering::SeqCst) {
+    while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
             tracing::warn!(
                 "Shared input: the input thread stopped; the keyboard and mouse come home"
@@ -1255,6 +1423,25 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        // The computer driven answering its pings, or not: one silent for
+        // a second brings the keyboard and mouse home.
+        let now = Instant::now();
+        let answered: Vec<String> = glue
+            .channels
+            .iter_mut()
+            .filter_map(|(id, channel)| {
+                let mut any = false;
+                while channel.try_pong().is_some() {
+                    any = true;
+                }
+                any.then(|| id.clone())
+            })
+            .collect();
+        for id in answered {
+            driver.answered(&id, now);
+        }
+        let actions = driver.tick(now);
+        glue.apply(&mut driver, actions);
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
         let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
@@ -1345,6 +1532,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                         let _ = glue.channel(&id);
                     }
                 }
+                // A computer driven whose link went comes home with it.
+                if let Some(to) = driver.away_on().map(str::to_string)
+                    && link::connection(&to).is_none()
+                {
+                    let actions = driver.link_gone(&to, "The link to that computer closed");
+                    glue.apply(&mut driver, actions);
+                }
                 glue.channels.retain(|id, _| link::connection(id).is_some());
             }
             let layout = read_layout(&glue);
@@ -1380,18 +1574,27 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
     status::set_keyboard_on(None);
+    // What was just sent goes out before the channels do, for a moment at
+    // most: the computer driven hears the leave now, not a second later.
+    let deadline = Instant::now() + FLUSH_WAIT;
+    for (_, channel) in glue.channels.drain() {
+        channel.finish_within(deadline.saturating_duration_since(Instant::now()));
+    }
     tracing::info!("Shared input: this computer's keyboard and mouse stay here");
     // Dropping the glue stops the input thread, restores the cursors and
     // lets the computer idle.
 }
 
 /// The driver on Windows for the server's life: running while shared input
-/// and driving are both on (read again every second); turning either off
-/// brings the keyboard and mouse home and stops it.
+/// and driving are both on (read again every second); turning either off,
+/// or the server stopping ([`stop`]), brings the keyboard and mouse home
+/// and stops it.
 pub async fn supervise() {
     // Once at every start: a crash while away must not leave the owner
-    // without a cursor.
+    // without a cursor. And once as it ends, however that is (the server
+    // stopping drops it with the runtime, a driver still running or not).
     restore_cursors();
+    let _cursors = RestoreCursors::with(restore_cursors);
     let runtime = tokio::runtime::Handle::current();
     let mut running: Option<(Arc<AtomicBool>, JoinHandle<()>)> = None;
     let mut retry_at: Option<Instant> = None;
@@ -1414,7 +1617,7 @@ pub async fn supervise() {
             retry_at = Some(Instant::now() + RESTART_AFTER);
             continue;
         }
-        match (&running, want) {
+        match (&running, want && !STOPPING.load(Ordering::SeqCst)) {
             (None, true) if retry_at.is_none_or(|at| Instant::now() >= at) => {
                 retry_at = None;
                 let stop = Arc::new(AtomicBool::new(false));
@@ -1470,6 +1673,113 @@ mod tests {
         thread.set_mode(Mode::Away);
         drop(thread);
         assert_eq!(RESTORED.load(Ordering::SeqCst), 2, "restored on drop");
+    }
+
+    static GUARDED: AtomicUsize = AtomicUsize::new(0);
+
+    /// The cursors come back however the supervisor ends: its guard runs
+    /// them back when dropped (counted by a stand-in).
+    #[test]
+    fn the_cursor_guard_restores_when_dropped() {
+        let guard = RestoreCursors::with(|| {
+            GUARDED.fetch_add(1, Ordering::SeqCst);
+        });
+        assert_eq!(GUARDED.load(Ordering::SeqCst), 0);
+        drop(guard);
+        assert_eq!(GUARDED.load(Ordering::SeqCst), 1);
+    }
+
+    /// The server stopping waits for the driver to end, but only so long.
+    #[tokio::test]
+    async fn a_stop_waits_for_the_driver_within_its_bound() {
+        static RUNNING: AtomicBool = AtomicBool::new(false);
+        let raised = Raised::raise(&RUNNING);
+        assert!(RUNNING.load(Ordering::SeqCst));
+        let ending = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(raised);
+        });
+        assert!(wait_lowered(&RUNNING, Duration::from_secs(5)).await);
+        ending.join().unwrap();
+        // One that does not end in time is left.
+        let _stuck = Raised::raise(&RUNNING);
+        let started = Instant::now();
+        assert!(!wait_lowered(&RUNNING, Duration::from_millis(100)).await);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A send to the computer driven never opens a channel for it; to any
+    /// other, and at home, it may.
+    #[test]
+    fn the_computer_driven_is_never_greeted_anew() {
+        assert!(!may_open(Some("L"), "L"));
+        assert!(may_open(Some("L"), "M"));
+        assert!(may_open(None, "L"));
+    }
+
+    /// Win+L while away locks this computer, whatever else is held with
+    /// the Win key; L alone, or with other modifiers, goes on.
+    #[test]
+    fn win_l_locks_here() {
+        let l = u32::from(b'L');
+        assert!(locks_here(MOD_WIN, l));
+        assert!(locks_here(MOD_WIN | MOD_SHIFT, l));
+        assert!(!locks_here(0, l));
+        assert!(!locks_here(MOD_CONTROL | MOD_ALT, l));
+        assert!(!locks_here(MOD_WIN, u32::from(b'K')));
+    }
+
+    /// Away needs both hooks; watching needs only the mouse's, and a
+    /// missing one there is only logged (nothing is swallowed).
+    #[test]
+    fn away_without_both_hooks_is_a_failure() {
+        assert!(!hooks_missing(Mode::Away, true, true));
+        assert!(hooks_missing(Mode::Away, true, false));
+        assert!(hooks_missing(Mode::Away, false, true));
+        assert!(!hooks_missing(Mode::Watch, false, false));
+        assert!(!hooks_missing(Mode::Off, false, false));
+    }
+
+    fn state(generation: u64) -> ThreadState {
+        let (events, _) = mpsc::channel();
+        ThreadState {
+            events,
+            hotkey: None,
+            mode: Mode::Off,
+            mouse: None,
+            keyboard: None,
+            foreground: None,
+            instance: HINSTANCE::default(),
+            mods: 0,
+            hotkey_down: false,
+            wheel: (0, 0),
+            locked: false,
+            asleep: false,
+            park: None,
+            generation,
+        }
+    }
+
+    fn generation(slot: &Option<ThreadState>) -> Option<u64> {
+        slot.as_ref().map(|s| s.generation)
+    }
+
+    /// An input thread left behind (stuck as it started) that gets going
+    /// later neither takes a newer thread's state nor clears it as it ends.
+    #[test]
+    fn an_older_input_thread_leaves_a_newer_ones_state_alone() {
+        let mut slot = None;
+        install_state(&mut slot, state(2));
+        install_state(&mut slot, state(1));
+        assert_eq!(generation(&slot), Some(2), "not taken by the older");
+        clear_own(&mut slot, 1);
+        assert_eq!(generation(&slot), Some(2), "not cleared by the older");
+        clear_own(&mut slot, 2);
+        assert_eq!(generation(&slot), None, "cleared by its own");
+        // A newer thread takes over from an older one left in place.
+        install_state(&mut slot, state(3));
+        install_state(&mut slot, state(4));
+        assert_eq!(generation(&slot), Some(4));
     }
 
     #[test]
