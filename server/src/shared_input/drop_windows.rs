@@ -412,11 +412,12 @@ struct DropTarget {
     has_files: Cell<bool>,
 }
 
-/// Answer `effect` for a drag that holds files, or not.
+/// Answer `effect` (holding, as it comes, the effects the drag's source
+/// allows) for a drag that holds files, or not.
 fn answer_effect(effect: *mut DROPEFFECT, has_files: bool) {
     if !effect.is_null() {
-        // SAFETY: Windows' out value for this call.
-        unsafe { *effect = DROPEFFECT(drag_files::effect(has_files)) };
+        // SAFETY: Windows' in and out value for this call.
+        unsafe { *effect = DROPEFFECT(drag_files::effect(has_files, (*effect).0)) };
     }
 }
 

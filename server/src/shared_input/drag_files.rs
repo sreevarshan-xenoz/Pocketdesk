@@ -130,11 +130,16 @@ impl Catcher {
     }
 }
 
-/// What the catcher answers a drag over it: a copy for files (never a
-/// move, Shift held or not: the files stay where they are), nothing for
+/// What the catcher answers a drag over it, whose source allows the
+/// effects `allowed`: a copy for files (never a move, Shift held or not:
+/// the files stay where they are) where a copy is allowed, nothing for
 /// anything else.
-pub fn effect(has_files: bool) -> u32 {
-    if has_files { EFFECT_COPY } else { EFFECT_NONE }
+pub fn effect(has_files: bool, allowed: u32) -> u32 {
+    if has_files && allowed & EFFECT_COPY != 0 {
+        EFFECT_COPY
+    } else {
+        EFFECT_NONE
+    }
 }
 
 /// Whether Esc going down is left to Windows rather than sent to the
@@ -375,11 +380,18 @@ mod tests {
         assert!(!c.shown());
     }
 
-    /// Files are taken as a copy, never a move; anything else not at all.
+    /// Files are taken as a copy, never a move, and only where the drag's
+    /// source allows a copy; anything else not at all.
     #[test]
     fn files_are_taken_as_a_copy_and_nothing_else_is_taken() {
-        assert_eq!(effect(true), EFFECT_COPY);
-        assert_eq!(effect(false), EFFECT_NONE);
+        const MOVE: u32 = 2;
+        const LINK: u32 = 4;
+        assert_eq!(effect(true, EFFECT_COPY | MOVE | LINK), EFFECT_COPY);
+        assert_eq!(effect(true, EFFECT_COPY), EFFECT_COPY);
+        assert_eq!(effect(true, MOVE), EFFECT_NONE, "a move only");
+        assert_eq!(effect(true, MOVE | LINK), EFFECT_NONE);
+        assert_eq!(effect(true, EFFECT_NONE), EFFECT_NONE);
+        assert_eq!(effect(false, EFFECT_COPY | MOVE), EFFECT_NONE);
     }
 
     /// Esc is Windows' own only going down while files are over the
