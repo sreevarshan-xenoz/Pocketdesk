@@ -796,6 +796,8 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status = None;
+    // The link the driving computer's cursor arrived on.
+    let mut driver_link: Option<usize> = None;
     // Whether sharing was on when the status was last kept, and when.
     let mut status_kept: Option<(bool, Instant)> = None;
     // The refusals heard from other computers, and told to them, for the
@@ -831,7 +833,7 @@ pub async fn run() {
                 }
                 // Its cursor arriving over a relay is refused, and it comes
                 // home: the keyboard and mouse go over a direct link only.
-                if standing.allowed && arrives_relayed(&msg, || direct_now(&from)) {
+                if standing.allowed && arrives_relayed(&msg, || link::direct_on(link_id) == Some(true)) {
                     tracing::info!(
                         from,
                         "Shared input: another computer's cursor came over a relay; refused"
@@ -875,6 +877,7 @@ pub async fn run() {
                 }
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
+                    driver_link = Some(link_id);
                 }
                 if standing.allowed && matches!(msg, Msg::AskTimings) {
                     let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
@@ -919,7 +922,12 @@ pub async fn run() {
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     let linked = link::linked().contains(&driver);
-                    let refusal = refusal_now(gate.refusal(&driver).await, linked, direct_now(&driver));
+                    // The link its cursor came on while it is still read,
+                    // else the one up now.
+                    let direct = driver_link
+                        .and_then(link::direct_on)
+                        .unwrap_or_else(|| direct_now(&driver));
+                    let refusal = refusal_now(gate.refusal(&driver).await, linked, direct);
                     if linked
                         && let Some(reason) = refusal
                         && !refused_now.contains(&driver)

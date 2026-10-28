@@ -502,7 +502,8 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     // Win+L: swallowed like any key (Windows never saw the Win key go
     // down, so passed on it would type an "l"), never sent; the driver
     // brings the keyboard and mouse home and locks this computer. Its
-    // key-up is swallowed below too (Windows does not hold it).
+    // key-up is swallowed below if the hook is still in then; once home
+    // the hook is out, and the key-up reaches Windows on its own.
     if down && locks_here(modifiers_down(s.mods), info.vkCode) {
         let _ = s.events.send(Captured::LockKey);
         return true;
@@ -515,6 +516,15 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     // A key pressed here before the keyboard went away (Ctrl and Alt of
     // the switch key, say) comes up here too, or Windows would hold it.
     down || !windows_holds(info.vkCode)
+}
+
+/// Whether a send to `to` may open (and greet) a channel for it, with the
+/// keyboard and mouse on `away_on`: never for the computer driven, where a
+/// missing channel is a failed send and brings them home (a new channel's
+/// hello and leave would end the visit there, and its pongs would keep the
+/// watchdog quiet while nothing reached it).
+fn may_open(away_on: Option<&str>, to: &str) -> bool {
+    away_on != Some(to)
 }
 
 /// Whether the key `vk` going down with modifiers `mods` held while away
@@ -1123,8 +1133,14 @@ impl Glue {
         while let Some(action) = queue.pop_front() {
             match action {
                 Action::Send(to, msg) => {
-                    let sent = self
-                        .channel(&to)
+                    // The computer driven is never greeted anew mid-visit:
+                    // a new channel's leave would end the visit there.
+                    let channel = if may_open(driver.away_on(), &to) {
+                        self.channel(&to)
+                    } else {
+                        self.channels.get_mut(&to)
+                    };
+                    let sent = channel
                         .map(|channel| channel.send(&msg))
                         .unwrap_or_else(|| Err("no channel".to_string()));
                     if let Err(e) = sent {
@@ -1165,14 +1181,14 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
-                // Sent as any message is, so a ping that cannot go brings
-                // the keyboard and mouse home as a failed send does.
                 // Only ever after the keyboard and mouse came home.
                 Action::LockHere => {
                     if let Err(e) = crate::privacy::lock_screen() {
                         tracing::warn!("Shared input: Win+L did not lock this computer: {e}");
                     }
                 }
+                // Sent as any message is, so a ping that cannot go brings
+                // the keyboard and mouse home as a failed send does.
                 Action::Ping(to) => queue.push_front(Action::Send(
                     to,
                     Msg::Ping {
@@ -1516,6 +1532,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                         let _ = glue.channel(&id);
                     }
                 }
+                // A computer driven whose link went comes home with it.
+                if let Some(to) = driver.away_on().map(str::to_string)
+                    && link::connection(&to).is_none()
+                {
+                    let actions = driver.link_gone(&to, "The link to that computer closed");
+                    glue.apply(&mut driver, actions);
+                }
                 glue.channels.retain(|id, _| link::connection(id).is_some());
             }
             let layout = read_layout(&glue);
@@ -1683,6 +1706,15 @@ mod tests {
         let started = Instant::now();
         assert!(!wait_lowered(&RUNNING, Duration::from_millis(100)).await);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A send to the computer driven never opens a channel for it; to any
+    /// other, and at home, it may.
+    #[test]
+    fn the_computer_driven_is_never_greeted_anew() {
+        assert!(!may_open(Some("L"), "L"));
+        assert!(may_open(Some("L"), "M"));
+        assert!(may_open(None, "L"));
     }
 
     /// Win+L while away locks this computer, whatever else is held with

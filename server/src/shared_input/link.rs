@@ -282,10 +282,32 @@ pub fn last_heard(device_id: &str) -> Option<std::time::Instant> {
     lock(&LAST_HEARD).get(device_id).copied()
 }
 
+/// The connections being read now, by `stable_id`: an arrival's link
+/// ([`Arrival`]'s last field) is looked up here.
+static READING: LazyLock<Mutex<HashMap<usize, Connection>>> = LazyLock::new(Default::default);
+
+/// A connection in [`READING`] while its reader runs, however it ends.
+struct Reading(usize);
+
+impl Drop for Reading {
+    fn drop(&mut self) {
+        lock(&READING).remove(&self.0);
+    }
+}
+
+/// Whether the link `link` (a connection's `stable_id`, as an arrival
+/// carries it) is direct now; `None` once it is no longer read.
+pub fn direct_on(link: usize) -> Option<bool> {
+    let conn = lock(&READING).get(&link).cloned()?;
+    Some(is_direct(&conn))
+}
+
 /// Read what the computer `device_id` sends on `conn` until it closes: its
 /// datagrams, and each uni stream it opens, each in a task of its own (a
 /// frame is read in parts, so a read is never raced against another).
 async fn read_link(device_id: String, conn: Connection) {
+    lock(&READING).insert(conn.stable_id(), conn.clone());
+    let _reading = Reading(conn.stable_id());
     let mut streams = tokio::task::JoinSet::new();
     loop {
         // Both are cancel-safe: each takes its stream or datagram only in
@@ -705,13 +727,28 @@ mod tests {
         b.close().await;
     }
 
-    /// Over loopback the path is an IP one: direct, as at home.
+    /// Over loopback the path is an IP one: direct, as at home. An
+    /// arrival's link is looked up by its id while it is read, and is no
+    /// link once it is not.
     #[tokio::test]
     async fn a_loopback_link_is_direct() {
         let (a, b, out, _back) = linked_pair().await;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while !is_direct(&out) {
             assert!(tokio::time::Instant::now() < deadline, "direct in time");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let id = out.stable_id();
+        assert_eq!(direct_on(id), None, "not read yet");
+        register("test-direct-on", out);
+        while direct_on(id).is_none() {
+            assert!(tokio::time::Instant::now() < deadline, "read in time");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(direct_on(id), Some(true));
+        unregister("test-direct-on");
+        while direct_on(id).is_some() {
+            assert!(tokio::time::Instant::now() < deadline, "forgotten in time");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         a.close().await;
