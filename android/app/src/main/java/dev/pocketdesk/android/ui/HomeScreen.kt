@@ -1,5 +1,6 @@
 package dev.pocketdesk.android.ui
 
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.CardDefaults
@@ -56,6 +57,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.core.net.toUri
 import dev.pocketdesk.android.ForgetComputer
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.ComputerName
@@ -144,6 +146,9 @@ private fun tryPorts(change: FoundComputers.Moved, context: android.content.Cont
     }
     return MoveOutcome.MOVED
 }
+
+/** Where the empty Home sends a phone with no computer yet: the newest release's downloads. */
+private const val DESKTOP_APP_URL = "https://github.com/sreevarshan-xenoz/Pocketdesk/releases/latest"
 
 /**
  * Landing screen: the saved-desktop card list. Tapping a card connects;
@@ -440,6 +445,14 @@ fun HomeScreen(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = onAdd) {
                     Text(stringResource(R.string.add_computer))
+                }
+                Spacer(Modifier.height(8.dp))
+                // A first-time user may have only the phone app: say where the
+                // computer's half comes from.
+                TextButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, DESKTOP_APP_URL.toUri())) }
+                }) {
+                    Text(stringResource(R.string.home_get_desktop_app))
                 }
             }
         } else {
