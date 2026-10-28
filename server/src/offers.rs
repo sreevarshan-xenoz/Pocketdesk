@@ -629,6 +629,28 @@ fn finish_in(dir: &Path, id: &str, outcome: Result<(), String>) {
     update_sent(dir, id, state);
 }
 
+/// The file or folder at `path` as the log may name it on a send to
+/// another computer (BK4): its kind, extension and size, never its name
+/// or where it is. An extension that is not a short plain one is left out.
+pub(crate) fn unnamed(path: &Path) -> String {
+    let meta = std::fs::metadata(path).ok();
+    if meta.as_ref().is_some_and(|m| m.is_dir()) {
+        return "a folder".to_string();
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|_| path.file_stem().is_some_and(|s| !s.is_empty()))
+        .filter(|e| (1..=5).contains(&e.len()) && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(|e| format!(" .{}", e.to_ascii_lowercase()));
+    let size = meta.map(|m| format!(" of {} bytes", m.len()));
+    format!(
+        "a{} file{}",
+        ext.unwrap_or_default(),
+        size.unwrap_or_default()
+    )
+}
+
 /// Send a file to another of the owner's computers (2h): on the link to it,
 /// as a phone shares one, never as an offer (the other computer is not this
 /// one's client). Recorded first, then sent on a task of its own. A folder
@@ -677,7 +699,7 @@ fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
     if let Err(reason) = checked {
         tracing::warn!(
             "Not sending {} to {}: {reason}",
-            path.display(),
+            unnamed(&path),
             request.device_id
         );
         return;
@@ -689,7 +711,7 @@ fn deliver_to_computer(dir: &Path, request: SendRequest, path: PathBuf) {
             Err(reason) => {
                 tracing::warn!(
                     "Sending {} to another computer failed: {reason}",
-                    path.display()
+                    unnamed(&path)
                 );
                 SentState::Failed(reason)
             }
@@ -784,7 +806,7 @@ fn deliver_folder_to_computer(dir: &Path, request: SendRequest, root: PathBuf) {
             (_, Err(reason)) | (Err(reason), _) => {
                 tracing::warn!(
                     "Not sending {} to {}: {reason}",
-                    root.display(),
+                    unnamed(&root),
                     request.device_id
                 );
                 return;
@@ -812,8 +834,9 @@ fn deliver_folder_to_computer(dir: &Path, request: SendRequest, root: PathBuf) {
                 crate::peer_computers::send_file(&request.device_id, &file.full, Some(&part)).await
             {
                 tracing::warn!(
-                    "Sending folder {folder} to another computer stopped at {}: {reason}",
-                    file.path.join("/")
+                    "Sending a folder to another computer stopped at file {} of {count} ({}): {reason}",
+                    n + 1,
+                    unnamed(&file.full)
                 );
                 state = SentState::Failed(format!("{n} of {count} files sent: {reason}"));
                 break;
@@ -1605,6 +1628,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// BK4: a send to another computer is logged by its kind and size,
+    /// never by its name or where it is.
+    #[test]
+    fn a_computer_sends_file_is_logged_without_its_name() {
+        let dir = temp_dir("unnamed");
+        let file = dir.join("private-plans.TXT");
+        std::fs::write(&file, b"hello").unwrap();
+        assert_eq!(unnamed(&file), "a .txt file of 5 bytes");
+        let bare = dir.join("README");
+        std::fs::write(&bare, b"").unwrap();
+        assert_eq!(unnamed(&bare), "a file of 0 bytes");
+        assert_eq!(unnamed(&dir), "a folder");
+        assert_eq!(unnamed(&dir.join("gone.pdf")), "a .pdf file");
+        // A name that is all extension, or an odd one, is not let through.
+        assert_eq!(unnamed(Path::new("x/.bashrc")), "a file");
+        assert_eq!(unnamed(Path::new("x/a.my-secret")), "a file");
+        for words in [unnamed(&file), unnamed(&dir)] {
+            assert!(!words.contains("private"), "{words}");
+            assert!(!words.contains("ll-offers"), "{words}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

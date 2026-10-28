@@ -887,7 +887,8 @@ pub(crate) async fn send_file(
             Err(reason) => match retried(&reason, attempt) {
                 Some(wait) => {
                     tracing::info!(
-                        "Sending {name} to another computer failed ({reason}); again in {wait:?}"
+                        "Sending {} to another computer failed ({reason}); again in {wait:?}",
+                        crate::offers::unnamed(path)
                     );
                     // Others go while this one waits.
                     drop(_turn);
