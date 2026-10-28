@@ -305,17 +305,61 @@ fn what_follows(
     }
 }
 
-/// The image last sent to each computer (by id), until its clipboard holds
-/// something else: the same image is never sent to a computer twice in a
-/// row.
-static IMAGE_SENT: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
+/// The image last sent to each computer, from the start of its send, until
+/// its clipboard holds something else: the same image is never sent to a
+/// computer twice in a row, nor again while it is on its way (BK3 review:
+/// a switch's push and the watcher's sent it twice).
+static IMAGE_SENT: LazyLock<Mutex<HashMap<String, Sent>>> = LazyLock::new(Default::default);
 
-/// Note that the image `id` reached the computer `device_id`.
+/// Note that the image `id` is on its way to the computer `device_id`, or
+/// reached it: from the start of its send ([`forget_image_sent_if`] if it
+/// fails).
 pub(crate) fn note_image_sent(device_id: &str, id: &str) {
-    IMAGE_SENT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(device_id.to_string(), id.to_string());
+    note_sent(device_id, id, None);
+}
+
+fn note_sent(device_id: &str, id: &str, told_until: Option<std::time::Instant>) {
+    IMAGE_SENT.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        device_id.to_string(),
+        Sent {
+            id: id.to_string(),
+            told_until,
+        },
+    );
+}
+
+/// How long an image told to a computer counts as on its way to it before
+/// that computer fetches it: one whose settings do not take it never does.
+const TOLD_WAIT: Duration = Duration::from_secs(10);
+
+/// An image sent or told to a computer: its id, and while it is only told
+/// (not fetched yet), until when it counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Sent {
+    id: String,
+    told_until: Option<std::time::Instant>,
+}
+
+/// The id `sent` names at `now`: a told image only until its wait ends.
+fn sent_counts(sent: &Sent, now: std::time::Instant) -> Option<&str> {
+    sent.told_until
+        .is_none_or(|until| now < until)
+        .then_some(sent.id.as_str())
+}
+
+/// Note that the image `id` was told to the computer `device_id`, for it to
+/// fetch: on its way for [`TOLD_WAIT`] unless the fetch comes.
+fn note_image_told(device_id: &str, id: &str) {
+    note_sent(device_id, id, Some(std::time::Instant::now() + TOLD_WAIT));
+}
+
+/// A send or tell of the image `id` to `device_id` failed: its note goes,
+/// unless a later one replaced it.
+pub(crate) fn forget_image_sent_if(device_id: &str, id: &str) {
+    let mut sent = IMAGE_SENT.lock().unwrap_or_else(|e| e.into_inner());
+    if sent.get(device_id).is_some_and(|s| s.id == id) {
+        sent.remove(device_id);
+    }
 }
 
 /// The computer `device_id`'s clipboard holds no image of this one's now:
@@ -330,11 +374,13 @@ fn forget_image_sent(device_id: &str) {
 /// The image last sent to the computer `device_id`, while nothing has
 /// gone to it since.
 fn image_sent_last(device_id: &str) -> Option<String> {
+    let now = std::time::Instant::now();
     IMAGE_SENT
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(device_id)
-        .cloned()
+        .and_then(|sent| sent_counts(sent, now))
+        .map(str::to_string)
 }
 
 /// The switches of the shared keyboard and mouse this computer has seen: a
@@ -570,6 +616,7 @@ async fn push_image_now(device_id: &str, id: &str, at: u64) {
         Some(client) if crate::plugins::pair::permits(device_id, "kdeconnect.clipboard") => {
             *TOLD.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some((device_id.to_string(), id.to_string(), at));
+            note_image_told(device_id, id);
             client
                 .send_packet(&follow_image_packet(id, size))
                 .await
@@ -577,12 +624,12 @@ async fn push_image_now(device_id: &str, id: &str, at: u64) {
                 .map_err(|e| e.to_string())
         }
         Some(_) => Err("it does not have the Clipboard permission here".to_string()),
-        None => crate::peer_computers::send_clipboard_image(device_id, image, true, || still(at))
-            .await
-            .map(|()| {
-                note_image_sent(device_id, id);
-                "sent"
-            }),
+        None => {
+            note_image_sent(device_id, id);
+            crate::peer_computers::send_clipboard_image(device_id, image, true, || still(at))
+                .await
+                .map(|()| "sent")
+        }
     };
     match sent {
         // Who and how large, never the image.
@@ -590,6 +637,7 @@ async fn push_image_now(device_id: &str, id: &str, at: u64) {
             "Clipboard image followed the mouse to {device_id} ({size} bytes, {how})"
         ),
         Err(e) => {
+            forget_image_sent_if(device_id, id);
             tracing::debug!("The clipboard image did not follow the mouse to {device_id}: {e}")
         }
     }
@@ -1093,6 +1141,11 @@ async fn push_image(
         .into_iter()
         .filter(|c| may_push_image(c.device_id(), phone_images) && image_goes_to(c.device_id(), id))
     {
+        // A computer's is on its way from now (BK3 review).
+        let computer = crate::plugins::pair::is_computer_device(target.device_id());
+        if computer {
+            note_image_told(target.device_id(), id);
+        }
         match target.send_packet(&packet).await {
             // AD1: who and how large, never the image: a phone's switch or
             // permission keeping it from the phone can be told apart.
@@ -1100,7 +1153,12 @@ async fn push_image(
                 "Clipboard image told to {} ({size} bytes)",
                 target.device_id()
             ),
-            Err(e) => tracing::debug!("Clipboard image not told to {}: {e}", target.device_id()),
+            Err(e) => {
+                if computer {
+                    forget_image_sent_if(target.device_id(), id);
+                }
+                tracing::debug!("Clipboard image not told to {}: {e}", target.device_id())
+            }
         }
     }
     let linked: Vec<String> = linked
@@ -1117,16 +1175,18 @@ async fn push_image(
     };
     for device_id in linked {
         let (image, id) = (image.clone(), id.to_string());
+        // On its way from now (BK3 review).
+        note_image_sent(&device_id, &id);
         // Its own task: one computer slow to open its stream holds up none.
         tokio::spawn(async move {
             match crate::peer_computers::send_clipboard_image(&device_id, image, false, || true)
                 .await
             {
-                Ok(()) => {
-                    note_image_sent(&device_id, &id);
-                    tracing::info!("Clipboard image sent to {device_id} ({size} bytes)");
+                Ok(()) => tracing::info!("Clipboard image sent to {device_id} ({size} bytes)"),
+                Err(e) => {
+                    forget_image_sent_if(&device_id, &id);
+                    tracing::debug!("Clipboard image not sent to {device_id}: {e}")
                 }
-                Err(e) => tracing::debug!("Clipboard image not sent to {device_id}: {e}"),
             }
         });
     }
@@ -1392,6 +1452,47 @@ mod tests {
             what_follows(text(), "desk", None, None, Some("ab12")),
             text()
         );
+    }
+
+    /// BK3 review: an image on its way to a computer counts from the start
+    /// of its send, so a switch's push and the watcher's never send it
+    /// twice; a failed send lets the next one go, and only its own note.
+    #[test]
+    fn an_image_on_its_way_is_not_sent_again_and_a_failure_lets_it_go() {
+        let image = || Held::Image("ab12".to_string());
+        note_image_sent("bk3-flight", "ab12");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "the watcher's");
+        let last = image_sent_last("bk3-flight");
+        assert_eq!(
+            what_follows(image(), "bk3-flight", None, None, last.as_deref()),
+            Held::Nothing,
+            "a switch's"
+        );
+        forget_image_sent_if("bk3-flight", "cd34");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "another's failure");
+        forget_image_sent_if("bk3-flight", "ab12");
+        assert!(image_goes_to("bk3-flight", "ab12"), "the next one goes");
+        let last = image_sent_last("bk3-flight");
+        assert_eq!(
+            what_follows(image(), "bk3-flight", None, None, last.as_deref()),
+            image()
+        );
+        // Told, it waits for the fetch only so long.
+        note_image_told("bk3-flight", "ab12");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "told, on its way");
+        forget_image_sent("bk3-flight");
+        let now = std::time::Instant::now();
+        let told = Sent {
+            id: "ab12".to_string(),
+            told_until: Some(now + TOLD_WAIT),
+        };
+        assert_eq!(sent_counts(&told, now), Some("ab12"));
+        assert_eq!(sent_counts(&told, now + TOLD_WAIT), None, "never fetched");
+        let sent = Sent {
+            id: "ab12".to_string(),
+            told_until: None,
+        };
+        assert_eq!(sent_counts(&sent, now + TOLD_WAIT * 100), Some("ab12"));
     }
 
     /// BK3: the image last sent to a computer is kept, each computer's own,

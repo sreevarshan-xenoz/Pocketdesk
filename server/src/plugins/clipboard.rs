@@ -402,19 +402,24 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         }
     };
     let to = sender.device_id().to_string();
+    // To another computer: on its way from now, and never sent to it twice
+    // in a row (BK3).
+    let computer = crate::plugins::pair::is_computer_device(&to);
+    if computer {
+        crate::clipboard_push::note_image_sent(&to, &image.id);
+    }
     tokio::spawn(async move {
         let _slot = slot;
         let size = image.png.len() as u64;
         let mut reader = image.png.as_slice();
         match share::send_reader(route, &key, &mut reader, size).await {
-            Ok(_) => {
-                // Not sent to another computer twice in a row (BK3).
-                if crate::plugins::pair::is_computer_device(&to) {
-                    crate::clipboard_push::note_image_sent(&to, &image.id);
+            Ok(_) => tracing::info!("Clipboard image sent to {to} ({size} bytes)"),
+            Err(e) => {
+                if computer {
+                    crate::clipboard_push::forget_image_sent_if(&to, &image.id);
                 }
-                tracing::info!("Clipboard image sent to {to} ({size} bytes)");
+                tracing::warn!("Clipboard image not sent to {to}: {e}")
             }
-            Err(e) => tracing::warn!("Clipboard image not sent to {to}: {e}"),
         }
     });
 }
