@@ -464,7 +464,7 @@ cmd_uninstall() {
   # Remove binary
   if [ -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" ]; then
     info "Removing binary ${INSTALL_PREFIX}/bin/${BINARY_NAME}..."
-    [ "$DRY_RUN" = true ] || sudo rm -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" "${INSTALL_PREFIX}/bin/pocketdesk"
+    [ "$DRY_RUN" = true ] || sudo rm -f "${INSTALL_PREFIX}/bin/${BINARY_NAME}" "${INSTALL_PREFIX}/bin/pocketdesk-app" "${INSTALL_PREFIX}/bin/pocketdesk-tray"
   fi
 
   # Remove service file
@@ -1177,11 +1177,14 @@ cmd_install() {
   # Install binary
   info "Installing binary to ${INSTALL_PREFIX}/bin/${BINARY_NAME}..."
   [ "$DRY_RUN" = true ] || sudo install -Dm755 "${extracted_dir}/${BINARY_NAME}" "${INSTALL_PREFIX}/bin/${BINARY_NAME}"
-  # The Pocketdesk desktop app, when the release carries it.
-  if [ -f "${extracted_dir}/pocketdesk" ]; then
-    info "Installing the desktop app to ${INSTALL_PREFIX}/bin/pocketdesk..."
-    [ "$DRY_RUN" = true ] || sudo install -Dm755 "${extracted_dir}/pocketdesk" "${INSTALL_PREFIX}/bin/pocketdesk"
-  fi
+  # The desktop app and its tray, when the release carries them.
+  local app
+  for app in pocketdesk-app pocketdesk-tray; do
+    if [ -f "${extracted_dir}/${app}" ]; then
+      info "Installing ${app} to ${INSTALL_PREFIX}/bin/${app}..."
+      [ "$DRY_RUN" = true ] || sudo install -Dm755 "${extracted_dir}/${app}" "${INSTALL_PREFIX}/bin/${app}"
+    fi
+  done
 
   # Install service (systemd *user* unit — the server needs the graphical
   # session's Wayland/PipeWire, which a system unit cannot reach)
