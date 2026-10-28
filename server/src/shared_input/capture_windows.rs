@@ -13,8 +13,10 @@
 //! carried off again. Ctrl+Alt+Del and Win+L are Windows' own; no hook sees
 //! them, and the lock that follows brings the keyboard and mouse home. The
 //! loop looks at what is in front every half second for the gaming lock
-//! ([`game_lock`]): a game in front puts the input thread in [`Mode::Off`],
-//! with no hooks at all.
+//! ([`game_lock`]), and at once when a window comes to the front (an
+//! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
+//! hook): a game in front puts the input thread in [`Mode::Off`], with no
+//! hooks of any kind. The probes run on the loop's own thread.
 //!
 //! The hook reports physical pixels; the loop works in logical ones
 //! ([`Desktop`]), as the layout does. Nothing here is run by the tests: they
@@ -39,6 +41,7 @@ use windows::Win32::System::StationsAndDesktops::{
 };
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
 };
@@ -49,15 +52,16 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateCursor, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetCursorPos, GetMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED,
-    LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, OCR_APPSTARTING, OCR_CROSS, OCR_HAND, OCR_IBEAM, OCR_NO,
-    OCR_NORMAL, OCR_SIZEALL, OCR_SIZENESW, OCR_SIZENS, OCR_SIZENWSE, OCR_SIZEWE, OCR_UP, OCR_WAIT,
-    PostThreadMessageW, RegisterClassW, SPI_SETCURSORS, SYSTEM_CURSOR_ID,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursorPos, SetSystemCursor, SetWindowsHookExW,
-    SystemParametersInfoW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_HOTKEY,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
-    WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
-    WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_POPUP,
+    EVENT_SYSTEM_FOREGROUND, GetCursorPos, GetMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT,
+    LLKHF_EXTENDED, LLKHF_INJECTED, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, OCR_APPSTARTING,
+    OCR_CROSS, OCR_HAND, OCR_IBEAM, OCR_NO, OCR_NORMAL, OCR_SIZEALL, OCR_SIZENESW, OCR_SIZENS,
+    OCR_SIZENWSE, OCR_SIZEWE, OCR_UP, OCR_WAIT, PostThreadMessageW, RegisterClassW, SPI_SETCURSORS,
+    SYSTEM_CURSOR_ID, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetCursorPos, SetSystemCursor,
+    SetWindowsHookExW, SystemParametersInfoW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
+    WS_POPUP,
 };
 use windows::core::w;
 
@@ -274,6 +278,9 @@ struct ThreadState {
     mode: Mode,
     mouse: Option<HHOOK>,
     keyboard: Option<HHOOK>,
+    /// The out-of-context hook that hears a window come to the front, set
+    /// and removed with the mouse hook.
+    foreground: Option<HWINEVENTHOOK>,
     instance: HINSTANCE,
     /// Modifiers seen down by the keyboard hook.
     mods: u32,
@@ -474,6 +481,21 @@ fn windows_holds(vk: u32) -> bool {
     (unsafe { GetAsyncKeyState(vk) } as u16) & 0x8000 == 0x8000
 }
 
+/// Another window came to the front: told, so the loop looks at once.
+unsafe extern "system" fn foreground_changed(
+    _hook: HWINEVENTHOOK,
+    _event: u32,
+    _window: HWND,
+    _object: i32,
+    _child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    with_state(|s| {
+        let _ = s.events.send(Captured::ForegroundChanged);
+    });
+}
+
 /// Put the hooks `mode` wants in place, on the input thread.
 fn apply_mode(s: &mut ThreadState, mode: Mode) {
     s.mode = mode;
@@ -503,6 +525,33 @@ fn apply_mode(s: &mut ThreadState, mode: Mode) {
     if !want_keyboard && let Some(hook) = s.keyboard.take() {
         // SAFETY: as above.
         let _ = unsafe { UnhookWindowsHookEx(hook) };
+    }
+    // A window coming to the front is heard at once while the mouse hook
+    // is in (out of context: nothing is loaded into other programs; told
+    // through this thread's message loop). Off, with a game in front, there
+    // is no hook of any kind; the loop's poll sees the game leave.
+    if want_mouse && s.foreground.is_none() {
+        // SAFETY: a callback of this module, on this thread.
+        let hook = unsafe {
+            SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                None,
+                Some(foreground_changed),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            )
+        };
+        if hook.0.is_null() {
+            tracing::warn!("Shared input: a window coming to the front will not be heard at once");
+        } else {
+            s.foreground = Some(hook);
+        }
+    }
+    if !want_mouse && let Some(hook) = s.foreground.take() {
+        // SAFETY: a hook this thread set.
+        let _ = unsafe { UnhookWinEvent(hook) };
     }
     if mode != Mode::Away {
         s.wheel = (0, 0);
@@ -618,6 +667,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 mode: Mode::Off,
                 mouse: None,
                 keyboard: None,
+                foreground: None,
                 instance,
                 mods: 0,
                 hotkey_down: false,
@@ -877,21 +927,33 @@ const RESTART_AFTER: Duration = Duration::from_secs(30);
 const PARKING_WAIT: Duration = Duration::from_millis(250);
 /// How long after a channel could not be opened it is tried again.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
-/// How often what is in front is looked at, for the gaming lock.
+/// How often what is in front is looked at, for the gaming lock (a game
+/// leaving the front is seen this way: no hook is in while it is there).
 const GAME_EVERY: Duration = Duration::from_millis(500);
+/// After a window comes to the front, how often it is looked at again and
+/// for how long: Windows can say "full screen" a little after the window
+/// takes the front.
+const GAME_SETTLE_EVERY: Duration = Duration::from_millis(50);
+const GAME_SETTLE_FOR: Duration = Duration::from_millis(500);
 
-/// What is in front now and whether a kernel-level anti-cheat runs, for
-/// the driver; nothing is probed with the gaming lock off.
-fn foreground_now(game_lock: bool) -> Captured {
+/// What is in front now (the cursor in logical pixels) and whether a
+/// kernel-level anti-cheat runs, for the driver. Nothing is probed with the
+/// gaming lock off, and the services only while a game is in front (the
+/// only time the answer matters).
+fn foreground_now(game_lock: bool, lock_programs: &[String], desktop: &Desktop) -> Captured {
     if !game_lock {
         return Captured::Foreground {
             fg: game_lock::Foreground::default(),
             kernel_anti_cheat: false,
         };
     }
+    let mut fg = game_lock::foreground();
+    fg.cursor = fg.cursor.map(|at| desktop.to_logical(at));
+    let kernel_anti_cheat = game_lock::in_front(&fg, lock_programs, game_lock)
+        && game_lock::kernel_anti_cheat_running();
     Captured::Foreground {
-        fg: game_lock::foreground(),
-        kernel_anti_cheat: game_lock::kernel_anti_cheat_running(),
+        fg,
+        kernel_anti_cheat,
     }
 }
 
@@ -1086,9 +1148,10 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     // What is in front is weighed before anything else, so a game already
     // there never sees a hook.
     let mut game_lock_on = config.shared_input_game_lock;
+    let mut lock_programs = config.shared_input_lock_programs.clone();
     let mut driver = Driver::new(&me.device_id, read_layout(&glue))
-        .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
-    let actions = driver.on(foreground_now(game_lock_on));
+        .with_game_lock(game_lock_on, lock_programs.clone());
+    let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
     let start = driver.start();
     glue.apply(&mut driver, start);
@@ -1102,6 +1165,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         Instant::now(),
     );
     let mut greeted_at: Option<Instant> = None;
+    // Until when what is in front is looked at every 50 ms, after a window
+    // came to the front.
+    let mut settle_until: Option<Instant> = None;
     while !stop.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
             tracing::warn!(
@@ -1114,6 +1180,17 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             return;
         }
         match captured.recv_timeout(Duration::from_millis(50)) {
+            // Looked at at once (and again for a while), before any move
+            // queued behind it can cross an edge.
+            Ok(Captured::ForegroundChanged) => {
+                let actions = driver.on(Captured::ForegroundChanged);
+                glue.apply(&mut driver, actions);
+                let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+                let actions = driver.on(now);
+                glue.apply(&mut driver, actions);
+                game_at = Instant::now();
+                settle_until = Some(game_at + GAME_SETTLE_FOR);
+            }
             Ok(event) => {
                 last_input = Instant::now();
                 if let Some(event) = glue.logical(&driver, event) {
@@ -1126,9 +1203,15 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
-        if game_at.elapsed() >= GAME_EVERY {
+        let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
+            GAME_SETTLE_EVERY
+        } else {
+            GAME_EVERY
+        };
+        if game_at.elapsed() >= game_every {
             game_at = Instant::now();
-            let actions = driver.on(foreground_now(game_lock_on));
+            let now = foreground_now(game_lock_on, &lock_programs, &glue.desktop);
+            let actions = driver.on(now);
             glue.apply(&mut driver, actions);
         }
         // Who is at this computer, to every computer with a channel: the
@@ -1175,7 +1258,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // The gaming lock's settings, taken without a restart.
             let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
-            let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
+            lock_programs = config.shared_input_lock_programs;
+            let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
             let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
             if desktop != glue.desktop {

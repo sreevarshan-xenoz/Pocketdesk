@@ -87,6 +87,9 @@ pub enum Captured {
         fg: Foreground,
         kernel_anti_cheat: bool,
     },
+    /// Another window came to the front (heard while the hooks are in): no
+    /// edge crosses until what is in front has been looked at again.
+    ForegroundChanged,
 }
 
 /// What the driver wants done.
@@ -152,6 +155,11 @@ pub struct Driver {
     /// The keyboard and mouse went off a game here by the switch key: no
     /// snap back while they are away.
     forced: bool,
+    /// Another window came to the front and has not been looked at yet.
+    foreground_pending: bool,
+    /// The mouse was not watched until now (no hooks): the first position
+    /// watched only marks where it is, so no stale point measures a move.
+    reseed: bool,
 }
 
 impl Driver {
@@ -172,6 +180,8 @@ impl Driver {
             foreground: None,
             game_held: false,
             forced: false,
+            foreground_pending: false,
+            reseed: false,
         }
     }
 
@@ -273,8 +283,10 @@ impl Driver {
                 kernel_anti_cheat,
             } => {
                 self.foreground = Some((fg, kernel_anti_cheat));
+                self.foreground_pending = false;
                 self.weigh_game(&mut out);
             }
+            Captured::ForegroundChanged => self.foreground_pending = true,
             _ if self.locked => {}
             Captured::Moved { x, y } => match &self.away {
                 None => self.watch((x, y), &mut out),
@@ -432,6 +444,14 @@ impl Driver {
             None => (false, Lock::Free),
         };
         let was = std::mem::replace(&mut self.game_held, held);
+        // While a game holds them here no move is watched: where the cursor
+        // is comes from the probe, for a forced switch to park from.
+        if held
+            && self.away.is_none()
+            && let Some(at) = self.foreground.as_ref().and_then(|(fg, _)| fg.cursor)
+        {
+            self.home = Some(at);
+        }
         let why = match lock {
             Lock::SnapBack => {
                 Some("A game came to the front here: the keyboard and mouse are back here")
@@ -461,6 +481,11 @@ impl Driver {
     fn settle(&mut self, out: &mut Vec<Action>) {
         let wanted = self.wanted_mode();
         if wanted != self.mode {
+            // Watched again after a time unwatched: the last position seen
+            // is stale, so the first one now only marks where it is.
+            if wanted == Mode::Watch {
+                self.reseed = true;
+            }
             self.mode = wanted;
             out.push(Action::SetMode(wanted));
         }
@@ -486,7 +511,11 @@ impl Driver {
     /// At home: the cursor moved to `pos`; off an edge onto another
     /// computer, it goes there.
     fn watch(&mut self, pos: (i32, i32), out: &mut Vec<Action>) {
-        let Some(prev) = self.home.replace(pos) else {
+        let prev = self.home.replace(pos);
+        if std::mem::take(&mut self.reseed) {
+            return;
+        }
+        let Some(prev) = prev else {
             return;
         };
         let (dx, dy) = (pos.0.saturating_sub(prev.0), pos.1.saturating_sub(prev.1));
@@ -495,6 +524,7 @@ impl Driver {
         // A game in front: the edges lead nowhere (the hooks are out, but a
         // move already on its way may still come).
         if !self.game_held
+            && !self.foreground_pending
             && let Some(crossing) = self.layout.crossing(&self.this, at, dx, dy)
             && crossing.to != self.this
             && self.reachable.contains(&crossing.to)
@@ -1399,6 +1429,7 @@ mod tests {
                 }
                 .to_string(),
                 elevated: false,
+                cursor: None,
             },
             kernel_anti_cheat,
         }
@@ -1433,6 +1464,80 @@ mod tests {
         assert_eq!(modes(&free), vec![Mode::Watch], "{free:?}");
         d.on(moved(3440, 480));
         d.on(moved(3455, 480));
+        assert_eq!(d.away_on(), Some("L"));
+    }
+
+    #[test]
+    fn a_single_move_after_the_game_leaves_does_not_cross() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(500, 500));
+        d.on(in_front(true, false));
+        assert_eq!(d.mode(), Mode::Off);
+        // Unwatched meanwhile, the cursor went to the edge; the first move
+        // watched again is measured from nowhere stale.
+        assert_eq!(modes(&d.on(in_front(false, false))), vec![Mode::Watch]);
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        // A push from there crosses as ever.
+        d.on(moved(3450, 480));
+        d.on(moved(3455, 480));
+        assert_eq!(d.away_on(), Some("L"));
+
+        // The same after a lock and unlock.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(500, 500));
+        d.on(Captured::Locked);
+        d.on(Captured::Unlocked);
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+    }
+
+    #[test]
+    fn a_foreground_change_holds_the_edges_until_it_is_looked_at() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(3440, 480));
+        // A window comes to the front: until the probe answers, an edge
+        // scroll does not cross.
+        assert_eq!(d.on(Captured::ForegroundChanged), vec![]);
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        // It was a game: locked before any move can cross.
+        assert_eq!(modes(&d.on(in_front(true, false))), vec![Mode::Off]);
+        d.on(moved(3450, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+
+        // An ordinary window: the edges work again once it is looked at.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(3440, 480));
+        d.on(Captured::ForegroundChanged);
+        assert_eq!(d.on(in_front(false, false)), vec![]);
+        d.on(moved(3450, 480));
+        d.on(moved(3455, 480));
+        assert_eq!(d.away_on(), Some("L"));
+    }
+
+    #[test]
+    fn a_forced_switch_parks_where_the_cursor_is_in_the_game() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        // Last watched on the monitor; the game then has the cursor on the
+        // laptop's screen, where the probe sees it.
+        d.on(moved(500, 500));
+        let mut game = in_front(true, false);
+        if let Captured::Foreground { fg, .. } = &mut game {
+            fg.cursor = Some((3000, 500));
+        }
+        d.on(game);
+        let over = d.on(Captured::Hotkey);
+        assert!(
+            over.contains(&Action::ParkCursor(PARK.0, PARK.1)),
+            "{over:?}"
+        );
         assert_eq!(d.away_on(), Some("L"));
     }
 
@@ -1536,6 +1641,7 @@ mod tests {
                 cursor_captured: false,
                 program: "game.exe".to_string(),
                 elevated: true,
+                cursor: None,
             },
             kernel_anti_cheat: false,
         });

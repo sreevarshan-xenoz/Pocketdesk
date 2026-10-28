@@ -28,6 +28,10 @@ pub struct Foreground {
     /// That program runs above this server (elevated while the server is
     /// not), so this server's hooks cannot hold input back from it.
     pub elevated: bool,
+    /// Where the cursor is, if it could be read: physical pixels from the
+    /// probe, logical once the loop has it. While a game holds the lock it
+    /// is where a forced switch parks from.
+    pub cursor: Option<(i32, i32)>,
 }
 
 /// What the gaming lock wants.
@@ -63,13 +67,14 @@ pub const ANTI_CHEAT_REFUSED: &str = "A kernel-level anti-cheat (Vanguard, FACEI
      or BattlEye) is running: the keyboard and mouse stay with the game here";
 
 /// The switch key's refusal while the program in front is elevated.
-pub const ELEVATED_REFUSED: &str = "The program in front runs as administrator, so this \
-     computer's keyboard and mouse cannot be held back from it: they stay here. Installing \
-     with `pocketdesk install --elevated` lifts this";
+pub const ELEVATED_REFUSED: &str = "The program in front runs as administrator (or won't let \
+     Pocketdesk look at it), so this computer's keyboard and mouse cannot be held back from \
+     it: they stay here. Installing with `pocketdesk install --elevated` lifts this";
 
 /// Whether `program` (a file name, `EldenRing.exe`) is on `lock_programs`:
-/// by file name, in any case, a listed name's folder and its `.exe` left
-/// out as the owner likes (`eldenring` is `EldenRing.exe`).
+/// by file name, in any case, a listed name's folder, its `.exe` and any
+/// quotes around it left out as the owner likes (`eldenring` is
+/// `EldenRing.exe`).
 pub fn listed(program: &str, lock_programs: &[String]) -> bool {
     let program = file_name(program).to_lowercase();
     if program.is_empty() {
@@ -77,7 +82,8 @@ pub fn listed(program: &str, lock_programs: &[String]) -> bool {
     }
     let stem = program.strip_suffix(".exe").unwrap_or(&program);
     lock_programs.iter().any(|entry| {
-        let entry = file_name(entry.trim()).to_lowercase();
+        let entry = entry.trim().trim_matches(['"', '\'']).trim();
+        let entry = file_name(entry).to_lowercase();
         !entry.is_empty() && (entry == program || entry == stem)
     })
 }
@@ -138,6 +144,7 @@ pub use probes::{foreground, kernel_anti_cheat_running};
 #[cfg(windows)]
 mod probes {
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use windows::Win32::Foundation::{CloseHandle, E_ACCESSDENIED, HANDLE, RECT};
     use windows::Win32::Graphics::Gdi::{
@@ -174,29 +181,44 @@ mod probes {
         let fullscreen = unsafe { SHQueryUserNotificationState() }
             .is_ok_and(|state| state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_BUSY);
         let (program, elevated) = program_in_front();
+        let (cursor_captured, cursor) = cursor_captured();
         Foreground {
             fullscreen,
-            cursor_captured: cursor_captured(),
+            cursor_captured,
             program,
             elevated: elevated && !self_elevated(),
+            cursor,
         }
     }
 
-    /// Whether one of [`KERNEL_ANTI_CHEAT`]'s services is running.
+    /// Whether one of [`KERNEL_ANTI_CHEAT`]'s services is running. Fails
+    /// closed: a service manager that will not open, or one of those
+    /// services this server may not look at, counts as running (the switch
+    /// key is then refused mid-game, never let through blind).
     pub fn kernel_anti_cheat_running() -> bool {
+        static LOGGED: AtomicBool = AtomicBool::new(false);
         // SAFETY: opens the service manager to connect only; closed below.
-        let Ok(manager) =
-            (unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) })
-        else {
-            return false;
-        };
+        let manager =
+            match unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) } {
+                Ok(manager) => manager,
+                Err(e) => {
+                    if !LOGGED.swap(true, Ordering::SeqCst) {
+                        tracing::warn!(
+                            "Shared input: the services could not be read, so the switch key \
+                             is refused mid-game (logged once): {e}"
+                        );
+                    }
+                    return true;
+                }
+            };
         let running = KERNEL_ANTI_CHEAT.iter().any(|name| {
             // SAFETY: the manager just opened; a service not installed fails.
-            let Ok(service) =
-                (unsafe { OpenServiceW(manager, &HSTRING::from(*name), SERVICE_QUERY_STATUS) })
-            else {
-                return false;
-            };
+            let service =
+                match unsafe { OpenServiceW(manager, &HSTRING::from(*name), SERVICE_QUERY_STATUS) }
+                {
+                    Ok(service) => service,
+                    Err(e) => return e.code() == E_ACCESSDENIED,
+                };
             let mut status = SERVICE_STATUS::default();
             // SAFETY: the service just opened, an out value on this stack.
             let read = unsafe { QueryServiceStatus(service, &mut status) };
@@ -213,13 +235,15 @@ mod probes {
         (r.left, r.top, r.right, r.bottom)
     }
 
-    /// The cursor hidden and held inside part of its monitor.
-    fn cursor_captured() -> bool {
+    /// The cursor hidden and held inside part of its monitor, and where it
+    /// is (physical).
+    fn cursor_captured() -> (bool, Option<(i32, i32)>) {
         // Physical pixels for the clip and the monitor alike, whatever this
         // thread's own awareness; put back after.
         // SAFETY: this thread's own setting.
         let before =
             unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        let mut at = None;
         let captured = (|| {
             let mut info = CURSORINFO {
                 cbSize: size_of::<CURSORINFO>() as u32,
@@ -227,6 +251,7 @@ mod probes {
             };
             // SAFETY: an out value on this stack, its size set.
             unsafe { GetCursorInfo(&mut info) }.ok()?;
+            at = Some((info.ptScreenPos.x, info.ptScreenPos.y));
             if info.flags.0 & CURSOR_SHOWING.0 != 0 {
                 return Some(false);
             }
@@ -250,7 +275,7 @@ mod probes {
             // SAFETY: as above, the setting it had.
             unsafe { SetThreadDpiAwarenessContext(before) };
         }
-        captured
+        (captured, at)
     }
 
     /// The file name of the program in front, and whether it is elevated.
@@ -343,6 +368,7 @@ mod tests {
             cursor_captured: false,
             program: "eldenring.exe".to_string(),
             elevated: false,
+            cursor: None,
         }
     }
 
@@ -352,6 +378,7 @@ mod tests {
             cursor_captured: false,
             program: program.to_string(),
             elevated: false,
+            cursor: None,
         }
     }
 
@@ -492,6 +519,18 @@ mod tests {
         assert!(!listed("", &programs(&[""])));
         // A listed name with another extension does not lose it.
         assert!(!listed("game.exe", &programs(&["game.bin"])));
+        // Quotes around an entry (a path pasted as copied) are dropped.
+        let quoted = programs(&[
+            r#""C:\Program Files\Steam\steamapps\common\Game\Game.exe""#,
+            " 'Blender.exe' ",
+            r#""""#,
+        ]);
+        assert!(listed("game.exe", &quoted));
+        assert!(listed("blender.exe", &quoted));
+        assert!(
+            !listed("other.exe", &quoted),
+            "an entry of quotes alone is empty"
+        );
     }
 
     #[test]
