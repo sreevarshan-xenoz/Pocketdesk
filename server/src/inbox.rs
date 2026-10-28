@@ -235,12 +235,15 @@ mod tests {
             took >= Duration::from_millis(190) && took < Duration::from_secs(2),
             "{took:?}"
         );
+        // Whether the wait below is a watched one is decided as it starts:
+        // another test can start the shared watcher while this one sleeps
+        // its unwatched 3 s, and asking afterwards then blamed that sleep.
+        let watched = watching();
         nudge(FOLDER);
         let start = tokio::time::Instant::now();
         wait_at_most(FOLDER, Duration::from_secs(3), Duration::from_secs(3)).await;
-        if watching() {
-            // Well under the 3 s deadline, with room for a slow CI runner
-            // (500 ms failed once on GitHub's Windows runner).
+        if watched {
+            // Well under the 3 s deadline, with room for a slow CI runner.
             assert!(
                 start.elapsed() < Duration::from_millis(1500),
                 "the change ends it"
