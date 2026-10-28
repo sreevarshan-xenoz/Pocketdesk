@@ -38,6 +38,10 @@ pub trait Inject: Send {
     /// Put the pointer at 0..=65535 across this computer's screens'
     /// bounding box, 65535 being its last pixel.
     fn move_abs(&mut self, x: u16, y: u16);
+    /// Get ready to inject before the first event: a uinput device made
+    /// at the first event misses it (libinput opens new devices a moment
+    /// after they appear).
+    fn prepare(&mut self) {}
 }
 
 impl Inject for InputInjector {
@@ -119,6 +123,12 @@ impl Receiver {
         }
     }
 
+    /// Get the injector ready (sharing is on, or a computer that may
+    /// drive this one said hello).
+    pub fn prepare(&mut self) {
+        self.inject.prepare();
+    }
+
     /// The computer driving this one now.
     pub fn driver(&self) -> Option<&str> {
         self.driver.as_deref()
@@ -141,6 +151,11 @@ impl Receiver {
         // Anything at all from the driving computer says it is still there.
         if self.driver.as_deref() == Some(from) {
             self.heard_at = Some(now);
+        }
+        if let Msg::Hello { .. } = msg {
+            // A computer that may drive this one is there: be ready.
+            self.inject.prepare();
+            return;
         }
         if let Msg::Active { idle_ms } = msg {
             if idle_ms < IDLE_MS_AWAKE {
@@ -238,8 +253,17 @@ impl Receiver {
     }
 }
 
-/// The injector, made when it is first needed: a server whose computers
-/// never drive it makes no virtual devices. One that cannot be made is
+/// A receiver going away (the server stopping or upgrading mid-session)
+/// lets go of what it held down first.
+impl Drop for Receiver {
+    fn drop(&mut self) {
+        self.release_held();
+    }
+}
+
+/// The injector, made when sharing is on or a computer that may drive this
+/// one says hello (else at the first event): a server with sharing off
+/// makes no virtual devices. One that cannot be made is
 /// tried again a while later.
 #[derive(Default)]
 struct LazyInjector {
@@ -269,6 +293,10 @@ impl LazyInjector {
 }
 
 impl Inject for LazyInjector {
+    fn prepare(&mut self) {
+        self.get();
+    }
+
     fn key(&mut self, code: u16, pressed: bool) {
         if let Some(injector) = self.get() {
             Inject::key(injector, code, pressed);
@@ -376,6 +404,37 @@ impl Gate {
     }
 }
 
+/// This computer's own screens as last read, so they are written to
+/// `shared_screens.json` (and told) when they are first read, whichever
+/// way that is, and again only when they change.
+#[derive(Debug, Default)]
+struct OwnScreens(Option<Vec<Screen>>);
+
+impl OwnScreens {
+    /// Not read since sharing was last turned on.
+    fn is_unread(&self) -> bool {
+        self.0.is_none()
+    }
+
+    /// Take `now` as this computer's screens; whether they are new (never
+    /// read, or changed), and so to be written and told.
+    fn note(&mut self, now: Vec<Screen>) -> bool {
+        if self.0.as_ref() == Some(&now) {
+            return false;
+        }
+        self.0 = Some(now);
+        true
+    }
+
+    fn get(&self) -> &[Screen] {
+        self.0.as_deref().unwrap_or_default()
+    }
+
+    fn forget(&mut self) {
+        self.0 = None;
+    }
+}
+
 /// What other computers said of their screens and is not written yet, by
 /// computer: the name it gave (when it gave one) and its screens, clipped.
 type Heard = HashMap<String, (Option<String>, Vec<Screen>)>;
@@ -448,7 +507,7 @@ pub async fn run() {
     let mut gate = Gate::default();
     // This computer's screens as last looked at (none while shared input
     // is off), and the computers told them.
-    let mut own: Option<Vec<Screen>> = None;
+    let mut own = OwnScreens::default();
     let mut channels: HashMap<String, Channel> = HashMap::new();
     let mut heard = Heard::new();
     let mut tick = tokio::time::interval(TICK);
@@ -464,10 +523,11 @@ pub async fn run() {
                     Msg::Hello { version, name, screens } if standing.computer => {
                         note_heard(&mut heard, &from, Some(name), screens);
                         if standing.allowed && *version == wire::VERSION {
-                            if own.is_none() {
-                                own = Some(screens::current().await);
+                            if own.is_unread() && own.note(screens::current().await) {
+                                write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec()))
+                                    .await;
                             }
-                            tell_screens(&mut channels, &from, own.as_deref().unwrap_or_default());
+                            tell_screens(&mut channels, &from, own.get());
                         }
                     }
                     Msg::Screens(screens) if standing.computer => {
@@ -513,18 +573,19 @@ pub async fn run() {
             }
             _ = look.tick() => {
                 if !gate.on().await {
-                    own = None;
+                    own.forget();
                     channels.clear();
                     continue;
                 }
-                let now = screens::current().await;
-                if own.as_ref() != Some(&now) {
-                    write_screens(state_dir.as_ref(), Heard::new(), Some(now.clone())).await;
-                    own = Some(now);
+                // Sharing is on: the injector is made now, not at the first
+                // event, which it would miss.
+                receiver.prepare();
+                if own.note(screens::current().await) {
+                    write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
                     for to in told {
                         if gate.standing(&to).await.allowed {
-                            tell_screens(&mut channels, &to, own.as_deref().unwrap_or_default());
+                            tell_screens(&mut channels, &to, own.get());
                         } else {
                             channels.remove(&to);
                         }
@@ -549,7 +610,13 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
-    struct Fake(Arc<Mutex<Vec<Call>>>);
+    struct Fake(Arc<Mutex<Vec<Call>>>, Arc<Mutex<usize>>);
+
+    impl Fake {
+        fn prepared(&self) -> usize {
+            *self.1.lock().unwrap()
+        }
+    }
 
     impl Fake {
         fn take(&self) -> Vec<Call> {
@@ -569,6 +636,9 @@ mod tests {
         }
         fn move_abs(&mut self, x: u16, y: u16) {
             self.0.lock().unwrap().push(Call::Move(x, y));
+        }
+        fn prepare(&mut self) {
+            *self.1.lock().unwrap() += 1;
         }
     }
 
@@ -833,6 +903,72 @@ mod tests {
         assert_eq!(fake.take(), vec![]);
         assert_eq!(r.driver(), Some("pc"));
         assert!(r.wants_awake(t0 + step * 30));
+    }
+
+    #[test]
+    fn dropping_the_receiver_releases_what_is_held() {
+        let (mut r, fake) = receiver();
+        r.handle("pc", Msg::Enter { x: 0, y: 0 }, true);
+        r.handle("pc", key(42, true), true);
+        r.handle(
+            "pc",
+            Msg::Button {
+                button: 0,
+                pressed: true,
+            },
+            true,
+        );
+        fake.take();
+        // The server stopping (or upgrading) mid-session.
+        drop(r);
+        assert_eq!(
+            fake.take(),
+            vec![Call::Key(42, false), Call::Button(0, false)]
+        );
+    }
+
+    #[test]
+    fn an_allowed_hello_prepares_the_injector() {
+        let (mut r, fake) = receiver();
+        let hello = || Msg::Hello {
+            version: wire::VERSION,
+            name: "pc".to_string(),
+            screens: Vec::new(),
+        };
+        r.handle("pc", hello(), false);
+        assert_eq!(fake.prepared(), 0);
+        r.handle("pc", hello(), true);
+        assert_eq!(fake.prepared(), 1);
+        // Nothing is injected for it.
+        assert_eq!(fake.take(), vec![]);
+        r.prepare();
+        assert_eq!(fake.prepared(), 2);
+    }
+
+    #[test]
+    fn this_computers_screens_are_written_the_first_time_whichever_way() {
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        // A Hello reads them first: written then, so the next look that
+        // finds the same does not need to.
+        let mut own = OwnScreens::default();
+        assert!(own.is_unread());
+        assert!(own.note(vec![screen]));
+        assert!(!own.note(vec![screen]));
+        assert_eq!(own.get(), &[screen]);
+        // None at all is written too, the first time.
+        let mut own = OwnScreens::default();
+        assert!(own.note(Vec::new()));
+        assert!(!own.note(Vec::new()));
+        // A change is written; sharing turned off forgets them.
+        assert!(own.note(vec![screen]));
+        own.forget();
+        assert!(own.is_unread());
+        assert!(own.note(vec![screen]));
     }
 
     #[test]

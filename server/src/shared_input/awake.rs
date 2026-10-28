@@ -9,9 +9,20 @@
 //! thread lives while it is held).
 
 /// Whether this computer is being kept awake, and the means of letting go.
-#[derive(Default)]
 pub struct KeepAwake {
-    held: Option<Holder>,
+    /// Dropping it lets go.
+    held: Option<Box<dyn Send>>,
+    /// How a hold is started: the system's, or a test's stand-in.
+    start: fn() -> Option<Box<dyn Send>>,
+}
+
+impl Default for KeepAwake {
+    fn default() -> Self {
+        KeepAwake {
+            held: None,
+            start: || start().map(|holder| Box::new(holder) as Box<dyn Send>),
+        }
+    }
 }
 
 /// Dropping it lets go.
@@ -35,7 +46,7 @@ impl KeepAwake {
     /// nothing changes. On Linux, called on a runtime.
     pub fn hold(&mut self) {
         if self.held.is_none() {
-            self.held = start();
+            self.held = (self.start)();
         }
     }
 
@@ -125,16 +136,45 @@ fn start() -> Option<Holder> {
 mod tests {
     use super::*;
 
-    /// Held once however often it is asked, and let go.
-    #[tokio::test]
-    async fn holds_once_and_lets_go() {
-        let mut awake = KeepAwake::default();
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// How often the stand-in was started, and how many of its holds are
+    /// still up.
+    static STARTED: AtomicUsize = AtomicUsize::new(0);
+    static UP: AtomicUsize = AtomicUsize::new(0);
+
+    struct StandIn;
+
+    impl Drop for StandIn {
+        fn drop(&mut self) {
+            UP.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Held once however often it is asked, and let go; the system is never
+    /// asked (a test must not keep the owner's computer awake).
+    #[test]
+    fn holds_once_and_lets_go() {
+        let mut awake = KeepAwake {
+            held: None,
+            start: || {
+                STARTED.fetch_add(1, Ordering::SeqCst);
+                UP.fetch_add(1, Ordering::SeqCst);
+                Some(Box::new(StandIn))
+            },
+        };
         assert!(!awake.is_held());
         awake.hold();
-        let held = awake.is_held();
         awake.hold();
-        assert_eq!(awake.is_held(), held);
+        assert!(awake.is_held());
+        assert_eq!(STARTED.load(Ordering::SeqCst), 1);
+        assert_eq!(UP.load(Ordering::SeqCst), 1);
         awake.release();
         assert!(!awake.is_held());
+        assert_eq!(UP.load(Ordering::SeqCst), 0);
+        // Dropped while held lets go too.
+        awake.hold();
+        drop(awake);
+        assert_eq!(UP.load(Ordering::SeqCst), 0);
     }
 }
