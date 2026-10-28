@@ -118,7 +118,7 @@ jobs:
 
   # The Windows server and the desktop app are self-contained exes importing
   # only system DLLs and the Windows 10+ UCRT. FFmpeg is not bundled (the
-  # encoder sidecar finds it on PATH; the README says how to get it).
+  # encoder sidecar finds it on PATH; docs/guide.md says how to get it).
   build-windows:
     needs: version
     runs-on: windows-latest

@@ -910,7 +910,7 @@ mod tests {
 
     #[test]
     fn the_example_config_reads_as_it_ships() {
-        // README says to copy it; a value it spells that the server refuses
+        // docs/guide.md says to copy it; a value it spells that the server refuses
         // stops the server at start.
         let example = concat!(env!("CARGO_MANIFEST_DIR"), "/../config.toml.example");
         let config = Config::load_from(std::path::Path::new(example))
