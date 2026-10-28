@@ -76,8 +76,25 @@ For each release:
 
 `packaging/fdroid/dev.pocketdesk.android.yml` is the draft of fdroiddata's metadata file: the bridge built as CI builds it (the pinned Rust, cargo-ndk, `android/bridge/build-android.sh`, JDK 21) and the release key's certificate, so F-Droid would ship the developer's signature on bytes it built itself. The Reproducible APK workflow shows two of CI's machines agree; F-Droid's build server (another JDK distribution, its own SDK) is not tried yet, and any difference fails its comparison. The store listing and screenshots are in `fastlane/metadata/android/en-US/`.
 
-To publish: a merge request to fdroiddata adding the file as `metadata/dev.pocketdesk.android.yml` (the owner's call), with `fdroid lint` and `fdroid build` run on it there. Submit it with the first release that holds the screenshots: F-Droid reads the listing from the tag it builds, and the screenshots show settings newer than 0.4.0 (move the `Builds` entry to that release).
+To publish (the owner's call, from a GitLab account):
+1. Fork [fdroiddata](https://gitlab.com/fdroid/fdroiddata) and add the file as `metadata/dev.pocketdesk.android.yml`. It carries one `Builds` entry, 0.7.0, the first release whose tag holds the screenshots F-Droid reads from `fastlane/`.
+2. In the fork, `fdroid lint dev.pocketdesk.android` and `fdroid rewritemeta dev.pocketdesk.android`. Run against this file outside fdroiddata (fdroidserver from pip, 2026-10-28), lint flagged only the categories, which a checkout without fdroiddata's `config/categories.yml` cannot know (all three are in it), and rewritemeta changed nothing but dropping the comments, which fdroiddata's copy goes without. fdroiddata's CI runs `fdroid build` on the merge request.
+3. Open the merge request with fdroiddata's *App inclusion* template.
 
-## Android developer verification
+After that, F-Droid's update check (`UpdateCheckMode: Tags`) picks up each new `vX.Y.Z` tag by itself.
 
-Registering the developer with Google for Android's developer verification (required from 2027 for apps installed outside Play) is the owner's decision; nothing here depends on it.
+## AUR (Arch Linux)
+
+`aur/PKGBUILD` builds the release's source tarball as the release workflow does (the server, then the desktop app and the tray), and installs the three programs, the systemd user unit pointed at `/usr/bin`, the menu entry, the icon, the man page and the licences. Tailscale is optional, not a dependency. Pocketdesk is not on the AUR yet, so `yay -S pocketdesk` finds nothing until it is published.
+
+For each release, once its tag is pushed:
+1. In `aur/`, set `pkgver`, run `updpkgsums` (it replaces `SKIP` with the tarball's checksum) and `makepkg --printsrcinfo > .SRCINFO`.
+2. `makepkg -si` on an Arch machine or in an `archlinux` container to check it builds and installs.
+3. To publish (the owner's call, from an AUR account with an SSH key): clone `ssh://aur@aur.archlinux.org/pocketdesk.git`, copy in `PKGBUILD`, `pocketdesk.install` and `.SRCINFO`, commit and push.
+
+## Signing the Windows programs
+
+The Windows programs and `setup.exe` are unsigned, so SmartScreen calls their publisher unknown. [SignPath Foundation](https://signpath.org/) signs open-source projects for free; the certificate is issued to SignPath Foundation, which then shows as the publisher. Applying is the owner's call:
+1. Apply at [signpath.io/product/open-source](https://about.signpath.io/product/open-source). Every member with access needs multi-factor authentication on GitHub and SignPath.
+2. Publish a code signing policy page (who builds and approves releases; the line *Free code signing provided by SignPath.io, certificate by SignPath Foundation*) on the landing page or in the README.
+3. Once accepted, add the API token as a repository secret, and a step in the release workflow's Windows job that sends `pocketdesk.exe`, `pocketdesk-app.exe`, `pocketdesk-tray.exe` and the setup to SignPath (`signpath/github-action-submit-signing-request`) before the zip, the installer and `SHA256SUMS` are made. SignPath checks that the files came from that workflow run (origin verification).

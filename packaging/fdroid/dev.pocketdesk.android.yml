@@ -4,7 +4,8 @@
 # request, and running those there, is the owner's call (packaging/README.md).
 Categories:
   - Connectivity
-  - System
+  - File Transfer
+  - Remote Access
 # The code is MIT OR Apache-2.0; fdroiddata takes one SPDX id.
 License: MIT
 AuthorName: sreevarshan-xenoz
@@ -21,57 +22,9 @@ Repo: https://github.com/sreevarshan-xenoz/Pocketdesk.git
 Binaries: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v%v/pocketdesk-v%v-android-arm64.apk
 
 Builds:
-  - versionName: 0.4.0
-    versionCode: 4
-    commit: v0.4.0
-    subdir: android/app
-    # The environment CI builds the release in: JDK 21 (the APK's bytes depend on the
-    # compiler), and cmake for the TLS crate iroh brings (aws-lc-sys).
-    sudo:
-      - apt-get update
-      - apt-get install -y openjdk-21-jdk-headless cmake
-      - update-alternatives --auto java
-    gradle:
-      - yes
-    srclibs:
-      - rustup@1.28.2
-    # The bridge as CI builds it: the pinned Rust, cargo-ndk 4.1.2, one script.
-    prebuild:
-      - $$rustup$$/rustup-init.sh -y --default-toolchain "$(cat ../bridge/rust-toolchain-version)"
-        --profile minimal --target aarch64-linux-android
-      - source $HOME/.cargo/env
-      - cargo install cargo-ndk --version 4.1.2 --locked
-      - export ANDROID_NDK_HOME=$$NDK$$
-      - sh ../bridge/build-android.sh
-    ndk: 29.0.14206865
-
-  - versionName: 0.5.0
-    versionCode: 5
-    commit: v0.5.0
-    subdir: android/app
-    # The environment CI builds the release in: JDK 21 (the APK's bytes depend on the
-    # compiler), and cmake for the TLS crate iroh brings (aws-lc-sys).
-    sudo:
-      - apt-get update
-      - apt-get install -y openjdk-21-jdk-headless cmake
-      - update-alternatives --auto java
-    gradle:
-      - yes
-    srclibs:
-      - rustup@1.28.2
-    # The bridge as CI builds it: the pinned Rust, cargo-ndk 4.1.2, one script.
-    prebuild:
-      - $$rustup$$/rustup-init.sh -y --default-toolchain "$(cat ../bridge/rust-toolchain-version)"
-        --profile minimal --target aarch64-linux-android
-      - source $HOME/.cargo/env
-      - cargo install cargo-ndk --version 4.1.2 --locked
-      - export ANDROID_NDK_HOME=$$NDK$$
-      - sh ../bridge/build-android.sh
-    ndk: 29.0.14206865
-
-  - versionName: 0.6.0
-    versionCode: 6
-    commit: v0.6.0
+  - versionName: 0.7.0
+    versionCode: 7
+    commit: v0.7.0
     subdir: android/app
     # The environment CI builds the release in: JDK 21 (the APK's bytes depend on the
     # compiler), and cmake for the TLS crate iroh brings (aws-lc-sys).
@@ -98,5 +51,5 @@ AllowedAPKSigningKeys: 3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
-CurrentVersion: 0.6.0
-CurrentVersionCode: 6
+CurrentVersion: 0.7.0
+CurrentVersionCode: 7
