@@ -656,6 +656,7 @@ pub async fn connect_to_peer(
                     }
                 }
                 crate::CONTROL_OVER_INTERNET.store(over_internet, Ordering::SeqCst);
+                crate::session::CONTROL_LINKS.fetch_add(1, Ordering::SeqCst);
 
                 // Create a broadcast channel for forwarding incoming packets to Flutter
                 let (packet_tx, _) = broadcast::channel(256);

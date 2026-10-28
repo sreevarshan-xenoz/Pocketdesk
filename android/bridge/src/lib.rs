@@ -1539,6 +1539,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedI
     to_jstring(&mut env, json)
 }
 
+/// How many control links this process has opened (BK5): a new one is
+/// when the phone says its screen again.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeControlLinkCount(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jlong {
+    crate::session::CONTROL_LINKS.load(std::sync::atomic::Ordering::SeqCst) as jlong
+}
+
 /// The app refuses the computer's keyboard and mouse now (BK5): for two
 /// seconds nothing is kept and no ping answered, so the computer brings
 /// its mouse home.

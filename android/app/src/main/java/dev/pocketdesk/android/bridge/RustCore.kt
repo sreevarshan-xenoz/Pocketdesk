@@ -186,6 +186,7 @@ object RustCore {
     private external fun nativeTypeTake(waitMs: Int): String
     private external fun nativeSharedInputTake(waitMs: Int): String
     private external fun nativeSharedInputRefuse()
+    private external fun nativeControlLinkCount(): Long
     private external fun nativeSharedInputScreen(address: String, port: Int, report: String): String
     private external fun nativeTakeMediaPresses(): String
     private external fun nativeTakeComputerMedia(): String
@@ -1104,6 +1105,9 @@ object RustCore {
                 TypedBatch(o.getString("host"), o.getInt("port"), o.getJSONArray("events").toString())
             }.getOrNull()
         }
+
+    /** How many control links the bridge has opened (BK5): -1 when it cannot say. */
+    fun controlLinkCount(): Long = runCatching { nativeControlLinkCount() }.getOrDefault(-1L)
 
     /** The phone refuses the computer's keyboard and mouse now (BK5): for two seconds its pings go unanswered. */
     fun sharedInputRefuse() {

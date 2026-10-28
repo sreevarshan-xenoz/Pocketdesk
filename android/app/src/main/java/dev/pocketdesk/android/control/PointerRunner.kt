@@ -18,7 +18,8 @@ import kotlin.math.roundToInt
  * kept by the notification listener. It tells the phone's own computer what
  * the phone is: whether "Let my computer's keyboard and mouse use this
  * phone" and the Accessibility service are on, and its screen, as any of it
- * changes, every 15 s while the switch is on, and once as it turns off.
+ * changes, on each new link to it, every 15 s while the switch is on, and
+ * once as it turns off.
  * While the switch and C8's Accessibility service are on, one thread waits
  * for what the computer sends and does it through the service, as
  * [PointerPlan] says, showing the computer's pointer. Taking is what keeps
@@ -32,9 +33,6 @@ object PointerRunner {
     private const val WAIT_MS = 200
     private const val BUSY_WAIT_MS = 20
 
-    /** How often the phone says itself again while the switch is on. */
-    private const val REPORT_EVERY_MS = 15_000L
-
     /** Which thread may act: a stopped one's last batch is not done. */
     @Volatile
     private var generation = 0
@@ -44,6 +42,9 @@ object PointerRunner {
     private var said: String? = null
     private var saidTo: Pair<String, Int>? = null
     private var saidAtMs = 0L
+
+    /** The control link it was last said on ([RustCore.controlLinkCount]). */
+    private var saidOnLink = -1L
 
     /** Start or stop the thread, and tell the computer, as the switch and the service say: on the listener's ticks. */
     @Synchronized
@@ -164,8 +165,9 @@ object PointerRunner {
 
     /**
      * Tell the phone's own computer what this phone is ([on]: the switch),
-     * when it changed, every [REPORT_EVERY_MS] while on, or once as it turns
-     * off; again until it went.
+     * as [PointerPlan.reportDue] says (a change, another computer, a new
+     * link, every 15 s while on), or once as it turns off; again until it
+     * went.
      */
     @Synchronized
     private fun report(ctx: Context, on: Boolean) {
@@ -174,12 +176,14 @@ object PointerRunner {
         val to = own.address to own.controlPort
         val json = screen(ctx, on, ControlService.instance != null) ?: return
         val now = SystemClock.elapsedRealtime()
-        val due = json != said || to != saidTo || (on && now - saidAtMs >= REPORT_EVERY_MS)
+        val link = RustCore.controlLinkCount()
+        val due = PointerPlan.reportDue(json, said, to != saidTo, link != saidOnLink, on, now - saidAtMs)
         if (!due) return
         if (RustCore.sharedInputScreen(own.address, own.controlPort, json).isSuccess) {
             said = if (on) json else null
             saidTo = to
             saidAtMs = now
+            saidOnLink = link
         }
     }
 

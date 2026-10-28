@@ -165,6 +165,19 @@ object PointerPlan {
         }
     }
 
+    /** How often the phone says itself again while its switch is on. */
+    const val REPORT_EVERY_MS = 15_000L
+
+    /**
+     * Whether the phone says itself to its computer now: what it says
+     * changed ([json] against what was [said]), it is to another computer,
+     * the link to it is new (a server restarted, a reconnect: the review's
+     * M6, as it forgets what it heard), or, while [on], it was said
+     * [sinceMs] ago and that is [REPORT_EVERY_MS].
+     */
+    fun reportDue(json: String, said: String?, newComputer: Boolean, newLink: Boolean, on: Boolean, sinceMs: Long): Boolean =
+        json != said || newComputer || newLink || (on && sinceMs >= REPORT_EVERY_MS)
+
     /** The keys that act in the field in front. */
     private val KEYS = setOf("enter", "backspace", "delete", "left", "right", "up", "down")
 

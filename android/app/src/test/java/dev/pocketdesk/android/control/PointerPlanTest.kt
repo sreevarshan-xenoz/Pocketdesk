@@ -140,6 +140,21 @@ class PointerPlanTest {
         assertEquals(up, pacer.admit(up, 3_001))
     }
 
+    /** The review's M6: said again at each new link, not only on a change or every 15 s. */
+    @Test
+    fun `the screen is said on a change, a new computer, a new link, and every 15 s`() {
+        val due = { json: String, said: String?, computer: Boolean, link: Boolean, on: Boolean, since: Long ->
+            PointerPlan.reportDue(json, said, computer, link, on, since)
+        }
+        assertFalse(due("a", "a", false, false, true, 1_000))
+        assertTrue("changed", due("b", "a", false, false, true, 1_000))
+        assertTrue("never said", due("a", null, false, false, false, 0))
+        assertTrue("another computer", due("a", "a", true, false, true, 1_000))
+        assertTrue("a new link", due("a", "a", false, true, true, 1_000))
+        assertTrue("15 s on", due("a", "a", false, false, true, PointerPlan.REPORT_EVERY_MS))
+        assertFalse("off: said once", due("a", "a", false, false, false, PointerPlan.REPORT_EVERY_MS))
+    }
+
     @Test
     fun `delete takes the character after the cursor, or the selection`() {
         assertEquals(ControlPlan.Edited("ac", 1), PointerPlan.deleteForward("abc", 1, 1))
