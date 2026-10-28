@@ -24,24 +24,21 @@ Binaries: https://github.com/sreevarshan-xenoz/Pocketdesk/releases/download/v%v/
 Builds:
   - versionName: 0.7.0
     versionCode: 7
-    commit: v0.7.0
+    commit: 5570c80420921aee878068ca07844f84b8570b1e
     subdir: android/app
-    # The environment CI builds the release in: JDK 21 (the APK's bytes depend on the
-    # compiler), and cmake for the TLS crate iroh brings (aws-lc-sys).
+    # Rust from Debian's rustup, as fdroiddata asks (MR !54623): the
+    # toolchain pinned in the repo, the Android target, cargo-ndk 4.1.2,
+    # then the bridge as CI builds it. The build server's own JDK.
     sudo:
       - apt-get update
-      - apt-get install -y openjdk-21-jdk-headless cmake
-      - update-alternatives --auto java
+      - apt-get install -y cmake gcc libc-dev rustup
     gradle:
       - yes
-    srclibs:
-      - rustup@1.28.2
-    # The bridge as CI builds it: the pinned Rust, cargo-ndk 4.1.2, one script.
     prebuild:
-      - $$rustup$$/rustup-init.sh -y --default-toolchain "$(cat ../bridge/rust-toolchain-version)"
-        --profile minimal --target aarch64-linux-android
-      - source $HOME/.cargo/env
-      - cargo install cargo-ndk --version 4.1.2 --locked
+      - rustup set profile minimal
+      - rustup default "$(cat ../bridge/rust-toolchain-version)"
+      - rustup target add aarch64-linux-android
+      - cargo install cargo-ndk@4.1.2 --locked
       - export ANDROID_NDK_HOME=$$NDK$$
       - sh ../bridge/build-android.sh
     ndk: 29.0.14206865
