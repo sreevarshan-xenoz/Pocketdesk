@@ -223,16 +223,34 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
 /// AwayLock only where it works (Q2 review: the question named one Apply
 /// then left alone).
 fn profile_touches(capability: Capability, computer: bool) -> bool {
-    shown_for(capability, computer)
+    profile_carries(capability, computer)
         && (capability != Capability::AwayLock || away_lock_unavailable().is_none())
+}
+
+/// Whether a profile carries `capability` from or to a device's page: what
+/// the page shows, but a phone's Keyboard and mouse, which says the other
+/// way round from a computer's (BK5: this computer onto the phone), is
+/// only ever set on its own.
+fn profile_carries(capability: Capability, computer: bool) -> bool {
+    shown_for(capability, computer) && (computer || capability != Capability::SharedInput)
+}
+
+/// What `capability`'s switch says of itself on a device's page: a phone's
+/// Keyboard and mouse is this computer's onto the phone (BK5).
+fn hint_for(capability: Capability, computer: bool, hint: &'static str) -> &'static str {
+    if capability == Capability::SharedInput && !computer {
+        "This computer may move its keyboard and mouse onto this phone, used as another screen          beside it (the phone must allow it too)"
+    } else {
+        hint
+    }
 }
 
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.
 fn shown_for(capability: Capability, computer: bool) -> bool {
-    // Between computers only: a phone drives through Input.
+    // A computer may drive this one; this one may drive a phone (BK5).
     if capability == Capability::SharedInput {
-        return computer;
+        return true;
     }
     !(computer
         && matches!(
@@ -2104,7 +2122,7 @@ impl PocketdeskApp {
                             // (P9 review).
                             let mut kept = device.permissions.clone();
                             for capability in Capability::ALL {
-                                if !shown_for(capability, device.computer) {
+                                if !profile_carries(capability, device.computer) {
                                     kept.set(capability, capability.default_allowed());
                                 }
                             }
@@ -2214,6 +2232,7 @@ impl PocketdeskApp {
                         let unavailable = (capability == Capability::AwayLock)
                             .then(away_lock_unavailable)
                             .flatten();
+                        let hint = hint_for(capability, device.computer, hint);
                         if ui
                             .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
                             .on_hover_text(hint)
@@ -4066,16 +4085,21 @@ mod tests {
         assert!(shown_for(Capability::Files, true));
     }
 
-    /// The shared keyboard and mouse is between computers: a paired
-    /// computer's page has its switch, and a phone's page never does.
+    /// The shared keyboard and mouse: a paired computer's page has its
+    /// switch (it may drive this one), and so does a phone's (BK5: this one
+    /// may drive the phone), said the phone's way.
     #[test]
-    fn the_keyboard_and_mouse_switch_is_for_a_paired_computer_only() {
+    fn the_keyboard_and_mouse_switch_is_on_a_computers_page_and_a_phones() {
         assert!(shown_for(Capability::SharedInput, true));
-        assert!(!shown_for(Capability::SharedInput, false));
-        // A profile saved from a computer's page keeps it; one applied to a
-        // phone never turns it on or off there.
+        assert!(shown_for(Capability::SharedInput, false));
+        // A profile saved from a computer's page keeps it; one saved from
+        // or applied to a phone never carries it, as it says the other way.
         assert!(profile_touches(Capability::SharedInput, true));
         assert!(!profile_touches(Capability::SharedInput, false));
+        assert!(!profile_carries(Capability::SharedInput, false));
+        assert!(profile_carries(Capability::Clipboard, false));
+        assert!(hint_for(Capability::SharedInput, false, "x").contains("onto this phone"));
+        assert_eq!(hint_for(Capability::SharedInput, true, "x"), "x");
         let row = PERMISSIONS
             .iter()
             .find(|(c, _, _)| *c == Capability::SharedInput)

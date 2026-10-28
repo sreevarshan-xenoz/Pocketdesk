@@ -374,6 +374,66 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
     assert!(config.shared_input, "the page's switch is the setting");
 }
 
+/// BK5: a phone that said its screen is on the Keyboard and mouse page,
+/// with why it is not ready yet, and this computer's permission for it,
+/// which the switch there sets in the trust store.
+#[test]
+fn the_keyboard_and_mouse_page_shows_the_phone_as_a_screen() {
+    use pocketdesk_core::local::shared_input::{self, PHONE_OFF, PhoneScreen, StatusFile};
+    use pocketdesk_core::protocol::permissions::Capability;
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    shared_input::update(fixture.state(), |file| {
+        file.set_own(
+            DESK,
+            "Test Desk",
+            &[shared_input::Screen {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            }],
+            1,
+        );
+        file.heard_phone(
+            PHONE,
+            "Test Phone",
+            &PhoneScreen {
+                width_px: 1080,
+                height_px: 2400,
+                width_dp: 411,
+                height_dp: 914,
+                rotation: 0,
+            },
+            1,
+        );
+    })
+    .expect("a screens file");
+    let status = StatusFile {
+        phones: [(PHONE.to_string(), PHONE_OFF.to_string())].into(),
+        ..StatusFile::default()
+    };
+    shared_input::write_status(fixture.state(), &status).expect("a status file");
+    let mut app = fixture.open(Some(Tab::KeyboardMouse));
+    app.run_steps(3);
+    assert!(app.query_by_label("Your phones").is_some());
+    assert!(
+        app.query_by_label(
+            "Off on Test Phone: turn on \"Let my computer's keyboard and mouse use this phone\" in its Settings"
+        )
+        .is_some()
+    );
+    // Below the fold in the test window: clicked as a screen reader would.
+    app.get_by_label("Test Desk may drive Test Phone")
+        .click_accesskit();
+    app.run_steps(3);
+    let store = TrustStore::read(fixture.state().join(TRUST_FILE)).expect("the trust store");
+    assert!(
+        store.permissions(PHONE).allows(Capability::SharedInput),
+        "the switch is the phone's Keyboard and mouse permission"
+    );
+}
+
 /// I3: Esc answers an open question with Cancel.
 #[test]
 fn escape_cancels_the_unpair_question() {
