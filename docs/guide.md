@@ -385,13 +385,14 @@ says so in the log. Build notes: [docs/development-setup.md](development-setup.m
 
 ### Arch Linux
 
-Pocketdesk is not on the AUR yet. Until it is, build the package from this repository's `aur/PKGBUILD`, which builds a release's source tarball:
+Pocketdesk is on the AUR as [`pocketdesk`](https://aur.archlinux.org/packages/pocketdesk). It builds the release's source tarball and installs the server, the desktop app and the tray, the systemd user unit, the menu entry and the man page:
 
 ```bash
-git clone https://github.com/sreevarshan-xenoz/Pocketdesk.git
-cd Pocketdesk/aur
-makepkg -si
+yay -S pocketdesk          # or paru, or any AUR helper
+systemctl --user enable --now pocketdesk
 ```
+
+Without a helper: `git clone https://aur.archlinux.org/pocketdesk.git && cd pocketdesk && makepkg -si`. The same PKGBUILD is in this repository's `aur/`.
 
 ## Usage
 
