@@ -1172,6 +1172,9 @@ impl Glue {
                     }
                 }
                 Action::WarpHome(x, y) => {
+                    // An image still on its way to the computer left goes
+                    // no further (BK3).
+                    crate::clipboard_push::came_home();
                     self.park = None;
                     self.parking = None;
                     self.input

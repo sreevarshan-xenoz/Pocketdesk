@@ -1,8 +1,9 @@
 //! What the tests with two real servers side by side share (R6a's seams:
 //! each with its own config and state folders and ports): their folders,
 //! starting them, waiting, cleaning up, and pairing A with B as the
-//! desktop app asks, through `computers_out/`. Each has a file for a
-//! clipboard (`POCKETDESK_CLIPBOARD_FILE`) and a folder for Downloads
+//! desktop app asks, through `computers_out/`. Each has files for a
+//! clipboard (`POCKETDESK_CLIPBOARD_FILE`, and its image
+//! `POCKETDESK_CLIPBOARD_IMAGE_FILE`) and a folder for Downloads
 //! (`POCKETDESK_DOWNLOAD_DIR`): two servers on one machine would share its
 //! real ones.
 
@@ -42,6 +43,7 @@ pub fn pocketdesk(config: &Path, state: &Path) -> Command {
         .env("POCKETDESK_CONFIG_DIR", config)
         .env("POCKETDESK_STATE_DIR", state)
         .env("POCKETDESK_CLIPBOARD_FILE", clipboard(state))
+        .env("POCKETDESK_CLIPBOARD_IMAGE_FILE", clipboard_image(state))
         .env("POCKETDESK_DOWNLOAD_DIR", downloads(state))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -51,6 +53,11 @@ pub fn pocketdesk(config: &Path, state: &Path) -> Command {
 /// The file that stands in for a server's clipboard.
 pub fn clipboard(state: &Path) -> PathBuf {
     state.parent().unwrap().join("clipboard.txt")
+}
+
+/// The PNG that stands in for a server's clipboard image.
+pub fn clipboard_image(state: &Path) -> PathBuf {
+    state.parent().unwrap().join("clipboard.png")
 }
 
 /// The folder that stands in for a server's Downloads.

@@ -10,17 +10,22 @@
 //!
 //! The owner's other computers (2g) get it the same way when
 //! `computer_clipboard` is on: those linked to this one as its clients, and
-//! those this one keeps a link to (`peer_computers`). Never back to the
-//! device it came from.
+//! those this one keeps a link to (`peer_computers`). Its image too (BK3),
+//! without the phones' switch: told to the first, which fetch it, and sent
+//! on a stream each of the others opens. Never back to the device it came
+//! from.
 //!
 //! With the shared keyboard and mouse, the clipboard also follows the
-//! mouse ([`push_now`]): its text goes to a computer as the cursor goes
-//! there, and comes back as it comes home, marked ([`FOLLOWS`]) so the
-//! computer it reaches takes it with "Clipboard follows the mouse" on
-//! there, even with `computer_clipboard` off ([`takes_follow`]).
+//! mouse ([`push_now`]): its text, or with no text its image (BK3), goes to
+//! a computer as the cursor goes there, and comes back as it comes home,
+//! marked ([`FOLLOWS`]) so the computer it reaches takes it with
+//! "Clipboard follows the mouse" on there, even with `computer_clipboard`
+//! off ([`takes_follow`]). An image rides the link's transfer streams, as
+//! files do, and a later switch drops one still on its way ([`switch`]).
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use pocketdesk_core::protocol::kdeconnect::{DeviceSender, NetworkPacket};
@@ -150,6 +155,7 @@ static FROM_PHONE: Mutex<Option<(String, String)>> = Mutex::new(None);
 pub(crate) fn note_from_phone(device_id: &str, text: &str) {
     // It crossed: kept in the history (D3), with the device it came from.
     crate::clip_history::note(text, Some(device_id));
+    forget_image_sent(device_id);
     *FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()) =
         Some((device_id.to_string(), text.to_string()));
 }
@@ -160,6 +166,7 @@ static IMAGE_FROM: Mutex<Option<(String, String)>> = Mutex::new(None);
 
 /// Note that `device_id` just put the image `id` on the clipboard.
 pub(crate) fn note_image_from(device_id: &str, id: &str) {
+    forget_image_sent(device_id);
     *IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()) =
         Some((device_id.to_string(), id.to_string()));
 }
@@ -239,10 +246,22 @@ pub(crate) fn image_packet(id: &str, size: u64) -> NetworkPacket {
         .with_body(serde_json::json!({ "image": { "id": id, "size": size } }))
 }
 
-/// Whether a connection is told of an image (M3): a phone, never another
-/// computer (they share text only), that may be pushed the clipboard.
-fn may_push_image(device_id: &str) -> bool {
-    !crate::plugins::pair::is_computer_device(device_id) && may_push(device_id)
+/// Whether a connection is told of an image (M3), with "Images to phones'
+/// clipboards" on or not (`phone_images`): [`tells_image`].
+fn may_push_image(device_id: &str, phone_images: bool) -> bool {
+    tells_image(
+        crate::plugins::pair::is_computer_device(device_id),
+        phone_images,
+        || may_push(device_id),
+    )
+}
+
+/// Whether a connection is told of the clipboard's image: a phone while
+/// "Images to phones' clipboards" is on (`phone_images`, M3), or another
+/// computer (BK3), and either only if it may be pushed the clipboard now
+/// (`may`: a computer while it is shared with computers), asked last.
+fn tells_image(computer: bool, phone_images: bool, may: impl FnOnce() -> bool) -> bool {
+    (computer || phone_images) && may()
 }
 
 /// The packet a push sends: what the phone's own request is answered with.
@@ -253,32 +272,299 @@ pub(crate) fn packet(text: &str) -> NetworkPacket {
 /// The mark on a push that follows the mouse (shared input), in its body.
 pub(crate) const FOLLOWS: &str = "follows";
 
+/// What the clipboard holds at a switch, as read for another computer:
+/// its text (none a password manager marked private, nor a pairing link),
+/// else its image's id (none marked private), else nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Held {
+    Text(String),
+    Image(String),
+    Nothing,
+}
+
+/// What follows the mouse to the computer `to` of what the clipboard
+/// `held`: nothing that computer put here itself (`text_from`, the note of
+/// the last text a device set; `image_from`, of the last image), no text
+/// over [`MAX_PUSH`], and not the image last sent to it again
+/// (`last_image`, that computer's).
+fn what_follows(
+    held: Held,
+    to: &str,
+    text_from: Option<&(String, String)>,
+    image_from: Option<&(String, String)>,
+    last_image: Option<&str>,
+) -> Held {
+    match held {
+        Held::Text(text) if text.len() <= MAX_PUSH && !came_from(text_from, to, &text) => {
+            Held::Text(text)
+        }
+        Held::Image(id) if !came_from(image_from, to, &id) && last_image != Some(id.as_str()) => {
+            Held::Image(id)
+        }
+        _ => Held::Nothing,
+    }
+}
+
+/// The image last sent to each computer, from the start of its send, until
+/// its clipboard holds something else: the same image is never sent to a
+/// computer twice in a row, nor again while it is on its way (BK3 review:
+/// a switch's push and the watcher's sent it twice).
+static IMAGE_SENT: LazyLock<Mutex<HashMap<String, Sent>>> = LazyLock::new(Default::default);
+
+/// Note that the image `id` is on its way to the computer `device_id`, or
+/// reached it: from the start of its send ([`forget_image_sent_if`] if it
+/// fails).
+pub(crate) fn note_image_sent(device_id: &str, id: &str) {
+    note_sent(device_id, id, None);
+}
+
+fn note_sent(device_id: &str, id: &str, told_until: Option<std::time::Instant>) {
+    IMAGE_SENT.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        device_id.to_string(),
+        Sent {
+            id: id.to_string(),
+            told_until,
+        },
+    );
+}
+
+/// How long an image told to a computer counts as on its way to it before
+/// that computer fetches it: one whose settings do not take it never does.
+const TOLD_WAIT: Duration = Duration::from_secs(10);
+
+/// An image sent or told to a computer: its id, and while it is only told
+/// (not fetched yet), until when it counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Sent {
+    id: String,
+    told_until: Option<std::time::Instant>,
+}
+
+/// The id `sent` names at `now`: a told image only until its wait ends.
+fn sent_counts(sent: &Sent, now: std::time::Instant) -> Option<&str> {
+    sent.told_until
+        .is_none_or(|until| now < until)
+        .then_some(sent.id.as_str())
+}
+
+/// Note that the image `id` was told to the computer `device_id`, for it to
+/// fetch: on its way for [`TOLD_WAIT`] unless the fetch comes.
+fn note_image_told(device_id: &str, id: &str) {
+    note_sent(device_id, id, Some(std::time::Instant::now() + TOLD_WAIT));
+}
+
+/// A send or tell of the image `id` to `device_id` failed: its note goes,
+/// unless a later one replaced it.
+pub(crate) fn forget_image_sent_if(device_id: &str, id: &str) {
+    let mut sent = IMAGE_SENT.lock().unwrap_or_else(|e| e.into_inner());
+    if sent.get(device_id).is_some_and(|s| s.id == id) {
+        sent.remove(device_id);
+    }
+}
+
+/// The computer `device_id`'s clipboard holds no image of this one's now:
+/// text went to it, or it sent this one something of its own.
+fn forget_image_sent(device_id: &str) {
+    IMAGE_SENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
+}
+
+/// The image last sent to the computer `device_id`, while nothing has
+/// gone to it since.
+fn image_sent_last(device_id: &str) -> Option<String> {
+    let now = std::time::Instant::now();
+    IMAGE_SENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .and_then(|sent| sent_counts(sent, now))
+        .map(str::to_string)
+}
+
+/// The switches of the shared keyboard and mouse this computer has seen: a
+/// push for one ([`push_now`]), a follow arriving from another computer,
+/// the keyboard and mouse coming home. An image still on its way for an
+/// earlier one is dropped.
+static SWITCHES: AtomicU64 = AtomicU64::new(0);
+
+/// A switch: what is on its way for an earlier one is dropped. Its number.
+pub(crate) fn switch() -> u64 {
+    SWITCHES.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Whether no switch has come since the one numbered `at`.
+pub(crate) fn still(at: u64) -> bool {
+    SWITCHES.load(Ordering::SeqCst) == at
+}
+
+/// The keyboard and mouse came home (the driving side): an image still on
+/// its way to the computer they left is dropped. Only Windows drives.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn came_home() {
+    switch();
+}
+
+/// The image following the mouse here now, from which computer and at
+/// which switch: one at a time, the newest.
+static LANDING: Mutex<Option<(String, u64)>> = Mutex::new(None);
+
+/// An image following the mouse here, while it lands: dropped by a later
+/// switch, and while it lands this computer sends that computer nothing
+/// back at a switch (its clipboard is about to be that one's own).
+pub(crate) struct Landing {
+    from: String,
+    at: u64,
+}
+
+impl Landing {
+    /// An image from the computer `from` starts landing: the cursor came
+    /// here, a switch.
+    pub(crate) fn begin(from: &str) -> Landing {
+        let mut landing = LANDING.lock().unwrap_or_else(|e| e.into_inner());
+        let at = switch();
+        *landing = Some((from.to_string(), at));
+        Landing {
+            from: from.to_string(),
+            at,
+        }
+    }
+
+    /// Whether it may still go onto the clipboard: no switch since.
+    pub(crate) fn current(&self) -> bool {
+        still(self.at)
+    }
+}
+
+impl Drop for Landing {
+    fn drop(&mut self) {
+        let mut landing = LANDING.lock().unwrap_or_else(|e| e.into_inner());
+        if landing
+            .as_ref()
+            .is_some_and(|(from, at)| *from == self.from && *at == self.at)
+        {
+            *landing = None;
+        }
+    }
+}
+
+/// Whether an image from the computer `from` is landing here, with no
+/// switch since it began.
+fn landing_from(from: &str) -> bool {
+    LANDING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|(landing, at)| landing == from && still(*at))
+}
+
+/// The image told to a computer as following the mouse, at which switch:
+/// its fetch is served while no switch has come since.
+static TOLD: Mutex<Option<(String, String, u64)>> = Mutex::new(None);
+
+/// Whether a fetch by `device_id` of the image `id` is of the image told
+/// to it at the last switch (`told`), with no switch since (`still`).
+fn fetch_told(
+    told: Option<&(String, String, u64)>,
+    device_id: &str,
+    id: &str,
+    still: impl FnOnce(u64) -> bool,
+) -> bool {
+    told.is_some_and(|(to, image, at)| to == device_id && image == id && still(*at))
+}
+
+/// Whether the computer `device_id` may fetch the image `id` as one
+/// following the mouse, with "Clipboard with my computers" off here.
+pub(crate) fn fetch_follows(device_id: &str, id: &str) -> bool {
+    let told = TOLD.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    fetch_told(told.as_ref(), device_id, id, still)
+}
+
+/// The packet an image push that follows the mouse sends to a computer
+/// linked to this one as its client: [`image_packet`], marked. It fetches
+/// the image ([`fetch_follows`]).
+fn follow_image_packet(id: &str, size: u64) -> NetworkPacket {
+    NetworkPacket::new("kdeconnect.clipboard")
+        .with_body(serde_json::json!({ "image": { "id": id, "size": size }, FOLLOWS: true }))
+}
+
+/// The packet that offers another computer this one's clipboard image on
+/// the link this one keeps to it, as a phone offers its own (N4): the size
+/// and the transfer's key, and no port, since that computer opens a stream
+/// on the link for it. Marked when it follows the mouse.
+pub(crate) fn image_offer_packet(size: u64, key: &str, follows: bool) -> NetworkPacket {
+    let mut body = serde_json::json!({ "size": size, "key": key });
+    if follows {
+        body[FOLLOWS] = true.into();
+    }
+    NetworkPacket::new(pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE).with_body(body)
+}
+
 /// The packet a push that follows the mouse sends: [`packet`], marked.
 fn follow_packet(text: &str) -> NetworkPacket {
     NetworkPacket::new("kdeconnect.clipboard")
         .with_body(serde_json::json!({ "content": text, FOLLOWS: true }))
 }
 
-/// Push this computer's clipboard text to the computer `device_id` now:
-/// the cursor of the shared keyboard and mouse just went there, or came
-/// back from there. What a push to computers never sends is not sent
-/// here either: an image, a copy a password manager marked private, a
-/// pairing link, text over [`MAX_PUSH`]; nor the text that computer itself
-/// put here (a switch back with nothing new copied).
+/// Push this computer's clipboard to the computer `device_id` now: the
+/// cursor of the shared keyboard and mouse just went there, or came back
+/// from there. Its text, or with no text its image (BK3), as
+/// [`what_follows`] says: never a copy a password manager marked private,
+/// a pairing link, text over [`MAX_PUSH`], nor what that computer itself
+/// put here (a switch back with nothing new copied). Each switch runs it
+/// on a task of its own, off the input thread; an image a later switch
+/// overtakes goes no further ([`switch`]).
 pub(crate) async fn push_now(device_id: &str) {
-    let text = match crate::plugins::clipboard::read_text().await {
-        Ok(Some(text)) if text.len() <= MAX_PUSH => text,
-        Ok(_) => return,
+    // That computer's image still on its way here: this clipboard is about
+    // to be its own, so nothing older goes back, and the switch drops it.
+    let landing = landing_from(device_id);
+    let at = switch();
+    if landing {
+        tracing::debug!(
+            "The clipboard did not follow the mouse to {device_id}: its image was still on its way here"
+        );
+        return;
+    }
+    let held = match read_held().await {
+        Ok(held) => held,
         Err(e) => {
             tracing::debug!("The clipboard did not follow the mouse: not read: {e}");
             return;
         }
     };
-    let from = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    if came_from(from.as_ref(), device_id, &text) {
-        return;
+    let text_from = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let image_from = IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let last_image = image_sent_last(device_id);
+    match what_follows(
+        held,
+        device_id,
+        text_from.as_ref(),
+        image_from.as_ref(),
+        last_image.as_deref(),
+    ) {
+        Held::Text(text) => push_text_now(device_id, &text).await,
+        Held::Image(id) => push_image_now(device_id, &id, at).await,
+        Held::Nothing => {}
     }
-    let packet = follow_packet(&text);
+}
+
+/// What the clipboard holds for another computer: its text, else its image
+/// (read only when there is no text).
+async fn read_held() -> std::io::Result<Held> {
+    if let Some(text) = crate::plugins::clipboard::read_text().await? {
+        return Ok(Held::Text(text));
+    }
+    match crate::plugins::clipboard::image_for_push().await {
+        Ok(Some((id, _))) => Ok(Held::Image(id)),
+        Ok(None) => Ok(Held::Nothing),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
+    }
+}
+
+/// The text of [`push_now`].
+async fn push_text_now(device_id: &str, text: &str) {
+    let packet = follow_packet(text);
     let client = crate::state::clone_clients()
         .await
         .into_iter()
@@ -302,7 +588,8 @@ pub(crate) async fn push_now(device_id: &str) {
     match sent {
         // Who and how long, never the text (Z1).
         Ok(()) => {
-            crate::clip_history::note(&text, None);
+            forget_image_sent(device_id);
+            crate::clip_history::note(text, None);
             tracing::info!(
                 "Clipboard followed the mouse to {device_id} ({} chars)",
                 text.chars().count()
@@ -312,9 +599,74 @@ pub(crate) async fn push_now(device_id: &str) {
     }
 }
 
+/// The image of [`push_now`], `id`, for the switch numbered `at` (BK3). To
+/// a computer linked to this one as its client, it is told, and it fetches
+/// the image while no switch has come since ([`fetch_follows`]); to one
+/// this one keeps a link to, it goes on a stream that computer opens.
+async fn push_image_now(device_id: &str, id: &str, at: u64) {
+    // Kept as the clipboard was read; gone if it changed since.
+    let Some(image) = crate::plugins::clipboard::kept_image(id) else {
+        return;
+    };
+    let size = image.png.len() as u64;
+    let client = crate::state::clone_clients()
+        .await
+        .into_iter()
+        .find(|c| c.device_id() == device_id);
+    let sent = match client {
+        Some(client) if crate::plugins::pair::permits(device_id, "kdeconnect.clipboard") => {
+            *TOLD.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((device_id.to_string(), id.to_string(), at));
+            note_image_told(device_id, id);
+            client
+                .send_packet(&follow_image_packet(id, size))
+                .await
+                .map(|()| "told")
+                .map_err(|e| e.to_string())
+        }
+        Some(_) => Err("it does not have the Clipboard permission here".to_string()),
+        None => {
+            note_image_sent(device_id, id);
+            crate::peer_computers::send_clipboard_image(device_id, image, true, || still(at))
+                .await
+                .map(|()| "sent")
+        }
+    };
+    match sent {
+        // Who and how large, never the image.
+        Ok(how) => tracing::info!(
+            "Clipboard image followed the mouse to {device_id} ({size} bytes, {how})"
+        ),
+        Err(e) => {
+            forget_image_sent_if(device_id, id);
+            tracing::debug!("The clipboard image did not follow the mouse to {device_id}: {e}")
+        }
+    }
+}
+
+/// A packet marked as following the mouse arrived here (`body`): the
+/// cursor came here, a switch.
+pub(crate) fn follow_arrived(body: &serde_json::Value) {
+    if marked(body) {
+        switch();
+    }
+}
+
+/// The image a clipboard packet's `body` tells of (M3's `{image: {id,
+/// size}}`): an id as this computer makes one (hex SHA-256), and a size
+/// within N4's limit.
+pub(crate) fn told_image(body: &serde_json::Value) -> Option<(String, u64)> {
+    let image = body.get("image")?;
+    let id = image.get("id")?.as_str()?;
+    let size = image.get("size")?.as_u64()?;
+    let valid = id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit());
+    (valid && size > 0 && size <= pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE)
+        .then(|| (id.to_ascii_lowercase(), size))
+}
+
 /// Whether a clipboard packet's `body` is marked as following the mouse:
 /// [`FOLLOWS`] is JSON `true`, nothing else.
-fn marked(body: &serde_json::Value) -> bool {
+pub(crate) fn marked(body: &serde_json::Value) -> bool {
     body.get(FOLLOWS).and_then(|v| v.as_bool()) == Some(true)
 }
 
@@ -592,7 +944,7 @@ pub(crate) async fn run() {
             // review): a read that failed (another app held it) is tried
             // again next tick.
             match crate::plugins::clipboard::read_text().await {
-                Ok(text) => match image_now(text.is_none(), &clients).await {
+                Ok(text) => match image_now(text.is_none(), &clients, &linked).await {
                     Ok(image) => {
                         sequence = now;
                         push_change(&mut watch, text, image, clients, linked).await;
@@ -648,7 +1000,7 @@ pub(crate) async fn run() {
                 }
                 image_read_at = Some(tokio::time::Instant::now());
             }
-            let Ok(image) = image_now(text.is_none(), &clients).await else {
+            let Ok(image) = image_now(text.is_none(), &clients, &linked).await else {
                 continue;
             };
             push_change(&mut watch, text, image, clients, linked).await;
@@ -661,27 +1013,39 @@ pub(crate) async fn run() {
 #[cfg(not(windows))]
 const IMAGE_FALLBACK: Duration = Duration::from_secs(30);
 
-/// The clipboard's image to tell phones of (M3), when it holds no text,
-/// "Images to phones' clipboards" is on (read live from the config) and a
-/// phone among `clients` may have it: never read and encoded for no one
+/// The clipboard's image to tell of, when it holds no text and a phone or
+/// computer among `clients` may have it ([`may_push_image`]: a phone with
+/// "Images to phones' clipboards" on, M3; a computer while the clipboard is
+/// shared with computers, BK3), or a computer this one keeps a link to is
+/// up (`linked`, only while it is shared): never read and encoded for no one
 /// (M3 review). An error says the clipboard could not be read now.
 async fn image_now(
     no_text: bool,
     clients: &[Arc<dyn DeviceSender>],
+    linked: &[crate::peer_computers::LinkedComputer],
 ) -> pocketdesk_core::error::Result<Option<(String, u64)>> {
-    if !no_text
-        || !crate::events::current_config().clipboard_images
-        || !TO_PHONES.load(Ordering::Relaxed)
-        || !clients.iter().any(|c| may_push_image(c.device_id()))
+    if !no_text {
+        return Ok(None);
+    }
+    let phone_images = phone_images();
+    if linked.is_empty()
+        && !clients
+            .iter()
+            .any(|c| may_push_image(c.device_id(), phone_images))
     {
         return Ok(None);
     }
     crate::plugins::clipboard::image_for_push().await
 }
 
+/// Whether phones are told of an image: pushing to phones, with "Images to
+/// phones' clipboards" on (M3; read live from the config).
+fn phone_images() -> bool {
+    TO_PHONES.load(Ordering::Relaxed) && crate::events::current_config().clipboard_images
+}
+
 /// Push `text` to `clients`, and to the computers this one keeps a link to
-/// (`linked`), if it is a change; or, with no text, tell the phones of
-/// `image` (M3).
+/// (`linked`), if it is a change; or, with no text, `image` (M3, BK3).
 async fn push_change(
     watch: &mut Watch,
     text: Option<String>,
@@ -697,7 +1061,7 @@ async fn push_change(
     };
     if text.is_none() {
         if let Some((id, size)) = image.filter(|(id, _)| image_key(id) == changed) {
-            push_image(&id, size, clients).await;
+            push_image(&id, size, clients, linked).await;
         }
         return;
     }
@@ -732,16 +1096,20 @@ async fn push_change(
         match target.send_packet(&packet).await {
             // Z1: who and how long, never the text: a copy sent once, and
             // never back to the phone it came from, can be seen.
-            Ok(()) => tracing::info!(
-                "Clipboard sent to {} ({} chars)",
-                target.device_id(),
-                text.chars().count()
-            ),
+            Ok(()) => {
+                forget_image_sent(target.device_id());
+                tracing::info!(
+                    "Clipboard sent to {} ({} chars)",
+                    target.device_id(),
+                    text.chars().count()
+                )
+            }
             Err(e) => tracing::debug!("Clipboard not pushed to {}: {e}", target.device_id()),
         }
     }
     for computer in linked {
         if !came_from(from_phone.as_ref(), &computer.device_id, &text) {
+            forget_image_sent(&computer.device_id);
             computer.send(packet.clone());
         }
     }
@@ -753,13 +1121,32 @@ async fn push_change(
     }
 }
 
-/// Tell the phones that may have it of the clipboard's image (M3).
-async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
+/// Whether the image `id` goes to `device_id`: not back to where it came
+/// from, nor to a computer that was sent it last.
+fn image_goes_to(device_id: &str, id: &str) -> bool {
+    !image_came_from(device_id, id) && image_sent_last(device_id).as_deref() != Some(id)
+}
+
+/// Tell the phones and computers that may have it of the clipboard's image
+/// (M3), each then fetching it; and send it to the computers this one keeps
+/// a link to (`linked`, BK3), each on a stream it opens for it.
+async fn push_image(
+    id: &str,
+    size: u64,
+    clients: Vec<Arc<dyn DeviceSender>>,
+    linked: Vec<crate::peer_computers::LinkedComputer>,
+) {
     let packet = image_packet(id, size);
+    let phone_images = phone_images();
     for target in clients
         .into_iter()
-        .filter(|c| may_push_image(c.device_id()) && !image_came_from(c.device_id(), id))
+        .filter(|c| may_push_image(c.device_id(), phone_images) && image_goes_to(c.device_id(), id))
     {
+        // A computer's is on its way from now (BK3 review).
+        let computer = crate::plugins::pair::is_computer_device(target.device_id());
+        if computer {
+            note_image_told(target.device_id(), id);
+        }
         match target.send_packet(&packet).await {
             // AD1: who and how large, never the image: a phone's switch or
             // permission keeping it from the phone can be told apart.
@@ -767,8 +1154,42 @@ async fn push_image(id: &str, size: u64, clients: Vec<Arc<dyn DeviceSender>>) {
                 "Clipboard image told to {} ({size} bytes)",
                 target.device_id()
             ),
-            Err(e) => tracing::debug!("Clipboard image not told to {}: {e}", target.device_id()),
+            Err(e) => {
+                if computer {
+                    forget_image_sent_if(target.device_id(), id);
+                }
+                tracing::debug!("Clipboard image not told to {}: {e}", target.device_id())
+            }
         }
+    }
+    let linked: Vec<String> = linked
+        .into_iter()
+        .map(|c| c.device_id)
+        .filter(|device_id| image_goes_to(device_id, id))
+        .collect();
+    if linked.is_empty() {
+        return;
+    }
+    // Kept as the clipboard was read; gone if it changed since.
+    let Some(image) = crate::plugins::clipboard::kept_image(id) else {
+        return;
+    };
+    for device_id in linked {
+        let (image, id) = (image.clone(), id.to_string());
+        // On its way from now (BK3 review).
+        note_image_sent(&device_id, &id);
+        // Its own task: one computer slow to open its stream holds up none.
+        tokio::spawn(async move {
+            match crate::peer_computers::send_clipboard_image(&device_id, image, false, || true)
+                .await
+            {
+                Ok(()) => tracing::info!("Clipboard image sent to {device_id} ({size} bytes)"),
+                Err(e) => {
+                    forget_image_sent_if(&device_id, &id);
+                    tracing::debug!("Clipboard image not sent to {device_id}: {e}")
+                }
+            }
+        });
     }
 }
 
@@ -976,6 +1397,250 @@ mod tests {
         assert_eq!(watch.observe(Some(&key)), None, "once per change");
         assert_eq!(watch.observe(Some("after")), Some("after".to_string()));
         assert!(!key.starts_with("image:"), "no text reads as an image");
+    }
+
+    /// BK3: at a switch, the clipboard's text goes, else its image, but
+    /// nothing the computer reached put here itself, no text too long, and
+    /// not the image last sent to it again.
+    #[test]
+    fn text_follows_else_an_image_but_not_back_or_twice() {
+        let text = || Held::Text("hello".to_string());
+        let image = || Held::Image("ab12".to_string());
+        assert_eq!(what_follows(text(), "desk", None, None, None), text());
+        assert_eq!(what_follows(image(), "desk", None, None, None), image());
+        assert_eq!(
+            what_follows(Held::Nothing, "desk", None, None, None),
+            Held::Nothing
+        );
+        let long = Held::Text("x".repeat(MAX_PUSH + 1));
+        assert_eq!(what_follows(long, "desk", None, None, None), Held::Nothing);
+        // Not back to where it came from.
+        let text_from = ("desk".to_string(), "hello".to_string());
+        assert_eq!(
+            what_follows(text(), "desk", Some(&text_from), None, None),
+            Held::Nothing
+        );
+        assert_eq!(
+            what_follows(text(), "other", Some(&text_from), None, None),
+            text()
+        );
+        let image_from = ("desk".to_string(), "ab12".to_string());
+        assert_eq!(
+            what_follows(image(), "desk", None, Some(&image_from), None),
+            Held::Nothing
+        );
+        assert_eq!(
+            what_follows(image(), "other", None, Some(&image_from), None),
+            image(),
+            "another computer gets it"
+        );
+        assert_eq!(
+            what_follows(text(), "desk", None, Some(&image_from), None),
+            text(),
+            "the image's note says nothing of text"
+        );
+        // Not the same image twice in a row.
+        assert_eq!(
+            what_follows(image(), "desk", None, None, Some("ab12")),
+            Held::Nothing
+        );
+        assert_eq!(
+            what_follows(image(), "desk", None, None, Some("cd34")),
+            image(),
+            "another image was the last"
+        );
+        assert_eq!(
+            what_follows(text(), "desk", None, None, Some("ab12")),
+            text()
+        );
+    }
+
+    /// BK3 review: an image on its way to a computer counts from the start
+    /// of its send, so a switch's push and the watcher's never send it
+    /// twice; a failed send lets the next one go, and only its own note.
+    #[test]
+    fn an_image_on_its_way_is_not_sent_again_and_a_failure_lets_it_go() {
+        let image = || Held::Image("ab12".to_string());
+        note_image_sent("bk3-flight", "ab12");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "the watcher's");
+        let last = image_sent_last("bk3-flight");
+        assert_eq!(
+            what_follows(image(), "bk3-flight", None, None, last.as_deref()),
+            Held::Nothing,
+            "a switch's"
+        );
+        forget_image_sent_if("bk3-flight", "cd34");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "another's failure");
+        forget_image_sent_if("bk3-flight", "ab12");
+        assert!(image_goes_to("bk3-flight", "ab12"), "the next one goes");
+        let last = image_sent_last("bk3-flight");
+        assert_eq!(
+            what_follows(image(), "bk3-flight", None, None, last.as_deref()),
+            image()
+        );
+        // Told, it waits for the fetch only so long.
+        note_image_told("bk3-flight", "ab12");
+        assert!(!image_goes_to("bk3-flight", "ab12"), "told, on its way");
+        forget_image_sent("bk3-flight");
+        let now = std::time::Instant::now();
+        let told = Sent {
+            id: "ab12".to_string(),
+            told_until: Some(now + TOLD_WAIT),
+        };
+        assert_eq!(sent_counts(&told, now), Some("ab12"));
+        assert_eq!(sent_counts(&told, now + TOLD_WAIT), None, "never fetched");
+        let sent = Sent {
+            id: "ab12".to_string(),
+            told_until: None,
+        };
+        assert_eq!(sent_counts(&sent, now + TOLD_WAIT * 100), Some("ab12"));
+    }
+
+    /// BK3: the image last sent to a computer is kept, each computer's own,
+    /// until its clipboard holds something else.
+    #[test]
+    fn the_image_last_sent_is_each_computers_until_its_clipboard_changes() {
+        assert_eq!(image_sent_last("bk3-desk-a"), None);
+        note_image_sent("bk3-desk-a", "ab12");
+        note_image_sent("bk3-desk-b", "cd34");
+        assert_eq!(image_sent_last("bk3-desk-a").as_deref(), Some("ab12"));
+        assert_eq!(image_sent_last("bk3-desk-b").as_deref(), Some("cd34"));
+        note_image_sent("bk3-desk-a", "ef56");
+        assert_eq!(image_sent_last("bk3-desk-a").as_deref(), Some("ef56"));
+        forget_image_sent("bk3-desk-a");
+        assert_eq!(image_sent_last("bk3-desk-a"), None, "something else since");
+        assert_eq!(image_sent_last("bk3-desk-b").as_deref(), Some("cd34"));
+        forget_image_sent("bk3-desk-b");
+    }
+
+    /// BK3: an image that follows the mouse is marked as text is, told to a
+    /// computer linked as this one's client with its id and size, and
+    /// offered on a kept link with its size and key, never a port.
+    #[test]
+    fn an_image_that_follows_is_marked_and_offered_without_a_port() {
+        let told = follow_image_packet("ab12", 2048);
+        assert_eq!(told.packet_type, "kdeconnect.clipboard");
+        assert_eq!(told.body["image"]["id"], "ab12");
+        assert_eq!(told.body["image"]["size"], 2048);
+        assert!(marked(&told.body));
+        assert!(told.body.get("content").is_none());
+        assert!(!marked(&image_packet("ab12", 2048).body), "M3's is not");
+
+        let key = "0123456789abcdef0123456789abcdef";
+        let offer = image_offer_packet(4096, key, true);
+        assert_eq!(
+            offer.packet_type,
+            pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE
+        );
+        assert_eq!(offer.body["size"], 4096);
+        assert_eq!(offer.body["key"], key);
+        assert!(offer.body.get("port").is_none(), "the link, not a dial");
+        assert!(marked(&offer.body));
+        let shared = image_offer_packet(4096, key, false);
+        assert!(!marked(&shared.body));
+        assert!(shared.body.get(FOLLOWS).is_none());
+    }
+
+    /// BK3: the image a computer tells of is read as this computer names
+    /// one (64 hex digits) within N4's limit; nothing else is fetched.
+    #[test]
+    fn a_told_image_is_read_only_as_an_id_and_a_size_within_the_limit() {
+        let id = "ab".repeat(32);
+        let told = |id: &str, size: u64| serde_json::json!({"image": {"id": id, "size": size}});
+        assert_eq!(told_image(&told(&id, 9)), Some((id.clone(), 9)));
+        assert_eq!(
+            told_image(&follow_image_packet(&id.to_uppercase(), 9).body),
+            Some((id.clone(), 9)),
+            "either case"
+        );
+        assert_eq!(told_image(&told("ab12", 9)), None, "too short");
+        assert_eq!(told_image(&told(&"zz".repeat(32), 9)), None, "not hex");
+        assert_eq!(told_image(&told(&id, 0)), None, "empty");
+        let max = pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE;
+        assert_eq!(told_image(&told(&id, max + 1)), None, "too large");
+        assert_eq!(told_image(&packet("text").body), None, "text");
+    }
+
+    /// BK3: a marked image is taken under the same rule as marked text.
+    #[test]
+    fn a_marked_image_is_taken_as_marked_text_is() {
+        let yes = || true;
+        let no = || false;
+        let image = serde_json::json!({"image": {"id": "ab12", "size": 3}, "follows": true});
+        let offer = serde_json::json!({"size": 3, "key": "k", "follows": true});
+        for body in [&image, &offer] {
+            assert!(follow_taken(marked(body), true, true, yes, yes, no));
+            assert!(!follow_taken(marked(body), true, false, yes, yes, yes));
+            assert!(!follow_taken(marked(body), true, true, no, yes, yes));
+        }
+        let unmarked = serde_json::json!({"image": {"id": "ab12", "size": 3}});
+        assert!(!follow_taken(marked(&unmarked), true, true, yes, yes, yes));
+    }
+
+    /// BK3: a computer fetches only the image told to it at the last
+    /// switch, and only while no switch has come since.
+    #[test]
+    fn a_fetch_is_served_only_for_the_image_told_at_the_last_switch() {
+        let told = ("desk".to_string(), "ab12".to_string(), 7);
+        let now = |at: u64| at == 7;
+        assert!(fetch_told(Some(&told), "desk", "ab12", now));
+        assert!(!fetch_told(Some(&told), "other", "ab12", now), "another");
+        assert!(!fetch_told(Some(&told), "desk", "cd34", now), "another id");
+        assert!(!fetch_told(None, "desk", "ab12", now), "nothing told");
+        assert!(
+            !fetch_told(Some(&told), "desk", "ab12", |_| false),
+            "a later switch"
+        );
+    }
+
+    /// The tests that move the process-wide switch counter ([`SWITCHES`])
+    /// take turns: one moving it between another's steps would read as a
+    /// later switch. Any test that moves it holds this.
+    static SWITCH_TESTS: Mutex<()> = Mutex::new(());
+
+    /// BK3: a later switch drops an image on its way, and while one from a
+    /// computer lands, nothing goes back to it.
+    #[test]
+    fn a_later_switch_drops_an_image_on_its_way() {
+        let _turn = SWITCH_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let at = switch();
+        assert!(still(at));
+        let landing = Landing::begin("bk3-desk");
+        assert!(!still(at), "an image arriving is a switch");
+        assert!(landing.current());
+        assert!(landing_from("bk3-desk"));
+        assert!(!landing_from("bk3-other"));
+        switch();
+        assert!(!landing.current(), "dropped by a later switch");
+        assert!(!landing_from("bk3-desk"));
+        let next = Landing::begin("bk3-desk");
+        assert!(landing_from("bk3-desk"));
+        drop(landing);
+        assert!(
+            landing_from("bk3-desk"),
+            "an older one ending clears nothing"
+        );
+        drop(next);
+        assert!(!landing_from("bk3-desk"), "landed or not, it is over");
+        let before = switch();
+        came_home();
+        assert!(!still(before), "coming home is a switch");
+    }
+
+    /// BK3: another computer is told of an image as a phone is, without
+    /// the phones' switch; neither without leave to be pushed the clipboard.
+    #[test]
+    fn computers_are_told_of_an_image_as_phones_are_without_their_switch() {
+        let yes = || true;
+        let no = || false;
+        assert!(tells_image(true, false, yes), "a computer");
+        assert!(tells_image(true, true, yes));
+        assert!(tells_image(false, true, yes), "a phone, images on");
+        assert!(!tells_image(false, false, yes), "a phone, images off");
+        assert!(!tells_image(true, true, no), "not shared with computers");
+        assert!(!tells_image(false, true, no), "no Clipboard permission");
+        let unread = || -> bool { panic!("asked for nothing") };
+        assert!(!tells_image(false, false, unread));
     }
 
     #[test]

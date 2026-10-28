@@ -1,10 +1,11 @@
-//! Two computers pair, keep a link (2f), share the clipboard (2g) and send
-//! each other files (2h), as
+//! Two computers pair, keep a link (2f), share the clipboard (2g), its
+//! images too (BK3), and send each other files (2h), as
 //! two real servers side by side (R6a's seams: each with its own config and
 //! state folders and ports). B mints a code as its Pair tab does; A is
 //! asked to pair with B's pairing link as the desktop app asks, through
-//! `computers_out/`. Each has a file for a clipboard
-//! (`POCKETDESK_CLIPBOARD_FILE`) and a folder for Downloads
+//! `computers_out/`. Each has files for a clipboard and its image
+//! (`POCKETDESK_CLIPBOARD_FILE`, `POCKETDESK_CLIPBOARD_IMAGE_FILE`) and a
+//! folder for Downloads
 //! (`POCKETDESK_DOWNLOAD_DIR`): two servers on one machine would share its
 //! real ones.
 //!
@@ -16,7 +17,10 @@ mod common;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{Cleanup, clipboard, downloads, folders, pair, pairing_link, pocketdesk, wait_for};
+use common::{
+    Cleanup, clipboard, clipboard_image, downloads, folders, pair, pairing_link, pocketdesk,
+    wait_for,
+};
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile};
 use pocketdesk_core::local::sent::{self, SentState};
 use pocketdesk_core::local::{device_keys, identity, outbox, pin};
@@ -48,6 +52,26 @@ fn send_and_receive(from: &Path, to: &str, to_state: &Path, file: &Path) {
         "{} kept its date",
         arrived.display()
     );
+}
+
+/// Put `png` on `state`'s clipboard, as a copy of an image: no text.
+fn copy_image(state: &Path, png: &[u8]) {
+    std::fs::write(clipboard(state), "").unwrap();
+    std::fs::write(clipboard_image(state), png).unwrap();
+}
+
+/// Wait for `state`'s clipboard to hold the image `png`.
+fn image_holds(state: &Path, png: &[u8], what: &str) {
+    wait_for(30, what, || {
+        (std::fs::read(clipboard_image(state)).ok().as_deref() == Some(png)).then_some(())
+    });
+}
+
+/// A picture as a PNG reads (its signature), `len` bytes in all.
+fn picture(len: usize, seed: u8) -> Vec<u8> {
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png.extend((0..len - 8).map(|i| (i % 251) as u8 ^ seed));
+    png
 }
 
 /// Wait for `state`'s clipboard to hold `text`.
@@ -153,6 +177,28 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
         std::fs::read_to_string(clipboard(&b_state)).unwrap(),
         "copied on B"
     );
+
+    // An image, both ways (BK3): A offers it on the link, B tells A of its
+    // own and A fetches it; neither comes back (it would be written again).
+    let written = |state: &Path| {
+        std::fs::metadata(clipboard_image(state))
+            .unwrap()
+            .modified()
+            .unwrap()
+    };
+    let from_a = picture(2 * 1024 * 1024, 1);
+    copy_image(&a_state, &from_a);
+    let a_copied = written(&a_state);
+    image_holds(&b_state, &from_a, "A's image on B");
+    assert_eq!(std::fs::read_to_string(clipboard(&b_state)).unwrap(), "");
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(written(&a_state), a_copied, "A's image not sent back to A");
+    let from_b = picture(600_000, 2);
+    copy_image(&b_state, &from_b);
+    let b_copied = written(&b_state);
+    image_holds(&a_state, &from_b, "B's image on A");
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(written(&b_state), b_copied, "B's image not sent back to B");
 
     // Files both ways (2h): A shares on the link, B offers and A fetches.
     let file = |state: &Path, name: &str, seed: u8| {

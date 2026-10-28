@@ -1924,7 +1924,10 @@ where
         ));
     }
     let mut stream = route.open().await?;
-    present_key(&mut stream, key).await?;
+    // Not on a stream another computer opened (BK3): it presented the key.
+    if route.presents_key() {
+        present_key(&mut stream, key).await?;
+    }
     let mut memory = transfer::Memory::holding(&[]);
     let received = transfer::receive(
         &mut stream,

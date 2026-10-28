@@ -46,9 +46,9 @@ enum Clip {
 
 /// A clipboard image as PNG, known by its id.
 #[derive(Debug, PartialEq, Eq)]
-struct Image {
-    id: String,
-    png: Vec<u8>,
+pub(crate) struct Image {
+    pub(crate) id: String,
+    pub(crate) png: Vec<u8>,
 }
 
 impl Image {
@@ -131,23 +131,33 @@ impl Plugin for ClipboardPlugin {
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         // Another computer (2f) has the clipboard, text or image, read or
         // set, only while this one shares it with its computers (2g); or
-        // its text as the shared keyboard and mouse's cursor switches, while
-        // the clipboard follows the mouse here.
+        // its text or image as the shared keyboard and mouse's cursor
+        // switches, while the clipboard follows the mouse here (BK3).
         if crate::plugins::pair::is_computer_device(sender.device_id())
             && !crate::clipboard_push::with_computers()
-            && !(packet.packet_type == "kdeconnect.clipboard"
-                && crate::clipboard_push::takes_follow(sender.device_id(), &packet.body))
+            && !follows_the_mouse(packet, sender.device_id())
         {
             tracing::debug!(
                 "Another computer's {}, with the clipboard not shared here; ignored",
                 packet.packet_type
             );
+            // An image's transfer is refused, so that computer stops waiting.
+            if matches!(
+                packet.packet_type.as_str(),
+                CLIPBOARD_IMAGE | CLIPBOARD_IMAGE_FETCH
+            ) && let Some(key) = transfer_key(packet)
+            {
+                share::refuse(sender, &key, "the clipboard is not shared here").await;
+            }
             return Ok(());
         }
         match packet.packet_type.as_str() {
             "kdeconnect.clipboard" => {
                 // Remote clipboard update - set local clipboard
                 if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+                    if crate::plugins::pair::is_computer_device(sender.device_id()) {
+                        crate::clipboard_push::follow_arrived(&packet.body);
+                    }
                     // Not pushed back to the phone it came from (T10b).
                     crate::clipboard_push::note_from_phone(sender.device_id(), content);
                     if let Err(e) = set_clipboard(content).await {
@@ -193,6 +203,24 @@ impl Plugin for ClipboardPlugin {
             _ => {}
         }
         Ok(())
+    }
+}
+
+/// Whether another computer's `packet` is one following the mouse that is
+/// taken here with "Clipboard with my computers" off: its text or the
+/// offer of its image, marked ([`crate::clipboard_push::takes_follow`]), or
+/// the fetch of the image this one told it of at the last switch.
+fn follows_the_mouse(packet: &NetworkPacket, device_id: &str) -> bool {
+    match packet.packet_type.as_str() {
+        "kdeconnect.clipboard" | CLIPBOARD_IMAGE => {
+            crate::clipboard_push::takes_follow(device_id, &packet.body)
+        }
+        CLIPBOARD_IMAGE_FETCH => packet
+            .body
+            .get("id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| crate::clipboard_push::fetch_follows(device_id, id)),
+        _ => false,
     }
 }
 
@@ -250,25 +278,44 @@ async fn receive_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
         }
     };
     let from = sender.device_id().to_string();
+    // Another computer's, following the mouse (BK3): a later switch drops it.
+    let landing = (crate::plugins::pair::is_computer_device(&from)
+        && crate::clipboard_push::marked(&packet.body))
+    .then(|| crate::clipboard_push::Landing::begin(&from));
     tokio::spawn(async move {
         let _slot = slot;
         let from = &from;
         let kept = share::receive_bytes(route, &key, size, MAX_CLIPBOARD_IMAGE, |png| async move {
-            if !crate::platform::clip_image::is_png(&png) {
-                return Err(share::io_error("clipboard", "not a PNG"));
+            if landing.as_ref().is_some_and(|l| !l.current()) {
+                return Err(share::io_error("clipboard", "a later switch came first"));
             }
-            let image = Arc::new(Image::new(png));
-            // Not told back to the phone it came from (O7 review of M3).
-            crate::clipboard_push::note_image_from(from, &image.id);
-            set_clipboard_image(&image).await?;
-            Ok(())
+            put_image(from, png, None).await
         })
         .await;
         match kept {
-            Ok(()) => tracing::info!("Clipboard image received ({size} bytes)"),
-            Err(e) => tracing::warn!("Clipboard image not taken: {e}"),
+            Ok(()) => tracing::info!("Clipboard image received from {from} ({size} bytes)"),
+            Err(e) => tracing::warn!("Clipboard image from {from} not taken: {e}"),
         }
     });
+}
+
+/// Put the PNG `png` that the device `from` sent on the clipboard; with
+/// `id`, only if it is that image. Not told back to `from` (O7 review of
+/// M3), unless the clipboard did not take it.
+pub(crate) async fn put_image(from: &str, png: Vec<u8>, id: Option<&str>) -> Result<()> {
+    if !crate::platform::clip_image::is_png(&png) {
+        return Err(share::io_error("clipboard", "not a PNG"));
+    }
+    let image = Arc::new(Image::new(png));
+    if id.is_some_and(|id| id != image.id) {
+        return Err(share::io_error("clipboard", "not the image it named"));
+    }
+    crate::clipboard_push::note_image_from(from, &image.id);
+    if let Err(e) = set_clipboard_image(&image).await {
+        crate::clipboard_push::forget_image_from(&image.id);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// The largest image file put on the clipboard as it arrives (O7), as N4's.
@@ -354,13 +401,25 @@ async fn send_image(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             return;
         }
     };
+    let to = sender.device_id().to_string();
+    // To another computer: on its way from now, and never sent to it twice
+    // in a row (BK3).
+    let computer = crate::plugins::pair::is_computer_device(&to);
+    if computer {
+        crate::clipboard_push::note_image_sent(&to, &image.id);
+    }
     tokio::spawn(async move {
         let _slot = slot;
         let size = image.png.len() as u64;
         let mut reader = image.png.as_slice();
         match share::send_reader(route, &key, &mut reader, size).await {
-            Ok(_) => tracing::info!("Clipboard image sent ({size} bytes)"),
-            Err(e) => tracing::warn!("Clipboard image not sent: {e}"),
+            Ok(_) => tracing::info!("Clipboard image sent to {to} ({size} bytes)"),
+            Err(e) => {
+                if computer {
+                    crate::clipboard_push::forget_image_sent_if(&to, &image.id);
+                }
+                tracing::warn!("Clipboard image not sent to {to}: {e}")
+            }
         }
     });
 }
@@ -442,6 +501,13 @@ pub(crate) async fn image_for_push() -> Result<Option<(String, u64)>> {
         Clip::Image(image) => Some((image.id.clone(), image.png.len() as u64)),
         _ => None,
     })
+}
+
+/// The image `id` as the clipboard was last read, while it still holds it:
+/// its PNG, for another computer (BK3).
+pub(crate) fn kept_image(id: &str) -> Option<Arc<Image>> {
+    let cached = cache().lock().unwrap_or_else(|e| e.into_inner());
+    image_for_fetch(cached.as_ref(), id).ok()
 }
 
 /// Whether `text` is a pairing link (`pocketdesk://pair?...`), which the
