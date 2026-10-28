@@ -10,8 +10,9 @@
 //! spots it instead). A hidden window of its own hears the session lock
 //! (WTS session notifications) and sleep (`WM_POWERBROADCAST`). Injected
 //! input always passes: what another computer sends this one is never
-//! carried off again. Ctrl+Alt+Del and Win+L are Windows' own; no hook sees
-//! them, and the lock that follows brings the keyboard and mouse home. The
+//! carried off again. Ctrl+Alt+Del is Windows' own, which no hook sees;
+//! Win+L the keyboard hook leaves to Windows ([`left_to_windows`]). The
+//! lock that follows either brings the keyboard and mouse home. The
 //! loop looks at what is in front every half second for the gaming lock
 //! ([`game_lock`]), and at once when a window comes to the front (an
 //! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
@@ -462,6 +463,11 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
     }
+    // Its key-up passes too: Windows holds the key, so it is not swallowed
+    // below, and it was never sent down.
+    if down && left_to_windows(modifiers_down(s.mods), info.vkCode) {
+        return false;
+    }
     let _ = s.events.send(Captured::Key {
         scan: info.scanCode as u16,
         extended: info.flags.0 & LLKHF_EXTENDED.0 != 0,
@@ -470,6 +476,15 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     // A key pressed here before the keyboard went away (Ctrl and Alt of
     // the switch key, say) comes up here too, or Windows would hold it.
     down || !windows_holds(info.vkCode)
+}
+
+/// Whether the key `vk` going down with modifiers `mods` held is Windows'
+/// own even while away: Win+L, which locks this computer. The hook leaves
+/// it to Windows, neither swallowed nor sent on (a hook that swallowed it
+/// could keep the lock from happening), and the lock that follows brings
+/// the keyboard and mouse home.
+pub(crate) fn left_to_windows(mods: u32, vk: u32) -> bool {
+    vk == u32::from(b'L') && mods & MOD_WIN != 0
 }
 
 /// Whether Windows has the key or button `vk` down: pressed before the
@@ -1606,6 +1621,19 @@ mod tests {
         let started = Instant::now();
         assert!(!wait_lowered(&RUNNING, Duration::from_millis(100)).await);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Win+L is left to Windows (it locks, and the lock brings the
+    /// keyboard and mouse home), whatever else is held with the Win key;
+    /// L alone, or with other modifiers, goes on.
+    #[test]
+    fn win_l_is_left_to_windows() {
+        let l = u32::from(b'L');
+        assert!(left_to_windows(MOD_WIN, l));
+        assert!(left_to_windows(MOD_WIN | MOD_SHIFT, l));
+        assert!(!left_to_windows(0, l));
+        assert!(!left_to_windows(MOD_CONTROL | MOD_ALT, l));
+        assert!(!left_to_windows(MOD_WIN, u32::from(b'K')));
     }
 
     #[test]
