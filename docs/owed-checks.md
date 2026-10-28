@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-908 open items.
+909 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 131 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 132 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -474,6 +474,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Esc while the drag is on Linux: the drag ends, nothing is sent, no Esc reaches Linux; let go afterwards and nothing is dropped anywhere. (where: owner)
 - A window dragged by its title bar across and let go, and text dragged from a browser across: nothing is sent and nothing is dropped into the window under the parked cursor. (where: owner)
 - A drag with the right button across: the files land on Linux too. (where: owner)
+- Over 100 files at once (select 120 in a folder) dragged across: the first 100 land, "20 more left out: at most 100 go at once" flashes, and the drop is quick (only the first 100 paths are read). (where: owner)
 - "Files over the internet" off on Windows: "Not sent" with the reason flashes and nothing goes; off on Linux, or Files not allowed there: the refusal's reason flashes within a few seconds. (where: owner)
 - The catcher is never seen or felt: no box in the middle of the screen while away, the window typed in keeps the focus; with "Drag files across the edge" off no catcher is put up, and a drag carried across ends as before BK4. (where: owner)
 - With the server installed `--elevated`, note what a drag across does (Windows is expected to refuse the drop: nothing sent, nothing dropped elsewhere). (where: owner)

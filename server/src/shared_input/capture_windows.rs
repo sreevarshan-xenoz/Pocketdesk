@@ -1085,7 +1085,10 @@ struct Glue {
     catcher: Catcher,
     drop_catcher: Option<DropCatcher>,
     catcher_failed: bool,
-    drops: (Sender<Vec<PathBuf>>, Receiver<Vec<PathBuf>>),
+    drops: (
+        Sender<(Vec<PathBuf>, usize)>,
+        Receiver<(Vec<PathBuf>, usize)>,
+    ),
 }
 
 /// Whether Windows has a mouse button down that a drag could be carried
@@ -1288,9 +1291,15 @@ impl Glue {
             );
             self.catch(catch);
         }
-        while let Ok(items) = self.drops.1.try_recv() {
+        while let Ok((items, total)) = self.drops.1.try_recv() {
             let internet_files = crate::events::current_config().internet_files;
-            match drag_files::on_drop(items, self.files_on, internet_files, driver.away_on()) {
+            match drag_files::on_drop(
+                items,
+                total,
+                self.files_on,
+                internet_files,
+                driver.away_on(),
+            ) {
                 Dropped::Send {
                     to,
                     items,

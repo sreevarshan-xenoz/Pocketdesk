@@ -163,13 +163,14 @@ pub enum Dropped {
     Keep(Option<&'static str>),
 }
 
-/// `items` dropped on the catcher, with the setting (`files_on`), this
-/// computer's "Files over the internet", and the computer driven now:
-/// sent to that computer, at most [`MOST_ITEMS`] of them. Nothing goes at
-/// home (the drag came back before the button came up) or with the setting
-/// off.
+/// `items` dropped on the catcher (read of the `total` the drop held),
+/// with the setting (`files_on`), this computer's "Files over the
+/// internet", and the computer driven now: sent to that computer, at most
+/// [`MOST_ITEMS`] of them, the rest counted. Nothing goes at home (the drag
+/// came back before the button came up) or with the setting off.
 pub fn on_drop(
     mut items: Vec<PathBuf>,
+    total: usize,
     files_on: bool,
     internet_files: bool,
     away_on: Option<&str>,
@@ -180,8 +181,8 @@ pub fn on_drop(
     if !internet_files {
         return Dropped::Keep(Some(FILES_OFF_HERE));
     }
-    let left_out = items.len().saturating_sub(MOST_ITEMS);
     items.truncate(MOST_ITEMS);
+    let left_out = total.max(items.len()) - items.len();
     Dropped::Send {
         to: to.to_string(),
         items,
@@ -415,7 +416,7 @@ mod tests {
     #[test]
     fn a_drop_goes_to_the_computer_driven_only() {
         assert_eq!(
-            on_drop(items(2), true, true, Some("L")),
+            on_drop(items(2), 2, true, true, Some("L")),
             Dropped::Send {
                 to: "L".into(),
                 items: items(2),
@@ -423,22 +424,25 @@ mod tests {
             }
         );
         // Come home before the button came up: Windows' own.
-        assert_eq!(on_drop(items(2), true, true, None), Dropped::Keep(None));
-        assert_eq!(on_drop(items(2), true, false, None), Dropped::Keep(None));
+        assert_eq!(on_drop(items(2), 2, true, true, None), Dropped::Keep(None));
+        assert_eq!(on_drop(items(2), 2, true, false, None), Dropped::Keep(None));
         // The setting off (turned off mid-drag).
         assert_eq!(
-            on_drop(items(2), false, true, Some("L")),
+            on_drop(items(2), 2, false, true, Some("L")),
             Dropped::Keep(None)
         );
         assert_eq!(
-            on_drop(items(2), false, false, Some("L")),
+            on_drop(items(2), 2, false, false, Some("L")),
             Dropped::Keep(None)
         );
         // Nothing in it.
-        assert_eq!(on_drop(vec![], true, true, Some("L")), Dropped::Keep(None));
+        assert_eq!(
+            on_drop(vec![], 0, true, true, Some("L")),
+            Dropped::Keep(None)
+        );
         // Files over the internet off here: said why.
         assert_eq!(
-            on_drop(items(2), true, false, Some("L")),
+            on_drop(items(2), 2, true, false, Some("L")),
             Dropped::Keep(Some(FILES_OFF_HERE))
         );
     }
@@ -447,24 +451,41 @@ mod tests {
     #[test]
     fn a_drop_goes_to_whichever_computer_is_driven_as_it_lands() {
         assert!(matches!(
-            on_drop(items(1), true, true, Some("M")),
+            on_drop(items(1), 1, true, true, Some("M")),
             Dropped::Send { to, .. } if to == "M"
         ));
     }
 
-    /// At most a hundred go at once; the rest are counted, not sent.
+    /// At most a hundred go at once; the rest are counted, not sent: those
+    /// never read (the drop reads only the first hundred of its count) as
+    /// well as any read past the hundred.
     #[test]
     fn a_large_drop_sends_the_first_hundred() {
         let Dropped::Send {
             items: sent,
             left_out,
             ..
-        } = on_drop(items(130), true, true, Some("L"))
+        } = on_drop(items(100), 130, true, true, Some("L"))
         else {
             panic!("sent");
         };
         assert_eq!(sent, items(100));
         assert_eq!(left_out, 30);
+        let Dropped::Send {
+            items: sent,
+            left_out,
+            ..
+        } = on_drop(items(130), 130, true, true, Some("L"))
+        else {
+            panic!("sent");
+        };
+        assert_eq!(sent, items(100));
+        assert_eq!(left_out, 30, "read past the hundred");
+        // A count below what was read (it cannot be) counts nothing out.
+        assert!(matches!(
+            on_drop(items(3), 0, true, true, Some("L")),
+            Dropped::Send { left_out: 0, .. }
+        ));
     }
 
     #[test]

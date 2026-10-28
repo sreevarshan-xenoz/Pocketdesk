@@ -85,7 +85,7 @@ pub struct DropCatcher {
 impl DropCatcher {
     /// Start the catcher's thread, its window down; the files dropped on it
     /// go to `dropped`. `None` when it could not start.
-    pub fn start(dropped: Sender<Vec<PathBuf>>) -> Option<DropCatcher> {
+    pub fn start(dropped: Sender<(Vec<PathBuf>, usize)>) -> Option<DropCatcher> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<isize, String>>();
         let (answer_tx, answers) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -189,7 +189,7 @@ impl Drop for DropCatcher {
 
 /// The catcher's thread: OLE, its window and drop target, and its loop.
 fn run(
-    dropped: Sender<Vec<PathBuf>>,
+    dropped: Sender<(Vec<PathBuf>, usize)>,
     ready: Sender<Result<isize, String>>,
     answers: Sender<usize>,
 ) {
@@ -380,17 +380,19 @@ fn holds_files(data: &IDataObject) -> bool {
     unsafe { data.QueryGetData(&hdrop_format()) }.is_ok()
 }
 
-/// The paths of the files and folders `data` holds, as Windows lists them.
-fn files_of(data: &IDataObject) -> Vec<PathBuf> {
+/// The paths of the first [`drag_files::MOST_ITEMS`] files and folders
+/// `data` holds, as Windows lists them, and how many it holds.
+fn files_of(data: &IDataObject) -> (Vec<PathBuf>, usize) {
     // SAFETY: the medium Windows hands over is read with DragQueryFileW
     // within its bounds, and released once read.
     unsafe {
         let Ok(mut medium) = data.GetData(&hdrop_format()) else {
-            return Vec::new();
+            return (Vec::new(), 0);
         };
         let drop = HDROP(medium.u.hGlobal.0);
         let count = DragQueryFileW(drop, u32::MAX, None);
-        let paths = (0..count)
+        let read = count.min(drag_files::MOST_ITEMS as u32);
+        let paths = (0..read)
             .filter_map(|i| {
                 let len = (DragQueryFileW(drop, i, None) as usize).min(MOST_PATH);
                 let mut name = vec![0u16; len + 1];
@@ -399,7 +401,7 @@ fn files_of(data: &IDataObject) -> Vec<PathBuf> {
             })
             .collect();
         ReleaseStgMedium(&mut medium);
-        paths
+        (paths, count as usize)
     }
 }
 
@@ -407,7 +409,7 @@ fn files_of(data: &IDataObject) -> Vec<PathBuf> {
 /// not at all.
 #[implement(IDropTarget)]
 struct DropTarget {
-    dropped: Sender<Vec<PathBuf>>,
+    dropped: Sender<(Vec<PathBuf>, usize)>,
     /// The drag over it now holds files.
     has_files: Cell<bool>,
 }
@@ -459,14 +461,14 @@ impl IDropTarget_Impl for DropTarget_Impl {
         _at: &POINTL,
         effect: *mut DROPEFFECT,
     ) -> windows::core::Result<()> {
-        let files = data.as_ref().map(files_of).unwrap_or_default();
+        let (files, count) = data.as_ref().map(files_of).unwrap_or_default();
         self.has_files.set(false);
         FILES_OVER.store(false, Ordering::SeqCst);
         answer_effect(effect, !files.is_empty());
         // The sends go on the driver's loop: the drag's own program waits
         // for this to return.
         if !files.is_empty() {
-            let _ = self.dropped.send(files);
+            let _ = self.dropped.send((files, count));
         }
         Ok(())
     }
