@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-877 open items.
+880 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 107 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 110 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -447,6 +447,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The network unplugged while typing on Linux: the Windows cursor comes home and shows; Linux lets go of the held key within about a second. (where: owner)
 - The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
 - Mixed scales: a monitor at 100% beside the laptop at 125%; the pointer crosses between Windows' own screens as before, and onto Linux from the laptop's edge at the height it left. (where: owner)
+- The gaming lock: a full-screen game in front keeps the pointer on Windows at the edge (the log says so, and no hook is installed meanwhile); Alt+Tab out and within a second the edge crosses again; a game started while the pointer is on Linux brings it home. (where: owner)
+- The switch key mid-game goes to Linux and back, the game getting its mouse again; a program on the always-stay list locks only while it is in front. (where: owner)
+- With a kernel anti-cheat running (Vanguard, FACEIT, Easy Anti-Cheat or BattlEye), the switch key mid-game is refused and the log says why; an elevated program in front is refused with the `install --elevated` hint. (where: owner)
 
 ## A phone with a SIM
 

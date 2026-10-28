@@ -2929,7 +2929,7 @@ Owed:
 
 ## 214. Driving another computer from Windows (shared input)
 
-Built 2026-10-28. Unit-tested: the driver's state machine (crossing, keys, crossing back with releases, the switch key, a lock, a failed send, a relayed link, the clamped cursor, the keep-awake), the scancode table against the injector's, Windows' logical pixels and the cursor's restore (counted, no hook installed). Nothing here was run on a desktop: the tests never hook, hide or move the cursor on the owner's computer.
+Built 2026-10-28. Unit-tested: the driver's state machine (crossing, keys, crossing back with releases, the switch key, a lock, a failed send, a relayed link, the clamped cursor, the keep-awake), the scancode table against the injector's, Windows' logical pixels and the cursor's restore (counted, no hook installed); the gaming lock's decisions (a full-screen game, a listed program only in front, the snap back, the switch key forced, refused for a kernel anti-cheat or an elevated program, the setting off) and the driver's hooks out while a game is in front. Nothing here was run on a desktop: the tests never hook, hide or move the cursor on the owner's computer.
 Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and mouse allowed, the link direct):
 - [ ] Windows to Linux at the edge: the pointer off the Windows laptop's right edge lands on the Linux screen at the same height, the Windows cursor hidden; back off the Linux screen's left edge, it returns where it crossed and shows again. (where: owner)
 - [ ] Typing in a terminal on Linux while away: letters, Shift and capitals, Ctrl+C, the arrows, AltGr, and nothing typed on Windows meanwhile. (where: owner)
@@ -2938,6 +2938,9 @@ Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and 
 - [ ] The network unplugged while typing on Linux: the Windows cursor comes home and shows; Linux lets go of the held key within about a second. (where: owner)
 - [ ] The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
 - [ ] Mixed scales: a monitor at 100% beside the laptop at 125%; the pointer crosses between Windows' own screens as before, and onto Linux from the laptop's edge at the height it left. (where: owner)
+- [ ] The gaming lock: a full-screen game in front keeps the pointer on Windows at the edge (the log says so, and no hook is installed meanwhile); Alt+Tab out and within a second the edge crosses again; a game started while the pointer is on Linux brings it home. (where: owner)
+- [ ] The switch key mid-game goes to Linux and back, the game getting its mouse again; a program on the always-stay list locks only while it is in front. (where: owner)
+- [ ] With a kernel anti-cheat running (Vanguard, FACEIT, Easy Anti-Cheat or BattlEye), the switch key mid-game is refused and the log says why; an elevated program in front is refused with the `install --elevated` hint. (where: owner)
 
 ## Recording results
 

@@ -11,7 +11,10 @@
 //! (WTS session notifications) and sleep (`WM_POWERBROADCAST`). Injected
 //! input always passes: what another computer sends this one is never
 //! carried off again. Ctrl+Alt+Del and Win+L are Windows' own; no hook sees
-//! them, and the lock that follows brings the keyboard and mouse home.
+//! them, and the lock that follows brings the keyboard and mouse home. The
+//! loop looks at what is in front every half second for the gaming lock
+//! ([`game_lock`]): a game in front puts the input thread in [`Mode::Off`],
+//! with no hooks at all.
 //!
 //! The hook reports physical pixels; the loop works in logical ones
 //! ([`Desktop`]), as the layout does. Nothing here is run by the tests: they
@@ -61,6 +64,7 @@ use windows::core::w;
 use super::awake::KeepAwake;
 use super::drive::{Action, Driver, OpenChannel, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
+use super::game_lock;
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
 use super::wire::{self, Msg};
@@ -873,6 +877,23 @@ const RESTART_AFTER: Duration = Duration::from_secs(30);
 const PARKING_WAIT: Duration = Duration::from_millis(250);
 /// How long after a channel could not be opened it is tried again.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
+/// How often what is in front is looked at, for the gaming lock.
+const GAME_EVERY: Duration = Duration::from_millis(500);
+
+/// What is in front now and whether a kernel-level anti-cheat runs, for
+/// the driver; nothing is probed with the gaming lock off.
+fn foreground_now(game_lock: bool) -> Captured {
+    if !game_lock {
+        return Captured::Foreground {
+            fg: game_lock::Foreground::default(),
+            kernel_anti_cheat: false,
+        };
+    }
+    Captured::Foreground {
+        fg: game_lock::foreground(),
+        kernel_anti_cheat: game_lock::kernel_anti_cheat_running(),
+    }
+}
 
 /// Where the cursor is parked while away: logical, physical, and its
 /// monitor's scale.
@@ -1062,14 +1083,24 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             &link::linked(),
         )
     };
-    let mut driver = Driver::new(&me.device_id, read_layout(&glue));
+    // What is in front is weighed before anything else, so a game already
+    // there never sees a hook.
+    let mut game_lock_on = config.shared_input_game_lock;
+    let mut driver = Driver::new(&me.device_id, read_layout(&glue))
+        .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
+    let actions = driver.on(foreground_now(game_lock_on));
+    glue.apply(&mut driver, actions);
     let start = driver.start();
     glue.apply(&mut driver, start);
     tracing::info!("Shared input: this computer's keyboard and mouse may go to the others");
 
     let mut last_input = Instant::now();
-    let (mut active_at, mut link_at, mut layout_at) =
-        (Instant::now(), Instant::now(), Instant::now());
+    let (mut active_at, mut link_at, mut layout_at, mut game_at) = (
+        Instant::now(),
+        Instant::now(),
+        Instant::now(),
+        Instant::now(),
+    );
     let mut greeted_at: Option<Instant> = None;
     while !stop.load(Ordering::SeqCst) {
         if !glue.input.is_alive() {
@@ -1092,6 +1123,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
+        }
+        // A game in front keeps the keyboard and mouse here with no hooks;
+        // one come to the front while away brings them home.
+        if game_at.elapsed() >= GAME_EVERY {
+            game_at = Instant::now();
+            let actions = driver.on(foreground_now(game_lock_on));
+            glue.apply(&mut driver, actions);
         }
         // Who is at this computer, to every computer with a channel: the
         // driven one lets go after a second without a word.
@@ -1134,6 +1172,11 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         if layout_at.elapsed() >= LAYOUT_EVERY {
             layout_at = Instant::now();
+            // The gaming lock's settings, taken without a restart.
+            let config = crate::events::current_config();
+            game_lock_on = config.shared_input_game_lock;
+            let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
+            glue.apply(&mut driver, actions);
             let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
             if desktop != glue.desktop {
                 glue.desktop = desktop;
