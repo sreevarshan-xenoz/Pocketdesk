@@ -518,22 +518,35 @@ pub(crate) fn may_drive_here(device_id: &str) -> bool {
 /// [`RECHECK`] (they are files: config.toml and the trust store).
 #[derive(Default)]
 struct Gate {
-    on: Option<(bool, Instant)>,
+    /// `shared_input` and `shared_input_clipboard`, and when read.
+    on: Option<((bool, bool), Instant)>,
     standings: HashMap<String, (Standing, Instant)>,
 }
 
 impl Gate {
-    async fn on(&mut self) -> bool {
+    async fn settings(&mut self) -> (bool, bool) {
         if let Some((on, at)) = self.on
             && at.elapsed() < RECHECK
         {
             return on;
         }
-        let on = tokio::task::spawn_blocking(|| crate::events::current_config().shared_input)
-            .await
-            .unwrap_or(false);
+        let on = tokio::task::spawn_blocking(|| {
+            let config = crate::events::current_config();
+            (config.shared_input, config.shared_input_clipboard)
+        })
+        .await
+        .unwrap_or((false, false));
         self.on = Some((on, Instant::now()));
         on
+    }
+
+    async fn on(&mut self) -> bool {
+        self.settings().await.0
+    }
+
+    /// The clipboard follows the mouse here (`shared_input_clipboard`).
+    async fn clipboard_follows(&mut self) -> bool {
+        self.settings().await.1
     }
 
     /// Why `device_id` may not drive this one, as a [`Msg::Refuse`] says
@@ -665,6 +678,16 @@ fn send_to(channels: &mut HashMap<String, Channel>, to: &str, msg: &Msg) {
     }
 }
 
+/// Whether this computer pushes its clipboard back to `from` for `msg`
+/// (the clipboard following the mouse home): a leave from the computer
+/// driving this one now (`driver`), allowed to (`allowed`), with
+/// `shared_input_clipboard` on here (`follows`). Not the leave a driver
+/// sends as it greets (it drives nothing then), nor one from another
+/// computer.
+fn pushes_back(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>, follows: bool) -> bool {
+    matches!(msg, Msg::Leave) && allowed && follows && driver == Some(from)
+}
+
 /// Whether a computer that may not drive this one is told so for `msg`:
 /// its hello and its entering are, and anything at all while it drives
 /// (`driving`, its permission or the setting having just gone). Its moves
@@ -759,8 +782,10 @@ pub async fn run() {
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
                 // hello from its own driver is not).
-                if standing.computer && super::drive::is_answer(&msg) {
-                    link::note_screens(&from);
+                if standing.computer
+                    && super::drive::is_answer(&msg)
+                    && link::note_screens(&from)
+                {
                     heard_refusals.clear(&from);
                 }
                 match &msg {
@@ -797,17 +822,10 @@ pub async fn run() {
                 }
                 // The cursor going home from here: this computer's
                 // clipboard goes with it, when it follows the mouse here.
-                let leaving = matches!(msg, Msg::Leave)
-                    && standing.allowed
-                    && receiver.driver() == Some(from.as_str());
+                let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
+                let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
                 receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
-                if leaving
-                    && tokio::task::spawn_blocking(|| {
-                        crate::events::current_config().shared_input_clipboard
-                    })
-                    .await
-                    .unwrap_or(false)
-                {
+                if back {
                     let to = from.clone();
                     tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
                 }
@@ -990,6 +1008,31 @@ mod tests {
     /// when it came off the link, and kept for it after it leaves: a stale
     /// move, a key out of range (counted, not timed) and what another
     /// computer sends are not; the next arrival starts over.
+    /// The clipboard goes back only on a leave from the computer driving
+    /// this one now, allowed to, with the setting on: never the leave a
+    /// driver sends as it greets, nor one from another computer.
+    #[test]
+    fn only_the_drivers_leave_pushes_the_clipboard_back() {
+        let leave = Msg::Leave;
+        assert!(pushes_back(&leave, "pc", true, Some("pc"), true));
+        // The greeting leave: nothing is driven.
+        assert!(!pushes_back(&leave, "pc", true, None, true));
+        // Another computer's leave while "pc" drives.
+        assert!(!pushes_back(&leave, "other", true, Some("pc"), true));
+        // Not allowed to drive this one, or the setting off here.
+        assert!(!pushes_back(&leave, "pc", false, Some("pc"), true));
+        assert!(!pushes_back(&leave, "pc", true, Some("pc"), false));
+        // Anything but a leave.
+        assert!(!pushes_back(
+            &Msg::Enter { x: 0, y: 0 },
+            "pc",
+            true,
+            Some("pc"),
+            true
+        ));
+        assert!(!pushes_back(&Msg::ReleaseAll, "pc", true, Some("pc"), true));
+    }
+
     #[test]
     fn keys_and_moves_are_timed_for_the_visit() {
         let (mut r, _fake) = receiver();

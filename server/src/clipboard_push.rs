@@ -312,23 +312,50 @@ pub(crate) async fn push_now(device_id: &str) {
     }
 }
 
+/// Whether a clipboard packet's `body` is marked as following the mouse:
+/// [`FOLLOWS`] is JSON `true`, nothing else.
+fn marked(body: &serde_json::Value) -> bool {
+    body.get(FOLLOWS).and_then(|v| v.as_bool()) == Some(true)
+}
+
+/// Whether a push marked as following the mouse is taken (`marked`): with
+/// the shared keyboard and mouse (`shared_input`) and "Clipboard follows
+/// the mouse" (`follows_on`) on here, from one of the owner's paired
+/// computers (`is_computer`) that may drive this one (`may_drive`) or that
+/// answered this one's hello with its screens on the link up now
+/// (`answered`: this one may drive it). Each later word is asked only when
+/// those before it hold (they read files).
+fn follow_taken(
+    marked: bool,
+    shared_input: bool,
+    follows_on: bool,
+    is_computer: impl FnOnce() -> bool,
+    may_drive: impl FnOnce() -> bool,
+    answered: impl FnOnce() -> bool,
+) -> bool {
+    marked && shared_input && follows_on && is_computer() && (may_drive() || answered())
+}
+
 /// Whether a clipboard packet's `body` from the computer `device_id` is
-/// taken as one following the mouse: marked so ([`FOLLOWS`]), with the
-/// shared keyboard and mouse and "Clipboard follows the mouse" on here,
-/// from a computer this one shares them with (it may drive this one, or it
-/// answered this one with its screens: this one may drive it). Reads files
-/// (blocking).
+/// taken as one following the mouse, with "Clipboard with my computers"
+/// off here ([`follow_taken`]). Reads files (blocking), but only for a
+/// marked packet.
 pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
-    if body.get(FOLLOWS).and_then(|v| v.as_bool()) != Some(true) {
+    if !marked(body) {
         return false;
     }
     let config = crate::events::current_config();
-    config.shared_input
-        && config.shared_input_clipboard
-        && (crate::plugins::pair::is_computer_device(device_id)
-            || crate::peer_computers::is_paired(device_id))
-        && (crate::shared_input::receive::may_drive_here(device_id)
-            || crate::shared_input::link::screens_heard().contains_key(device_id))
+    follow_taken(
+        true,
+        config.shared_input,
+        config.shared_input_clipboard,
+        || {
+            crate::plugins::pair::is_computer_device(device_id)
+                || crate::peer_computers::is_paired(device_id)
+        },
+        || crate::shared_input::receive::may_drive_here(device_id),
+        || crate::shared_input::link::answered(device_id),
+    )
 }
 
 /// One `wl-paste --watch` while a phone could receive the clipboard (R6d):
@@ -783,6 +810,55 @@ mod tests {
         let mut ended = ChangeWatch::start_with("sh", &["-c", "exit 1"]).unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(ended.take_change(), None, "an old wl-paste without --watch");
+    }
+
+    /// Only a body whose mark is JSON `true` is marked.
+    #[test]
+    fn only_a_true_mark_is_a_follow() {
+        assert!(marked(
+            &serde_json::json!({"content": "x", "follows": true})
+        ));
+        for body in [
+            serde_json::json!({"content": "x"}),
+            serde_json::json!({"content": "x", "follows": "true"}),
+            serde_json::json!({"content": "x", "follows": 1}),
+            serde_json::json!({"content": "x", "follows": false}),
+            serde_json::json!({"content": "x", "follows": null}),
+        ] {
+            assert!(!marked(&body), "{body}");
+        }
+        assert!(follow_packet("x").body[FOLLOWS] == true);
+    }
+
+    /// A marked push is taken with both settings on, from a paired computer
+    /// that may drive this one or that this one may drive; never from a
+    /// phone, a computer sharing nothing, or with either setting off.
+    #[test]
+    fn a_follow_is_taken_only_from_a_computer_sharing_input() {
+        let yes = || true;
+        let no = || false;
+        // Both ways in.
+        assert!(
+            follow_taken(true, true, true, yes, yes, no),
+            "it drives here"
+        );
+        assert!(
+            follow_taken(true, true, true, yes, no, yes),
+            "this drives it"
+        );
+        // A phone (no paired computer), even with the permission flag.
+        assert!(!follow_taken(true, true, true, no, yes, yes));
+        // A paired computer sharing nothing with this one.
+        assert!(!follow_taken(true, true, true, yes, no, no));
+        // Unmarked.
+        assert!(!follow_taken(false, true, true, yes, yes, yes));
+        // Either setting off here.
+        assert!(!follow_taken(true, false, true, yes, yes, yes));
+        assert!(!follow_taken(true, true, false, yes, yes, yes));
+        // Nothing is read for a push turned away early.
+        let unread = || -> bool { panic!("read for nothing") };
+        assert!(!follow_taken(false, true, true, unread, unread, unread));
+        assert!(!follow_taken(true, true, true, no, unread, unread));
     }
 
     #[test]

@@ -2958,7 +2958,7 @@ Run so far on the Linux laptop, into a headless Sway its own session never sees 
 Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and mouse allowed, the link direct):
 - [ ] `pocketdesk share-test <laptop> --keys 2000 --moves 2000` over the home Wi-Fi: Pocketdesk's share under 5 ms at the 95th percentile; the result on the desktop app's Diagnostics page. (where: linux)
 - [ ] Copy text on Windows, push the pointer onto Linux, paste there: the text is there, with "Clipboard with my computers" off on both; copy on Linux, come back, paste on Windows. (where: owner)
-- [ ] A password manager's private copy (KeePassXC, or Windows' marks) does not follow; an image does not follow; with "Clipboard follows the mouse" off on either side, nothing crosses that way. (where: owner)
+- [ ] A password manager's private copy (KeePassXC, or Windows' marks) does not follow; an image does not follow; with "Clipboard follows the mouse" off on either side (with Clipboard with my computers off), nothing crosses that way. (where: owner)
 - [ ] The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
 - [ ] Linux kept awake while driven: its screensaver and idle lock do not start while typing goes on from Windows for longer than the idle time. (where: linux)
 - [ ] The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)

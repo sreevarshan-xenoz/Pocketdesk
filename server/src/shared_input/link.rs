@@ -79,7 +79,15 @@ impl Drop for Registered {
 /// earlier one, and read what comes on it. Called on a runtime.
 pub fn register(device_id: &str, conn: Connection) {
     let reader = tokio::spawn(read_link(device_id.to_string(), conn.clone())).abort_handle();
+    let stable_id = conn.stable_id();
     let replaced = lock(&LINKS).insert(device_id.to_string(), Registered { conn, reader });
+    // An answer on the link replaced is no answer on this one.
+    if replaced
+        .as_ref()
+        .is_some_and(|r| r.conn.stable_id() != stable_id)
+    {
+        forget_answer(device_id);
+    }
     // Its reader is stopped outside the lock.
     drop(replaced);
 }
@@ -87,6 +95,7 @@ pub fn register(device_id: &str, conn: Connection) {
 /// Forget the link to `device_id` and stop reading it.
 pub fn unregister(device_id: &str) {
     let gone = lock(&LINKS).remove(device_id);
+    forget_answer(device_id);
     drop(gone);
 }
 
@@ -102,18 +111,45 @@ pub(crate) fn linked() -> Vec<String> {
 
 /// When each computer last sent its screens ([`Msg::Screens`], which a
 /// computer sends only to one it lets drive it: in answer to its `Hello`,
-/// and when its screens change). The driving side takes a computer that
-/// answered this way since its channel opened as one it may cross onto
-/// (`drive::reachable`); a `Hello` from that computer's own driver is no
-/// answer.
+/// and when its screens change), counted only on the link this computer
+/// greeted it on ([`GREETED`]) and forgotten when that link goes. The
+/// driving side takes a computer that answered this way since its channel
+/// opened as one it may cross onto (`drive::reachable`); a `Hello` from
+/// that computer's own driver is no answer, and nor are screens it sent
+/// unasked.
 static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
     LazyLock::new(Default::default);
 
-/// Note that `device_id` just sent its screens: it takes input from this
-/// computer now, whatever it refused before.
-pub fn note_screens(device_id: &str) {
+/// The computers this one said hello to ([`Msg::Hello`]), each with the
+/// link it said it on (its connection's `stable_id`).
+static GREETED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
+
+/// Note that `device_id` just sent its screens: when this computer greeted
+/// it on the link up now, it takes input from this one, whatever it
+/// refused before. Whether it counted.
+pub fn note_screens(device_id: &str) -> bool {
+    let current = lock(&LINKS).get(device_id).map(|r| r.conn.stable_id());
+    let greeted = lock(&GREETED).get(device_id).copied();
+    if current.is_none() || greeted != current {
+        return false;
+    }
     lock(&REFUSED).remove(device_id);
     lock(&SCREENS_HEARD).insert(device_id.to_string(), std::time::Instant::now());
+    true
+}
+
+/// Whether `device_id` answered this computer's hello with its screens on
+/// the link up now (and has not refused since): this computer may drive
+/// it.
+pub fn answered(device_id: &str) -> bool {
+    lock(&SCREENS_HEARD).contains_key(device_id)
+}
+
+/// The link to `device_id` went or was replaced: its greeting and answer
+/// go with it.
+fn forget_answer(device_id: &str) {
+    lock(&GREETED).remove(device_id);
+    lock(&SCREENS_HEARD).remove(device_id);
 }
 
 /// The computers that last answered this one by refusing to be driven
@@ -179,6 +215,9 @@ impl Drop for Held {
             None
         };
         drop(links);
+        if gone.is_some() {
+            forget_answer(&self.device_id);
+        }
         drop(gone);
     }
 }
@@ -423,6 +462,9 @@ impl Channel {
         }
         if let Some(why) = lock(&self.broken).clone() {
             return Err(why);
+        }
+        if matches!(msg, Msg::Hello { .. }) {
+            lock(&GREETED).insert(self.device_id.clone(), self.conn.stable_id());
         }
         if rides_datagram(msg) {
             return self
@@ -686,6 +728,33 @@ mod tests {
             .expect("the ping answered");
         assert!(pong.round_trip() < Duration::from_secs(5));
         drop(channel);
+        a.close().await;
+        b.close().await;
+    }
+
+    /// Screens count as an answer only on the link this computer said
+    /// hello on: not sent unasked, and not once that link goes.
+    #[tokio::test]
+    async fn screens_count_only_as_an_answer_to_a_hello_on_the_link_up() {
+        let (a, b, out, _back) = linked_pair().await;
+        assert!(!note_screens("test-answer"), "no link");
+        let held = hold("test-answer", out);
+        assert!(!note_screens("test-answer"), "unasked");
+        assert!(!answered("test-answer"));
+        let mut channel = Channel::open_with("test-answer", |_| true).unwrap();
+        channel
+            .send(&Msg::Hello {
+                version: wire::VERSION,
+                name: "A".to_string(),
+                screens: Vec::new(),
+            })
+            .unwrap();
+        assert!(note_screens("test-answer"), "an answer to the hello");
+        assert!(answered("test-answer"));
+        drop(channel);
+        drop(held);
+        assert!(!answered("test-answer"), "forgotten with the link");
+        assert!(!note_screens("test-answer"));
         a.close().await;
         b.close().await;
     }
