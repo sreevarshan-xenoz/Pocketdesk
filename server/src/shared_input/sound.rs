@@ -96,6 +96,29 @@ pub enum Step {
     Unask(String),
 }
 
+/// What the driving side has said of each computer's having no sound to
+/// give (review M5): each visit asks anew, and a computer with no capture
+/// at all would say so at every crossing; it is said once a link and
+/// reason.
+#[derive(Debug, Default)]
+pub struct Unavailable {
+    said: HashMap<String, (Option<usize>, String)>,
+}
+
+impl Unavailable {
+    /// Whether `to` saying `why` on the link `link` (its connection's
+    /// `stable_id`) is to be said: not when it said just that on that link
+    /// already. Notes it as said.
+    pub fn worth_saying(&mut self, to: &str, link: Option<usize>, why: &str) -> bool {
+        let now = (link, why.to_string());
+        if self.said.get(to) == Some(&now) {
+            return false;
+        }
+        self.said.insert(to.to_string(), now);
+        true
+    }
+}
+
 /// The driving side's asking for sound: at most one computer at a time,
 /// asked once each visit.
 #[derive(Debug, Default)]
@@ -1037,6 +1060,25 @@ mod tests {
         assert!(!lock(&LISTENING).contains_key("test-snd-l"));
         heard("test-snd-l", 1, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review M5: a computer with no sound to give is said once a link
+    /// and reason, not at every crossing.
+    #[test]
+    fn no_sound_is_said_once_a_link_and_reason() {
+        let mut told = Unavailable::default();
+        assert!(told.worth_saying("linux", Some(1), "no PipeWire"));
+        assert!(!told.worth_saying("linux", Some(1), "no PipeWire"), "again");
+        assert!(
+            told.worth_saying("other", Some(2), "no PipeWire"),
+            "another"
+        );
+        assert!(told.worth_saying("linux", Some(1), "it stopped"), "new why");
+        assert!(!told.worth_saying("linux", Some(1), "it stopped"));
+        assert!(
+            told.worth_saying("linux", Some(3), "it stopped"),
+            "new link"
+        );
     }
 
     /// Review M4: a capture whose start blocks (WASAPI waits up to 3 s

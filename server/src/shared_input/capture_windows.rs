@@ -1098,6 +1098,8 @@ struct Glue {
     sound_on: bool,
     asking: sound::Asking,
     listening: Option<sound::Listening>,
+    /// The "no sound" each computer said, flashed once a link and reason.
+    told_unavailable: sound::Unavailable,
 }
 
 /// Whether Windows has a mouse button down that a drag could be carried
@@ -1304,7 +1306,7 @@ impl Glue {
     /// it, with "Hear the computer you're driving here" on (BK6): asked
     /// for after each arrival, played while asked, and let go of as the
     /// cursor leaves (or the setting goes off). What that computer says
-    /// when it has no sound to give flashes here once.
+    /// when it has no sound to give flashes here once a link and reason.
     fn follow_sound(&mut self, driver: &mut Driver) {
         let want = sound::want_for(driver.away_on(), driver.visit(), self.sound_on, |id| {
             self.phone_ids.contains(id)
@@ -1336,6 +1338,12 @@ impl Glue {
         }
         if let Some(to) = self.asking.asked().map(str::to_string)
             && let Some(why) = sound::take_unavailable(&to)
+            // Once a link and reason, not at every crossing (review M5).
+            && self.told_unavailable.worth_saying(
+                &to,
+                link::connection(&to).map(|conn| conn.stable_id()),
+                &why,
+            )
         {
             let words = format!("No sound from {}: {why}", driver.name_of(&to));
             let note = badge::of(&badge::Event::Note(&words));
@@ -1666,6 +1674,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         sound_on: config.shared_input_sound,
         asking: sound::Asking::default(),
         listening: None,
+        told_unavailable: sound::Unavailable::default(),
     };
     // The catcher's thread ready before a drag first needs it.
     glue.files_setting(config.shared_input_files);
