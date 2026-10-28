@@ -91,3 +91,10 @@ For each release, once its tag is pushed:
 1. In `aur/`, set `pkgver`, run `updpkgsums` (it replaces `SKIP` with the tarball's checksum) and `makepkg --printsrcinfo > .SRCINFO`.
 2. `makepkg -si` on an Arch machine or in an `archlinux` container to check it builds and installs.
 3. To publish (the owner's call, from an AUR account with an SSH key): clone `ssh://aur@aur.archlinux.org/pocketdesk.git`, copy in `PKGBUILD`, `pocketdesk.install` and `.SRCINFO`, commit and push.
+
+## Signing the Windows programs
+
+The Windows programs and `setup.exe` are unsigned, so SmartScreen calls their publisher unknown. [SignPath Foundation](https://signpath.org/) signs open-source projects for free; the certificate is issued to SignPath Foundation, which then shows as the publisher. Applying is the owner's call:
+1. Apply at [signpath.io/product/open-source](https://about.signpath.io/product/open-source). Every member with access needs multi-factor authentication on GitHub and SignPath.
+2. Publish a code signing policy page (who builds and approves releases; the line *Free code signing provided by SignPath.io, certificate by SignPath Foundation*) on the landing page or in the README.
+3. Once accepted, add the API token as a repository secret, and a step in the release workflow's Windows job that sends `pocketdesk.exe`, `pocketdesk-app.exe`, `pocketdesk-tray.exe` and the setup to SignPath (`signpath/github-action-submit-signing-request`) before the zip, the installer and `SHA256SUMS` are made. SignPath checks that the files came from that workflow run (origin verification).
