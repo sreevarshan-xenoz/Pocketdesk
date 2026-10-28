@@ -632,7 +632,7 @@ pub async fn record(file: PathBuf) {
 }
 
 /// One recorded line for `msg` from `from`, come off the link at `at_us`.
-fn line((from, msg, at_us): link::Arrival) -> String {
+fn line((from, msg, at_us, _): link::Arrival) -> String {
     let mut line = serde_json::json!({
         "at_us": at_us,
         "from": from,
@@ -875,7 +875,7 @@ mod tests {
             code: 30,
             pressed: true,
         };
-        let line = line(("aaaa".to_string(), msg.clone(), 42));
+        let line = line(("aaaa".to_string(), msg.clone(), 42, 0));
         let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(value["from"], "aaaa");
         assert!(value["at_us"].as_u64().is_some());

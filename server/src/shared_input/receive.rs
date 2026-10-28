@@ -755,7 +755,7 @@ pub async fn run() {
     loop {
         tokio::select! {
             arrival = arriving.recv() => {
-                let Some((from, msg, arrived_us)) = arrival else { break };
+                let Some((from, msg, arrived_us, link_id)) = arrival else { break };
                 if let Msg::Refuse { reason } = msg {
                     // Its answer to this computer driving it.
                     if heard_refusals.note(&from, reason) {
@@ -784,7 +784,7 @@ pub async fn run() {
                 // hello from its own driver is not).
                 if standing.computer
                     && super::drive::is_answer(&msg)
-                    && link::note_screens(&from)
+                    && link::note_screens(&from, link_id)
                 {
                     heard_refusals.clear(&from);
                 }
@@ -1004,10 +1004,6 @@ mod tests {
         Msg::Key { code, pressed }
     }
 
-    /// Each key and move injected for the driving computer is timed from
-    /// when it came off the link, and kept for it after it leaves: a stale
-    /// move, a key out of range (counted, not timed) and what another
-    /// computer sends are not; the next arrival starts over.
     /// The clipboard goes back only on a leave from the computer driving
     /// this one now, allowed to, with the setting on: never the leave a
     /// driver sends as it greets, nor one from another computer.
@@ -1033,6 +1029,10 @@ mod tests {
         assert!(!pushes_back(&Msg::ReleaseAll, "pc", true, Some("pc"), true));
     }
 
+    /// Each key and move injected for the driving computer is timed from
+    /// when it came off the link, and kept for it after it leaves: a stale
+    /// move, a key out of range (counted, not timed) and what another
+    /// computer sends are not; the next arrival starts over.
     #[test]
     fn keys_and_moves_are_timed_for_the_visit() {
         let (mut r, _fake) = receiver();

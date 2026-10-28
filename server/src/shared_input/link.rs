@@ -40,9 +40,10 @@ const STREAM_PRIORITY: i32 = 1;
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
 
-/// A message from another computer: that computer's id, the message, and
-/// when it came off the link ([`now_us`]).
-pub type Arrival = (String, Msg, u64);
+/// A message from another computer: that computer's id, the message, when
+/// it came off the link ([`now_us`]), and the link it came on (its
+/// connection's `stable_id`).
+pub type Arrival = (String, Msg, u64, usize);
 
 /// Where what arrives goes: the receiver [`incoming`] handed out last.
 static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(Default::default);
@@ -82,11 +83,10 @@ pub fn register(device_id: &str, conn: Connection) {
     let stable_id = conn.stable_id();
     let replaced = lock(&LINKS).insert(device_id.to_string(), Registered { conn, reader });
     // An answer on the link replaced is no answer on this one.
-    if replaced
-        .as_ref()
-        .is_some_and(|r| r.conn.stable_id() != stable_id)
+    if let Some(old) = replaced.as_ref().map(|r| r.conn.stable_id())
+        && old != stable_id
     {
-        forget_answer(device_id);
+        forget_answer(device_id, old);
     }
     // Its reader is stopped outside the lock.
     drop(replaced);
@@ -95,7 +95,9 @@ pub fn register(device_id: &str, conn: Connection) {
 /// Forget the link to `device_id` and stop reading it.
 pub fn unregister(device_id: &str) {
     let gone = lock(&LINKS).remove(device_id);
-    forget_answer(device_id);
+    if let Some(gone) = &gone {
+        forget_answer(device_id, gone.conn.stable_id());
+    }
     drop(gone);
 }
 
@@ -117,24 +119,24 @@ pub(crate) fn linked() -> Vec<String> {
 /// opened as one it may cross onto (`drive::reachable`); a `Hello` from
 /// that computer's own driver is no answer, and nor are screens it sent
 /// unasked.
-static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+/// Each with the link it came on.
+static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, (std::time::Instant, usize)>>> =
     LazyLock::new(Default::default);
 
 /// The computers this one said hello to ([`Msg::Hello`]), each with the
 /// link it said it on (its connection's `stable_id`).
 static GREETED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
 
-/// Note that `device_id` just sent its screens: when this computer greeted
-/// it on the link up now, it takes input from this one, whatever it
-/// refused before. Whether it counted.
-pub fn note_screens(device_id: &str) -> bool {
-    let current = lock(&LINKS).get(device_id).map(|r| r.conn.stable_id());
-    let greeted = lock(&GREETED).get(device_id).copied();
-    if current.is_none() || greeted != current {
+/// Note that `device_id` just sent its screens on the link `link` (its
+/// connection's `stable_id`): when this computer greeted it on that link,
+/// it takes input from this one, whatever it refused before. Whether it
+/// counted.
+pub fn note_screens(device_id: &str, link: usize) -> bool {
+    if lock(&GREETED).get(device_id) != Some(&link) {
         return false;
     }
     lock(&REFUSED).remove(device_id);
-    lock(&SCREENS_HEARD).insert(device_id.to_string(), std::time::Instant::now());
+    lock(&SCREENS_HEARD).insert(device_id.to_string(), (std::time::Instant::now(), link));
     true
 }
 
@@ -145,11 +147,19 @@ pub fn answered(device_id: &str) -> bool {
     lock(&SCREENS_HEARD).contains_key(device_id)
 }
 
-/// The link to `device_id` went or was replaced: its greeting and answer
-/// go with it.
-fn forget_answer(device_id: &str) {
-    lock(&GREETED).remove(device_id);
-    lock(&SCREENS_HEARD).remove(device_id);
+/// The link `link` to `device_id` went or was replaced: its greeting and
+/// answer go with it. Those on a newer link stay (a hello said on it just
+/// as it was registered).
+fn forget_answer(device_id: &str, link: usize) {
+    let mut greeted = lock(&GREETED);
+    if greeted.get(device_id) == Some(&link) {
+        greeted.remove(device_id);
+    }
+    drop(greeted);
+    let mut heard = lock(&SCREENS_HEARD);
+    if heard.get(device_id).is_some_and(|(_, on)| *on == link) {
+        heard.remove(device_id);
+    }
 }
 
 /// The computers that last answered this one by refusing to be driven
@@ -172,7 +182,10 @@ pub fn refusals() -> HashMap<String, (u8, std::time::Instant)> {
 
 /// When each computer last sent its screens.
 pub fn screens_heard() -> HashMap<String, std::time::Instant> {
-    lock(&SCREENS_HEARD).clone()
+    lock(&SCREENS_HEARD)
+        .iter()
+        .map(|(id, (at, _))| (id.clone(), *at))
+        .collect()
 }
 
 /// Whether `conn`'s traffic rides a direct path now: its selected path is
@@ -216,7 +229,7 @@ impl Drop for Held {
         };
         drop(links);
         if gone.is_some() {
-            forget_answer(&self.device_id);
+            forget_answer(&self.device_id, self.stable_id);
         }
         drop(gone);
     }
@@ -261,7 +274,8 @@ async fn read_link(device_id: String, conn: Connection) {
                             && let Some(incoming) = incoming_sender()
                         {
                             // A datagram is dropped rather than waited for.
-                            let _ = incoming.try_send((device_id.clone(), msg, at_us));
+                            let arrival = (device_id.clone(), msg, at_us, conn.stable_id());
+                            let _ = incoming.try_send(arrival);
                         }
                     }
                     Err(e) => tracing::debug!(device_id, "A shared-input datagram did not read: {e}"),
@@ -307,23 +321,25 @@ async fn read_stream(device_id: String, conn: Connection, mut stream: RecvStream
                 "Another computer shares input in another version"
             );
             if matches!(msg, Msg::Hello { .. }) {
-                hand_on(&device_id, msg, now_us()).await;
+                hand_on(&device_id, msg, now_us(), conn.stable_id()).await;
             }
             let _ = stream.stop(0u32.into());
             return;
         }
         let at_us = now_us();
         if answer(&device_id, &conn, &msg) {
-            hand_on(&device_id, msg, at_us).await;
+            hand_on(&device_id, msg, at_us, conn.stable_id()).await;
         }
     }
 }
 
 /// Hand `msg` on to whoever takes [`incoming`], waiting while it is full:
 /// what the stream carries is not dropped.
-async fn hand_on(device_id: &str, msg: Msg, at_us: u64) {
+async fn hand_on(device_id: &str, msg: Msg, at_us: u64, link: usize) {
     if let Some(incoming) = incoming_sender() {
-        let _ = incoming.send((device_id.to_string(), msg, at_us)).await;
+        let _ = incoming
+            .send((device_id.to_string(), msg, at_us, link))
+            .await;
     }
 }
 
@@ -708,7 +724,7 @@ mod tests {
         let mut pinged = false;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while on_stream.last() != Some(&Msg::Leave) || !pinged {
-            let (from, msg, _) = tokio::time::timeout_at(deadline, arriving.recv())
+            let (from, msg, _, _) = tokio::time::timeout_at(deadline, arriving.recv())
                 .await
                 .expect("everything in time")
                 .expect("still taken");
@@ -736,10 +752,11 @@ mod tests {
     /// hello on: not sent unasked, and not once that link goes.
     #[tokio::test]
     async fn screens_count_only_as_an_answer_to_a_hello_on_the_link_up() {
-        let (a, b, out, _back) = linked_pair().await;
-        assert!(!note_screens("test-answer"), "no link");
+        let (a, b, out, back) = linked_pair().await;
+        let link = out.stable_id();
+        assert!(!note_screens("test-answer", link), "no hello");
         let held = hold("test-answer", out);
-        assert!(!note_screens("test-answer"), "unasked");
+        assert!(!note_screens("test-answer", link), "unasked");
         assert!(!answered("test-answer"));
         let mut channel = Channel::open_with("test-answer", |_| true).unwrap();
         channel
@@ -749,14 +766,33 @@ mod tests {
                 screens: Vec::new(),
             })
             .unwrap();
-        assert!(note_screens("test-answer"), "an answer to the hello");
+        // Screens late from another link do not count.
+        assert!(!note_screens("test-answer", back.stable_id()));
+        assert!(note_screens("test-answer", link), "an answer to the hello");
         assert!(answered("test-answer"));
         drop(channel);
         drop(held);
         assert!(!answered("test-answer"), "forgotten with the link");
-        assert!(!note_screens("test-answer"));
+        assert!(!note_screens("test-answer", link));
         a.close().await;
         b.close().await;
+    }
+
+    /// The link that goes takes only its own greeting and answer: a hello
+    /// said on the newer link just as it was registered stays.
+    #[test]
+    fn a_replaced_link_forgets_only_its_own_answer() {
+        lock(&GREETED).insert("test-replace".to_string(), 2);
+        forget_answer("test-replace", 1);
+        assert!(
+            note_screens("test-replace", 2),
+            "the newer link's hello kept"
+        );
+        forget_answer("test-replace", 1);
+        assert!(answered("test-replace"), "the newer link's answer kept");
+        forget_answer("test-replace", 2);
+        assert!(!answered("test-replace"));
+        assert!(!note_screens("test-replace", 2));
     }
 
     #[test]
