@@ -48,16 +48,23 @@ pub type Arrival = (String, Msg, u64, usize);
 /// Where what arrives goes: the receiver [`incoming`] handed out last.
 static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(Default::default);
 
-/// Where the answers to this computer's pings go, by the computer that
-/// answered: the [`Channel`] opened to it last.
-static PONGS: LazyLock<Mutex<HashMap<String, mpsc::UnboundedSender<Pong>>>> =
-    LazyLock::new(Default::default);
+/// The way to the [`Channel`] waiting for the answers to its pings.
+type PongsIn = mpsc::UnboundedSender<Pong>;
+
+/// Where the answers to this computer's pings go, by the computer pinged
+/// and the reading the ping carried: the [`Channel`] that sent that ping.
+/// Several channels to one computer (a driver's, and one opened for a
+/// refusal or an Identify) each hear only their own.
+static PONGS: LazyLock<Mutex<HashMap<(String, u64), PongsIn>>> = LazyLock::new(Default::default);
+
+/// A ping unanswered this long is forgotten (its answer is no use then).
+const PONG_FORGET_US: u64 = 60_000_000;
 
 /// The way to the [`Channel`] waiting for a computer's timings.
 type TimingsIn = mpsc::UnboundedSender<Vec<wire::Timing>>;
 
 /// Where the timings a computer sends back ([`Msg::Timings`]) go, by that
-/// computer: the [`Channel`] opened to it last, as for [`PONGS`].
+/// computer: the [`Channel`] that last asked it for them.
 static TIMINGS: LazyLock<Mutex<HashMap<String, TimingsIn>>> = LazyLock::new(Default::default);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -344,8 +351,8 @@ async fn hand_on(device_id: &str, msg: Msg, at_us: u64, link: usize) {
 }
 
 /// What the link itself does with `msg` from `device_id`: a ping is
-/// answered at once (with this computer's clock), a pong and timings go to
-/// the channel that asked for them. Whether it is handed on too (all but
+/// answered at once (with this computer's clock), a pong goes to the
+/// channel that sent its ping and timings to the one that asked for them. Whether it is handed on too (all but
 /// those two).
 fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
     match msg {
@@ -365,7 +372,7 @@ fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
                 back_us: now_us(),
                 at_us: *at_us,
             };
-            if let Some(waiting) = lock(&PONGS).get(device_id) {
+            if let Some(waiting) = lock(&PONGS).remove(&(device_id.to_string(), *t_us)) {
                 let _ = waiting.send(pong);
             }
             false
@@ -424,8 +431,9 @@ pub struct Channel {
     /// Why the stream stopped, once it did.
     broken: Arc<Mutex<Option<String>>>,
     pongs: mpsc::UnboundedReceiver<Pong>,
-    /// The way into `pongs`, to know it is still this channel's on drop.
-    pongs_in: mpsc::UnboundedSender<Pong>,
+    /// The way into `pongs`, given with each ping sent and taken back on
+    /// drop.
+    pongs_in: PongsIn,
     /// The timings the other computer sends back, and the way into them.
     timings: mpsc::UnboundedReceiver<Vec<wire::Timing>>,
     timings_in: TimingsIn,
@@ -451,10 +459,10 @@ impl Channel {
         }
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| "no runtime to send shared input on".to_string())?;
+        // Nothing is routed here until this channel pings or asks: a
+        // channel opened beside another takes none of its answers.
         let (pongs_in, pongs) = mpsc::unbounded_channel();
-        lock(&PONGS).insert(device_id.to_string(), pongs_in.clone());
         let (timings_in, timings) = mpsc::unbounded_channel();
-        lock(&TIMINGS).insert(device_id.to_string(), timings_in.clone());
         Ok(Channel {
             device_id: device_id.to_string(),
             conn,
@@ -479,8 +487,21 @@ impl Channel {
         if let Some(why) = lock(&self.broken).clone() {
             return Err(why);
         }
-        if matches!(msg, Msg::Hello { .. }) {
-            lock(&GREETED).insert(self.device_id.clone(), self.conn.stable_id());
+        match msg {
+            Msg::Hello { .. } => {
+                lock(&GREETED).insert(self.device_id.clone(), self.conn.stable_id());
+            }
+            Msg::Ping { t_us } => {
+                let mut pongs = lock(&PONGS);
+                // Pings never answered (a link that went quiet) are let go.
+                let fresh = now_us().saturating_sub(PONG_FORGET_US);
+                pongs.retain(|(_, sent), _| *sent >= fresh);
+                pongs.insert((self.device_id.clone(), *t_us), self.pongs_in.clone());
+            }
+            Msg::AskTimings => {
+                lock(&TIMINGS).insert(self.device_id.clone(), self.timings_in.clone());
+            }
+            _ => {}
         }
         if rides_datagram(msg) {
             return self
@@ -531,14 +552,7 @@ impl Channel {
 
 impl Drop for Channel {
     fn drop(&mut self) {
-        let mut pongs = lock(&PONGS);
-        if pongs
-            .get(&self.device_id)
-            .is_some_and(|waiting| waiting.same_channel(&self.pongs_in))
-        {
-            pongs.remove(&self.device_id);
-        }
-        drop(pongs);
+        lock(&PONGS).retain(|_, waiting| !waiting.same_channel(&self.pongs_in));
         let mut timings = lock(&TIMINGS);
         if timings
             .get(&self.device_id)
@@ -744,6 +758,50 @@ mod tests {
             .expect("the ping answered");
         assert!(pong.round_trip() < Duration::from_secs(5));
         drop(channel);
+        a.close().await;
+        b.close().await;
+    }
+
+    /// A channel opened and dropped beside a live one (a refusal, an
+    /// Identify) leaves the live one's pongs alone: each pong goes to the
+    /// channel whose ping it answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_short_lived_channel_leaves_a_live_ones_pongs_alone() {
+        let (a, b, out, back) = linked_pair().await;
+        // The other end answers pings by hand: nothing it reads is handed
+        // to `incoming`, which another test may hold.
+        let answering = tokio::spawn(async move {
+            while let Ok(bytes) = back.read_datagram().await {
+                if let Ok(Msg::Ping { t_us }) = wire::decode(&bytes) {
+                    let pong = Msg::Pong {
+                        t_us,
+                        at_us: now_us(),
+                    };
+                    let _ = back.send_datagram(wire::encode(&pong).into());
+                }
+            }
+        });
+        let _held = hold("test-pongs", out);
+        let mut live = Channel::open_with("test-pongs", |_| true).unwrap();
+        let mut short = Channel::open_with("test-pongs", |_| true).unwrap();
+        // Each gets the answer to its own ping, not the other's.
+        let (live_t, short_t) = (now_us(), now_us() + 1);
+        live.send(&Msg::Ping { t_us: live_t }).unwrap();
+        short.send(&Msg::Ping { t_us: short_t }).unwrap();
+        let got = short.pong(Duration::from_secs(5)).await.expect("its pong");
+        assert_eq!(got.sent_us, short_t);
+        let got = live.pong(Duration::from_secs(5)).await.expect("its pong");
+        assert_eq!(got.sent_us, live_t);
+        drop(short);
+        let t_us = now_us() + 2;
+        live.send(&Msg::Ping { t_us }).unwrap();
+        let got = live
+            .pong(Duration::from_secs(5))
+            .await
+            .expect("the live channel still hears its answers");
+        assert_eq!(got.sent_us, t_us);
+        drop(live);
+        answering.abort();
         a.close().await;
         b.close().await;
     }
