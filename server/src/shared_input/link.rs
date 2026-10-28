@@ -40,8 +40,9 @@ const STREAM_PRIORITY: i32 = 1;
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
 
-/// A message from another computer, with that computer's id.
-type Arrival = (String, Msg);
+/// A message from another computer: that computer's id, the message, and
+/// when it came off the link ([`now_us`]).
+pub type Arrival = (String, Msg, u64);
 
 /// Where what arrives goes: the receiver [`incoming`] handed out last.
 static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(Default::default);
@@ -50,6 +51,13 @@ static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(
 /// answered: the [`Channel`] opened to it last.
 static PONGS: LazyLock<Mutex<HashMap<String, mpsc::UnboundedSender<Pong>>>> =
     LazyLock::new(Default::default);
+
+/// The way to the [`Channel`] waiting for a computer's timings.
+type TimingsIn = mpsc::UnboundedSender<Vec<wire::Timing>>;
+
+/// Where the timings a computer sends back ([`Msg::Timings`]) go, by that
+/// computer: the [`Channel`] opened to it last, as for [`PONGS`].
+static TIMINGS: LazyLock<Mutex<HashMap<String, TimingsIn>>> = LazyLock::new(Default::default);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -175,13 +183,13 @@ impl Drop for Held {
     }
 }
 
-/// What the other computers send from now on, with each one's id: one
-/// receiver at a time, so a later call takes them from the earlier one,
-/// whose receiver then ends. Pings are in it (each already answered), the
-/// answers to this computer's own pings are not (they go to the
-/// [`Channel`] that sent them). With no receiver taken, what arrives is
-/// dropped.
-pub fn incoming() -> mpsc::Receiver<(String, Msg)> {
+/// What the other computers send from now on, with each one's id and when
+/// it came off the link: one receiver at a time, so a later call takes them
+/// from the earlier one, whose receiver then ends. Pings are in it (each
+/// already answered), the answers to this computer's own pings and asks
+/// are not (they go to the [`Channel`] that sent them). With no receiver
+/// taken, what arrives is dropped.
+pub fn incoming() -> mpsc::Receiver<Arrival> {
     let (tx, rx) = mpsc::channel(INCOMING_DEPTH);
     *lock(&INCOMING) = Some(tx);
     rx
@@ -209,11 +217,12 @@ async fn read_link(device_id: String, conn: Connection) {
             datagram = conn.read_datagram() => match datagram {
                 Ok(bytes) => match wire::decode(&bytes) {
                     Ok(msg) => {
+                        let at_us = now_us();
                         if answer(&device_id, &conn, &msg)
                             && let Some(incoming) = incoming_sender()
                         {
                             // A datagram is dropped rather than waited for.
-                            let _ = incoming.try_send((device_id.clone(), msg));
+                            let _ = incoming.try_send((device_id.clone(), msg, at_us));
                         }
                     }
                     Err(e) => tracing::debug!(device_id, "A shared-input datagram did not read: {e}"),
@@ -259,44 +268,56 @@ async fn read_stream(device_id: String, conn: Connection, mut stream: RecvStream
                 "Another computer shares input in another version"
             );
             if matches!(msg, Msg::Hello { .. }) {
-                hand_on(&device_id, msg).await;
+                hand_on(&device_id, msg, now_us()).await;
             }
             let _ = stream.stop(0u32.into());
             return;
         }
+        let at_us = now_us();
         if answer(&device_id, &conn, &msg) {
-            hand_on(&device_id, msg).await;
+            hand_on(&device_id, msg, at_us).await;
         }
     }
 }
 
 /// Hand `msg` on to whoever takes [`incoming`], waiting while it is full:
 /// what the stream carries is not dropped.
-async fn hand_on(device_id: &str, msg: Msg) {
+async fn hand_on(device_id: &str, msg: Msg, at_us: u64) {
     if let Some(incoming) = incoming_sender() {
-        let _ = incoming.send((device_id.to_string(), msg)).await;
+        let _ = incoming.send((device_id.to_string(), msg, at_us)).await;
     }
 }
 
 /// What the link itself does with `msg` from `device_id`: a ping is
-/// answered at once, a pong goes to the channel whose ping it answers.
-/// Whether it is handed on too (all but a pong).
+/// answered at once (with this computer's clock), a pong and timings go to
+/// the channel that asked for them. Whether it is handed on too (all but
+/// those two).
 fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
     match msg {
         Msg::Ping { t_us } => {
-            let pong = wire::encode(&Msg::Pong { t_us: *t_us });
+            let pong = wire::encode(&Msg::Pong {
+                t_us: *t_us,
+                at_us: now_us(),
+            });
             if let Err(e) = conn.send_datagram(pong.into()) {
                 tracing::debug!(device_id, "A ping went unanswered: {e}");
             }
             true
         }
-        Msg::Pong { t_us } => {
+        Msg::Pong { t_us, at_us } => {
             let pong = Pong {
                 sent_us: *t_us,
                 back_us: now_us(),
+                at_us: *at_us,
             };
             if let Some(waiting) = lock(&PONGS).get(device_id) {
                 let _ = waiting.send(pong);
+            }
+            false
+        }
+        Msg::Timings(timings) => {
+            if let Some(waiting) = lock(&TIMINGS).get(device_id) {
+                let _ = waiting.send(timings.clone());
             }
             false
         }
@@ -314,11 +335,12 @@ pub fn now_us() -> u64 {
 
 /// An answer to one of this computer's pings: the reading the ping carried
 /// ([`now_us`] as it was sent) and when the answer came back, both on this
-/// computer's clock.
+/// computer's clock; and the other computer's clock as it answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pong {
     pub sent_us: u64,
     pub back_us: u64,
+    pub at_us: u64,
 }
 
 impl Pong {
@@ -349,6 +371,9 @@ pub struct Channel {
     pongs: mpsc::UnboundedReceiver<Pong>,
     /// The way into `pongs`, to know it is still this channel's on drop.
     pongs_in: mpsc::UnboundedSender<Pong>,
+    /// The timings the other computer sends back, and the way into them.
+    timings: mpsc::UnboundedReceiver<Vec<wire::Timing>>,
+    timings_in: TimingsIn,
 }
 
 impl Channel {
@@ -373,6 +398,8 @@ impl Channel {
             .map_err(|_| "no runtime to send shared input on".to_string())?;
         let (pongs_in, pongs) = mpsc::unbounded_channel();
         lock(&PONGS).insert(device_id.to_string(), pongs_in.clone());
+        let (timings_in, timings) = mpsc::unbounded_channel();
+        lock(&TIMINGS).insert(device_id.to_string(), timings_in.clone());
         Ok(Channel {
             device_id: device_id.to_string(),
             conn,
@@ -381,6 +408,8 @@ impl Channel {
             broken: Arc::default(),
             pongs,
             pongs_in,
+            timings,
+            timings_in,
         })
     }
 
@@ -431,6 +460,15 @@ impl Channel {
             .ok()
             .flatten()
     }
+
+    /// The timings the other computer sent back after a
+    /// [`Msg::AskTimings`], waited for at most `within`.
+    pub async fn timings(&mut self, within: Duration) -> Option<Vec<wire::Timing>> {
+        tokio::time::timeout(within, self.timings.recv())
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 impl Drop for Channel {
@@ -441,6 +479,14 @@ impl Drop for Channel {
             .is_some_and(|waiting| waiting.same_channel(&self.pongs_in))
         {
             pongs.remove(&self.device_id);
+        }
+        drop(pongs);
+        let mut timings = lock(&TIMINGS);
+        if timings
+            .get(&self.device_id)
+            .is_some_and(|waiting| waiting.same_channel(&self.timings_in))
+        {
+            timings.remove(&self.device_id);
         }
     }
 }
@@ -620,7 +666,7 @@ mod tests {
         let mut pinged = false;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while on_stream.last() != Some(&Msg::Leave) || !pinged {
-            let (from, msg) = tokio::time::timeout_at(deadline, arriving.recv())
+            let (from, msg, _) = tokio::time::timeout_at(deadline, arriving.recv())
                 .await
                 .expect("everything in time")
                 .expect("still taken");
@@ -649,7 +695,7 @@ mod tests {
         assert!(rides_datagram(&Msg::Move { seq: 1, x: 0, y: 0 }));
         assert!(rides_datagram(&Msg::Active { idle_ms: 0 }));
         assert!(rides_datagram(&Msg::Ping { t_us: 0 }));
-        assert!(rides_datagram(&Msg::Pong { t_us: 0 }));
+        assert!(rides_datagram(&Msg::Pong { t_us: 0, at_us: 0 }));
         assert!(!rides_datagram(&Msg::Key {
             code: 30,
             pressed: true

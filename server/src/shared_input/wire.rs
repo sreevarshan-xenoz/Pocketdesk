@@ -42,6 +42,27 @@ const TAG_IDENTIFY: u8 = 10;
 const TAG_PING: u8 = 11;
 const TAG_PONG: u8 = 12;
 const TAG_REFUSE: u8 = 13;
+const TAG_ASK_TIMINGS: u8 = 14;
+const TAG_TIMINGS: u8 = 15;
+
+/// The most timings one [`Msg::Timings`] carries (the rest are left off
+/// when encoded), so it fits a frame.
+pub const MAX_TIMINGS: usize = 3500;
+
+/// How long one key or move took on the computer driven, from the moment
+/// it came off the link until it was injected ([`Msg::Timings`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Timing {
+    /// A move (its `seq` is `n`), or a key, button or wheel turn (the
+    /// `n`th since the cursor arrived, 1 the first).
+    pub moved: bool,
+    pub n: u32,
+    /// When it came off the link, in microseconds since the Unix epoch, on
+    /// the clock of the computer driven.
+    pub arrived_us: u64,
+    /// From then until it was injected, in microseconds.
+    pub took_us: u32,
+}
 
 /// Why a computer refuses to be driven ([`Msg::Refuse`]): the shared
 /// keyboard and mouse are off there.
@@ -109,8 +130,12 @@ pub enum Msg {
     Ping {
         t_us: u64,
     },
+    /// The answer to a [`Msg::Ping`]: its reading, and the answering
+    /// computer's own clock as it answered (microseconds since the Unix
+    /// epoch), so the two clocks can be lined up.
     Pong {
         t_us: u64,
+        at_us: u64,
     },
     /// The receiver will not be driven by the sender: its answer to a
     /// `Hello` it will not take, and its word to a computer it took when it
@@ -119,6 +144,13 @@ pub enum Msg {
     Refuse {
         reason: u8,
     },
+    /// Ask the receiver how long what this computer sent since its cursor
+    /// last arrived took there (`share-test`); answered with a
+    /// [`Msg::Timings`].
+    AskTimings,
+    /// How long each key and move from the asking computer took here since
+    /// its cursor last arrived, at most [`MAX_TIMINGS`].
+    Timings(Vec<Timing>),
 }
 
 /// Why bytes are not a message.
@@ -208,13 +240,26 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
             out.push(TAG_PING);
             out.extend_from_slice(&t_us.to_be_bytes());
         }
-        Msg::Pong { t_us } => {
+        Msg::Pong { t_us, at_us } => {
             out.push(TAG_PONG);
             out.extend_from_slice(&t_us.to_be_bytes());
+            out.extend_from_slice(&at_us.to_be_bytes());
         }
         Msg::Refuse { reason } => {
             out.push(TAG_REFUSE);
             out.push(*reason);
+        }
+        Msg::AskTimings => out.push(TAG_ASK_TIMINGS),
+        Msg::Timings(timings) => {
+            out.push(TAG_TIMINGS);
+            let timings = &timings[..timings.len().min(MAX_TIMINGS)];
+            out.extend_from_slice(&(timings.len() as u16).to_be_bytes());
+            for t in timings {
+                out.push(u8::from(t.moved));
+                out.extend_from_slice(&t.n.to_be_bytes());
+                out.extend_from_slice(&t.arrived_us.to_be_bytes());
+                out.extend_from_slice(&t.took_us.to_be_bytes());
+            }
         }
     }
     out
@@ -256,8 +301,13 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
         TAG_ACTIVE => Msg::Active { idle_ms: r.u32()? },
         TAG_IDENTIFY => Msg::Identify { name: r.string()? },
         TAG_PING => Msg::Ping { t_us: r.u64()? },
-        TAG_PONG => Msg::Pong { t_us: r.u64()? },
+        TAG_PONG => Msg::Pong {
+            t_us: r.u64()?,
+            at_us: r.u64()?,
+        },
         TAG_REFUSE => Msg::Refuse { reason: r.u8()? },
+        TAG_ASK_TIMINGS => Msg::AskTimings,
+        TAG_TIMINGS => Msg::Timings(r.timings()?),
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -270,8 +320,8 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
 /// A message ready for a stream: its length as a big-endian `u16`, then it.
 pub fn frame(msg: &Msg) -> Vec<u8> {
     let body = encode(msg);
-    // Names and screen lists are clipped when encoded, so a message always
-    // fits: the largest is a `Hello` of about 1.3 KB.
+    // Names, screen lists and timings are clipped when encoded, so a
+    // message always fits: the largest is a `Timings` of about 60 KB.
     let len = u16::try_from(body.len()).expect("an encoded message fits a u16 length");
     let mut out = Vec::with_capacity(2 + body.len());
     out.extend_from_slice(&len.to_be_bytes());
@@ -387,6 +437,20 @@ impl Reader<'_> {
         }
         Ok(screens)
     }
+
+    fn timings(&mut self) -> Result<Vec<Timing>, WireError> {
+        let count = usize::from(self.u16()?);
+        let mut timings = Vec::with_capacity(count.min(self.rest.len() / 17));
+        for _ in 0..count {
+            timings.push(Timing {
+                moved: self.flag()?,
+                n: self.u32()?,
+                arrived_us: self.u64()?,
+                took_us: self.u32()?,
+            });
+        }
+        Ok(timings)
+    }
 }
 
 #[cfg(test)]
@@ -463,11 +527,30 @@ mod tests {
                 name: "Linux".to_string(),
             },
             Msg::Ping { t_us: u64::MAX },
-            Msg::Pong { t_us: 0 },
+            Msg::Pong {
+                t_us: 0,
+                at_us: u64::MAX,
+            },
             Msg::Refuse {
                 reason: REFUSE_SHARING_OFF,
             },
             Msg::Refuse { reason: u8::MAX },
+            Msg::AskTimings,
+            Msg::Timings(vec![
+                Timing {
+                    moved: true,
+                    n: u32::MAX,
+                    arrived_us: 1_700_000_000_000_000,
+                    took_us: 250,
+                },
+                Timing {
+                    moved: false,
+                    n: 1,
+                    arrived_us: 0,
+                    took_us: u32::MAX,
+                },
+            ]),
+            Msg::Timings(Vec::new()),
         ]
     }
 
@@ -544,6 +627,21 @@ mod tests {
         assert_eq!(screens.len(), MAX_SCREENS);
     }
 
+    #[test]
+    fn many_timings_still_fit_a_frame() {
+        let one = Timing {
+            moved: true,
+            n: 1,
+            arrived_us: u64::MAX,
+            took_us: u32::MAX,
+        };
+        let framed = frame(&Msg::Timings(vec![one; 10_000]));
+        let Ok(Msg::Timings(timings)) = decode(&framed[2..]) else {
+            panic!("the clipped timings decode");
+        };
+        assert_eq!(timings.len(), MAX_TIMINGS);
+    }
+
     #[tokio::test]
     async fn frames_read_back_in_order() {
         let a = Msg::Enter { x: 10, y: 20 };
@@ -580,7 +678,7 @@ mod tests {
 
     #[test]
     fn frame_is_a_big_endian_length_then_the_message() {
-        let m = Msg::Pong { t_us: 7 };
+        let m = Msg::Pong { t_us: 7, at_us: 9 };
         let body = encode(&m);
         let framed = frame(&m);
         assert_eq!(&framed[..2], &(body.len() as u16).to_be_bytes());

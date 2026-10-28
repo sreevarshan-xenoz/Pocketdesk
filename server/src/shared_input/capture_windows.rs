@@ -1061,7 +1061,10 @@ impl Glue {
                         self.channels.remove(&to);
                         if driver.away_on() == Some(to.as_str()) {
                             // Home now; the rest queued for it is dropped.
-                            queue.retain(|a| !matches!(a, Action::Send(t, _) if *t == to));
+                            queue.retain(|a| match a {
+                                Action::Send(t, _) | Action::PushClipboard(t) => *t != to,
+                                _ => true,
+                            });
                             queue.extend(driver.on_send_error());
                         }
                     }
@@ -1091,6 +1094,11 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
+                Action::PushClipboard(to) => {
+                    // Read and sent off this thread: a clipboard another
+                    // program holds open must not hold the mouse.
+                    tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                }
                 Action::Badge(said_here) => {
                     let said = said_here.text.lines().collect::<Vec<_>>().join("; ");
                     tracing::info!("Shared input: {said}");
@@ -1195,6 +1203,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let mut lock_programs = config.shared_input_lock_programs.clone();
     let mut driver = Driver::new(&me.device_id, read_layout(&glue))
         .with_game_lock(game_lock_on, lock_programs.clone());
+    driver.set_clipboard(config.shared_input_clipboard);
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
     let start = driver.start();
@@ -1306,6 +1315,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
+            driver.set_clipboard(config.shared_input_clipboard);
             let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
             let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());

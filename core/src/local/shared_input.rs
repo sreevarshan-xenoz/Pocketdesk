@@ -27,7 +27,8 @@ use serde::{Deserialize, Serialize};
 
 use super::approval::is_valid_id;
 use super::paths::{
-    SHARED_INPUT_DIR, SHARED_INPUT_STATUS_FILE, SHARED_LAYOUT_FILE, SHARED_SCREENS_FILE,
+    SHARED_INPUT_DIR, SHARED_INPUT_LATENCY_FILE, SHARED_INPUT_STATUS_FILE, SHARED_LAYOUT_FILE,
+    SHARED_SCREENS_FILE,
 };
 
 /// The longest name kept or sent for a computer, in bytes; a longer one is
@@ -478,6 +479,43 @@ pub fn read_status(state_dir: &Path) -> StatusFile {
 pub fn write_status(state_dir: &Path, status: &StatusFile) -> io::Result<()> {
     let json = serde_json::to_string_pretty(status).map_err(io::Error::other)?;
     write_whole(state_dir, SHARED_INPUT_STATUS_FILE, json.as_bytes())
+}
+
+/// What `share-test` last measured of the shared keyboard and mouse
+/// (`shared_input_latency.json`), in microseconds over each key and move
+/// timed: Pocketdesk's share (the sending computer taking it to handing it
+/// to the link, and the computer driven taking it off the link to
+/// injecting it) and the network's (one way, the two clocks lined up by
+/// the pings), each at the median (`p50`) and the 95th percentile (`p95`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LatencyReport {
+    pub network_p50_us: u64,
+    pub network_p95_us: u64,
+    pub ours_p50_us: u64,
+    pub ours_p95_us: u64,
+    /// Pocketdesk's share on each side alone, at the 95th percentile.
+    #[serde(default)]
+    pub sending_p95_us: u64,
+    #[serde(default)]
+    pub receiving_p95_us: u64,
+    /// How many keys and moves were timed.
+    #[serde(default)]
+    pub samples: u32,
+    #[serde(default)]
+    pub measured_unix: u64,
+}
+
+/// The last measurement, if there is one: a missing file, or one that does
+/// not read, is none.
+pub fn read_latency(state_dir: &Path) -> Option<LatencyReport> {
+    let raw = std::fs::read_to_string(state_dir.join(SHARED_INPUT_LATENCY_FILE)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Keep a measurement (the server's side), whole and owner-only.
+pub fn write_latency(state_dir: &Path, report: &LatencyReport) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(report).map_err(io::Error::other)?;
+    write_whole(state_dir, SHARED_INPUT_LATENCY_FILE, json.as_bytes())
 }
 
 /// How long a request waits for the server before it is dropped.

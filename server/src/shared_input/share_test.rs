@@ -1,6 +1,11 @@
 //! `pocketdesk share-test` (hidden): send a paired computer a script of
 //! shared input over the link, and print how long its pings took to come
-//! back; and its other end, a server started with `POCKETDESK_SHARE_TEST`
+//! back and how long its keys and moves took ([`Report`], also kept in
+//! `shared_input_latency.json`): Pocketdesk's share (here, from taking each
+//! to handing it to the link; there, from taking it off the link to
+//! injecting it, which that computer sends back when asked,
+//! [`Msg::AskTimings`]) and the network's (one way, the two clocks lined
+//! up by the pings' answers, [`clock_offset`]). And its other end, a server started with `POCKETDESK_SHARE_TEST`
 //! set to a file, which records each message that arrives there, with when
 //! it arrived, instead of using it (the receiver, [`super::receive`], does
 //! not start then). The command injects nothing itself; a receiving server
@@ -16,8 +21,8 @@ use std::time::Duration;
 use pocketdesk_core::local::pin::now_unix;
 use serde::{Deserialize, Serialize};
 
-use super::link::{self, Channel};
-use super::wire::{self, Msg};
+use super::link::{self, Channel, Pong};
+use super::wire::{self, Msg, Timing};
 use crate::local_api::exit;
 
 /// The variable that makes a server record what other computers send it
@@ -47,19 +52,101 @@ const DIRECT_WAIT: Duration = Duration::from_secs(10);
 /// The time between scripted events: a fast typist's, a 1 kHz mouse's.
 const GAP: Duration = Duration::from_millis(1);
 
-/// A ping goes with every this many events.
-const PING_EVERY: usize = 20;
+/// A ping goes with every this many events: enough answers to line the
+/// clocks up by.
+const PING_EVERY: usize = 5;
 
 /// How often an activity note goes while the script runs, as a driving
 /// computer sends one: the receiver lets go of a driver silent for a second.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
 
-/// How long the last pings' answers are waited for.
+/// How long the last pings' answers, and the timings, are waited for.
 const PONG_WAIT: Duration = Duration::from_secs(2);
+
+/// A list of round trips longer than this is not printed whole.
+const LISTED_MOST: usize = 50;
 
 /// The keys a script presses and lets go of in turn: a to l on the home row,
 /// as evdev codes.
 const KEYS: [u16; 9] = [30, 31, 32, 33, 34, 35, 36, 37, 38];
+
+/// What `share-test` measured: printed, and kept in
+/// `shared_input_latency.json` for the desktop app's Diagnostics.
+pub use pocketdesk_core::local::shared_input::LatencyReport as Report;
+
+/// One key or move as this computer sent it: a move (`n` its `seq`) or a
+/// key (`n` the count since the cursor arrived, 1 the first), when the
+/// script took it and when it was handed to the link, on this computer's
+/// clock ([`link::now_us`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Sent {
+    moved: bool,
+    n: u32,
+    taken_us: u64,
+    sent_us: u64,
+}
+
+/// How far the other computer's clock is ahead of this one's, in
+/// microseconds, from the answers to this computer's pings: the answer
+/// with the least round trip, taken to have been made halfway through it.
+/// It is off by half how uneven that round trip was, which nothing a round
+/// trip shows can tell.
+fn clock_offset(pongs: &[Pong]) -> Option<i64> {
+    let best = pongs
+        .iter()
+        .min_by_key(|p| p.back_us.saturating_sub(p.sent_us))?;
+    let halfway =
+        i128::from(best.sent_us) + i128::from(best.back_us.saturating_sub(best.sent_us)) / 2;
+    i64::try_from(i128::from(best.at_us) - halfway).ok()
+}
+
+/// The `pct`th percentile of `sorted` (nearest rank); 0 for none.
+fn percentile(sorted: &[u64], pct: usize) -> u64 {
+    let rank = (sorted.len() * pct).div_ceil(100).max(1);
+    sorted.get(rank - 1).copied().unwrap_or(0)
+}
+
+/// The report for the keys and moves `sent` and the `timings` the other
+/// computer sent back, its clock `offset_us` ahead of this one's: each key
+/// and move timed on both sides (a move by its `seq`, a key by its count)
+/// is Pocketdesk's share (taken to handed to the link here, plus off the
+/// link to injected there) and the network's (handed to the link here to
+/// off it there, one way; under 0, by the clocks' error, is 0). None when
+/// nothing was timed on both sides.
+fn split(sent: &[Sent], timings: &[Timing], offset_us: i64, now_unix: u64) -> Option<Report> {
+    let there: std::collections::HashMap<(bool, u32), &Timing> =
+        timings.iter().map(|t| ((t.moved, t.n), t)).collect();
+    let (mut ours, mut network, mut sending, mut receiving) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for s in sent {
+        let Some(t) = there.get(&(s.moved, s.n)) else {
+            continue;
+        };
+        let here = s.sent_us.saturating_sub(s.taken_us);
+        let arrived = i128::from(t.arrived_us) - i128::from(offset_us);
+        let away = u64::try_from((arrived - i128::from(s.sent_us)).max(0)).unwrap_or(u64::MAX);
+        sending.push(here);
+        receiving.push(u64::from(t.took_us));
+        ours.push(here + u64::from(t.took_us));
+        network.push(away);
+    }
+    if ours.is_empty() {
+        return None;
+    }
+    for times in [&mut ours, &mut network, &mut sending, &mut receiving] {
+        times.sort_unstable();
+    }
+    Some(Report {
+        network_p50_us: percentile(&network, 50),
+        network_p95_us: percentile(&network, 95),
+        ours_p50_us: percentile(&ours, 50),
+        ours_p95_us: percentile(&ours, 95),
+        sending_p95_us: percentile(&sending, 95),
+        receiving_p95_us: percentile(&receiving, 95),
+        samples: u32::try_from(ours.len()).unwrap_or(u32::MAX),
+        measured_unix: now_unix,
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Request {
@@ -82,6 +169,13 @@ struct Outcome {
     /// Each answered ping's round trip, in microseconds, in the order they
     /// came back.
     round_trips_us: Vec<u64>,
+    /// What the keys and moves took, when the other computer sent its
+    /// timings back.
+    #[serde(default)]
+    latency: Option<Report>,
+    /// Why there is no `latency`.
+    #[serde(default)]
+    unmeasured: Option<String>,
 }
 
 /// What `share-test` sends after its `Hello` (pings and activity notes,
@@ -185,18 +279,35 @@ fn report(outcome: &Outcome) -> String {
         ));
         return out;
     };
-    let listed: Vec<String> = outcome
-        .round_trips_us
-        .iter()
-        .map(|us| us.to_string())
-        .collect();
-    out.push_str(&format!("round trips (µs): {}\n", listed.join(" ")));
+    if outcome.round_trips_us.len() <= LISTED_MOST {
+        let listed: Vec<String> = outcome
+            .round_trips_us
+            .iter()
+            .map(|us| us.to_string())
+            .collect();
+        out.push_str(&format!("round trips (µs): {}\n", listed.join(" ")));
+    }
     out.push_str(&format!(
         "round trips: {} of {} pings answered; least {least} µs, median {} µs, most {most} µs\n",
         sorted.len(),
         outcome.pings,
         sorted[sorted.len() / 2],
     ));
+    match (&outcome.latency, &outcome.unmeasured) {
+        (Some(r), _) => out.push_str(&format!(
+            "latency over {} keys and moves:\n  Pocketdesk's share: p50 {} µs, p95 {} µs (sending p95 {} µs, \
+             injecting there p95 {} µs)\n  the network's share: p50 {} µs, p95 {} µs (one way)\n",
+            r.samples,
+            r.ours_p50_us,
+            r.ours_p95_us,
+            r.sending_p95_us,
+            r.receiving_p95_us,
+            r.network_p50_us,
+            r.network_p95_us,
+        )),
+        (None, Some(why)) => out.push_str(&format!("latency: not measured: {why}\n")),
+        (None, None) => {}
+    }
     out
 }
 
@@ -321,6 +432,9 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         name: me.device_name,
         screens: Vec::new(),
     };
+    // Each key and move as it was sent, for its timing there.
+    let mut sent: Vec<Sent> = Vec::new();
+    let mut keys = 0u32;
     let ping = |channel: &mut Channel, outcome: &mut Outcome| {
         channel.send(&Msg::Ping {
             t_us: link::now_us(),
@@ -346,21 +460,70 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
                 outcome.sent += 1;
                 active_due = now + ACTIVE_EVERY;
             }
+            // As a driver takes a key or move from its hook, to its handing
+            // over to the link.
+            let taken_us = link::now_us();
             channel.send(msg)?;
+            let sent_us = link::now_us();
             outcome.sent += 1;
+            match msg {
+                Msg::Move { seq, .. } => sent.push(Sent {
+                    moved: true,
+                    n: *seq,
+                    taken_us,
+                    sent_us,
+                }),
+                Msg::Key { .. } => {
+                    keys += 1;
+                    sent.push(Sent {
+                        moved: false,
+                        n: keys,
+                        taken_us,
+                        sent_us,
+                    });
+                }
+                _ => {}
+            }
         }
-        ping(&mut channel, &mut outcome)
+        ping(&mut channel, &mut outcome)?;
+        // After the leave, on the same stream: everything is injected by
+        // the time it is read there.
+        channel.send(&Msg::AskTimings)?;
+        outcome.sent += 1;
+        Ok(())
     }
     .await;
     if let Err(why) = sending {
         outcome.error = Some(why);
     }
-    while outcome.round_trips_us.len() < outcome.pings {
+    let mut pongs = Vec::new();
+    while pongs.len() < outcome.pings {
         let Some(pong) = channel.pong(PONG_WAIT).await else {
             break;
         };
         let us = u64::try_from(pong.round_trip().as_micros()).unwrap_or(u64::MAX);
         outcome.round_trips_us.push(us);
+        pongs.push(pong);
+    }
+    let timings = channel.timings(PONG_WAIT).await;
+    let measured = match (clock_offset(&pongs), timings) {
+        (None, _) => Err("no ping was answered".to_string()),
+        (Some(_), None) => Err(
+            "the other computer sent no timings back (it does not take this one's input, only \
+             records it, or runs an older Pocketdesk)"
+                .to_string(),
+        ),
+        (Some(offset), Some(timings)) => split(&sent, &timings, offset, now_unix())
+            .ok_or_else(|| "no key or move was timed on both computers".to_string()),
+    };
+    match measured {
+        Ok(report) => {
+            if let Err(e) = pocketdesk_core::local::shared_input::write_latency(dir, &report) {
+                tracing::warn!("share-test: the latency could not be kept: {e}");
+            }
+            outcome.latency = Some(report);
+        }
+        Err(why) => outcome.unmeasured = Some(why),
     }
     outcome
 }
@@ -428,7 +591,7 @@ fn pick(linked: &[String], names: &[(String, String)], query: &str) -> Result<St
 
 /// The receiving server's side with [`RECORD_ENV`] set: append each
 /// message other computers send to `file`, one JSON object a line (`at_us`,
-/// microseconds since the Unix epoch as it was taken off the channel;
+/// microseconds since the Unix epoch as it came off the link;
 /// `from`, the computer's id; `msg`), instead of using it.
 pub async fn record(file: PathBuf) {
     use tokio::io::AsyncWriteExt;
@@ -450,8 +613,8 @@ pub async fn record(file: PathBuf) {
         file.display()
     );
     while let Some(first) = arriving.recv().await {
-        // Each stamped as it is taken; what waits behind it is taken too
-        // before the write.
+        // Each stamped as it came off the link; what waits behind it is
+        // taken too before the write.
         let mut lines = line(first);
         while let Ok(next) = arriving.try_recv() {
             lines.push_str(&line(next));
@@ -468,10 +631,10 @@ pub async fn record(file: PathBuf) {
     }
 }
 
-/// One recorded line for `msg` from `from`, taken now.
-fn line((from, msg): (String, Msg)) -> String {
+/// One recorded line for `msg` from `from`, come off the link at `at_us`.
+fn line((from, msg, at_us): link::Arrival) -> String {
     let mut line = serde_json::json!({
-        "at_us": link::now_us(),
+        "at_us": at_us,
         "from": from,
         "msg": msg,
     })
@@ -560,6 +723,17 @@ mod tests {
             sent: 10,
             pings: 3,
             round_trips_us: vec![900, 300, 600],
+            latency: Some(Report {
+                network_p50_us: 1_100,
+                network_p95_us: 2_400,
+                ours_p50_us: 120,
+                ours_p95_us: 480,
+                sending_p95_us: 30,
+                receiving_p95_us: 450,
+                samples: 200,
+                measured_unix: 1,
+            }),
+            unmeasured: None,
         };
         let said = report(&outcome);
         assert!(said.contains("sent 10 messages to bbbb"), "{said}");
@@ -567,6 +741,24 @@ mod tests {
         assert!(
             said.contains("3 of 3 pings answered; least 300 µs, median 600 µs, most 900 µs"),
             "{said}"
+        );
+        assert!(said.contains("latency over 200 keys and moves"), "{said}");
+        assert!(
+            said.contains("Pocketdesk's share: p50 120 µs, p95 480 µs"),
+            "{said}"
+        );
+        assert!(
+            said.contains("the network's share: p50 1100 µs, p95 2400 µs"),
+            "{said}"
+        );
+        let unmeasured = report(&Outcome {
+            latency: None,
+            unmeasured: Some("no timings".to_string()),
+            ..outcome.clone()
+        });
+        assert!(
+            unmeasured.contains("latency: not measured: no timings"),
+            "{unmeasured}"
         );
         let unanswered = report(&Outcome {
             round_trips_us: Vec::new(),
@@ -578,6 +770,104 @@ mod tests {
         );
     }
 
+    /// The other clock is put where the fastest answer says: that answer is
+    /// taken to have been made halfway through its round trip, and a slow
+    /// one (queued on the way out) does not pull it.
+    #[test]
+    fn clock_offset_from_round_trips() {
+        assert_eq!(clock_offset(&[]), None);
+        for ahead in [5_000_000i64, -3_000_000, 0] {
+            // Sent at `sent_us`, `out` microseconds there and `back` back.
+            let pong = |sent_us: u64, out: u64, back: u64| Pong {
+                sent_us,
+                back_us: sent_us + out + back,
+                at_us: (sent_us + out).checked_add_signed(ahead).unwrap(),
+            };
+            let pongs = [
+                pong(10_000_000, 9_000, 100),
+                pong(11_000_000, 400, 400),
+                pong(12_000_000, 700, 900),
+            ];
+            assert_eq!(clock_offset(&pongs), Some(ahead), "{ahead}");
+        }
+        // An uneven fastest answer is off by half its unevenness: the most
+        // a round trip can tell.
+        let lopsided = [Pong {
+            sent_us: 1_000,
+            back_us: 2_000,
+            at_us: 1_900,
+        }];
+        assert_eq!(clock_offset(&lopsided), Some(400));
+    }
+
+    /// Each key and move timed on both sides splits into Pocketdesk's share
+    /// (sending here plus injecting there) and the network's (one way, the
+    /// other clock lined up); a key and a move of the same count are told
+    /// apart, and what only one side has is left out.
+    #[test]
+    fn report_splits_network_and_ours() {
+        let offset = 7_000_000i64;
+        let mut sent = Vec::new();
+        let mut timings = Vec::new();
+        for i in 1..=20u32 {
+            let taken_us = u64::from(i) * 10_000;
+            let sent_us = taken_us + 10;
+            sent.push(Sent {
+                moved: false,
+                n: i,
+                taken_us,
+                sent_us,
+            });
+            let arrived = sent_us + 1_000 + u64::from(i) * 10;
+            timings.push(Timing {
+                moved: false,
+                n: i,
+                arrived_us: arrived.checked_add_signed(offset).unwrap(),
+                took_us: i * 5,
+            });
+        }
+        // A move with the same count as a key, timed as a move: the
+        // slowest by far, and not mixed up with key 1.
+        sent.push(Sent {
+            moved: true,
+            n: 1,
+            taken_us: 500_000,
+            sent_us: 500_020,
+        });
+        timings.push(Timing {
+            moved: true,
+            n: 1,
+            arrived_us: 503_020u64.checked_add_signed(offset).unwrap(),
+            took_us: 2_000,
+        });
+        // A move dropped there as stale, and a timing for nothing sent.
+        sent.push(Sent {
+            moved: true,
+            n: 2,
+            taken_us: 600_000,
+            sent_us: 600_010,
+        });
+        timings.push(Timing {
+            moved: false,
+            n: 99,
+            arrived_us: 0,
+            took_us: 1,
+        });
+        let report = split(&sent, &timings, offset, 1_700_000_000).expect("timed");
+        // Ours: keys 15, 20, .. 110 µs, the move 2020; the network: keys
+        // 1010 .. 1200 µs, the move 3000.
+        assert_eq!(report.samples, 21);
+        assert_eq!(report.ours_p50_us, 65);
+        assert_eq!(report.ours_p95_us, 110);
+        assert_eq!(report.network_p50_us, 1_110);
+        assert_eq!(report.network_p95_us, 1_200);
+        assert_eq!(report.sending_p95_us, 10);
+        assert_eq!(report.receiving_p95_us, 100);
+        assert_eq!(report.measured_unix, 1_700_000_000);
+        // Nothing timed on both sides: no report.
+        assert_eq!(split(&sent, &[], offset, 0), None);
+    }
+
     /// A recorded line reads back as the message it was.
     #[test]
     fn a_recorded_line_reads_back() {
@@ -585,7 +875,7 @@ mod tests {
             code: 30,
             pressed: true,
         };
-        let line = line(("aaaa".to_string(), msg.clone()));
+        let line = line(("aaaa".to_string(), msg.clone(), 42));
         let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(value["from"], "aaaa");
         assert!(value["at_us"].as_u64().is_some());

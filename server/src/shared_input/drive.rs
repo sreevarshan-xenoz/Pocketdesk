@@ -110,6 +110,9 @@ pub enum Action {
     KeepAwake(bool),
     /// A word for the owner on where the keyboard and mouse are.
     Badge(badge::Badge),
+    /// Push this computer's clipboard to that computer: the cursor just
+    /// went there, and the clipboard follows it.
+    PushClipboard(String),
 }
 
 /// Where the keyboard and mouse are while away.
@@ -166,6 +169,8 @@ pub struct Driver {
     /// The mouse was not watched until now (no hooks): the first position
     /// watched only marks where it is, so no stale point measures a move.
     reseed: bool,
+    /// The clipboard follows the mouse (`shared_input_clipboard`).
+    clipboard: bool,
 }
 
 impl Driver {
@@ -188,7 +193,14 @@ impl Driver {
             forced: false,
             foreground_pending: false,
             reseed: false,
+            clipboard: false,
         }
+    }
+
+    /// Whether the clipboard follows the mouse (`shared_input_clipboard`):
+    /// pushed to each computer the cursor goes to, as it goes.
+    pub fn set_clipboard(&mut self, on: bool) {
+        self.clipboard = on;
     }
 
     /// The gaming lock's settings before the driver starts: nothing is
@@ -698,6 +710,10 @@ impl Driver {
         out.push(Action::ParkCursor(park.0, park.1));
         self.settle(out);
         out.push(Action::Send(to.to_string(), Msg::Enter { x, y }));
+        // Once as the cursor arrives, never with each move.
+        if self.clipboard {
+            out.push(Action::PushClipboard(to.to_string()));
+        }
         if !was_away {
             out.push(Action::HideCursor(true));
             out.push(Action::KeepAwake(true));
@@ -1050,6 +1066,57 @@ mod tests {
         assert_eq!(sends(&step), vec![sent("L", Msg::Move { seq: 2, x, y })]);
         // The park point itself is no movement.
         assert_eq!(sends(&d.on(moved(PARK.0, PARK.1))), vec![]);
+    }
+
+    fn pushes(actions: &[Action]) -> Vec<String> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::PushClipboard(to) => Some(to.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The clipboard goes with the cursor once as it arrives, never with
+    /// each move or key, and not as it comes home (the other computer
+    /// pushes its own back then).
+    #[test]
+    fn clipboard_pushed_once_per_enter() {
+        let mut d = driver(desk(true), &["L", "M"]);
+        d.set_clipboard(true);
+        d.start();
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        assert_eq!(pushes(&crossed), ["L"], "{crossed:?}");
+        // After the Enter, so the other computer is driven when it lands.
+        let at = |wanted: &dyn Fn(&Action) -> bool| crossed.iter().position(wanted).unwrap();
+        assert!(
+            at(&|a| matches!(a, Action::Send(_, Msg::Enter { .. })))
+                < at(&|a| matches!(a, Action::PushClipboard(_)))
+        );
+        let mut later = Vec::new();
+        for i in 1..50 {
+            later.extend(d.on(moved(PARK.0 + i % 7, PARK.1)));
+            later.extend(d.on(key(0x1e, i % 2 == 1)));
+        }
+        assert_eq!(pushes(&later), Vec::<String>::new(), "not per move or key");
+        // The switch key on to the next computer: one push there.
+        let next = d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), Some("M"));
+        assert_eq!(pushes(&next), ["M"]);
+        // And home: none from here.
+        let home = d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), None);
+        assert_eq!(pushes(&home), Vec::<String>::new());
+
+        // With the setting off, nothing follows.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        assert_eq!(d.away_on(), Some("L"));
+        assert_eq!(pushes(&crossed), Vec::<String>::new());
     }
 
     #[test]

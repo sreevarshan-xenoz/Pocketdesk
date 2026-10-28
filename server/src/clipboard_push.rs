@@ -12,6 +12,12 @@
 //! `computer_clipboard` is on: those linked to this one as its clients, and
 //! those this one keeps a link to (`peer_computers`). Never back to the
 //! device it came from.
+//!
+//! With the shared keyboard and mouse, the clipboard also follows the
+//! mouse ([`push_now`]): its text goes to a computer as the cursor goes
+//! there, and comes back as it comes home, marked ([`FOLLOWS`]) so the
+//! computer it reaches takes it with "Clipboard follows the mouse" on
+//! there, even with `computer_clipboard` off ([`takes_follow`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -242,6 +248,87 @@ fn may_push_image(device_id: &str) -> bool {
 /// The packet a push sends: what the phone's own request is answered with.
 pub(crate) fn packet(text: &str) -> NetworkPacket {
     NetworkPacket::new("kdeconnect.clipboard").with_body(serde_json::json!({ "content": text }))
+}
+
+/// The mark on a push that follows the mouse (shared input), in its body.
+pub(crate) const FOLLOWS: &str = "follows";
+
+/// The packet a push that follows the mouse sends: [`packet`], marked.
+fn follow_packet(text: &str) -> NetworkPacket {
+    NetworkPacket::new("kdeconnect.clipboard")
+        .with_body(serde_json::json!({ "content": text, FOLLOWS: true }))
+}
+
+/// Push this computer's clipboard text to the computer `device_id` now:
+/// the cursor of the shared keyboard and mouse just went there, or came
+/// back from there. What a push to computers never sends is not sent
+/// here either: an image, a copy a password manager marked private, a
+/// pairing link, text over [`MAX_PUSH`]; nor the text that computer itself
+/// put here (a switch back with nothing new copied).
+pub(crate) async fn push_now(device_id: &str) {
+    let text = match crate::plugins::clipboard::read_text().await {
+        Ok(Some(text)) if text.len() <= MAX_PUSH => text,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::debug!("The clipboard did not follow the mouse: not read: {e}");
+            return;
+        }
+    };
+    let from = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if came_from(from.as_ref(), device_id, &text) {
+        return;
+    }
+    let packet = follow_packet(&text);
+    let client = crate::state::clone_clients()
+        .await
+        .into_iter()
+        .find(|c| c.device_id() == device_id);
+    let sent = match client {
+        // One linked to this one as its client: with the Clipboard
+        // permission, as any push to it.
+        Some(client) if crate::plugins::pair::permits(device_id, "kdeconnect.clipboard") => {
+            client.send_packet(&packet).await.map_err(|e| e.to_string())
+        }
+        Some(_) => Err("it does not have the Clipboard permission here".to_string()),
+        // One this one keeps a link to.
+        None => match crate::peer_computers::live_link(device_id) {
+            Some(link) => {
+                link.send(packet);
+                Ok(())
+            }
+            None => Err("no link to it".to_string()),
+        },
+    };
+    match sent {
+        // Who and how long, never the text (Z1).
+        Ok(()) => {
+            crate::clip_history::note(&text, None);
+            tracing::info!(
+                "Clipboard followed the mouse to {device_id} ({} chars)",
+                text.chars().count()
+            );
+        }
+        Err(e) => tracing::debug!("The clipboard did not follow the mouse to {device_id}: {e}"),
+    }
+}
+
+/// Whether a clipboard packet's `body` from the computer `device_id` is
+/// taken as one following the mouse: marked so ([`FOLLOWS`]), with the
+/// shared keyboard and mouse and "Clipboard follows the mouse" on here,
+/// from a computer this one shares them with (it may drive this one, or it
+/// answered this one with its screens: this one may drive it). Reads files
+/// (blocking).
+pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
+    if body.get(FOLLOWS).and_then(|v| v.as_bool()) != Some(true) {
+        return false;
+    }
+    let config = crate::events::current_config();
+    config.shared_input
+        && config.shared_input_clipboard
+        && (crate::plugins::pair::is_computer_device(device_id)
+            || crate::peer_computers::is_paired(device_id))
+        && (crate::shared_input::receive::may_drive_here(device_id)
+            || crate::shared_input::link::screens_heard().contains_key(device_id))
 }
 
 /// One `wl-paste --watch` while a phone could receive the clipboard (R6d):

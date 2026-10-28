@@ -7,6 +7,7 @@ use std::thread::JoinHandle;
 use eframe::egui;
 use pocketdesk_core::local::config::Config;
 use pocketdesk_core::local::diagnostics::{self, Finding, Report, Status};
+use pocketdesk_core::local::shared_input::LatencyReport;
 
 #[derive(Default)]
 pub struct DiagnosticsView {
@@ -20,6 +21,9 @@ pub struct DiagnosticsView {
     copied: Option<std::time::Instant>,
     /// The checks were started once by opening the page (I3).
     started: bool,
+    /// The shared keyboard and mouse's last measured latency
+    /// (`pocketdesk share-test`), read with each run.
+    latency: Option<LatencyReport>,
 }
 
 impl DiagnosticsView {
@@ -33,6 +37,7 @@ impl DiagnosticsView {
                     self.report = Some(report);
                     self.ran_at = now_unix();
                     self.failed = false;
+                    self.latency = pocketdesk_core::local::shared_input::read_latency(state_dir);
                 }
                 Err(_) => self.failed = true,
             }
@@ -117,6 +122,14 @@ impl DiagnosticsView {
                 }
             }
         }
+        // Only once one was measured: most owners never run the test.
+        if let Some(latency) = &self.latency {
+            ui.add_space(10.0);
+            ui.strong("Keyboard and mouse to another computer");
+            for line in latency_lines(latency, now_unix()) {
+                ui.label(line);
+            }
+        }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             if ui.button("Copy debug report").clicked() {
@@ -138,6 +151,29 @@ impl DiagnosticsView {
             .color(crate::theme::muted(ui)),
         );
     }
+}
+
+/// The last measured latency, in words: when, then each share, in
+/// milliseconds.
+fn latency_lines(l: &LatencyReport, now: u64) -> [String; 3] {
+    let ms = |us: u64| format!("{:.2} ms", us as f64 / 1000.0);
+    [
+        format!(
+            "Measured {}, over {} keys and moves.",
+            crate::words::ago(now, l.measured_unix),
+            l.samples
+        ),
+        format!(
+            "Pocketdesk: {} typical, {} at worst (p95).",
+            ms(l.ours_p50_us),
+            ms(l.ours_p95_us)
+        ),
+        format!(
+            "The network: {} typical, {} at worst (p95), one way.",
+            ms(l.network_p50_us),
+            ms(l.network_p95_us)
+        ),
+    ]
 }
 
 fn finding_row(ui: &mut egui::Ui, finding: &Finding) {
@@ -434,6 +470,31 @@ fn now_unix() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::{LatencyReport, latency_lines};
+
+    #[test]
+    fn the_last_latency_reads_in_milliseconds() {
+        let latency = LatencyReport {
+            network_p50_us: 1_250,
+            network_p95_us: 4_000,
+            ours_p50_us: 180,
+            ours_p95_us: 2_350,
+            samples: 400,
+            measured_unix: 1_000,
+            ..LatencyReport::default()
+        };
+        let lines = latency_lines(&latency, 1_000 + 120);
+        assert!(lines[0].contains("over 400 keys and moves"), "{lines:?}");
+        assert_eq!(
+            lines[1],
+            "Pocketdesk: 0.18 ms typical, 2.35 ms at worst (p95)."
+        );
+        assert_eq!(
+            lines[2],
+            "The network: 1.25 ms typical, 4.00 ms at worst (p95), one way."
+        );
+    }
+
     #[test]
     fn a_findings_commands_read_without_backticks() {
         assert_eq!(

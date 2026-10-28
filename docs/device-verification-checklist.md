@@ -2948,6 +2948,22 @@ Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and 
 - [ ] Identify on the Keyboard and mouse page: this computer flashes "This is <name>" for about 3 seconds and so does each computer it can drive; a computer not allowed to drive another makes it flash nothing. (where: owner)
 - [ ] The tray's menu: "Keyboard and mouse: this computer", then the laptop's name within about a second of crossing; no line with sharing off or the server stopped. (where: by hand)
 
+## 215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)
+
+Built 2026-10-28, with §214 (the driving side). Unit-tested: the wire (every message round-trips; cut short, unknown or trailing bytes are errors; names, screen lists and timings clipped to fit a frame), the channel over a real loopback iroh pair (the stream's order, moves as datagrams, a ping answered, a relayed link refused), the receiver (keys and moves from the computer that entered only, a stale move dropped, everything let go of on leaving, on a lost link or permission and after a second of silence, the keep-awake, each key and move timed for `share-test`), the arrangement (snapping, no overlap, the default row, a file that does not read), the clipboard pushed once as the cursor arrives and never per move or key, and the latency's split (the clocks lined up by the fastest ping's answer; Pocketdesk's share and the network's). Nothing here changed the owner's clipboard or typed on this computer.
+Run so far on the Linux laptop, into a headless Sway its own session never sees (WlrInput; `/dev/uinput` is root-only there), driven by `share-test` from a throwaway server on Windows:
+- [x] Without the Keyboard and mouse permission nothing is typed or moved; with it, 102 key events arrive in the script's order, none left down (2026-10-28).
+- [x] A sender killed with a key held: the key let go about a second after the last message (1027 ms and 1086 ms) (2026-10-28).
+- [x] A lock screen (hyprlock inside that Sway) takes typed keys: the password field went from 5 to 9 dots after 4 presses (2026-10-28).
+Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and mouse allowed, the link direct):
+- [ ] `pocketdesk share-test <laptop> --keys 2000 --moves 2000` over the home Wi-Fi: Pocketdesk's share under 5 ms at the 95th percentile; the result on the desktop app's Diagnostics page. (where: linux)
+- [ ] Copy text on Windows, push the pointer onto Linux, paste there: the text is there, with "Clipboard with my computers" off on both; copy on Linux, come back, paste on Windows. (where: owner)
+- [ ] A password manager's private copy (KeePassXC, or Windows' marks) does not follow; an image does not follow; with "Clipboard follows the mouse" off on either side, nothing crosses that way. (where: owner)
+- [ ] The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
+- [ ] Linux kept awake while driven: its screensaver and idle lock do not start while typing goes on from Windows for longer than the idle time. (where: linux)
+- [ ] The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
+- [ ] The Keyboard and mouse page's links and permission line, both ways: "Won't take input: sharing off there" when sharing is off on the laptop, and "may drive" switched from the computer that pasted the link. (where: by hand)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
