@@ -42,6 +42,26 @@ pub fn monitors() -> Vec<HyprMonitor> {
     monitor_handles().into_iter().map(|(_, m)| m).collect()
 }
 
+/// [`monitors`], each with its scale: its effective DPI over 96 (150% is
+/// 1.5), or 1 when Windows does not say.
+pub fn monitors_scaled() -> Vec<HyprMonitor> {
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    monitor_handles()
+        .into_iter()
+        .map(|(handle, mut m)| {
+            let (mut dpi_x, mut dpi_y) = (0u32, 0u32);
+            // SAFETY: a monitor handle Windows just listed, and two out
+            // values on this stack.
+            let read =
+                unsafe { GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
+            if read.is_ok() && dpi_x > 0 {
+                m.scale = f64::from(dpi_x) / 96.0;
+            }
+            m
+        })
+        .collect()
+}
+
 fn monitor_info(monitor: HMONITOR) -> Option<HyprMonitor> {
     let mut info = MONITORINFOEXW {
         monitorInfo: MONITORINFO {

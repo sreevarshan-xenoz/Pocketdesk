@@ -548,6 +548,11 @@ pub async fn run(config: Config) -> Result<()> {
     } else {
         tokio::spawn(crate::shared_input::receive::run());
     }
+    // This computer's own keyboard and mouse carried onto the others, on
+    // Windows while shared input and driving are on (Linux drives nothing
+    // yet).
+    #[cfg(windows)]
+    tokio::spawn(crate::shared_input::capture_windows::supervise());
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and
         // the phone only ever dials its cached EndpointAddr — periodic

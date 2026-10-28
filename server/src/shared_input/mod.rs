@@ -9,9 +9,16 @@
 //! them. The computer being driven acts on what arrives ([`receive`]): it
 //! types and moves what a computer allowed to drive it sends, says what
 //! screens it has ([`screens`]) and stays awake meanwhile ([`awake`]).
+//! The computer driving decides where its keyboard and mouse are
+//! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
+//! and, on Windows, captures them (`capture_windows`).
 
 pub mod awake;
+#[cfg(windows)]
+pub mod capture_windows;
+pub mod drive;
 pub mod held;
+pub mod keys_windows;
 pub mod layout;
 pub mod link;
 pub mod receive;

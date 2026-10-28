@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-870 open items.
+877 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 100 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 107 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -437,6 +437,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **199. Files copied in Explorer sent with the clipboard key (P7)**
 
 - Files off and text copied too: the text sent instead. (where: owner) (the clipboard key on this computer.)
+
+**214. Driving another computer from Windows (shared input)**
+
+- Windows to Linux at the edge: the pointer off the Windows laptop's right edge lands on the Linux screen at the same height, the Windows cursor hidden; back off the Linux screen's left edge, it returns where it crossed and shows again. (where: owner)
+- Typing in a terminal on Linux while away: letters, Shift and capitals, Ctrl+C, the arrows, AltGr, and nothing typed on Windows meanwhile. (where: owner)
+- The switch key (Ctrl+Alt+Right) goes over and back, from the edge's side and from the middle of a screen; no Ctrl or Alt left down on either side. (where: owner)
+- Win+L while away: Windows locks, the keyboard and mouse come home, the Super key is not left down on Linux; after unlocking, the edge works again. (where: owner)
+- The network unplugged while typing on Linux: the Windows cursor comes home and shows; Linux lets go of the held key within about a second. (where: owner)
+- The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
+- Mixed scales: a monitor at 100% beside the laptop at 125%; the pointer crosses between Windows' own screens as before, and onto Linux from the laptop's edge at the height it left. (where: owner)
 
 ## A phone with a SIM
 

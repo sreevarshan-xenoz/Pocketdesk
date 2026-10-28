@@ -269,7 +269,16 @@ impl Drop for Receiver {
 struct LazyInjector {
     injector: Option<InputInjector>,
     failed_at: Option<Instant>,
+    /// Windows: the monitors as last read, and when, to put a position
+    /// across the logical screens told to the driving computer onto the
+    /// physical ones Windows' absolute input spans.
+    #[cfg(windows)]
+    desktop: Option<(screens::Desktop, Instant)>,
 }
+
+/// How long Windows' monitors are taken as read.
+#[cfg(windows)]
+const DESKTOP_FOR: Duration = Duration::from_secs(2);
 
 /// How long after the injector could not be made it is tried again.
 const INJECTOR_RETRY: Duration = Duration::from_secs(10);
@@ -316,6 +325,20 @@ impl Inject for LazyInjector {
     }
 
     fn move_abs(&mut self, x: u16, y: u16) {
+        #[cfg(windows)]
+        let (x, y) = {
+            if self
+                .desktop
+                .as_ref()
+                .is_none_or(|(_, at)| at.elapsed() >= DESKTOP_FOR)
+            {
+                let desktop = screens::Desktop::arrange(&crate::windows_desktop::monitors_scaled());
+                self.desktop = Some((desktop, Instant::now()));
+            }
+            self.desktop
+                .as_ref()
+                .map_or((x, y), |(desktop, _)| desktop.physical_norm(x, y))
+        };
         if let Some(injector) = self.get() {
             Inject::move_abs(injector, x, y);
         }

@@ -2927,6 +2927,18 @@ Owed:
 - [ ] A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
 - [ ] V5: the desktop app's Settings shows "Lock after the phone leaves" on Linux, and a change there is taken without a restart. (where: linux)
 
+## 214. Driving another computer from Windows (shared input)
+
+Built 2026-10-28. Unit-tested: the driver's state machine (crossing, keys, crossing back with releases, the switch key, a lock, a failed send, a relayed link, the clamped cursor, the keep-awake), the scancode table against the injector's, Windows' logical pixels and the cursor's restore (counted, no hook installed). Nothing here was run on a desktop: the tests never hook, hide or move the cursor on the owner's computer.
+Owed (Windows with `shared_input` on, the Linux laptop paired with Keyboard and mouse allowed, the link direct):
+- [ ] Windows to Linux at the edge: the pointer off the Windows laptop's right edge lands on the Linux screen at the same height, the Windows cursor hidden; back off the Linux screen's left edge, it returns where it crossed and shows again. (where: owner)
+- [ ] Typing in a terminal on Linux while away: letters, Shift and capitals, Ctrl+C, the arrows, AltGr, and nothing typed on Windows meanwhile. (where: owner)
+- [ ] The switch key (Ctrl+Alt+Right) goes over and back, from the edge's side and from the middle of a screen; no Ctrl or Alt left down on either side. (where: owner)
+- [ ] Win+L while away: Windows locks, the keyboard and mouse come home, the Super key is not left down on Linux; after unlocking, the edge works again. (where: owner)
+- [ ] The network unplugged while typing on Linux: the Windows cursor comes home and shows; Linux lets go of the held key within about a second. (where: owner)
+- [ ] The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
+- [ ] Mixed scales: a monitor at 100% beside the laptop at 125%; the pointer crosses between Windows' own screens as before, and onto Linux from the laptop's edge at the height it left. (where: owner)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
