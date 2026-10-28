@@ -39,7 +39,7 @@ A **pure Rust** server for Linux (Wayland-native, Hyprland first) and Windows 10
 |---|---|
 | Windows 10/11 | Run `pocketdesk-…-windows-x86_64-setup.exe`. It starts Pocketdesk at sign-in, opens its firewall ports and offers to install FFmpeg. |
 | Debian, Ubuntu | `sudo apt install ./pocketdesk-…-linux-amd64.deb` |
-| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` (needs PipeWire and FFmpeg). On Arch, [build `aur/PKGBUILD`](docs/guide.md#arch-linux). |
+| Other Linux | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` (needs PipeWire and FFmpeg). On Arch: `yay -S pocketdesk` ([AUR](https://aur.archlinux.org/packages/pocketdesk)). |
 
 **2. Install the app on your phone** (Android 8 or newer): `pocketdesk-…-android-arm64.apk` from the same release, or add `https://github.com/sreevarshan-xenoz/Pocketdesk` to [Obtainium](https://github.com/ImranR98/Obtainium) to keep it updated.
 
