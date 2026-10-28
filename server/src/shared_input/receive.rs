@@ -125,7 +125,7 @@ pub struct Receiver {
     last_seq: Option<u32>,
     /// When the last note came that someone is at a driving computer.
     active_at: Option<Instant>,
-    /// When anything last came from the driving computer.
+    /// When anything last came off the link from the driving computer.
     heard_at: Option<Instant>,
     /// This computer's name, for its badge.
     name: String,
@@ -205,9 +205,11 @@ impl Receiver {
     }
 
     /// [`Receiver::handle`] for what came off the link at `arrived_us`
-    /// ([`link::now_us`]): each key and move is timed.
+    /// ([`link::now_us`]): it counts as heard from then, not from when it
+    /// is handled, and each key and move is timed.
     pub fn handle_arrived(&mut self, from: &str, msg: Msg, allowed: bool, arrived_us: u64) {
-        self.handle_timed(from, msg, allowed, Instant::now(), Some(arrived_us));
+        let arrived = arrived_at(arrived_us, Instant::now(), link::now_us());
+        self.handle_timed(from, msg, allowed, arrived, Some(arrived_us));
     }
 
     fn handle_timed(
@@ -225,7 +227,7 @@ impl Receiver {
         }
         // Anything at all from the driving computer says it is still there.
         if self.driver.as_deref() == Some(from) {
-            self.heard_at = Some(now);
+            self.heard_at = self.heard_at.max(Some(now));
         }
         if let Msg::Hello { .. } = msg {
             // A computer that may drive this one is there: be ready.
@@ -317,11 +319,15 @@ impl Receiver {
     /// left. Everything it held down is let go of, and this computer is no
     /// longer kept awake for it; what it sends later is ignored until it
     /// enters again. A link that goes without a word is noticed here long
-    /// before the connection times out.
-    pub fn check_silence(&mut self, now: Instant) {
-        let silent = self
+    /// before the connection times out. Silence is counted from when its
+    /// messages came off the link: what it handled last, or `newest`, the
+    /// last thing from it to come off the link, handled or not (a loop
+    /// held up a moment does not end a session that is still going).
+    pub fn check_silence(&mut self, now: Instant, newest: Option<Instant>) {
+        let heard = self
             .heard_at
-            .is_some_and(|at| now.saturating_duration_since(at) >= SILENCE_RELEASE);
+            .max(newest.filter(|_| self.heard_at.is_some()));
+        let silent = heard.is_some_and(|at| now.saturating_duration_since(at) >= SILENCE_RELEASE);
         if self.driver.is_some() && silent {
             self.stop();
             self.active_at = None;
@@ -352,6 +358,13 @@ impl Receiver {
         self.active_at
             .is_some_and(|at| now.saturating_duration_since(at) < AWAKE_FOR)
     }
+}
+
+/// When something that came off the link at `arrived_us` ([`link::now_us`])
+/// came, on the monotonic clock: `now` is `now_us`. Never later than now.
+fn arrived_at(arrived_us: u64, now: Instant, now_us: u64) -> Instant {
+    now.checked_sub(Duration::from_micros(now_us.saturating_sub(arrived_us)))
+        .unwrap_or(now)
 }
 
 /// A receiver going away (the server stopping or upgrading mid-session)
@@ -848,7 +861,7 @@ pub async fn run() {
                     }
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
-                    receiver.check_silence(Instant::now());
+                    receiver.check_silence(Instant::now(), link::last_heard(&driver));
                     if receiver.driver().is_none() {
                         tracing::info!(
                             driver,
@@ -1320,16 +1333,16 @@ mod tests {
         r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, t0);
         fake.take();
         // Not yet: a little short of a second of silence.
-        r.check_silence(t0 + SILENCE_RELEASE - Duration::from_millis(1));
+        r.check_silence(t0 + SILENCE_RELEASE - Duration::from_millis(1), None);
         assert_eq!(fake.take(), vec![]);
         assert_eq!(r.driver(), Some("pc"));
         // A second of nothing: let go of once, as a Leave, and no longer
         // kept awake for it.
-        r.check_silence(t0 + SILENCE_RELEASE);
+        r.check_silence(t0 + SILENCE_RELEASE, None);
         assert_eq!(fake.take(), vec![Call::Key(42, false)]);
         assert_eq!(r.driver(), None);
         assert!(!r.wants_awake(t0 + SILENCE_RELEASE));
-        r.check_silence(t0 + SILENCE_RELEASE * 5);
+        r.check_silence(t0 + SILENCE_RELEASE * 5, None);
         assert_eq!(fake.take(), vec![]);
         // What it sends later is ignored until it enters again.
         let later = t0 + SILENCE_RELEASE * 6;
@@ -1339,6 +1352,48 @@ mod tests {
         r.handle_at("pc", Msg::Enter { x: 2, y: 2 }, true, later);
         r.handle_at("pc", key(30, true), true, later);
         assert_eq!(fake.take(), vec![Call::Move(2, 2), Call::Key(30, true)]);
+    }
+
+    /// Silence is counted from when the driving computer's messages came
+    /// off the link, not from when this loop got to them: one that came
+    /// while the loop was busy keeps the session, and one handled late
+    /// counts from when it came.
+    #[test]
+    fn silence_is_counted_from_arrival() {
+        let (mut r, fake) = receiver();
+        let t0 = Instant::now();
+        let ms = |n: u64| t0 + Duration::from_millis(n);
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        r.handle_at("pc", key(42, true), true, t0);
+        fake.take();
+        // The loop stalled; a note came off the link at 0.9 s and waits.
+        r.check_silence(ms(1500), Some(ms(900)));
+        assert_eq!(fake.take(), vec![]);
+        assert_eq!(r.driver(), Some("pc"));
+        r.check_silence(ms(1900), Some(ms(900)));
+        assert_eq!(fake.take(), vec![Call::Key(42, false)]);
+        assert_eq!(r.driver(), None);
+
+        // A note handled now that came off the link 1.5 s ago, and nothing
+        // since: a second and more of silence already.
+        let (mut r, fake) = receiver();
+        let now_us = link::now_us();
+        r.handle_arrived("pc", Msg::Enter { x: 0, y: 0 }, true, now_us - 1_600_000);
+        r.handle_arrived("pc", key(42, true), true, now_us - 1_600_000);
+        r.handle_arrived("pc", Msg::Active { idle_ms: 0 }, true, now_us - 1_500_000);
+        fake.take();
+        r.check_silence(Instant::now(), None);
+        assert_eq!(fake.take(), vec![Call::Key(42, false)]);
+        assert_eq!(r.driver(), None);
+    }
+
+    #[test]
+    fn an_arrival_is_put_on_the_monotonic_clock() {
+        let now = Instant::now();
+        let at = arrived_at(1_000_300_000, now, 1_000_600_000);
+        assert_eq!(now - at, Duration::from_millis(300));
+        // A wall clock stepped back: never later than now.
+        assert_eq!(arrived_at(1_000_600_000, now, 1_000_300_000), now);
     }
 
     #[test]
@@ -1354,7 +1409,7 @@ mod tests {
             if i % 2 == 0 {
                 r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, now);
             }
-            r.check_silence(now);
+            r.check_silence(now, None);
         }
         assert_eq!(fake.take(), vec![]);
         assert_eq!(r.driver(), Some("pc"));

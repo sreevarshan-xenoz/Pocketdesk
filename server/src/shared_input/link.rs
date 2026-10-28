@@ -258,6 +258,30 @@ fn incoming_sender() -> Option<mpsc::Sender<Arrival>> {
     lock(&INCOMING).clone()
 }
 
+/// When anything last came off the link from each computer, handed on yet
+/// or not.
+static LAST_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+    LazyLock::new(Default::default);
+
+fn heard_now(device_id: &str) {
+    let now = std::time::Instant::now();
+    let mut heard = lock(&LAST_HEARD);
+    match heard.get_mut(device_id) {
+        Some(at) => *at = now,
+        None => {
+            heard.insert(device_id.to_string(), now);
+        }
+    }
+}
+
+/// When the last message from `device_id` came off its link, whether or
+/// not whoever takes [`incoming`] has got to it: the computer being driven
+/// counts its driver's silence from this, so a moment's hold-up in its own
+/// loop is no silence.
+pub fn last_heard(device_id: &str) -> Option<std::time::Instant> {
+    lock(&LAST_HEARD).get(device_id).copied()
+}
+
 /// Read what the computer `device_id` sends on `conn` until it closes: its
 /// datagrams, and each uni stream it opens, each in a task of its own (a
 /// frame is read in parts, so a read is never raced against another).
@@ -276,6 +300,7 @@ async fn read_link(device_id: String, conn: Connection) {
             datagram = conn.read_datagram() => match datagram {
                 Ok(bytes) => match wire::decode(&bytes) {
                     Ok(msg) => {
+                        heard_now(&device_id);
                         let at_us = now_us();
                         if answer(&device_id, &conn, &msg)
                             && let Some(incoming) = incoming_sender()
@@ -333,6 +358,7 @@ async fn read_stream(device_id: String, conn: Connection, mut stream: RecvStream
             let _ = stream.stop(0u32.into());
             return;
         }
+        heard_now(&device_id);
         let at_us = now_us();
         if answer(&device_id, &conn, &msg) {
             hand_on(&device_id, msg, at_us, conn.stable_id()).await;
