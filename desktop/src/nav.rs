@@ -18,7 +18,7 @@ pub const GROUPS: &[Group] = &[
     },
     Group {
         title: Some("Phones and computers"),
-        pages: &[Tab::Pair, Tab::Devices, Tab::Sessions],
+        pages: &[Tab::Pair, Tab::Devices, Tab::KeyboardMouse, Tab::Sessions],
     },
     Group {
         title: Some("Sharing"),
@@ -42,10 +42,11 @@ pub const GROUPS: &[Group] = &[
 
 impl Tab {
     /// Every page.
-    pub const ALL: [Tab; 13] = [
+    pub const ALL: [Tab; 14] = [
         Tab::Status,
         Tab::Pair,
         Tab::Devices,
+        Tab::KeyboardMouse,
         Tab::Sessions,
         Tab::Files,
         Tab::Messages,
@@ -64,6 +65,7 @@ impl Tab {
             Tab::Status => "Overview",
             Tab::Pair => "Pair",
             Tab::Devices => "Devices",
+            Tab::KeyboardMouse => "Keyboard and mouse",
             Tab::Sessions => "Sessions",
             Tab::Files => "Files",
             Tab::Messages => "Messages",
@@ -83,6 +85,9 @@ impl Tab {
             Tab::Status => "Whether the server runs, and how phones reach this computer.",
             Tab::Pair => "Pair a phone with a code it scans, or a PIN.",
             Tab::Devices => "The phones and computers paired with this one, and what each may do.",
+            Tab::KeyboardMouse => {
+                "One keyboard and mouse across your computers: where each sits, and who may drive whom."
+            }
             Tab::Sessions => "Who is viewing or driving this computer now.",
             Tab::Files => "Send files to a phone or computer, and the files received.",
             Tab::Messages => "Texts from the phone, and replies to them.",
@@ -119,6 +124,7 @@ impl Tab {
             Tab::Status => "overview",
             Tab::Pair => "pair",
             Tab::Devices => "devices",
+            Tab::KeyboardMouse => "keyboard-mouse",
             Tab::Sessions => "sessions",
             Tab::Files => "files",
             Tab::Messages => "messages",
@@ -208,6 +214,8 @@ mod tests {
         assert_eq!(step(Tab::Status, true), Tab::Pair);
         assert_eq!(step(Tab::Pair, false), Tab::Status);
         assert_eq!(step(Tab::Sessions, true), Tab::Files, "across a group");
+        assert_eq!(step(Tab::Devices, true), Tab::KeyboardMouse);
+        assert_eq!(step(Tab::KeyboardMouse, true), Tab::Sessions);
         assert_eq!(step(Tab::Logs, true), Tab::Status, "round to the first");
         assert_eq!(step(Tab::Status, false), Tab::Logs, "and back to the last");
     }
@@ -279,6 +287,10 @@ mod tests {
         assert_eq!(
             page_from_args(args(&["app", "--page=phone-files"])),
             Some(Tab::Phone)
+        );
+        assert_eq!(
+            page_from_args(args(&["app", "--page", "keyboard-mouse"])),
+            Some(Tab::KeyboardMouse)
         );
         assert_eq!(page_from_args(args(&["app", "--page", "nope"])), None);
         assert_eq!(page_from_args(args(&["app"])), None);

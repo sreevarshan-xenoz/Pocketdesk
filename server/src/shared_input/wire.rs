@@ -41,6 +41,15 @@ const TAG_ACTIVE: u8 = 9;
 const TAG_IDENTIFY: u8 = 10;
 const TAG_PING: u8 = 11;
 const TAG_PONG: u8 = 12;
+const TAG_REFUSE: u8 = 13;
+
+/// Why a computer refuses to be driven ([`Msg::Refuse`]): the shared
+/// keyboard and mouse are off there.
+pub const REFUSE_SHARING_OFF: u8 = 1;
+/// Why a computer refuses to be driven: it does not let the sender (it has
+/// not the Keyboard and mouse permission there, or is not one of the
+/// owner's computers to it).
+pub const REFUSE_NOT_ALLOWED: u8 = 2;
 
 /// One message between two computers sharing input. Its serde form is for
 /// records such as `share-test`'s, never the wire, which is [`encode`]'s.
@@ -101,6 +110,13 @@ pub enum Msg {
     },
     Pong {
         t_us: u64,
+    },
+    /// The receiver will not be driven by the sender: its answer to a
+    /// `Hello` it will not take, and its word to a computer it took when it
+    /// stops ([`REFUSE_SHARING_OFF`], [`REFUSE_NOT_ALLOWED`]; another
+    /// reason is still a refusal).
+    Refuse {
+        reason: u8,
     },
 }
 
@@ -195,6 +211,10 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
             out.push(TAG_PONG);
             out.extend_from_slice(&t_us.to_be_bytes());
         }
+        Msg::Refuse { reason } => {
+            out.push(TAG_REFUSE);
+            out.push(*reason);
+        }
     }
     out
 }
@@ -236,6 +256,7 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
         TAG_IDENTIFY => Msg::Identify { name: r.string()? },
         TAG_PING => Msg::Ping { t_us: r.u64()? },
         TAG_PONG => Msg::Pong { t_us: r.u64()? },
+        TAG_REFUSE => Msg::Refuse { reason: r.u8()? },
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -442,7 +463,22 @@ mod tests {
             },
             Msg::Ping { t_us: u64::MAX },
             Msg::Pong { t_us: 0 },
+            Msg::Refuse {
+                reason: REFUSE_SHARING_OFF,
+            },
+            Msg::Refuse { reason: u8::MAX },
         ]
+    }
+
+    #[test]
+    fn a_refusal_round_trips_with_its_reason() {
+        for reason in [REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED] {
+            let m = Msg::Refuse { reason };
+            let bytes = encode(&m);
+            assert_eq!(bytes, vec![13, reason]);
+            assert_eq!(decode(&bytes), Ok(m));
+        }
+        assert_ne!(REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED);
     }
 
     #[test]

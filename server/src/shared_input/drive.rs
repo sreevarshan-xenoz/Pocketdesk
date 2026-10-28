@@ -35,7 +35,7 @@ use super::game_lock::{self, Foreground, Lock};
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
 use super::layout::{Layout, Placed};
-use super::wire::{Msg, Screen};
+use super::wire::{Msg, REFUSE_SHARING_OFF, Screen};
 
 /// What the input thread does with this computer's keyboard and mouse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,6 +363,28 @@ impl Driver {
         if let Some(away) = self.away.as_ref().filter(|a| a.to == device_id) {
             let park = away.park;
             self.go_home(&mut out, park, true, why);
+        }
+        out
+    }
+
+    /// The computer `device_id` refused to be driven (`reason`, as
+    /// [`Msg::Refuse`] gives it): no longer one to cross onto (until the
+    /// glue finds it reachable again), and if it is driven, home, letting
+    /// go of what was sent down.
+    pub fn refused(&mut self, device_id: &str, reason: u8) -> Vec<Action> {
+        self.reachable.remove(device_id);
+        let mut out = Vec::new();
+        if let Some(away) = self.away.as_ref().filter(|a| a.to == device_id) {
+            let park = away.park;
+            let why = match reason {
+                REFUSE_SHARING_OFF => "the keyboard and mouse are turned off there",
+                _ => "it does not allow this computer (its Keyboard and mouse page)",
+            };
+            let why = format!(
+                "{} won't take input: {why}; the keyboard and mouse are back here",
+                self.name_of(device_id)
+            );
+            self.go_home(&mut out, park, true, &why);
         }
         out
     }
@@ -816,47 +838,87 @@ pub fn reachable(
         .collect()
 }
 
-/// The layout this computer drives in: its own screens, and to their right
-/// the linked computers whose screens `shared_screens.json` holds, in its
-/// order (until the owner arranges them).
+/// The layout this computer drives in: its own screens, and the linked
+/// computers whose screens `shared_screens.json` holds where the owner put
+/// them (`saved`, the Keyboard and mouse page's `shared_layout.json`), or,
+/// with no arrangement or one that would put screens over each other, to
+/// their right in the file's order. The places are worked out over every
+/// computer in the file, linked or not, as the page draws them.
 pub fn layout_for(
     this: &str,
     name: &str,
     own: Vec<Screen>,
     file: &pocketdesk_core::local::shared_input::ScreensFile,
     linked: &[String],
+    saved: Option<&pocketdesk_core::local::shared_input::LayoutFile>,
 ) -> Layout {
-    let others = file
+    // Arranged as the Keyboard and mouse page does, over every computer
+    // whose screens are known, so the two agree; then only the linked ones
+    // are kept, each where it was put.
+    let others: Vec<(String, Vec<Screen>)> = file
         .computers
         .iter()
-        .filter(|c| {
-            !c.this_computer
-                && c.device_id != this
-                && !c.screens.is_empty()
-                && linked.contains(&c.device_id)
-        })
-        .map(|c| Placed {
-            device_id: c.device_id.clone(),
-            name: c.name.clone(),
-            origin: (0, 0),
-            screens: c.screens.clone(),
-        })
+        .filter(|c| !c.this_computer && c.device_id != this && !c.screens.is_empty())
+        .map(|c| (c.device_id.clone(), c.screens.clone()))
         .collect();
-    Layout::default_for(
-        Placed {
-            device_id: this.to_string(),
-            name: name.to_string(),
-            origin: (0, 0),
-            screens: own,
-        },
-        others,
-    )
+    let origins = pocketdesk_core::local::shared_input::arrange(&own, &others, saved);
+    let (others, origins): (Vec<_>, Vec<_>) = others
+        .into_iter()
+        .zip(origins)
+        .filter(|((id, _), _)| linked.contains(id))
+        .unzip();
+    let mut computers = vec![Placed {
+        device_id: this.to_string(),
+        name: name.to_string(),
+        origin: (0, 0),
+        screens: own,
+    }];
+    computers.extend(
+        others
+            .into_iter()
+            .zip(origins)
+            .map(|((id, screens), origin)| {
+                let name = file.get(&id).map(|c| c.name.clone()).unwrap_or_default();
+                Placed {
+                    device_id: id,
+                    name,
+                    origin,
+                    screens,
+                }
+            }),
+    );
+    Layout { computers }
+}
+
+/// The owner's arrangement (`shared_layout.json`), read again only when
+/// the file changed.
+#[derive(Default)]
+pub struct SavedLayout {
+    stamp: Option<std::time::SystemTime>,
+    file: Option<pocketdesk_core::local::shared_input::LayoutFile>,
+}
+
+impl SavedLayout {
+    /// The arrangement in `state_dir`, if there is one that reads.
+    pub fn get(
+        &mut self,
+        state_dir: &std::path::Path,
+    ) -> Option<&pocketdesk_core::local::shared_input::LayoutFile> {
+        let path = state_dir.join(pocketdesk_core::local::paths::SHARED_LAYOUT_FILE);
+        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        if stamp.is_none() || stamp != self.stamp {
+            self.stamp = stamp;
+            self.file = stamp.and(pocketdesk_core::local::shared_input::read_layout(state_dir));
+        }
+        self.file.as_ref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pocketdesk_core::local::shared_input::{ComputerScreens, ScreensFile};
+    use pocketdesk_core::local::shared_input::{ComputerScreens, LayoutFile, ScreensFile};
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
     fn screen(x: i32, y: i32, width: u32, height: u32) -> Screen {
@@ -1404,6 +1466,128 @@ mod tests {
     }
 
     #[test]
+    fn a_refusing_computer_is_left_with_releases_and_not_crossed_onto() {
+        let mut d = away_on_linux(false);
+        d.on(key(0x1E, true));
+        // Another computer refusing is none of this one's business.
+        assert_eq!(d.refused("M", REFUSE_SHARING_OFF), vec![]);
+        let back = d.refused("L", REFUSE_SHARING_OFF);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
+        );
+        assert!(
+            back.contains(&Action::Badge(
+                "L computer won't take input: the keyboard and mouse are turned off there; \
+             the keyboard and mouse are back here"
+                    .to_string()
+            ))
+        );
+        assert_eq!(d.away_on(), None);
+        // Its edge is a wall now, until the glue says it is reachable again.
+        d.on(moved(3440, 480));
+        let pushed = d.on(moved(3455, 480));
+        assert_eq!(sends(&pushed), vec![], "{pushed:?}");
+        assert_eq!(d.away_on(), None);
+    }
+
+    #[test]
+    fn an_offline_computer_keeps_its_place_in_the_row() {
+        // L is offline, M linked: with no arrangement M sits where the
+        // page draws it, after L, not in L's place.
+        let other = |id: &str, screens: Vec<Screen>| ComputerScreens {
+            device_id: id.to_string(),
+            name: format!("{id} computer"),
+            screens,
+            changed_unix: 0,
+            this_computer: false,
+        };
+        let file = ScreensFile {
+            computers: vec![
+                ComputerScreens {
+                    this_computer: true,
+                    ..other("W", Vec::new())
+                },
+                other("L", vec![screen(0, 0, 1600, 1000)]),
+                other("M", vec![screen(0, 0, 1280, 800)]),
+            ],
+        };
+        let own = vec![screen(0, 0, 1920, 1080)];
+        let page = pocketdesk_core::local::shared_input::arrange(
+            &own,
+            &[
+                ("L".to_string(), vec![screen(0, 0, 1600, 1000)]),
+                ("M".to_string(), vec![screen(0, 0, 1280, 800)]),
+            ],
+            None,
+        );
+        let layout = layout_for("W", "W computer", own, &file, &["M".to_string()], None);
+        let ids: Vec<&str> = layout
+            .computers
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        assert_eq!(ids, ["W", "M"], "only the linked one");
+        assert_eq!(layout.computers[1].origin, page[1]);
+        assert_eq!(page[1], (1920 + 1600, 0));
+    }
+
+    #[test]
+    fn the_owners_arrangement_is_used_when_there_is_one() {
+        let file = ScreensFile {
+            computers: vec![
+                ComputerScreens {
+                    device_id: "W".to_string(),
+                    name: "W computer".to_string(),
+                    screens: Vec::new(),
+                    changed_unix: 0,
+                    this_computer: true,
+                },
+                ComputerScreens {
+                    device_id: "L".to_string(),
+                    name: "L computer".to_string(),
+                    screens: vec![screen(0, 0, 1600, 1000)],
+                    changed_unix: 0,
+                    this_computer: false,
+                },
+            ],
+        };
+        let own = vec![screen(0, 0, 1920, 1080), screen(1920, 0, 1536, 960)];
+        let linked = ["L".to_string()];
+        // The laptop to the left, its bottom level with the monitor's.
+        let saved = LayoutFile {
+            origins: BTreeMap::from([("L".to_string(), (-1600, 80))]),
+            rev: 1,
+        };
+        let layout = layout_for("W", "W computer", own.clone(), &file, &linked, Some(&saved));
+        assert_eq!(layout.computers[1].origin, (-1600, 80));
+        // Crossing off the monitor's left edge lands on the laptop's right.
+        let crossing = layout.crossing("W", (0, 500), -5, 0).unwrap();
+        assert_eq!(crossing.to, "L");
+        assert_eq!(crossing.at, (1599, 420));
+        // None, or one that would overlap, is the row to the right.
+        let overlapping = LayoutFile {
+            origins: BTreeMap::from([("L".to_string(), (10, 10))]),
+            rev: 2,
+        };
+        assert_eq!(
+            layout_for(
+                "W",
+                "W computer",
+                own.clone(),
+                &file,
+                &linked,
+                Some(&overlapping)
+            ),
+            desk(false)
+        );
+        assert_eq!(
+            layout_for("W", "W computer", own, &file, &linked, None),
+            desk(false)
+        );
+    }
+
+    #[test]
     fn shutdown_goes_home_with_releases_and_stops_watching() {
         let mut d = away_on_linux(false);
         d.on(key(0x1E, true));
@@ -1716,9 +1900,12 @@ mod tests {
         };
         let linked = ["L".to_string(), "blank".to_string()];
         let own = vec![screen(0, 0, 1920, 1080), screen(1920, 0, 1536, 960)];
-        let layout = layout_for("W", "W computer", own, &file, &linked);
+        let layout = layout_for("W", "W computer", own, &file, &linked, None);
         // This computer's own screens as read now (not the file's), and only
-        // the linked computer that has screens, to their right.
-        assert_eq!(layout, desk(false));
+        // the linked computer that has screens, to their right, after the
+        // place of the one not linked now (as the page draws them).
+        let mut expected = desk(false);
+        expected.computers[1].origin = (3456 + 800, 0);
+        assert_eq!(layout, expected);
     }
 }

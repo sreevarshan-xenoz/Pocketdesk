@@ -682,6 +682,14 @@ impl SettingsForm {
         self.edited != self.saved
     }
 
+    /// `shared_input` was saved elsewhere (the Keyboard and mouse page):
+    /// the form says so too, and the server reads it without a restart.
+    pub fn saved_elsewhere_shared_input(&mut self, on: bool) {
+        self.saved.shared_input = on;
+        self.edited.shared_input = on;
+        self.running.shared_input = on;
+    }
+
     /// Whether the save bar shows: for changes, or for a problem in what
     /// is saved (a hand-edited config), which would otherwise go unsaid
     /// (U1 review).

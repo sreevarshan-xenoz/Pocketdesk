@@ -191,6 +191,7 @@ mod tests {
             paired_unix: 0,
             link: link.to_string(),
             link_unix: 0,
+            lets_drive: false,
         }
     }
 

@@ -7,6 +7,7 @@
 mod activity_view;
 mod app;
 mod apps_view;
+mod arrange_view;
 mod cast_view;
 mod clipboard_view;
 mod computers_view;

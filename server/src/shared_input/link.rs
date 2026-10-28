@@ -101,9 +101,29 @@ pub(crate) fn linked() -> Vec<String> {
 static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
     LazyLock::new(Default::default);
 
-/// Note that `device_id` just sent its screens.
+/// Note that `device_id` just sent its screens: it takes input from this
+/// computer now, whatever it refused before.
 pub fn note_screens(device_id: &str) {
+    lock(&REFUSED).remove(device_id);
     lock(&SCREENS_HEARD).insert(device_id.to_string(), std::time::Instant::now());
+}
+
+/// The computers that last answered this one by refusing to be driven
+/// ([`Msg::Refuse`]): the reason, and when.
+static REFUSED: LazyLock<Mutex<HashMap<String, (u8, std::time::Instant)>>> =
+    LazyLock::new(Default::default);
+
+/// Note that `device_id` refused to be driven (`reason`, as
+/// [`Msg::Refuse`] says it): its answer before no longer counts, so it is
+/// no computer to cross onto until it sends its screens again.
+pub fn note_refused(device_id: &str, reason: u8) {
+    lock(&SCREENS_HEARD).remove(device_id);
+    lock(&REFUSED).insert(device_id.to_string(), (reason, std::time::Instant::now()));
+}
+
+/// The computers refusing to be driven now: why, and since when.
+pub fn refusals() -> HashMap<String, (u8, std::time::Instant)> {
+    lock(&REFUSED).clone()
 }
 
 /// When each computer last sent its screens.

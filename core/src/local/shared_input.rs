@@ -6,15 +6,29 @@
 //! said them on the link (its `Hello` or `Screens`). Only the server writes
 //! it; the layout is built from it. What another computer says is its to
 //! claim, so it is clipped here before it is kept ([`clean_name`],
-//! [`clean_screens`]).
+//! [`clean_screens`]). It holds only computers paired now: the server
+//! drops the others each time it writes ([`ScreensFile::keep_only`]).
+//!
+//! The desktop app's Keyboard and mouse page keeps
+//! `<state>/shared_layout.json` ([`LayoutFile`]): where the owner put each
+//! computer, which the server's driver uses in place of the default row
+//! ([`arrange`]). The server keeps `<state>/shared_input_status.json`
+//! ([`StatusFile`]) for the page: where the keyboard and mouse are, and how
+//! each computer's link stands. The page asks the server through
+//! `<state>/shared_input_out/<id>.json`, one request per file
+//! ([`ShareAsk`]).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use super::paths::SHARED_SCREENS_FILE;
+use super::approval::is_valid_id;
+use super::paths::{
+    SHARED_INPUT_DIR, SHARED_INPUT_STATUS_FILE, SHARED_LAYOUT_FILE, SHARED_SCREENS_FILE,
+};
 
 /// The longest name kept or sent for a computer, in bytes; a longer one is
 /// cut short at a character.
@@ -155,6 +169,13 @@ impl ScreensFile {
             }),
         }
     }
+
+    /// Drop every computer not in `paired` (unpaired or forgotten since it
+    /// was heard); this computer's own entry stays.
+    pub fn keep_only(&mut self, paired: &BTreeSet<String>) {
+        self.computers
+            .retain(|c| c.this_computer || paired.contains(&c.device_id));
+    }
 }
 
 /// The screens known. A missing or unreadable file is empty.
@@ -195,6 +216,314 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ScreensFile)) -> io::Re
     std::fs::rename(&tmp, &path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
+}
+
+/// `bytes` as `name` in `state_dir`, written whole (a reader never sees it
+/// half-written) and owner-only.
+fn write_whole(state_dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+    let path = state_dir.join(name);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::create_dir_all(state_dir)?;
+    crate::secure_fs::write_private(&tmp, bytes)?;
+    std::fs::rename(&tmp, &path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Where the owner put each computer (the Keyboard and mouse page's
+/// arrangement): each computer's origin, by its id, in the logical pixels
+/// of the shared layout space, where this computer's own desktop space
+/// starts at (0, 0). Written whole by the desktop app; `rev` counts its
+/// saves.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LayoutFile {
+    #[serde(default)]
+    pub origins: BTreeMap<String, (i32, i32)>,
+    #[serde(default)]
+    pub rev: u64,
+}
+
+/// The owner's arrangement, if there is one: a missing file, or one that
+/// does not read, is none (the default row is used).
+pub fn read_layout(state_dir: &Path) -> Option<LayoutFile> {
+    let raw = std::fs::read_to_string(state_dir.join(SHARED_LAYOUT_FILE)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Keep the owner's arrangement (the app's side), whole and owner-only.
+pub fn write_layout(state_dir: &Path, layout: &LayoutFile) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(layout).map_err(io::Error::other)?;
+    write_whole(state_dir, SHARED_LAYOUT_FILE, json.as_bytes())
+}
+
+/// A box of pixels: from `x0`, `y0` up to but not including `x1`, `y1`.
+/// Wide enough that sums of `i32`s never overflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bounds {
+    pub x0: i64,
+    pub y0: i64,
+    pub x1: i64,
+    pub y1: i64,
+}
+
+impl Bounds {
+    /// `s`'s pixels.
+    pub fn of(s: &Screen) -> Bounds {
+        let (x0, y0) = (i64::from(s.x), i64::from(s.y));
+        Bounds {
+            x0,
+            y0,
+            x1: x0 + i64::from(s.width),
+            y1: y0 + i64::from(s.height),
+        }
+    }
+
+    /// Moved by `(dx, dy)`.
+    pub fn shifted(self, (dx, dy): (i32, i32)) -> Bounds {
+        let (dx, dy) = (i64::from(dx), i64::from(dy));
+        Bounds {
+            x0: self.x0 + dx,
+            y0: self.y0 + dy,
+            x1: self.x1 + dx,
+            y1: self.y1 + dy,
+        }
+    }
+
+    pub fn width(&self) -> i64 {
+        self.x1 - self.x0
+    }
+
+    pub fn height(&self) -> i64 {
+        self.y1 - self.y0
+    }
+
+    fn is_empty(&self) -> bool {
+        self.x1 <= self.x0 || self.y1 <= self.y0
+    }
+
+    /// Whether the two share any pixel (touching edges share none).
+    pub fn overlaps(&self, o: &Bounds) -> bool {
+        self.x0 < o.x1 && o.x0 < self.x1 && self.y0 < o.y1 && o.y0 < self.y1
+    }
+
+    fn union(self, o: Bounds) -> Bounds {
+        Bounds {
+            x0: self.x0.min(o.x0),
+            y0: self.y0.min(o.y0),
+            x1: self.x1.max(o.x1),
+            y1: self.y1.max(o.y1),
+        }
+    }
+}
+
+/// The box around `screens`, in their computer's own desktop space; none
+/// for a computer with no screens.
+pub fn bounds(screens: &[Screen]) -> Option<Bounds> {
+    screens
+        .iter()
+        .map(Bounds::of)
+        .filter(|b| !b.is_empty())
+        .reduce(Bounds::union)
+}
+
+/// Where each of `others` sits (its origin), with this computer's own
+/// desktop space at (0, 0) and its screens `this`: `saved`'s origins when
+/// it has them and no two computers' screens then overlap, and the default
+/// row otherwise (each to the right of the one before, tops level with this
+/// computer's). One `saved` leaves out goes to the right of the rest.
+pub fn arrange(
+    this: &[Screen],
+    others: &[(String, Vec<Screen>)],
+    saved: Option<&LayoutFile>,
+) -> Vec<(i32, i32)> {
+    let row = |placed: &[(Vec<Screen>, (i32, i32))], from: &[&Vec<Screen>]| {
+        // The right of what is placed already, and this computer's top.
+        let mut right = placed
+            .iter()
+            .filter_map(|(s, origin)| bounds(s).map(|b| b.shifted(*origin).x1))
+            .max()
+            .unwrap_or(0);
+        let top = bounds(this).map_or(0, |b| b.y0);
+        from.iter()
+            .map(|screens| {
+                let (left, other_top, width) =
+                    bounds(screens).map_or((0, 0, 0), |b| (b.x0, b.y0, b.width()));
+                let origin = (clamp_i32(right - left), clamp_i32(top - other_top));
+                right += width;
+                origin
+            })
+            .collect::<Vec<_>>()
+    };
+    let me = vec![(this.to_vec(), (0, 0))];
+    let default = row(&me, &others.iter().map(|(_, s)| s).collect::<Vec<_>>());
+    let Some(saved) = saved else {
+        return default;
+    };
+    let mut origins: Vec<Option<(i32, i32)>> = others
+        .iter()
+        .map(|(id, _)| saved.origins.get(id).copied())
+        .collect();
+    let mut placed = me;
+    placed.extend(
+        others
+            .iter()
+            .zip(&origins)
+            .filter_map(|((_, s), o)| o.map(|o| (s.clone(), o))),
+    );
+    let missing: Vec<&Vec<Screen>> = others
+        .iter()
+        .zip(&origins)
+        .filter(|(_, o)| o.is_none())
+        .map(|((_, s), _)| s)
+        .collect();
+    let mut appended = row(&placed, &missing).into_iter();
+    for origin in origins.iter_mut().filter(|o| o.is_none()) {
+        *origin = appended.next();
+    }
+    let origins: Vec<(i32, i32)> = origins.into_iter().flatten().collect();
+    let mut all: Vec<Bounds> = this.iter().map(Bounds::of).collect();
+    for ((_, screens), origin) in others.iter().zip(&origins) {
+        let mine: Vec<Bounds> = screens
+            .iter()
+            .map(|s| Bounds::of(s).shifted(*origin))
+            .collect();
+        if mine.iter().any(|b| all.iter().any(|o| b.overlaps(o))) {
+            return default;
+        }
+        all.extend(mine);
+    }
+    origins
+}
+
+fn clamp_i32(v: i64) -> i32 {
+    v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+/// A computer's link, as [`StatusFile::link`] says it.
+pub const LINK_DIRECT: &str = "direct";
+pub const LINK_RELAYED: &str = "relayed";
+pub const LINK_AWAY: &str = "away";
+/// It answered this computer's hello by refusing: shared input is off
+/// there.
+pub const REFUSED_SHARING_OFF: &str = "refused: sharing off";
+/// It answered by refusing: it does not let this computer drive it.
+pub const REFUSED_NOT_ALLOWED: &str = "refused: not allowed";
+
+/// How the shared keyboard and mouse stand now, for the desktop app.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusFile {
+    /// The computer this one's keyboard and mouse are on now; empty while
+    /// they are here.
+    #[serde(default)]
+    pub keyboard_on: String,
+    /// Each paired computer's link: [`LINK_DIRECT`], [`LINK_RELAYED`],
+    /// [`LINK_AWAY`] (none), or a refusal ([`REFUSED_SHARING_OFF`],
+    /// [`REFUSED_NOT_ALLOWED`]).
+    #[serde(default)]
+    pub link: BTreeMap<String, String>,
+    /// The computers that answered this one's hello with their screens
+    /// since their link last opened: they let it drive them.
+    #[serde(default)]
+    pub answered: BTreeSet<String>,
+}
+
+/// How things stand, as the server last wrote. A missing or unreadable file
+/// is nothing known.
+pub fn read_status(state_dir: &Path) -> StatusFile {
+    std::fs::read_to_string(state_dir.join(SHARED_INPUT_STATUS_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Keep how things stand (the server's side), whole and owner-only.
+pub fn write_status(state_dir: &Path, status: &StatusFile) -> io::Result<()> {
+    let json = serde_json::to_string_pretty(status).map_err(io::Error::other)?;
+    write_whole(state_dir, SHARED_INPUT_STATUS_FILE, json.as_bytes())
+}
+
+/// How long a request waits for the server before it is dropped.
+pub const REQUEST_TTL_SECS: u64 = 30;
+
+/// What the app asks of the server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "ask", rename_all = "snake_case")]
+pub enum ShareAsk {
+    /// Have each computer this one can drive now show who it is.
+    Identify,
+}
+
+/// One request, as a file in `shared_input_out/`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareRequest {
+    pub id: String,
+    #[serde(flatten)]
+    pub ask: ShareAsk,
+    pub created_unix: u64,
+}
+
+/// Leave a request for the server (the app's side).
+pub fn request(state_dir: &Path, ask: ShareAsk, now_unix: u64) -> io::Result<ShareRequest> {
+    let request = ShareRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        ask,
+        created_unix: now_unix,
+    };
+    let file = request_path(state_dir, &request.id)?;
+    std::fs::create_dir_all(state_dir.join(SHARED_INPUT_DIR))?;
+    let json = serde_json::to_string(&request).map_err(io::Error::other)?;
+    let tmp = file.with_extension("json.tmp");
+    crate::secure_fs::write_private(&tmp, json.as_bytes())?;
+    std::fs::rename(&tmp, &file).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(request)
+}
+
+/// Take every waiting request (the server's side), oldest first. Each file
+/// is removed once read; one that is stale, from the future, unreadable or
+/// named for another request is dropped.
+pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ShareRequest> {
+    let Ok(entries) = std::fs::read_dir(state_dir.join(SHARED_INPUT_DIR)) else {
+        return Vec::new();
+    };
+    let mut taken = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(stem) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".json"))
+            .map(str::to_string)
+        else {
+            continue; // a temp file mid-write
+        };
+        let raw = std::fs::read_to_string(&path);
+        let _ = std::fs::remove_file(&path);
+        let Some(request) = raw
+            .ok()
+            .and_then(|raw| serde_json::from_str::<ShareRequest>(&raw).ok())
+        else {
+            continue;
+        };
+        let fresh =
+            request.created_unix <= now_unix && now_unix - request.created_unix <= REQUEST_TTL_SECS;
+        if fresh && request.id == stem && is_valid_id(&request.id) {
+            taken.push(request);
+        }
+    }
+    taken.sort_by_key(|r| r.created_unix);
+    taken
+}
+
+fn request_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
+    if !is_valid_id(id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a request id",
+        ));
+    }
+    Ok(state_dir.join(SHARED_INPUT_DIR).join(format!("{id}.json")))
 }
 
 #[cfg(test)]
@@ -269,6 +598,121 @@ mod tests {
         assert_eq!(peer.name, "Laptop");
         assert_eq!(peer.screens, vec![screen(0, 0, 1280, 800)]);
         assert_eq!(peer.changed_unix, 7);
+    }
+
+    #[test]
+    fn only_paired_computers_are_kept() {
+        let mut file = ScreensFile::default();
+        file.set_own("me", "Desk", &[screen(0, 0, 1920, 1080)], 1);
+        file.heard("peer", Some("Laptop"), &[screen(0, 0, 1600, 1000)], 2);
+        file.heard("gone", Some("Old"), &[screen(0, 0, 800, 600)], 3);
+        file.keep_only(&BTreeSet::from(["peer".to_string()]));
+        let ids: Vec<&str> = file
+            .computers
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        // This computer always stays.
+        assert_eq!(ids, ["me", "peer"]);
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pd-shared-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn layout_file_round_trips() {
+        let dir = temp("layout");
+        assert_eq!(read_layout(&dir), None, "none written yet");
+        let layout = LayoutFile {
+            origins: BTreeMap::from([
+                ("me".to_string(), (0, 0)),
+                ("peer".to_string(), (-1600, 80)),
+            ]),
+            rev: 3,
+        };
+        write_layout(&dir, &layout).unwrap();
+        assert_eq!(read_layout(&dir), Some(layout));
+        // One that does not read is none, as if missing.
+        std::fs::write(dir.join(SHARED_LAYOUT_FILE), "{not json").unwrap();
+        assert_eq!(read_layout(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_layout_uses_the_default() {
+        let this = [screen(0, 0, 1920, 1080), screen(1920, 0, 1536, 960)];
+        let laptop = vec![screen(0, 0, 1600, 1000)];
+        let other = vec![screen(-100, 50, 1280, 800)];
+        let others = vec![("L".to_string(), laptop), ("M".to_string(), other)];
+        // A row to the right, tops level with this computer's.
+        let row = vec![(3456, 0), (3456 + 1600 + 100, -50)];
+        assert_eq!(arrange(&this, &others, None), row);
+        // A file that places each where it does not overlap is used.
+        let saved = LayoutFile {
+            origins: BTreeMap::from([
+                ("L".to_string(), (-1600, 0)),
+                ("M".to_string(), (100, 1080)),
+            ]),
+            rev: 1,
+        };
+        assert_eq!(
+            arrange(&this, &others, Some(&saved)),
+            vec![(-1600, 0), (100, 1080)]
+        );
+        // One the file leaves out goes to the right of the rest.
+        let partial = LayoutFile {
+            origins: BTreeMap::from([("L".to_string(), (-1600, 0))]),
+            rev: 1,
+        };
+        assert_eq!(
+            arrange(&this, &others, Some(&partial)),
+            vec![(-1600, 0), (3456 + 100, -50)]
+        );
+        // One that would put two computers' screens over each other is not.
+        let overlapping = LayoutFile {
+            origins: BTreeMap::from([("L".to_string(), (100, 100)), ("M".to_string(), (0, 0))]),
+            rev: 1,
+        };
+        assert_eq!(arrange(&this, &others, Some(&overlapping)), row);
+    }
+
+    #[test]
+    fn status_file_round_trips() {
+        let dir = temp("status");
+        assert_eq!(read_status(&dir), StatusFile::default());
+        let status = StatusFile {
+            keyboard_on: "peer".to_string(),
+            link: BTreeMap::from([
+                ("peer".to_string(), "direct".to_string()),
+                ("other".to_string(), REFUSED_SHARING_OFF.to_string()),
+            ]),
+            answered: BTreeSet::from(["peer".to_string()]),
+        };
+        write_status(&dir, &status).unwrap();
+        assert_eq!(read_status(&dir), status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_identify_request_is_taken_once() {
+        let dir = temp("asks");
+        assert!(take_all(&dir, 100).is_empty());
+        let asked = request(&dir, ShareAsk::Identify, 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        assert!(take_all(&dir, 101).is_empty(), "taken");
+        // A stale one is dropped, not left behind.
+        request(&dir, ShareAsk::Identify, 100).unwrap();
+        assert!(take_all(&dir, 100 + REQUEST_TTL_SECS + 1).is_empty());
+        assert!(
+            std::fs::read_dir(dir.join(SHARED_INPUT_DIR))
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

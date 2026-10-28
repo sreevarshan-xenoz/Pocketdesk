@@ -66,11 +66,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::awake::KeepAwake;
-use super::drive::{Action, Driver, OpenChannel, layout_for, reachable};
+use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
+use super::status;
 use super::wire::{self, Msg};
 
 /// The thread message that sets the mode (its `WPARAM`: 0 off, 1 watch,
@@ -970,8 +971,11 @@ struct Glue {
     /// When each channel in `channels` was opened (before its `Hello`), so
     /// only an answer since then makes its computer reachable.
     opened: HashMap<String, Instant>,
-    /// When opening a channel to a computer last failed.
-    refused: HashMap<String, Instant>,
+    /// When opening a channel to a computer last failed, or it last
+    /// refused to be driven, and how long it waits to be greeted again.
+    refused: HashMap<String, (Instant, Duration)>,
+    /// The refusals in a row from each computer, for that wait.
+    refusals: status::RefusalLog,
     /// This computer's name and logical screens, for a `Hello`.
     name: String,
     own: Vec<wire::Screen>,
@@ -998,7 +1002,8 @@ impl Glue {
                         screens: self.own.clone(),
                     };
                     if channel.send(&hello).and(channel.send(&Msg::Leave)).is_err() {
-                        self.refused.insert(to.to_string(), Instant::now());
+                        self.refused
+                            .insert(to.to_string(), (Instant::now(), REOPEN_AFTER));
                         return None;
                     }
                     self.refused.remove(to);
@@ -1007,12 +1012,38 @@ impl Glue {
                 }
                 Err(e) => {
                     tracing::debug!(to, "Shared input: no channel: {e}");
-                    self.refused.insert(to.to_string(), Instant::now());
+                    self.refused
+                        .insert(to.to_string(), (Instant::now(), REOPEN_AFTER));
                     return None;
                 }
             }
         }
         self.channels.get_mut(to)
+    }
+
+    /// Leave each computer (`only` that one, if given) that refused to be
+    /// driven since its channel opened: home from it if it is driven, its
+    /// releases on that channel, still open; then the channel goes, and it
+    /// is greeted again after a wait that grows while it keeps refusing.
+    fn take_refusals(&mut self, driver: &mut Driver, only: Option<&str>) {
+        let refusals = link::refusals();
+        let refusing: Vec<(String, u8)> = self
+            .channels
+            .keys()
+            .filter(|id| only.is_none_or(|only| only == id.as_str()))
+            .filter_map(|id| {
+                let (reason, at) = refusals.get(id)?;
+                (*at >= *self.opened.get(id)?).then(|| (id.clone(), *reason))
+            })
+            .collect();
+        for (id, reason) in refusing {
+            let actions = driver.refused(&id, reason);
+            self.apply(driver, actions);
+            self.channels.remove(&id);
+            self.refusals.note(&id, reason);
+            let wait = self.refusals.backoff(&id);
+            self.refused.insert(id, (Instant::now(), wait));
+        }
     }
 
     /// Do what the driver wants.
@@ -1125,6 +1156,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         channels: HashMap::new(),
         opened: HashMap::new(),
         refused: HashMap::new(),
+        refusals: status::RefusalLog::default(),
         name: me.device_name.clone(),
         own,
         park: None,
@@ -1132,7 +1164,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         motion: Motion::default(),
         awake: KeepAwake::default(),
     };
-    let read_layout = |glue: &Glue| {
+    // The owner's arrangement, read again when its file changes.
+    let mut saved = SavedLayout::default();
+    let mut read_layout = |glue: &Glue| {
         let file = state_dir
             .as_deref()
             .map(pocketdesk_core::local::shared_input::read)
@@ -1143,6 +1177,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             glue.own.clone(),
             &file,
             &link::linked(),
+            state_dir.as_deref().and_then(|dir| saved.get(dir)),
         )
     };
     // What is in front is weighed before anything else, so a game already
@@ -1175,6 +1210,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             );
             let actions = driver.shutdown();
             glue.apply(&mut driver, actions);
+            status::set_keyboard_on(None);
             // Dropping the glue restores the cursors; the supervisor starts a
             // fresh driver after a pause.
             return;
@@ -1227,6 +1263,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 .collect();
             glue.apply(&mut driver, actions);
         }
+        // Where the keyboard and mouse are, for the app's page.
+        status::set_keyboard_on(driver.away_on());
         // Away, a desktop switch (a secure prompt hides key-ups) or a link
         // that turned relayed or closed brings it home.
         if let Some(to) = driver.away_on().map(str::to_string)
@@ -1252,6 +1290,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 glue.apply(&mut driver, actions);
                 glue.channels.remove(&to);
             }
+            // It refused while driven: home within a quarter of a second.
+            glue.take_refusals(&mut driver, Some(&to));
         }
         if layout_at.elapsed() >= LAYOUT_EVERY {
             layout_at = Instant::now();
@@ -1277,11 +1317,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // screens; ones refused are tried again a while later.
             if greeted_at.is_none_or(|at| at.elapsed() >= REOPEN_AFTER) {
                 greeted_at = Some(Instant::now());
-                for id in link::linked() {
+                let linked = link::linked();
+                glue.refusals.keep_linked(&linked);
+                for id in linked {
                     let refused = glue
                         .refused
                         .get(&id)
-                        .is_some_and(|at| at.elapsed() < REOPEN_AFTER);
+                        .is_some_and(|(at, wait)| at.elapsed() < *wait);
                     if !refused && driver.away_on() != Some(id.as_str()) {
                         let _ = glue.channel(&id);
                     }
@@ -1291,6 +1333,10 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let layout = read_layout(&glue);
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
+            // A computer that refused since its channel opened is left, and
+            // greeted again a while later: it answers with its screens once
+            // it takes input.
+            glue.take_refusals(&mut driver, None);
             // The computers the cursor may cross onto: an open, direct
             // channel whose computer sent its screens since it opened.
             let open: Vec<OpenChannel> = glue
@@ -1305,12 +1351,18 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 })
                 .collect();
             let reachable = reachable(&open, &link::screens_heard());
+            // One that answers takes input: its next refusal starts the
+            // wait over.
+            for id in &reachable {
+                glue.refusals.clear(id);
+            }
             let actions = driver.set_reachable(reachable.into_iter().collect());
             glue.apply(&mut driver, actions);
         }
     }
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
+    status::set_keyboard_on(None);
     tracing::info!("Shared input: this computer's keyboard and mouse stay here");
     // Dropping the glue stops the input thread, restores the cursors and
     // lets the computer idle.

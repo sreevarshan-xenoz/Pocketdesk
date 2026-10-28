@@ -12,8 +12,11 @@
 //! The computer driving decides where its keyboard and mouse are
 //! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
 //! and, on Windows, captures them (`capture_windows`), staying put while a
-//! game is in front ([`game_lock`]).
+//! game is in front ([`game_lock`]). A computer that will not be driven
+//! says so ([`wire::Msg::Refuse`]); how things stand is written for the
+//! desktop app ([`status`]), and its requests are taken ([`asks`]).
 
+pub mod asks;
 pub mod awake;
 #[cfg(windows)]
 pub mod capture_windows;
@@ -26,4 +29,5 @@ pub mod link;
 pub mod receive;
 pub mod screens;
 pub mod share_test;
+pub mod status;
 pub mod wire;

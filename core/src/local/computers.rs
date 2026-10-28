@@ -43,6 +43,14 @@ pub struct PeerComputer {
     pub link: String,
     #[serde(default)]
     pub link_unix: u64,
+    /// Whether this computer lets it drive this one's keyboard and mouse
+    /// (shared input). A computer that paired with this one has the
+    /// Keyboard and mouse permission in the trust store instead; one this
+    /// computer paired with has no entry there (an entry would let it
+    /// connect as a paired device), so the grant is kept here. Off when
+    /// paired, again too.
+    #[serde(default)]
+    pub lets_drive: bool,
 }
 
 /// How the last pairing went, for the app to show.
@@ -111,6 +119,9 @@ pub enum ComputerAsk {
     Pair { link: String },
     /// Forget a paired computer.
     Forget { device_id: String },
+    /// Let a computer this one paired with drive this one's keyboard and
+    /// mouse, or not ([`PeerComputer::lets_drive`]).
+    LetDrive { device_id: String, allow: bool },
 }
 
 /// One request, as a file in `computers_out/`.
@@ -261,7 +272,25 @@ mod tests {
             paired_unix: 100,
             link: String::new(),
             link_unix: 0,
+            lets_drive: false,
         }
+    }
+
+    #[test]
+    fn letting_a_computer_drive_is_asked_and_kept() {
+        let dir = temp_dir("let-drive");
+        let ask = ComputerAsk::LetDrive {
+            device_id: "desk-b".to_string(),
+            allow: true,
+        };
+        let asked = request(&dir, ask.clone(), 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        // A file from before the switch reads as not letting it.
+        let raw = serde_json::to_string(&computer("desk-b")).unwrap();
+        let raw = raw.replace(",\"lets_drive\":false", "");
+        let old: PeerComputer = serde_json::from_str(&raw).unwrap();
+        assert!(!old.lets_drive);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

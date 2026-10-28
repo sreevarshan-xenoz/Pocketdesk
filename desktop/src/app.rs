@@ -266,6 +266,7 @@ pub enum Tab {
     Activity,
     Pair,
     Devices,
+    KeyboardMouse,
     Sessions,
     Files,
     Messages,
@@ -364,6 +365,8 @@ pub struct PocketdeskApp {
     notes: crate::notes_view::NotesView,
     /// Settings → Other computers (2f).
     computers: crate::computers_view::ComputersView,
+    /// The Keyboard and mouse page (shared input).
+    arrange: crate::arrange_view::ArrangeView,
     /// Settings → KDE Connect devices (3a).
     kdeconnect: crate::kdeconnect_view::KdeConnectView,
     /// The Phone tab (T10g).
@@ -441,6 +444,7 @@ impl PocketdeskApp {
             clipboard: Default::default(),
             notes: Default::default(),
             computers: Default::default(),
+            arrange: Default::default(),
             kdeconnect: Default::default(),
             phone_files: Default::default(),
             photos: Default::default(),
@@ -1101,6 +1105,7 @@ impl PocketdeskApp {
                 now_unix(),
             ),
             Tab::Devices => self.devices_tab(ui),
+            Tab::KeyboardMouse => self.keyboard_mouse_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
             Tab::Files => self.files_tab(ui),
             Tab::Messages => {
@@ -2306,6 +2311,54 @@ impl PocketdeskApp {
             self.confirm_revoke = None;
             self.revoke(&id);
         }
+    }
+
+    /// The Keyboard and mouse page: its switches go where Settings' and
+    /// Devices' do.
+    fn keyboard_mouse_tab(&mut self, ui: &mut egui::Ui) {
+        let sharing_on = self.config.as_ref().is_some_and(|c| c.shared_input);
+        let action = self.arrange.show(
+            ui,
+            &self.state_dir,
+            &self.snapshot.devices,
+            sharing_on,
+            self.snapshot.running,
+            now_unix(),
+        );
+        match action {
+            Some(crate::arrange_view::Action::Sharing(on)) => self.set_sharing(on),
+            Some(crate::arrange_view::Action::Allow { device_id, allow }) => {
+                self.set_permission(&device_id, Capability::SharedInput, allow)
+            }
+            None => {}
+        }
+    }
+
+    /// Turn the shared keyboard and mouse on or off (`shared_input`),
+    /// written as Settings writes it: that key alone, the rest of the file
+    /// as it is. The server reads it within a second.
+    fn set_sharing(&mut self, on: bool) {
+        let saved = Config::path().map_err(|e| e.to_string()).and_then(|path| {
+            let mut config = Config::load_from(&path).map_err(|e| e.to_string())?;
+            config.shared_input = on;
+            config
+                .save_keys_to(&path, &["shared_input"])
+                .map_err(|e| e.to_string())
+        });
+        match saved {
+            Ok(()) => {
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_shared_input(on);
+                }
+                self.notice = crate::notice::Notice::done(if on {
+                    "Sharing the keyboard and mouse with your computers."
+                } else {
+                    "The keyboard and mouse stay on each computer."
+                });
+            }
+            Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
+        }
+        self.refresh();
     }
 
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
@@ -3811,6 +3864,7 @@ impl eframe::App for PocketdeskApp {
             self.photos.take_notice(),
             self.kdeconnect.take_notice(),
             self.computers.take_notice(),
+            self.arrange.take_notice(),
             self.messages.take_notice(),
             self.logs.take_notice(),
         ];

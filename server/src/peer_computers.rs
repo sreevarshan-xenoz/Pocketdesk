@@ -97,6 +97,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     }
                     forget(&dir, &cert_manager, &device_id);
                 }
+                ComputerAsk::LetDrive { device_id, allow } => {
+                    let_drive(&dir, &device_id, allow);
+                }
             }
         }
         if let Some(wan) = &wan {
@@ -341,6 +344,7 @@ async fn pair_with(
         paired_unix: now,
         link: "connecting".to_string(),
         link_unix: now,
+        lets_drive: false,
     };
     let mut was = None;
     computers::update(dir, |file| {
@@ -501,6 +505,29 @@ pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
         }
     }
     listed
+}
+
+/// Let the computer `device_id`, one this one paired with, drive this one's
+/// keyboard and mouse (`allow`), or not. Shared input reads it each second.
+fn let_drive(dir: &Path, device_id: &str, allow: bool) {
+    let mut found = false;
+    let saved = computers::update(dir, |file| {
+        if let Some(computer) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+            computer.lets_drive = allow;
+            found = true;
+        }
+    });
+    match saved {
+        Ok(()) if found => tracing::info!(
+            device_id,
+            allow,
+            "Shared input: whether another computer may drive this one"
+        ),
+        Ok(()) => tracing::debug!(device_id, "Shared input: no such computer to let drive"),
+        Err(e) => {
+            tracing::warn!("Could not change whether {device_id} may drive this computer: {e}")
+        }
+    }
 }
 
 /// Forget a computer: its entry and the pins for its addresses. It keeps
@@ -1155,6 +1182,7 @@ mod tests {
                 paired_unix: 1,
                 link: "refused".to_string(),
                 link_unix: 1,
+                lets_drive: false,
             })
         })
         .unwrap();
@@ -1211,6 +1239,7 @@ mod tests {
             paired_unix: 1,
             link: String::new(),
             link_unix: 1,
+            lets_drive: false,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
