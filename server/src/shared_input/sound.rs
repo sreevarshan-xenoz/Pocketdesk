@@ -250,12 +250,19 @@ pub fn heard(device_id: &str, seq: u32, opus: &[u8]) {
 }
 
 /// `device_id` said it cannot give its sound (`why`): kept for the driving
-/// side to say, while it listens to that computer.
+/// side to say, while it listens to that computer, cut to [`REASON_CHARS`]
+/// on one line.
 pub fn said_unavailable(device_id: &str, why: &str) {
     if lock(&LISTENING).contains_key(device_id) {
-        lock(&UNAVAILABLE).insert(device_id.to_string(), why.to_string());
+        let why = super::badge::clip(why, REASON_CHARS);
+        lock(&UNAVAILABLE).insert(device_id.to_string(), why);
     }
 }
+
+/// The longest reason kept and flashed, in characters (review M3): a
+/// reason is a capture's error, a line long; one from a computer that sent
+/// more is cut short.
+pub const REASON_CHARS: usize = 160;
 
 /// What `device_id` said it cannot give, once.
 pub fn take_unavailable(device_id: &str) -> Option<String> {
@@ -1009,6 +1016,25 @@ mod tests {
         assert!(!lock(&LISTENING).contains_key("test-snd-l"));
         heard("test-snd-l", 1, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review M3: a computer's reason is kept short, cut at a character,
+    /// before it is kept or flashed.
+    #[test]
+    fn a_long_reason_is_cut_short_at_a_character() {
+        let dir = std::env::temp_dir().join(format!("pd-bk6-why-{}", std::process::id()));
+        let listening = Listening::start_with("test-snd-why", Some(dir.join("w.wav")));
+        let accented = char::from_u32(0xe9).unwrap();
+        said_unavailable("test-snd-why", &accented.to_string().repeat(40_000));
+        let why = take_unavailable("test-snd-why").expect("kept");
+        assert!(why.chars().count() <= REASON_CHARS, "{}", why.len());
+        assert!(why.starts_with(accented));
+        said_unavailable("test-snd-why", "no PipeWire");
+        assert_eq!(
+            take_unavailable("test-snd-why").as_deref(),
+            Some("no PipeWire")
+        );
+        drop(listening);
     }
 
     /// Review M2: no sound packet goes while the link is not direct (it
