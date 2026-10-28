@@ -343,6 +343,22 @@ pub enum Commands {
         #[arg(long, default_value_t = 50)]
         tolerance_pct: u64,
     },
+    /// Send a paired computer a script of shared input (keys and moves) on
+    /// the link and print the pings' round trips; a server started with
+    /// POCKETDESK_SHARE_TEST=<file> records what arrives there instead of
+    /// using it. Exit codes: 0 sent, 1 failed, 3 no server running, 4 no
+    /// answer from it in time
+    #[command(hide = true)]
+    ShareTest {
+        /// The computer: its id, or its name
+        computer: String,
+        /// Key events to send (each key pressed, then let go)
+        #[arg(long, default_value_t = 100)]
+        keys: u32,
+        /// Pointer moves to send
+        #[arg(long, default_value_t = 100)]
+        moves: u32,
+    },
     /// List peers currently visible on the tailnet
     List {
         /// Print the local API's JSON (see docs/local-api.md)

@@ -11,56 +11,17 @@
 //! Ignored: it starts two real servers, which reach iroh's relays. Run it
 //! with `cargo test -p pocketdesk-server --test two_computers -- --ignored`.
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+mod common;
 
+use std::path::Path;
+use std::time::Duration;
+
+use common::{Cleanup, clipboard, downloads, folders, pair, pairing_link, pocketdesk, wait_for};
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile};
-use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::sent::{self, SentState};
 use pocketdesk_core::local::{device_keys, identity, outbox, pin};
 use pocketdesk_core::protocol::kdeconnect::TrustStore;
 use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
-
-const EXE: &str = env!("CARGO_BIN_EXE_pocketdesk");
-
-fn folders(name: &str, control: u16, streaming: u16) -> (PathBuf, PathBuf) {
-    let base = std::env::temp_dir().join(format!("pd-computers-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
-    let (config, state) = (base.join("config"), base.join("state"));
-    std::fs::create_dir_all(&config).unwrap();
-    std::fs::create_dir_all(&state).unwrap();
-    std::fs::write(
-        config.join("config.toml"),
-        format!(
-            "control_port = {control}\nstreaming_port = {streaming}\nlan_discovery = false\ndht_publish = \"off\"\ncomputer_clipboard = true\n"
-        ),
-    )
-    .unwrap();
-    (config, state)
-}
-
-fn pocketdesk(config: &Path, state: &Path) -> Command {
-    let mut command = Command::new(EXE);
-    command
-        .env("POCKETDESK_CONFIG_DIR", config)
-        .env("POCKETDESK_STATE_DIR", state)
-        .env("POCKETDESK_CLIPBOARD_FILE", clipboard(state))
-        .env("POCKETDESK_DOWNLOAD_DIR", downloads(state))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    command
-}
-
-/// The file that stands in for a server's clipboard.
-fn clipboard(state: &Path) -> PathBuf {
-    state.parent().unwrap().join("clipboard.txt")
-}
-
-/// The folder that stands in for a server's Downloads.
-fn downloads(state: &Path) -> PathBuf {
-    state.parent().unwrap().join("downloads")
-}
 
 /// Ask `from`'s server to send `file` to `to` as its desktop app asks, and
 /// wait for it to arrive whole in `to_state`'s Downloads.
@@ -96,73 +57,6 @@ fn clipboard_holds(state: &Path, text: &str, what: &str) {
     });
 }
 
-/// Stops the servers and removes their folders however the test ends.
-struct Cleanup {
-    servers: Vec<std::process::Child>,
-    folders: Vec<PathBuf>,
-}
-
-impl Drop for Cleanup {
-    fn drop(&mut self) {
-        for server in &mut self.servers {
-            let _ = server.kill();
-            let _ = server.wait();
-        }
-        for folder in &self.folders {
-            let _ = std::fs::remove_dir_all(folder);
-        }
-    }
-}
-
-/// Wait up to `secs` for `ready`, saying `what` if it never is.
-fn wait_for<T>(secs: u64, what: &str, mut ready: impl FnMut() -> Option<T>) -> T {
-    let start = Instant::now();
-    loop {
-        if let Some(value) = ready() {
-            return value;
-        }
-        assert!(
-            start.elapsed() < Duration::from_secs(secs),
-            "{what} within {secs} s"
-        );
-        std::thread::sleep(Duration::from_millis(250));
-    }
-}
-
-/// B's pairing link, as its Pair tab would show it, for `pin`.
-fn pairing_link(state: &Path, control: u16, streaming: u16, pin: &str) -> PairLink {
-    PairLink {
-        name: "Computer B".to_string(),
-        device_id: identity::device_id(state).unwrap(),
-        addresses: vec!["127.0.0.1".to_string()],
-        control_port: control,
-        stream_port: streaming,
-        pin: pin.to_string(),
-        fingerprint: Some(identity::fingerprint_hex(
-            identity::cert_fingerprint(state).unwrap(),
-        )),
-        endpoint: identity::read_endpoint(state).map(|e| e.to_string()),
-    }
-}
-
-/// Ask A to pair with `link` and wait for that request's outcome.
-fn pair(a_state: &Path, link: &PairLink) -> String {
-    let asked = computers::request(
-        a_state,
-        ComputerAsk::Pair {
-            link: link.to_uri(),
-        },
-        pin::now_unix(),
-    )
-    .unwrap();
-    wait_for(60, "a pairing outcome", || {
-        computers::read(a_state)
-            .last_pairing
-            .filter(|p| p.request == asked.id)
-            .map(|p| p.outcome)
-    })
-}
-
 #[test]
 #[ignore = "starts two real servers, which reach iroh's relays"]
 fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
@@ -173,8 +67,8 @@ fn two_computers_pair_once_and_keep_a_link_over_the_internet_road() {
             "something already listens on {port}"
         );
     }
-    let (a_config, a_state) = folders("a", a_control, a_control + 1);
-    let (b_config, b_state) = folders("b", b_control, b_control + 1);
+    let (a_config, a_state) = folders("computers", "a", a_control, a_control + 1);
+    let (b_config, b_state) = folders("computers", "b", b_control, b_control + 1);
     let mut run = Cleanup {
         servers: Vec::new(),
         folders: vec![

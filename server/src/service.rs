@@ -537,6 +537,13 @@ pub async fn run(config: Config) -> Result<()> {
         Arc::clone(&cert_manager),
         wan_endpoint.clone(),
     ));
+    // Shared input between the owner's computers rides those links: the
+    // hidden `share-test`'s requests, and, with POCKETDESK_SHARE_TEST set
+    // to a file, what other computers send recorded there instead of used.
+    tokio::spawn(crate::shared_input::share_test::run_requests());
+    if let Some(file) = std::env::var_os(crate::shared_input::share_test::RECORD_ENV) {
+        tokio::spawn(crate::shared_input::share_test::record(file.into()));
+    }
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and
         // the phone only ever dials its cached EndpointAddr — periodic
@@ -1302,6 +1309,7 @@ async fn handle_connection_with_kde(
                 local: local_ip,
             },
             None,
+            None,
             peer_key,
             identity_packet,
             registry,
@@ -1381,6 +1389,7 @@ pub(crate) async fn handle_internet_control(
             tokio::io::join(recv, send),
             Road::Internet,
             Some(link),
+            Some(conn.clone()),
             peer_key,
             identity_packet,
             registry,
@@ -1401,12 +1410,15 @@ pub(crate) async fn handle_internet_control(
 }
 
 /// The control channel past its transport: the handshake, the phone's
-/// identity held to the key its road proved, and the packet loop.
+/// identity held to the key its road proved, and the packet loop. `conn` is
+/// the iroh connection an internet-road stream rides: one of the owner's
+/// computers admitted on it sends shared input there too.
 #[allow(clippy::too_many_arguments)]
 async fn serve_control<S>(
     stream: S,
     road: Road,
     link: Option<Arc<dyn pocketdesk_core::protocol::kdeconnect::OpenLinkStream>>,
+    conn: Option<iroh::endpoint::Connection>,
     peer_key: Option<pocketdesk_core::streaming::PeerKey>,
     identity_packet: Option<NetworkPacket>,
     registry: &Arc<PluginRegistry>,
@@ -1512,6 +1524,9 @@ where
             .get("deviceName")
             .and_then(|v| v.as_str())
             .map(str::to_string);
+        // Shared input's channel on this connection, held while it is
+        // served, for one of the owner's computers (below).
+        let mut _shared_input = None;
         let peer = match road {
             Road::Local { peer: None, .. } => return Ok(()),
             Road::Local {
@@ -1550,6 +1565,14 @@ where
                     let _ = w.flush().await;
                     let _ = w.shutdown().await;
                     return Ok(());
+                }
+                // One of the owner's computers sends shared input on this
+                // connection too (datagrams and a uni stream): read from
+                // now, before it hears it is in.
+                if crate::plugins::pair::is_computer_device(&device_id)
+                    && let Some(conn) = conn
+                {
+                    _shared_input = Some(crate::shared_input::link::hold(&device_id, conn));
                 }
                 // Admitted: the desktop's identity is the phone's answer.
                 if let Some(identity) = &identity_packet {

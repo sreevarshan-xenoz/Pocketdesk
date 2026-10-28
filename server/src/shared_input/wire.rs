@@ -10,6 +10,7 @@
 
 use std::io;
 
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// The wire's version, the first thing a [`Msg::Hello`] says. A `Hello`'s own
@@ -44,7 +45,7 @@ const TAG_PONG: u8 = 12;
 
 /// A monitor, in its computer's own desktop space and logical pixels (what a
 /// 125% display shows, not what it has).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Screen {
     pub x: i32,
     pub y: i32,
@@ -52,8 +53,9 @@ pub struct Screen {
     pub height: u32,
 }
 
-/// One message between two computers sharing input.
-#[derive(Debug, Clone, PartialEq)]
+/// One message between two computers sharing input. Its serde form is for
+/// records such as `share-test`'s, never the wire, which is [`encode`]'s.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Msg {
     /// The first message each way: the wire's version, who is speaking and
     /// what screens it has.
