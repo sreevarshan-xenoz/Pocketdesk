@@ -460,11 +460,16 @@ impl Pong {
 }
 
 /// Whether `msg` goes as a datagram: the newest of each matters, and a lost
-/// one is not worth the wait for its resend.
+/// one is not worth the wait for its resend (a sound packet late is
+/// dropped where it plays).
 fn rides_datagram(msg: &Msg) -> bool {
     matches!(
         msg,
-        Msg::Move { .. } | Msg::Active { .. } | Msg::Ping { .. } | Msg::Pong { .. }
+        Msg::Move { .. }
+            | Msg::Active { .. }
+            | Msg::Ping { .. }
+            | Msg::Pong { .. }
+            | Msg::Sound { .. }
     )
 }
 
@@ -959,5 +964,14 @@ mod tests {
         assert!(!rides_datagram(&Msg::Enter { x: 0, y: 0 }));
         assert!(!rides_datagram(&Msg::Leave));
         assert!(!rides_datagram(&Msg::ReleaseAll));
+        // BK6: sound is a datagram, the ask and its answer go in order.
+        assert!(rides_datagram(&Msg::Sound {
+            seq: 1,
+            opus: vec![1]
+        }));
+        assert!(!rides_datagram(&Msg::SoundWanted { on: true }));
+        assert!(!rides_datagram(&Msg::SoundUnavailable {
+            why: String::new()
+        }));
     }
 }
