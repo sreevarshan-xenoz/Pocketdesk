@@ -11,12 +11,14 @@
 //! screens it has ([`screens`]) and stays awake meanwhile ([`awake`]).
 //! The computer driving decides where its keyboard and mouse are
 //! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
-//! and, on Windows, captures them (`capture_windows`).
+//! and, on Windows, captures them (`capture_windows`), staying put while a
+//! game is in front ([`game_lock`]).
 
 pub mod awake;
 #[cfg(windows)]
 pub mod capture_windows;
 pub mod drive;
+pub mod game_lock;
 pub mod held;
 pub mod keys_windows;
 pub mod layout;
