@@ -165,6 +165,19 @@ object PointerPlan {
         }
     }
 
+    /** What the runner does before a take: whether it refuses, and what it lets go of then. */
+    data class Turn(val refuse: Boolean, val acts: List<Act>)
+
+    /**
+     * Before each take: with the switch off or the service gone ([on],
+     * [service]) the phone refuses, and lets go of the visit at once, a
+     * finger down lifted (the re-review's N2: the refusal empties the
+     * queue, so no batch would come to lift it before the second's
+     * silence).
+     */
+    fun beforeTake(pointer: Pointer, on: Boolean, service: Boolean): Turn =
+        if (on && service) Turn(false, emptyList()) else Turn(true, pointer.release())
+
     /** How often the phone says itself again while its switch is on. */
     const val REPORT_EVERY_MS = 15_000L
 

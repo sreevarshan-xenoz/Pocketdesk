@@ -155,6 +155,27 @@ class PointerPlanTest {
         assertFalse("off: said once", due("a", "a", false, false, false, PointerPlan.REPORT_EVERY_MS))
     }
 
+    /** The re-review's N2: the switch turned off mid-press lifts the finger at once. */
+    @Test
+    fun `a switch turned off mid-press lifts the finger before the next take`() {
+        val p = PointerPlan.Pointer()
+        p.take(enter(), 0)
+        p.take(button("left", "down"), 1)
+        assertEquals(PointerPlan.Turn(false, emptyList()), PointerPlan.beforeTake(p, on = true, service = true))
+        assertTrue(p.fingerDown)
+        assertEquals(
+            PointerPlan.Turn(true, listOf(Act.Touch("up", 100, 200), Act.Hide)),
+            PointerPlan.beforeTake(p, on = false, service = true),
+        )
+        assertFalse(p.on)
+        // Still off: refused, nothing more to let go of.
+        assertEquals(PointerPlan.Turn(true, emptyList()), PointerPlan.beforeTake(p, on = false, service = true))
+        // The service gone refuses too.
+        p.take(button("left", "down"), 2)
+        assertEquals(true, PointerPlan.beforeTake(p, on = true, service = false).refuse)
+        assertFalse(p.fingerDown)
+    }
+
     @Test
     fun `delete takes the character after the cursor, or the selection`() {
         assertEquals(ControlPlan.Edited("ac", 1), PointerPlan.deleteForward("abc", 1, 1))

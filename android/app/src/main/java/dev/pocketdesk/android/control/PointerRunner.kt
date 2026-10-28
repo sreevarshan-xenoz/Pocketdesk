@@ -86,8 +86,13 @@ object PointerRunner {
             while (generation == mine) {
                 val on = Prefs.keyboardMouseFromComputer(ctx)
                 // Refused before anything comes, so no ping is answered for
-                // a phone that does nothing (the review's M2).
-                if (!on || ControlService.instance == null) RustCore.sharedInputRefuse()
+                // a phone that does nothing (the review's M2), and let go of
+                // at once (N2); a service gone lifts its own finger.
+                val turn = PointerPlan.beforeTake(pointer, on, ControlService.instance != null)
+                if (turn.refuse) {
+                    RustCore.sharedInputRefuse()
+                    ControlService.instance?.let { perform(it, turn.acts) }
+                }
                 val busy = ControlService.instance?.waiting() == true
                 val batch = runCatching { RustCore.sharedInputTake(if (busy) BUSY_WAIT_MS else WAIT_MS) }.getOrNull()
                 if (generation != mine) break
