@@ -22,12 +22,11 @@ pub const VERSION: u8 = 1;
 /// read as these.
 pub const STREAM_MAGIC: [u8; 4] = *b"PDSI";
 
-/// The longest name a message carries, in bytes; a longer one is cut short
-/// (at a character) when encoded.
-pub const MAX_NAME_BYTES: usize = 255;
-
-/// The most screens a message lists; the rest are left off when encoded.
-pub const MAX_SCREENS: usize = 64;
+/// A monitor ([`Screen`]); the longest name a message carries, in bytes (a
+/// longer one is cut short at a character when encoded); and the most
+/// screens a message lists (the rest are left off when encoded). They are
+/// core's, which keeps what each computer said in `shared_screens.json`.
+pub use pocketdesk_core::local::shared_input::{MAX_NAME_BYTES, MAX_SCREENS, Screen};
 
 const TAG_HELLO: u8 = 0;
 const TAG_SCREENS: u8 = 1;
@@ -42,16 +41,6 @@ const TAG_ACTIVE: u8 = 9;
 const TAG_IDENTIFY: u8 = 10;
 const TAG_PING: u8 = 11;
 const TAG_PONG: u8 = 12;
-
-/// A monitor, in its computer's own desktop space and logical pixels (what a
-/// 125% display shows, not what it has).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Screen {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-}
 
 /// One message between two computers sharing input. Its serde form is for
 /// records such as `share-test`'s, never the wire, which is [`encode`]'s.

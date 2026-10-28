@@ -64,7 +64,7 @@ pub(super) fn monitor_rect(index: u32) -> Option<(i32, i32, u32, u32)> {
 /// The bounding box of every monitor: the whole desktop layout, which is
 /// the space Windows' absolute `SendInput` (`MOUSEEVENTF_VIRTUALDESK`)
 /// normalizes over.
-pub(super) fn layout_rect() -> Option<(i32, i32, u32, u32)> {
+pub fn layout_rect() -> Option<(i32, i32, u32, u32)> {
     let monitors = xcap::Monitor::all().ok()?;
     let rects: Vec<(i32, i32, i32, i32)> = monitors
         .iter()

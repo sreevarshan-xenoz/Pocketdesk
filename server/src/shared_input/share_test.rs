@@ -2,7 +2,9 @@
 //! shared input over the link, and print how long its pings took to come
 //! back; and its other end, a server started with `POCKETDESK_SHARE_TEST`
 //! set to a file, which records each message that arrives there, with when
-//! it arrived, instead of using it. Nothing is injected on either side.
+//! it arrived, instead of using it (the receiver, [`super::receive`], does
+//! not start then). The command injects nothing itself; a receiving server
+//! that lets the sending computer drive it types and moves what it sends.
 //!
 //! The command asks the running server, which holds the link: a request in
 //! `share_test_out/`, its outcome in `share_test_in/`, one file each under
@@ -48,6 +50,10 @@ const GAP: Duration = Duration::from_millis(1);
 /// A ping goes with every this many events.
 const PING_EVERY: usize = 20;
 
+/// How often an activity note goes while the script runs, as a driving
+/// computer sends one: the receiver lets go of a driver silent for a second.
+const ACTIVE_EVERY: Duration = Duration::from_millis(200);
+
 /// How long the last pings' answers are waited for.
 const PONG_WAIT: Duration = Duration::from_secs(2);
 
@@ -78,9 +84,11 @@ struct Outcome {
     round_trips_us: Vec<u64>,
 }
 
-/// What `share-test` sends after its `Hello` (pings aside): the cursor
+/// What `share-test` sends after its `Hello` (pings and activity notes,
+/// every 200 ms, aside): the cursor
 /// coming onto the other computer, `keys` key events (each key pressed, then
-/// let go) and `moves` pointer moves taken in turn, and the cursor leaving.
+/// let go) and `moves` pointer moves taken in turn, everything let go of
+/// (an odd `keys` ends on a press), and the cursor leaving.
 pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
     let mut out = vec![Msg::Enter { x: 32768, y: 32768 }];
     for i in 0..keys.max(moves) {
@@ -100,6 +108,7 @@ pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
             });
         }
     }
+    out.push(Msg::ReleaseAll);
     out.push(Msg::Leave);
     out
 }
@@ -324,11 +333,18 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         channel.send(&hello)?;
         outcome.sent += 1;
         let started = tokio::time::Instant::now();
+        let mut active_due = started;
         for (i, msg) in script(request.keys, request.moves).iter().enumerate() {
             let due = started + GAP * u32::try_from(i).unwrap_or(u32::MAX);
             tokio::time::sleep_until(due).await;
             if i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
+            }
+            let now = tokio::time::Instant::now();
+            if now >= active_due {
+                channel.send(&Msg::Active { idle_ms: 0 })?;
+                outcome.sent += 1;
+                active_due = now + ACTIVE_EVERY;
             }
             channel.send(msg)?;
             outcome.sent += 1;
@@ -472,7 +488,9 @@ mod tests {
     fn the_script_enters_types_moves_and_leaves() {
         let script = script(5, 3);
         assert_eq!(script.first(), Some(&Msg::Enter { x: 32768, y: 32768 }));
-        assert_eq!(script.last(), Some(&Msg::Leave));
+        // The last key is left down (an odd count): everything is let go
+        // of before the cursor leaves.
+        assert_eq!(script[script.len() - 2..], [Msg::ReleaseAll, Msg::Leave]);
         let keys: Vec<(u16, bool)> = script
             .iter()
             .filter_map(|m| match m {

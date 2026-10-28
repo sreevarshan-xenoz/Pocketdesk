@@ -61,6 +61,8 @@ fn monitor_info(monitor: HMONITOR) -> Option<HyprMonitor> {
         y: r.top,
         width: r.right - r.left,
         height: r.bottom - r.top,
+        scale: 1.0,
+        transform: 0,
     })
 }
 
