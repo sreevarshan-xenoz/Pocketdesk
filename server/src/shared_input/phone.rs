@@ -52,9 +52,14 @@ pub fn heard(device_id: &str, report: ScreenReport) {
 
 /// What the phone `device_id` last said of itself, if it is current.
 pub fn report(device_id: &str) -> Option<ScreenReport> {
+    report_at(device_id, Instant::now())
+}
+
+/// [`report`] as it stands at `now`.
+pub fn report_at(device_id: &str, now: Instant) -> Option<ScreenReport> {
     lock(&REPORTS)
         .get(device_id)
-        .filter(|(_, at)| at.elapsed() < REPORT_FRESH)
+        .filter(|(_, at)| now.saturating_duration_since(*at) < REPORT_FRESH)
         .map(|(report, _)| *report)
 }
 
@@ -538,6 +543,9 @@ mod tests {
         heard("phone-report", report(true, true));
         assert_eq!(super::report("phone-report"), Some(report(true, true)));
         assert_eq!(super::report("phone-never"), None);
+        // Not said again within its time: none (the review's M10).
+        let later = Instant::now() + REPORT_FRESH;
+        assert_eq!(report_at("phone-report", later), None);
         assert_eq!(pongs("phone-pong"), None);
         ponged("phone-pong");
         ponged("phone-pong");
