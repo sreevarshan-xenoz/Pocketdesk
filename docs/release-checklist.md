@@ -45,5 +45,5 @@ These need the published release (its SHA256SUMS, its URLs), so they come after 
 
 - [ ] `python3 scripts/winget_manifest.py <version> SHA256SUMS` (the release's; `python` or `py` on Windows), `winget validate --manifest` on the folder it wrote, and commit it. Sending it to winget-pkgs is the owner's call.
 - [ ] `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`: what changed, in a few lines (F-Droid shows it). Before the tag, since F-Droid reads the tag.
-- [ ] `packaging/fdroid/dev.pocketdesk.android.yml`: a new `Builds` entry (`versionName`, `versionCode`, `commit: vX.Y.Z`), and `CurrentVersion`/`CurrentVersionCode`. Once it is in fdroiddata, its update check does this.
+- [ ] `packaging/fdroid/dev.pocketdesk.android.yml`: a new `Builds` entry (`versionName`, `versionCode`, `commit:` the tag's full commit hash, which fdroiddata requires instead of the tag name), and `CurrentVersion`/`CurrentVersionCode`. Once it is in fdroiddata, its update check does this.
 - [ ] The release has exactly one APK, named `pocketdesk-vX.Y.Z-android-arm64.apk` (Obtainium picks it without a filter), signed with the same key (the certificate in packaging/README.md).
