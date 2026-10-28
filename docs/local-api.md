@@ -86,7 +86,7 @@ A sent row's `state` is `offered` (not taken yet), `sent` (saved there: on the p
 - `list`: the tailnet's peers, `{"api": 1, "peers": [{"name", "dns_name", "online", "ips"}]}`.
 - `relay-ids`: the ids a relay elsewhere should allow, `{"api": 1, "ids": [{"who", "id"}]}`.
 
-`pocketdesk bench --json` prints the encoder benchmark's record, a contract of its own for CI (exit codes in `pocketdesk bench --help` and README).
+`pocketdesk bench --json` prints the encoder benchmark's record, a contract of its own for CI (exit codes in `pocketdesk bench --help`).
 
 ### `pocketdesk events [--since-start] --json`
 

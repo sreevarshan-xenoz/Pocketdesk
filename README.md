@@ -43,7 +43,7 @@ A **pure Rust** server for Linux (Wayland-native, Hyprland first) and Windows 10
 
 **2. Install the app on your phone** (Android 8 or newer): `pocketdesk-…-android-arm64.apk` from the same release, or add `https://github.com/sreevarshan-xenoz/Pocketdesk` to [Obtainium](https://github.com/ImranR98/Obtainium) to keep it updated.
 
-**3. Pair them.** Open Pocketdesk on the computer and go to its **Pair** page. On the phone, tap **Scan pairing code** and point it at the QR code. Do this once with both on the same network (or tailnet); after that the phone reaches the computer from anywhere.
+**3. Pair them.** Open Pocketdesk on the computer and go to its **Pair** page. On the phone, tap **Scan pairing code** and point it at the QR code. Do this once with both on the same network (or tailnet); after that the phone reaches the computer from anywhere. If the app says the server is not running, press **Start server** on its Overview page.
 
 Something not working? The desktop app's **Diagnostics** page checks the server, its ports, the firewall and the internet path, and copies a report you can paste into an issue.
 
@@ -54,12 +54,12 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 | From outside without a port forward or VPN | ✅ (after one session at home) | ✅ | ⚠️ UPnP or a forward | ❌ |
 | Wayland-native | ✅ | ⚠️ Partial | ⚠️ Partial | ✅ |
 | Hyprland optimized | ✅ | ❌ | ⚠️ Limited | ⚠️ Limited |
-| Works with KDE Connect devices | ⚠️ Pairs, clipboard, battery, ring, notifications, files from them (not yet to them) | ❌ | ❌ | ✅ |
+| Works with KDE Connect devices | ⚠️ Pairs, ping, clipboard, battery, ring, notifications, files both ways | ❌ | ❌ | ✅ |
 | Screen streaming | ✅ | ✅ | ✅ | ❌ |
 | Rust server, Kotlin phone app | ✅ | ✅ (Rust) | ❌ (C++) | ❌ (C++) |
 | Open Source | ✅ | ✅ | ✅ | ✅ |
 
-**Status: beta.** Device-checked on Hyprland and Sway, on Windows 11, and on two Android phones; GNOME and KDE Plasma are supported but not yet checked on real hardware. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
+**Status: beta.** Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. GNOME and KDE Plasma are supported but not yet checked. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
 ## Learn more
 
