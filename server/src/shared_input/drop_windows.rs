@@ -68,6 +68,13 @@ const MOST_PATH: usize = 32_767;
 /// ([`drag_files::esc_cancels_drag`]).
 static FILES_OVER: AtomicBool = AtomicBool::new(false);
 
+/// Files dropped on the catcher: the first [`drag_files::MOST_ITEMS`]
+/// paths, and how many the drop held.
+pub struct Caught {
+    pub items: Vec<PathBuf>,
+    pub total: usize,
+}
+
 /// Whether a drag of files is over the catcher now.
 pub fn files_over() -> bool {
     FILES_OVER.load(Ordering::SeqCst)
@@ -85,7 +92,7 @@ pub struct DropCatcher {
 impl DropCatcher {
     /// Start the catcher's thread, its window down; the files dropped on it
     /// go to `dropped`. `None` when it could not start.
-    pub fn start(dropped: Sender<(Vec<PathBuf>, usize)>) -> Option<DropCatcher> {
+    pub fn start(dropped: Sender<Caught>) -> Option<DropCatcher> {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<isize, String>>();
         let (answer_tx, answers) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -188,11 +195,7 @@ impl Drop for DropCatcher {
 }
 
 /// The catcher's thread: OLE, its window and drop target, and its loop.
-fn run(
-    dropped: Sender<(Vec<PathBuf>, usize)>,
-    ready: Sender<Result<isize, String>>,
-    answers: Sender<usize>,
-) {
+fn run(dropped: Sender<Caught>, ready: Sender<Result<isize, String>>, answers: Sender<usize>) {
     // SAFETY: plain Win32 and OLE calls on this thread's own state; each
     // made here is undone below.
     unsafe {
@@ -409,7 +412,7 @@ fn files_of(data: &IDataObject) -> (Vec<PathBuf>, usize) {
 /// not at all.
 #[implement(IDropTarget)]
 struct DropTarget {
-    dropped: Sender<(Vec<PathBuf>, usize)>,
+    dropped: Sender<Caught>,
     /// The drag over it now holds files.
     has_files: Cell<bool>,
 }
@@ -468,7 +471,10 @@ impl IDropTarget_Impl for DropTarget_Impl {
         // The sends go on the driver's loop: the drag's own program waits
         // for this to return.
         if !files.is_empty() {
-            let _ = self.dropped.send((files, count));
+            let _ = self.dropped.send(Caught {
+                items: files,
+                total: count,
+            });
         }
         Ok(())
     }

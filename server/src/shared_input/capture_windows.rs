@@ -76,7 +76,7 @@ use super::badge;
 use super::drag_files::{self, Catch, Catcher, Dropped, Outcome};
 use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
-use super::drop_windows::{self, DropCatcher};
+use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
@@ -1085,10 +1085,7 @@ struct Glue {
     catcher: Catcher,
     drop_catcher: Option<DropCatcher>,
     catcher_failed: bool,
-    drops: (
-        Sender<(Vec<PathBuf>, usize)>,
-        Receiver<(Vec<PathBuf>, usize)>,
-    ),
+    drops: (Sender<Caught>, Receiver<Caught>),
 }
 
 /// Whether Windows has a mouse button down that a drag could be carried
@@ -1291,7 +1288,7 @@ impl Glue {
             );
             self.catch(catch);
         }
-        while let Ok((items, total)) = self.drops.1.try_recv() {
+        while let Ok(Caught { items, total }) = self.drops.1.try_recv() {
             let internet_files = crate::events::current_config().internet_files;
             match drag_files::on_drop(
                 items,
