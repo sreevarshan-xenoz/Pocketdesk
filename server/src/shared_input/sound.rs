@@ -360,6 +360,9 @@ fn play(packets: std::sync::mpsc::Receiver<(u32, Vec<u8>)>, seam: Option<PathBuf
         // packet comes, so no waking 200 times a second through a silence
         // (review M9).
         let next = if jitter.is_empty() && player.queued() == 0 {
+            // The output may have drained since the last pass looked, so
+            // the packet after this silence waits for its preroll again.
+            jitter.ran_dry();
             packets.recv().map_err(|_| RecvTimeoutError::Disconnected)
         } else {
             packets.recv_timeout(Duration::from_millis(5))
