@@ -2,9 +2,10 @@
 //! script of what a keyboard and mouse would do on it as a screen (BK5),
 //! through the same channel the driver uses ([`PhoneChannel`]), and print
 //! what was sent and how many of its pings the phone answered. It moves no
-//! cursor and reads no key here: the script is the input. The phone must
-//! stand ready ([`phone::standing_now`]): it allows it, and this computer's
-//! Keyboard and mouse permission for it is on.
+//! cursor and reads no key here: the script is the input. It sends only
+//! with the shared keyboard and mouse on here (`shared_input`) and the phone
+//! standing ready ([`phone::standing_now`]): it allows it, and this
+//! computer's Keyboard and mouse permission for it is on ([`refusal`]).
 //!
 //! The command asks the running server, which holds the phone's link: a
 //! request in `phone_test_out/`, its outcome in `phone_test_in/`, one file
@@ -189,6 +190,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
         }
     }
     Ok(steps)
+}
+
+/// Why the server does not send a phone the script: the shared keyboard
+/// and mouse off here (`sharing_on`, as the driver needs it: the review's
+/// M4), or the phone not ready (`standing`); none when it may.
+pub fn refusal(sharing_on: bool, standing: &str) -> Option<String> {
+    if !sharing_on {
+        return Some(
+            "the shared keyboard and mouse is off on this computer (shared_input)".to_string(),
+        );
+    }
+    (standing != PHONE_READY).then(|| format!("the phone is not ready: {standing}"))
 }
 
 /// What the command asks of the server.
@@ -389,11 +402,11 @@ async fn run_one(request: &Request) -> Outcome {
     let query = request.phone.clone();
     let picked = tokio::task::spawn_blocking(move || {
         let id = pick(&query)?;
-        let standing = phone::standing_now(&id);
-        if standing != PHONE_READY {
-            return Err(format!("the phone is not ready: {standing}"));
+        let sharing_on = crate::events::current_config().shared_input;
+        match refusal(sharing_on, phone::standing_now(&id)) {
+            Some(why) => Err(why),
+            None => Ok(id),
         }
-        Ok(id)
     })
     .await
     .unwrap_or_else(|e| Err(e.to_string()));
@@ -561,6 +574,18 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn it_goes_only_with_sharing_on_to_a_ready_phone() {
+        assert_eq!(refusal(true, PHONE_READY), None);
+        assert!(
+            refusal(false, PHONE_READY)
+                .unwrap()
+                .contains("shared_input")
+        );
+        let off = refusal(true, pocketdesk_core::local::shared_input::PHONE_OFF).unwrap();
+        assert!(off.contains("not ready"), "{off}");
     }
 
     #[test]
