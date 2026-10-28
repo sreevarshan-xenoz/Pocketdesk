@@ -14,7 +14,8 @@
     <string name="found_confirm_message">Se hace llamar «%1$s» en %2$s. Cualquiera en esta red puede anunciar un nombre, así que escribe solo un PIN que Pocketdesk muestre ahora en tu propio equipo. Escanear su código de emparejamiento asegura que es ese equipo.</string>
     <string name="found_confirm_connect">Conectar</string>
     <string name="no_computers">Aún no hay equipos.</string>
-    <string name="home_explainer">Necesita un equipo Linux o Windows con el servicio Pocketdesk en su red.</string>
+    <string name="home_explainer">Primero instala Pocketdesk en tu equipo Linux o Windows. Luego abre su página Pair y escanea el código, con este teléfono en la misma red.</string>
+    <string name="home_get_desktop_app">Descargar Pocketdesk para tu equipo</string>
     <string name="settings_find">Buscar un ajuste</string>
     <string name="settings_find_clear">Borrar la búsqueda</string>
     <string name="settings_find_none">Ningún ajuste coincide con «%1$s»</string>

@@ -14,7 +14,8 @@
     <string name="found_confirm_message">இது %2$s இல் “%1$s” என்று தன்னை அழைத்துக்கொள்கிறது. இந்த நெட்வொர்க்கில் யார் வேண்டுமானாலும் ஒரு பெயரை அறிவிக்கலாம்; எனவே உங்கள் சொந்தக் கணினியில் Pocketdesk இப்போது காட்டும் PIN-ஐ மட்டுமே உள்ளிடவும். அதன் இணைப்புக் குறியீட்டை ஸ்கேன் செய்தால் அது அந்தக் கணினிதான் என்பது உறுதியாகும்.</string>
     <string name="found_confirm_connect">இணை</string>
     <string name="no_computers">இன்னும் கணினிகள் இல்லை.</string>
-    <string name="home_explainer">உங்கள் பிணையத்தில் Pocketdesk சேவையை இயக்கும் ஒரு Linux அல்லது Windows கணினி தேவை.</string>
+    <string name="home_explainer">முதலில் உங்கள் Linux அல்லது Windows கணினியில் Pocketdesk-ஐ நிறுவுங்கள். பிறகு அதன் Pair பக்கத்தைத் திறந்து, இந்த ஃபோன் அதே பிணையத்தில் இருக்கும்போது குறியீட்டை ஸ்கேன் செய்யுங்கள்.</string>
+    <string name="home_get_desktop_app">உங்கள் கணினிக்கான Pocketdesk-ஐப் பெறுங்கள்</string>
     <string name="settings_find">அமைப்பைத் தேடு</string>
     <string name="settings_find_clear">தேடலை அழி</string>
     <string name="settings_find_none">“%1$s” உடன் பொருந்தும் அமைப்பு இல்லை</string>

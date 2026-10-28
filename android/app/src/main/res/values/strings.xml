@@ -23,7 +23,8 @@
     <string name="found_confirm_message">It calls itself “%1$s” at %2$s. Anyone on this network can announce a name, so only type a PIN that Pocketdesk on your own computer is showing right now. Scanning its pairing code instead makes sure it is that computer.</string>
     <string name="found_confirm_connect">Connect</string>
     <string name="no_computers">No computers yet.</string>
-    <string name="home_explainer">Needs a Linux or Windows computer running the Pocketdesk service on your network.</string>
+    <string name="home_explainer">First install Pocketdesk on your Linux or Windows computer. Then open its Pair page and scan the code there, with this phone on the same network.</string>
+    <string name="home_get_desktop_app">Get Pocketdesk for your computer</string>
     <string name="settings_find">Find a setting</string>
     <string name="settings_find_clear">Clear the search</string>
     <string name="settings_find_none">No setting matches “%1$s”</string>
