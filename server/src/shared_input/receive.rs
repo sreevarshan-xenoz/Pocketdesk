@@ -28,6 +28,7 @@ use super::badge;
 use super::held::HeldInput;
 use super::link::{self, Channel};
 use super::screens;
+use super::sound;
 use super::status;
 use super::wire::{self, Msg, Screen, Timing};
 use crate::input_injector::InputInjector;
@@ -136,6 +137,8 @@ pub struct Receiver {
     timed_for: Option<String>,
     /// The keys, buttons and wheel turns from it since it arrived.
     inputs: u32,
+    /// It asked for this computer's sound this visit (BK6).
+    sound_wanted: bool,
 }
 
 impl Receiver {
@@ -151,6 +154,7 @@ impl Receiver {
             timings: Vec::new(),
             timed_for: None,
             inputs: 0,
+            sound_wanted: false,
         }
     }
 
@@ -190,6 +194,12 @@ impl Receiver {
     /// The computer driving this one now.
     pub fn driver(&self) -> Option<&str> {
         self.driver.as_deref()
+    }
+
+    /// The computer that wants this one's sound now: the one driving it,
+    /// when it asked this visit (BK6).
+    pub fn sound_for(&self) -> Option<&str> {
+        self.driver.as_deref().filter(|_| self.sound_wanted)
     }
 
     /// Act on `msg` from the computer `from`; `allowed` is whether it may
@@ -256,6 +266,8 @@ impl Receiver {
             self.timings.clear();
             self.timed_for = Some(from.to_string());
             self.inputs = 0;
+            // An ask is for one visit: it asks again after it arrives.
+            self.sound_wanted = false;
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -301,6 +313,7 @@ impl Receiver {
                 self.time(false, n, arrived_us);
             }
             Msg::ReleaseAll => self.release_held(),
+            Msg::SoundWanted { on } => self.sound_wanted = on,
             _ => {}
         }
     }
@@ -339,6 +352,7 @@ impl Receiver {
         self.driver = None;
         self.heard_at = None;
         self.last_seq = None;
+        self.sound_wanted = false;
     }
 
     /// Let go of everything injected as down, last pressed first.
@@ -663,6 +677,23 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
     }
 }
 
+/// Capture and send this computer's sound to the computer driving it
+/// while it asks ([`Receiver::sound_for`]), and stop as soon as it does
+/// not; a capture that could not give it is told to that computer, once,
+/// while it still asks.
+fn follow_sound(
+    sound: &mut sound::Sending,
+    receiver: &Receiver,
+    channels: &mut HashMap<String, Channel>,
+) {
+    sound.set(receiver.sound_for());
+    while let Some((to, why)) = sound.take_unavailable() {
+        if receiver.sound_for() == Some(to.as_str()) {
+            send_to(channels, &to, &Msg::SoundUnavailable { why });
+        }
+    }
+}
+
 /// Tell the computer `to` this computer's `screens`, on the channel kept
 /// for it.
 fn tell_screens(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Screen]) {
@@ -804,7 +835,13 @@ pub async fn run() {
     // log to say each once.
     let mut heard_refusals = status::RefusalLog::default();
     let mut told_refusals = status::RefusalLog::default();
+    // This computer's sound, sent to the computer driving it while that
+    // one asks (BK6).
+    let mut sound = sound::Sending::new(sound::desktop_source());
     loop {
+        // Whatever changed last time round (an arrival, a leave, a silence,
+        // a permission or a link gone), the sound follows it.
+        follow_sound(&mut sound, &receiver, &mut channels);
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg, arrived_us, link_id)) = arrival else { break };
@@ -1655,5 +1692,59 @@ mod tests {
         r.handle("pc", Msg::Active { idle_ms: 200 }, true);
         assert!(r.wants_awake(Instant::now()));
         assert!(!r.wants_awake(Instant::now() + AWAKE_FOR));
+    }
+
+    /// BK6: only the computer driving this one asks for its sound, and its
+    /// ask lasts its visit: a leave, a new arrival, its silence, its link
+    /// or its permission going all end it, and it never moves anything.
+    #[test]
+    fn only_the_driver_asks_for_sound_and_for_its_visit_only() {
+        let wants = |on| Msg::SoundWanted { on };
+        let enter = Msg::Enter { x: 0, y: 0 };
+        let (mut r, fake) = receiver();
+        r.handle("pc", wants(true), true);
+        assert_eq!(r.sound_for(), None, "not driving this one");
+        r.handle("pc", enter.clone(), true);
+        assert_eq!(r.sound_for(), None, "not asked this visit");
+        r.handle("pc", wants(true), true);
+        assert_eq!(r.sound_for(), Some("pc"));
+        r.handle("other", wants(false), true);
+        assert_eq!(r.sound_for(), Some("pc"), "another computer's word");
+        r.handle("pc", wants(false), true);
+        assert_eq!(r.sound_for(), None, "no longer");
+        // The leave ends it.
+        r.handle("pc", wants(true), true);
+        r.handle("pc", Msg::Leave, true);
+        assert_eq!(r.sound_for(), None, "left");
+        // A new arrival forgets the last visit's ask, and another
+        // computer arriving takes over without it.
+        r.handle("pc", enter.clone(), true);
+        r.handle("pc", wants(true), true);
+        r.handle("pc", enter.clone(), true);
+        assert_eq!(r.sound_for(), None, "arrived anew");
+        r.handle("pc", wants(true), true);
+        r.handle("other", enter.clone(), true);
+        assert_eq!(r.sound_for(), None, "another computer drives now");
+        // Its silence, its link and its permission end it.
+        let t0 = Instant::now();
+        r.handle_at("pc", enter.clone(), true, t0);
+        r.handle_at("pc", wants(true), true, t0);
+        r.check_silence(t0 + SILENCE_RELEASE, None);
+        assert_eq!(r.sound_for(), None, "silent");
+        r.handle("pc", enter.clone(), true);
+        r.handle("pc", wants(true), true);
+        r.link_lost("pc");
+        assert_eq!(r.sound_for(), None, "its link went");
+        r.handle("pc", enter, true);
+        r.handle("pc", wants(true), true);
+        r.handle("pc", wants(true), false);
+        assert_eq!(r.sound_for(), None, "its permission went");
+        // Asking moves and presses nothing.
+        assert!(
+            fake.take()
+                .iter()
+                .all(|call| matches!(call, Call::Move(0, 0))),
+            "only the arrivals moved"
+        );
     }
 }
