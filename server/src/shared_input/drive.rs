@@ -20,7 +20,8 @@
 //! send: nothing stale is sent again, the other computer lets go of what it
 //! held by itself when it stops hearing from this one).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::Instant;
 
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
@@ -618,6 +619,44 @@ fn centre(s: &Screen) -> (i32, i32) {
     )
 }
 
+/// An open channel to another computer, as [`reachable`] weighs it.
+#[derive(Debug, Clone)]
+pub struct OpenChannel {
+    pub device_id: String,
+    /// When this channel was opened (before its `Hello` went).
+    pub opened: Instant,
+    /// Whether the link to that computer is direct now.
+    pub direct: bool,
+}
+
+/// Whether `msg` from another computer answers this one's `Hello`: only its
+/// screens do (it sends them only to a computer it lets drive it). A
+/// `Hello` from that computer's own driver, or its activity notes, are not.
+pub fn is_answer(msg: &Msg) -> bool {
+    matches!(msg, Msg::Screens(_))
+}
+
+/// The computers the cursor may cross onto: an open channel whose link is
+/// direct, to a computer that sent its screens (`screens_heard`, when each
+/// last did) since that channel opened. There is no time window: a quiet
+/// computer stays reachable for as long as its channel is open; a channel
+/// opened anew needs a new answer.
+pub fn reachable(
+    channels: &[OpenChannel],
+    screens_heard: &HashMap<String, Instant>,
+) -> BTreeSet<String> {
+    channels
+        .iter()
+        .filter(|c| {
+            c.direct
+                && screens_heard
+                    .get(&c.device_id)
+                    .is_some_and(|heard| *heard >= c.opened)
+        })
+        .map(|c| c.device_id.clone())
+        .collect()
+}
+
 /// The layout this computer drives in: its own screens, and to their right
 /// the linked computers whose screens `shared_screens.json` holds, in its
 /// order (until the owner arranges them).
@@ -659,6 +698,7 @@ pub fn layout_for(
 mod tests {
     use super::*;
     use pocketdesk_core::local::shared_input::{ComputerScreens, ScreensFile};
+    use std::time::Duration;
 
     fn screen(x: i32, y: i32, width: u32, height: u32) -> Screen {
         Screen {
@@ -1055,6 +1095,61 @@ mod tests {
         assert_eq!(d.away_on(), None);
         let over = d.on(Captured::Hotkey);
         assert_eq!(d.away_on(), Some("M"), "{over:?}");
+    }
+
+    fn open(id: &str, opened: Instant, direct: bool) -> OpenChannel {
+        OpenChannel {
+            device_id: id.to_string(),
+            opened,
+            direct,
+        }
+    }
+
+    #[test]
+    fn a_quiet_direct_computer_stays_reachable() {
+        // Opened, answered once a second later; then a minute of nothing
+        // but activity notes (which are no answer). Nothing ages it out.
+        let opened = Instant::now();
+        let heard = HashMap::from([("L".to_string(), opened + Duration::from_secs(1))]);
+        assert!(!is_answer(&Msg::Active { idle_ms: 0 }));
+        let channels = [open("L", opened, true)];
+        assert_eq!(
+            reachable(&channels, &heard),
+            BTreeSet::from(["L".to_string()])
+        );
+        // A minute on, with the same map (nothing more heard), still so.
+        let later = opened + Duration::from_secs(61);
+        assert!(later > opened);
+        assert_eq!(reachable(&channels, &heard).len(), 1);
+        // A link turned relayed is not.
+        assert!(reachable(&[open("L", opened, false)], &heard).is_empty());
+    }
+
+    #[test]
+    fn a_reopened_channel_needs_a_new_answer() {
+        let first = Instant::now();
+        let answered = first + Duration::from_secs(1);
+        let reopened = first + Duration::from_secs(10);
+        let mut heard = HashMap::from([("L".to_string(), answered)]);
+        // The answer came before this channel opened: not reachable yet.
+        assert!(reachable(&[open("L", reopened, true)], &heard).is_empty());
+        // Once it answers on the new channel, it is.
+        heard.insert("L".to_string(), reopened + Duration::from_millis(5));
+        assert_eq!(reachable(&[open("L", reopened, true)], &heard).len(), 1);
+        // Never answered at all: not reachable.
+        assert!(reachable(&[open("M", first, true)], &heard).is_empty());
+    }
+
+    #[test]
+    fn a_peer_drivers_hello_is_not_an_answer() {
+        assert!(!is_answer(&Msg::Hello {
+            version: crate::shared_input::wire::VERSION,
+            name: "L".to_string(),
+            screens: vec![screen(0, 0, 1600, 1000)],
+        }));
+        assert!(!is_answer(&Msg::Enter { x: 0, y: 0 }));
+        assert!(!is_answer(&Msg::Leave));
+        assert!(is_answer(&Msg::Screens(vec![screen(0, 0, 1600, 1000)])));
     }
 
     #[test]

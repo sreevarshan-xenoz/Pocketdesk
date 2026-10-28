@@ -59,7 +59,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::awake::KeepAwake;
-use super::drive::{Action, Driver, layout_for};
+use super::drive::{Action, Driver, OpenChannel, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
@@ -546,6 +546,10 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
     let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
     let tid = Arc::new(AtomicU32::new(0));
     let tid_thread = Arc::clone(&tid);
+    // Set by a parent that gave up waiting: the thread then skips its loop
+    // and tears down, even if the WM_QUIT sent to it was lost (no queue yet).
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let abandoned_thread = Arc::clone(&abandoned);
     let spawned = std::thread::Builder::new()
         .name("pd-shared-input".into())
         .spawn(move || {
@@ -634,8 +638,10 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
             let _ = ready_tx.send(Ok(()));
             let mut msg = MSG::default();
             // SAFETY: the loop the hooks and the window run in; it ends on
-            // WM_QUIT.
-            while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+            // WM_QUIT (and is skipped when the parent already gave up).
+            while !abandoned_thread.load(Ordering::SeqCst)
+                && unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool()
+            {
                 match msg.message {
                     WM_SET_MODE if msg.hwnd.is_invalid() => {
                         let mode = match msg.wParam.0 {
@@ -698,18 +704,33 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
         }
         Err(_) => {
             tracing::warn!("Shared input: the input thread did not start in time");
-            // It may yet be running with STATE set: tell it to quit and wait,
-            // so no live thread is left behind.
+            // It may yet be running with STATE set: tell it to quit, and wait
+            // a bounded time so a stuck thread cannot hang the driver.
+            abandoned.store(true, Ordering::SeqCst);
             let id = tid.load(Ordering::SeqCst);
             if id != 0 {
                 // SAFETY: a plain message to that thread.
                 let _ = unsafe { PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0)) };
             }
-            let _ = thread.join();
+            let deadline = Instant::now() + QUIT_WAIT;
+            while !thread.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if thread.is_finished() {
+                let _ = thread.join();
+            } else {
+                tracing::error!(
+                    "Shared input: the input thread is stuck and was left behind; \
+                     sharing stays off until it is started again"
+                );
+            }
             None
         }
     }
 }
+
+/// How long a parent that gave up on the input thread waits for it to quit.
+const QUIT_WAIT: Duration = Duration::from_secs(2);
 
 /// The standard cursors, each made blank while away.
 const CURSORS: [SYSTEM_CURSOR_ID; 13] = [
@@ -782,16 +803,27 @@ fn set_cursor(p: (i32, i32)) {
 
 /// Whether the input is going to this session's normal desktop (named
 /// "Default"), not a secure one (a UAC prompt, Ctrl+Alt+Del, the lock or
-/// screensaver desktop), whose switches hide key-ups from the hooks. On any
-/// doubt it says the normal one, so a read error does not strand input.
+/// screensaver desktop), whose switches hide key-ups from the hooks. An
+/// input desktop that cannot be opened counts as a switch (the secure
+/// desktop is exactly where opening fails; the first such failure is logged
+/// once, so a desk check can tell if it ever happens on the normal one). A
+/// desktop that opens but whose name cannot be read counts as the normal one.
 fn on_default_desktop() -> bool {
+    static LOGGED: AtomicBool = AtomicBool::new(false);
     // SAFETY: opens the input desktop for reading and closes it.
-    let Ok(desktop) =
-        (unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) })
-    else {
-        // The secure desktop is on another window station: cannot be opened.
-        return false;
-    };
+    let desktop =
+        match unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) } {
+            Ok(desktop) => desktop,
+            Err(e) => {
+                if !LOGGED.swap(true, Ordering::SeqCst) {
+                    tracing::info!(
+                        "Shared input: the input desktop could not be opened (taken as a \
+                     secure desktop; logged once): {e}"
+                    );
+                }
+                return false;
+            }
+        };
     let mut name = [0u16; 64];
     let mut needed = 0u32;
     // SAFETY: the handle just opened, and a buffer on this stack.
@@ -841,9 +873,6 @@ const RESTART_AFTER: Duration = Duration::from_secs(30);
 const PARKING_WAIT: Duration = Duration::from_millis(250);
 /// How long after a channel could not be opened it is tried again.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
-/// A computer that answered this long ago is still taken as reachable
-/// (longer than the greet interval, so an idle target does not drop out).
-const SEEN_FRESH: Duration = Duration::from_secs(15);
 
 /// Where the cursor is parked while away: logical, physical, and its
 /// monitor's scale.
@@ -855,6 +884,9 @@ struct Glue {
     input: InputThread,
     desktop: Desktop,
     channels: HashMap<String, Channel>,
+    /// When each channel in `channels` was opened (before its `Hello`), so
+    /// only an answer since then makes its computer reachable.
+    opened: HashMap<String, Instant>,
     /// When opening a channel to a computer last failed.
     refused: HashMap<String, Instant>,
     /// This computer's name and logical screens, for a `Hello`.
@@ -872,6 +904,7 @@ impl Glue {
     /// The channel to `to`, opened (and greeted) if there is none.
     fn channel(&mut self, to: &str) -> Option<&mut Channel> {
         if !self.channels.contains_key(to) {
+            let opened = Instant::now();
             match Channel::open(to) {
                 Ok(mut channel) => {
                     // A greeting, so it says its screens, and a leave, so a
@@ -886,6 +919,7 @@ impl Glue {
                         return None;
                     }
                     self.refused.remove(to);
+                    self.opened.insert(to.to_string(), opened);
                     self.channels.insert(to.to_string(), channel);
                 }
                 Err(e) => {
@@ -1006,6 +1040,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         input,
         desktop,
         channels: HashMap::new(),
+        opened: HashMap::new(),
         refused: HashMap::new(),
         name: me.device_name.clone(),
         own,
@@ -1130,19 +1165,20 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
             // The computers the cursor may cross onto: an open, direct
-            // channel that answered this run (or the one driven now, which
-            // does not answer while it is driven).
-            let reachable: Vec<String> = glue
+            // channel whose computer sent its screens since it opened.
+            let open: Vec<OpenChannel> = glue
                 .channels
                 .keys()
-                .filter(|id| {
-                    link::connection(id).is_some_and(|conn| link::is_direct(&conn))
-                        && (link::seen_recently(id, SEEN_FRESH)
-                            || driver.away_on() == Some(id.as_str()))
+                .filter_map(|id| {
+                    Some(OpenChannel {
+                        device_id: id.clone(),
+                        opened: *glue.opened.get(id)?,
+                        direct: link::connection(id).is_some_and(|conn| link::is_direct(&conn)),
+                    })
                 })
-                .cloned()
                 .collect();
-            let actions = driver.set_reachable(reachable);
+            let reachable = reachable(&open, &link::screens_heard());
+            let actions = driver.set_reachable(reachable.into_iter().collect());
             glue.apply(&mut driver, actions);
         }
     }
