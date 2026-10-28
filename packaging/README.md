@@ -76,11 +76,12 @@ For each release:
 
 `packaging/fdroid/dev.pocketdesk.android.yml` is the draft of fdroiddata's metadata file: the bridge built as CI builds it (the pinned Rust, cargo-ndk, `android/bridge/build-android.sh`, JDK 21) and the release key's certificate, so F-Droid would ship the developer's signature on bytes it built itself. The Reproducible APK workflow shows two of CI's machines agree; F-Droid's build server (another JDK distribution, its own SDK) is not tried yet, and any difference fails its comparison. The store listing and screenshots are in `fastlane/metadata/android/en-US/`.
 
-To publish: a merge request to fdroiddata adding the file as `metadata/dev.pocketdesk.android.yml` (the owner's call), with `fdroid lint` and `fdroid build` run on it there. Submit it with the first release that holds the screenshots: F-Droid reads the listing from the tag it builds, and the screenshots show settings newer than 0.4.0 (move the `Builds` entry to that release).
+To publish (the owner's call, from a GitLab account):
+1. Fork [fdroiddata](https://gitlab.com/fdroid/fdroiddata) and add the file as `metadata/dev.pocketdesk.android.yml`. It carries one `Builds` entry, 0.7.0, the first release whose tag holds the screenshots F-Droid reads from `fastlane/`.
+2. In the fork, `fdroid lint dev.pocketdesk.android` and `fdroid rewritemeta dev.pocketdesk.android`. Run against this file outside fdroiddata (fdroidserver from pip, 2026-10-28), lint flagged only the categories, which a checkout without fdroiddata's `config/categories.yml` cannot know (all three are in it), and rewritemeta changed nothing but dropping the comments, which fdroiddata's copy goes without. fdroiddata's CI runs `fdroid build` on the merge request.
+3. Open the merge request with fdroiddata's *App inclusion* template.
 
-## Android developer verification
-
-Registering the developer with Google for Android's developer verification (required from 2027 for apps installed outside Play) is the owner's decision; nothing here depends on it.
+After that, F-Droid's update check (`UpdateCheckMode: Tags`) picks up each new `vX.Y.Z` tag by itself.
 
 ## AUR (Arch Linux)
 
