@@ -159,6 +159,22 @@ pub fn force_stop(pid: u32) -> std::io::Result<bool> {
     windows::force_stop(pid)
 }
 
+/// Wait at most `within` for process `pid` to end; `true` once it has.
+/// A stopped server's PID file goes as its loop ends, a moment before the
+/// process does, and on Windows only then is its executable free to delete
+/// (the uninstaller does next). Elsewhere the PID file answers alone.
+pub fn wait_for_exit(pid: u32, within: std::time::Duration) -> bool {
+    #[cfg(windows)]
+    {
+        windows::wait_for_exit(pid, within)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (pid, within);
+        true
+    }
+}
+
 /// Ask the server running as `pid` to shut down gracefully. Returns `false`
 /// when no graceful path exists, so the caller can fall back to force.
 pub async fn request_stop(pid: u32) -> std::io::Result<bool> {

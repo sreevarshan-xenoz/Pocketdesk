@@ -239,17 +239,13 @@ impl LanDiscoveryService {
             .context("Failed to browse mDNS")?;
 
         let mut peers = Vec::new();
-        let deadline = std::time::Instant::now() + SCAN_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + SCAN_TIMEOUT;
 
-        // Collect mDNS responses within the timeout
-        while std::time::Instant::now() < deadline {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-
-            if let Ok(ServiceEvent::ServiceResolved(info)) =
-                receiver.recv_timeout(remaining.min(Duration::from_millis(500)))
+        // Collect mDNS responses within the timeout, awaited: a blocking wait
+        // held a runtime thread for the whole scan, and a server asked to
+        // stop then lingered until the scan was over.
+        while let Ok(Ok(event)) = tokio::time::timeout_at(deadline, receiver.recv_async()).await {
+            if let ServiceEvent::ServiceResolved(info) = event
                 && let Some(peer) = service_info_to_peer(&info)
             {
                 peers.push(peer);

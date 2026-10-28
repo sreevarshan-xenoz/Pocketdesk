@@ -6,15 +6,17 @@ use windows::UI::Notifications::{
     NotificationData, NotificationUpdateResult, ToastActivatedEventArgs, ToastDismissalReason,
     ToastDismissedEventArgs, ToastNotification, ToastNotificationManager,
 };
-use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0,
+};
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
     RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteTreeW, RegSetValueExW,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, OpenProcess, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, SetEvent,
-    TerminateProcess, WaitForSingleObject,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    QueryFullProcessImageNameW, SetEvent, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::Win32::UI::HiDpi::{
@@ -755,6 +757,20 @@ pub(super) fn signal_stop_event(pid: u32) -> bool {
     let set = unsafe { SetEvent(event) }.is_ok();
     let _ = unsafe { CloseHandle(event) };
     set
+}
+
+/// Wait at most `within` for process `pid` to end; `true` once it has. A
+/// process that cannot be opened to wait on is gone, or not this user's to
+/// watch: only "no such process" counts as gone.
+pub(super) fn wait_for_exit(pid: u32, within: std::time::Duration) -> bool {
+    let process = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(process) => process,
+        Err(e) => return e.code() == ERROR_INVALID_PARAMETER.to_hresult(),
+    };
+    let millis = u32::try_from(within.as_millis()).unwrap_or(INFINITE - 1);
+    let ended = unsafe { WaitForSingleObject(process, millis) } == WAIT_OBJECT_0;
+    let _ = unsafe { CloseHandle(process) };
+    ended
 }
 
 /// Whether two executable paths name the same program file (Windows paths

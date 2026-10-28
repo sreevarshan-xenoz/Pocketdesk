@@ -7,8 +7,21 @@ use clap::Parser;
 use pocketdesk_server::*;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// How long the process waits, once a command is done, for work that cannot
+/// be cancelled (a call blocking a runtime thread) before it ends anyway.
+/// Without a bound a stopped server lingered on such a call, its executable
+/// still in use for the uninstaller that stopped it.
+const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What `#[tokio::main]` builds, but its shutdown bounded by [`EXIT_GRACE`].
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(main_async());
+    runtime.shutdown_timeout(EXIT_GRACE);
+    result
+}
+
+async fn main_async() -> Result<()> {
     platform::init_process();
     // A crash leaves a report in the state folder (crash.log).
     if let Ok(dir) = state::state_dir() {
