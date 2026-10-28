@@ -81,3 +81,12 @@ To publish: a merge request to fdroiddata adding the file as `metadata/dev.pocke
 ## Android developer verification
 
 Registering the developer with Google for Android's developer verification (required from 2027 for apps installed outside Play) is the owner's decision; nothing here depends on it.
+
+## AUR (Arch Linux)
+
+`aur/PKGBUILD` builds the release's source tarball as the release workflow does (the server, then the desktop app and the tray), and installs the three programs, the systemd user unit pointed at `/usr/bin`, the menu entry, the icon, the man page and the licences. Tailscale is optional, not a dependency. Pocketdesk is not on the AUR yet, so `yay -S pocketdesk` finds nothing until it is published.
+
+For each release, once its tag is pushed:
+1. In `aur/`, set `pkgver`, run `updpkgsums` (it replaces `SKIP` with the tarball's checksum) and `makepkg --printsrcinfo > .SRCINFO`.
+2. `makepkg -si` on an Arch machine or in an `archlinux` container to check it builds and installs.
+3. To publish (the owner's call, from an AUR account with an SSH key): clone `ssh://aur@aur.archlinux.org/pocketdesk.git`, copy in `PKGBUILD`, `pocketdesk.install` and `.SRCINFO`, commit and push.
