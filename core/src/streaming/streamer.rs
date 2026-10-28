@@ -98,11 +98,12 @@ impl Drop for CastEnded {
 
 /// What a screen session's ready stream says this computer takes (E3): a
 /// pen only for a phone whose input is taken (E3 review: one in view-only
-/// was offered a pen whose every stroke was dropped).
+/// was offered a pen whose every stroke was dropped), and whether its input
+/// is taken at all (BK7: another computer's window says it is view-only).
 fn screen_feature_byte(input: bool) -> u8 {
     let mut byte = super::client::SCREEN_FEATURES_SAID;
     if input {
-        byte |= super::client::SCREEN_FEATURE_PEN;
+        byte |= super::client::SCREEN_FEATURE_PEN | super::client::SCREEN_FEATURE_INPUT;
     }
     byte
 }
@@ -2737,6 +2738,22 @@ mod tests {
             screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_PEN,
             0,
             "said, and no pen"
+        );
+    }
+
+    /// BK7: a screen session hears whether its input is taken, so another
+    /// computer's window can say it is view-only.
+    #[test]
+    fn a_screen_session_hears_whether_its_input_is_taken() {
+        use super::super::client::{SCREEN_FEATURE_INPUT, screen_features};
+        assert_eq!(
+            screen_features(&[screen_feature_byte(true)]) & SCREEN_FEATURE_INPUT,
+            SCREEN_FEATURE_INPUT
+        );
+        assert_eq!(
+            screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_INPUT,
+            0,
+            "said, and view-only"
         );
     }
 
