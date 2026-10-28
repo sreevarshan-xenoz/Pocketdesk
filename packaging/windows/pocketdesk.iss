@@ -45,6 +45,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 WizardStyle=modern
+; What Pocketdesk sends to whom, and how to turn it off, before anything is
+; installed (SignPath Foundation's terms ask for it): docs/privacy.md in short.
+InfoBeforeFile=privacy.txt
 WizardImageFile=wizard-large.bmp,wizard-large-200.bmp
 WizardSmallImageFile=wizard-small.bmp,wizard-small-200.bmp
 SetupIconFile={#RepoRoot}\assets\brand\pocketdesk.ico
