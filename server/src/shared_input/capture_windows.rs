@@ -512,6 +512,13 @@ unsafe extern "system" fn foreground_changed(
     });
 }
 
+/// Whether `mode` lacks a hook it needs, with the mouse's and the
+/// keyboard's in or not: away takes both, so without either this
+/// computer's own input would act here and on the other computer at once.
+fn hooks_missing(mode: Mode, mouse: bool, keyboard: bool) -> bool {
+    mode == Mode::Away && !(mouse && keyboard)
+}
+
 /// Put the hooks `mode` wants in place, on the input thread.
 fn apply_mode(s: &mut ThreadState, mode: Mode) {
     s.mode = mode;
@@ -571,6 +578,10 @@ fn apply_mode(s: &mut ThreadState, mode: Mode) {
     }
     if mode != Mode::Away {
         s.wheel = (0, 0);
+    }
+    // The driver brings the keyboard and mouse home, the cursor shown.
+    if hooks_missing(mode, s.mouse.is_some(), s.keyboard.is_some()) {
+        let _ = s.events.send(Captured::HookFailed);
     }
 }
 
@@ -1634,6 +1645,17 @@ mod tests {
         assert!(!left_to_windows(0, l));
         assert!(!left_to_windows(MOD_CONTROL | MOD_ALT, l));
         assert!(!left_to_windows(MOD_WIN, u32::from(b'K')));
+    }
+
+    /// Away needs both hooks; watching needs only the mouse's, and a
+    /// missing one there is only logged (nothing is swallowed).
+    #[test]
+    fn away_without_both_hooks_is_a_failure() {
+        assert!(!hooks_missing(Mode::Away, true, true));
+        assert!(hooks_missing(Mode::Away, true, false));
+        assert!(hooks_missing(Mode::Away, false, true));
+        assert!(!hooks_missing(Mode::Watch, false, false));
+        assert!(!hooks_missing(Mode::Off, false, false));
     }
 
     #[test]

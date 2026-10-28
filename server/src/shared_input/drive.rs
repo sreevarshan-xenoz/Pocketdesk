@@ -100,6 +100,9 @@ pub enum Captured {
     /// Another window came to the front (heard while the hooks are in): no
     /// edge crosses until what is in front has been looked at again.
     ForegroundChanged,
+    /// The hooks [`Mode::Away`] needs could not be installed: this
+    /// computer's keyboard and mouse would act here and there at once.
+    HookFailed,
 }
 
 /// What the driver wants done.
@@ -321,6 +324,16 @@ impl Driver {
                 self.weigh_game(&mut out);
             }
             Captured::ForegroundChanged => self.foreground_pending = true,
+            Captured::HookFailed => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("The keyboard and mouse could not be taken from this computer"),
+                    );
+                }
+            }
             _ if self.locked => {}
             Captured::Moved { x, y } => match &self.away {
                 None => self.watch((x, y), &mut out),
@@ -1446,6 +1459,32 @@ mod tests {
         assert_eq!(d.on(Captured::Unlocked), vec![Action::SetMode(Mode::Watch)]);
         // Locked at home is only the mode.
         assert_eq!(d.on(Captured::Locked), vec![Action::SetMode(Mode::Off)]);
+    }
+
+    /// The hooks that take the keyboard and mouse could not be put in as
+    /// they went away: home the usual way, with what was sent let go of.
+    #[test]
+    fn a_hook_that_did_not_go_in_brings_them_home() {
+        let mut d = away_on_linux(false);
+        d.on(key(0x1E, true));
+        let back = d.on(Captured::HookFailed);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
+        );
+        for wanted in [
+            Action::WarpHome(PARK.0, PARK.1),
+            Action::HideCursor(false),
+            Action::SetMode(Mode::Watch),
+            home_badge(Some(
+                "The keyboard and mouse could not be taken from this computer",
+            )),
+        ] {
+            assert!(back.contains(&wanted), "{wanted:?} in {back:?}");
+        }
+        assert_eq!(d.away_on(), None);
+        // At home it changes nothing.
+        assert_eq!(d.on(Captured::HookFailed), vec![]);
     }
 
     #[test]
