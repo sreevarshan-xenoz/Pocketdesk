@@ -100,6 +100,9 @@ pub enum Captured {
     /// Another window came to the front (heard while the hooks are in): no
     /// edge crosses until what is in front has been looked at again.
     ForegroundChanged,
+    /// Win+L was pressed while away (its L swallowed, never sent): this
+    /// computer is to lock.
+    LockKey,
     /// The hooks [`Mode::Away`] needs could not be installed: this
     /// computer's keyboard and mouse would act here and there at once.
     HookFailed,
@@ -127,6 +130,8 @@ pub enum Action {
     PushClipboard(String),
     /// Ping that computer (its link answers at once): see [`Driver::tick`].
     Ping(String),
+    /// Lock this computer (Win+L while away, home first).
+    LockHere,
 }
 
 /// Where the keyboard and mouse are while away.
@@ -324,6 +329,17 @@ impl Driver {
                 self.weigh_game(&mut out);
             }
             Captured::ForegroundChanged => self.foreground_pending = true,
+            Captured::LockKey => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("Win+L: locking this computer"),
+                    );
+                    out.push(Action::LockHere);
+                }
+            }
             Captured::HookFailed => {
                 if let Some(away) = self.away.clone() {
                     self.go_home(
@@ -1486,6 +1502,36 @@ mod tests {
         assert_eq!(d.away_on(), None);
         // At home it changes nothing.
         assert_eq!(d.on(Captured::HookFailed), vec![]);
+    }
+
+    /// Win+L while away: home the usual way (the Win key already sent is
+    /// let go of there, then the leave), and then this computer locks;
+    /// nothing is sent for the L. At home the hook passes it to Windows, so
+    /// the driver hears nothing and does nothing.
+    #[test]
+    fn win_l_while_away_comes_home_then_locks() {
+        let mut d = away_on_linux(false);
+        d.on(Captured::Key {
+            scan: 0x5B,
+            extended: true,
+            down: true,
+        });
+        let locking = d.on(Captured::LockKey);
+        assert_eq!(
+            sends(&locking),
+            vec![sent("L", evdev(125, false)), sent("L", Msg::Leave)]
+        );
+        for wanted in [
+            Action::WarpHome(PARK.0, PARK.1),
+            Action::HideCursor(false),
+            home_badge(Some("Win+L: locking this computer")),
+        ] {
+            assert!(locking.contains(&wanted), "{wanted:?} in {locking:?}");
+        }
+        assert_eq!(locking.last(), Some(&Action::LockHere), "{locking:?}");
+        assert_eq!(d.away_on(), None);
+        // At home it is not the driver's.
+        assert_eq!(d.on(Captured::LockKey), vec![]);
     }
 
     #[test]

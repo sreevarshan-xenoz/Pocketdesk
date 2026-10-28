@@ -443,7 +443,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows to Linux at the edge: the pointer off the Windows laptop's right edge lands on the Linux screen at the same height, the Windows cursor hidden; back off the Linux screen's left edge, it returns where it crossed and shows again. (where: owner)
 - Typing in a terminal on Linux while away: letters, Shift and capitals, Ctrl+C, the arrows, AltGr, and nothing typed on Windows meanwhile. (where: owner)
 - The switch key (Ctrl+Alt+Right) goes over and back, from the edge's side and from the middle of a screen; no Ctrl or Alt left down on either side. (where: owner)
-- Win+L while away: Windows locks, the keyboard and mouse come home, the Super key is not left down on Linux; after unlocking, the edge works again. (where: owner)
+- Win+L while away: the keyboard and mouse come home and then Windows locks; no "l" is typed on Windows or on Linux, the Super key is not left down on Linux; after unlocking, the edge works again. (where: owner)
 - The network unplugged while typing on Linux: the Windows cursor comes home and shows within about a second, its keys typing on Windows again; Linux lets go of the held key within about a second. Plugged back in, the pointer crosses onto Linux again once the link is back. (where: owner)
 - The server killed while away (Task Manager): the Windows cursor shows again when the server starts; Linux lets go of everything within about a second. (where: owner)
 - The server stopped while away (`pocketdesk stop`, then again by an uninstall): the Windows cursor shows again at once, Linux lets go of a held key at once (it hears the leave, not a second's silence), and the server exits within a couple of seconds. (where: owner)

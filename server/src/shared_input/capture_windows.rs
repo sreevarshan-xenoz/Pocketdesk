@@ -10,9 +10,10 @@
 //! spots it instead). A hidden window of its own hears the session lock
 //! (WTS session notifications) and sleep (`WM_POWERBROADCAST`). Injected
 //! input always passes: what another computer sends this one is never
-//! carried off again. Ctrl+Alt+Del is Windows' own, which no hook sees;
-//! Win+L the keyboard hook leaves to Windows ([`left_to_windows`]). The
-//! lock that follows either brings the keyboard and mouse home. The
+//! carried off again. Ctrl+Alt+Del is Windows' own, which no hook sees,
+//! and the lock that follows brings the keyboard and mouse home; Win+L
+//! while away is swallowed, brings them home, and then locks this computer
+//! ([`locks_here`]). The
 //! loop looks at what is in front every half second for the gaming lock
 //! ([`game_lock`]), and at once when a window comes to the front (an
 //! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
@@ -498,10 +499,13 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
     }
-    // Its key-up passes too: Windows holds the key, so it is not swallowed
-    // below, and it was never sent down.
-    if down && left_to_windows(modifiers_down(s.mods), info.vkCode) {
-        return false;
+    // Win+L: swallowed like any key (Windows never saw the Win key go
+    // down, so passed on it would type an "l"), never sent; the driver
+    // brings the keyboard and mouse home and locks this computer. Its
+    // key-up is swallowed below too (Windows does not hold it).
+    if down && locks_here(modifiers_down(s.mods), info.vkCode) {
+        let _ = s.events.send(Captured::LockKey);
+        return true;
     }
     let _ = s.events.send(Captured::Key {
         scan: info.scanCode as u16,
@@ -513,12 +517,10 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     down || !windows_holds(info.vkCode)
 }
 
-/// Whether the key `vk` going down with modifiers `mods` held is Windows'
-/// own even while away: Win+L, which locks this computer. The hook leaves
-/// it to Windows, neither swallowed nor sent on (a hook that swallowed it
-/// could keep the lock from happening), and the lock that follows brings
-/// the keyboard and mouse home.
-pub(crate) fn left_to_windows(mods: u32, vk: u32) -> bool {
+/// Whether the key `vk` going down with modifiers `mods` held while away
+/// is Win+L, which locks this computer: the driver brings the keyboard and
+/// mouse home and then locks it ([`Captured::LockKey`]).
+pub(crate) fn locks_here(mods: u32, vk: u32) -> bool {
     vk == u32::from(b'L') && mods & MOD_WIN != 0
 }
 
@@ -1165,6 +1167,12 @@ impl Glue {
                 Action::KeepAwake(false) => self.awake.release(),
                 // Sent as any message is, so a ping that cannot go brings
                 // the keyboard and mouse home as a failed send does.
+                // Only ever after the keyboard and mouse came home.
+                Action::LockHere => {
+                    if let Err(e) = crate::privacy::lock_screen() {
+                        tracing::warn!("Shared input: Win+L did not lock this computer: {e}");
+                    }
+                }
                 Action::Ping(to) => queue.push_front(Action::Send(
                     to,
                     Msg::Ping {
@@ -1677,17 +1685,16 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
-    /// Win+L is left to Windows (it locks, and the lock brings the
-    /// keyboard and mouse home), whatever else is held with the Win key;
-    /// L alone, or with other modifiers, goes on.
+    /// Win+L while away locks this computer, whatever else is held with
+    /// the Win key; L alone, or with other modifiers, goes on.
     #[test]
-    fn win_l_is_left_to_windows() {
+    fn win_l_locks_here() {
         let l = u32::from(b'L');
-        assert!(left_to_windows(MOD_WIN, l));
-        assert!(left_to_windows(MOD_WIN | MOD_SHIFT, l));
-        assert!(!left_to_windows(0, l));
-        assert!(!left_to_windows(MOD_CONTROL | MOD_ALT, l));
-        assert!(!left_to_windows(MOD_WIN, u32::from(b'K')));
+        assert!(locks_here(MOD_WIN, l));
+        assert!(locks_here(MOD_WIN | MOD_SHIFT, l));
+        assert!(!locks_here(0, l));
+        assert!(!locks_here(MOD_CONTROL | MOD_ALT, l));
+        assert!(!locks_here(MOD_WIN, u32::from(b'K')));
     }
 
     /// Away needs both hooks; watching needs only the mouse's, and a
