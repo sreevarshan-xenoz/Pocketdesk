@@ -38,7 +38,7 @@ object PointerRunner {
     private var generation = 0
     private var running = false
 
-    /** What the computer was last told, to whom and when; null once it was told off. */
+    /** What the computer was last told, to whom and when; null once it was told off. Only [sync]'s thread touches these. */
     private var said: String? = null
     private var saidTo: Pair<String, Int>? = null
     private var saidAtMs = 0L
@@ -47,7 +47,11 @@ object PointerRunner {
     private var saidOnLink = -1L
 
     /** Start or stop the thread, and tell the computer, as the switch and the service say: on the listener's ticks. */
-    @Synchronized
+    /**
+     * Called on the listener's keeper thread alone. Not under the lock
+     * (the review's M3): its report goes on the network, and [stop] runs
+     * on the main thread.
+     */
     fun sync(ctx: Context) {
         val on = Prefs.keyboardMouseFromComputer(ctx)
         if (on && ControlService.instance != null) start(ctx) else stop()
@@ -169,7 +173,6 @@ object PointerRunner {
      * link, every 15 s while on), or once as it turns off; again until it
      * went.
      */
-    @Synchronized
     private fun report(ctx: Context, on: Boolean) {
         if (!on && said == null) return
         val own = PhoneLink.target(ctx) ?: return

@@ -1573,7 +1573,16 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedI
     let address = jstring_to_string(&mut env, &address);
     let report = jstring_to_string(&mut env, &report);
     let sent = phone_screen::screen_packet(&report).and_then(|packet| {
-        RUNTIME.block_on(crate::api::send_on_live(&address, port as u16, &packet))
+        // Bounded: a half-open link's writer could hold it for good (the
+        // review's M3).
+        RUNTIME.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                crate::api::send_on_live(&address, port as u16, &packet),
+            )
+            .await
+            .unwrap_or_else(|_| Err("the computer did not take it in time".to_string()))
+        })
     });
     let json = envelope(sent.map(|()| String::new()));
     to_jstring(&mut env, json)
