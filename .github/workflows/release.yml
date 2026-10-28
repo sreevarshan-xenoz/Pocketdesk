@@ -126,7 +126,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # The GNU host toolchain, as on the dev box: it builds without a Windows
-      # SDK, which is why AGENTS.md's Windows gates name this target.
+      # SDK, which is why docs/AGENTS.md's Windows gates name this target.
       - name: Install Rust (x86_64-pc-windows-gnu)
         run: |
           rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component clippy,rustfmt
