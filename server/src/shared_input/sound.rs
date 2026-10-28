@@ -491,10 +491,29 @@ struct Out {
     to: String,
     full: usize,
     too_large: bool,
+    /// Whether a connection is direct now (a seam for the tests).
+    direct: fn(&iroh::endpoint::Connection) -> bool,
 }
 
 impl Out {
-    /// Send packet `seq`; whether it went.
+    /// Sending to `to`, only while its link is direct.
+    fn new(to: &str) -> Out {
+        Self::with_direct(to, link::is_direct)
+    }
+
+    /// [`Out::new`], with whether a link is direct decided by `direct`.
+    fn with_direct(to: &str, direct: fn(&iroh::endpoint::Connection) -> bool) -> Out {
+        Out {
+            to: to.to_string(),
+            full: 0,
+            too_large: false,
+            direct,
+        }
+    }
+
+    /// Send packet `seq`; whether it went. Never over a link that is not
+    /// direct (review M2): one that turned relayed mid-visit carries no
+    /// sound in the moment before the visit is ended for it.
     fn send(&mut self, seq: u32, opus: Vec<u8>) -> bool {
         if opus.len() > wire::MAX_SOUND_BYTES {
             return false;
@@ -502,6 +521,9 @@ impl Out {
         let Some(conn) = link::connection(&self.to) else {
             return false;
         };
+        if !(self.direct)(&conn) {
+            return false;
+        }
         let bytes = wire::encode(&Msg::Sound { seq, opus });
         if conn.max_datagram_size().is_none_or(|max| bytes.len() > max) {
             if !std::mem::replace(&mut self.too_large, true) {
@@ -642,11 +664,7 @@ async fn capture_and_send(
         to,
         "Shared input: this computer's sound goes to the computer driving it"
     );
-    let mut out = Out {
-        to: to.clone(),
-        full: 0,
-        too_large: false,
-    };
+    let mut out = Out::new(&to);
     let mut frames = Frames::default();
     let mut seq = 0u32;
     let (mut sent, mut dropped) = (0u64, 0u64);
@@ -991,6 +1009,21 @@ mod tests {
         assert!(!lock(&LISTENING).contains_key("test-snd-l"));
         heard("test-snd-l", 1, &[1, 2, 3]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review M2: no sound packet goes while the link is not direct (it
+    /// turned relayed mid-visit, before the visit is ended for it).
+    #[tokio::test]
+    async fn no_sound_goes_over_a_link_that_is_not_direct() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (a, b, out, _back) = link::tests::linked_pair().await;
+        let _held = link::hold("test-snd-relayed", out);
+        let mut relayed = Out::with_direct("test-snd-relayed", |_| false);
+        assert!(!relayed.send(1, vec![1, 2, 3]), "relayed: dropped");
+        let mut direct = Out::with_direct("test-snd-relayed", |_| true);
+        assert!(direct.send(2, vec![1, 2, 3]), "direct: sent");
+        a.close().await;
+        b.close().await;
     }
 
     /// The whole way between two computers on this machine, over a real
