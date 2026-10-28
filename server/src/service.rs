@@ -543,6 +543,8 @@ pub async fn run(config: Config) -> Result<()> {
     // POCKETDESK_SHARE_TEST set to a file, recorded there instead: what
     // arrives has one taker.
     tokio::spawn(crate::shared_input::share_test::run_requests());
+    // The Keyboard and mouse page's requests (Identify).
+    tokio::spawn(crate::shared_input::asks::run());
     if let Some(file) = std::env::var_os(crate::shared_input::share_test::RECORD_ENV) {
         tokio::spawn(crate::shared_input::share_test::record(file.into()));
     } else {

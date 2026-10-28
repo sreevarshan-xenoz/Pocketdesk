@@ -7,7 +7,10 @@
 //! Only the computer whose cursor came onto this one's screens
 //! ([`Msg::Enter`]) moves it, presses its keys and buttons, and turns its
 //! wheel; everything it pressed is let go of when it leaves, when it asks,
-//! when its link goes, and when its permission does.
+//! when its link goes, and when its permission does. A computer that may
+//! not drive this one is told so ([`Msg::Refuse`]) when it says hello or
+//! enters, and a computer that could is told when sharing is turned off
+//! here or its permission goes.
 //!
 //! [`Capability::SharedInput`]: pocketdesk_core::protocol::permissions::Capability::SharedInput
 
@@ -23,6 +26,7 @@ use super::awake::KeepAwake;
 use super::held::HeldInput;
 use super::link::{self, Channel};
 use super::screens;
+use super::status;
 use super::wire::{self, Msg, Screen};
 use crate::input_injector::InputInjector;
 
@@ -390,6 +394,15 @@ impl Gate {
         on
     }
 
+    /// Why `device_id` may not drive this one, as a [`Msg::Refuse`] says
+    /// it; none when it may.
+    async fn refusal(&mut self, device_id: &str) -> Option<u8> {
+        if !self.on().await {
+            return Some(wire::REFUSE_SHARING_OFF);
+        }
+        (!self.standing(device_id).await.allowed).then_some(wire::REFUSE_NOT_ALLOWED)
+    }
+
     async fn standing(&mut self, device_id: &str) -> Standing {
         if !self.on().await {
             return Standing::default();
@@ -479,7 +492,10 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
     let written = tokio::task::spawn_blocking(move || {
         let me = own.as_ref().map(|_| crate::kde::host_identity());
         let now = pocketdesk_core::local::pin::now_unix();
+        // Only the computers paired now are kept.
+        let paired = status::paired_computers(&dir);
         shared_input::update(&dir, |file| {
+            file.keep_only(&paired);
             if let (Some(me), Some(own)) = (&me, &own) {
                 file.set_own(&me.device_id, &me.device_name, own, now);
             }
@@ -518,6 +534,32 @@ fn tell_screens(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Sc
     }
 }
 
+/// Whether a computer that may not drive this one is told so for `msg`:
+/// its hello and its entering are, and anything at all while it drives
+/// (`driving`, its permission or the setting having just gone). Its moves
+/// and notes otherwise are not, one refusal each time it tries.
+fn refuses(msg: &Msg, driving: bool) -> bool {
+    driving || matches!(msg, Msg::Hello { .. } | Msg::Enter { .. })
+}
+
+/// Tell the computer `to` that this one will not be driven by it
+/// (`reason`), on a channel of its own, dropped once sent.
+fn refuse(to: &str, reason: u8) {
+    let sent = Channel::open(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
+    match sent {
+        Ok(()) => tracing::info!(
+            to,
+            reason,
+            "Shared input: told another computer this one won't take its input"
+        ),
+        Err(e) => tracing::debug!(to, "Shared input: the refusal was not sent: {e}"),
+    }
+}
+
+/// How often `shared_input_status.json` is brought up to date (and
+/// `shared_screens.json` kept to the computers paired now).
+const STATUS_EVERY: Duration = Duration::from_secs(1);
+
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
 /// someone drives it, and keep `shared_screens.json`. Not run with
@@ -537,11 +579,29 @@ pub async fn run() {
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut look = tokio::time::interval(SCREENS_EVERY);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut status_every = tokio::time::interval(STATUS_EVERY);
+    status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_status = None;
     loop {
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg)) = arrival else { break };
+                if let Msg::Refuse { reason } = msg {
+                    // Its answer to this computer driving it.
+                    tracing::info!(
+                        from,
+                        reason,
+                        "Shared input: another computer won't take this one's input"
+                    );
+                    link::note_refused(&from, reason);
+                    continue;
+                }
                 let standing = gate.standing(&from).await;
+                if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
+                    let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
+                    refuse(&from, reason);
+                    channels.remove(&from);
+                }
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
                 // hello from its own driver is not).
@@ -562,6 +622,14 @@ pub async fn run() {
                     Msg::Screens(screens) if standing.computer => {
                         note_heard(&mut heard, &from, None, screens);
                     }
+                    Msg::Identify { name } if standing.computer => {
+                        // Shown on screen in a later step; said here for now.
+                        tracing::info!(
+                            from,
+                            name,
+                            "Shared input: another computer asks this one to show who it is"
+                        );
+                    }
                     _ => {}
                 }
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
@@ -570,6 +638,26 @@ pub async fn run() {
                 receiver.handle(&from, msg, standing.allowed);
             }
             _ = tick.tick() => {
+                // A computer told this one's screens (one that may cross
+                // onto it) whose permission went, or with sharing turned
+                // off here, is told it may not.
+                let mut refused_now = Vec::new();
+                let told: Vec<String> = channels.keys().cloned().collect();
+                for to in told {
+                    if let Some(reason) = gate.refusal(&to).await {
+                        if let Some(mut channel) = channels.remove(&to)
+                            && let Err(e) = channel.send(&Msg::Refuse { reason })
+                        {
+                            tracing::debug!(to, "Shared input: the refusal was not sent: {e}");
+                        }
+                        tracing::info!(
+                            to,
+                            reason,
+                            "Shared input: another computer may no longer drive this one"
+                        );
+                        refused_now.push(to);
+                    }
+                }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     receiver.check_silence(Instant::now());
                     if receiver.driver().is_none() {
@@ -581,7 +669,14 @@ pub async fn run() {
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     let linked = link::linked().contains(&driver);
-                    if !linked || !gate.standing(&driver).await.allowed {
+                    let refusal = gate.refusal(&driver).await;
+                    if linked
+                        && let Some(reason) = refusal
+                        && !refused_now.contains(&driver)
+                    {
+                        refuse(&driver, reason);
+                    }
+                    if !linked || refusal.is_some() {
                         tracing::info!(
                             driver,
                             linked,
@@ -603,7 +698,16 @@ pub async fn run() {
             _ = look.tick() => {
                 if !gate.on().await {
                     own.forget();
-                    channels.clear();
+                    // Those that could cross onto this one are told they
+                    // cannot now.
+                    for (to, mut channel) in channels.drain() {
+                        let refusal = Msg::Refuse {
+                            reason: wire::REFUSE_SHARING_OFF,
+                        };
+                        if let Err(e) = channel.send(&refusal) {
+                            tracing::debug!(to, "Shared input: the refusal was not sent: {e}");
+                        }
+                    }
                     continue;
                 }
                 // Sharing is on: the injector is made now, not at the first
@@ -620,6 +724,17 @@ pub async fn run() {
                         }
                     }
                 }
+            }
+            _ = status_every.tick() => {
+                let Some(dir) = state_dir.clone() else { continue };
+                let mut last = last_status.take();
+                last_status = tokio::task::spawn_blocking(move || {
+                    let paired = status::paired_computers(&dir);
+                    status::write_if_changed(&dir, status::now(&paired), &paired, &mut last);
+                    last
+                })
+                .await
+                .unwrap_or(None);
             }
         }
     }
@@ -998,6 +1113,23 @@ mod tests {
         own.forget();
         assert!(own.is_unread());
         assert!(own.note(vec![screen]));
+    }
+
+    #[test]
+    fn a_computer_that_may_not_drive_is_told_when_it_tries() {
+        let hello = Msg::Hello {
+            version: wire::VERSION,
+            name: "pc".to_string(),
+            screens: Vec::new(),
+        };
+        assert!(refuses(&hello, false));
+        assert!(refuses(&Msg::Enter { x: 0, y: 0 }, false));
+        // Its moves and notes alone are not answered, one each.
+        assert!(!refuses(&Msg::Move { seq: 1, x: 0, y: 0 }, false));
+        assert!(!refuses(&Msg::Active { idle_ms: 0 }, false));
+        assert!(!refuses(&key(30, true), false));
+        // While it drives, anything is: its permission just went.
+        assert!(refuses(&Msg::Move { seq: 1, x: 0, y: 0 }, true));
     }
 
     #[test]

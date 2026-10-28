@@ -66,11 +66,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::awake::KeepAwake;
-use super::drive::{Action, Driver, OpenChannel, layout_for, reachable};
+use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
+use super::status;
 use super::wire::{self, Msg};
 
 /// The thread message that sets the mode (its `WPARAM`: 0 off, 1 watch,
@@ -1132,7 +1133,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         motion: Motion::default(),
         awake: KeepAwake::default(),
     };
-    let read_layout = |glue: &Glue| {
+    // The owner's arrangement, read again when its file changes.
+    let mut saved = SavedLayout::default();
+    let mut read_layout = |glue: &Glue| {
         let file = state_dir
             .as_deref()
             .map(pocketdesk_core::local::shared_input::read)
@@ -1143,6 +1146,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             glue.own.clone(),
             &file,
             &link::linked(),
+            state_dir.as_deref().and_then(|dir| saved.get(dir)),
         )
     };
     // What is in front is weighed before anything else, so a game already
@@ -1175,6 +1179,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             );
             let actions = driver.shutdown();
             glue.apply(&mut driver, actions);
+            status::set_keyboard_on(None);
             // Dropping the glue restores the cursors; the supervisor starts a
             // fresh driver after a pause.
             return;
@@ -1227,6 +1232,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 .collect();
             glue.apply(&mut driver, actions);
         }
+        // Where the keyboard and mouse are, for the app's page.
+        status::set_keyboard_on(driver.away_on());
         // Away, a desktop switch (a secure prompt hides key-ups) or a link
         // that turned relayed or closed brings it home.
         if let Some(to) = driver.away_on().map(str::to_string)
@@ -1291,6 +1298,24 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let layout = read_layout(&glue);
             let actions = driver.set_layout(layout);
             glue.apply(&mut driver, actions);
+            // A computer that refused since its channel opened is left (its
+            // releases on that channel, still open), and greeted again a
+            // while later: it answers with its screens once it takes input.
+            let refusals = link::refusals();
+            let refusing: Vec<(String, u8)> = glue
+                .channels
+                .keys()
+                .filter_map(|id| {
+                    let (reason, at) = refusals.get(id)?;
+                    (*at >= *glue.opened.get(id)?).then(|| (id.clone(), *reason))
+                })
+                .collect();
+            for (id, reason) in refusing {
+                let actions = driver.refused(&id, reason);
+                glue.apply(&mut driver, actions);
+                glue.channels.remove(&id);
+                glue.refused.insert(id, Instant::now());
+            }
             // The computers the cursor may cross onto: an open, direct
             // channel whose computer sent its screens since it opened.
             let open: Vec<OpenChannel> = glue
@@ -1311,6 +1336,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     }
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
+    status::set_keyboard_on(None);
     tracing::info!("Shared input: this computer's keyboard and mouse stay here");
     // Dropping the glue stops the input thread, restores the cursors and
     // lets the computer idle.

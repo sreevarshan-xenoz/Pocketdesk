@@ -73,6 +73,15 @@ pub const COMPUTERS_DIR: &str = "computers_out";
 /// What the shared keyboard and mouse knows of each computer's screens,
 /// this one's first, written by the server.
 pub const SHARED_SCREENS_FILE: &str = "shared_screens.json";
+/// Where the owner put each computer for the shared keyboard and mouse,
+/// written by the desktop app's Keyboard and mouse page.
+pub const SHARED_LAYOUT_FILE: &str = "shared_layout.json";
+/// How the shared keyboard and mouse stand now (where they are, each
+/// computer's link), written by the server.
+pub const SHARED_INPUT_STATUS_FILE: &str = "shared_input_status.json";
+/// The desktop app's requests for the shared keyboard and mouse
+/// (Identify), one file each.
+pub const SHARED_INPUT_DIR: &str = "shared_input_out";
 pub const SENT_FILE: &str = "sent.json";
 /// The transfers under way (C1), written by the server for the desktop app.
 pub const TRANSFERS_FILE: &str = "transfers.json";

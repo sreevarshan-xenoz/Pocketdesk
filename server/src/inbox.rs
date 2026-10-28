@@ -16,7 +16,7 @@ use pocketdesk_core::local::paths::{
     ALERTS_DIR, ASKS_DIR, CLIPBOARD_OUT_DIR, COMMANDS_DIR, COMPUTERS_DIR, CONTROL_DIR, DIALS_DIR,
     KDECONNECT_OUT_DIR, KICKS_DIR, LINKS_DIR, NOTIFICATION_CLEARS_DIR, NOTIFICATION_OUT_DIR,
     OUTBOX_DIR, PHONE_FILES_DIR, PHONE_MEDIA_DIR, PHONE_PHOTOS_OUT_DIR, QUIET_DIR, RINGS_DIR,
-    TRANSFER_CANCELS_DIR, TYPING_DIR,
+    SHARED_INPUT_DIR, TRANSFER_CANCELS_DIR, TYPING_DIR,
 };
 use tokio::sync::Notify;
 
@@ -52,6 +52,8 @@ pub const FOLDERS: &[&str] = &[
     TYPING_DIR,
     // `pocketdesk share-test`'s requests (shared input between computers).
     crate::shared_input::share_test::REQUESTS_DIR,
+    // The Keyboard and mouse page's requests (Identify).
+    SHARED_INPUT_DIR,
 ];
 
 /// One wake-up per folder; a change while its consumer is busy is kept for
@@ -189,6 +191,7 @@ mod tests {
         assert!(FOLDERS.contains(&NOTIFICATION_CLEARS_DIR));
         assert!(FOLDERS.contains(&DIALS_DIR));
         assert!(FOLDERS.contains(&COMMANDS_DIR));
+        assert!(FOLDERS.contains(&SHARED_INPUT_DIR));
     }
 
     #[test]
