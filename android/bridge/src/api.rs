@@ -689,6 +689,28 @@ pub async fn connect_to_peer(
                                 if let Ok(pkt) = NetworkPacket::from_wire(&trimmed) {
                                     crate::unpaired::heard(&from_peer.0, &pkt.packet_type, &pkt.body);
                                 }
+                                // The computer's keyboard and mouse on this
+                                // phone as a screen (BK5): kept for the
+                                // pointer thread, its pings answered at once,
+                                // and nothing else to look at in it.
+                                if trimmed.contains("shared_input.input")
+                                    && let Ok(pkt) = NetworkPacket::from_wire(&trimmed)
+                                    && pkt.packet_type
+                                        == pocketdesk_core::protocol::phone_screen::INPUT
+                                {
+                                    for pong in crate::phone_screen::receive(
+                                        &pkt.body,
+                                        &from_peer.0,
+                                        from_peer.1,
+                                    ) {
+                                        let (host, port) = from_peer.clone();
+                                        tokio::spawn(async move {
+                                            let _ = send_on_live(&host, port, &pong).await;
+                                        });
+                                    }
+                                    line.clear();
+                                    continue;
+                                }
                                 // Cache the server's iroh WAN identity as it is
                                 // announced, independent of Kotlin's poll loop.
                                 if trimmed.contains("pocketdesk.endpoint")
@@ -1057,6 +1079,7 @@ async fn forget_link(from: &(String, u16)) {
     crate::asks::forget();
     crate::phone_actions::forget();
     crate::typing::forget();
+    crate::phone_screen::forget();
     crate::media_presses::forget();
     crate::computer_media::forget();
     // N7 review: it can show nothing now.

@@ -27,6 +27,7 @@ mod notification_answers;
 mod peer_names;
 mod phone_actions;
 mod phone_file_requests;
+mod phone_screen;
 mod photo_requests;
 mod quiet_requests;
 mod rates;
@@ -1520,6 +1521,40 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTypeTak
 ) -> jstring {
     let wait = std::time::Duration::from_millis(wait_ms.clamp(0, 5_000) as u64);
     let json = envelope(Ok(typing::take_json(wait)));
+    to_jstring(&mut env, json)
+}
+
+/// The computer's keyboard and mouse on this phone as a screen (BK5): the
+/// oldest batch as `{"ok": "{\"host\", \"port\", \"events\"}"}`, waiting
+/// up to `wait_ms` for one; `{"ok": ""}` when none came. Taking keeps the
+/// input coming and its pings answered.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputTake(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    wait_ms: jint,
+) -> jstring {
+    let wait = std::time::Duration::from_millis(wait_ms.clamp(0, 1_000) as u64);
+    let json = envelope(Ok(phone_screen::take_json(wait)));
+    to_jstring(&mut env, json)
+}
+
+/// Tell the computer at `address`:`port`, on the live link, what this phone
+/// says of itself as a screen (BK5): `report` is the packet's body.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeSharedInputScreen(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    report: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let report = jstring_to_string(&mut env, &report);
+    let sent = phone_screen::screen_packet(&report).and_then(|packet| {
+        RUNTIME.block_on(crate::api::send_on_live(&address, port as u16, &packet))
+    });
+    let json = envelope(sent.map(|()| String::new()));
     to_jstring(&mut env, json)
 }
 
