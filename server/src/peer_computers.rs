@@ -971,6 +971,124 @@ async fn fetch_offer(device_id: String, offer: serde_json::Value) {
     }
 }
 
+/// Why an image on its way to or from another computer went no further: a
+/// later switch of the shared keyboard and mouse came first (BK3).
+const LATER_SWITCH: &str = "a later switch came first";
+
+/// Send this computer's clipboard image to the computer `device_id` on the
+/// link (BK3), as a phone sends its own (N4): told its size and a key,
+/// that computer opens a stream for it and puts it on its clipboard.
+/// Marked with `follows` when it follows the mouse; `still` says whether it
+/// is still wanted, asked before it is offered and before its bytes go.
+pub(crate) async fn send_clipboard_image(
+    device_id: &str,
+    image: Arc<crate::plugins::clipboard::Image>,
+    follows: bool,
+    still: impl Fn() -> bool,
+) -> Result<(), String> {
+    // The link is the internet road, at home too, as for files.
+    if !crate::events::current_config().internet_files {
+        return Err("files over the internet are off on this computer (Settings)".to_string());
+    }
+    let outgoing = live(device_id).ok_or("the computer is not linked now")?;
+    image_on_link(&outgoing, &image.png, follows, still).await
+}
+
+/// [`send_clipboard_image`] on the link `outgoing` sends on.
+async fn image_on_link(
+    outgoing: &mpsc::Sender<NetworkPacket>,
+    png: &[u8],
+    follows: bool,
+    still: impl Fn() -> bool,
+) -> Result<(), String> {
+    if !still() {
+        return Err(LATER_SWITCH.to_string());
+    }
+    let mut waiter = Waiter::new();
+    let size = png.len() as u64;
+    let offer = crate::clipboard_push::image_offer_packet(size, &waiter.key, follows);
+    if outgoing.send(offer).await.is_err() {
+        return Err("the link closed".to_string());
+    }
+    let stream = waiter.arrived().await?;
+    // Dropped unopened: the other computer's receive ends at once.
+    if !still() {
+        return Err(LATER_SWITCH.to_string());
+    }
+    let mut reader = png;
+    crate::plugins::share::send_reader(
+        crate::plugins::share::Route::arrived(stream),
+        &waiter.key,
+        &mut reader,
+        size,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Fetch the clipboard image `id`, of `size` bytes, that the computer
+/// `device_id` told this one of (BK3), and put it on this computer's
+/// clipboard; with `follows`, as one following the mouse here, which a
+/// later switch drops.
+async fn fetch_clipboard_image(device_id: String, id: String, size: u64, follows: bool) {
+    // The link is the internet road, at home too, as for files.
+    if !crate::events::current_config().internet_files {
+        tracing::debug!(
+            "Another computer's clipboard image not fetched: files over the internet are off"
+        );
+        return;
+    }
+    let landing = follows.then(|| crate::clipboard_push::Landing::begin(&device_id));
+    let Some(outgoing) = live(&device_id) else {
+        return;
+    };
+    let (from, named) = (device_id.as_str(), id.as_str());
+    let fetched = fetch_image_on_link(&outgoing, &id, size, |png| async move {
+        if landing.as_ref().is_some_and(|l| !l.current()) {
+            return Err(crate::plugins::share::io_error("clipboard", LATER_SWITCH));
+        }
+        crate::plugins::clipboard::put_image(from, png, Some(named)).await
+    })
+    .await;
+    // Who and how large, never the image.
+    match fetched {
+        Ok(()) => tracing::info!("Clipboard image received from {device_id} ({size} bytes)"),
+        Err(e) => tracing::debug!("Clipboard image from {device_id} not taken: {e}"),
+    }
+}
+
+/// [`fetch_clipboard_image`] on the link `outgoing` sends on: the bytes go
+/// to `keep`, and the other computer hears they were saved only if it
+/// succeeds.
+async fn fetch_image_on_link<F, Fut>(
+    outgoing: &mpsc::Sender<NetworkPacket>,
+    id: &str,
+    size: u64,
+    keep: F,
+) -> Result<(), String>
+where
+    F: FnOnce(Vec<u8>) -> Fut,
+    Fut: std::future::Future<Output = pocketdesk_core::error::Result<()>>,
+{
+    let mut waiter = Waiter::new();
+    let ask = NetworkPacket::new(pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE_FETCH)
+        .with_body(serde_json::json!({"id": id, "key": waiter.key}));
+    if outgoing.send(ask).await.is_err() {
+        return Err("the link closed".to_string());
+    }
+    let stream = waiter.arrived().await?;
+    crate::plugins::share::receive_bytes(
+        crate::plugins::share::Route::arrived(stream),
+        &waiter.key,
+        size,
+        pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE,
+        keep,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Stops a task when dropped.
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
 
@@ -1050,7 +1168,8 @@ async fn run_link(
 }
 
 /// What this computer takes from another on the link: its endpoint, kept
-/// current, its clipboard while it is shared (2g), and the files it offers
+/// current, its clipboard while it is shared (2g) or as it follows the
+/// mouse (text, or an image fetched, BK3), and the files it offers
 /// and its refusals of a transfer (2h). The rest it pushes to any client
 /// (the HUD, wake info, control) is for phones.
 async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
@@ -1068,18 +1187,27 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         return;
     }
     if packet.packet_type == "kdeconnect.clipboard" {
-        let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) else {
-            return;
-        };
         if !crate::clipboard_push::with_computers()
             && !crate::clipboard_push::takes_follow(device_id, &packet.body)
         {
             return;
         }
-        // Not sent back to the computer it came from.
-        crate::clipboard_push::note_from_phone(device_id, content);
-        if let Err(e) = crate::plugins::clipboard::set_clipboard(content).await {
-            tracing::warn!("Another computer's clipboard was not set: {e}");
+        if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
+            crate::clipboard_push::follow_arrived(&packet.body);
+            // Not sent back to the computer it came from.
+            crate::clipboard_push::note_from_phone(device_id, content);
+            if let Err(e) = crate::plugins::clipboard::set_clipboard(content).await {
+                tracing::warn!("Another computer's clipboard was not set: {e}");
+            }
+        } else if let Some((id, size)) = crate::clipboard_push::told_image(&packet.body) {
+            // Its image (BK3): fetched on a stream it opens on the link.
+            let follows = crate::clipboard_push::marked(&packet.body);
+            tokio::spawn(fetch_clipboard_image(
+                device_id.to_string(),
+                id,
+                size,
+                follows,
+            ));
         }
         return;
     }
@@ -1356,6 +1484,135 @@ mod tests {
             !WAITERS.lock().unwrap().contains_key(&refused_one.key),
             "nothing left waiting"
         );
+    }
+
+    /// The other computer's side of the link's streams, in memory: each it
+    /// opens goes to this one's [`hand_over`], as the link's acceptor does.
+    struct ToHandOver;
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::protocol::kdeconnect::OpenLinkStream for ToHandOver {
+        async fn open(&self) -> std::io::Result<Box<dyn TransferIo>> {
+            let (theirs, ours) = tokio::io::duplex(64 * 1024);
+            tokio::spawn(hand_over(Box::new(ours)));
+            Ok(Box::new(theirs))
+        }
+    }
+
+    fn other_computers_route() -> crate::plugins::share::Route {
+        crate::plugins::share::Route::Link(Arc::new(ToHandOver))
+    }
+
+    /// A picture of `len` bytes, not a real PNG: the link carries bytes.
+    fn picture(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    /// BK3: a clipboard image offered on the link (its size and key, no
+    /// port) goes over the stream the other computer opens for it, as a
+    /// phone's does, and the other computer receives it whole.
+    #[tokio::test]
+    async fn a_clipboard_image_goes_over_the_stream_the_other_computer_opens() {
+        let png = picture(300_000);
+        let (outgoing, mut packets) = mpsc::channel::<NetworkPacket>(4);
+        let other = tokio::spawn(async move {
+            let offer = packets.recv().await.unwrap();
+            assert_eq!(
+                offer.packet_type,
+                pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE
+            );
+            assert_eq!(offer.body["follows"], true);
+            assert!(offer.body.get("port").is_none());
+            let size = offer.body["size"].as_u64().unwrap();
+            let key = offer.body["key"].as_str().unwrap().to_string();
+            let (kept, got) = tokio::sync::oneshot::channel();
+            crate::plugins::share::receive_bytes(
+                other_computers_route(),
+                &key,
+                size,
+                pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE,
+                |bytes| async move {
+                    let _ = kept.send(bytes);
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+            got.await.unwrap()
+        });
+        image_on_link(&outgoing, &png, true, || true).await.unwrap();
+        assert_eq!(other.await.unwrap(), png, "received whole");
+    }
+
+    /// BK3: an image a later switch overtakes is not offered, and one
+    /// overtaken while the other computer opens its stream sends nothing.
+    #[tokio::test]
+    async fn a_clipboard_image_a_later_switch_overtakes_goes_no_further() {
+        let png = picture(1000);
+        let (outgoing, mut packets) = mpsc::channel::<NetworkPacket>(4);
+        let refused = image_on_link(&outgoing, &png, true, || false).await;
+        assert_eq!(refused.unwrap_err(), LATER_SWITCH);
+        assert!(packets.try_recv().is_err(), "not offered");
+
+        let wanted = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let switched = wanted.clone();
+        let other = tokio::spawn(async move {
+            let offer = packets.recv().await.unwrap();
+            let key = offer.body["key"].as_str().unwrap().to_string();
+            // The switch comes while the stream opens.
+            switched.store(false, std::sync::atomic::Ordering::SeqCst);
+            crate::plugins::share::receive_bytes(
+                other_computers_route(),
+                &key,
+                1000,
+                pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE,
+                |_| async { panic!("nothing should arrive") },
+            )
+            .await
+        });
+        let overtaken = image_on_link(&outgoing, &png, true, || {
+            wanted.load(std::sync::atomic::Ordering::SeqCst)
+        })
+        .await;
+        assert_eq!(overtaken.unwrap_err(), LATER_SWITCH);
+        assert!(other.await.unwrap().is_err(), "the other end got nothing");
+    }
+
+    /// BK3: an image the other computer told this one of is fetched on the
+    /// link (its id and a key), over the stream that computer opens, and
+    /// handed whole to what keeps it.
+    #[tokio::test]
+    async fn a_told_clipboard_image_is_fetched_over_the_stream_the_other_opens() {
+        let png = picture(200_000);
+        let sent = png.clone();
+        let (outgoing, mut packets) = mpsc::channel::<NetworkPacket>(4);
+        let other = tokio::spawn(async move {
+            let ask = packets.recv().await.unwrap();
+            assert_eq!(
+                ask.packet_type,
+                pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE_FETCH
+            );
+            assert_eq!(ask.body["id"], "ab12");
+            assert!(ask.body.get("port").is_none());
+            let key = ask.body["key"].as_str().unwrap().to_string();
+            let mut reader = sent.as_slice();
+            crate::plugins::share::send_reader(
+                other_computers_route(),
+                &key,
+                &mut reader,
+                sent.len() as u64,
+            )
+            .await
+        });
+        let (kept, got) = tokio::sync::oneshot::channel();
+        fetch_image_on_link(&outgoing, "ab12", png.len() as u64, |bytes| async move {
+            let _ = kept.send(bytes);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(got.await.unwrap(), png);
+        assert!(other.await.unwrap().is_ok(), "the other end heard it saved");
     }
 
     #[test]

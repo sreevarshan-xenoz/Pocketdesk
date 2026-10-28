@@ -2,13 +2,13 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-894 open items.
+898 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 118 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 122 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
@@ -458,7 +458,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
 
 - Copy text on Windows, push the pointer onto Linux, paste there: the text is there, with "Clipboard with my computers" off on both; copy on Linux, come back, paste on Windows. (where: owner)
-- A password manager's private copy (KeePassXC, or Windows' marks) does not follow; an image does not follow; with "Clipboard follows the mouse" off on either side (with Clipboard with my computers off), nothing crosses that way. (where: owner)
+- A password manager's private copy (KeePassXC, or Windows' marks) does not follow; with "Clipboard follows the mouse" off on either side (with Clipboard with my computers off), nothing crosses that way. (where: owner)
+- Take a screenshot to the clipboard on Windows (Win+Shift+S), push the pointer onto Linux, paste into an image editor there: the picture is there, with "Clipboard with my computers" off on both; the server's log says "Clipboard image followed the mouse" with its size and no more. (where: owner)
+- Copy an image on Linux (a picture from a browser), come back to Windows, paste into Paint: the picture is there. Cross again with nothing new copied: the log shows no second send of it. (where: owner)
+- An image from a program on "Never send copies from these programs", or one KeePassXC marks private, does not follow; with "Files over the internet" off on either side, no image follows (text still does). (where: owner)
+- A large image (a full-screen screenshot of a 4K screen) does not hold up the pointer as it crosses; push the pointer across and straight back before it lands: the image does not land late on the computer left, and nothing older comes back. (where: owner)
 - The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
 - The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
 
