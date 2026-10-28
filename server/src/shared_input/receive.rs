@@ -757,8 +757,21 @@ fn say_refused(told: &mut status::RefusalLog, to: &str, reason: u8) {
 }
 
 /// How often `shared_input_status.json` is brought up to date (and
-/// `shared_screens.json` kept to the computers paired now).
+/// `shared_screens.json` kept to the computers paired now) while sharing is
+/// on ([`STATUS_IDLE_EVERY`] while it is off).
 const STATUS_EVERY: Duration = Duration::from_secs(1);
+
+/// How often the status is kept while sharing is off here: the page still
+/// shows each paired computer's link then, but reading the computers and
+/// the trust store every second for the server's life is not worth it.
+const STATUS_IDLE_EVERY: Duration = Duration::from_secs(30);
+
+/// Whether the status is kept now: sharing on (`on`) or just turned off
+/// (`was_on`, as it was last kept; none yet), or `since` it was last kept
+/// is [`STATUS_IDLE_EVERY`].
+fn status_due(on: bool, was_on: Option<bool>, since: Option<Duration>) -> bool {
+    on || was_on != Some(false) || since.is_none_or(|since| since >= STATUS_IDLE_EVERY)
+}
 
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
@@ -783,6 +796,8 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status = None;
+    // Whether sharing was on when the status was last kept, and when.
+    let mut status_kept: Option<(bool, Instant)> = None;
     // The refusals heard from other computers, and told to them, for the
     // log to say each once.
     let mut heard_refusals = status::RefusalLog::default();
@@ -968,6 +983,15 @@ pub async fn run() {
                 told_refusals.keep_linked(&linked);
                 let Some(dir) = state_dir.clone() else { continue };
                 let sharing_on = gate.on().await;
+                let due = status_due(
+                    sharing_on,
+                    status_kept.map(|(on, _)| on),
+                    status_kept.map(|(_, at)| at.elapsed()),
+                );
+                if !due {
+                    continue;
+                }
+                status_kept = Some((sharing_on, Instant::now()));
                 let mut last = last_status.take();
                 last_status = tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
@@ -1575,6 +1599,27 @@ mod tests {
         );
         // No link at all is no refusal: it is let go of as gone.
         assert_eq!(refusal_now(None, false, false), None);
+    }
+
+    /// The status (computers.json and the trust store read, the file
+    /// written) is kept each second while sharing is on, once as it turns
+    /// off, and then only every half minute.
+    #[test]
+    fn the_status_is_kept_rarely_while_sharing_is_off() {
+        let s = Duration::from_secs;
+        // The first time, whatever the setting.
+        assert!(status_due(false, None, None));
+        assert!(status_due(true, None, None));
+        // On: each second.
+        assert!(status_due(true, Some(true), Some(s(1))));
+        // Turned off: at once, to say so.
+        assert!(status_due(false, Some(true), Some(s(1))));
+        // Off: every half minute.
+        assert!(!status_due(false, Some(false), Some(s(1))));
+        assert!(!status_due(false, Some(false), Some(s(29))));
+        assert!(status_due(false, Some(false), Some(STATUS_IDLE_EVERY)));
+        // Turned on: at once.
+        assert!(status_due(true, Some(false), Some(s(1))));
     }
 
     #[test]
