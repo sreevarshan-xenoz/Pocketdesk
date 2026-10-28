@@ -418,6 +418,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         cameraUploads.close()
         clipboardTicker.shutdownNow()
         dev.pocketdesk.android.control.TypeRunner.stop(this)
+        dev.pocketdesk.android.control.PointerRunner.stop()
         liveTicker.shutdownNow()
         media.close()
         computerMedia.close()
@@ -945,6 +946,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         }
         lastKeeperUptime = uptime
         dev.pocketdesk.android.control.TypeRunner.sync(this)
+        // BK5: the phone as a screen, said to its computer and taken, as
+        // its switch and the Accessibility service say.
+        dev.pocketdesk.android.control.PointerRunner.sync(this)
         media.sync()
         // Its inputs (the features, shared folders' grants, the saved
         // computers) cost a read each: every 10 s is soon enough (M1 review).
@@ -989,6 +993,9 @@ class PhoneNotificationListener : NotificationListenerService() {
         PhoneLink.keepOthers(this, wanted = answering || clearsWanted || opensWanted || toastWhere)
         // M4: typing comes on the own computer's link, kept while it may come.
         val typingOn = Prefs.typingFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null
+        // BK5: the computer's keyboard and mouse come on it too, and the
+        // phone says its screen on it.
+        val pointerOn = Prefs.keyboardMouseFromComputer(this)
         // O2: the computer's screenshots and locks wait on this link too.
         val actionsOn = (Prefs.phoneActionsFromComputer(this) && dev.pocketdesk.android.control.ControlService.instance != null) ||
             // P2: a list of apps needs no service; an open checks for it.
@@ -1006,7 +1013,7 @@ class PhoneNotificationListener : NotificationListenerService() {
         val alertsOn = Prefs.computerAlerts(this)
         // BF3: so do questions from `pocketdesk ask`.
         val questionsOn = Prefs.questionsFromComputer(this)
-        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || actionsOn || mediaWanted || computerMediaWanted || toastWhere || alertsOn || questionsOn) &&
+        if ((answering || callsOn || clearsWanted || opensWanted || typingOn || pointerOn || actionsOn || mediaWanted || computerMediaWanted || toastWhere || alertsOn || questionsOn) &&
             own != null && RustCore.controlPeer() == null
         ) {
             val now = SystemClock.elapsedRealtime()

@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.graphics.Path
+import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,8 @@ import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -97,6 +100,7 @@ class ControlService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        removePointer()
         typing.quitSafely()
         super.onDestroy()
     }
@@ -286,6 +290,113 @@ class ControlService : AccessibilityService() {
             busy = false
             stroke = null
             strokes.cancelled()
+        }
+    }
+
+    /** BK5: the pointer the computer's mouse moves here, while it is on this phone. */
+    private var pointer: PointerArrow? = null
+    private var pointerParams: WindowManager.LayoutParams? = null
+
+    /**
+     * BK5: show the computer's pointer at a fraction of the screen, over
+     * every app, taking no touch; never over a locked phone.
+     */
+    fun pointerAt(x: Int, y: Int) = main.post {
+        if (locked()) {
+            removePointer()
+            return@post
+        }
+        val (w, h) = screen()
+        val at = ControlPlan.place(x, y, w, h)
+        val windows = getSystemService(WindowManager::class.java)
+        val params = pointerParams ?: run {
+            val side = (PointerArrow.SIZE_DP * resources.displayMetrics.density).toInt()
+            WindowManager.LayoutParams(
+                side,
+                side,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                // Over a cutout too, so the pointer sits where a touch lands.
+                if (Build.VERSION.SDK_INT >= 30) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else if (Build.VERSION.SDK_INT >= 28) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                title = "Pocketdesk pointer"
+            }.also { pointerParams = it }
+        }
+        params.x = at.x.toInt()
+        params.y = at.y.toInt()
+        val shown = pointer
+        if (shown == null) {
+            val view = PointerArrow(this)
+            runCatching { windows.addView(view, params) }
+                .onSuccess { pointer = view }
+                .onFailure { Log.w(TAG, "The pointer could not be shown", it) }
+        } else {
+            runCatching { windows.updateViewLayout(shown, params) }
+        }
+    }
+
+    /** BK5: the computer's pointer goes. */
+    fun hidePointer() = main.post { removePointer() }
+
+    private fun removePointer() {
+        val shown = pointer ?: return
+        pointer = null
+        runCatching { getSystemService(WindowManager::class.java).removeView(shown) }
+    }
+
+    /**
+     * BK5: a key from the computer's keyboard in the field in front, never
+     * in a password field ([refused] is told instead): Enter and Backspace
+     * as M4 does them, Delete, and the arrows moving the cursor (up and down
+     * by a line, where the field moves by lines).
+     */
+    fun keyBlind(key: String, refused: () -> Unit) {
+        when (key) {
+            "enter" -> enterBlind(refused)
+            "backspace" -> backspaceBlind(refused)
+            "delete" -> text.post {
+                val node = blindField(refused) ?: return@post
+                val (start, end) = selectionOf(node)
+                setText(node, PointerPlan.deleteForward(textOf(node), start, end))
+            }
+            "left", "right" -> text.post {
+                val node = blindField(refused) ?: return@post
+                val (start, end) = selectionOf(node)
+                val at = PointerPlan.caret(textOf(node), start, end, if (key == "left") -1 else 1)
+                node.performAction(
+                    AccessibilityNodeInfo.ACTION_SET_SELECTION,
+                    Bundle().apply {
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, at)
+                        putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, at)
+                    },
+                )
+            }
+            "up", "down" -> text.post {
+                val node = blindField(refused) ?: return@post
+                node.performAction(
+                    if (key == "up") {
+                        AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY
+                    } else {
+                        AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
+                    },
+                    Bundle().apply {
+                        putInt(
+                            AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT,
+                            AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE,
+                        )
+                        putBoolean(AccessibilityNodeInfo.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN, false)
+                    },
+                )
+            }
         }
     }
 
