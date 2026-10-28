@@ -12,7 +12,9 @@
 //! The computer driving decides where its keyboard and mouse are
 //! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
 //! and, on Windows, captures them (`capture_windows`), staying put while a
-//! game is in front ([`game_lock`]). A computer that will not be driven
+//! game is in front ([`game_lock`]); files dragged in Explorer and let go
+//! on the computer driven are sent to it ([`drag_files`], caught on Windows
+//! by `drop_windows`). A computer that will not be driven
 //! says so ([`wire::Msg::Refuse`]); how things stand is written for the
 //! desktop app ([`status`]), and its requests are taken ([`asks`]). Each
 //! switch, and Identify, flashes a computer's name on its screens
@@ -23,7 +25,10 @@ pub mod awake;
 pub mod badge;
 #[cfg(windows)]
 pub mod capture_windows;
+pub mod drag_files;
 pub mod drive;
+#[cfg(windows)]
+pub mod drop_windows;
 pub mod game_lock;
 pub mod held;
 pub mod keys_windows;

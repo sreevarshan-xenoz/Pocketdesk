@@ -18,15 +18,19 @@
 //! ([`game_lock`]), and at once when a window comes to the front (an
 //! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
 //! hook): a game in front puts the input thread in [`Mode::Off`], with no
-//! hooks of any kind. The probes run on the loop's own thread.
+//! hooks of any kind. The probes run on the loop's own thread. A drag of
+//! files held as the cursor goes away finds the catcher under the parked
+//! cursor, and what is dropped on it is sent to the computer driven
+//! ([`drag_files`], [`drop_windows`]).
 //!
 //! The hook reports physical pixels; the loop works in logical ones
 //! ([`Desktop`]), as the layout does. Nothing here is run by the tests: they
 //! must not hook, hide the cursor or move it on the owner's computer.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -68,8 +72,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 use super::awake::KeepAwake;
+use super::badge;
+use super::drag_files::{self, Catch, Catcher, Dropped, Outcome};
 use super::drive::{Action, Driver, OpenChannel, SavedLayout, layout_for, reachable};
 pub use super::drive::{Captured, Mode};
+use super::drop_windows::{self, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::screens::{Desktop, Motion};
@@ -86,11 +93,11 @@ const WM_SET_MODE: u32 = WM_APP + 1;
 const WM_PUT_CURSOR: u32 = WM_APP + 2;
 
 /// A point in one `LPARAM`: x in the low 32 bits, y in the high.
-fn pack((x, y): (i32, i32)) -> isize {
+pub(super) fn pack((x, y): (i32, i32)) -> isize {
     ((u64::from(y as u32) << 32) | u64::from(x as u32)) as isize
 }
 
-fn unpack(packed: isize) -> (i32, i32) {
+pub(super) fn unpack(packed: isize) -> (i32, i32) {
     let bits = packed as u64;
     (bits as u32 as i32, (bits >> 32) as u32 as i32)
 }
@@ -507,6 +514,11 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
     if down && locks_here(modifiers_down(s.mods), info.vkCode) {
         let _ = s.events.send(Captured::LockKey);
         return true;
+    }
+    // Esc while files dragged across are over the catcher: Windows' own,
+    // cancelling the drag (BK4), and never sent.
+    if drag_files::esc_cancels_drag(info.vkCode, down, drop_windows::files_over()) {
+        return false;
     }
     let _ = s.events.send(Captured::Key {
         scan: info.scanCode as u16,
@@ -1066,6 +1078,21 @@ struct Glue {
     parking: Option<Instant>,
     motion: Motion,
     awake: KeepAwake,
+    /// Files dragged across the edge (BK4): the setting, the catcher's
+    /// state, its window's thread once a drag first needs it (or that it
+    /// would not start), and where its drops come in.
+    files_on: bool,
+    catcher: Catcher,
+    drop_catcher: Option<DropCatcher>,
+    catcher_failed: bool,
+    drops: (Sender<Vec<PathBuf>>, Receiver<Vec<PathBuf>>),
+}
+
+/// Whether Windows has a mouse button down that a drag could be carried
+/// by: the left or the right (GetAsyncKeyState reads the buttons as they
+/// are, not as swapped for a left hand, and Explorer drags with either).
+fn drag_held() -> bool {
+    windows_holds(0x01) || windows_holds(0x02)
 }
 
 impl Glue {
@@ -1168,6 +1195,10 @@ impl Glue {
                         self.motion.reset();
                         self.park = Some(((x, y), physical, self.desktop.scale_at(physical)));
                         self.parking = Some(Instant::now());
+                        // A drag held here goes with the cursor: the
+                        // catcher is under it before it lands (BK4).
+                        let catch = self.catcher.parking(physical, self.files_on, drag_held());
+                        self.catch(catch);
                         self.input.put_cursor(physical, true);
                     }
                 }
@@ -1175,6 +1206,9 @@ impl Glue {
                     // An image still on its way to the computer left goes
                     // no further (BK3).
                     crate::clipboard_push::came_home();
+                    // A drag carried back drops on Windows' own (BK4).
+                    let catch = self.catcher.home();
+                    self.catch(catch);
                     self.park = None;
                     self.parking = None;
                     self.input
@@ -1217,6 +1251,62 @@ impl Glue {
         }
     }
 
+    /// Put the catcher up or down, starting its thread the first time it
+    /// is wanted (once: one that would not start is not tried again).
+    fn catch(&mut self, catch: Option<Catch>) {
+        match catch {
+            Some(Catch::Show(at)) => {
+                if self.drop_catcher.is_none() && !self.catcher_failed {
+                    self.drop_catcher = DropCatcher::start(self.drops.0.clone());
+                    self.catcher_failed = self.drop_catcher.is_none();
+                }
+                match self.drop_catcher.as_mut() {
+                    Some(catcher) => catcher.show(at),
+                    None => {
+                        self.catcher.home();
+                    }
+                }
+            }
+            Some(Catch::Hide) => {
+                if let Some(catcher) = self.drop_catcher.as_mut() {
+                    catcher.hide();
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The catcher looked at (each turn of the loop while it is up), and
+    /// the files dropped on it sent on their way.
+    fn files_dropped(&mut self, driver: &Driver) {
+        if self.catcher.shown() {
+            let catch = self.catcher.look(
+                self.files_on,
+                drag_held(),
+                drop_windows::files_over(),
+                Instant::now(),
+            );
+            self.catch(catch);
+        }
+        while let Ok(items) = self.drops.1.try_recv() {
+            let internet_files = crate::events::current_config().internet_files;
+            match drag_files::on_drop(items, self.files_on, internet_files, driver.away_on()) {
+                Dropped::Send {
+                    to,
+                    items,
+                    left_out,
+                } => {
+                    let name = driver.name_of(&to);
+                    tokio::spawn(send_dropped(to, name, items, left_out));
+                }
+                Dropped::Keep(Some(why)) => tell(why),
+                Dropped::Keep(None) => {
+                    tracing::debug!("Shared input: files dropped with no computer to go to")
+                }
+            }
+        }
+    }
+
     /// What the input thread saw, in the driver's logical pixels; `None`
     /// for a movement too small to count yet.
     fn logical(&mut self, driver: &Driver, captured: Captured) -> Option<Captured> {
@@ -1248,6 +1338,118 @@ impl Glue {
             }
         }
     }
+}
+
+/// How long a drop's sends are watched for one that did not go.
+const DROP_WATCH: Duration = Duration::from_secs(30);
+/// How often the sent list is looked at meanwhile.
+const DROP_WATCH_EVERY: Duration = Duration::from_millis(500);
+
+/// Set while a game holds the keyboard and mouse here, for the words on
+/// a drop's sends that come after the cursor is home.
+static GAME_HELD: AtomicBool = AtomicBool::new(false);
+
+/// A word for the owner on files dragged across: logged, and flashed
+/// unless a game is in front by then (as the driver's own badges).
+fn tell(words: &str) {
+    tracing::info!(
+        "Shared input: {}",
+        words.lines().collect::<Vec<_>>().join("; ")
+    );
+    if !GAME_HELD.load(Ordering::SeqCst) {
+        badge::flash(&badge::of(&badge::Event::Note(words)), badge::SWITCH_FOR);
+    }
+}
+
+/// Files dragged across and let go on the computer `to` (named `name` to
+/// the owner): each queued for it as the desktop app's Send queues one, so
+/// the server's checks, a folder's send and the sent list follow; then
+/// watched a while, so one that does not go is told. Logged by count and
+/// size, never by name.
+async fn send_dropped(to: String, name: String, items: Vec<PathBuf>, left_out: usize) {
+    let Ok(dir) = crate::state::state_dir() else {
+        tell(&drag_files::not_sent(&name, "no state folder"));
+        return;
+    };
+    let queued = {
+        let dir = dir.clone();
+        tokio::task::spawn_blocking(move || queue_dropped(&dir, &to, &items)).await
+    };
+    let Ok(queued) = queued else {
+        return;
+    };
+    tracing::info!(
+        files = queued.files,
+        folders = queued.folders,
+        bytes = queued.bytes,
+        left_out,
+        "Shared input: files dragged across, queued for the computer driven"
+    );
+    if queued.ids.is_empty() {
+        tell(&drag_files::not_sent(&name, "they could not be queued"));
+        return;
+    }
+    tell(&drag_files::sending(
+        queued.files,
+        queued.folders,
+        &name,
+        left_out,
+    ));
+    let deadline = tokio::time::Instant::now() + DROP_WATCH;
+    while tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(DROP_WATCH_EVERY).await;
+        let rows = {
+            let dir = dir.clone();
+            tokio::task::spawn_blocking(move || pocketdesk_core::local::sent::read(&dir))
+                .await
+                .unwrap_or_default()
+        };
+        match drag_files::outcome(&rows, &queued.ids) {
+            Outcome::Waiting => {}
+            Outcome::Sent => return,
+            Outcome::Failed(reason) => {
+                tell(&drag_files::not_sent(&name, &reason));
+                return;
+            }
+        }
+    }
+}
+
+/// What a drop queued: its requests' ids, how many files and folders, and
+/// the files' bytes.
+struct Queued {
+    ids: Vec<String>,
+    files: usize,
+    folders: usize,
+    bytes: u64,
+}
+
+/// Queue each of `items` for the computer `to` in the outbox.
+fn queue_dropped(dir: &std::path::Path, to: &str, items: &[PathBuf]) -> Queued {
+    let now = pocketdesk_core::local::pin::now_unix();
+    let mut queued = Queued {
+        ids: Vec::new(),
+        files: 0,
+        folders: 0,
+        bytes: 0,
+    };
+    for item in items {
+        let meta = std::fs::metadata(item).ok();
+        match pocketdesk_core::local::outbox::request(dir, to, &item.to_string_lossy(), now) {
+            Ok(request) => queued.ids.push(request.id),
+            Err(e) => {
+                tracing::warn!("Shared input: a file dragged across was not queued: {e}");
+                continue;
+            }
+        }
+        if meta.as_ref().is_some_and(|m| m.is_dir()) {
+            queued.folders += 1;
+        } else {
+            queued.files += 1;
+            queued.bytes += meta.map_or(0, |m| m.len());
+        }
+    }
+    queued
 }
 
 /// Set once the server is stopping: no driver starts again, and the one
@@ -1351,7 +1553,18 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         parking: None,
         motion: Motion::default(),
         awake: KeepAwake::default(),
+        files_on: config.shared_input_files,
+        catcher: Catcher::default(),
+        drop_catcher: None,
+        catcher_failed: false,
+        drops: mpsc::channel(),
     };
+    // The catcher's thread ready before a drag first needs it, so the
+    // first drag carried away does not wait for it to start.
+    if glue.files_on {
+        glue.drop_catcher = DropCatcher::start(glue.drops.0.clone());
+        glue.catcher_failed = glue.drop_catcher.is_none();
+    }
     // The owner's arrangement, read again when its file changes.
     let mut saved = SavedLayout::default();
     let mut read_layout = |glue: &Glue| {
@@ -1400,6 +1613,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             let actions = driver.shutdown();
             glue.apply(&mut driver, actions);
             status::set_keyboard_on(None);
+            GAME_HELD.store(false, Ordering::SeqCst);
             // Dropping the glue restores the cursors; the supervisor starts a
             // fresh driver after a pause.
             return;
@@ -1426,6 +1640,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        // Files dragged across: the catcher looked at, its drops sent.
+        glue.files_dropped(&driver);
         // The computer driven answering its pings, or not: one silent for
         // a second brings the keyboard and mouse home.
         let now = Instant::now();
@@ -1473,6 +1689,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         // Where the keyboard and mouse are, for the app's page.
         status::set_keyboard_on(driver.away_on());
+        GAME_HELD.store(driver.game_held(), Ordering::SeqCst);
         // Away, a desktop switch (a secure prompt hides key-ups) or a link
         // that turned relayed or closed brings it home.
         if let Some(to) = driver.away_on().map(str::to_string)
@@ -1506,6 +1723,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
+            glue.files_on = config.shared_input_files;
             let actions = driver.set_game_lock(game_lock_on, lock_programs.clone());
             glue.apply(&mut driver, actions);
             let desktop = Desktop::arrange(&crate::windows_desktop::monitors_scaled());
@@ -1577,6 +1795,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
     status::set_keyboard_on(None);
+    GAME_HELD.store(false, Ordering::SeqCst);
     // What was just sent goes out before the channels do, for a moment at
     // most: the computer driven hears the leave now, not a second later.
     let deadline = Instant::now() + FLUSH_WAIT;

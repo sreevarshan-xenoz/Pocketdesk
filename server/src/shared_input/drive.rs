@@ -638,7 +638,7 @@ impl Driver {
 
     /// A computer's name as the owner is shown it (on one line, clipped):
     /// it goes into the badge's reasons as it is.
-    fn name_of(&self, device_id: &str) -> String {
+    pub fn name_of(&self, device_id: &str) -> String {
         let name = self
             .layout
             .computers
