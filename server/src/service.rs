@@ -60,25 +60,28 @@ pub async fn run(config: Config) -> Result<()> {
     state::set_pairing_required(config.pairing_required);
 
     let tailscale = TailscaleClient::new().context("failed to initialize Tailscale client")?;
-    // Where Tailscale is not installed this takes many seconds (each probe
-    // waits out its timeout), and a stop asked meanwhile must not wait for it.
-    let probed = unless_stopped(&mut shutdown, async {
-        let tailscale_ready = match tailscale.wait_for_ready(Duration::from_secs(5)).await {
-            Ok(_) => true,
-            Err(e) => {
-                tracing::warn!("Tailscale not ready: {e}");
-                false
+    // Tailscale only adds a log line here, and where it is not installed its
+    // probe takes many seconds (each local address waits out its timeout,
+    // about 2 s even refused on Windows): run beside start-up, it no longer
+    // keeps the control port closed that long.
+    let probe = tailscale.clone();
+    tokio::spawn(async move {
+        match probe.wait_for_ready(Duration::from_secs(5)).await {
+            Ok(()) => {
+                if let Ok(ip) = probe.get_self_ip().await {
+                    tracing::info!("Tailscale online at {}", ip);
+                }
             }
-        };
-        // For the LAN announcement only, which leaves the tailnet's addresses out.
-        let local_ips = pocketdesk_core::tailscale::lan::get_local_ips().await;
-        if tailscale_ready && let Ok(ip) = tailscale.get_self_ip().await {
-            tracing::info!("Tailscale online at {}", ip);
+            Err(e) => tracing::warn!("Tailscale not ready: {e}"),
         }
-        local_ips
-    })
-    .await;
-    let Some(local_ips) = probed else {
+    });
+    // For the LAN announcement only, which leaves the tailnet's addresses out.
+    let Some(local_ips) = unless_stopped(
+        &mut shutdown,
+        pocketdesk_core::tailscale::lan::get_local_ips(),
+    )
+    .await
+    else {
         return Ok(());
     };
 
