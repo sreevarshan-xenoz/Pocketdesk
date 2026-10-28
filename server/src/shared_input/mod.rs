@@ -14,10 +14,13 @@
 //! and, on Windows, captures them (`capture_windows`), staying put while a
 //! game is in front ([`game_lock`]). A computer that will not be driven
 //! says so ([`wire::Msg::Refuse`]); how things stand is written for the
-//! desktop app ([`status`]), and its requests are taken ([`asks`]).
+//! desktop app ([`status`]), and its requests are taken ([`asks`]). Each
+//! switch, and Identify, flashes a computer's name on its screens
+//! ([`badge`], drawn by [`crate::overlay`]).
 
 pub mod asks;
 pub mod awake;
+pub mod badge;
 #[cfg(windows)]
 pub mod capture_windows;
 pub mod drive;

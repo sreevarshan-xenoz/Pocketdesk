@@ -62,6 +62,40 @@ impl Screen {
     }
 }
 
+/// Whether `c` is shown as a space in a name put before the owner: a
+/// control character (a newline would add a line), or one that is unseen
+/// but turns or hides text around it (zero-width ones, the line and
+/// paragraph separators, and the bidirectional marks, embeddings,
+/// overrides and isolates).
+pub fn unshown(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// `name` as the owner is shown it: on one line, each [`unshown`]
+/// character a space, trimmed, and cut to `most` characters (an ellipsis
+/// marking the cut).
+pub fn display_name(name: &str, most: usize) -> String {
+    let flat: String = name
+        .chars()
+        .map(|c| if unshown(c) { ' ' } else { c })
+        .collect();
+    let flat = flat.trim();
+    if flat.chars().count() <= most {
+        return flat.to_string();
+    }
+    let mut cut: String = flat.chars().take(most.saturating_sub(1)).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('\u{2026}');
+    cut
+}
+
 /// `name` cut to at most [`MAX_NAME_BYTES`] at a character, without its
 /// control characters.
 pub fn clean_name(name: &str) -> String {
@@ -425,6 +459,10 @@ pub struct StatusFile {
     /// since their link last opened: they let it drive them.
     #[serde(default)]
     pub answered: BTreeSet<String>,
+    /// The shared keyboard and mouse is on here (`shared_input`), as the
+    /// server last read it: the tray's line shows only then.
+    #[serde(default)]
+    pub sharing_on: bool,
 }
 
 /// How things stand, as the server last wrote. A missing or unreadable file
@@ -680,6 +718,18 @@ mod tests {
     }
 
     #[test]
+    fn a_name_is_shown_tame() {
+        // Bidirectional overrides and isolates, zero-width characters and
+        // separators turn no text around and add no line.
+        let sly = "Lap\u{202E}pot\u{2066}x\u{2069}\u{200B}y\u{2028}z\u{FEFF}";
+        assert_eq!(display_name(sly, 64), "Lap pot x  y z");
+        assert_eq!(display_name("a\nb", 64), "a b");
+        assert_eq!(display_name("  long name  ", 6), "long\u{2026}");
+        assert_eq!(display_name("short", 64), "short");
+        assert!(unshown('\u{200F}') && unshown('\u{2029}') && !unshown('\u{00E9}'));
+    }
+
+    #[test]
     fn status_file_round_trips() {
         let dir = temp("status");
         assert_eq!(read_status(&dir), StatusFile::default());
@@ -690,6 +740,7 @@ mod tests {
                 ("other".to_string(), REFUSED_SHARING_OFF.to_string()),
             ]),
             answered: BTreeSet::from(["peer".to_string()]),
+            sharing_on: true,
         };
         write_status(&dir, &status).unwrap();
         assert_eq!(read_status(&dir), status);

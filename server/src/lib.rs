@@ -53,6 +53,7 @@ pub mod mic_relay;
 mod notification_listener_windows;
 pub mod notification_monitor;
 pub mod offers;
+pub mod overlay;
 pub mod packets;
 pub mod paused;
 pub mod peer_computers;

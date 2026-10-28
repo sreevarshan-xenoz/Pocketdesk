@@ -82,6 +82,13 @@ zbus.workspace = true
 evdev.workspace = true
 # X11's clipboard changes (T2): XFixes selection events.
 x11rb = { version = "0.13", features = ["xfixes"] }
+# The shared keyboard and mouse's badge on wlroots compositors: a
+# layer-shell surface (the versions core's laser dot uses), its words drawn
+# with ab_glyph (pure Rust, Apache-2.0) in a memfd buffer.
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["client"] }
+ab_glyph = "0.2"
+libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

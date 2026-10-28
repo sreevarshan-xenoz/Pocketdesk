@@ -167,6 +167,16 @@ fn main() {
                 pocketdesk_core::local::pause::current(&state_dir, now).as_ref(),
                 now,
             );
+            // The shared keyboard and mouse: which computer has them now,
+            // while sharing is on and the server runs.
+            let sharing = keyboard_status(&state_dir, snapshot.running).filter(|s| s.sharing_on);
+            let keyboard = sharing.as_ref().and_then(|status| {
+                pocketdesk_desktop::tray_menu::keyboard_line(
+                    Some(status),
+                    &computer_names(&state_dir, &snapshot),
+                )
+            });
+            entries = pocketdesk_desktop::tray_menu::with_keyboard(entries, keyboard);
             // H4: the key names itself where its action is.
             if key.status.registered
                 && let Some(phone) = hotkey::phone(&rows)
@@ -183,6 +193,40 @@ fn main() {
             refreshed = Some(Instant::now());
         }
     }
+}
+
+/// The shared keyboard and mouse as the running server last wrote it;
+/// none while it is not running (what it left behind is old).
+fn keyboard_status(
+    state_dir: &Path,
+    running: bool,
+) -> Option<pocketdesk_core::local::shared_input::StatusFile> {
+    running.then(|| pocketdesk_core::local::shared_input::read_status(state_dir))
+}
+
+/// The owner's other computers' names by device id: as they said them with
+/// their screens, else as paired. Read only while sharing is on.
+fn computer_names(
+    state_dir: &Path,
+    snapshot: &model::Snapshot,
+) -> std::collections::BTreeMap<String, String> {
+    let mut names: std::collections::BTreeMap<String, String> =
+        snapshot.paired_computers.iter().cloned().collect();
+    names.extend(
+        snapshot
+            .devices
+            .iter()
+            .filter(|d| d.computer)
+            .filter_map(|d| Some((d.id.clone(), d.name.clone()?))),
+    );
+    names.extend(
+        pocketdesk_core::local::shared_input::read(state_dir)
+            .computers
+            .into_iter()
+            .filter(|c| !c.name.trim().is_empty())
+            .map(|c| (c.device_id, c.name)),
+    );
+    names
 }
 
 /// The send-the-clipboard key's id with `RegisterHotKey` (H3).

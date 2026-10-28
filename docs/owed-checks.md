@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-880 open items.
+886 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 110 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 113 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
 | A second computer | 28 |
-| A Linux desktop (the Azure VM serves for some) | 169 |
+| A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 368 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 369 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -450,6 +450,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The gaming lock: a full-screen game in front keeps the pointer on Windows at the edge (the log says so, and no hook is installed meanwhile); Alt+Tab out and within a second the edge crosses again; a game started while the pointer is on Linux brings it home; a game that scrolls at the screen's edge, brought to the front with the pointer there, does not cross. (where: owner)
 - The switch key mid-game goes to Linux and back, the game getting its mouse again; a program on the always-stay list locks only while it is in front. (where: owner)
 - With a kernel anti-cheat running (Vanguard, FACEIT, Easy Anti-Cheat or BattlEye), the switch key mid-game is refused and the log says why; an elevated program in front is refused with the `install --elevated` hint. (where: owner)
+- The badge on Windows: crossing onto Linux flashes "Keyboard and mouse: <laptop>" in the middle of each Windows monitor for about a second, and coming back "Keyboard and mouse: <this computer>"; sharp at 100% and 125%; a click on it lands on the window under it, the window typed in keeps the focus, it is in neither the taskbar nor Alt+Tab, and two quick switches show one badge, not two. (where: owner)
+- Nothing flashes over a full-screen game in front (the gaming lock's words go to the log only), and the game draws as before. (where: owner)
+- Identify on the Keyboard and mouse page: this computer flashes "This is <name>" for about 3 seconds and so does each computer it can drive; a computer not allowed to drive another makes it flash nothing. (where: owner)
 
 ## A phone with a SIM
 
@@ -1258,6 +1261,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Hyprland, the same; and a video playing (an idle inhibitor) not keeping it from locking where the compositor offers version 2. (where: linux)
 - A compositor without `ext-idle-notify-v1`: never locks, as before. (where: linux)
 - V5: the desktop app's Settings shows "Lock after the phone leaves" on Linux, and a change there is taken without a restart. (where: linux)
+
+**214. Driving another computer from Windows (shared input)**
+
+- The badge on Linux (Hyprland or Sway): the cursor arriving flashes "Keyboard and mouse: <laptop>" in the middle of each output, sharp at the output's scale; clicks go through it and the keyboard focus stays; a screenshot of the headless session shows it. (where: linux)
+- GNOME (no layer shell), or no font found: an ordinary switch shows nothing, while Identify and a return for a reason (the laptop's sharing turned off, its link pulled) come as a desktop notification. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -2293,3 +2301,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - KDE Connect on Android, paired: a file from the Files page and from `pocketdesk send <device>` lands in its Downloads, its name and date kept; two files one after the other. (where: by hand)
 - The device not connected: the send fails in the Sent list with why; a folder refused with why. (where: by hand)
 - Windows: `pocketdesk install` opening TCP 1739-1764, and a device coming for a file through the firewall. (where: by hand)
+
+**214. Driving another computer from Windows (shared input)**
+
+- The tray's menu: "Keyboard and mouse: this computer", then the laptop's name within about a second of crossing; no line with sharing off or the server stopped. (where: by hand)

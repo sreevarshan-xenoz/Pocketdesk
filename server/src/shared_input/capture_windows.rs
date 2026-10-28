@@ -1091,7 +1091,16 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
-                Action::Badge(words) => tracing::info!("Shared input: {words}"),
+                Action::Badge(said_here) => {
+                    let said = said_here.text.lines().collect::<Vec<_>>().join("; ");
+                    tracing::info!("Shared input: {said}");
+                    // Never over a game in front: a window above it could
+                    // change how it draws, and the gaming lock promises a
+                    // game runs as it would without Pocketdesk.
+                    if !driver.game_held() {
+                        super::badge::flash(&said_here, super::badge::SWITCH_FOR);
+                    }
+                }
             }
         }
     }
@@ -1276,9 +1285,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 glue.apply(&mut driver, actions);
             }
             let why = match link::connection(&to) {
-                None => {
-                    Some("The link to that computer closed: the keyboard and mouse are back here")
-                }
+                None => Some("The link to that computer closed"),
                 Some(conn) if !link::is_direct(&conn) => Some(
                     "The link to that computer went through a relay: the keyboard and mouse are \
                      shared only on a direct link",

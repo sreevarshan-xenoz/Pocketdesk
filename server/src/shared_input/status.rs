@@ -82,6 +82,7 @@ pub fn status_from(
         keyboard_on,
         link,
         answered,
+        sharing_on: false,
     }
 }
 
@@ -135,8 +136,9 @@ pub fn paired_at(state_dir: &Path, trust: Option<&Path>) -> Option<BTreeSet<Stri
     Some(paired)
 }
 
-/// Write `status` to `shared_input_status.json` unless it is what was last
-/// written (`last`), and, with sharing on and the file there, keep
+/// Write `status` to `shared_input_status.json` (with whether sharing is
+/// on, `sharing_on`) unless it is what was last written (`last`), and,
+/// with sharing on and the file there, keep
 /// `shared_screens.json` to the `paired` computers. With no reading of
 /// which are paired (`None`) nothing is pruned and each computer's link is
 /// left as last written. Blocking file work.
@@ -147,6 +149,7 @@ pub fn write_if_changed(
     sharing_on: bool,
     last: &mut Option<StatusFile>,
 ) {
+    status.sharing_on = sharing_on;
     match paired {
         Some(paired) => {
             let there = state_dir
@@ -310,6 +313,7 @@ mod tests {
             keyboard_on: String::new(),
             link: BTreeMap::from([("peer".to_string(), LINK_DIRECT.to_string())]),
             answered: BTreeSet::new(),
+            sharing_on: true,
         };
         let mut last = Some(before.clone());
         let now = StatusFile {
@@ -322,6 +326,7 @@ mod tests {
         let written = shared_input::read_status(&dir);
         assert_eq!(written.link, before.link, "the links as they were");
         assert_eq!(written.keyboard_on, "peer");
+        assert!(written.sharing_on, "sharing on, as the server read it");
         // A good reading prunes; with sharing off the screens are left be.
         std::fs::remove_file(dir.join(COMPUTERS_FILE)).unwrap();
         let none = paired_at(&dir, Some(&trust));

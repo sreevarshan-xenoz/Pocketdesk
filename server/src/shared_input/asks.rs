@@ -1,7 +1,8 @@
 //! The desktop app's requests for the shared keyboard and mouse, one file
 //! each in `shared_input_out/`: Identify, which has each computer this one
-//! can drive now show who it is ([`Msg::Identify`], carrying this
-//! computer's name: the one that asks).
+//! can drive now flash its own name ([`Msg::Identify`], carrying this
+//! computer's name, the one that asks, for the other's log), and this one
+//! its own.
 
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
@@ -9,6 +10,7 @@ use std::time::Duration;
 use pocketdesk_core::local::paths::SHARED_INPUT_DIR;
 use pocketdesk_core::local::shared_input::{self, ShareAsk};
 
+use super::badge;
 use super::link::{self, Channel};
 use super::wire::Msg;
 
@@ -32,11 +34,16 @@ pub fn identify_targets(
     to
 }
 
-/// Ask each computer this one can drive now to show who it is.
+/// Ask each computer this one can drive now to show who it is, and show
+/// this one's name here too.
 async fn identify() {
     let name = tokio::task::spawn_blocking(|| crate::kde::host_identity().device_name)
         .await
         .unwrap_or_default();
+    badge::flash(
+        &badge::of(&badge::Event::Identify { here: &name }),
+        badge::IDENTIFY_FOR,
+    );
     let direct: HashMap<String, bool> = link::linked()
         .into_iter()
         .filter_map(|id| {
