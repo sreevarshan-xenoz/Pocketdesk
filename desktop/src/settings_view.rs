@@ -28,18 +28,20 @@ pub enum Section {
     Wake,
     Automation,
     Computers,
+    SharedInput,
     KdeConnect,
     Advanced,
 }
 
 impl Section {
-    pub const ALL: [Section; 8] = [
+    pub const ALL: [Section; 9] = [
         Section::Connection,
         Section::Phones,
         Section::Notifications,
         Section::Wake,
         Section::Automation,
         Section::Computers,
+        Section::SharedInput,
         Section::KdeConnect,
         Section::Advanced,
     ];
@@ -52,6 +54,7 @@ impl Section {
             Section::Wake => "Wake",
             Section::Automation => "Automation",
             Section::Computers => "Other computers",
+            Section::SharedInput => "Keyboard and mouse",
             Section::KdeConnect => "KDE Connect",
             Section::Advanced => "Advanced",
         }
@@ -66,6 +69,7 @@ impl Section {
             Section::Wake => "waking this computer from a phone",
             Section::Automation => "event log, hooks, tasks, Home Assistant",
             Section::Computers => "pairing and sharing with your other computers",
+            Section::SharedInput => "one keyboard and mouse across your computers",
             Section::KdeConnect => "devices that run KDE Connect",
             Section::Advanced => "screen capture, logs, relays, the DHT",
         }
@@ -305,6 +309,36 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "shared_input",
+        "Share my keyboard and mouse with my computers",
+        Section::SharedInput,
+    ),
+    (
+        "shared_input_drive",
+        "This computer's keyboard and mouse can move to the others",
+        Section::SharedInput,
+    ),
+    (
+        "shared_input_hotkey",
+        "Switch computer with a key",
+        Section::SharedInput,
+    ),
+    (
+        "shared_input_game_lock",
+        "Stay on this computer while a game runs",
+        Section::SharedInput,
+    ),
+    (
+        "shared_input_lock_programs",
+        "Always stay while these programs are in front",
+        Section::SharedInput,
+    ),
+    (
+        "shared_input_clipboard",
+        "Clipboard follows the mouse",
+        Section::SharedInput,
+    ),
+    (
         "kdeconnect_compat",
         "KDE Connect devices",
         Section::KdeConnect,
@@ -411,6 +445,13 @@ fn drawn_here(key: &str) -> bool {
         // R3: the lock on Linux too.
         "away_lock_minutes" => cfg!(any(windows, target_os = "linux")),
         "mic_relay_device" => cfg!(windows),
+        // The shared keyboard and mouse runs on Windows and Linux.
+        "shared_input"
+        | "shared_input_drive"
+        | "shared_input_hotkey"
+        | "shared_input_game_lock"
+        | "shared_input_lock_programs"
+        | "shared_input_clipboard" => cfg!(any(windows, target_os = "linux")),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
@@ -515,6 +556,12 @@ pub fn applies_live(key: &str) -> bool {
             | "phone_alarms"
             | "link_rules"
             | "away_lock_minutes"
+            // The key is read at start; the rest at each crossing.
+            | "shared_input"
+            | "shared_input_drive"
+            | "shared_input_game_lock"
+            | "shared_input_lock_programs"
+            | "shared_input_clipboard"
     )
 }
 
@@ -553,6 +600,8 @@ pub struct SettingsForm {
     pattern_checks: std::cell::RefCell<std::collections::HashMap<String, Option<String>>>,
     /// The text box behind `hold_words`: one rule a line (P4).
     pub hold_words_text: String,
+    /// The text box behind `shared_input_lock_programs`: one program a line.
+    pub lock_programs_text: String,
     /// The settings as the running server read them: saved changes wait
     /// for a restart (the KDE section's buttons follow this, not the box).
     running: Config,
@@ -592,6 +641,7 @@ impl SettingsForm {
             never_like_text: config.clipboard_never_like.join("\n"),
             pattern_checks: Default::default(),
             hold_words_text: config.hold_words.join("\n"),
+            lock_programs_text: config.shared_input_lock_programs.join("\n"),
             saved: config.clone(),
             running: config.clone(),
             edited: config,
@@ -625,6 +675,7 @@ impl SettingsForm {
         self.edited.clipboard_never_from = lines(&self.never_from_text);
         self.edited.clipboard_never_like = lines(&self.never_like_text);
         self.edited.hold_words = lines(&self.hold_words_text);
+        self.edited.shared_input_lock_programs = lines(&self.lock_programs_text);
     }
 
     pub fn dirty(&self) -> bool {
@@ -1885,6 +1936,79 @@ impl SettingsForm {
                     );
                 });
             }
+            Section::SharedInput => {
+                row(ui, "shared_input", |ui| {
+                    ui.checkbox(
+                        &mut e.shared_input,
+                        "one keyboard and mouse for this computer and my other paired computers",
+                    );
+                    note(
+                        ui,
+                        "A pointer pushed past the edge of one screen appears on the next computer, and the keys follow it. Turn it on on each computer, and allow \"Keyboard and mouse\" for each in the other's Devices page: it is off until you do.",
+                    );
+                });
+                let on = e.shared_input;
+                row(ui, "shared_input_drive", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_drive,
+                            "this computer's pointer and keys may be carried onto the others",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "Off, this computer only takes the others' keyboard and mouse: its own stay here.",
+                    );
+                });
+                row(ui, "shared_input_hotkey", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::TextEdit::singleline(&mut e.shared_input_hotkey)
+                            .hint_text("ctrl+alt+right")
+                            .desired_width(160.0),
+                    );
+                    note(
+                        ui,
+                        "Pressed anywhere, moves the keyboard and mouse on to the next computer. Empty is off: the screen's edge still switches. Read when the server starts.",
+                    );
+                });
+                row(ui, "shared_input_game_lock", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_game_lock,
+                            "the pointer stays here while a game is running",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "So a game's mouse is never carried off by a push at the edge.",
+                    );
+                });
+                let lock_programs = &mut self.lock_programs_text;
+                row(ui, "shared_input_lock_programs", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::TextEdit::multiline(lock_programs)
+                            .desired_rows(2)
+                            .hint_text("one program a line, as Blender.exe or blender"),
+                    );
+                    note(
+                        ui,
+                        "While one of these is the window in front, the pointer stays on this computer. By the program's file name.",
+                    );
+                });
+                row(ui, "shared_input_clipboard", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_clipboard,
+                            "what I copy here is ready to paste where the mouse goes",
+                        ),
+                    );
+                });
+            }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
                     ui.checkbox(
@@ -2562,6 +2686,109 @@ mod tests {
                 "{section:?} is empty"
             );
         }
+    }
+
+    /// The shared keyboard and mouse has a section of its own, right after
+    /// the other computers', with its six settings; Windows and Linux draw
+    /// them all.
+    #[test]
+    fn the_keyboard_and_mouse_section_holds_its_six_settings() {
+        assert_eq!(Section::SharedInput.title(), "Keyboard and mouse");
+        assert!(!Section::SharedInput.summary().is_empty());
+        assert!(!Section::SharedInput.opens(), "closed until looked for");
+        let place = |wanted| Section::ALL.iter().position(|s| *s == wanted).unwrap();
+        assert_eq!(
+            place(Section::SharedInput),
+            place(Section::Computers) + 1,
+            "after the other computers'"
+        );
+        let rows: Vec<(&str, &str)> = SETTINGS
+            .iter()
+            .filter(|(_, _, s)| *s == Section::SharedInput)
+            .map(|(key, name, _)| (*key, *name))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "shared_input",
+                    "Share my keyboard and mouse with my computers"
+                ),
+                (
+                    "shared_input_drive",
+                    "This computer's keyboard and mouse can move to the others"
+                ),
+                ("shared_input_hotkey", "Switch computer with a key"),
+                (
+                    "shared_input_game_lock",
+                    "Stay on this computer while a game runs"
+                ),
+                (
+                    "shared_input_lock_programs",
+                    "Always stay while these programs are in front"
+                ),
+                ("shared_input_clipboard", "Clipboard follows the mouse"),
+            ]
+        );
+        for (key, _) in rows {
+            assert_eq!(
+                drawn_here(key),
+                cfg!(any(windows, target_os = "linux")),
+                "{key}"
+            );
+        }
+    }
+
+    /// Everything but the key is read again by the running server; the key
+    /// is read at start, so changing it asks for a restart.
+    #[test]
+    fn the_keyboard_and_mouse_settings_apply_at_once_but_the_key() {
+        for key in [
+            "shared_input",
+            "shared_input_drive",
+            "shared_input_game_lock",
+            "shared_input_lock_programs",
+            "shared_input_clipboard",
+        ] {
+            assert!(applies_live(key), "{key}");
+        }
+        assert!(!applies_live("shared_input_hotkey"));
+        let saved = Config::default();
+        let mut edited = saved.clone();
+        edited.shared_input = true;
+        edited.shared_input_hotkey = "ctrl+alt+left".into();
+        edited.shared_input_lock_programs = vec!["gimp".into()];
+        let (now, later) = split_changes(&saved, &edited);
+        assert_eq!(
+            now,
+            [
+                "Share my keyboard and mouse with my computers",
+                "Always stay while these programs are in front"
+            ]
+        );
+        assert_eq!(later, ["Switch computer with a key"]);
+    }
+
+    /// The programs that keep the pointer are one a line in their box, blank
+    /// lines and spaces left out.
+    #[test]
+    fn the_programs_that_keep_the_pointer_are_one_a_line() {
+        let config = Config {
+            shared_input_lock_programs: vec!["Blender.exe".into(), "gimp".into()],
+            ..Config::default()
+        };
+        let mut form = SettingsForm::from_config(config);
+        assert_eq!(form.lock_programs_text, "Blender.exe\ngimp");
+        assert!(!form.dirty());
+        form.lock_programs_text = " Blender.exe \n\n krita \n".into();
+        form.apply_text_fields();
+        assert_eq!(
+            form.edited.shared_input_lock_programs,
+            ["Blender.exe", "krita"]
+        );
+        assert!(form.dirty());
+        form.undo();
+        assert_eq!(form.lock_programs_text, "Blender.exe\ngimp");
     }
 
     #[test]

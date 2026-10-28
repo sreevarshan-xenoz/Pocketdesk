@@ -107,6 +107,7 @@ pub fn capability_name(capability: Capability) -> &'static str {
         Capability::Peek => "peek",
         Capability::Ask => "ask",
         Capability::Notes => "notes",
+        Capability::SharedInput => "keyboard_and_mouse",
     }
 }
 

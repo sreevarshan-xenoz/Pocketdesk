@@ -138,6 +138,25 @@ video_quality = "balanced"
 # input_control = "one"
 # input_idle_secs = 10
 
+# One keyboard and mouse across your own paired computers (Windows and
+# Linux): a pointer pushed past the edge of one screen appears on the next
+# computer, and the keys follow it. Off until you turn it on, on each
+# computer; each computer must also be allowed "Keyboard and mouse" in the
+# other's Devices page (desktop app), which is off until you turn it on.
+# shared_input = true
+# This computer's keyboard and mouse may move onto the others; false, it only
+# takes theirs.
+# shared_input_drive = true
+# A key that moves on to the next computer; "" is off, and the screen's edge
+# still switches. Restart the server after changing it.
+# shared_input_hotkey = "ctrl+alt+right"
+# The pointer stays on this computer while a game runs, and while one of
+# these programs (by file name) is the window in front.
+# shared_input_game_lock = true
+# shared_input_lock_programs = ["Blender.exe"]
+# What is copied on one computer is ready to paste on the one the mouse goes to.
+# shared_input_clipboard = true
+
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a
 # program to provide a microphone; apps then record from its other end.
