@@ -165,8 +165,8 @@ begin
     FileExists(ExpandConstant('{localappdata}\Microsoft\WindowsApps\winget.exe'));
 end;
 
-{ An upgrade stops the running server, the tray and the app first, so their
-  files can be replaced. The logon task is disabled first: a server that had
+{ An upgrade stops the running server (killing one that outlives `stop`),
+  the tray and the app first, so their files can be replaced. The logon task is disabled first: a server that had
   to be killed would otherwise be restarted by it a minute later, mid-copy.
   `install` registers it again, enabled, when the start-up task is chosen. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -178,6 +178,9 @@ begin
   begin
     Exec(ExpandConstant('{sys}\schtasks.exe'), '/Change /TN "Pocketdesk" /DISABLE', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{app}\pocketdesk.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    { A server that has not exited by then (`stop` waits 10 s) still holds
+      pocketdesk.exe, which could then be replaced only at the next restart. }
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM pocketdesk.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM pocketdesk-tray.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
     Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM pocketdesk-app.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
   end;
