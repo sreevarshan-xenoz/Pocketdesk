@@ -425,6 +425,10 @@ pub struct StatusFile {
     /// since their link last opened: they let it drive them.
     #[serde(default)]
     pub answered: BTreeSet<String>,
+    /// The shared keyboard and mouse is on here (`shared_input`), as the
+    /// server last read it: the tray's line shows only then.
+    #[serde(default)]
+    pub sharing_on: bool,
 }
 
 /// How things stand, as the server last wrote. A missing or unreadable file
@@ -690,6 +694,7 @@ mod tests {
                 ("other".to_string(), REFUSED_SHARING_OFF.to_string()),
             ]),
             answered: BTreeSet::from(["peer".to_string()]),
+            sharing_on: true,
         };
         write_status(&dir, &status).unwrap();
         assert_eq!(read_status(&dir), status);

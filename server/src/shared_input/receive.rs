@@ -10,7 +10,8 @@
 //! when its link goes, and when its permission does. A computer that may
 //! not drive this one is told so ([`Msg::Refuse`]) when it says hello or
 //! enters, and a computer that could is told when sharing is turned off
-//! here or its permission goes.
+//! here or its permission goes. A computer that may drive this one has it
+//! flash its name ([`badge`]) when its cursor arrives, and on Identify.
 //!
 //! [`Capability::SharedInput`]: pocketdesk_core::protocol::permissions::Capability::SharedInput
 
@@ -23,6 +24,7 @@ use pocketdesk_core::protocol::permissions::Capability;
 use pocketdesk_core::streaming::input_packet::InputPacket;
 
 use super::awake::KeepAwake;
+use super::badge;
 use super::held::HeldInput;
 use super::link::{self, Channel};
 use super::screens;
@@ -46,6 +48,11 @@ pub trait Inject: Send {
     /// at the first event misses it (libinput opens new devices a moment
     /// after they appear).
     fn prepare(&mut self) {}
+    /// Flash `text` on this computer's screens for `how_long` (the
+    /// badge: which computer has the keyboard and mouse, Identify).
+    fn badge(&mut self, text: &str, how_long: Duration) {
+        crate::overlay::flash(text, how_long);
+    }
 }
 
 impl Inject for InputInjector {
@@ -113,6 +120,8 @@ pub struct Receiver {
     active_at: Option<Instant>,
     /// When anything last came from the driving computer.
     heard_at: Option<Instant>,
+    /// This computer's name, for its badge.
+    name: String,
 }
 
 impl Receiver {
@@ -124,7 +133,13 @@ impl Receiver {
             last_seq: None,
             active_at: None,
             heard_at: None,
+            name: String::new(),
         }
+    }
+
+    /// This computer's name, as its badge shows it.
+    pub fn set_name(&mut self, name: &str) {
+        name.clone_into(&mut self.name);
     }
 
     /// Get the injector ready (sharing is on, or a computer that may
@@ -167,6 +182,12 @@ impl Receiver {
             }
             return;
         }
+        if let Msg::Identify { .. } = msg {
+            // Only a computer that may drive this one has it show its name.
+            let here = badge::Event::Identify { here: &self.name };
+            self.inject.badge(&badge::text(&here), badge::IDENTIFY_FOR);
+            return;
+        }
         if let Msg::Enter { x, y } = msg {
             // A fresh start, whoever enters: what an earlier visit left
             // down is let go of first.
@@ -175,6 +196,10 @@ impl Receiver {
             self.heard_at = Some(now);
             self.last_seq = None;
             self.inject.move_abs(x, y);
+            // Where the cursor arrives, the owner sees whose keyboard and
+            // mouse they are now: this computer's.
+            let here = badge::Event::Arrived { here: &self.name };
+            self.inject.badge(&badge::text(&here), badge::SWITCH_FOR);
             return;
         }
         if self.driver.as_deref() != Some(from) {
@@ -599,6 +624,7 @@ pub async fn run() {
     let mut arriving = link::incoming();
     let state_dir = crate::state::state_dir().ok();
     let mut receiver = Receiver::new(Box::<LazyInjector>::default());
+    receiver.set_name(&crate::kde::host_device_name());
     let mut awake = KeepAwake::default();
     let mut gate = Gate::default();
     // This computer's screens as last looked at (none while shared input
@@ -665,8 +691,8 @@ pub async fn run() {
                     Msg::Screens(screens) if standing.computer => {
                         note_heard(&mut heard, &from, None, screens);
                     }
-                    Msg::Identify { name } if standing.computer => {
-                        // Shown on screen in a later step; said here for now.
+                    Msg::Identify { name } if standing.allowed => {
+                        // Shown on screen by the receiver, below.
                         tracing::info!(
                             from,
                             name,
@@ -752,6 +778,8 @@ pub async fn run() {
                 // Sharing is on: the injector is made now, not at the first
                 // event, which it would miss.
                 receiver.prepare();
+                // The name its badge shows, kept to a rename.
+                receiver.set_name(&crate::kde::host_device_name());
                 if own.note(screens::current().await) {
                     write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
@@ -798,7 +826,17 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
-    struct Fake(Arc<Mutex<Vec<Call>>>, Arc<Mutex<usize>>);
+    struct Fake(
+        Arc<Mutex<Vec<Call>>>,
+        Arc<Mutex<usize>>,
+        Arc<Mutex<Vec<String>>>,
+    );
+
+    impl Fake {
+        fn badges(&self) -> Vec<String> {
+            std::mem::take(&mut *self.2.lock().unwrap())
+        }
+    }
 
     impl Fake {
         fn prepared(&self) -> usize {
@@ -827,6 +865,9 @@ mod tests {
         }
         fn prepare(&mut self) {
             *self.1.lock().unwrap() += 1;
+        }
+        fn badge(&mut self, text: &str, _how_long: Duration) {
+            self.2.lock().unwrap().push(text.to_string());
         }
     }
 
@@ -886,6 +927,49 @@ mod tests {
             true,
         );
         assert_eq!(fake.take(), vec![]);
+    }
+
+    #[test]
+    fn identify_only_from_an_allowed_computer() {
+        let (mut r, fake) = receiver();
+        r.set_name("Laptop");
+        // A computer that may not drive this one cannot make it put
+        // anything up.
+        r.handle(
+            "stranger",
+            Msg::Identify {
+                name: "Someone".to_string(),
+            },
+            false,
+        );
+        assert_eq!(fake.badges(), Vec::<String>::new());
+        // One that may: this computer shows its own name.
+        r.handle(
+            "pc",
+            Msg::Identify {
+                name: "Desk".to_string(),
+            },
+            true,
+        );
+        assert_eq!(fake.badges(), ["This is Laptop"]);
+        // It moves nothing and drives nothing.
+        assert_eq!(r.driver(), None);
+        assert_eq!(fake.take(), vec![]);
+    }
+
+    #[test]
+    fn a_computer_entering_flashes_this_ones_name() {
+        let (mut r, fake) = receiver();
+        r.set_name("Laptop");
+        r.handle("pc", Msg::Enter { x: 1, y: 2 }, true);
+        assert_eq!(fake.badges(), ["Keyboard and mouse: Laptop"]);
+        // Moves and keys flash nothing.
+        r.handle("pc", Msg::Move { seq: 1, x: 3, y: 4 }, true);
+        r.handle("pc", key(30, true), true);
+        assert_eq!(fake.badges(), Vec::<String>::new());
+        // Nor does one that may not drive this one.
+        r.handle("stranger", Msg::Enter { x: 1, y: 2 }, false);
+        assert_eq!(fake.badges(), Vec::<String>::new());
     }
 
     #[test]

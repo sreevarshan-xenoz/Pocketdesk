@@ -99,7 +99,8 @@ pub enum Msg {
     Active {
         idle_ms: u32,
     },
-    /// Ask the receiver to show who is asking (a name, for a badge).
+    /// Ask the receiver to flash its own name (Identify); `name` is the
+    /// asking computer's, for its log.
     Identify {
         name: String,
     },

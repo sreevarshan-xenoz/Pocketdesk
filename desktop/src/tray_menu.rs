@@ -302,6 +302,64 @@ pub fn with_key(mut entries: Vec<Entry>, phone: &str, key: &str) -> Vec<Entry> {
     entries
 }
 
+/// The longest computer name the tray's keyboard line shows, in
+/// characters.
+const COMPUTER_CHARS: usize = 48;
+
+/// The tray's "Keyboard and mouse: <computer>" line from the server's
+/// `shared_input_status.json` (`status`, `None` when there is none or the
+/// server is not running): which computer this one's keyboard and mouse
+/// are on, by its name in `names` (by device id). None while sharing is
+/// off.
+pub fn keyboard_line(
+    status: Option<&pocketdesk_core::local::shared_input::StatusFile>,
+    names: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    let status = status.filter(|s| s.sharing_on)?;
+    let on = status.keyboard_on.trim();
+    let name = if on.is_empty() {
+        "this computer".to_string()
+    } else {
+        let name: String = names
+            .get(on)
+            .map(|n| {
+                n.chars()
+                    .map(|c| if c.is_control() { ' ' } else { c })
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        let name = name.trim();
+        if name.is_empty() {
+            "another computer".to_string()
+        } else if name.chars().count() > COMPUTER_CHARS {
+            let kept: String = name.chars().take(COMPUTER_CHARS - 1).collect();
+            format!("{}…", kept.trim_end())
+        } else {
+            name.to_string()
+        }
+    };
+    Some(format!("Keyboard and mouse: {name}"))
+}
+
+/// `entries` with the keyboard `line` (shown, not picked) before the
+/// first separator, under Open and the pause.
+pub fn with_keyboard(mut entries: Vec<Entry>, line: Option<String>) -> Vec<Entry> {
+    if let Some(label) = line {
+        let at = entries
+            .iter()
+            .position(|e| matches!(e, Entry::Separator))
+            .unwrap_or(entries.len());
+        entries.insert(
+            at,
+            Entry::Item {
+                label,
+                action: None,
+            },
+        );
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     /// N2: a phone's music leads its items, with Play/Pause and Next as
@@ -661,5 +719,63 @@ mod tests {
             })
             .ends_with(" · muted from here, 25 min left")
         );
+    }
+
+    #[test]
+    fn keyboard_line_from_status() {
+        use super::*;
+        use pocketdesk_core::local::shared_input::StatusFile;
+        let names = std::collections::BTreeMap::from([
+            ("L".to_string(), "Laptop".to_string()),
+            ("W".to_string(), "Desk".to_string()),
+        ]);
+        let on = |keyboard_on: &str| StatusFile {
+            keyboard_on: keyboard_on.to_string(),
+            sharing_on: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            keyboard_line(Some(&on("")), &names).as_deref(),
+            Some("Keyboard and mouse: this computer")
+        );
+        assert_eq!(
+            keyboard_line(Some(&on("L")), &names).as_deref(),
+            Some("Keyboard and mouse: Laptop")
+        );
+        // A computer with no name known yet is still said.
+        assert_eq!(
+            keyboard_line(Some(&on("gone")), &names).as_deref(),
+            Some("Keyboard and mouse: another computer")
+        );
+        // A long name is cut.
+        let long = std::collections::BTreeMap::from([("L".to_string(), "n".repeat(100))]);
+        let line = keyboard_line(Some(&on("L")), &long).unwrap();
+        assert!(line.ends_with('…'), "{line}");
+        assert!(line.chars().count() <= "Keyboard and mouse: ".len() + COMPUTER_CHARS);
+        // Sharing off, or no status: no line.
+        let off = StatusFile {
+            keyboard_on: "L".to_string(),
+            sharing_on: false,
+            ..Default::default()
+        };
+        assert_eq!(keyboard_line(Some(&off), &names), None);
+        assert_eq!(keyboard_line(None, &names), None);
+
+        // In the menu: under Open and Pair, before the phones.
+        let entries = menu(&[], &[], 0);
+        let with = with_keyboard(
+            entries.clone(),
+            Some("Keyboard and mouse: Laptop".to_string()),
+        );
+        assert_eq!(
+            with[2],
+            Entry::Item {
+                label: "Keyboard and mouse: Laptop".to_string(),
+                action: None,
+            }
+        );
+        assert_eq!(with[3], Entry::Separator);
+        assert_eq!(with.len(), entries.len() + 1);
+        assert_eq!(with_keyboard(entries.clone(), None), entries);
     }
 }

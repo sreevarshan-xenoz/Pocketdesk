@@ -31,6 +31,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
+use super::badge;
 use super::game_lock::{self, Foreground, Lock};
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
@@ -223,7 +224,7 @@ impl Driver {
                 &mut out,
                 away.from,
                 true,
-                &format!("{to} is no longer reachable: the keyboard and mouse are back here"),
+                Some(&format!("{to} is no longer reachable")),
             );
         }
         out
@@ -254,12 +255,7 @@ impl Driver {
                 self.locked = true;
                 if let Some(away) = &self.away {
                     let park = away.park;
-                    self.go_home(
-                        &mut out,
-                        park,
-                        true,
-                        "This computer locked: the keyboard and mouse are back here",
-                    );
+                    self.go_home(&mut out, park, true, Some("This computer locked"));
                 }
                 self.settle(&mut out);
             }
@@ -273,7 +269,7 @@ impl Driver {
                         &mut out,
                         away.park,
                         true,
-                        "A secure prompt took the screen: the keyboard and mouse are back here",
+                        Some("A secure prompt took the screen"),
                     );
                 }
                 self.settle(&mut out);
@@ -350,7 +346,7 @@ impl Driver {
                 &mut out,
                 away.from,
                 false,
-                &format!("The link to {to} failed: the keyboard and mouse are back here"),
+                Some(&format!("The link to {to} failed")),
             );
         }
         out
@@ -362,7 +358,7 @@ impl Driver {
         let mut out = Vec::new();
         if let Some(away) = self.away.as_ref().filter(|a| a.to == device_id) {
             let park = away.park;
-            self.go_home(&mut out, park, true, why);
+            self.go_home(&mut out, park, true, Some(why));
         }
         out
     }
@@ -380,11 +376,8 @@ impl Driver {
                 REFUSE_SHARING_OFF => "the keyboard and mouse are turned off there",
                 _ => "it does not allow this computer (its Keyboard and mouse page)",
             };
-            let why = format!(
-                "{} won't take input: {why}; the keyboard and mouse are back here",
-                self.name_of(device_id)
-            );
-            self.go_home(&mut out, park, true, &why);
+            let why = format!("{} won't take input: {why}", self.name_of(device_id));
+            self.go_home(&mut out, park, true, Some(&why));
         }
         out
     }
@@ -403,12 +396,7 @@ impl Driver {
                 .all(|c| c.device_id != away.to || c.screens.is_empty());
             if gone {
                 let to = self.name_of(&away.to);
-                self.go_home(
-                    &mut out,
-                    away.park,
-                    true,
-                    &format!("{to} is gone: the keyboard and mouse are back here"),
-                );
+                self.go_home(&mut out, away.park, true, Some(&format!("{to} is gone")));
             } else {
                 let at = self.layout.clamp(&away.to, away.at);
                 if let Some(away) = self.away.as_mut() {
@@ -426,7 +414,7 @@ impl Driver {
         let mut out = Vec::new();
         if let Some(away) = &self.away {
             let park = away.park;
-            self.go_home(&mut out, park, true, "The keyboard and mouse are back here");
+            self.go_home(&mut out, park, true, None);
         }
         if self.mode != Mode::Off {
             self.mode = Mode::Off;
@@ -475,14 +463,12 @@ impl Driver {
             self.home = Some(at);
         }
         let why = match lock {
-            Lock::SnapBack => {
-                Some("A game came to the front here: the keyboard and mouse are back here")
-            }
+            Lock::SnapBack => Some("A game came to the front here"),
             Lock::ForceRefused(why) => Some(why),
             Lock::Free | Lock::Locked => None,
         };
         if let (Some(why), Some(away)) = (why, self.away.clone()) {
-            self.go_home(out, away.park, true, why);
+            self.go_home(out, away.park, true, Some(why));
             return;
         }
         if self.away.is_none() && held != was && !self.targets().is_empty() {
@@ -573,12 +559,7 @@ impl Driver {
         let at = self.layout.clamp(&away.to, to);
         match self.layout.crossing(&away.to, at, dx, dy) {
             Some(crossing) if crossing.to == self.this => {
-                self.go_home(
-                    out,
-                    crossing.at,
-                    true,
-                    "The keyboard and mouse are back here",
-                );
+                self.go_home(out, crossing.at, true, None);
             }
             Some(crossing) if self.reachable.contains(&crossing.to) => {
                 self.leave(out);
@@ -645,7 +626,7 @@ impl Driver {
                 "No other computer to move the keyboard and mouse to".to_string(),
             )),
             (None, Some(away)) => {
-                self.go_home(out, away.park, true, "The keyboard and mouse are back here");
+                self.go_home(out, away.park, true, None);
             }
             (Some(next), away) => {
                 let park = match &away {
@@ -717,10 +698,8 @@ impl Driver {
             out.push(Action::HideCursor(true));
             out.push(Action::KeepAwake(true));
         }
-        out.push(Action::Badge(format!(
-            "The keyboard and mouse are on {}",
-            self.name_of(to)
-        )));
+        let to = self.name_of(to);
+        out.push(Action::Badge(badge::text(&badge::Event::Went { to: &to })));
     }
 
     /// Let go of everything sent down to the computer driven, and leave it.
@@ -735,8 +714,15 @@ impl Driver {
 
     /// Back home, the cursor at `at`: with `releases`, everything sent down
     /// is let go of and the computer driven is left first; without, nothing
-    /// is sent and what was held is forgotten.
-    fn go_home(&mut self, out: &mut Vec<Action>, at: (i32, i32), releases: bool, why: &str) {
+    /// is sent and what was held is forgotten. The badge names this
+    /// computer, with `why` when the owner did not bring them back.
+    fn go_home(
+        &mut self,
+        out: &mut Vec<Action>,
+        at: (i32, i32),
+        releases: bool,
+        why: Option<&str>,
+    ) {
         let at = self.nudge_inside(at);
         if releases {
             self.leave(out);
@@ -752,7 +738,11 @@ impl Driver {
         self.settle(out);
         out.push(Action::HideCursor(false));
         out.push(Action::KeepAwake(false));
-        out.push(Action::Badge(why.to_string()));
+        let here = self.name_of(&self.this);
+        out.push(Action::Badge(badge::text(&badge::Event::Home {
+            here: &here,
+            why,
+        })));
     }
 }
 
@@ -990,6 +980,14 @@ mod tests {
         Msg::Key { code, pressed }
     }
 
+    /// The badge for the keyboard and mouse coming home to W, for `why`.
+    fn home_badge(why: Option<&str>) -> Action {
+        Action::Badge(badge::text(&badge::Event::Home {
+            here: "W computer",
+            why,
+        }))
+    }
+
     /// A driver in `layout` with the given computers reachable.
     fn driver(layout: Layout, reachable: &[&str]) -> Driver {
         let mut d = Driver::new("W", layout);
@@ -1048,6 +1046,38 @@ mod tests {
         assert_eq!(sends(&step), vec![sent("L", Msg::Move { seq: 2, x, y })]);
         // The park point itself is no movement.
         assert_eq!(sends(&d.on(moved(PARK.0, PARK.1))), vec![]);
+    }
+
+    #[test]
+    fn each_switch_names_the_computer_that_has_them() {
+        let mut d = driver(desk(true), &["L", "M"]);
+        d.start();
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        assert!(
+            crossed.contains(&Action::Badge("Keyboard and mouse: L computer".to_string())),
+            "{crossed:?}"
+        );
+        // The switch key on to the next names it.
+        let next = d.on(Captured::Hotkey);
+        assert!(
+            next.contains(&Action::Badge("Keyboard and mouse: M computer".to_string())),
+            "{next:?}"
+        );
+        // Home by the switch key names this computer, with no why.
+        let home = d.on(Captured::Hotkey);
+        assert!(home.contains(&home_badge(None)), "{home:?}");
+        assert_eq!(
+            home_badge(None),
+            Action::Badge("Keyboard and mouse: W computer".to_string())
+        );
+        // Home the owner did not make says why under the name.
+        let mut d = away_on_linux(false);
+        let locked = d.on(Captured::Locked);
+        assert!(
+            locked.contains(&home_badge(Some("This computer locked"))),
+            "{locked:?}"
+        );
     }
 
     #[test]
@@ -1440,9 +1470,7 @@ mod tests {
             sends(&gone),
             vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
         );
-        assert!(gone.contains(&Action::Badge(
-            "the link to L goes through a relay".to_string()
-        )));
+        assert!(gone.contains(&home_badge(Some("the link to L goes through a relay"))));
         assert_eq!(d.away_on(), None);
 
         // The computer driven leaves the layout: home too.
@@ -1476,13 +1504,9 @@ mod tests {
             sends(&back),
             vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
         );
-        assert!(
-            back.contains(&Action::Badge(
-                "L computer won't take input: the keyboard and mouse are turned off there; \
-             the keyboard and mouse are back here"
-                    .to_string()
-            ))
-        );
+        assert!(back.contains(&home_badge(Some(
+            "L computer won't take input: the keyboard and mouse are turned off there"
+        ))));
         assert_eq!(d.away_on(), None);
         // Its edge is a wall now, until the glue says it is reachable again.
         d.on(moved(3440, 480));
@@ -1844,7 +1868,7 @@ mod tests {
         assert_eq!(d.away_on(), Some("L"));
         let back = d.on(in_front(true, true));
         assert_eq!(sends(&back), vec![sent("L", Msg::Leave)]);
-        assert!(back.contains(&Action::Badge(game_lock::ANTI_CHEAT_REFUSED.to_string())));
+        assert!(back.contains(&home_badge(Some(game_lock::ANTI_CHEAT_REFUSED))));
         assert_eq!(d.away_on(), None);
         assert_eq!(d.mode(), Mode::Off);
     }
