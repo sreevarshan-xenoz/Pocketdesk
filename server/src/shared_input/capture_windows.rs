@@ -1726,6 +1726,10 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         for id in answered {
             driver.answered(&id, now);
         }
+        // A key held on the phone driven repeats there (BK5 review M1).
+        if let Some(phone) = driver.away_on().and_then(|to| glue.phones.get_mut(to)) {
+            phone.repeat(now);
+        }
         // A phone's answers come on its control link (BK5).
         for id in &glue.phone_ids {
             if let Some((_, count)) = phone::pongs(id)

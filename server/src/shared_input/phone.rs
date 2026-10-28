@@ -197,6 +197,26 @@ const KEYPAD: [(u16, char); 11] = [
     (83, '.'),
 ];
 
+/// A key held on the phone repeats after this (the review's M1): the
+/// driver sends a key down once, as a computer repeats by itself.
+pub const REPEAT_DELAY: Duration = Duration::from_millis(500);
+
+/// And then once every this long, about 30 a second.
+pub const REPEAT_EVERY: Duration = Duration::from_millis(33);
+
+/// The most repeats one look sends, so a late look does not type a burst.
+const REPEATS_AT_ONCE: u32 = 5;
+
+/// A key held down and what it does there, since when, and how many times
+/// it has repeated.
+#[derive(Debug)]
+struct Held {
+    code: u16,
+    event: PhoneEvent,
+    since: Instant,
+    repeated: u32,
+}
+
 /// The keys that are no text, as evdev codes.
 const KEYS: [(u16, PhoneKey); 9] = [
     (28, PhoneKey::Enter),
@@ -242,10 +262,65 @@ pub struct ToPhone {
     shift: HashSet<u16>,
     shortcut: HashSet<u16>,
     caps: bool,
+    /// The key held now, repeated by [`ToPhone::repeats`].
+    held: Option<Held>,
 }
 
 impl ToPhone {
+    /// The key held down, repeated: after [`REPEAT_DELAY`], once every
+    /// [`REPEAT_EVERY`] until it is let go of, another key goes down or the
+    /// cursor leaves (Enter and Esc never repeat, nor a shortcut).
+    pub fn repeats(&mut self, now: Instant) -> Vec<PhoneEvent> {
+        let Some(held) = self.held.as_mut() else {
+            return Vec::new();
+        };
+        let since = now.saturating_duration_since(held.since);
+        let Some(past) = since.checked_sub(REPEAT_DELAY) else {
+            return Vec::new();
+        };
+        let due =
+            1 + u32::try_from(past.as_millis() / REPEAT_EVERY.as_millis()).unwrap_or(u32::MAX);
+        let n = due.saturating_sub(held.repeated).min(REPEATS_AT_ONCE);
+        // A late look skips what it did not send, as a slow key repeat does.
+        held.repeated = due;
+        vec![held.event.clone(); n as usize]
+    }
+
+    /// The key `code` went down (`pressed`) or up, doing `event` there:
+    /// the one held now, if it repeats.
+    fn note_held(&mut self, code: u16, pressed: bool, event: Option<&PhoneEvent>, now: Instant) {
+        if !pressed {
+            if self.held.as_ref().is_some_and(|h| h.code == code) {
+                self.held = None;
+            }
+            return;
+        }
+        if [LEFT_SHIFT, RIGHT_SHIFT, CAPS_LOCK].contains(&code) || SHORTCUT_KEYS.contains(&code) {
+            return;
+        }
+        let repeats = |e: &&PhoneEvent| {
+            !matches!(
+                e,
+                PhoneEvent::Key {
+                    key: PhoneKey::Enter | PhoneKey::Escape
+                }
+            )
+        };
+        self.held = event.filter(repeats).map(|event| Held {
+            code,
+            event: event.clone(),
+            since: now,
+            repeated: 0,
+        });
+    }
+
+    /// [`ToPhone::events_at`] now.
     pub fn events(&mut self, msg: &Msg) -> Vec<PhoneEvent> {
+        self.events_at(msg, Instant::now())
+    }
+
+    /// `msg` in the phone's words, come at `now`.
+    pub fn events_at(&mut self, msg: &Msg, now: Instant) -> Vec<PhoneEvent> {
         let event = match *msg {
             Msg::Enter { x, y } => {
                 // Nothing held from a visit before.
@@ -269,10 +344,14 @@ impl ToPhone {
             }
             Msg::Wheel { dx, dy } => PhoneEvent::Wheel { dx, dy },
             Msg::Ping { t_us } => PhoneEvent::Ping { t: t_us },
-            Msg::Key { code, pressed } => match self.key(code, pressed) {
-                Some(event) => event,
-                None => return Vec::new(),
-            },
+            Msg::Key { code, pressed } => {
+                let event = self.key(code, pressed);
+                self.note_held(code, pressed, event.as_ref(), now);
+                match event {
+                    Some(event) => event,
+                    None => return Vec::new(),
+                }
+            }
             _ => return Vec::new(),
         };
         vec![event]
@@ -364,6 +443,16 @@ impl PhoneChannel {
                 .map_err(|_| "the phone's link is gone".to_string())?;
         }
         Ok(())
+    }
+
+    /// Send what the key held repeats by `now` ([`ToPhone::repeats`]);
+    /// looked at on each turn of the driver's loop.
+    pub fn repeat(&mut self, now: Instant) {
+        for event in self.to_phone.repeats(now) {
+            if self.events.send(event).is_err() {
+                return;
+            }
+        }
     }
 
     /// Whether its task has ended (the phone's link is gone).
@@ -580,6 +669,54 @@ mod tests {
         to.events(&key(29, true));
         to.events(&Msg::Enter { x: 1, y: 1 });
         assert_eq!(to.events(&key(30, true)), text("a"));
+    }
+
+    /// The review's M1: a key held on the phone repeats after half a
+    /// second, about 30 a second, until it is let go of; Enter and Esc never
+    /// do, and leaving or another key stops it.
+    #[test]
+    fn a_key_held_repeats_until_it_is_let_go_of() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut to = ToPhone::default();
+        assert_eq!(
+            to.events_at(&key(14, true), t0),
+            vec![PhoneEvent::Key {
+                key: PhoneKey::Backspace
+            }]
+        );
+        assert!(to.repeats(at(499)).is_empty(), "not yet");
+        assert_eq!(
+            to.repeats(at(500)),
+            vec![PhoneEvent::Key {
+                key: PhoneKey::Backspace
+            }]
+        );
+        // 533, 566 and 599 since.
+        assert_eq!(to.repeats(at(600)).len(), 3);
+        assert!(to.repeats(at(600)).is_empty(), "each once");
+        // A late look sends a few, not a burst.
+        assert_eq!(to.repeats(at(5_000)).len(), REPEATS_AT_ONCE as usize);
+        to.events_at(&key(14, false), at(5_010));
+        assert!(to.repeats(at(6_000)).is_empty(), "let go of");
+        // Text repeats as text.
+        to.events_at(&key(30, true), at(7_000));
+        assert_eq!(to.repeats(at(7_500)), text("a"));
+        // Another key down takes over; leaving stops it.
+        to.events_at(&key(31, true), at(7_510));
+        assert!(to.repeats(at(7_600)).is_empty(), "its own half second");
+        assert_eq!(to.repeats(at(8_010)), text("s"));
+        to.events_at(&Msg::Leave, at(8_020));
+        assert!(to.repeats(at(9_000)).is_empty());
+        // Enter and Esc, and a shortcut, never repeat.
+        for code in [28, 1] {
+            to.events_at(&key(code, true), at(10_000));
+            assert!(to.repeats(at(11_000)).is_empty(), "{code}");
+            to.events_at(&key(code, false), at(11_000));
+        }
+        to.events_at(&key(29, true), at(12_000));
+        to.events_at(&key(46, true), at(12_000));
+        assert!(to.repeats(at(13_000)).is_empty(), "Ctrl+C");
     }
 
     #[test]
