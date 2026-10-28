@@ -29,6 +29,9 @@ use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
+};
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA, GetMessageW,
@@ -115,7 +118,8 @@ impl DropCatcher {
     /// until it is.
     pub fn show(&mut self, at: (i32, i32)) {
         if !self.ask(WM_CATCHER_SHOW, pack(at)) {
-            tracing::debug!("Shared input: the dragged files' catcher was slow to show");
+            // The cursor parks anyway; the window nudges it once it is up.
+            tracing::warn!("Shared input: the dragged files' catcher was slow to show");
         }
     }
 
@@ -296,6 +300,7 @@ unsafe extern "system" fn catcher_proc(
                     SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 )
             };
+            nudge();
             answer(hwnd, wparam.0);
             LRESULT(0)
         }
@@ -314,6 +319,35 @@ unsafe extern "system" fn catcher_proc(
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         // SAFETY: the default handling for this window's messages.
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+/// Move the cursor a pixel and back, as injected input: a drag under way
+/// looks again at the window under the cursor, now the catcher is up. If
+/// the catcher was slow and the cursor already parked on it, nothing else
+/// would make the drag look (the moves away are swallowed). Injected input
+/// passes the hooks in every mode and is never measured or re-parked
+/// (`capture_windows::mouse_hook` skips it); a real move after it is
+/// measured from wherever the cursor is, and parks it again.
+fn nudge() {
+    let step = |dx: i32| INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy: 0,
+                mouseData: 0,
+                dwFlags: MOUSEEVENTF_MOVE,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let steps = [step(1), step(-1)];
+    // SAFETY: two plain relative moves, read during the call.
+    let sent = unsafe { SendInput(&steps, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize != steps.len() {
+        tracing::debug!("Shared input: the dragged files' catcher could not nudge the cursor");
     }
 }
 
