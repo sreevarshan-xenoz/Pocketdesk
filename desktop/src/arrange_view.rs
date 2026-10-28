@@ -24,6 +24,16 @@ use crate::model::Device;
 /// How often the files are read again while the page is open.
 const REFRESH: Duration = Duration::from_secs(1);
 
+/// The most characters of a computer's name the page shows.
+const NAME_CHARS: usize = 48;
+
+/// A computer's name as the page shows it: another computer says it, so it
+/// is put on one line, rid of what would turn or hide the text around it,
+/// and clipped ([`shared_input::display_name`]).
+fn shown_name(name: &str) -> String {
+    shared_input::display_name(name, NAME_CHARS)
+}
+
 /// The canvas's height, in points.
 const CANVAS_HEIGHT: f32 = 220.0;
 
@@ -189,12 +199,12 @@ impl ArrangeView {
 
     fn name_of(&self, devices: &[Device], id: &str) -> String {
         if let Some(c) = self.screens.get(id).filter(|c| !c.name.is_empty()) {
-            return c.name.clone();
+            return shown_name(&c.name);
         }
         if let Some(c) = self.computers.computers.iter().find(|c| c.device_id == id) {
-            return c.name.clone();
+            return shown_name(&c.name);
         }
-        crate::model::device_label(devices, id)
+        shown_name(&crate::model::device_label(devices, id))
     }
 
     /// This computer and the paired computers that said their screens,
@@ -214,7 +224,7 @@ impl ArrangeView {
         let origins = shared_input::arrange(&me.screens, &others, self.saved.as_ref());
         let mut shown = vec![Shown {
             device_id: me.device_id.clone(),
-            name: me.name.clone(),
+            name: shown_name(&me.name),
             screens: me.screens.clone(),
             origin: (0, 0),
             this: true,
@@ -691,6 +701,46 @@ mod tests {
         let across = |a0: i64, a1: i64, b0: i64, b1: i64| a0.max(b0) < a1.min(b1);
         ((a.x1 == b.x0 || a.x0 == b.x1) && across(a.y0, a.y1, b.y0, b.y1))
             || ((a.y1 == b.y0 || a.y0 == b.y1) && across(a.x0, a.x1, b.x0, b.x1))
+    }
+
+    /// A computer's name as another computer gave it is shown tamed: on
+    /// one line, with no character that turns or hides the text around it,
+    /// and clipped; this computer's own name too.
+    #[test]
+    fn computers_names_are_shown_tamed() {
+        let screens = |id: &str, name: &str, this: bool| shared_input::ComputerScreens {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            screens: vec![Screen {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            }],
+            changed_unix: 0,
+            this_computer: this,
+        };
+        let long = "x".repeat(200);
+        let view = ArrangeView {
+            screens: ScreensFile {
+                computers: vec![
+                    screens("me", "Desk\u{2028}top", true),
+                    screens("laptop", "Lap\u{202E}top\nevil", false),
+                    screens("long", &long, false),
+                ],
+            },
+            ..Default::default()
+        };
+        assert_eq!(view.name_of(&[], "laptop"), "Lap top evil");
+        assert_eq!(view.name_of(&[], "long").chars().count(), NAME_CHARS);
+        let devices = [Device {
+            id: "laptop".to_string(),
+            computer: true,
+            ..Default::default()
+        }];
+        let shown = view.shown(&devices);
+        assert_eq!(shown[0].name, "Desk top");
+        assert_eq!(shown[1].name, "Lap top evil");
     }
 
     #[test]
