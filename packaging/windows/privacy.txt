@@ -1,0 +1,15 @@
+Pocketdesk and your privacy
+
+Pocketdesk has no account and no Pocketdesk server, and collects nothing: no analytics, no crash reports, no update checks. What you send between your phone and this computer is encrypted end to end.
+
+To reach this computer from outside your home network, Pocketdesk uses some public services by default:
+
+- Relays run by n0, the company that builds iroh (*.relay.n0.iroh.link). They see both ends' public IP addresses and Pocketdesk ids, and when and how much they talk; never the content.
+- The Mainline DHT, a public directory, so your phone finds this computer again after its address changes. Its nodes see this computer's public IP and its Pocketdesk id.
+- Your home router, asked to open a port for a direct path.
+
+To turn these off, open Pocketdesk's Settings after installing: "Reachable from the internet" off stops all three (phones then reach this computer only on the same network or through Tailscale); "Found by id (DHT)" set to off stops only the DHT; or list your own relay under "Your own relays".
+
+On your own network, the computer announces itself so phones there find it ("Visible on this network" turns that off).
+
+The full privacy policy: https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/privacy.md

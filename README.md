@@ -66,6 +66,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 - [Before you start](docs/guide.md#before-you-start): which network carries what, trust at first contact, and what the internet path reveals.
 - [Features](docs/guide.md#features), [installing every other way](docs/guide.md#installation), [commands and settings](docs/guide.md#usage), and [architecture](docs/guide.md#architecture): all in the [guide](docs/guide.md).
 - [SECURITY.md](SECURITY.md): read it before using Pocketdesk on a network you do not control.
+- [Privacy policy](docs/privacy.md): no account, no analytics; which public services it uses by default, and how to turn each off.
 - [docs/protocol.md](docs/protocol.md): everything that is sent, and to whom.
 
 ## Community
