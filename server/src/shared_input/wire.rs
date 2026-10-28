@@ -71,6 +71,9 @@ pub const REFUSE_SHARING_OFF: u8 = 1;
 /// not the Keyboard and mouse permission there, or is not one of the
 /// owner's computers to it).
 pub const REFUSE_NOT_ALLOWED: u8 = 2;
+/// Why a computer refuses to be driven: its link to the sender rides a
+/// relay there (the keyboard and mouse are shared on a direct link only).
+pub const REFUSE_RELAYED: u8 = 3;
 
 /// One message between two computers sharing input. Its serde form is for
 /// records such as `share-test`'s, never the wire, which is [`encode`]'s.
@@ -139,8 +142,8 @@ pub enum Msg {
     },
     /// The receiver will not be driven by the sender: its answer to a
     /// `Hello` it will not take, and its word to a computer it took when it
-    /// stops ([`REFUSE_SHARING_OFF`], [`REFUSE_NOT_ALLOWED`]; another
-    /// reason is still a refusal).
+    /// stops ([`REFUSE_SHARING_OFF`], [`REFUSE_NOT_ALLOWED`],
+    /// [`REFUSE_RELAYED`]; another reason is still a refusal).
     Refuse {
         reason: u8,
     },
@@ -556,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_refusal_round_trips_with_its_reason() {
-        for reason in [REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED] {
+        for reason in [REFUSE_SHARING_OFF, REFUSE_NOT_ALLOWED, REFUSE_RELAYED] {
             let m = Msg::Refuse { reason };
             let bytes = encode(&m);
             assert_eq!(bytes, vec![13, reason]);

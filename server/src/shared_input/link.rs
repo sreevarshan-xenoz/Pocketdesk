@@ -474,6 +474,13 @@ impl Channel {
         Self::open_with(device_id, is_direct)
     }
 
+    /// A channel to the computer `device_id` whether or not its link rides a
+    /// relay: only for a [`Msg::Refuse`], which carries no input, so a
+    /// computer refused for its relayed link hears why.
+    pub fn open_for_refusal(device_id: &str) -> Result<Channel, String> {
+        Self::open_with(device_id, |_| true)
+    }
+
     /// [`Channel::open`], with whether a connection is direct decided by
     /// `direct` (a seam for the tests).
     fn open_with(device_id: &str, direct: impl Fn(&Connection) -> bool) -> Result<Channel, String> {

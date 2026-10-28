@@ -709,11 +709,33 @@ fn refuses(msg: &Msg, driving: bool) -> bool {
     driving || matches!(msg, Msg::Hello { .. } | Msg::Enter { .. })
 }
 
+/// Whether `msg` is a cursor arriving over a link that is not direct now
+/// (`direct`, looked at only for an arrival: what else a computer sends is
+/// taken only once its arrival was).
+fn arrives_relayed(msg: &Msg, direct: impl FnOnce() -> bool) -> bool {
+    matches!(msg, Msg::Enter { .. }) && !direct()
+}
+
+/// Why the computer driving this one is refused now: `refusal`, its
+/// permission's or the setting's word, or its link, still up (`linked`),
+/// riding a relay (not `direct`).
+fn refusal_now(refusal: Option<u8>, linked: bool, direct: bool) -> Option<u8> {
+    refusal.or((linked && !direct).then_some(wire::REFUSE_RELAYED))
+}
+
+/// Whether the link to `device_id` is up and direct now.
+fn direct_now(device_id: &str) -> bool {
+    link::connection(device_id).is_some_and(|conn| link::is_direct(&conn))
+}
+
 /// Tell the computer `to` that this one will not be driven by it
 /// (`reason`), on a channel of its own, dropped once sent; said in the log
-/// at info only when `told` has not said it already.
+/// at info only when `told` has not said it already. A refusal goes over a
+/// relay too (it carries no input), so a computer refused for its relayed
+/// link hears why.
 fn refuse(to: &str, reason: u8, told: &mut status::RefusalLog) {
-    let sent = Channel::open(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
+    let sent =
+        Channel::open_for_refusal(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
     match sent {
         Ok(()) => say_refused(told, to, reason),
         Err(e) => tracing::debug!(to, "Shared input: the refusal was not sent: {e}"),
@@ -791,6 +813,17 @@ pub async fn run() {
                 }
                 if standing.allowed {
                     told_refusals.clear(&from);
+                }
+                // Its cursor arriving over a relay is refused, and it comes
+                // home: the keyboard and mouse go over a direct link only.
+                if standing.allowed && arrives_relayed(&msg, || direct_now(&from)) {
+                    tracing::info!(
+                        from,
+                        "Shared input: another computer's cursor came over a relay; refused"
+                    );
+                    refuse(&from, wire::REFUSE_RELAYED, &mut told_refusals);
+                    receiver.link_lost(&from);
+                    continue;
                 }
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
@@ -871,7 +904,7 @@ pub async fn run() {
                 }
                 if let Some(driver) = receiver.driver().map(str::to_string) {
                     let linked = link::linked().contains(&driver);
-                    let refusal = gate.refusal(&driver).await;
+                    let refusal = refusal_now(gate.refusal(&driver).await, linked, direct_now(&driver));
                     if linked
                         && let Some(reason) = refusal
                         && !refused_now.contains(&driver)
@@ -882,8 +915,8 @@ pub async fn run() {
                         tracing::info!(
                             driver,
                             linked,
-                            "Shared input: the driving computer's link or permission went; \
-                             what it held is let go of"
+                            "Shared input: the driving computer's link or permission went, or \
+                             its link turned relayed; what it held is let go of"
                         );
                         receiver.link_lost(&driver);
                     }
@@ -1515,6 +1548,33 @@ mod tests {
         assert!(!refuses(&key(30, true), false));
         // While it drives, anything is: its permission just went.
         assert!(refuses(&Msg::Move { seq: 1, x: 0, y: 0 }, true));
+    }
+
+    /// A cursor arriving over a relay is refused (the keyboard and mouse
+    /// go over a direct link only); whether the link is direct is looked at
+    /// only for an arrival.
+    #[test]
+    fn an_arrival_over_a_relay_is_refused() {
+        let enter = Msg::Enter { x: 0, y: 0 };
+        assert!(arrives_relayed(&enter, || false));
+        assert!(!arrives_relayed(&enter, || true));
+        let key = key(30, true);
+        assert!(!arrives_relayed(&key, || panic!("not looked at for a key")));
+    }
+
+    /// The computer driving this one is let go of, and told why, when its
+    /// link turns relayed, as when its permission or the setting goes.
+    #[test]
+    fn a_driver_whose_link_turned_relayed_is_refused() {
+        assert_eq!(refusal_now(None, true, true), None);
+        assert_eq!(refusal_now(None, true, false), Some(wire::REFUSE_RELAYED));
+        // Its permission's word comes first.
+        assert_eq!(
+            refusal_now(Some(wire::REFUSE_NOT_ALLOWED), true, false),
+            Some(wire::REFUSE_NOT_ALLOWED)
+        );
+        // No link at all is no refusal: it is let go of as gone.
+        assert_eq!(refusal_now(None, false, false), None);
     }
 
     #[test]

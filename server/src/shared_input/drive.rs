@@ -37,7 +37,7 @@ use super::game_lock::{self, Foreground, Lock};
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
 use super::layout::{Layout, Placed};
-use super::wire::{Msg, REFUSE_SHARING_OFF, Screen};
+use super::wire::{Msg, REFUSE_RELAYED, REFUSE_SHARING_OFF, Screen};
 
 /// How often, away, the computer driven is pinged ([`Driver::tick`]).
 pub const PING_EVERY: Duration = Duration::from_millis(200);
@@ -488,6 +488,7 @@ impl Driver {
             let park = away.park;
             let why = match reason {
                 REFUSE_SHARING_OFF => "the keyboard and mouse are turned off there",
+                REFUSE_RELAYED => "its link to this computer goes through a relay there",
                 _ => "it does not allow this computer (its Keyboard and mouse page)",
             };
             let why = format!("{} won't take input: {why}", self.name_of(device_id));
