@@ -842,7 +842,8 @@ pub fn reachable(
 /// computers whose screens `shared_screens.json` holds where the owner put
 /// them (`saved`, the Keyboard and mouse page's `shared_layout.json`), or,
 /// with no arrangement or one that would put screens over each other, to
-/// their right in the file's order.
+/// their right in the file's order. The places are worked out over every
+/// computer in the file, linked or not, as the page draws them.
 pub fn layout_for(
     this: &str,
     name: &str,
@@ -851,18 +852,21 @@ pub fn layout_for(
     linked: &[String],
     saved: Option<&pocketdesk_core::local::shared_input::LayoutFile>,
 ) -> Layout {
+    // Arranged as the Keyboard and mouse page does, over every computer
+    // whose screens are known, so the two agree; then only the linked ones
+    // are kept, each where it was put.
     let others: Vec<(String, Vec<Screen>)> = file
         .computers
         .iter()
-        .filter(|c| {
-            !c.this_computer
-                && c.device_id != this
-                && !c.screens.is_empty()
-                && linked.contains(&c.device_id)
-        })
+        .filter(|c| !c.this_computer && c.device_id != this && !c.screens.is_empty())
         .map(|c| (c.device_id.clone(), c.screens.clone()))
         .collect();
     let origins = pocketdesk_core::local::shared_input::arrange(&own, &others, saved);
+    let (others, origins): (Vec<_>, Vec<_>) = others
+        .into_iter()
+        .zip(origins)
+        .filter(|((id, _), _)| linked.contains(id))
+        .unzip();
     let mut computers = vec![Placed {
         device_id: this.to_string(),
         name: name.to_string(),
@@ -1488,6 +1492,47 @@ mod tests {
     }
 
     #[test]
+    fn an_offline_computer_keeps_its_place_in_the_row() {
+        // L is offline, M linked: with no arrangement M sits where the
+        // page draws it, after L, not in L's place.
+        let other = |id: &str, screens: Vec<Screen>| ComputerScreens {
+            device_id: id.to_string(),
+            name: format!("{id} computer"),
+            screens,
+            changed_unix: 0,
+            this_computer: false,
+        };
+        let file = ScreensFile {
+            computers: vec![
+                ComputerScreens {
+                    this_computer: true,
+                    ..other("W", Vec::new())
+                },
+                other("L", vec![screen(0, 0, 1600, 1000)]),
+                other("M", vec![screen(0, 0, 1280, 800)]),
+            ],
+        };
+        let own = vec![screen(0, 0, 1920, 1080)];
+        let page = pocketdesk_core::local::shared_input::arrange(
+            &own,
+            &[
+                ("L".to_string(), vec![screen(0, 0, 1600, 1000)]),
+                ("M".to_string(), vec![screen(0, 0, 1280, 800)]),
+            ],
+            None,
+        );
+        let layout = layout_for("W", "W computer", own, &file, &["M".to_string()], None);
+        let ids: Vec<&str> = layout
+            .computers
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        assert_eq!(ids, ["W", "M"], "only the linked one");
+        assert_eq!(layout.computers[1].origin, page[1]);
+        assert_eq!(page[1], (1920 + 1600, 0));
+    }
+
+    #[test]
     fn the_owners_arrangement_is_used_when_there_is_one() {
         let file = ScreensFile {
             computers: vec![
@@ -1857,7 +1902,10 @@ mod tests {
         let own = vec![screen(0, 0, 1920, 1080), screen(1920, 0, 1536, 960)];
         let layout = layout_for("W", "W computer", own, &file, &linked, None);
         // This computer's own screens as read now (not the file's), and only
-        // the linked computer that has screens, to their right.
-        assert_eq!(layout, desk(false));
+        // the linked computer that has screens, to their right, after the
+        // place of the one not linked now (as the page draws them).
+        let mut expected = desk(false);
+        expected.computers[1].origin = (3456 + 800, 0);
+        assert_eq!(layout, expected);
     }
 }

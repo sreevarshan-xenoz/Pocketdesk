@@ -14,7 +14,7 @@
 //!
 //! [`Capability::SharedInput`]: pocketdesk_core::protocol::permissions::Capability::SharedInput
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -509,10 +509,13 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
     let written = tokio::task::spawn_blocking(move || {
         let me = own.as_ref().map(|_| crate::kde::host_identity());
         let now = pocketdesk_core::local::pin::now_unix();
-        // Only the computers paired now are kept.
+        // Only the computers paired now are kept (none dropped on a
+        // reading that failed).
         let paired = status::paired_computers(&dir);
         shared_input::update(&dir, |file| {
-            file.keep_only(&paired);
+            if let Some(paired) = &paired {
+                file.keep_only(paired);
+            }
             if let (Some(me), Some(own)) = (&me, &own) {
                 file.set_own(&me.device_id, &me.device_name, own, now);
             }
@@ -560,16 +563,27 @@ fn refuses(msg: &Msg, driving: bool) -> bool {
 }
 
 /// Tell the computer `to` that this one will not be driven by it
-/// (`reason`), on a channel of its own, dropped once sent.
-fn refuse(to: &str, reason: u8) {
+/// (`reason`), on a channel of its own, dropped once sent; said in the log
+/// at info only when `told` has not said it already.
+fn refuse(to: &str, reason: u8, told: &mut status::RefusalLog) {
     let sent = Channel::open(to).and_then(|mut channel| channel.send(&Msg::Refuse { reason }));
     match sent {
-        Ok(()) => tracing::info!(
+        Ok(()) => say_refused(told, to, reason),
+        Err(e) => tracing::debug!(to, "Shared input: the refusal was not sent: {e}"),
+    }
+}
+
+/// Say in the log that this one refused `to` (`reason`): at info the
+/// first time, at debug again.
+fn say_refused(told: &mut status::RefusalLog, to: &str, reason: u8) {
+    if told.note(to, reason) {
+        tracing::info!(
             to,
             reason,
             "Shared input: told another computer this one won't take its input"
-        ),
-        Err(e) => tracing::debug!(to, "Shared input: the refusal was not sent: {e}"),
+        );
+    } else {
+        tracing::debug!(to, reason, "Shared input: refused another computer again");
     }
 }
 
@@ -599,31 +613,43 @@ pub async fn run() {
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status = None;
+    // The refusals heard from other computers, and told to them, for the
+    // log to say each once.
+    let mut heard_refusals = status::RefusalLog::default();
+    let mut told_refusals = status::RefusalLog::default();
     loop {
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg)) = arrival else { break };
                 if let Msg::Refuse { reason } = msg {
                     // Its answer to this computer driving it.
-                    tracing::info!(
-                        from,
-                        reason,
-                        "Shared input: another computer won't take this one's input"
-                    );
+                    if heard_refusals.note(&from, reason) {
+                        tracing::info!(
+                            from,
+                            reason,
+                            "Shared input: another computer won't take this one's input"
+                        );
+                    } else {
+                        tracing::debug!(from, reason, "Shared input: refused again");
+                    }
                     link::note_refused(&from, reason);
                     continue;
                 }
                 let standing = gate.standing(&from).await;
                 if !standing.allowed && refuses(&msg, receiver.driver() == Some(from.as_str())) {
                     let reason = gate.refusal(&from).await.unwrap_or(wire::REFUSE_NOT_ALLOWED);
-                    refuse(&from, reason);
+                    refuse(&from, reason, &mut told_refusals);
                     channels.remove(&from);
+                }
+                if standing.allowed {
+                    told_refusals.clear(&from);
                 }
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
                 // hello from its own driver is not).
                 if standing.computer && super::drive::is_answer(&msg) {
                     link::note_screens(&from);
+                    heard_refusals.clear(&from);
                 }
                 match &msg {
                     Msg::Hello { version, name, screens } if standing.computer => {
@@ -667,11 +693,7 @@ pub async fn run() {
                         {
                             tracing::debug!(to, "Shared input: the refusal was not sent: {e}");
                         }
-                        tracing::info!(
-                            to,
-                            reason,
-                            "Shared input: another computer may no longer drive this one"
-                        );
+                        say_refused(&mut told_refusals, &to, reason);
                         refused_now.push(to);
                     }
                 }
@@ -691,7 +713,7 @@ pub async fn run() {
                         && let Some(reason) = refusal
                         && !refused_now.contains(&driver)
                     {
-                        refuse(&driver, reason);
+                        refuse(&driver, reason, &mut told_refusals);
                     }
                     if !linked || refusal.is_some() {
                         tracing::info!(
@@ -743,11 +765,16 @@ pub async fn run() {
                 }
             }
             _ = status_every.tick() => {
+                let linked = link::linked();
+                heard_refusals.keep_linked(&linked);
+                told_refusals.keep_linked(&linked);
                 let Some(dir) = state_dir.clone() else { continue };
+                let sharing_on = gate.on().await;
                 let mut last = last_status.take();
                 last_status = tokio::task::spawn_blocking(move || {
                     let paired = status::paired_computers(&dir);
-                    status::write_if_changed(&dir, status::now(&paired), &paired, &mut last);
+                    let now = status::now(paired.as_ref().unwrap_or(&BTreeSet::new()));
+                    status::write_if_changed(&dir, now, paired.as_ref(), sharing_on, &mut last);
                     last
                 })
                 .await

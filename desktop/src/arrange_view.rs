@@ -235,8 +235,15 @@ impl ArrangeView {
     }
 
     /// Keep where each computer is, with `id` dropped at `origin`.
-    fn save(&mut self, state_dir: &Path, shown: &[Shown], id: &str, origin: (i32, i32)) {
-        let origins: BTreeMap<String, (i32, i32)> = shown
+    fn save(
+        &mut self,
+        state_dir: &Path,
+        shown: &[Shown],
+        paired: &BTreeSet<String>,
+        id: &str,
+        origin: (i32, i32),
+    ) {
+        let placed: Vec<(String, (i32, i32))> = shown
             .iter()
             .map(|c| {
                 let at = if c.device_id == id { origin } else { c.origin };
@@ -244,7 +251,7 @@ impl ArrangeView {
             })
             .collect();
         let layout = LayoutFile {
-            origins,
+            origins: origins_to_save(&placed, self.saved.as_ref(), paired),
             rev: self.saved.as_ref().map_or(0, |l| l.rev) + 1,
         };
         match shared_input::write_layout(state_dir, &layout) {
@@ -258,7 +265,21 @@ impl ArrangeView {
 
     /// The canvas: each computer's screens, scaled to fit, its name on its
     /// block; the others dragged into place.
-    fn canvas(&mut self, ui: &mut egui::Ui, state_dir: &Path, shown: &[Shown]) {
+    fn canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        shown: &[Shown],
+        paired: &BTreeSet<String>,
+    ) {
+        // A computer dragged that has gone (unpaired meanwhile) drags no more.
+        if self
+            .drag
+            .as_ref()
+            .is_some_and(|d| !shown.iter().any(|c| c.device_id == d.device_id))
+        {
+            self.drag = None;
+        }
         let width = ui.available_width().max(200.0);
         let (canvas, _) = ui.allocate_exact_size(Vec2::new(width, CANVAS_HEIGHT), Sense::hover());
         let painter = ui.painter_at(canvas);
@@ -268,8 +289,12 @@ impl ArrangeView {
         for (i, c) in shown.iter().enumerate() {
             let origin = match &self.drag {
                 Some(d) if d.device_id == c.device_id => (
-                    d.from.0 + (d.moved.x / d.view.scale).round() as i32,
-                    d.from.1 + (d.moved.y / d.view.scale).round() as i32,
+                    d.from
+                        .0
+                        .saturating_add((d.moved.x / d.view.scale).round() as i32),
+                    d.from
+                        .1
+                        .saturating_add((d.moved.y / d.view.scale).round() as i32),
                 ),
                 _ => c.origin,
             };
@@ -358,7 +383,7 @@ impl ArrangeView {
                 && let Some(b) = bounds(&c.screens)
             {
                 let origin = (clamp_i32(x - b.x0), clamp_i32(y - b.y0));
-                self.save(state_dir, shown, &id, origin);
+                self.save(state_dir, shown, paired, &id, origin);
             }
         }
     }
@@ -417,7 +442,8 @@ impl ArrangeView {
                 .color(muted),
             );
         } else {
-            self.canvas(ui, state_dir, &shown);
+            let paired = self.paired(devices);
+            self.canvas(ui, state_dir, &shown, &paired);
             ui.label(
                 RichText::new(
                     "Drag a computer to where it sits on your desk: it snaps to the nearest edge \
@@ -519,12 +545,22 @@ impl ArrangeView {
                                 .iter()
                                 .any(|c| c.device_id == *id && c.lets_drive),
                         };
+                        // Kept by the server for a computer this one paired
+                        // with, so asked of it: not while it is stopped.
+                        let can = device.is_some() || server_running;
                         if ui
-                            .checkbox(&mut allowed, format!("{name} may drive {this_name}"))
+                            .add_enabled(
+                                can,
+                                egui::Checkbox::new(
+                                    &mut allowed,
+                                    format!("{name} may drive {this_name}"),
+                                ),
+                            )
                             .on_hover_text(
                                 "Its keyboard and mouse may move onto this computer's screens \
                                  (the Keyboard and mouse permission).",
                             )
+                            .on_disabled_hover_text(STOPPED)
                             .changed()
                         {
                             if device.is_some() {
@@ -609,6 +645,30 @@ impl ArrangeView {
     }
 }
 
+/// Why a computer this one paired with cannot be let drive it now.
+const STOPPED: &str = "Start the server first: it keeps this for a computer this one paired with";
+
+/// The arrangement to keep: where each computer shown is (`placed`), and
+/// where `saved` put a computer still `paired` that is not shown now (its
+/// screens not known); any other id is dropped.
+pub fn origins_to_save(
+    placed: &[(String, (i32, i32))],
+    saved: Option<&LayoutFile>,
+    paired: &BTreeSet<String>,
+) -> BTreeMap<String, (i32, i32)> {
+    let mut origins: BTreeMap<String, (i32, i32)> = saved
+        .map(|s| {
+            s.origins
+                .iter()
+                .filter(|(id, _)| paired.contains(*id))
+                .map(|(id, at)| (id.clone(), *at))
+                .collect()
+        })
+        .unwrap_or_default();
+    origins.extend(placed.iter().cloned());
+    origins
+}
+
 fn clamp_i32(v: i64) -> i32 {
     v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
@@ -673,6 +733,37 @@ mod tests {
         // Touching edges are not overlapping; one pixel over is.
         assert!(!overlaps(&block(0, 0, 10, 10), &block(10, 0, 10, 10)));
         assert!(overlaps(&block(0, 0, 10, 10), &block(9, 9, 10, 10)));
+    }
+
+    #[test]
+    fn only_computers_paired_now_are_kept_in_the_arrangement() {
+        let saved = LayoutFile {
+            origins: BTreeMap::from([
+                ("me".to_string(), (0, 0)),
+                ("asleep".to_string(), (-1600, 0)),
+                ("unpaired".to_string(), (0, 1080)),
+                ("laptop".to_string(), (1920, 0)),
+            ]),
+            rev: 4,
+        };
+        let paired = BTreeSet::from(["asleep".to_string(), "laptop".to_string()]);
+        let placed = [
+            ("me".to_string(), (0, 0)),
+            ("laptop".to_string(), (0, -1000)),
+        ];
+        assert_eq!(
+            origins_to_save(&placed, Some(&saved), &paired),
+            BTreeMap::from([
+                ("me".to_string(), (0, 0)),
+                // Paired, its screens not known now: where it was put.
+                ("asleep".to_string(), (-1600, 0)),
+                ("laptop".to_string(), (0, -1000)),
+            ])
+        );
+        assert_eq!(
+            origins_to_save(&placed, None, &paired),
+            BTreeMap::from(placed.clone())
+        );
     }
 
     #[test]

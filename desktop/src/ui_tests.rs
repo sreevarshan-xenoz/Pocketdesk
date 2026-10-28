@@ -323,7 +323,7 @@ fn keyboard_mouse_computers(state: &Path) {
 }
 
 /// The Keyboard and mouse page: the paired computer by name and how it is
-/// linked; its switch, for a computer this one paired with, asks the
+/// linked; its switch, for a computer this one paired with, waits for the
 /// server; Identify asks for each computer that answered; the sharing
 /// switch is the setting.
 #[test]
@@ -344,20 +344,16 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
             .is_some()
     );
 
-    app.get_by_label("Test Laptop may drive Test Desk").click();
-    app.run_steps(3);
-    let now = pocketdesk_core::local::pin::now_unix();
-    let asked: Vec<_> = pocketdesk_core::local::computers::take_all(fixture.state(), now)
-        .into_iter()
-        .map(|r| r.ask)
-        .collect();
-    assert_eq!(
-        asked,
-        [pocketdesk_core::local::computers::ComputerAsk::LetDrive {
-            device_id: LAPTOP.to_string(),
-            allow: true,
-        }]
+    // Kept by the server for a computer this one paired with: no server
+    // here, so the switch waits for it (the request itself is core's test).
+    use egui_kittest::kittest::NodeT;
+    assert!(
+        app.get_by_label("Test Laptop may drive Test Desk")
+            .accesskit_node()
+            .is_disabled(),
+        "no server here, so no switch"
     );
+    let now = pocketdesk_core::local::pin::now_unix();
 
     app.get_by_label("Identify").click();
     app.run_steps(3);
