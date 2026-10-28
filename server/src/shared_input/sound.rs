@@ -356,7 +356,15 @@ fn play(packets: std::sync::mpsc::Receiver<(u32, Vec<u8>)>, seam: Option<PathBuf
     let mut jitter = Jitter::default();
     let mut dropped = 0u64;
     loop {
-        match packets.recv_timeout(Duration::from_millis(5)) {
+        // Nothing waiting here or at the output: nothing to do until a
+        // packet comes, so no waking 200 times a second through a silence
+        // (review M9).
+        let next = if jitter.is_empty() && player.queued() == 0 {
+            packets.recv().map_err(|_| RecvTimeoutError::Disconnected)
+        } else {
+            packets.recv_timeout(Duration::from_millis(5))
+        };
+        match next {
             Ok((seq, opus)) => dropped += u64::from(jitter.push(seq, opus) != Pushed::Kept),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
