@@ -1265,7 +1265,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **214. Driving another computer from Windows (shared input)**
 
 - The badge on Linux (Hyprland or Sway): the cursor arriving flashes "Keyboard and mouse: <laptop>" in the middle of each output, sharp at the output's scale; clicks go through it and the keyboard focus stays; a screenshot of the headless session shows it. (where: linux)
-- GNOME (no layer shell), or no font found: a desktop notification says the same instead. (where: linux)
+- GNOME (no layer shell), or no font found: an ordinary switch shows nothing, while Identify and a return for a reason (the laptop's sharing turned off, its link pulled) come as a desktop notification. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

@@ -48,10 +48,17 @@ pub trait Inject: Send {
     /// at the first event misses it (libinput opens new devices a moment
     /// after they appear).
     fn prepare(&mut self) {}
-    /// Flash `text` on this computer's screens for `how_long` (the
-    /// badge: which computer has the keyboard and mouse, Identify).
-    fn badge(&mut self, text: &str, how_long: Duration) {
-        crate::overlay::flash(text, how_long);
+    /// Flash `badge` on this computer's screens for `how_long` (which
+    /// computer has the keyboard and mouse, Identify); on Windows, never
+    /// over a full-screen program or a game holding the cursor in front,
+    /// as the driving side.
+    fn badge(&mut self, badge: &badge::Badge, how_long: Duration) {
+        #[cfg(windows)]
+        if super::game_lock::in_front(&super::game_lock::foreground(), &[], true) {
+            tracing::debug!("Shared input: no badge over the game in front");
+            return;
+        }
+        badge::flash(badge, how_long);
     }
 }
 
@@ -185,7 +192,7 @@ impl Receiver {
         if let Msg::Identify { .. } = msg {
             // Only a computer that may drive this one has it show its name.
             let here = badge::Event::Identify { here: &self.name };
-            self.inject.badge(&badge::text(&here), badge::IDENTIFY_FOR);
+            self.inject.badge(&badge::of(&here), badge::IDENTIFY_FOR);
             return;
         }
         if let Msg::Enter { x, y } = msg {
@@ -199,7 +206,7 @@ impl Receiver {
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
             let here = badge::Event::Arrived { here: &self.name };
-            self.inject.badge(&badge::text(&here), badge::SWITCH_FOR);
+            self.inject.badge(&badge::of(&here), badge::SWITCH_FOR);
             return;
         }
         if self.driver.as_deref() != Some(from) {
@@ -866,8 +873,8 @@ mod tests {
         fn prepare(&mut self) {
             *self.1.lock().unwrap() += 1;
         }
-        fn badge(&mut self, text: &str, _how_long: Duration) {
-            self.2.lock().unwrap().push(text.to_string());
+        fn badge(&mut self, badge: &badge::Badge, _how_long: Duration) {
+            self.2.lock().unwrap().push(badge.text.clone());
         }
     }
 

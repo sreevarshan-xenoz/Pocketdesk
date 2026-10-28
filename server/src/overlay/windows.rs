@@ -254,21 +254,14 @@ fn put_up(instance: HINSTANCE) -> Vec<HWND> {
             });
         }
         let corner = px(CORNER_PX);
-        // SAFETY: this thread's window; the region is handed to it.
+        // SAFETY: this thread's window; the region is handed to it, or freed
+        // here when it is not taken.
         unsafe {
             let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), ALPHA, LWA_ALPHA);
-            SetWindowRgn(
-                hwnd,
-                Some(CreateRoundRectRgn(
-                    0,
-                    0,
-                    width + 1,
-                    height + 1,
-                    corner,
-                    corner,
-                )),
-                false,
-            );
+            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, corner, corner);
+            if !region.is_invalid() && SetWindowRgn(hwnd, Some(region), false) == 0 {
+                let _ = DeleteObject(HGDIOBJ(region.0));
+            }
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
         shown.push(hwnd);

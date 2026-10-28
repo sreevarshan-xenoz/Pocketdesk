@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use crate::overlay::Fallback;
+
 /// How long a switch's badge shows.
 pub const SWITCH_FOR: Duration = Duration::from_millis(1200);
 
@@ -34,6 +36,43 @@ pub enum Event<'a> {
     Note(&'a str),
 }
 
+/// A badge to flash: its text, and whether it becomes a notification
+/// where it cannot be drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Badge {
+    pub text: String,
+    pub fallback: Fallback,
+}
+
+/// The badge for `event`.
+pub fn of(event: &Event) -> Badge {
+    Badge {
+        text: text(event),
+        fallback: fallback(event),
+    }
+}
+
+/// Flash `badge` on this computer's screens for `how_long`.
+pub fn flash(badge: &Badge, how_long: Duration) {
+    crate::overlay::flash(&badge.text, how_long, badge.fallback);
+}
+
+/// Whether `event`'s badge becomes a notification on a desktop that
+/// cannot draw it (GNOME, X11, no font): Identify, and what the owner did
+/// not do (a return for a reason, the driver's refusals and the gaming
+/// lock's words) do; an ordinary switch, which comes at every edge, does
+/// not.
+pub fn fallback(event: &Event) -> Fallback {
+    match event {
+        Event::Arrived { .. } | Event::Went { .. } | Event::Home { why: None, .. } => {
+            Fallback::Quiet
+        }
+        Event::Home { why: Some(_), .. } | Event::Identify { .. } | Event::Note(_) => {
+            Fallback::Notify
+        }
+    }
+}
+
 /// The badge's text for `event`: a line, and for a return the owner did
 /// not make, why on a second.
 pub fn text(event: &Event) -> String {
@@ -60,20 +99,11 @@ pub fn text(event: &Event) -> String {
 }
 
 /// `text` cut to `most` characters (an ellipsis marking the cut), on one
-/// line: a control character (a newline in a peer's name) is a space.
+/// line: a control character (a newline in a peer's name), or one that
+/// turns or hides text (a bidirectional override, a zero-width space), is
+/// a space.
 pub fn clip(text: &str, most: usize) -> String {
-    let flat: String = text
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    let flat = flat.trim();
-    if flat.chars().count() <= most {
-        return flat.to_string();
-    }
-    let mut cut: String = flat.chars().take(most.saturating_sub(1)).collect();
-    cut.truncate(cut.trim_end().len());
-    cut.push('…');
-    cut
+    pocketdesk_core::local::shared_input::display_name(text, most)
 }
 
 #[cfg(test)]
@@ -120,6 +150,39 @@ mod tests {
     }
 
     #[test]
+    fn only_identify_and_what_the_owner_did_not_do_notify() {
+        let quiet = [
+            Event::Arrived { here: "L" },
+            Event::Went { to: "L" },
+            Event::Home {
+                here: "W",
+                why: None,
+            },
+        ];
+        for event in quiet {
+            assert_eq!(fallback(&event), Fallback::Quiet, "{event:?}");
+        }
+        let told = [
+            Event::Home {
+                here: "W",
+                why: Some("This computer locked"),
+            },
+            Event::Identify { here: "W" },
+            Event::Note("L won't take input"),
+        ];
+        for event in told {
+            assert_eq!(fallback(&event), Fallback::Notify, "{event:?}");
+        }
+        assert_eq!(
+            of(&Event::Identify { here: "W" }),
+            Badge {
+                text: "This is W".to_string(),
+                fallback: Fallback::Notify
+            }
+        );
+    }
+
+    #[test]
     fn a_name_is_clipped_and_kept_to_one_line() {
         let long = "n".repeat(300);
         let shown = text(&Event::Arrived { here: &long });
@@ -136,5 +199,12 @@ mod tests {
         assert_eq!(clip("Ünïcödé", 4), "Ünï…");
         assert_eq!(clip("short", 64), "short");
         assert_eq!(clip("  padded  ", 64), "padded");
+        // Nor turn the text around it.
+        assert_eq!(
+            text(&Event::Arrived {
+                here: "Lap\u{202E}pot\u{2066}"
+            }),
+            "Keyboard and mouse: Lap pot"
+        );
     }
 }

@@ -1091,14 +1091,14 @@ impl Glue {
                 Action::HideCursor(false) => restore_cursors(),
                 Action::KeepAwake(true) => self.awake.hold(),
                 Action::KeepAwake(false) => self.awake.release(),
-                Action::Badge(words) => {
-                    let said = words.lines().collect::<Vec<_>>().join("; ");
+                Action::Badge(said_here) => {
+                    let said = said_here.text.lines().collect::<Vec<_>>().join("; ");
                     tracing::info!("Shared input: {said}");
                     // Never over a game in front: a window above it could
                     // change how it draws, and the gaming lock promises a
                     // game runs as it would without Pocketdesk.
                     if !driver.game_held() {
-                        crate::overlay::flash(&words, super::badge::SWITCH_FOR);
+                        super::badge::flash(&said_here, super::badge::SWITCH_FOR);
                     }
                 }
             }

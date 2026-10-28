@@ -109,7 +109,7 @@ pub enum Action {
     /// Keep this computer awake (true) or let it idle again.
     KeepAwake(bool),
     /// A word for the owner on where the keyboard and mouse are.
-    Badge(String),
+    Badge(badge::Badge),
 }
 
 /// Where the keyboard and mouse are while away.
@@ -124,6 +124,11 @@ struct Away {
     /// Where the cursor was just before it crossed (this computer's own
     /// space): where it returns if the crossing itself failed.
     from: (i32, i32),
+}
+
+/// The driver's word that is no switch, as a badge.
+fn note(words: &str) -> Action {
+    Action::Badge(badge::of(&badge::Event::Note(words)))
 }
 
 /// The state of this computer's keyboard and mouse.
@@ -472,15 +477,12 @@ impl Driver {
             return;
         }
         if self.away.is_none() && held != was && !self.targets().is_empty() {
-            out.push(Action::Badge(
-                if held {
-                    "A game is in front: the keyboard and mouse stay here (the switch key still \
-                     moves them)"
-                } else {
-                    "No game in front: the screens' edges lead to the other computers again"
-                }
-                .to_string(),
-            ));
+            out.push(note(if held {
+                "A game is in front: the keyboard and mouse stay here (the switch key still \
+                 moves them)"
+            } else {
+                "No game in front: the screens' edges lead to the other computers again"
+            }));
         }
         self.settle(out);
     }
@@ -508,12 +510,16 @@ impl Driver {
             .collect()
     }
 
+    /// A computer's name as the owner is shown it (on one line, clipped):
+    /// it goes into the badge's reasons as it is.
     fn name_of(&self, device_id: &str) -> String {
-        self.layout
+        let name = self
+            .layout
             .computers
             .iter()
             .find(|c| c.device_id == device_id)
-            .map_or_else(|| device_id.to_string(), |c| c.name.clone())
+            .map_or(device_id, |c| c.name.as_str());
+        badge::clip(name, badge::NAME_CHARS)
     }
 
     /// At home: the cursor moved to `pos`; off an edge onto another
@@ -603,7 +609,7 @@ impl Driver {
                 true,
             );
             if let Lock::ForceRefused(why) = lock {
-                out.push(Action::Badge(why.to_string()));
+                out.push(note(why));
                 return;
             }
         }
@@ -622,9 +628,7 @@ impl Driver {
         }
         .cloned();
         match (next, self.away.clone()) {
-            (None, None) => out.push(Action::Badge(
-                "No other computer to move the keyboard and mouse to".to_string(),
-            )),
+            (None, None) => out.push(note("No other computer to move the keyboard and mouse to")),
             (None, Some(away)) => {
                 self.go_home(out, away.park, true, None);
             }
@@ -699,7 +703,7 @@ impl Driver {
             out.push(Action::KeepAwake(true));
         }
         let to = self.name_of(to);
-        out.push(Action::Badge(badge::text(&badge::Event::Went { to: &to })));
+        out.push(Action::Badge(badge::of(&badge::Event::Went { to: &to })));
     }
 
     /// Let go of everything sent down to the computer driven, and leave it.
@@ -739,7 +743,7 @@ impl Driver {
         out.push(Action::HideCursor(false));
         out.push(Action::KeepAwake(false));
         let here = self.name_of(&self.this);
-        out.push(Action::Badge(badge::text(&badge::Event::Home {
+        out.push(Action::Badge(badge::of(&badge::Event::Home {
             here: &here,
             why,
         })));
@@ -982,7 +986,7 @@ mod tests {
 
     /// The badge for the keyboard and mouse coming home to W, for `why`.
     fn home_badge(why: Option<&str>) -> Action {
-        Action::Badge(badge::text(&badge::Event::Home {
+        Action::Badge(badge::of(&badge::Event::Home {
             here: "W computer",
             why,
         }))
@@ -1055,13 +1059,17 @@ mod tests {
         d.on(moved(3440, 480));
         let crossed = d.on(moved(3455, 480));
         assert!(
-            crossed.contains(&Action::Badge("Keyboard and mouse: L computer".to_string())),
+            crossed.contains(&Action::Badge(badge::of(&badge::Event::Went {
+                to: "L computer"
+            }))),
             "{crossed:?}"
         );
         // The switch key on to the next names it.
         let next = d.on(Captured::Hotkey);
         assert!(
-            next.contains(&Action::Badge("Keyboard and mouse: M computer".to_string())),
+            next.contains(&Action::Badge(badge::of(&badge::Event::Went {
+                to: "M computer"
+            }))),
             "{next:?}"
         );
         // Home by the switch key names this computer, with no why.
@@ -1069,7 +1077,10 @@ mod tests {
         assert!(home.contains(&home_badge(None)), "{home:?}");
         assert_eq!(
             home_badge(None),
-            Action::Badge("Keyboard and mouse: W computer".to_string())
+            Action::Badge(badge::Badge {
+                text: "Keyboard and mouse: W computer".to_string(),
+                fallback: crate::overlay::Fallback::Quiet,
+            })
         );
         // Home the owner did not make says why under the name.
         let mut d = away_on_linux(false);
@@ -1078,6 +1089,30 @@ mod tests {
             locked.contains(&home_badge(Some("This computer locked"))),
             "{locked:?}"
         );
+
+        // A peer's name in a reason is shown tame and clipped.
+        let mut sly = desk(false);
+        for c in &mut sly.computers {
+            if c.device_id == "L" {
+                c.name = format!("Lap\u{202E}top\n{}", "n".repeat(300));
+            }
+        }
+        let mut d = driver(sly, &["L"]);
+        d.start();
+        d.on(moved(3440, 480));
+        d.on(moved(3455, 480));
+        let failed = d.on_send_error();
+        let said = failed
+            .iter()
+            .find_map(|a| match a {
+                Action::Badge(b) => Some(b.text.clone()),
+                _ => None,
+            })
+            .expect("a badge");
+        let why = said.lines().nth(1).expect("why on a second line");
+        assert!(why.starts_with("The link to Lap top n"), "{why}");
+        assert!(why.chars().count() < 100, "{why}");
+        assert_eq!(said.lines().count(), 2, "{said}");
     }
 
     #[test]
@@ -1229,7 +1264,7 @@ mod tests {
         assert_eq!(alone.start(), vec![]);
         let said = alone.on(Captured::Hotkey);
         assert!(sends(&said).is_empty());
-        assert!(matches!(said.as_slice(), [Action::Badge(_)]), "{said:?}");
+        assert!(matches!(said.as_slice(), [Action::Badge(..)]), "{said:?}");
     }
 
     #[test]
@@ -1275,7 +1310,7 @@ mod tests {
         ] {
             assert!(failed.contains(&wanted), "{wanted:?} in {failed:?}");
         }
-        assert!(failed.iter().any(|a| matches!(a, Action::Badge(_))));
+        assert!(failed.iter().any(|a| matches!(a, Action::Badge(..))));
         assert_eq!(d.away_on(), None);
         // That target is suppressed until its channel reopens: a push at the
         // edge does not cross again.
@@ -1331,7 +1366,7 @@ mod tests {
         // The switch key has nowhere to go either.
         assert!(matches!(
             d.on(Captured::Hotkey).as_slice(),
-            [Action::Badge(_)]
+            [Action::Badge(..)]
         ));
     }
 
@@ -1659,7 +1694,7 @@ mod tests {
         assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
         let locked = d.on(in_front(true, false));
         assert_eq!(modes(&locked), vec![Mode::Off], "{locked:?}");
-        assert!(locked.iter().any(|a| matches!(a, Action::Badge(_))));
+        assert!(locked.iter().any(|a| matches!(a, Action::Badge(..))));
         assert!(d.game_held());
         // Still in front half a second later: nothing more.
         assert_eq!(d.on(in_front(true, false)), vec![]);
@@ -1833,10 +1868,7 @@ mod tests {
         d.start();
         d.on(in_front(true, true));
         let refused = d.on(Captured::Hotkey);
-        assert_eq!(
-            refused,
-            vec![Action::Badge(game_lock::ANTI_CHEAT_REFUSED.to_string())]
-        );
+        assert_eq!(refused, vec![note(game_lock::ANTI_CHEAT_REFUSED)]);
         assert_eq!(d.away_on(), None);
         assert_eq!(d.mode(), Mode::Off);
 
@@ -1854,10 +1886,7 @@ mod tests {
             kernel_anti_cheat: false,
         });
         let refused = d.on(Captured::Hotkey);
-        assert_eq!(
-            refused,
-            vec![Action::Badge(game_lock::ELEVATED_REFUSED.to_string())]
-        );
+        assert_eq!(refused, vec![note(game_lock::ELEVATED_REFUSED)]);
         assert_eq!(d.away_on(), None);
 
         // An anti-cheat starting while forced away brings them home.

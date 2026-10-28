@@ -320,22 +320,14 @@ pub fn keyboard_line(
     let name = if on.is_empty() {
         "this computer".to_string()
     } else {
-        let name: String = names
+        let name = names
             .get(on)
-            .map(|n| {
-                n.chars()
-                    .map(|c| if c.is_control() { ' ' } else { c })
-                    .collect::<String>()
-            })
+            .map(|n| pocketdesk_core::local::shared_input::display_name(n, COMPUTER_CHARS))
             .unwrap_or_default();
-        let name = name.trim();
         if name.is_empty() {
             "another computer".to_string()
-        } else if name.chars().count() > COMPUTER_CHARS {
-            let kept: String = name.chars().take(COMPUTER_CHARS - 1).collect();
-            format!("{}…", kept.trim_end())
         } else {
-            name.to_string()
+            name
         }
     };
     Some(format!("Keyboard and mouse: {name}"))
@@ -752,6 +744,15 @@ mod tests {
         let line = keyboard_line(Some(&on("L")), &long).unwrap();
         assert!(line.ends_with('…'), "{line}");
         assert!(line.chars().count() <= "Keyboard and mouse: ".len() + COMPUTER_CHARS);
+        // A name cannot turn the line around.
+        let sly = std::collections::BTreeMap::from([(
+            "L".to_string(),
+            "Lap\u{202E}top\u{200B}".to_string(),
+        )]);
+        assert_eq!(
+            keyboard_line(Some(&on("L")), &sly).as_deref(),
+            Some("Keyboard and mouse: Lap top")
+        );
         // Sharing off, or no status: no line.
         let off = StatusFile {
             keyboard_on: "L".to_string(),

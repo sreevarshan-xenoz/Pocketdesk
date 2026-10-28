@@ -26,19 +26,34 @@ pub const LINE_CHARS: usize = 56;
 /// The most lines a badge has.
 pub const MOST_LINES: usize = 6;
 
+/// What a flash becomes where it cannot be drawn (Linux without the layer
+/// shell or a font).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fallback {
+    /// A desktop notification says it.
+    Notify,
+    /// Nothing: it comes too often to be worth a notification.
+    Quiet,
+}
+
 /// Show `text` on this computer's screens for `how_long`, in place of
-/// what shows now. Returns at once: the drawing is another thread's.
-pub fn flash(text: &str, how_long: Duration) {
+/// what shows now; where it cannot be drawn, `fallback` says whether a
+/// notification says it. Returns at once: the drawing is another
+/// thread's.
+pub fn flash(text: &str, how_long: Duration, fallback: Fallback) {
     let lines = lines(text);
     if lines.is_empty() {
         return;
     }
     #[cfg(windows)]
-    windows::flash(lines, how_long);
+    {
+        let _ = fallback;
+        windows::flash(lines, how_long);
+    }
     #[cfg(target_os = "linux")]
-    wayland::flash(lines, how_long);
+    wayland::flash(lines, how_long, fallback);
     #[cfg(not(any(windows, target_os = "linux")))]
-    let _ = how_long;
+    let _ = (how_long, fallback);
 }
 
 /// `text`'s lines as a badge shows them: each of its own lines wrapped at

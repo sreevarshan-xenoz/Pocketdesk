@@ -169,13 +169,14 @@ fn main() {
             );
             // The shared keyboard and mouse: which computer has them now,
             // while sharing is on and the server runs.
-            entries = pocketdesk_desktop::tray_menu::with_keyboard(
-                entries,
+            let sharing = keyboard_status(&state_dir, snapshot.running).filter(|s| s.sharing_on);
+            let keyboard = sharing.as_ref().and_then(|status| {
                 pocketdesk_desktop::tray_menu::keyboard_line(
-                    keyboard_status(&state_dir, snapshot.running).as_ref(),
+                    Some(status),
                     &computer_names(&state_dir, &snapshot),
-                ),
-            );
+                )
+            });
+            entries = pocketdesk_desktop::tray_menu::with_keyboard(entries, keyboard);
             // H4: the key names itself where its action is.
             if key.status.registered
                 && let Some(phone) = hotkey::phone(&rows)
@@ -204,7 +205,7 @@ fn keyboard_status(
 }
 
 /// The owner's other computers' names by device id: as they said them with
-/// their screens, else as paired.
+/// their screens, else as paired. Read only while sharing is on.
 fn computer_names(
     state_dir: &Path,
     snapshot: &model::Snapshot,

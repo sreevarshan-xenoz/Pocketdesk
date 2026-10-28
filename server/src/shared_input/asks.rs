@@ -40,8 +40,8 @@ async fn identify() {
     let name = tokio::task::spawn_blocking(|| crate::kde::host_identity().device_name)
         .await
         .unwrap_or_default();
-    crate::overlay::flash(
-        &badge::text(&badge::Event::Identify { here: &name }),
+    badge::flash(
+        &badge::of(&badge::Event::Identify { here: &name }),
         badge::IDENTIFY_FOR,
     );
     let direct: HashMap<String, bool> = link::linked()

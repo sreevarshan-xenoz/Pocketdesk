@@ -4,7 +4,8 @@
 //! key goes to what is under it; its words drawn with `ab_glyph` from the
 //! font `fc-match sans` names (else DejaVu Sans or Noto Sans where they
 //! usually are). With no layer shell (GNOME, X11) or no font, a desktop
-//! notification says it instead. One thread of its own puts it up and takes
+//! notification says it instead, for a flash that asks for one
+//! ([`Fallback::Notify`]). One thread of its own puts it up and takes
 //! it down when its time is up or a newer badge replaces it.
 
 use std::fs::File;
@@ -34,6 +35,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
     self, KeyboardInteractivity, ZwlrLayerSurfaceV1,
 };
 
+use super::Fallback;
+
 /// The badge's sizes at scale 1, in logical pixels.
 const FONT_PX: f32 = 26.0;
 const LINE_GAP: f32 = 6.0;
@@ -59,10 +62,12 @@ const FALLBACK_FONTS: [&str; 6] = [
     "/usr/share/fonts/google-noto/NotoSans-Regular.ttf",
 ];
 
-/// A badge to show: its lines and until when.
+/// A badge to show: its lines, until when, and whether a notification
+/// says it where it cannot be drawn.
 struct Flash {
     lines: Vec<String>,
     until: Instant,
+    fallback: Fallback,
 }
 
 static SENDER: OnceLock<Mutex<Option<Sender<Flash>>>> = OnceLock::new();
@@ -82,11 +87,12 @@ fn sender() -> Option<Sender<Flash>> {
 }
 
 /// Show `lines` on every output for `how_long`, in place of what shows.
-pub fn flash(lines: Vec<String>, how_long: Duration) {
+pub fn flash(lines: Vec<String>, how_long: Duration, fallback: Fallback) {
     if let Some(tx) = sender() {
         let _ = tx.send(Flash {
             lines,
             until: Instant::now() + how_long,
+            fallback,
         });
     }
 }
@@ -122,6 +128,9 @@ fn run(flashes: Receiver<Flash>) {
             Some(badge) => {
                 shown = Some(badge);
                 until = flash.until;
+            }
+            None if flash.fallback == Fallback::Quiet => {
+                tracing::debug!("Badge: not drawn here, and not one to notify");
             }
             None => {
                 let (summary, body) = flash.lines.split_first().map_or_else(
@@ -284,7 +293,8 @@ impl Badge {
         let conn = Connection::connect_to_env().ok()?;
         let (globals, queue) = registry_queue_init::<State>(&conn).ok()?;
         let qh = queue.handle();
-        let compositor: WlCompositor = globals.bind(&qh, 1..=4, ()).ok()?;
+        // Version 4 for damage_buffer (and 3's buffer scale).
+        let compositor: WlCompositor = globals.bind(&qh, 4..=4, ()).ok()?;
         let shm: WlShm = globals.bind(&qh, 1..=1, ()).ok()?;
         let layer_shell: ZwlrLayerShellV1 = globals.bind(&qh, 1..=1, ()).ok()?;
         let found: Vec<(u32, u32)> = globals.contents().with_list(|list| {
@@ -319,9 +329,7 @@ impl Badge {
             let region: WlRegion = compositor.create_region(&qh, ());
             surface.set_input_region(Some(&region));
             region.destroy();
-            if compositor.version() >= 3 {
-                surface.set_buffer_scale(scale);
-            }
+            surface.set_buffer_scale(scale);
             let surface_index = badge.surfaces.len();
             let layer = layer_shell.get_layer_surface(
                 &surface,
