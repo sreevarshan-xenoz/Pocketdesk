@@ -16,6 +16,7 @@ pub mod encoder_detect;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
+pub mod h264_sps;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod in_flight;
