@@ -593,6 +593,19 @@ pub fn check_internet_path(state_dir: &Path, state: ServerState, configured: &[S
     }
 }
 
+/// The internet path when `internet_path` is off: not a failure, a choice.
+/// Its outside and DHT checks have nothing to measure then.
+pub fn internet_path_off() -> Finding {
+    with_hint(
+        finding(
+            "Internet path",
+            Status::Info,
+            "off in Settings: phones reach this computer on this network or through Tailscale only, and your other computers do not link with it",
+        ),
+        "Turn on \"Reachable from the internet\" in Settings for phones away from home.",
+    )
+}
+
 /// Read the desktop's firewall query: `allow,block,profiles`.
 pub fn parse_firewall(answer: &str) -> Result<FirewallState, String> {
     let mut parts = answer.trim().splitn(3, ',');
@@ -1252,6 +1265,14 @@ mod tests {
             Status::Info,
             "a file left by a stopped server proves nothing"
         );
+    }
+
+    #[test]
+    fn an_internet_path_turned_off_is_said_not_failed() {
+        let off = internet_path_off();
+        assert_eq!(off.check, "Internet path");
+        assert_eq!(off.status, Status::Info);
+        assert!(off.detail.starts_with("off in Settings"));
     }
 
     /// O9: ufw's status read for the two ports.

@@ -36,6 +36,13 @@ video_quality = "balanced"
 # (see SECURITY.md). Off, the portal asks at every session.
 # remember_screen_grant = false
 
+# Reachable from the internet: phones away from home and your other computers
+# reach this computer, directly or through a relay, and the DHT keeps a record
+# of it. Off, no relay or DHT is contacted and no router port is mapped: phones
+# reach this computer on this network or through Tailscale only, and your other
+# computers do not link with it. Restart the server after changing it.
+# internet_path = true
+
 # Relays for phones away from home: your own (`pocketdesk relay`) instead of
 # n0's public ones. The phone learns it from this desktop; restart the server
 # after changing it.

@@ -2,7 +2,7 @@
 
 Pocketdesk lets a phone see and control a computer, so what it protects, and what it does not yet protect, matters more than its feature list. This page describes the design as it is in this tree, including its limits.
 
-**Two things to know before you pair.** Pair by scanning the desktop app's QR code: typing an address, or picking a computer found on the network, trusts whatever answers there first (limit 1 below). And the internet path is always on: relays see both ends' IP addresses, which endpoints talk and how much, and the Mainline DHT links the computer's WAN id to its home IP, and the phone's IP to the id it looks for (limit 4), unless `dht_publish = "off"`. None of it needs a port forward, except waking a sleeping computer from outside and running your own relay.
+**Two things to know before you pair.** Pair by scanning the desktop app's QR code: typing an address, or picking a computer found on the network, trusts whatever answers there first (limit 1 below). And the internet path is on by default: relays see both ends' IP addresses, which endpoints talk and how much, and the Mainline DHT links the computer's WAN id to its home IP, and the phone's IP to the id it looks for (limit 4), unless `dht_publish = "off"`. None of it needs a port forward, except waking a sleeping computer from outside and running your own relay. "Reachable from the internet" in the desktop's Settings (`internet_path = false`) turns the whole path off: no relay or DHT is contacted, phones reach the computer on the same network or through Tailscale only, and your other computers do not link with it.
 
 ## Reporting a vulnerability
 
@@ -63,7 +63,7 @@ These are real gaps in the current design. Plan around them.
 2. **A phone paired before device keys, that has not streamed on the LAN since, holds no key yet.** Until it does, the control channel accepts it by its id alone, and it moves no files. The first LAN stream the desktop allows binds its key, and pairing it again binds it at once.
 3. **Someone who knows an unpaired phone's id can get in the way of its pairing**, by asking for PINs or spending the wrong guesses under that id. They cannot pair as it without the PIN.
 
-4. **The Mainline DHT links the desktop's WAN id to its home IP** (roadmap N3), unless `dht_publish = "off"`.
+4. **The Mainline DHT links the desktop's WAN id to its home IP** (roadmap N3), unless `dht_publish = "off"` or `internet_path = false`.
    - The record is public to anyone who knows the id. By default it holds the relay URLs, which name your own relay when you run one. With `"addresses"` it also holds your home's public IP addresses.
    - In every mode, the DHT nodes that store the record see the home IP it was published from, hourly, so the id can be followed to the home over time.
    - A phone's WAN dial asks the DHT for the id, which shows strangers' nodes the phone's IP and the id it is looking for.

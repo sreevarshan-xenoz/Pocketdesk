@@ -211,18 +211,23 @@ fn run(state_dir: &Path, config: Option<Config>) -> Report {
     findings.push(diagnostics::check_addresses(
         &pocketdesk_core::local::network::local_ips(),
     ));
-    findings.push(diagnostics::check_internet_path(
-        state_dir,
-        state,
-        &config.relay_urls,
-    ));
-    let wan_status = diagnostics::read_wan_status(state_dir);
-    findings.extend(diagnostics::check_outside(
-        wan_status.as_ref(),
-        state,
-        !config.relay_urls.is_empty(),
-    ));
-    findings.push(diagnostics::check_dht(wan_status.as_ref(), state));
+    if config.internet_path {
+        findings.push(diagnostics::check_internet_path(
+            state_dir,
+            state,
+            &config.relay_urls,
+        ));
+        let wan_status = diagnostics::read_wan_status(state_dir);
+        findings.extend(diagnostics::check_outside(
+            wan_status.as_ref(),
+            state,
+            !config.relay_urls.is_empty(),
+        ));
+        findings.push(diagnostics::check_dht(wan_status.as_ref(), state));
+    } else {
+        // Off in Settings: nothing outside to measure, and nothing failed.
+        findings.push(diagnostics::internet_path_off());
+    }
     // N6: the adapter a phone on this network would wake it through.
     let wake = pocketdesk_core::local::wake::wake_facts(None);
     let allowed = wake
