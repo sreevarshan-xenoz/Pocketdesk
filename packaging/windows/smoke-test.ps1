@@ -36,13 +36,28 @@ Check ((RuleCount) -gt 0) "the firewall rules ($(RuleCount))"
 $version = & (Join-Path $app 'pocketdesk.exe') --version
 Check ($LASTEXITCODE -eq 0) "pocketdesk --version runs ($version)"
 
+# Pocketdesk's processes running from the install folder, for the log.
+function ShowProcesses([string]$when) {
+    $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($app, [StringComparison]::OrdinalIgnoreCase) })
+    Write-Output "      $when`: $($running.Count) Pocketdesk process(es) running from $app"
+    foreach ($proc in $running) { Write-Output "        $($proc.Name) (pid $($proc.Id), started $($proc.StartTime.ToString('HH:mm:ss')))" }
+}
+ShowProcesses 'before uninstalling'
+
 # Uninstall. The uninstaller copies itself to TEMP and exits at once, so wait
 # for its work (the folder's files) to go, for up to two minutes.
-Start-Process (Join-Path $app 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+$uninstallLog = Join-Path $env:TEMP 'pocketdesk-uninstall.log'
+Start-Process (Join-Path $app 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$uninstallLog" -Wait
 $deadline = (Get-Date).AddMinutes(2)
 while ((Test-Path (Join-Path $app 'pocketdesk.exe')) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
 while ((Test-Path $uninstallKey) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
-Check (-not (Test-Path (Join-Path $app 'pocketdesk.exe'))) 'uninstalled the files'
+$filesGone = -not (Test-Path (Join-Path $app 'pocketdesk.exe'))
+Check $filesGone 'uninstalled the files'
+if (-not $filesGone) {
+    ShowProcesses 'after uninstalling'
+    Write-Output "      left in $app`: $((Get-ChildItem $app -ErrorAction SilentlyContinue).Name -join ', ')"
+    if (Test-Path $uninstallLog) { Get-Content $uninstallLog -Tail 40 | ForEach-Object { "      | $_" } }
+}
 Check (-not (Test-Path $shortcut)) 'removed the Start menu entry'
 Check (-not (Test-Path $uninstallKey)) 'removed the Apps & features entry'
 Check (-not (OnPath)) 'took Pocketdesk off PATH'
