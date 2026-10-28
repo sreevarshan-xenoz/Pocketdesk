@@ -100,6 +100,10 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
+                // Not taken by this server yet (BK7's relay comes next).
+                ComputerAsk::View { .. } | ComputerAsk::StopView => {
+                    tracing::debug!("A computer's screen was asked for; not shown here yet");
+                }
             }
         }
         if let Some(wan) = &wan {
@@ -344,6 +348,7 @@ async fn pair_with(
         name,
         addresses: link.addresses.clone(),
         control_port: link.control_port,
+        stream_port: link.stream_port,
         fingerprint: fingerprint.to_ascii_lowercase(),
         endpoint: pushed.or_else(|| {
             link.endpoint
@@ -1326,6 +1331,7 @@ mod tests {
                 name: "Desk".to_string(),
                 addresses: vec!["192.0.2.20".to_string()],
                 control_port: 1716,
+                stream_port: 4716,
                 fingerprint: "ab".repeat(32),
                 endpoint: None,
                 paired_unix: 1,
@@ -1383,6 +1389,7 @@ mod tests {
                 .map(str::to_string)
                 .to_vec(),
             control_port: 1716,
+            stream_port: 4716,
             fingerprint: "ab".repeat(32),
             endpoint: None,
             paired_unix: 1,

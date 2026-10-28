@@ -13,6 +13,8 @@ pub const TRUST_FILE: &str = "trusted_devices.json";
 pub const LIVE_FILE: &str = "live_sessions.json";
 /// The phone's cast the server holds now, for the desktop app (T10k).
 pub const CAST_FILE: &str = "cast.json";
+/// Another computer's screen the server shows now, for the desktop app (BK7).
+pub const VIEW_FILE: &str = "view.json";
 /// What Pocketdesk did, one event per line (ecosystem phase 1a).
 pub const EVENTS_FILE: &str = "events.jsonl";
 /// Task starts held for the owner (ecosystem 1c), and the owner's answers.

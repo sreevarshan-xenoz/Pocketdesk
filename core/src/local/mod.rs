@@ -69,4 +69,5 @@ pub mod tasks;
 pub mod tel_ask;
 pub mod transfers;
 pub mod typing;
+pub mod view;
 pub mod wake;

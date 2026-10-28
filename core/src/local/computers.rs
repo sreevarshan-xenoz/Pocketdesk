@@ -29,6 +29,10 @@ pub struct PeerComputer {
     /// Its addresses from the pairing link, best first.
     pub addresses: Vec<String>,
     pub control_port: u16,
+    /// Its streaming port, from the pairing link (BK7: where its screen is
+    /// shown from on the home network). Files written before read the default.
+    #[serde(default = "default_stream_port")]
+    pub stream_port: u16,
     /// Hex SHA-256 of its certificate, pinned for each address.
     pub fingerprint: String,
     /// Its iroh endpoint (`endpointId`, `relayUrls`, `directAddrs`, `dht`),
@@ -51,6 +55,10 @@ pub struct PeerComputer {
     /// paired, again too.
     #[serde(default)]
     pub lets_drive: bool,
+}
+
+fn default_stream_port() -> u16 {
+    crate::streaming::client::DEFAULT_STREAMING_PORT
 }
 
 /// How the last pairing went, for the app to show.
@@ -122,6 +130,17 @@ pub enum ComputerAsk {
     /// Let a computer this one paired with drive this one's keyboard and
     /// mouse, or not ([`PeerComputer::lets_drive`]).
     LetDrive { device_id: String, allow: bool },
+    /// Show a paired computer's screen in a window here (BK7): the server
+    /// dials it and relays its picture to the app ([`super::view`]).
+    /// `monitor` is which of its screens, from 0. A newer view replaces an
+    /// older one.
+    View {
+        device_id: String,
+        #[serde(default)]
+        monitor: u32,
+    },
+    /// Stop showing the computer's screen (its window closed).
+    StopView,
 }
 
 /// One request, as a file in `computers_out/`.
@@ -267,6 +286,7 @@ mod tests {
             name: "Desk".to_string(),
             addresses: vec!["192.0.2.10".to_string()],
             control_port: 1716,
+            stream_port: 4716,
             fingerprint: "ab".repeat(32),
             endpoint: None,
             paired_unix: 100,
@@ -337,6 +357,51 @@ mod tests {
         )
         .unwrap();
         assert!(take_all(&dir, 400).is_empty(), "from the future");
+    }
+
+    /// BK7: a view is asked for a computer and one of its screens, and
+    /// ended; a computer from a file written before has the default stream
+    /// port.
+    #[test]
+    fn a_view_is_asked_and_stopped() {
+        let dir = temp_dir("view");
+        let view = request(
+            &dir,
+            ComputerAsk::View {
+                device_id: "desk".to_string(),
+                monitor: 1,
+            },
+            100,
+        )
+        .unwrap();
+        let stop = request(&dir, ComputerAsk::StopView, 101).unwrap();
+        assert_eq!(take_all(&dir, 102), [view, stop]);
+        let wire = serde_json::to_value(ComputerRequest {
+            id: "a".to_string(),
+            ask: ComputerAsk::StopView,
+            created_unix: 1,
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"id": "a", "ask": "stop_view", "created_unix": 1})
+        );
+        let asked: ComputerRequest =
+            serde_json::from_str(r#"{"id":"a","ask":"view","device_id":"desk","created_unix":1}"#)
+                .unwrap();
+        assert_eq!(
+            asked.ask,
+            ComputerAsk::View {
+                device_id: "desk".to_string(),
+                monitor: 0
+            },
+            "the first screen unless named"
+        );
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        let old: PeerComputer =
+            serde_json::from_str(&raw.replace(",\"stream_port\":4716", "")).unwrap();
+        assert_eq!(old.stream_port, 4716);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
