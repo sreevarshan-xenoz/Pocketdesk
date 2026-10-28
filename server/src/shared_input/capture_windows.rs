@@ -81,6 +81,7 @@ use super::game_lock;
 use super::link::{self, Channel};
 use super::phone::{self, PhoneChannel};
 use super::screens::{Desktop, Motion};
+use super::sound;
 use super::status;
 use super::wire::{self, Msg};
 use pocketdesk_core::local::shared_input::PHONE_READY;
@@ -1092,6 +1093,11 @@ struct Glue {
     phone_ids: HashSet<String>,
     phones: HashMap<String, PhoneChannel>,
     pongs_seen: HashMap<String, u64>,
+    /// The sound of the computer driven (BK6): the setting, what was asked
+    /// for, and its playing while asked.
+    sound_on: bool,
+    asking: sound::Asking,
+    listening: Option<sound::Listening>,
 }
 
 /// Whether Windows has a mouse button down that a drag could be carried
@@ -1291,6 +1297,49 @@ impl Glue {
                     }
                 }
             }
+        }
+    }
+
+    /// The sound of the computer driven plays here while the cursor is on
+    /// it, with "Hear the computer you're driving here" on (BK6): asked
+    /// for after each arrival, played while asked, and let go of as the
+    /// cursor leaves (or the setting goes off). What that computer says
+    /// when it has no sound to give flashes here once.
+    fn follow_sound(&mut self, driver: &mut Driver) {
+        let want = sound::want_for(driver.away_on(), driver.visit(), self.sound_on, |id| {
+            self.phone_ids.contains(id)
+        });
+        let want = want.as_ref().map(|(to, visit)| (to.as_str(), *visit));
+        for step in self.asking.want(want) {
+            match step {
+                sound::Step::Unask(from) => {
+                    self.listening = None;
+                    // Said on its channel if one is open: a computer left
+                    // stops by itself, and one whose link went has gone.
+                    if let Some(channel) = self.channels.get_mut(&from)
+                        && let Err(e) = channel.send(&Msg::SoundWanted { on: false })
+                    {
+                        tracing::debug!(
+                            from,
+                            "Shared input: the end of the sound was not sent: {e}"
+                        );
+                    }
+                }
+                sound::Step::Ask(to) => {
+                    self.listening = Some(sound::Listening::start(&to));
+                    self.apply(
+                        driver,
+                        vec![Action::Send(to, Msg::SoundWanted { on: true })],
+                    );
+                }
+            }
+        }
+        if let Some(to) = self.asking.asked().map(str::to_string)
+            && let Some(why) = sound::take_unavailable(&to)
+        {
+            let words = format!("No sound from {}: {why}", driver.name_of(&to));
+            let note = badge::of(&badge::Event::Note(&words));
+            self.apply(driver, vec![Action::Badge(note)]);
         }
     }
 
@@ -1614,6 +1663,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         phone_ids: HashSet::new(),
         phones: HashMap::new(),
         pongs_seen: HashMap::new(),
+        sound_on: config.shared_input_sound,
+        asking: sound::Asking::default(),
+        listening: None,
     };
     // The catcher's thread ready before a drag first needs it.
     glue.files_setting(config.shared_input_files);
@@ -1679,6 +1731,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             );
             let actions = driver.shutdown();
             glue.apply(&mut driver, actions);
+            glue.follow_sound(&mut driver);
             status::set_keyboard_on(None);
             GAME_HELD.store(false, Ordering::SeqCst);
             // Dropping the glue restores the cursors; the supervisor starts a
@@ -1740,6 +1793,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
+        // The sound of the computer driven follows the cursor (BK6).
+        glue.follow_sound(&mut driver);
         // A game in front keeps the keyboard and mouse here with no hooks;
         // one come to the front while away brings them home.
         let game_every = if settle_until.is_some_and(|until| Instant::now() < until) {
@@ -1806,6 +1861,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
+            glue.sound_on = config.shared_input_sound;
             if config.shared_input_files != glue.files_on {
                 glue.files_setting(config.shared_input_files);
             }
@@ -1889,6 +1945,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     }
     let actions = driver.shutdown();
     glue.apply(&mut driver, actions);
+    glue.follow_sound(&mut driver);
     status::set_keyboard_on(None);
     GAME_HELD.store(false, Ordering::SeqCst);
     // What was just sent goes out before the channels do, for a moment at

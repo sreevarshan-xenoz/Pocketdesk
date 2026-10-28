@@ -197,6 +197,8 @@ pub struct Driver {
     /// The computers that stopped answering: no edge leads to them until
     /// they answer again.
     silent: HashSet<String>,
+    /// The arrivals so far: each is a visit of its own.
+    visits: u64,
 }
 
 impl Driver {
@@ -223,6 +225,7 @@ impl Driver {
             heard: None,
             pinged: None,
             silent: HashSet::new(),
+            visits: 0,
         }
     }
 
@@ -283,6 +286,12 @@ impl Driver {
     /// The computer driven now.
     pub fn away_on(&self) -> Option<&str> {
         self.away.as_ref().map(|a| a.to.as_str())
+    }
+
+    /// Which visit this is: a new number at each arrival on a computer,
+    /// for what is asked of it once a visit (its sound, BK6).
+    pub fn visit(&self) -> u64 {
+        self.visits
     }
 
     /// The input thread's first mode: the mouse watched when there is a
@@ -812,6 +821,7 @@ impl Driver {
         from: (i32, i32),
     ) {
         let was_away = self.away.is_some();
+        self.visits = self.visits.wrapping_add(1);
         // Each visit counts its own silence, from its first tick.
         self.heard = None;
         self.pinged = None;
@@ -1141,6 +1151,21 @@ mod tests {
         let crossed = d.on(moved(3455, 480));
         assert_eq!(d.away_on(), Some("L"), "{crossed:?}");
         d
+    }
+
+    /// BK6: each arrival is a visit of its own, so what is asked of a
+    /// computer for a visit (its sound) is asked again the next time.
+    #[test]
+    fn each_arrival_is_a_new_visit() {
+        let mut d = away_on_linux(false);
+        let first = d.visit();
+        d.on(moved(3440, 480));
+        assert_eq!(d.visit(), first, "a move is the same visit");
+        d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), None);
+        d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), Some("L"));
+        assert_ne!(d.visit(), first, "back on it: a new visit");
     }
 
     #[test]
