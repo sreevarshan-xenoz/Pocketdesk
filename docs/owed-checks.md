@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-886 open items.
+893 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 113 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 117 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
 | A second computer | 28 |
-| A Linux desktop (the Azure VM serves for some) | 171 |
+| A Linux desktop (the Azure VM serves for some) | 173 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 369 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -453,6 +453,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The badge on Windows: crossing onto Linux flashes "Keyboard and mouse: <laptop>" in the middle of each Windows monitor for about a second, and coming back "Keyboard and mouse: <this computer>"; sharp at 100% and 125%; a click on it lands on the window under it, the window typed in keeps the focus, it is in neither the taskbar nor Alt+Tab, and two quick switches show one badge, not two. (where: owner)
 - Nothing flashes over a full-screen game in front (the gaming lock's words go to the log only), and the game draws as before. (where: owner)
 - Identify on the Keyboard and mouse page: this computer flashes "This is <name>" for about 3 seconds and so does each computer it can drive; a computer not allowed to drive another makes it flash nothing. (where: owner)
+
+**215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
+
+- Copy text on Windows, push the pointer onto Linux, paste there: the text is there, with "Clipboard with my computers" off on both; copy on Linux, come back, paste on Windows. (where: owner)
+- A password manager's private copy (KeePassXC, or Windows' marks) does not follow; an image does not follow; with "Clipboard follows the mouse" off on either side (with Clipboard with my computers off), nothing crosses that way. (where: owner)
+- The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
+- The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
 
 ## A phone with a SIM
 
@@ -1266,6 +1273,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The badge on Linux (Hyprland or Sway): the cursor arriving flashes "Keyboard and mouse: <laptop>" in the middle of each output, sharp at the output's scale; clicks go through it and the keyboard focus stays; a screenshot of the headless session shows it. (where: linux)
 - GNOME (no layer shell), or no font found: an ordinary switch shows nothing, while Identify and a return for a reason (the laptop's sharing turned off, its link pulled) come as a desktop notification. (where: linux)
+
+**215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
+
+- `pocketdesk share-test <laptop> --keys 2000 --moves 2000` over the home Wi-Fi: Pocketdesk's share under 5 ms at the 95th percentile; the result on the desktop app's Diagnostics page. (where: linux)
+- Linux kept awake while driven: its screensaver and idle lock do not start while typing goes on from Windows for longer than the idle time. (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
@@ -2305,3 +2317,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **214. Driving another computer from Windows (shared input)**
 
 - The tray's menu: "Keyboard and mouse: this computer", then the laptop's name within about a second of crossing; no line with sharing off or the server stopped. (where: by hand)
+
+**215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
+
+- The Keyboard and mouse page's links and permission line, both ways: "Won't take input: sharing off there" when sharing is off on the laptop, and "may drive" switched from the computer that pasted the link. (where: by hand)

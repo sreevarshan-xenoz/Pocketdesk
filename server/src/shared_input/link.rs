@@ -40,8 +40,10 @@ const STREAM_PRIORITY: i32 = 1;
 /// The computers' connections registered now, by the other computer's id.
 static LINKS: LazyLock<Mutex<HashMap<String, Registered>>> = LazyLock::new(Default::default);
 
-/// A message from another computer, with that computer's id.
-type Arrival = (String, Msg);
+/// A message from another computer: that computer's id, the message, when
+/// it came off the link ([`now_us`]), and the link it came on (its
+/// connection's `stable_id`).
+pub type Arrival = (String, Msg, u64, usize);
 
 /// Where what arrives goes: the receiver [`incoming`] handed out last.
 static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(Default::default);
@@ -50,6 +52,13 @@ static INCOMING: LazyLock<Mutex<Option<mpsc::Sender<Arrival>>>> = LazyLock::new(
 /// answered: the [`Channel`] opened to it last.
 static PONGS: LazyLock<Mutex<HashMap<String, mpsc::UnboundedSender<Pong>>>> =
     LazyLock::new(Default::default);
+
+/// The way to the [`Channel`] waiting for a computer's timings.
+type TimingsIn = mpsc::UnboundedSender<Vec<wire::Timing>>;
+
+/// Where the timings a computer sends back ([`Msg::Timings`]) go, by that
+/// computer: the [`Channel`] opened to it last, as for [`PONGS`].
+static TIMINGS: LazyLock<Mutex<HashMap<String, TimingsIn>>> = LazyLock::new(Default::default);
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -71,7 +80,14 @@ impl Drop for Registered {
 /// earlier one, and read what comes on it. Called on a runtime.
 pub fn register(device_id: &str, conn: Connection) {
     let reader = tokio::spawn(read_link(device_id.to_string(), conn.clone())).abort_handle();
+    let stable_id = conn.stable_id();
     let replaced = lock(&LINKS).insert(device_id.to_string(), Registered { conn, reader });
+    // An answer on the link replaced is no answer on this one.
+    if let Some(old) = replaced.as_ref().map(|r| r.conn.stable_id())
+        && old != stable_id
+    {
+        forget_answer(device_id, old);
+    }
     // Its reader is stopped outside the lock.
     drop(replaced);
 }
@@ -79,6 +95,9 @@ pub fn register(device_id: &str, conn: Connection) {
 /// Forget the link to `device_id` and stop reading it.
 pub fn unregister(device_id: &str) {
     let gone = lock(&LINKS).remove(device_id);
+    if let Some(gone) = &gone {
+        forget_answer(device_id, gone.conn.stable_id());
+    }
     drop(gone);
 }
 
@@ -94,18 +113,53 @@ pub(crate) fn linked() -> Vec<String> {
 
 /// When each computer last sent its screens ([`Msg::Screens`], which a
 /// computer sends only to one it lets drive it: in answer to its `Hello`,
-/// and when its screens change). The driving side takes a computer that
-/// answered this way since its channel opened as one it may cross onto
-/// (`drive::reachable`); a `Hello` from that computer's own driver is no
-/// answer.
-static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+/// and when its screens change), counted only on the link this computer
+/// greeted it on ([`GREETED`]) and forgotten when that link goes. The
+/// driving side takes a computer that answered this way since its channel
+/// opened as one it may cross onto (`drive::reachable`); a `Hello` from
+/// that computer's own driver is no answer, and nor are screens it sent
+/// unasked.
+/// Each with the link it came on.
+static SCREENS_HEARD: LazyLock<Mutex<HashMap<String, (std::time::Instant, usize)>>> =
     LazyLock::new(Default::default);
 
-/// Note that `device_id` just sent its screens: it takes input from this
-/// computer now, whatever it refused before.
-pub fn note_screens(device_id: &str) {
+/// The computers this one said hello to ([`Msg::Hello`]), each with the
+/// link it said it on (its connection's `stable_id`).
+static GREETED: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
+
+/// Note that `device_id` just sent its screens on the link `link` (its
+/// connection's `stable_id`): when this computer greeted it on that link,
+/// it takes input from this one, whatever it refused before. Whether it
+/// counted.
+pub fn note_screens(device_id: &str, link: usize) -> bool {
+    if lock(&GREETED).get(device_id) != Some(&link) {
+        return false;
+    }
     lock(&REFUSED).remove(device_id);
-    lock(&SCREENS_HEARD).insert(device_id.to_string(), std::time::Instant::now());
+    lock(&SCREENS_HEARD).insert(device_id.to_string(), (std::time::Instant::now(), link));
+    true
+}
+
+/// Whether `device_id` answered this computer's hello with its screens on
+/// the link up now (and has not refused since): this computer may drive
+/// it.
+pub fn answered(device_id: &str) -> bool {
+    lock(&SCREENS_HEARD).contains_key(device_id)
+}
+
+/// The link `link` to `device_id` went or was replaced: its greeting and
+/// answer go with it. Those on a newer link stay (a hello said on it just
+/// as it was registered).
+fn forget_answer(device_id: &str, link: usize) {
+    let mut greeted = lock(&GREETED);
+    if greeted.get(device_id) == Some(&link) {
+        greeted.remove(device_id);
+    }
+    drop(greeted);
+    let mut heard = lock(&SCREENS_HEARD);
+    if heard.get(device_id).is_some_and(|(_, on)| *on == link) {
+        heard.remove(device_id);
+    }
 }
 
 /// The computers that last answered this one by refusing to be driven
@@ -128,7 +182,10 @@ pub fn refusals() -> HashMap<String, (u8, std::time::Instant)> {
 
 /// When each computer last sent its screens.
 pub fn screens_heard() -> HashMap<String, std::time::Instant> {
-    lock(&SCREENS_HEARD).clone()
+    lock(&SCREENS_HEARD)
+        .iter()
+        .map(|(id, (at, _))| (id.clone(), *at))
+        .collect()
 }
 
 /// Whether `conn`'s traffic rides a direct path now: its selected path is
@@ -171,17 +228,20 @@ impl Drop for Held {
             None
         };
         drop(links);
+        if gone.is_some() {
+            forget_answer(&self.device_id, self.stable_id);
+        }
         drop(gone);
     }
 }
 
-/// What the other computers send from now on, with each one's id: one
-/// receiver at a time, so a later call takes them from the earlier one,
-/// whose receiver then ends. Pings are in it (each already answered), the
-/// answers to this computer's own pings are not (they go to the
-/// [`Channel`] that sent them). With no receiver taken, what arrives is
-/// dropped.
-pub fn incoming() -> mpsc::Receiver<(String, Msg)> {
+/// What the other computers send from now on, with each one's id and when
+/// it came off the link: one receiver at a time, so a later call takes them
+/// from the earlier one, whose receiver then ends. Pings are in it (each
+/// already answered), the answers to this computer's own pings and asks
+/// are not (they go to the [`Channel`] that sent them). With no receiver
+/// taken, what arrives is dropped.
+pub fn incoming() -> mpsc::Receiver<Arrival> {
     let (tx, rx) = mpsc::channel(INCOMING_DEPTH);
     *lock(&INCOMING) = Some(tx);
     rx
@@ -209,11 +269,13 @@ async fn read_link(device_id: String, conn: Connection) {
             datagram = conn.read_datagram() => match datagram {
                 Ok(bytes) => match wire::decode(&bytes) {
                     Ok(msg) => {
+                        let at_us = now_us();
                         if answer(&device_id, &conn, &msg)
                             && let Some(incoming) = incoming_sender()
                         {
                             // A datagram is dropped rather than waited for.
-                            let _ = incoming.try_send((device_id.clone(), msg));
+                            let arrival = (device_id.clone(), msg, at_us, conn.stable_id());
+                            let _ = incoming.try_send(arrival);
                         }
                     }
                     Err(e) => tracing::debug!(device_id, "A shared-input datagram did not read: {e}"),
@@ -259,44 +321,58 @@ async fn read_stream(device_id: String, conn: Connection, mut stream: RecvStream
                 "Another computer shares input in another version"
             );
             if matches!(msg, Msg::Hello { .. }) {
-                hand_on(&device_id, msg).await;
+                hand_on(&device_id, msg, now_us(), conn.stable_id()).await;
             }
             let _ = stream.stop(0u32.into());
             return;
         }
+        let at_us = now_us();
         if answer(&device_id, &conn, &msg) {
-            hand_on(&device_id, msg).await;
+            hand_on(&device_id, msg, at_us, conn.stable_id()).await;
         }
     }
 }
 
 /// Hand `msg` on to whoever takes [`incoming`], waiting while it is full:
 /// what the stream carries is not dropped.
-async fn hand_on(device_id: &str, msg: Msg) {
+async fn hand_on(device_id: &str, msg: Msg, at_us: u64, link: usize) {
     if let Some(incoming) = incoming_sender() {
-        let _ = incoming.send((device_id.to_string(), msg)).await;
+        let _ = incoming
+            .send((device_id.to_string(), msg, at_us, link))
+            .await;
     }
 }
 
 /// What the link itself does with `msg` from `device_id`: a ping is
-/// answered at once, a pong goes to the channel whose ping it answers.
-/// Whether it is handed on too (all but a pong).
+/// answered at once (with this computer's clock), a pong and timings go to
+/// the channel that asked for them. Whether it is handed on too (all but
+/// those two).
 fn answer(device_id: &str, conn: &Connection, msg: &Msg) -> bool {
     match msg {
         Msg::Ping { t_us } => {
-            let pong = wire::encode(&Msg::Pong { t_us: *t_us });
+            let pong = wire::encode(&Msg::Pong {
+                t_us: *t_us,
+                at_us: now_us(),
+            });
             if let Err(e) = conn.send_datagram(pong.into()) {
                 tracing::debug!(device_id, "A ping went unanswered: {e}");
             }
             true
         }
-        Msg::Pong { t_us } => {
+        Msg::Pong { t_us, at_us } => {
             let pong = Pong {
                 sent_us: *t_us,
                 back_us: now_us(),
+                at_us: *at_us,
             };
             if let Some(waiting) = lock(&PONGS).get(device_id) {
                 let _ = waiting.send(pong);
+            }
+            false
+        }
+        Msg::Timings(timings) => {
+            if let Some(waiting) = lock(&TIMINGS).get(device_id) {
+                let _ = waiting.send(timings.clone());
             }
             false
         }
@@ -314,11 +390,12 @@ pub fn now_us() -> u64 {
 
 /// An answer to one of this computer's pings: the reading the ping carried
 /// ([`now_us`] as it was sent) and when the answer came back, both on this
-/// computer's clock.
+/// computer's clock; and the other computer's clock as it answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pong {
     pub sent_us: u64,
     pub back_us: u64,
+    pub at_us: u64,
 }
 
 impl Pong {
@@ -349,6 +426,9 @@ pub struct Channel {
     pongs: mpsc::UnboundedReceiver<Pong>,
     /// The way into `pongs`, to know it is still this channel's on drop.
     pongs_in: mpsc::UnboundedSender<Pong>,
+    /// The timings the other computer sends back, and the way into them.
+    timings: mpsc::UnboundedReceiver<Vec<wire::Timing>>,
+    timings_in: TimingsIn,
 }
 
 impl Channel {
@@ -373,6 +453,8 @@ impl Channel {
             .map_err(|_| "no runtime to send shared input on".to_string())?;
         let (pongs_in, pongs) = mpsc::unbounded_channel();
         lock(&PONGS).insert(device_id.to_string(), pongs_in.clone());
+        let (timings_in, timings) = mpsc::unbounded_channel();
+        lock(&TIMINGS).insert(device_id.to_string(), timings_in.clone());
         Ok(Channel {
             device_id: device_id.to_string(),
             conn,
@@ -381,6 +463,8 @@ impl Channel {
             broken: Arc::default(),
             pongs,
             pongs_in,
+            timings,
+            timings_in,
         })
     }
 
@@ -394,6 +478,9 @@ impl Channel {
         }
         if let Some(why) = lock(&self.broken).clone() {
             return Err(why);
+        }
+        if matches!(msg, Msg::Hello { .. }) {
+            lock(&GREETED).insert(self.device_id.clone(), self.conn.stable_id());
         }
         if rides_datagram(msg) {
             return self
@@ -431,6 +518,15 @@ impl Channel {
             .ok()
             .flatten()
     }
+
+    /// The timings the other computer sent back after a
+    /// [`Msg::AskTimings`], waited for at most `within`.
+    pub async fn timings(&mut self, within: Duration) -> Option<Vec<wire::Timing>> {
+        tokio::time::timeout(within, self.timings.recv())
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 impl Drop for Channel {
@@ -441,6 +537,14 @@ impl Drop for Channel {
             .is_some_and(|waiting| waiting.same_channel(&self.pongs_in))
         {
             pongs.remove(&self.device_id);
+        }
+        drop(pongs);
+        let mut timings = lock(&TIMINGS);
+        if timings
+            .get(&self.device_id)
+            .is_some_and(|waiting| waiting.same_channel(&self.timings_in))
+        {
+            timings.remove(&self.device_id);
         }
     }
 }
@@ -620,7 +724,7 @@ mod tests {
         let mut pinged = false;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while on_stream.last() != Some(&Msg::Leave) || !pinged {
-            let (from, msg) = tokio::time::timeout_at(deadline, arriving.recv())
+            let (from, msg, _, _) = tokio::time::timeout_at(deadline, arriving.recv())
                 .await
                 .expect("everything in time")
                 .expect("still taken");
@@ -644,12 +748,59 @@ mod tests {
         b.close().await;
     }
 
+    /// Screens count as an answer only on the link this computer said
+    /// hello on: not sent unasked, and not once that link goes.
+    #[tokio::test]
+    async fn screens_count_only_as_an_answer_to_a_hello_on_the_link_up() {
+        let (a, b, out, back) = linked_pair().await;
+        let link = out.stable_id();
+        assert!(!note_screens("test-answer", link), "no hello");
+        let held = hold("test-answer", out);
+        assert!(!note_screens("test-answer", link), "unasked");
+        assert!(!answered("test-answer"));
+        let mut channel = Channel::open_with("test-answer", |_| true).unwrap();
+        channel
+            .send(&Msg::Hello {
+                version: wire::VERSION,
+                name: "A".to_string(),
+                screens: Vec::new(),
+            })
+            .unwrap();
+        // Screens late from another link do not count.
+        assert!(!note_screens("test-answer", back.stable_id()));
+        assert!(note_screens("test-answer", link), "an answer to the hello");
+        assert!(answered("test-answer"));
+        drop(channel);
+        drop(held);
+        assert!(!answered("test-answer"), "forgotten with the link");
+        assert!(!note_screens("test-answer", link));
+        a.close().await;
+        b.close().await;
+    }
+
+    /// The link that goes takes only its own greeting and answer: a hello
+    /// said on the newer link just as it was registered stays.
+    #[test]
+    fn a_replaced_link_forgets_only_its_own_answer() {
+        lock(&GREETED).insert("test-replace".to_string(), 2);
+        forget_answer("test-replace", 1);
+        assert!(
+            note_screens("test-replace", 2),
+            "the newer link's hello kept"
+        );
+        forget_answer("test-replace", 1);
+        assert!(answered("test-replace"), "the newer link's answer kept");
+        forget_answer("test-replace", 2);
+        assert!(!answered("test-replace"));
+        assert!(!note_screens("test-replace", 2));
+    }
+
     #[test]
     fn only_the_newest_kind_rides_datagrams() {
         assert!(rides_datagram(&Msg::Move { seq: 1, x: 0, y: 0 }));
         assert!(rides_datagram(&Msg::Active { idle_ms: 0 }));
         assert!(rides_datagram(&Msg::Ping { t_us: 0 }));
-        assert!(rides_datagram(&Msg::Pong { t_us: 0 }));
+        assert!(rides_datagram(&Msg::Pong { t_us: 0, at_us: 0 }));
         assert!(!rides_datagram(&Msg::Key {
             code: 30,
             pressed: true

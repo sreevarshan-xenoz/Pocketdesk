@@ -82,6 +82,9 @@ pub const SHARED_INPUT_STATUS_FILE: &str = "shared_input_status.json";
 /// The desktop app's requests for the shared keyboard and mouse
 /// (Identify), one file each.
 pub const SHARED_INPUT_DIR: &str = "shared_input_out";
+/// `share-test`'s last measurement of the shared keyboard and mouse's
+/// latency, written by the server.
+pub const SHARED_INPUT_LATENCY_FILE: &str = "shared_input_latency.json";
 pub const SENT_FILE: &str = "sent.json";
 /// The transfers under way (C1), written by the server for the desktop app.
 pub const TRANSFERS_FILE: &str = "transfers.json";

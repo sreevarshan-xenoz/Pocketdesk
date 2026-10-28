@@ -29,7 +29,7 @@ use super::held::HeldInput;
 use super::link::{self, Channel};
 use super::screens;
 use super::status;
-use super::wire::{self, Msg, Screen};
+use super::wire::{self, Msg, Screen, Timing};
 use crate::input_injector::InputInjector;
 
 /// Where what the driving computer sends ends up.
@@ -129,6 +129,13 @@ pub struct Receiver {
     heard_at: Option<Instant>,
     /// This computer's name, for its badge.
     name: String,
+    /// How long each key and move took here since a computer's cursor
+    /// last arrived (that computer), for its `share-test` to ask
+    /// ([`Msg::AskTimings`]); at most [`wire::MAX_TIMINGS`].
+    timings: Vec<Timing>,
+    timed_for: Option<String>,
+    /// The keys, buttons and wheel turns from it since it arrived.
+    inputs: u32,
 }
 
 impl Receiver {
@@ -141,6 +148,31 @@ impl Receiver {
             active_at: None,
             heard_at: None,
             name: String::new(),
+            timings: Vec::new(),
+            timed_for: None,
+            inputs: 0,
+        }
+    }
+
+    /// How long what `from` sent took here since its cursor last arrived
+    /// (kept after it leaves, until a cursor arrives again).
+    pub fn timings_for(&self, from: &str) -> Option<&[Timing]> {
+        (self.timed_for.as_deref() == Some(from)).then_some(self.timings.as_slice())
+    }
+
+    /// Note how long the move (`moved`, `n` its `seq`) or key (`n` its
+    /// count) that came off the link at `arrived_us` took to inject.
+    fn time(&mut self, moved: bool, n: u32, arrived_us: Option<u64>) {
+        if let Some(arrived_us) = arrived_us
+            && self.timings.len() < wire::MAX_TIMINGS
+        {
+            let took = link::now_us().saturating_sub(arrived_us);
+            self.timings.push(Timing {
+                moved,
+                n,
+                arrived_us,
+                took_us: u32::try_from(took).unwrap_or(u32::MAX),
+            });
         }
     }
 
@@ -169,6 +201,23 @@ impl Receiver {
 
     /// [`Receiver::handle`], with `now` the time it arrived.
     pub fn handle_at(&mut self, from: &str, msg: Msg, allowed: bool, now: Instant) {
+        self.handle_timed(from, msg, allowed, now, None);
+    }
+
+    /// [`Receiver::handle`] for what came off the link at `arrived_us`
+    /// ([`link::now_us`]): each key and move is timed.
+    pub fn handle_arrived(&mut self, from: &str, msg: Msg, allowed: bool, arrived_us: u64) {
+        self.handle_timed(from, msg, allowed, Instant::now(), Some(arrived_us));
+    }
+
+    fn handle_timed(
+        &mut self,
+        from: &str,
+        msg: Msg,
+        allowed: bool,
+        now: Instant,
+        arrived_us: Option<u64>,
+    ) {
         if !allowed {
             // Its permission went (or the feature did) while it drove.
             self.link_lost(from);
@@ -202,6 +251,9 @@ impl Receiver {
             self.driver = Some(from.to_string());
             self.heard_at = Some(now);
             self.last_seq = None;
+            self.timings.clear();
+            self.timed_for = Some(from.to_string());
+            self.inputs = 0;
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -212,6 +264,13 @@ impl Receiver {
         if self.driver.as_deref() != Some(from) {
             return;
         }
+        if matches!(
+            msg,
+            Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. }
+        ) {
+            self.inputs = self.inputs.wrapping_add(1);
+        }
+        let n = self.inputs;
         match msg {
             Msg::Leave => self.stop(),
             Msg::Move { seq, x, y } => {
@@ -222,17 +281,23 @@ impl Receiver {
                 if newer {
                     self.last_seq = Some(seq);
                     self.inject.move_abs(x, y);
+                    self.time(true, seq, arrived_us);
                 }
             }
             Msg::Key { code, pressed } if code <= KEY_MAX => {
                 self.held.note(&msg);
                 self.inject.key(code, pressed);
+                self.time(false, n, arrived_us);
             }
             Msg::Button { button, pressed } if button <= BUTTON_MAX => {
                 self.held.note(&msg);
                 self.inject.button(button, pressed);
+                self.time(false, n, arrived_us);
             }
-            Msg::Wheel { dx, dy } => self.inject.wheel(dx, dy),
+            Msg::Wheel { dx, dy } => {
+                self.inject.wheel(dx, dy);
+                self.time(false, n, arrived_us);
+            }
             Msg::ReleaseAll => self.release_held(),
             _ => {}
         }
@@ -421,26 +486,67 @@ fn standing_of(trusted: bool, permitted: bool, paired_with: Option<bool>) -> Sta
     }
 }
 
+/// What `device_id` may do here, read now (files: blocking), with shared
+/// input on.
+fn standing_now(device_id: &str) -> Standing {
+    // A permission profile could carry the flag onto a phone: only the
+    // owner's computers drive this one, those that paired with this one
+    // (the trust store's) by its permission there.
+    let trusted = crate::plugins::pair::is_computer_device(device_id);
+    // One this computer paired with has no trust store entry: what it may
+    // do is kept with it in computers.json.
+    let paired_with = crate::state::state_dir().ok().and_then(|dir| {
+        pocketdesk_core::local::computers::read(&dir)
+            .computers
+            .into_iter()
+            .find(|c| c.device_id == device_id)
+    });
+    standing_of(
+        trusted,
+        trusted && crate::plugins::pair::allows(device_id, Capability::SharedInput),
+        paired_with.map(|c| c.lets_drive),
+    )
+}
+
+/// Whether the computer `device_id` may drive this one now: shared input
+/// on here, and its standing (files: blocking).
+pub(crate) fn may_drive_here(device_id: &str) -> bool {
+    crate::events::current_config().shared_input && standing_now(device_id).allowed
+}
+
 /// The setting and each computer's standing, read again at most once a
 /// [`RECHECK`] (they are files: config.toml and the trust store).
 #[derive(Default)]
 struct Gate {
-    on: Option<(bool, Instant)>,
+    /// `shared_input` and `shared_input_clipboard`, and when read.
+    on: Option<((bool, bool), Instant)>,
     standings: HashMap<String, (Standing, Instant)>,
 }
 
 impl Gate {
-    async fn on(&mut self) -> bool {
+    async fn settings(&mut self) -> (bool, bool) {
         if let Some((on, at)) = self.on
             && at.elapsed() < RECHECK
         {
             return on;
         }
-        let on = tokio::task::spawn_blocking(|| crate::events::current_config().shared_input)
-            .await
-            .unwrap_or(false);
+        let on = tokio::task::spawn_blocking(|| {
+            let config = crate::events::current_config();
+            (config.shared_input, config.shared_input_clipboard)
+        })
+        .await
+        .unwrap_or((false, false));
         self.on = Some((on, Instant::now()));
         on
+    }
+
+    async fn on(&mut self) -> bool {
+        self.settings().await.0
+    }
+
+    /// The clipboard follows the mouse here (`shared_input_clipboard`).
+    async fn clipboard_follows(&mut self) -> bool {
+        self.settings().await.1
     }
 
     /// Why `device_id` may not drive this one, as a [`Msg::Refuse`] says
@@ -462,27 +568,9 @@ impl Gate {
             return *standing;
         }
         let id = device_id.to_string();
-        let standing = tokio::task::spawn_blocking(move || {
-            // A permission profile could carry the flag onto a phone: only
-            // the owner's computers drive this one, those that paired with
-            // this one (the trust store's) by its permission there.
-            let trusted = crate::plugins::pair::is_computer_device(&id);
-            // One this computer paired with has no trust store entry: what
-            // it may do is kept with it in computers.json.
-            let paired_with = crate::state::state_dir().ok().and_then(|dir| {
-                pocketdesk_core::local::computers::read(&dir)
-                    .computers
-                    .into_iter()
-                    .find(|c| c.device_id == id)
-            });
-            standing_of(
-                trusted,
-                trusted && crate::plugins::pair::allows(&id, Capability::SharedInput),
-                paired_with.map(|c| c.lets_drive),
-            )
-        })
-        .await
-        .unwrap_or_default();
+        let standing = tokio::task::spawn_blocking(move || standing_now(&id))
+            .await
+            .unwrap_or_default();
         self.standings
             .insert(device_id.to_string(), (standing, Instant::now()));
         standing
@@ -563,27 +651,41 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
 }
 
 /// Tell the computer `to` this computer's `screens`, on the channel kept
-/// for it (opened the first time; dropped when a send fails, so the next
-/// opens it again).
+/// for it.
 fn tell_screens(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Screen]) {
+    send_to(channels, to, &Msg::Screens(screens.to_vec()));
+}
+
+/// Send `msg` to the computer `to` on the channel kept for it (opened the
+/// first time; dropped when a send fails, so the next opens it again).
+fn send_to(channels: &mut HashMap<String, Channel>, to: &str, msg: &Msg) {
     if !channels.contains_key(to) {
         match Channel::open(to) {
             Ok(channel) => {
                 channels.insert(to.to_string(), channel);
             }
             Err(e) => {
-                tracing::debug!(to, "Shared input: this computer's screens not sent: {e}");
+                tracing::debug!(to, "Shared input: not sent to another computer: {e}");
                 return;
             }
         }
     }
-    let msg = Msg::Screens(screens.to_vec());
     if let Some(channel) = channels.get_mut(to)
-        && let Err(e) = channel.send(&msg)
+        && let Err(e) = channel.send(msg)
     {
-        tracing::debug!(to, "Shared input: this computer's screens not sent: {e}");
+        tracing::debug!(to, "Shared input: not sent to another computer: {e}");
         channels.remove(to);
     }
+}
+
+/// Whether this computer pushes its clipboard back to `from` for `msg`
+/// (the clipboard following the mouse home): a leave from the computer
+/// driving this one now (`driver`), allowed to (`allowed`), with
+/// `shared_input_clipboard` on here (`follows`). Not the leave a driver
+/// sends as it greets (it drives nothing then), nor one from another
+/// computer.
+fn pushes_back(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>, follows: bool) -> bool {
+    matches!(msg, Msg::Leave) && allowed && follows && driver == Some(from)
 }
 
 /// Whether a computer that may not drive this one is told so for `msg`:
@@ -653,7 +755,7 @@ pub async fn run() {
     loop {
         tokio::select! {
             arrival = arriving.recv() => {
-                let Some((from, msg)) = arrival else { break };
+                let Some((from, msg, arrived_us, link_id)) = arrival else { break };
                 if let Msg::Refuse { reason } = msg {
                     // Its answer to this computer driving it.
                     if heard_refusals.note(&from, reason) {
@@ -680,8 +782,10 @@ pub async fn run() {
                 // Its screens are the answer the driving side waits for
                 // before it treats this computer as one to cross onto (a
                 // hello from its own driver is not).
-                if standing.computer && super::drive::is_answer(&msg) {
-                    link::note_screens(&from);
+                if standing.computer
+                    && super::drive::is_answer(&msg)
+                    && link::note_screens(&from, link_id)
+                {
                     heard_refusals.clear(&from);
                 }
                 match &msg {
@@ -711,7 +815,20 @@ pub async fn run() {
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
                 }
-                receiver.handle(&from, msg, standing.allowed);
+                if standing.allowed && matches!(msg, Msg::AskTimings) {
+                    let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
+                    send_to(&mut channels, &from, &Msg::Timings(timings));
+                    continue;
+                }
+                // The cursor going home from here: this computer's
+                // clipboard goes with it, when it follows the mouse here.
+                let follows = matches!(msg, Msg::Leave) && gate.clipboard_follows().await;
+                let back = pushes_back(&msg, &from, standing.allowed, receiver.driver(), follows);
+                receiver.handle_arrived(&from, msg, standing.allowed, arrived_us);
+                if back {
+                    let to = from.clone();
+                    tokio::spawn(async move { crate::clipboard_push::push_now(&to).await });
+                }
             }
             _ = tick.tick() => {
                 // A computer told this one's screens (one that may cross
@@ -885,6 +1002,66 @@ mod tests {
 
     fn key(code: u16, pressed: bool) -> Msg {
         Msg::Key { code, pressed }
+    }
+
+    /// The clipboard goes back only on a leave from the computer driving
+    /// this one now, allowed to, with the setting on: never the leave a
+    /// driver sends as it greets, nor one from another computer.
+    #[test]
+    fn only_the_drivers_leave_pushes_the_clipboard_back() {
+        let leave = Msg::Leave;
+        assert!(pushes_back(&leave, "pc", true, Some("pc"), true));
+        // The greeting leave: nothing is driven.
+        assert!(!pushes_back(&leave, "pc", true, None, true));
+        // Another computer's leave while "pc" drives.
+        assert!(!pushes_back(&leave, "other", true, Some("pc"), true));
+        // Not allowed to drive this one, or the setting off here.
+        assert!(!pushes_back(&leave, "pc", false, Some("pc"), true));
+        assert!(!pushes_back(&leave, "pc", true, Some("pc"), false));
+        // Anything but a leave.
+        assert!(!pushes_back(
+            &Msg::Enter { x: 0, y: 0 },
+            "pc",
+            true,
+            Some("pc"),
+            true
+        ));
+        assert!(!pushes_back(&Msg::ReleaseAll, "pc", true, Some("pc"), true));
+    }
+
+    /// Each key and move injected for the driving computer is timed from
+    /// when it came off the link, and kept for it after it leaves: a stale
+    /// move, a key out of range (counted, not timed) and what another
+    /// computer sends are not; the next arrival starts over.
+    #[test]
+    fn keys_and_moves_are_timed_for_the_visit() {
+        let (mut r, _fake) = receiver();
+        let at = link::now_us();
+        r.handle_arrived("pc", Msg::Enter { x: 0, y: 0 }, true, at);
+        let mv = |seq| Msg::Move { seq, x: 1, y: 1 };
+        r.handle_arrived("pc", mv(5), true, at);
+        r.handle_arrived("pc", mv(4), true, at);
+        r.handle_arrived("pc", key(30, true), true, at);
+        r.handle_arrived("pc", key(0x300, true), true, at);
+        r.handle_arrived("pc", key(30, false), true, at);
+        r.handle_arrived("other", key(31, true), true, at);
+        r.handle_arrived("pc", Msg::Leave, true, at);
+        let timed: Vec<(bool, u32)> = r
+            .timings_for("pc")
+            .unwrap()
+            .iter()
+            .map(|t| (t.moved, t.n))
+            .collect();
+        assert_eq!(timed, [(true, 5), (false, 1), (false, 3)]);
+        let first = r.timings_for("pc").unwrap()[0];
+        assert_eq!(first.arrived_us, at);
+        assert!(first.took_us < 1_000_000, "{first:?}");
+        assert_eq!(r.timings_for("other"), None);
+        // Untimed (the tests' way in) and a new arrival: nothing kept.
+        r.handle("other", Msg::Enter { x: 0, y: 0 }, true);
+        r.handle("other", key(30, true), true);
+        assert_eq!(r.timings_for("pc"), None);
+        assert_eq!(r.timings_for("other"), Some(&[][..]));
     }
 
     #[test]

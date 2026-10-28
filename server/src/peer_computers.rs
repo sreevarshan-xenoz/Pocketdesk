@@ -153,6 +153,16 @@ fn live(device_id: &str) -> Option<mpsc::Sender<NetworkPacket>> {
         .cloned()
 }
 
+/// The link to the computer `device_id`, while it is up, whether or not
+/// the clipboard is shared with computers (shared input's clipboard
+/// follows the mouse with that off).
+pub(crate) fn live_link(device_id: &str) -> Option<LinkedComputer> {
+    live(device_id).map(|outgoing| LinkedComputer {
+        device_id: device_id.to_string(),
+        outgoing,
+    })
+}
+
 /// Whether the link to `device_id` is up now.
 pub(crate) fn is_linked(device_id: &str) -> bool {
     live(device_id).is_some()
@@ -1061,7 +1071,9 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) else {
             return;
         };
-        if !crate::clipboard_push::with_computers() {
+        if !crate::clipboard_push::with_computers()
+            && !crate::clipboard_push::takes_follow(device_id, &packet.body)
+        {
             return;
         }
         // Not sent back to the computer it came from.

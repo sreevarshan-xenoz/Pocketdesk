@@ -130,9 +130,13 @@ impl Plugin for ClipboardPlugin {
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         // Another computer (2f) has the clipboard, text or image, read or
-        // set, only while this one shares it with its computers (2g).
-        if !crate::clipboard_push::with_computers()
-            && crate::plugins::pair::is_computer_device(sender.device_id())
+        // set, only while this one shares it with its computers (2g); or
+        // its text as the shared keyboard and mouse's cursor switches, while
+        // the clipboard follows the mouse here.
+        if crate::plugins::pair::is_computer_device(sender.device_id())
+            && !crate::clipboard_push::with_computers()
+            && !(packet.packet_type == "kdeconnect.clipboard"
+                && crate::clipboard_push::takes_follow(sender.device_id(), &packet.body))
         {
             tracing::debug!(
                 "Another computer's {}, with the clipboard not shared here; ignored",
