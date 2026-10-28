@@ -262,6 +262,7 @@ fn unpairing_a_computer_waits_for_the_server() {
                 paired_unix: 0,
                 link: String::new(),
                 link_unix: 0,
+                lets_drive: false,
             });
     })
     .expect("a computers file");
@@ -276,6 +277,103 @@ fn unpairing_a_computer_waits_for_the_server() {
         app.get_by_label("Unpair…").accesskit_node().is_disabled(),
         "no server here, so no Unpair"
     );
+}
+
+/// Test computers for the Keyboard and mouse page: this one ("Test Desk")
+/// and one it paired with ("Test Laptop"), linked directly, that answered
+/// with its screens.
+const DESK: &str = "00000000-0000-4000-8000-0000000000d1";
+const LAPTOP: &str = "00000000-0000-4000-8000-0000000000d2";
+
+fn keyboard_mouse_computers(state: &Path) {
+    use pocketdesk_core::local::shared_input::{self, Screen, StatusFile};
+    pocketdesk_core::local::computers::update(state, |file| {
+        file.computers
+            .push(pocketdesk_core::local::computers::PeerComputer {
+                device_id: LAPTOP.to_string(),
+                name: "Test Laptop".to_string(),
+                addresses: Vec::new(),
+                control_port: 1716,
+                fingerprint: String::new(),
+                endpoint: None,
+                paired_unix: 0,
+                link: "linked".to_string(),
+                link_unix: 0,
+                lets_drive: false,
+            });
+    })
+    .expect("a computers file");
+    let screen = |width, height| Screen {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    shared_input::update(state, |file| {
+        file.set_own(DESK, "Test Desk", &[screen(1920, 1080)], 1);
+        file.heard(LAPTOP, Some("Test Laptop"), &[screen(1600, 1000)], 1);
+    })
+    .expect("a screens file");
+    let status = StatusFile {
+        keyboard_on: String::new(),
+        link: [(LAPTOP.to_string(), "direct".to_string())].into(),
+        answered: [LAPTOP.to_string()].into(),
+    };
+    shared_input::write_status(state, &status).expect("a status file");
+}
+
+/// The Keyboard and mouse page: the paired computer by name and how it is
+/// linked; its switch, for a computer this one paired with, asks the
+/// server; Identify asks for each computer that answered; the sharing
+/// switch is the setting.
+#[test]
+fn the_keyboard_and_mouse_page_lets_either_side_drive() {
+    let fixture = Fixture::new();
+    keyboard_mouse_computers(fixture.state());
+    let mut app = fixture.open(Some(Tab::KeyboardMouse));
+    app.run_steps(3);
+    assert!(app.query_by_label("Test Laptop").is_some());
+    assert!(app.query_by_label("Linked directly").is_some());
+    assert!(
+        app.query_by_label("Test Desk may drive Test Laptop")
+            .is_some(),
+        "it answered: it lets this one drive it"
+    );
+    assert!(
+        app.query_by_label("The keyboard and mouse are on this computer.")
+            .is_some()
+    );
+
+    app.get_by_label("Test Laptop may drive Test Desk").click();
+    app.run_steps(3);
+    let now = pocketdesk_core::local::pin::now_unix();
+    let asked: Vec<_> = pocketdesk_core::local::computers::take_all(fixture.state(), now)
+        .into_iter()
+        .map(|r| r.ask)
+        .collect();
+    assert_eq!(
+        asked,
+        [pocketdesk_core::local::computers::ComputerAsk::LetDrive {
+            device_id: LAPTOP.to_string(),
+            allow: true,
+        }]
+    );
+
+    app.get_by_label("Identify").click();
+    app.run_steps(3);
+    let identify = pocketdesk_core::local::shared_input::take_all(fixture.state(), now);
+    assert_eq!(identify.len(), 1, "one Identify asked");
+
+    app.get_by_label("Share my keyboard and mouse with my computers")
+        .click();
+    app.run_steps(3);
+    let config = pocketdesk_core::local::config::Config::load_from(
+        &fixture
+            .config()
+            .join(pocketdesk_core::local::paths::CONFIG_FILE),
+    )
+    .expect("the config");
+    assert!(config.shared_input, "the page's switch is the setting");
 }
 
 /// I3: Esc answers an open question with Cancel.
@@ -354,8 +452,8 @@ fn control_page_down_opens_the_next_page() {
     app.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::PageDown);
     app.run_steps(3);
     assert!(
-        app.query_by_label(Tab::Sessions.purpose()).is_some(),
-        "Sessions follows Devices"
+        app.query_by_label(Tab::KeyboardMouse.purpose()).is_some(),
+        "Keyboard and mouse follows Devices"
     );
 }
 
@@ -489,7 +587,7 @@ fn empty_pages_with_no_phone_offer_pairing() {
     }
 }
 
-/// The Overview, Devices and Settings at 720×480 in both themes, compared
+/// The Overview, Devices, Settings and Keyboard and mouse at 720×480 in both themes, compared
 /// with the pictures under `desktop/tests/snapshots/` (C4). They need a GPU
 /// renderer, so only with the `snapshots` feature; CI draws them with
 /// Mesa's software Vulkan, where they were made. `UPDATE_SNAPSHOTS=1`
@@ -526,6 +624,25 @@ mod snapshots {
                 if let Err(e) = app.try_snapshot_options(format!("{name}_{shade}"), &options) {
                     failed.push(e.to_string());
                 }
+            }
+        }
+        // The Keyboard and mouse page with a computer beside this one,
+        // drawn last: its computer would show on the pages above.
+        keyboard_mouse_computers(fixture.state());
+        for (theme, shade) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+            let state = fixture.state().to_path_buf();
+            let mut app = Harness::builder()
+                .with_size(SIZE)
+                .with_theme(theme)
+                .wgpu()
+                .build_eframe(move |cc| {
+                    crate::theme::install(&cc.egui_ctx);
+                    PocketdeskApp::new(state, None, Some(Tab::KeyboardMouse))
+                });
+            app.run_steps(3);
+            let name = format!("keyboard_mouse_{shade}");
+            if let Err(e) = app.try_snapshot_options(name, &options) {
+                failed.push(e.to_string());
             }
         }
         assert!(failed.is_empty(), "{failed:#?}");

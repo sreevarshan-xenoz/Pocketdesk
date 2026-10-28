@@ -2737,6 +2737,7 @@ mod tests {
             paired_unix: 0,
             link: "linked".to_string(),
             link_unix: 0,
+            lets_drive: false,
         };
         let computers = [
             computer("a1b2c3d4e5", "Desk"),

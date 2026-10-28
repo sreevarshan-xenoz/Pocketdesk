@@ -367,9 +367,26 @@ struct Standing {
     /// Shared input is on and it is one of the owner's computers, paired
     /// either way: what it says of its screens is kept.
     computer: bool,
-    /// And it paired with this one and has the Keyboard and mouse
-    /// permission here: it may drive this one.
+    /// And this computer lets it drive this one: the Keyboard and mouse
+    /// permission in the trust store for one that paired with this one,
+    /// else what `computers.json` keeps for one this one paired with.
     allowed: bool,
+}
+
+/// A computer's standing from the trust store (`trusted`, a computer
+/// there, and `permitted`, its Keyboard and mouse permission) and
+/// `computers.json` (`paired_with`, whether this one lets it drive, when
+/// this one paired with it). The trust store's word wins where both have
+/// it.
+fn standing_of(trusted: bool, permitted: bool, paired_with: Option<bool>) -> Standing {
+    Standing {
+        computer: trusted || paired_with.is_some(),
+        allowed: if trusted {
+            permitted
+        } else {
+            paired_with.unwrap_or(false)
+        },
+    }
 }
 
 /// The setting and each computer's standing, read again at most once a
@@ -416,21 +433,21 @@ impl Gate {
         let standing = tokio::task::spawn_blocking(move || {
             // A permission profile could carry the flag onto a phone: only
             // the owner's computers drive this one, those that paired with
-            // this one (the trust store's).
+            // this one (the trust store's) by its permission there.
             let trusted = crate::plugins::pair::is_computer_device(&id);
-            // One this computer paired with is heard too (its screens):
-            // this one drives it, whether or not it may drive this one.
-            let paired_with = trusted
-                || crate::state::state_dir().is_ok_and(|dir| {
-                    pocketdesk_core::local::computers::read(&dir)
-                        .computers
-                        .iter()
-                        .any(|c| c.device_id == id)
-                });
-            Standing {
-                computer: paired_with,
-                allowed: trusted && crate::plugins::pair::allows(&id, Capability::SharedInput),
-            }
+            // One this computer paired with has no trust store entry: what
+            // it may do is kept with it in computers.json.
+            let paired_with = crate::state::state_dir().ok().and_then(|dir| {
+                pocketdesk_core::local::computers::read(&dir)
+                    .computers
+                    .into_iter()
+                    .find(|c| c.device_id == id)
+            });
+            standing_of(
+                trusted,
+                trusted && crate::plugins::pair::allows(&id, Capability::SharedInput),
+                paired_with.map(|c| c.lets_drive),
+            )
         })
         .await
         .unwrap_or_default();
@@ -1113,6 +1130,24 @@ mod tests {
         own.forget();
         assert!(own.is_unread());
         assert!(own.note(vec![screen]));
+    }
+
+    #[test]
+    fn either_side_of_a_pairing_can_let_the_other_drive() {
+        // Paired with this one: its permission in the trust store.
+        let s = standing_of(true, true, None);
+        assert!(s.computer && s.allowed);
+        assert!(!standing_of(true, false, None).allowed);
+        // This one paired with it: what computers.json keeps.
+        let s = standing_of(false, false, Some(true));
+        assert!(s.computer && s.allowed);
+        let s = standing_of(false, false, Some(false));
+        assert!(s.computer && !s.allowed);
+        // Paired both ways: the trust store's word.
+        assert!(!standing_of(true, false, Some(true)).allowed);
+        // Neither: no computer of the owner's.
+        let s = standing_of(false, false, None);
+        assert!(!s.computer && !s.allowed);
     }
 
     #[test]
