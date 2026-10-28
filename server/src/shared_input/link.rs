@@ -92,6 +92,25 @@ pub(crate) fn linked() -> Vec<String> {
     lock(&LINKS).keys().cloned().collect()
 }
 
+/// When a shared-input message (a `Hello` or `Screens`) was last heard from
+/// each computer: the driving side takes a computer that answered its
+/// `Hello` within a short window as one it may cross onto, so sharing turned
+/// off or the permission revoked on the other side stops being a crossing
+/// target once it goes quiet.
+static SEEN: LazyLock<Mutex<HashMap<String, std::time::Instant>>> = LazyLock::new(Default::default);
+
+/// Note that a shared-input message was just heard from `device_id`.
+pub fn note_seen(device_id: &str) {
+    lock(&SEEN).insert(device_id.to_string(), std::time::Instant::now());
+}
+
+/// Whether a shared-input message was heard from `device_id` within `within`.
+pub fn seen_recently(device_id: &str, within: Duration) -> bool {
+    lock(&SEEN)
+        .get(device_id)
+        .is_some_and(|at| at.elapsed() < within)
+}
+
 /// Whether `conn`'s traffic rides a direct path now: its selected path is
 /// not a relay's, as `IrohConnection::stats` reads it. iroh keeps trying to
 /// punch a direct path while the traffic rides a relay, so this can turn

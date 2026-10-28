@@ -18,7 +18,7 @@
 //! must not hook, hide the cursor or move it on the owner's computer.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -27,7 +27,13 @@ use std::time::{Duration, Instant};
 use pocketdesk_core::local::hotkey::{Hotkey, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN};
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::RemoteDesktop::WTSRegisterSessionNotification;
+use windows::Win32::System::RemoteDesktop::{
+    WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
+};
+use windows::Win32::System::StationsAndDesktops::{
+    CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS, GetUserObjectInformationW,
+    OpenInputDesktop, UOI_NAME,
+};
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::HiDpi::{
@@ -139,6 +145,14 @@ impl InputThread {
     /// Whether the thread is running (its hooks could be installed).
     pub fn is_running(&self) -> bool {
         self.worker.is_some()
+    }
+
+    /// Whether the input thread is still running (it stops only on drop, so
+    /// `false` here means it died and the keyboard and mouse must come home).
+    pub fn is_alive(&self) -> bool {
+        self.worker
+            .as_ref()
+            .is_some_and(|w| !w.thread.is_finished())
     }
 
     /// Off: no hooks, only the switch key. Watch: the mouse hook watches and
@@ -293,7 +307,13 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         // SAFETY: for HC_ACTION, lparam points at an MSLLHOOKSTRUCT.
         let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
         if info.flags & LLMHF_INJECTED == 0 {
-            let swallow = with_state(|s| on_mouse(s, wparam.0 as u32, info)).unwrap_or(false);
+            let (swallow, repark) =
+                with_state(|s| on_mouse(s, wparam.0 as u32, info)).unwrap_or((false, None));
+            // Re-park outside the lock: SetCursorPos makes another move that
+            // re-enters this hook, which would take the lock again.
+            if let Some(park) = repark {
+                set_cursor(park);
+            }
             if swallow {
                 return LRESULT(1);
             }
@@ -303,19 +323,23 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
-/// A mouse event from a device: told, and whether to swallow it.
-fn on_mouse(s: &mut ThreadState, message: u32, info: &MSLLHOOKSTRUCT) -> bool {
+/// A mouse event from a device: told, whether to swallow it, and where the
+/// cursor should be re-parked (done by the caller outside the state lock).
+fn on_mouse(
+    s: &mut ThreadState,
+    message: u32,
+    info: &MSLLHOOKSTRUCT,
+) -> (bool, Option<(i32, i32)>) {
     let away = s.mode == Mode::Away;
     let wheel_delta = i32::from((info.mouseData >> 16) as u16 as i16);
+    let mut repark = None;
     let captured = match message {
         WM_MOUSEMOVE => Some(match s.park.filter(|_| away) {
             // Away the cursor stays put: the move is how far the mouse went
             // from where the cursor is, told from the park point.
             Some(park) => {
                 let now = cursor_at().unwrap_or(park);
-                if now != park {
-                    set_cursor(park);
-                }
+                repark = (now != park).then_some(park);
                 Captured::Moved {
                     x: park.0.saturating_add(info.pt.x.saturating_sub(now.0)),
                     y: park.1.saturating_add(info.pt.y.saturating_sub(now.1)),
@@ -370,13 +394,17 @@ fn on_mouse(s: &mut ThreadState, message: u32, info: &MSLLHOOKSTRUCT) -> bool {
         WM_LBUTTONUP => windows_holds(0x01),
         WM_RBUTTONUP => windows_holds(0x02),
         WM_MBUTTONUP => windows_holds(0x04),
-        WM_XBUTTONUP => windows_holds(0x05) || windows_holds(0x06),
+        WM_XBUTTONUP => match info.mouseData >> 16 {
+            1 => windows_holds(0x05),
+            2 => windows_holds(0x06),
+            _ => false,
+        },
         _ => false,
     };
     if let Some(captured) = captured {
         let _ = s.events.send(captured);
     }
-    away && !up_held_here
+    (away && !up_held_here, repark)
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -515,10 +543,16 @@ unsafe extern "system" fn window_proc(
 /// Start the input thread: its hidden window, the switch key, and its
 /// message loop; `None` when it could not start.
 fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Option<Worker> {
-    let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+    let tid = Arc::new(AtomicU32::new(0));
+    let tid_thread = Arc::clone(&tid);
     let spawned = std::thread::Builder::new()
         .name("pd-shared-input".into())
         .spawn(move || {
+            // Its id first, so a parent that times out can still tell it to
+            // quit and clean STATE up.
+            // SAFETY: this thread's id.
+            tid_thread.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
             // SAFETY: plain Win32 calls on this thread's own state.
             unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
             let instance: HINSTANCE = match unsafe { GetModuleHandleW(None) } {
@@ -597,8 +631,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
                 }
                 taken.is_ok()
             });
-            // SAFETY: this thread's id.
-            let _ = ready_tx.send(Ok(unsafe { GetCurrentThreadId() }));
+            let _ = ready_tx.send(Ok(()));
             let mut msg = MSG::default();
             // SAFETY: the loop the hooks and the window run in; it ends on
             // WM_QUIT.
@@ -641,6 +674,7 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
             }
             if let Some(window) = window {
                 // SAFETY: the window this thread made.
+                let _ = unsafe { WTSUnRegisterSessionNotification(window) };
                 let _ = unsafe { DestroyWindow(window) };
             }
             *STATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -653,13 +687,25 @@ fn spawn_input_thread(events: Sender<Captured>, hotkey: Option<Hotkey>) -> Optio
         }
     };
     match ready_rx.recv_timeout(Duration::from_secs(3)) {
-        Ok(Ok(thread_id)) => Some(Worker { thread_id, thread }),
+        Ok(Ok(())) => Some(Worker {
+            thread_id: tid.load(Ordering::SeqCst),
+            thread,
+        }),
         Ok(Err(e)) => {
             tracing::warn!("Shared input: the input thread did not start: {e}");
+            let _ = thread.join();
             None
         }
         Err(_) => {
             tracing::warn!("Shared input: the input thread did not start in time");
+            // It may yet be running with STATE set: tell it to quit and wait,
+            // so no live thread is left behind.
+            let id = tid.load(Ordering::SeqCst);
+            if id != 0 {
+                // SAFETY: a plain message to that thread.
+                let _ = unsafe { PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+            }
+            let _ = thread.join();
             None
         }
     }
@@ -734,6 +780,39 @@ fn set_cursor(p: (i32, i32)) {
     }
 }
 
+/// Whether the input is going to this session's normal desktop (named
+/// "Default"), not a secure one (a UAC prompt, Ctrl+Alt+Del, the lock or
+/// screensaver desktop), whose switches hide key-ups from the hooks. On any
+/// doubt it says the normal one, so a read error does not strand input.
+fn on_default_desktop() -> bool {
+    // SAFETY: opens the input desktop for reading and closes it.
+    let Ok(desktop) =
+        (unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) })
+    else {
+        // The secure desktop is on another window station: cannot be opened.
+        return false;
+    };
+    let mut name = [0u16; 64];
+    let mut needed = 0u32;
+    // SAFETY: the handle just opened, and a buffer on this stack.
+    let read = unsafe {
+        GetUserObjectInformationW(
+            windows::Win32::Foundation::HANDLE(desktop.0),
+            UOI_NAME,
+            Some(name.as_mut_ptr().cast()),
+            (name.len() * 2) as u32,
+            Some(&mut needed),
+        )
+    };
+    // SAFETY: the handle this function opened.
+    let _ = unsafe { CloseDesktop(desktop) };
+    if read.is_err() {
+        return true;
+    }
+    let end = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+    String::from_utf16_lossy(&name[..end]).eq_ignore_ascii_case("default")
+}
+
 /// How long ago the owner last touched this computer, as Windows has it.
 fn idle_ms() -> u32 {
     let mut info = LASTINPUTINFO {
@@ -762,6 +841,9 @@ const RESTART_AFTER: Duration = Duration::from_secs(30);
 const PARKING_WAIT: Duration = Duration::from_millis(250);
 /// How long after a channel could not be opened it is tried again.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
+/// A computer that answered this long ago is still taken as reachable
+/// (longer than the greet interval, so an idle target does not drop out).
+const SEEN_FRESH: Duration = Duration::from_secs(15);
 
 /// Where the cursor is parked while away: logical, physical, and its
 /// monitor's scale.
@@ -955,6 +1037,16 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         (Instant::now(), Instant::now(), Instant::now());
     let mut greeted_at: Option<Instant> = None;
     while !stop.load(Ordering::SeqCst) {
+        if !glue.input.is_alive() {
+            tracing::warn!(
+                "Shared input: the input thread stopped; the keyboard and mouse come home"
+            );
+            let actions = driver.shutdown();
+            glue.apply(&mut driver, actions);
+            // Dropping the glue restores the cursors; the supervisor starts a
+            // fresh driver after a pause.
+            return;
+        }
         match captured.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
                 last_input = Instant::now();
@@ -979,11 +1071,16 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 .collect();
             glue.apply(&mut driver, actions);
         }
-        // Away, a link that turned relayed or closed brings it home.
+        // Away, a desktop switch (a secure prompt hides key-ups) or a link
+        // that turned relayed or closed brings it home.
         if let Some(to) = driver.away_on().map(str::to_string)
             && link_at.elapsed() >= LINK_EVERY
         {
             link_at = Instant::now();
+            if !on_default_desktop() {
+                let actions = driver.on(Captured::DesktopSwitch);
+                glue.apply(&mut driver, actions);
+            }
             let why = match link::connection(&to) {
                 None => {
                     Some("The link to that computer closed: the keyboard and mouse are back here")
@@ -1031,6 +1128,21 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             }
             let layout = read_layout(&glue);
             let actions = driver.set_layout(layout);
+            glue.apply(&mut driver, actions);
+            // The computers the cursor may cross onto: an open, direct
+            // channel that answered this run (or the one driven now, which
+            // does not answer while it is driven).
+            let reachable: Vec<String> = glue
+                .channels
+                .keys()
+                .filter(|id| {
+                    link::connection(id).is_some_and(|conn| link::is_direct(&conn))
+                        && (link::seen_recently(id, SEEN_FRESH)
+                            || driver.away_on() == Some(id.as_str()))
+                })
+                .cloned()
+                .collect();
+            let actions = driver.set_reachable(reachable);
             glue.apply(&mut driver, actions);
         }
     }

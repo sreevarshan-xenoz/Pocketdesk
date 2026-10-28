@@ -20,6 +20,8 @@
 //! send: nothing stale is sent again, the other computer lets go of what it
 //! held by itself when it stops hearing from this one).
 
+use std::collections::HashSet;
+
 use super::held::HeldInput;
 use super::keys_windows::evdev_from_scan;
 use super::layout::{Layout, Placed};
@@ -65,6 +67,10 @@ pub enum Captured {
     /// The session locked (or the computer is going to sleep).
     Locked,
     Unlocked,
+    /// The input went to another desktop (a UAC prompt, Ctrl+Alt+Del, the
+    /// lock or screensaver desktop): its switches hide key-ups from the
+    /// hooks, so the keyboard and mouse come home as for a lock.
+    DesktopSwitch,
 }
 
 /// What the driver wants done.
@@ -95,6 +101,9 @@ struct Away {
     at: (i32, i32),
     /// Where this computer's cursor is parked, in its own space.
     park: (i32, i32),
+    /// Where the cursor was just before it crossed (this computer's own
+    /// space): where it returns if the crossing itself failed.
+    from: (i32, i32),
 }
 
 /// The state of this computer's keyboard and mouse.
@@ -112,6 +121,9 @@ pub struct Driver {
     locked: bool,
     /// The mode the input thread was last told.
     mode: Mode,
+    /// The computers the cursor may cross onto now: their channel is open
+    /// and direct and they answered this run (the glue keeps it up to date).
+    reachable: HashSet<String>,
 }
 
 impl Driver {
@@ -126,7 +138,28 @@ impl Driver {
             seq: 0,
             locked: false,
             mode: Mode::Off,
+            reachable: HashSet::new(),
         }
+    }
+
+    /// The computers the cursor may cross onto now (an open, direct channel
+    /// that answered this run). The glue sets it; a computer that drops out
+    /// while it is driven brings the keyboard and mouse home.
+    pub fn set_reachable(&mut self, ids: Vec<String>) -> Vec<Action> {
+        self.reachable = ids.into_iter().collect();
+        let mut out = Vec::new();
+        if let Some(away) = self.away.clone()
+            && !self.reachable.contains(&away.to)
+        {
+            let to = self.name_of(&away.to);
+            self.go_home(
+                &mut out,
+                away.from,
+                true,
+                &format!("{to} is no longer reachable: the keyboard and mouse are back here"),
+            );
+        }
+        out
     }
 
     pub fn mode(&self) -> Mode {
@@ -165,6 +198,17 @@ impl Driver {
             }
             Captured::Unlocked => {
                 self.locked = false;
+                self.settle(&mut out);
+            }
+            Captured::DesktopSwitch => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        "A secure prompt took the screen: the keyboard and mouse are back here",
+                    );
+                }
                 self.settle(&mut out);
             }
             _ if self.locked => {}
@@ -220,11 +264,15 @@ impl Driver {
     /// from this one.
     pub fn on_send_error(&mut self) -> Vec<Action> {
         let mut out = Vec::new();
-        if let Some(away) = &self.away {
-            let (park, to) = (away.park, self.name_of(&away.to));
+        if let Some(away) = self.away.clone() {
+            // Suppress this target until its channel reopens (the glue adds
+            // it to `reachable` again), so a push does not re-cross and
+            // re-fail at once.
+            self.reachable.remove(&away.to);
+            let to = self.name_of(&away.to);
             self.go_home(
                 &mut out,
-                park,
+                away.from,
                 false,
                 &format!("The link to {to} failed: the keyboard and mouse are back here"),
             );
@@ -337,9 +385,10 @@ impl Driver {
         let at = self.layout.clamp(&self.this, pos);
         if let Some(crossing) = self.layout.crossing(&self.this, at, dx, dy)
             && crossing.to != self.this
+            && self.reachable.contains(&crossing.to)
         {
             let park = self.park_for(at);
-            self.go_away(out, &crossing.to, crossing.at, park);
+            self.go_away(out, &crossing.to, crossing.at, park, at);
         }
     }
 
@@ -367,11 +416,13 @@ impl Driver {
                     "The keyboard and mouse are back here",
                 );
             }
-            Some(crossing) => {
+            Some(crossing) if self.reachable.contains(&crossing.to) => {
                 self.leave(out);
-                self.go_away(out, &crossing.to, crossing.at, away.park);
+                self.go_away(out, &crossing.to, crossing.at, away.park, away.park);
             }
-            None => {
+            // An edge onto a computer that is not reachable is a wall: the
+            // cursor stays here, clamped to the far screen.
+            _ => {
                 if at != away.at {
                     self.seq = self.seq.wrapping_add(1);
                     let (x, y) = self.layout.normalized(&away.to, at);
@@ -395,7 +446,12 @@ impl Driver {
     /// The switch key: home goes to the first other computer, each goes to
     /// the next, the last comes home.
     fn hotkey(&mut self, out: &mut Vec<Action>) {
-        let targets: Vec<String> = self.targets().iter().map(|c| c.device_id.clone()).collect();
+        let targets: Vec<String> = self
+            .targets()
+            .iter()
+            .filter(|c| self.reachable.contains(&c.device_id))
+            .map(|c| c.device_id.clone())
+            .collect();
         let next = match &self.away {
             None => targets.first(),
             Some(away) => targets
@@ -432,7 +488,7 @@ impl Driver {
                     .find(|c| c.device_id == next)
                     .and_then(|c| c.screens.first())
                     .map_or((0, 0), centre);
-                self.go_away(out, &next, at, park);
+                self.go_away(out, &next, at, park, park);
             }
         }
     }
@@ -455,13 +511,21 @@ impl Driver {
 
     /// Go to `to`, its cursor at `at` (its own space), this computer's
     /// parked at `park`.
-    fn go_away(&mut self, out: &mut Vec<Action>, to: &str, at: (i32, i32), park: (i32, i32)) {
+    fn go_away(
+        &mut self,
+        out: &mut Vec<Action>,
+        to: &str,
+        at: (i32, i32),
+        park: (i32, i32),
+        from: (i32, i32),
+    ) {
         let was_away = self.away.is_some();
         let (x, y) = self.layout.normalized(to, at);
         self.away = Some(Away {
             to: to.to_string(),
             at,
             park,
+            from,
         });
         // Parked before the mouse is swallowed, so no movement is measured
         // from where the cursor was before.
@@ -492,6 +556,7 @@ impl Driver {
     /// is let go of and the computer driven is left first; without, nothing
     /// is sent and what was held is forgotten.
     fn go_home(&mut self, out: &mut Vec<Action>, at: (i32, i32), releases: bool, why: &str) {
+        let at = self.nudge_inside(at);
         if releases {
             self.leave(out);
         } else {
@@ -506,6 +571,36 @@ impl Driver {
         out.push(Action::HideCursor(false));
         out.push(Action::KeepAwake(false));
         out.push(Action::Badge(why.to_string()));
+    }
+}
+
+impl Driver {
+    /// `at` moved a few pixels inside this computer's screen, so the cursor
+    /// does not come home sitting on the very edge it would cross from.
+    fn nudge_inside(&self, at: (i32, i32)) -> (i32, i32) {
+        const EDGE: i32 = 4;
+        let screens = self
+            .layout
+            .computers
+            .iter()
+            .find(|c| c.device_id == self.this)
+            .map(|c| c.screens.as_slice())
+            .unwrap_or_default();
+        let Some(s) = screens.iter().find(|s| contains(s, at)) else {
+            return at;
+        };
+        let inside = |v: i32, lo: i32, len: i32| {
+            let (lo, hi) = (lo + EDGE, lo + len - 1 - EDGE);
+            if lo <= hi {
+                v.clamp(lo, hi)
+            } else {
+                lo - EDGE + len / 2
+            }
+        };
+        (
+            inside(at.0, s.x, s.width as i32),
+            inside(at.1, s.y, s.height as i32),
+        )
     }
 }
 
@@ -634,10 +729,17 @@ mod tests {
         Msg::Key { code, pressed }
     }
 
+    /// A driver in `layout` with the given computers reachable.
+    fn driver(layout: Layout, reachable: &[&str]) -> Driver {
+        let mut d = Driver::new("W", layout);
+        d.set_reachable(reachable.iter().map(|s| s.to_string()).collect());
+        d
+    }
+
     /// A driver whose cursor has just crossed onto the Linux laptop at
     /// (0, 480).
     fn away_on_linux(third: bool) -> Driver {
-        let mut d = Driver::new("W", desk(third));
+        let mut d = driver(desk(third), &["L", "M"]);
         d.start();
         d.on(moved(3440, 480));
         let crossed = d.on(moved(3455, 480));
@@ -648,7 +750,7 @@ mod tests {
     #[test]
     fn crossing_sends_enter_then_moves() {
         let layout = desk(false);
-        let mut d = Driver::new("W", layout.clone());
+        let mut d = driver(layout.clone(), &["L"]);
         assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
         // The first sighting has no direction yet; moving inside a screen
         // goes nowhere.
@@ -690,7 +792,7 @@ mod tests {
     #[test]
     fn keys_while_away_are_sent_not_local() {
         // At home, keys are this computer's own: nothing is sent.
-        let mut home = Driver::new("W", desk(false));
+        let mut home = driver(desk(false), &["L"]);
         home.start();
         assert_eq!(home.on(key(0x1E, true)), vec![]);
         assert_eq!(
@@ -773,14 +875,14 @@ mod tests {
         for wanted in [
             Action::SetMode(Mode::Watch),
             Action::HideCursor(false),
-            Action::WarpHome(3455, 480),
+            Action::WarpHome(3451, 480),
         ] {
             assert!(back.contains(&wanted), "{wanted:?} in {back:?}");
         }
         // Put back before the mouse is only watched.
         let at = |wanted: &Action| back.iter().position(|a| a == wanted).unwrap();
         assert!(
-            at(&Action::WarpHome(3455, 480)) < at(&Action::SetMode(Mode::Watch)),
+            at(&Action::WarpHome(3451, 480)) < at(&Action::SetMode(Mode::Watch)),
             "{back:?}"
         );
         assert_eq!(d.away_on(), None);
@@ -793,7 +895,7 @@ mod tests {
     fn hotkey_toggles_to_next_and_home() {
         // Two computers: the key goes over and comes back.
         let layout = desk(false);
-        let mut d = Driver::new("W", layout.clone());
+        let mut d = driver(layout.clone(), &["L"]);
         d.start();
         d.on(moved(500, 500));
         let over = d.on(Captured::Hotkey);
@@ -813,7 +915,7 @@ mod tests {
 
         // Three: home, the next, the one after, home.
         let layout = desk(true);
-        let mut d = Driver::new("W", layout.clone());
+        let mut d = driver(layout.clone(), &["L", "M"]);
         d.start();
         d.on(Captured::Hotkey);
         assert_eq!(d.away_on(), Some("L"));
@@ -875,23 +977,101 @@ mod tests {
         for wanted in [
             Action::SetMode(Mode::Watch),
             Action::HideCursor(false),
-            Action::WarpHome(PARK.0, PARK.1),
+            // Back to where it left (the edge, a few pixels inside), not the
+            // park point.
+            Action::WarpHome(3451, 480),
             Action::KeepAwake(false),
         ] {
             assert!(failed.contains(&wanted), "{wanted:?} in {failed:?}");
         }
         assert!(failed.iter().any(|a| matches!(a, Action::Badge(_))));
         assert_eq!(d.away_on(), None);
-        // Crossing again starts fresh: the key held before is neither
-        // released nor pressed again.
+        // That target is suppressed until its channel reopens: a push at the
+        // edge does not cross again.
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        // Once the glue says it is reachable again, it crosses, fresh: the
+        // key held before is neither released nor pressed again.
+        d.set_reachable(vec!["L".to_string()]);
         d.on(moved(3440, 480));
         let again = d.on(moved(3455, 480));
         assert!(matches!(sends(&again).as_slice(), [(to, Msg::Enter { .. })] if to == "L"));
         assert_eq!(sends(&d.on(key(0x1E, false))), vec![]);
         // Failing at home changes nothing.
-        let mut home = Driver::new("W", desk(false));
+        let mut home = driver(desk(false), &["L"]);
         home.start();
         assert_eq!(home.on_send_error(), vec![]);
+    }
+
+    #[test]
+    fn failed_enter_returns_to_where_it_left() {
+        // The crossing is sent, then the glue finds the Enter could not go
+        // (the channel refused): the cursor goes back where it left, not to
+        // the park point, and the target is suppressed.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        assert!(
+            sends(&crossed)
+                .iter()
+                .any(|(_, m)| matches!(m, Msg::Enter { .. }))
+        );
+        let failed = d.on_send_error();
+        assert_eq!(sends(&failed), vec![], "nothing is sent on a dead link");
+        // The edge pixel it left from (3455), a few pixels inside.
+        assert!(failed.contains(&Action::WarpHome(3451, 480)), "{failed:?}");
+        assert_eq!(d.away_on(), None);
+        // Suppressed: the same push does not cross until reachable again.
+        d.on(moved(3440, 480));
+        assert_eq!(d.on(moved(3455, 480)), vec![]);
+    }
+
+    #[test]
+    fn relayed_target_is_not_a_crossing() {
+        // The Linux laptop is in the layout but not reachable (its link is
+        // relayed, or its channel will not open): the edge is a wall.
+        let mut d = driver(desk(false), &[]);
+        d.start();
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        // The switch key has nowhere to go either.
+        assert!(matches!(
+            d.on(Captured::Hotkey).as_slice(),
+            [Action::Badge(_)]
+        ));
+    }
+
+    #[test]
+    fn computer_that_did_not_answer_is_not_a_target() {
+        // L has screens in the layout but did not answer this run; only M
+        // did. The edge toward L is a wall; the switch key reaches M.
+        let mut d = driver(desk(true), &["M"]);
+        d.start();
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        assert_eq!(d.away_on(), None);
+        let over = d.on(Captured::Hotkey);
+        assert_eq!(d.away_on(), Some("M"), "{over:?}");
+    }
+
+    #[test]
+    fn desktop_switch_snaps_back_with_releases() {
+        let mut d = away_on_linux(false);
+        d.on(key(0x1E, true));
+        let back = d.on(Captured::DesktopSwitch);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(30, false)), sent("L", Msg::Leave)]
+        );
+        assert!(back.contains(&Action::SetMode(Mode::Watch)), "{back:?}");
+        assert!(back.contains(&Action::HideCursor(false)));
+        assert!(back.contains(&Action::KeepAwake(false)));
+        assert_eq!(d.away_on(), None);
+        // At home it is a no-op.
+        assert_eq!(d.on(Captured::DesktopSwitch), vec![]);
     }
 
     #[test]
@@ -924,7 +1104,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        let mut d = Driver::new("W", desk(false));
+        let mut d = driver(desk(false), &["L"]);
         assert_eq!(awake(&d.start()), Vec::<bool>::new());
         assert_eq!(awake(&d.on(moved(3440, 480))), Vec::<bool>::new());
         assert_eq!(awake(&d.on(moved(3455, 480))), vec![true]);

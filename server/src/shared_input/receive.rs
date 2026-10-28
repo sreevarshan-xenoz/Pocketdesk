@@ -542,6 +542,11 @@ pub async fn run() {
             arrival = arriving.recv() => {
                 let Some((from, msg)) = arrival else { break };
                 let standing = gate.standing(&from).await;
+                // Its hello or screens is the answer the driving side waits
+                // for before it treats this computer as one to cross onto.
+                if standing.computer && matches!(msg, Msg::Hello { .. } | Msg::Screens(_)) {
+                    link::note_seen(&from);
+                }
                 match &msg {
                     Msg::Hello { version, name, screens } if standing.computer => {
                         note_heard(&mut heard, &from, Some(name), screens);
