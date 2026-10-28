@@ -171,10 +171,14 @@ config/secrets.json
 # Configuration files with potential secrets
 config.json
 settings.json
-!.qoder/settings.json
 local_settings.py
-# Agent/editor-local state and scratch config (never commit)
-.qoder/sessions/
+# Agent/editor-local state and scratch config (never commit). AGENTS.md stays
+# on disk for the tools that read it; docs/AGENTS.md is its tracked copy.
+/AGENTS.md
+.qoder/
+.crush/
+.vscode/
+.playwright-mcp/
 # A dev run with XDG_CONFIG_HOME=$PWD/devconfig per CONTRIBUTING
 devconfig/
 # Stray directory a tool created when ~ was not expanded: a full Android SDK
