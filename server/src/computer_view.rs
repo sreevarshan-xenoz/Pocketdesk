@@ -384,7 +384,10 @@ async fn session(
     let dialed = match dialer.dial(&computer, monitor).await {
         Ok(dialed) => dialed,
         Err(why) => {
-            tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached: {why}");
+            // Its addresses stay out of the log at info (BK7 review M8):
+            // the window says them to the owner.
+            tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached");
+            tracing::debug!(device_id = %computer.device_id, "Another computer's screen not reached: {why}");
             say(Event::Ended(format!("Could not reach {name}: {why}"))).await;
             return;
         }
