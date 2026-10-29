@@ -555,11 +555,15 @@ pub async fn run(config: Config) -> Result<()> {
     // Which devices have a link now, for the owner's phone as a screen
     // (BK5): the driver's thread and the status read it without waiting.
     tokio::spawn(crate::shared_input::phone::keep_linked());
-    // This computer's own keyboard and mouse carried onto the others, on
-    // Windows while shared input and driving are on (Linux drives nothing
-    // yet).
+    // This computer's own keyboard and mouse carried onto the others while
+    // shared input and driving are on: Windows' hooks, Linux's
+    // input-capture portal (BK8).
     #[cfg(windows)]
     tokio::spawn(crate::shared_input::capture_windows::supervise());
+    #[cfg(target_os = "linux")]
+    tokio::spawn(crate::shared_input::portal_drive::supervise(
+        crate::shared_input::capture_linux::start,
+    ));
     if let Some(endpoint) = wan_endpoint.as_ref() {
         // Relay URLs and direct addresses drift (relay reconnects, DHCP), and
         // the phone only ever dials its cached EndpointAddr — periodic
@@ -886,13 +890,17 @@ pub async fn run(config: Config) -> Result<()> {
     if !crate::shared_input::capture_windows::stop(SHARED_INPUT_STOP).await {
         tracing::warn!("Shared input: the driver did not end in time");
     }
+    #[cfg(target_os = "linux")]
+    if !crate::shared_input::portal_drive::stop(SHARED_INPUT_STOP).await {
+        tracing::warn!("Shared input: the driver did not end in time");
+    }
 
     Ok(())
 }
 
 /// How long the server's stop waits for the shared keyboard and mouse to
 /// come home (it is bounded again by the process's own exit grace).
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 const SHARED_INPUT_STOP: Duration = Duration::from_secs(1);
 
 /// `work`, unless a request to stop comes first (then `None`). For the

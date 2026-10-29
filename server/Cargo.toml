@@ -89,6 +89,10 @@ wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["client"] }
 ab_glyph = "0.2"
 libc.workspace = true
+# Driving from Linux (BK8): the input-capture portal (ashpd, MIT) and its
+# libei stream, received in pure Rust (reis, MIT; no C libei).
+ashpd = { workspace = true, features = ["input_capture"] }
+reis = { version = "0.7.1", features = ["tokio"] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

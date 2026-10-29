@@ -72,6 +72,21 @@ pub enum Captured {
         extended: bool,
         down: bool,
     },
+    /// The pointer at (x, y) (logical) was pushed (dx, dy) past this
+    /// computer's edge, as Linux's input-capture portal says when it hits a
+    /// barrier: no move is watched there, so it crosses as such a push from
+    /// that edge would, with no position before it.
+    Edge {
+        x: i32,
+        y: i32,
+        dx: i32,
+        dy: i32,
+    },
+    /// A key as its evdev code (Linux's libei gives these): sent as it is.
+    EvKey {
+        code: u16,
+        down: bool,
+    },
     /// 0 left, 1 middle, 2 right, 3 back, 4 forward.
     Button {
         button: u8,
@@ -106,6 +121,10 @@ pub enum Captured {
     /// The hooks [`Mode::Away`] needs could not be installed: this
     /// computer's keyboard and mouse would act here and there at once.
     HookFailed,
+    /// Linux's desktop ended the capture by itself (its portal said so, or
+    /// its libei stream closed): this computer has its keyboard and mouse
+    /// again.
+    CaptureLost,
 }
 
 /// What the driver wants done.
@@ -359,29 +378,41 @@ impl Driver {
                     );
                 }
             }
+            Captured::CaptureLost => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("The desktop took the keyboard and mouse back"),
+                    );
+                }
+            }
             _ if self.locked => {}
             Captured::Moved { x, y } => match &self.away {
                 None => self.watch((x, y), &mut out),
                 Some(_) => self.carry((x, y), &mut out),
             },
+            Captured::Edge { x, y, dx, dy } => {
+                if self.away.is_none() {
+                    // Where it is now: the next move watched measures from
+                    // here, and none is marked first.
+                    self.home = Some((x, y));
+                    self.reseed = false;
+                    let at = self.layout.clamp(&self.this, (x, y));
+                    self.cross(at, dx, dy, &mut out);
+                }
+            }
             Captured::Key {
                 scan,
                 extended,
                 down,
             } => {
-                if let (Some(away), Some(code)) = (&self.away, evdev_from_scan(scan, extended)) {
-                    // A key held down repeats on the other computer by
-                    // itself, and one never sent down is not let go of.
-                    if down != self.held.holds_key(code) {
-                        let msg = Msg::Key {
-                            code,
-                            pressed: down,
-                        };
-                        self.held.note(&msg);
-                        out.push(Action::Send(away.to.clone(), msg));
-                    }
+                if let Some(code) = evdev_from_scan(scan, extended) {
+                    self.key(code, down, &mut out);
                 }
             }
+            Captured::EvKey { code, down } => self.key(code, down, &mut out),
             Captured::Button { button, down } => {
                 if let Some(away) = &self.away
                     && down != self.held.holds_button(button)
@@ -404,6 +435,22 @@ impl Driver {
             Captured::Hotkey => self.hotkey(&mut out),
         }
         out
+    }
+
+    /// Away, the key `code` (evdev) went down or up: sent to the computer
+    /// driven. A key held down repeats there by itself, and one never sent
+    /// down is not let go of.
+    fn key(&mut self, code: u16, down: bool, out: &mut Vec<Action>) {
+        if let Some(away) = &self.away
+            && down != self.held.holds_key(code)
+        {
+            let msg = Msg::Key {
+                code,
+                pressed: down,
+            };
+            self.held.note(&msg);
+            out.push(Action::Send(away.to.clone(), msg));
+        }
     }
 
     /// The time is `now` (called several times a second): away, the
@@ -670,6 +717,12 @@ impl Driver {
         let (dx, dy) = (pos.0.saturating_sub(prev.0), pos.1.saturating_sub(prev.1));
         // A pointer pushed past the edge is on its last pixel.
         let at = self.layout.clamp(&self.this, pos);
+        self.cross(at, dx, dy, out);
+    }
+
+    /// At home, the cursor at `at` (on a screen here) moved by (dx, dy): off
+    /// an edge onto another computer it may go to, it goes there.
+    fn cross(&mut self, at: (i32, i32), dx: i32, dy: i32, out: &mut Vec<Action>) {
         // A game in front: the edges lead nowhere (the hooks are out, but a
         // move already on its way may still come).
         if !self.game_held
@@ -2379,5 +2432,113 @@ mod tests {
         let mut expected = desk(false);
         expected.computers[1].origin = (3456 + 800, 0);
         assert_eq!(layout, expected);
+    }
+
+    /// BK8: Linux's libei gives evdev codes, sent as they are while away
+    /// (no scancode on the way), held and let go of as a scancode's are.
+    #[test]
+    fn an_evdev_key_while_away_is_sent_as_it_is() {
+        let ev = |code: u16, down: bool| Captured::EvKey { code, down };
+        let mut home = driver(desk(false), &["L"]);
+        home.start();
+        assert_eq!(
+            home.on(ev(30, true)),
+            vec![],
+            "at home, this computer's own"
+        );
+
+        let mut d = away_on_linux(false);
+        assert_eq!(sends(&d.on(ev(30, true))), vec![sent("L", evdev(30, true))]);
+        assert_eq!(
+            sends(&d.on(ev(30, true))),
+            vec![],
+            "repeats are L's to make"
+        );
+        assert_eq!(
+            sends(&d.on(ev(30, false))),
+            vec![sent("L", evdev(30, false))]
+        );
+        assert_eq!(
+            sends(&d.on(ev(30, false))),
+            vec![],
+            "never down: not let go"
+        );
+        // Held when it leaves: let go of there, as a scancode's key is.
+        d.on(ev(29, true));
+        let back = d.on(moved(PARK.0 - 20, PARK.1));
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(29, false)), sent("L", Msg::Leave)]
+        );
+    }
+
+    /// BK8: Linux's input-capture portal says only that the pointer hit a
+    /// barrier, where and which way: no move is watched before it, yet it
+    /// crosses as a push off that edge does, with the same walls.
+    #[test]
+    fn a_push_at_a_barrier_crosses_with_no_move_before_it() {
+        let layout = desk(false);
+        let edge = |x: i32, y: i32, dx: i32, dy: i32| Captured::Edge { x, y, dx, dy };
+        let mut d = driver(layout.clone(), &["L"]);
+        assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
+        // The laptop's last column, pushed right: onto L at the same height,
+        // though the first position watched would only mark where it is.
+        let crossed = d.on(edge(3455, 480, 1, 0));
+        let (x, y) = layout.normalized("L", (0, 480));
+        assert_eq!(sends(&crossed), vec![sent("L", Msg::Enter { x, y })]);
+        assert!(crossed.contains(&Action::ParkCursor(PARK.0, PARK.1)));
+        assert_eq!(d.away_on(), Some("L"));
+        // Away, a barrier's word is stale: nothing.
+        assert_eq!(d.on(edge(3455, 480, 1, 0)), vec![]);
+        // Back the usual way, by the mouse.
+        d.on(moved(PARK.0 - 20, PARK.1));
+        assert_eq!(d.away_on(), None);
+
+        // A point a little past the edge is held on it.
+        let mut d = driver(layout.clone(), &["L"]);
+        d.start();
+        d.on(edge(3460, 480, 1, 0));
+        assert_eq!(d.away_on(), Some("L"));
+        // An edge with nothing past it, or onto a computer that is not
+        // reachable, leads nowhere.
+        let mut d = driver(layout.clone(), &["L"]);
+        d.start();
+        assert_eq!(d.on(edge(0, 480, -1, 0)), vec![]);
+        let mut d = driver(layout, &[]);
+        d.start();
+        assert_eq!(d.on(edge(3455, 480, 1, 0)), vec![]);
+        // Nor while a game is in front, or locked.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(in_front(true, false));
+        assert_eq!(sends(&d.on(edge(3455, 480, 1, 0))), vec![]);
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(Captured::Locked);
+        assert_eq!(sends(&d.on(edge(3455, 480, 1, 0))), vec![]);
+    }
+
+    /// BK8: Linux's desktop can end the capture by itself (its portal says
+    /// so, or its libei stream closes): home, letting go of what was sent.
+    #[test]
+    fn a_capture_the_desktop_ended_brings_them_home_with_releases() {
+        let mut d = away_on_linux(false);
+        d.on(Captured::EvKey {
+            code: 42,
+            down: true,
+        });
+        let back = d.on(Captured::CaptureLost);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(42, false)), sent("L", Msg::Leave)]
+        );
+        assert!(back.contains(&Action::WarpHome(PARK.0, PARK.1)), "{back:?}");
+        assert!(back.contains(&home_badge(Some(
+            "The desktop took the keyboard and mouse back"
+        ))));
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Watch);
+        // At home it is nothing.
+        assert_eq!(d.on(Captured::CaptureLost), vec![]);
     }
 }

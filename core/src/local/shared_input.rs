@@ -510,6 +510,17 @@ pub const PHONE_NOT_ALLOWED: &str = "not allowed here";
 /// It is not linked now, or has not said its screen since it linked.
 pub const PHONE_AWAY: &str = "not linked";
 
+/// How Linux's input-capture portal stands for driving (BK8), as
+/// [`StatusFile::input_capture`] says it: capturing as asked.
+pub const CAPTURE_READY: &str = "ready";
+/// Its permission dialog asks the owner (or was refused).
+pub const CAPTURE_NEEDS_PERMISSION: &str = "needs permission";
+/// The desktop has no input-capture portal.
+pub const CAPTURE_UNSUPPORTED: &str = "unsupported";
+/// Hyprland with a fractionally scaled screen: an edge flips and is walled
+/// (xdg-desktop-portal-hyprland bug 435).
+pub const CAPTURE_FRACTIONAL_SCALE: &str = "fractional scale";
+
 /// How the shared keyboard and mouse stand now, for the desktop app.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusFile {
@@ -535,6 +546,12 @@ pub struct StatusFile {
     /// [`PHONE_NEEDS_SERVICE`], [`PHONE_NOT_ALLOWED`], [`PHONE_AWAY`]).
     #[serde(default)]
     pub phones: BTreeMap<String, String>,
+    /// On Linux, how its input-capture portal stands for driving (BK8):
+    /// [`CAPTURE_READY`], or why not ([`CAPTURE_NEEDS_PERMISSION`],
+    /// [`CAPTURE_UNSUPPORTED`], [`CAPTURE_FRACTIONAL_SCALE`]); empty when
+    /// not known (Windows, driving off, or not started yet).
+    #[serde(default)]
+    pub input_capture: String,
 }
 
 /// How things stand, as the server last wrote. A missing or unreadable file
@@ -948,6 +965,7 @@ phone",
             answered: BTreeSet::from(["peer".to_string()]),
             sharing_on: true,
             phones: BTreeMap::from([("phone".to_string(), PHONE_READY.to_string())]),
+            input_capture: CAPTURE_NEEDS_PERMISSION.to_string(),
         };
         write_status(&dir, &status).unwrap();
         assert_eq!(read_status(&dir), status);

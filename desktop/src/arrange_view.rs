@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
 use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile};
 use pocketdesk_core::local::shared_input::{
-    self, Bounds, LINK_AWAY, LINK_DIRECT, LINK_RELAYED, LayoutFile, PHONE_AWAY,
+    self, Bounds, CAPTURE_FRACTIONAL_SCALE, CAPTURE_NEEDS_PERMISSION, CAPTURE_READY,
+    CAPTURE_UNSUPPORTED, LINK_AWAY, LINK_DIRECT, LINK_RELAYED, LayoutFile, PHONE_AWAY,
     PHONE_NEEDS_SERVICE, PHONE_NOT_ALLOWED, PHONE_OFF, PHONE_READY, REFUSED_NOT_ALLOWED,
     REFUSED_SHARING_OFF, Screen, ScreensFile, ShareAsk, StatusFile, bounds,
 };
@@ -192,6 +193,34 @@ fn phone_words(standing: &str, name: &str, this_name: &str) -> (String, bool) {
         PHONE_AWAY | "" => (format!("Not linked now: open Pocketdesk on {name}"), false),
         _ => (format!("Not linked now: open Pocketdesk on {name}"), false),
     }
+}
+
+/// How Linux's input capture stands for driving (BK8) as the page says
+/// it, and whether it is a warning; `None` when nothing is known.
+fn capture_words(word: &str) -> Option<(&'static str, bool)> {
+    Some(match word {
+        CAPTURE_READY => (
+            "Ready: push the pointer off an edge that leads to another computer",
+            false,
+        ),
+        CAPTURE_NEEDS_PERMISSION => (
+            "Needs permission: your desktop shows a dialog asking to let Pocketdesk capture \
+             input; allow it (turn sharing off and on to be asked again)",
+            true,
+        ),
+        CAPTURE_UNSUPPORTED => (
+            "Your desktop doesn't offer input capture, so this computer's keyboard and mouse \
+             stay here (it needs GNOME 45, KDE Plasma 6.1 or Hyprland's portal 1.4 or later); \
+             it can still be driven",
+            true,
+        ),
+        CAPTURE_FRACTIONAL_SCALE => (
+            "Fractional scaling stops crossing on Hyprland (a bug in its portal): set the \
+             screen's scale to a whole number to cross its edges",
+            true,
+        ),
+        _ => return None,
+    })
 }
 
 /// A link as the page says it.
@@ -489,6 +518,19 @@ impl ArrangeView {
                 .color(crate::theme::warn(ui)),
             );
         }
+        // Linux drives through its desktop's input capture (BK8): how that
+        // stands, while sharing is on.
+        if !cfg!(windows)
+            && sharing_on
+            && let Some((words, warn)) = capture_words(&self.status.input_capture)
+        {
+            let words = RichText::new(words);
+            ui.label(if warn {
+                words.color(crate::theme::warn(ui))
+            } else {
+                words.color(muted)
+            });
+        }
         let shown = self.shown(devices);
         let this_name = shown
             .first()
@@ -716,15 +758,6 @@ impl ArrangeView {
                         } else {
                             words.color(muted)
                         });
-                        if !cfg!(windows) {
-                            ui.label(
-                                RichText::new(
-                                    "Driving a phone from here comes later; a Windows computer \
-                                     can drive it",
-                                )
-                                .color(muted),
-                            );
-                        }
                     });
                     ui.vertical(|ui| {
                         let Some(device) = devices.iter().find(|d| !d.computer && d.id == *id)
@@ -777,11 +810,6 @@ impl ArrangeView {
             REFUSED_SHARING_OFF => (
                 format!("{name} has sharing off: turn it on there, on its Keyboard and mouse page"),
                 true,
-            ),
-            LINK_DIRECT if !cfg!(windows) => (
-                "Driving another computer from here comes later; this one can be driven"
-                    .to_string(),
-                false,
             ),
             LINK_DIRECT if !sharing_on => (format!("Turn sharing on above to drive {name}"), false),
             LINK_DIRECT => (format!("Waiting for {name} to answer"), false),
@@ -1054,5 +1082,28 @@ mod tests {
         );
         assert_eq!(link_words(LINK_AWAY), "Not linked now");
         assert_eq!(link_words("something new"), "Not linked now");
+    }
+
+    /// BK8: how Linux's input capture stands reads in words, a warning
+    /// when crossing cannot happen; nothing said is nothing shown.
+    #[test]
+    fn linuxs_input_capture_reads_in_words() {
+        let (ready, warn) = capture_words(CAPTURE_READY).unwrap();
+        assert!(ready.starts_with("Ready"), "{ready}");
+        assert!(!warn);
+        let (ask, warn) = capture_words(CAPTURE_NEEDS_PERMISSION).unwrap();
+        assert!(ask.contains("dialog"), "{ask}");
+        assert!(warn);
+        let (none, warn) = capture_words(CAPTURE_UNSUPPORTED).unwrap();
+        assert!(
+            none.contains("GNOME 45") && none.contains("Plasma 6.1"),
+            "{none}"
+        );
+        assert!(warn);
+        let (scale, warn) = capture_words(CAPTURE_FRACTIONAL_SCALE).unwrap();
+        assert!(scale.contains("Fractional scaling"), "{scale}");
+        assert!(warn);
+        assert_eq!(capture_words(""), None);
+        assert_eq!(capture_words("something new"), None);
     }
 }

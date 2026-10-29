@@ -5714,6 +5714,7 @@ version = "0.8.1"
 dependencies = [
  "ab_glyph",
  "anyhow",
+ "ashpd",
  "async-trait",
  "base64 0.22.1",
  "clap",
@@ -5734,6 +5735,7 @@ dependencies = [
  "quinn",
  "rand 0.8.6",
  "rcgen",
+ "reis",
  "reqwest 0.12.28",
  "ring",
  "rumqttc",
@@ -6340,6 +6342,19 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "reis"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b967ec6489a42067a20724f11987bb96178ea796873cbe1afd25fb93ee6f85f"
+dependencies = [
+ "enumflags2",
+ "futures-util",
+ "log",
+ "rustix 1.1.4",
+ "tokio",
+]
 
 [[package]]
 name = "reloadable-core"
