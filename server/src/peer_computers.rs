@@ -792,16 +792,7 @@ async fn pair_with(
         mine,
     };
     let mut was = None;
-    let recorded = computers::update(dir, |file| {
-        if let Some(at) = file
-            .computers
-            .iter()
-            .position(|c| c.device_id == computer.device_id)
-        {
-            was = Some(file.computers.remove(at));
-        }
-        file.computers.push(computer.clone());
-    });
+    let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
     if let Err(e) = recorded {
         // Not listed, so not trusted either (PC1 review M1).
         if mine {
@@ -830,6 +821,24 @@ fn link_endpoint(link: &PairLink) -> Option<serde_json::Value> {
         .as_deref()
         .and_then(|raw| serde_json::from_str(raw).ok())
         .filter(|body| WanTarget::parse(body).is_some())
+}
+
+/// Record `computer`, which this one just paired with by its link, in
+/// place of any entry it had; what it had.
+fn record_pasted(
+    file: &mut computers::ComputersFile,
+    computer: &PeerComputer,
+) -> Option<PeerComputer> {
+    let was = file
+        .computers
+        .iter()
+        .position(|c| c.device_id == computer.device_id)
+        .map(|at| file.computers.remove(at));
+    file.computers.push(computer.clone());
+    // Its pairing here both ways, if any, is over (PC1 re-review m-4).
+    file.pending.retain(|id| *id != computer.device_id);
+    file.lapsed.retain(|id| *id != computer.device_id);
+    was
 }
 
 /// Whether this computer lists `device_id` as one paired both ways (PC1).
@@ -2343,6 +2352,27 @@ mod tests {
         ];
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(verdicts, [true, false, false, false, false]);
+    }
+
+    /// PC1 re-review m-4: a computer this one pairs with again by its link
+    /// leaves no grant waiting, or lapsed, from when it paired here both
+    /// ways: that pairing is over.
+    #[test]
+    fn pairing_again_by_a_link_leaves_no_grant_waiting() {
+        let mut file = computers::ComputersFile {
+            computers: vec![facts().into_peer("lap", "", 1)],
+            pending: vec!["lap".to_string()],
+            lapsed: vec!["lap".to_string()],
+            ..computers::ComputersFile::default()
+        };
+        let again = PeerComputer {
+            mine: false,
+            ..facts().into_peer("lap", "", 2)
+        };
+        let was = record_pasted(&mut file, &again);
+        assert_eq!(was.map(|c| c.paired_unix), Some(1));
+        assert_eq!(file.computers, [again]);
+        assert!(file.pending.is_empty() && file.lapsed.is_empty());
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
