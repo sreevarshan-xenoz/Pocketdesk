@@ -295,6 +295,25 @@ pub(crate) fn group_turns_off(capabilities: &[Capability], computer: bool) -> Ve
         .collect()
 }
 
+/// A group switch's hover (PR #558 review): what it turns on by name,
+/// and that Run commands stays off.
+pub(crate) fn group_hover(on: &[Capability], off: &[Capability]) -> String {
+    let named = |c: &Capability| {
+        PERMISSIONS
+            .iter()
+            .find(|(p, _, _)| p == c)
+            .map_or_else(|| format!("{c:?}"), |(_, label, _)| label.to_string())
+    };
+    let mut said = format!(
+        "Turns on: {}. Unticked, it turns them all off.",
+        on.iter().map(named).collect::<Vec<_>>().join("; ")
+    );
+    if off.contains(&Capability::Exec) {
+        said.push_str(" Run commands stays off; it turns on only by itself.");
+    }
+    said
+}
+
 /// A group switch's note: Run commands is never turned on with the rest.
 pub(crate) const EXEC_ALONE: &str = "Run commands turns on only by itself.";
 
@@ -2693,7 +2712,7 @@ impl PocketdeskApp {
                                 egui::Checkbox::new(&mut checked, RichText::new(group).strong())
                                     .indeterminate(some_on && !all_on),
                             )
-                            .on_hover_text("Turn every switch in this group on or off.")
+                            .on_hover_text(group_hover(&on, &off))
                             .changed()
                         {
                             group_change =
@@ -4608,6 +4627,22 @@ mod start_tests {
         for (_, label, _) in PERMISSIONS {
             assert!(label.split_whitespace().count() <= 6, "{label}");
         }
+    }
+
+    /// PR #558 review: a group switch's hover names what it turns on, and
+    /// says Run commands stays off where the group has it.
+    #[test]
+    fn a_group_switch_names_what_it_turns_on() {
+        let on = [Capability::Command, Capability::Tasks];
+        let said = group_hover(&on, &[Capability::Exec, Capability::Command]);
+        assert!(
+            said.contains("Send commands to its automation apps; Start my tasks"),
+            "{said}"
+        );
+        assert!(said.contains("Run commands stays off"), "{said}");
+        let said = group_hover(&[Capability::Clipboard], &[Capability::Clipboard]);
+        assert!(said.starts_with("Turns on: Share the clipboard."), "{said}");
+        assert!(!said.contains("Run commands"), "{said}");
     }
 
     /// UX 3: a group's switch never turns Run commands on, but does turn
