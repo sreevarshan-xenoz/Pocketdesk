@@ -377,6 +377,11 @@ pub struct Config {
     /// it sends that computer nothing until switched.
     #[serde(default)]
     pub computer_view_only: bool,
+    /// The window that shows another computer's screen shows how the
+    /// picture comes over it: frames, bitrate, round trip, road and decode
+    /// time (PC2). Off until chosen, there or in Settings.
+    #[serde(default)]
+    pub computer_view_stats: bool,
 }
 
 fn default_computer_view_quality() -> String {
@@ -593,6 +598,7 @@ impl Default for Config {
             shared_input_low_latency: true,
             computer_view_quality: default_computer_view_quality(),
             computer_view_only: false,
+            computer_view_stats: false,
         }
     }
 }
@@ -848,6 +854,7 @@ impl Config {
         "shared_input_low_latency",
         "computer_view_quality",
         "computer_view_only",
+        "computer_view_stats",
     ];
 }
 
@@ -1265,6 +1272,28 @@ phone_battery = \"x\"
         assert_eq!(
             upper.computer_view_preset(),
             crate::streaming::input_packet::PRESET_BALANCED
+        );
+    }
+
+    /// PC2: the stats over a computer's window are off until chosen, and
+    /// the choice saves and reads back.
+    #[test]
+    fn a_computers_window_stats_are_off_until_chosen() {
+        let path = temp("computer-view-stats");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_stats);
+        assert!(!Config::default().computer_view_stats);
+        let chosen = Config {
+            computer_view_stats: true,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_stats"])
+            .unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_stats);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_stats"]
         );
     }
 
