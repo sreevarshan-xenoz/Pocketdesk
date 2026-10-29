@@ -24,6 +24,7 @@
 pub mod asks;
 pub mod awake;
 pub mod badge;
+pub mod barriers;
 #[cfg(windows)]
 pub mod capture_windows;
 pub mod drag_files;
