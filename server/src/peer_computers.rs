@@ -635,6 +635,14 @@ async fn pair_with(
     if taken() {
         return Err("the link's id is one of this computer's paired devices".to_string());
     }
+    // One listed under that id with another certificate is not this one:
+    // a link reusing it would take that computer's place (PC1 review C1).
+    if computers::read(dir).listed_with_other_certificate(&link.device_id, fingerprint) {
+        return Err(
+            "a computer listed here has that id with another certificate: unpair it first"
+                .to_string(),
+        );
+    }
     let name = shown_name(&link.name);
     let labels: Vec<String> = link
         .addresses

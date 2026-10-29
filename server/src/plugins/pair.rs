@@ -1050,6 +1050,16 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // guest's.
         let computer = grant_secs.is_none()
             && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        // A computer pairing under the id of one listed here with another
+        // certificate would take that one's place (PC1 review M2): refused,
+        // until that one is unpaired here.
+        if computer && listed_with_other_key(&phone_id, sender.peer_key().as_ref()) {
+            tracing::warn!(
+                "Pairing refused: {phone_id} is a computer listed here with another certificate"
+            );
+            respond_pair(sender, false, "").await;
+            return;
+        }
         // PC1: one of the owner's own, paired both ways, when it asked and
         // this computer's own code was minted for that; listed here in turn
         // from what it said of itself.
@@ -1146,6 +1156,27 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         respond_pair(sender, false, "").await;
+    }
+}
+
+/// Whether `device_id` is a computer this one lists with a certificate
+/// other than the one its connection proved (`key`), or proved none.
+fn listed_with_other_key(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> bool {
+    let Ok(dir) = state::state_dir() else {
+        return false;
+    };
+    let file = pocketdesk_core::local::computers::read(&dir);
+    if !file.computers.iter().any(|c| c.device_id == device_id) {
+        return false;
+    }
+    match key {
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
+            file.listed_with_other_certificate(device_id, &hex(hash))
+        }
+        _ => true,
     }
 }
 

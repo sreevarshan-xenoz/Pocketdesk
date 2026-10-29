@@ -168,6 +168,16 @@ pub struct ComputersFile {
 }
 
 impl ComputersFile {
+    /// Whether `device_id` is listed here with a certificate other than
+    /// `fingerprint` (hex, either case): a link or a pairing that reuses a
+    /// listed computer's id with another certificate is someone else's
+    /// (PC1 review C1, M2), and is refused until that computer is unpaired.
+    pub fn listed_with_other_certificate(&self, device_id: &str, fingerprint: &str) -> bool {
+        self.computers
+            .iter()
+            .any(|c| c.device_id == device_id && !c.fingerprint.eq_ignore_ascii_case(fingerprint))
+    }
+
     /// Take the computer `device_id` out, and its pairing's line with it
     /// (BD3: the line, and any address a failure named, outlived Unpair).
     pub fn remove(&mut self, device_id: &str) -> Option<PeerComputer> {
@@ -688,6 +698,20 @@ mod tests {
         let old: PairingOutcome =
             serde_json::from_str(r#"{"name":"Desk","outcome":"paired","unix":1}"#).unwrap();
         assert_eq!(old.device_id, "");
+    }
+
+    /// PC1 review C1, M2: a listed computer's id with another certificate
+    /// is someone else's; the same certificate, in either case, or an id
+    /// not listed, is not.
+    #[test]
+    fn a_listed_id_with_another_certificate_is_someone_elses() {
+        let file = ComputersFile {
+            computers: vec![computer("desk")],
+            last_pairing: None,
+        };
+        assert!(file.listed_with_other_certificate("desk", &"cd".repeat(32)));
+        assert!(!file.listed_with_other_certificate("desk", &"AB".repeat(32)));
+        assert!(!file.listed_with_other_certificate("lap", &"cd".repeat(32)));
     }
 
     /// BD3: a computer taken out takes its pairing's line, not another's.
