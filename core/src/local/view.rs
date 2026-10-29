@@ -76,6 +76,48 @@ pub struct ViewStatus {
     /// review M6: frames too large for the window).
     #[serde(default)]
     pub note: Option<String>,
+    /// The view dropped and the server is dialling the other computer again
+    /// by itself (PC2): the try it is on, from 1; 0 when it is not.
+    #[serde(default)]
+    pub reconnecting: u32,
+    /// How the picture comes, about once a second while connected (PC2);
+    /// `None` before.
+    #[serde(default)]
+    pub stats: Option<ViewStats>,
+}
+
+/// How a view's picture comes, as the server measures it (PC2). Each field
+/// has a default, so either side may know more fields than the other.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewStats {
+    /// Frames that came from the other computer in the last second.
+    #[serde(default)]
+    pub fps: u32,
+    /// The picture's bitrate over the last second, in kilobits a second.
+    #[serde(default)]
+    pub kbps: u32,
+    /// The connection's round trip, when known.
+    #[serde(default)]
+    pub rtt_ms: Option<u32>,
+    /// Whether the internet road rides a relay now (it may turn direct
+    /// later); never on the home network.
+    #[serde(default)]
+    pub relayed: bool,
+    /// How long the road that won took to reach the other computer.
+    #[serde(default)]
+    pub dial_ms: Option<u32>,
+    /// Since the view connected: frames that never came (gaps in their
+    /// numbers), frames that came after a newer one (dropped), and frames
+    /// dropped here (too large, or the window slow to read).
+    #[serde(default)]
+    pub lost: u64,
+    #[serde(default)]
+    pub late: u64,
+    #[serde(default)]
+    pub dropped: u64,
+    /// The picture's codec, as the window should name it ("H.264").
+    #[serde(default)]
+    pub codec: String,
 }
 
 /// One message.
@@ -299,6 +341,7 @@ mod tests {
                 monitors: vec!["DP-1".into(), "HDMI-A-1".into()],
                 monitor: 1,
                 note: Some("Its frames are too large to show here.".into()),
+                ..ViewStatus::default()
             }),
             Message::Status(ViewStatus::default()),
             Message::WantKeyframe,
@@ -349,6 +392,61 @@ mod tests {
                 phase: Phase::Waiting,
                 route: "internet".into(),
                 ..ViewStatus::default()
+            })
+        );
+    }
+
+    /// PC2: the stats and the reconnect count read back as written, and a
+    /// status from a server before them (or an app before them reading a
+    /// later one) still reads, with none.
+    #[test]
+    fn the_stats_and_a_reconnect_read_back_and_are_optional() {
+        let status = ViewStatus {
+            phase: Phase::Connecting,
+            route: "internet".into(),
+            reconnecting: 3,
+            stats: Some(ViewStats {
+                fps: 59,
+                kbps: 8_400,
+                rtt_ms: Some(23),
+                relayed: true,
+                dial_ms: Some(640),
+                lost: 2,
+                late: 1,
+                dropped: 4,
+                codec: "H.264".into(),
+            }),
+            ..ViewStatus::default()
+        };
+        let wire = Message::Status(status.clone()).encode();
+        assert_eq!(
+            Message::read(&mut io::Cursor::new(wire)).unwrap(),
+            Message::Status(status)
+        );
+        let before = Message::parse(
+            STATUS,
+            br#"{"phase":"showing","route":"home network"}"#.to_vec(),
+        )
+        .unwrap();
+        let Message::Status(before) = before else {
+            panic!("a status");
+        };
+        assert_eq!((before.reconnecting, before.stats), (0, None));
+        // Stats from a later server with a field this one does not know,
+        // and with some left out.
+        let later = Message::parse(
+            STATUS,
+            br#"{"phase":"showing","stats":{"fps":30,"jitter_ms":4}}"#.to_vec(),
+        )
+        .unwrap();
+        let Message::Status(later) = later else {
+            panic!("a status");
+        };
+        assert_eq!(
+            later.stats,
+            Some(ViewStats {
+                fps: 30,
+                ..ViewStats::default()
             })
         );
     }
