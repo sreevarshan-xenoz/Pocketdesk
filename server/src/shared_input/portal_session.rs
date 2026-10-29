@@ -157,8 +157,9 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                         }
                     }
                     Some(Ask::Release(activation, at)) => {
+                        // The glue lets go of it again if input keeps coming.
                         if let Err(e) = calls.release(activation, at).await {
-                            tracing::debug!("Shared input: input capture not released: {e}");
+                            tracing::warn!("Shared input: input capture not released: {e}");
                         }
                     }
                 },

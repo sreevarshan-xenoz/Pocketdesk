@@ -25,7 +25,7 @@
 //! `capture_linux`'s; the tests use a stand-in.
 
 use std::collections::HashSet;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::hotkey::Hotkey;
 
@@ -120,6 +120,14 @@ pub trait Backend {
 /// Pixels a release lands inside the edge it was taken at.
 const INSIDE: i32 = 8;
 
+/// How long input may keep coming with no capture here before it is let
+/// go of again (libei can run a little ahead of the portal's signals), and
+/// how often it is let go of again after that.
+const STRAY_GRACE: Duration = Duration::from_millis(300);
+
+/// A pause in such input this long starts its count over.
+const STRAY_GAP: Duration = Duration::from_secs(1);
+
 /// Smooth scroll, in pixels, that makes one notch of a wheel.
 const SMOOTH_PER_NOTCH: f64 = 15.0;
 
@@ -160,6 +168,12 @@ pub struct PortalGlue<B: Backend> {
     breaker: FlipBreaker,
     standing: Standing,
     closed: Option<String>,
+    /// Input coming with no capture here: since when, and when last.
+    stray: Option<(Instant, Instant)>,
+    /// When such input was last let go of again.
+    rereleased: Option<Instant>,
+    /// Where the cursor last came home.
+    home: Option<(i32, i32)>,
 }
 
 impl<B: Backend> PortalGlue<B> {
@@ -184,6 +198,9 @@ impl<B: Backend> PortalGlue<B> {
             breaker: FlipBreaker::default(),
             standing: Standing::Starting,
             closed: None,
+            stray: None,
+            rereleased: None,
+            home: None,
         }
     }
 
@@ -229,6 +246,18 @@ impl<B: Backend> PortalGlue<B> {
     /// What the portal said: the driver told, and what it wants done here
     /// done; the rest (sends, the badge, the keep-awake) is returned.
     pub fn portal(&mut self, event: Portal, driver: &mut Driver, now: Instant) -> Vec<Action> {
+        if self.captured.is_none()
+            && matches!(
+                event,
+                Portal::Motion { .. }
+                    | Portal::Button { .. }
+                    | Portal::Scroll { .. }
+                    | Portal::Key { .. }
+            )
+        {
+            self.stray(now);
+            return Vec::new();
+        }
         match event {
             Portal::Standing(standing) => {
                 self.standing = standing;
@@ -338,6 +367,47 @@ impl<B: Backend> PortalGlue<B> {
         }
     }
 
+    /// Input came with no capture here: libei only sends it while the
+    /// desktop captures, so if it keeps coming past the grace the desktop
+    /// still holds this computer's keyboard and mouse (a release it ignored
+    /// or that failed, an activation that never came): let go of them
+    /// again, where the cursor last came home.
+    fn stray(&mut self, now: Instant) {
+        let first = match self.stray {
+            Some((first, last)) if now.saturating_duration_since(last) < STRAY_GAP => first,
+            _ => now,
+        };
+        self.stray = Some((first, now));
+        if now.saturating_duration_since(first) < STRAY_GRACE
+            || self
+                .rereleased
+                .is_some_and(|at| now.saturating_duration_since(at) < STRAY_GRACE)
+        {
+            return;
+        }
+        // Said once a spell, not at each try.
+        if self.rereleased.is_none_or(|at| at < first) {
+            tracing::warn!(
+                "Shared input: the desktop still sends input with nothing captured here: letting go of it again"
+            );
+        }
+        self.rereleased = Some(now);
+        let home = self.home.unwrap_or_else(|| {
+            self.zones
+                .as_deref()
+                .and_then(|zones| zones.first())
+                .map_or((0, 0), |z| {
+                    let half = |len: u32| i32::try_from(len / 2).unwrap_or(0);
+                    (
+                        z.x.saturating_add(half(z.width)),
+                        z.y.saturating_add(half(z.height)),
+                    )
+                })
+        });
+        self.backend.release(None, home);
+        self.keys.switched();
+    }
+
     /// Tell the driver `captured`, doing here what it wants done here.
     fn tell(&mut self, driver: &mut Driver, captured: Captured) -> Vec<Action> {
         let actions = driver.on(captured);
@@ -355,6 +425,7 @@ impl<B: Backend> PortalGlue<B> {
         now: Instant,
     ) -> Vec<Action> {
         let mut out = Vec::new();
+        self.stray = None;
         // What was down before the capture is not this computer's to send.
         self.keys.switched();
         self.reset_rests();
@@ -421,6 +492,7 @@ impl<B: Backend> PortalGlue<B> {
 
     /// Let go of the capture, the cursor at `at`.
     fn let_go(&mut self, at: (i32, i32)) {
+        self.home = Some(at);
         if let Some(activation) = self.captured.take() {
             self.backend.release(activation, at);
         }
@@ -1004,5 +1076,56 @@ mod tests {
         assert_eq!(button_of(0x113), Some(3));
         assert_eq!(button_of(0x114), Some(4));
         assert_eq!(button_of(0x117), None);
+    }
+
+    /// BK8 review I1: the desktop still captures (a Release it ignored or
+    /// that failed, an Activated that never came) while the glue thinks it
+    /// does not: input that keeps coming for 300 ms is let go of again,
+    /// at most every 300 ms, never in the moment after a release.
+    #[test]
+    fn input_with_no_capture_is_let_go_of_again() {
+        let mut rig = Rig::new(&["W"]);
+        rig.calls();
+        let t0 = rig.now;
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let motion = || Portal::Motion { dx: 3.0, dy: 0.0 };
+        for ms in [0, 100, 250] {
+            rig.now = at(ms);
+            assert_eq!(rig.say(motion()), vec![]);
+        }
+        assert_eq!(rig.calls(), vec![], "within the grace: libei may run ahead");
+        rig.now = at(300);
+        rig.say(Portal::Key {
+            code: 30,
+            down: true,
+        });
+        // Let go of at this computer's centre, where it would come home.
+        assert_eq!(rig.calls(), vec![Call::Release(None, PARK)]);
+        rig.now = at(450);
+        rig.say(motion());
+        assert_eq!(rig.calls(), vec![], "not again at once");
+        rig.now = at(600);
+        rig.say(Portal::Button {
+            code: 0x110,
+            down: true,
+        });
+        assert_eq!(rig.calls(), vec![Call::Release(None, PARK)]);
+        assert_eq!(rig.driver.away_on(), None, "nothing was sent anywhere");
+
+        // After a real crossing home, libei's last events are no cause.
+        let mut rig = Rig::new(&["W"]);
+        rig.hit(7, 1, (1600.0, 500.0));
+        rig.say(Portal::Motion { dx: -30.0, dy: 0.0 });
+        rig.calls();
+        let t0 = rig.now;
+        for ms in [10, 100, 200] {
+            rig.now = t0 + Duration::from_millis(ms);
+            rig.say(Portal::Motion { dx: -1.0, dy: 0.0 });
+        }
+        assert_eq!(rig.calls(), vec![]);
+        // Kept up past the grace, it is let go of where it came home.
+        rig.now = t0 + Duration::from_millis(400);
+        rig.say(Portal::Motion { dx: -1.0, dy: 0.0 });
+        assert_eq!(rig.calls(), vec![Call::Release(None, (1595, 500))]);
     }
 }
