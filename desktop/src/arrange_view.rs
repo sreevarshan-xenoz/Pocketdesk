@@ -616,7 +616,7 @@ impl ArrangeView {
         for step in checklist(facts) {
             ui.horizontal_wrapped(|ui| {
                 if step.done {
-                    ui.label(RichText::new("✓").color(crate::theme::good(ui)).strong());
+                    ui.label(RichText::new("✔").color(crate::theme::good(ui)).strong());
                     ui.label(step.label);
                 } else {
                     ui.label(RichText::new("•").color(crate::theme::warn(ui)).strong());
@@ -781,6 +781,8 @@ impl ArrangeView {
         let mut ask: Option<(String, bool)> = None;
         egui::Grid::new("keyboard_mouse_computers")
             .num_columns(2)
+            // Its name on a line of its own, not a narrow column (UX 2).
+            .min_col_width(180.0)
             .spacing([16.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
@@ -898,6 +900,7 @@ impl ArrangeView {
         ui.heading("Your phones");
         egui::Grid::new("keyboard_mouse_phones")
             .num_columns(2)
+            .min_col_width(180.0)
             .spacing([16.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
