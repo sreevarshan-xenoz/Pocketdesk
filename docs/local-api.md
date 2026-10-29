@@ -192,6 +192,14 @@ Makes a pairing PIN, valid for one phone: `{"api": 1, "pin": "123456", "valid_se
 
 Removes a paired phone, or every one when none is named: `{"api": 1, "unpaired": ["0d7c3a52-…"]}`.
 
+## The desktop app's own sockets
+
+The desktop app reaches the server through the state folder, and two loopback sockets the server opens while there is a picture to show: the phone's cast (`cast.json`) and another computer's screen (`view.json`, BK7). They are the app's, not a scripting API, and may change between versions; they are named here so you know what listens.
+
+- **`view.json`** names the view relay while another computer's screen is shown: `session_id` (new for each view, larger than the last), `device_id` and `name` of that computer, `port` on 127.0.0.1, and `token` (32 bytes as hex). It is owner-only, and removed when the view ends. The desktop app asks for a view by leaving `{"id", "ask": "view", "device_id", "monitor", "created_unix"}` in `computers_out/<id>.json`, and ends it with `"ask": "stop_view"` and the `session_id` it showed (a Stop for a view since replaced stops nothing). Requests carry `created_ms` too, so those left in one second are taken in order.
+- A client sends the 32 token bytes within 2 s, then reads messages `[type u8][len u32 LE][payload]`: `1` the picture's size (`[w u16][h u16]`, before the first frame and when it changes), `2` a frame (`[keyframe u8][seq u64][Annex-B H.264]`), `3` the end (UTF-8, why), `4` a heartbeat (every 2 s), `5` the view's state (JSON: `phase` `connecting`, `waiting` or `showing`; `route`; `control`, whether the other computer takes this one's input; `monitors`; `monitor`; `note`, what keeps the picture from showing, such as frames too large for the window). It may send `0x11` (a keyframe, please) and `0x12` (one input packet, at most 16 KiB; only the pointer, keys, text, keyframe, quality and view-only are passed on). The newest client replaces an older one.
+- A view nobody watches for 30 s ends, so a script that only reads `view.json` ends it soon after the app's window goes.
+
 ## The phone
 
 Automation apps on the phone (Tasker and the like) use Android intents: connect, wake, text to a computer's clipboard, files to it. `docs/phone-automation.md` lists them.

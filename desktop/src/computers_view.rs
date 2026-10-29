@@ -23,6 +23,8 @@ pub struct ComputersView {
     forgetting: Option<String>,
     /// What it said happened, until the app takes it (E5).
     notice: Option<crate::notice::Notice>,
+    /// The computer whose screen was asked for, until the app takes it (BK7).
+    view: Option<(String, String)>,
 }
 
 /// A link's state in words.
@@ -40,6 +42,19 @@ pub fn link_words(computer: &PeerComputer) -> String {
     }
 }
 
+/// Whether "Show its screen" can ask for `computer` now (BK7): the server
+/// dials it, so it must run, and the computer must be reachable some way,
+/// its link up or an address known. Why not, when it cannot.
+pub fn view_reach(computer: &PeerComputer, server_running: bool) -> Result<(), &'static str> {
+    if !server_running {
+        return Err("Start the server first: it reaches the other computer");
+    }
+    if computer.link != "linked" && computer.addresses.is_empty() {
+        return Err("Not reachable now: its link is down and no address of it is known");
+    }
+    Ok(())
+}
+
 /// Whether `text` looks like a pairing link (the server checks it fully).
 pub fn looks_like_link(text: &str) -> bool {
     text.trim().starts_with("pocketdesk://pair?")
@@ -50,6 +65,12 @@ impl ComputersView {
     /// notice (E5).
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
         self.notice.take()
+    }
+
+    /// The computer whose screen "Show its screen" asked for, by id and
+    /// name, once (BK7).
+    pub fn take_view(&mut self) -> Option<(String, String)> {
+        self.view.take()
     }
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
@@ -130,6 +151,18 @@ impl ComputersView {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&computer.name).strong());
                 ui.label(RichText::new(link_words(computer)).weak());
+                // BK7: its screen in a window here.
+                let reach = view_reach(computer, server_running);
+                if ui
+                    .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
+                    .on_hover_text(
+                        "Its screen in a window here, controlled from it if it lets this computer (its Devices page's Control switch for this one). It may ask its owner first.",
+                    )
+                    .on_disabled_hover_text(reach.err().unwrap_or_default())
+                    .clicked()
+                {
+                    self.view = Some((computer.device_id.clone(), computer.name.clone()));
+                }
                 // U5: "Unpair" for a pairing everywhere, asked by name.
                 if self.forgetting.as_deref() == Some(computer.device_id.as_str()) {
                     ui.label(format!(
@@ -186,6 +219,7 @@ mod tests {
             name: "Desk".to_string(),
             addresses: Vec::new(),
             control_port: 1716,
+            stream_port: 4716,
             fingerprint: String::new(),
             endpoint: None,
             paired_unix: 0,
@@ -204,6 +238,26 @@ mod tests {
             "not linked (iroh dial timed out)"
         );
         assert!(link_words(&computer("refused")).starts_with("refused"));
+    }
+
+    /// BK7: a computer's screen is asked for through the running server,
+    /// for a computer linked or with an address.
+    #[test]
+    fn its_screen_can_be_asked_for_when_it_can_be_reached() {
+        assert!(view_reach(&computer("linked"), true).is_ok());
+        assert!(view_reach(&computer("linked"), false).is_err(), "no server");
+        assert!(
+            view_reach(&computer("away: the link closed"), true).is_err(),
+            "no link and no address"
+        );
+        let at_home = PeerComputer {
+            addresses: vec!["192.0.2.10".into()],
+            ..computer("away: the link closed")
+        };
+        assert!(
+            view_reach(&at_home, true).is_ok(),
+            "tried on the home network"
+        );
     }
 
     #[test]

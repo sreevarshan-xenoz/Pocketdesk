@@ -10,6 +10,7 @@ mod apps_view;
 mod arrange_view;
 mod cast_view;
 mod clipboard_view;
+mod computer_view;
 mod computers_view;
 mod diagnostics_view;
 mod fonts;
@@ -33,6 +34,8 @@ mod theme;
 mod type_view;
 #[cfg(test)]
 mod ui_tests;
+mod video;
+mod view_input;
 
 use eframe::egui;
 // What the window shares with the tray program (E2).

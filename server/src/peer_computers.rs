@@ -64,6 +64,8 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         return;
     };
     let mut links: HashMap<String, Link> = HashMap::new();
+    // Another computer's screen in a window here (BK7), from the first ask.
+    let mut views: Option<mpsc::Sender<crate::computer_view::Command>> = None;
     // What an earlier run said of its links is not this run's.
     let restarted = computers::update(&dir, |file| {
         for computer in &mut file.computers {
@@ -99,6 +101,23 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
+                }
+                ComputerAsk::View { device_id, monitor } => {
+                    let views = views.get_or_insert_with(|| {
+                        crate::computer_view::spawn(dir.clone(), cert_manager.clone(), wan.clone())
+                    });
+                    let start = crate::computer_view::Command::Start { device_id, monitor };
+                    if views.send(start).await.is_err() {
+                        tracing::warn!(
+                            "Another computer's screen cannot be shown: the view relay stopped"
+                        );
+                    }
+                }
+                ComputerAsk::StopView { session_id } => {
+                    if let Some(views) = &views {
+                        let stop = crate::computer_view::Command::Stop { session_id };
+                        let _ = views.send(stop).await;
+                    }
                 }
             }
         }
@@ -166,6 +185,62 @@ pub(crate) fn live_link(device_id: &str) -> Option<LinkedComputer> {
 /// Whether the link to `device_id` is up now.
 pub(crate) fn is_linked(device_id: &str) -> bool {
     live(device_id).is_some()
+}
+
+/// The monitors packet, asked of a computer on its link and answered there.
+pub(crate) const MONITORS: &str = "kdeconnect.pocketdesk.monitors";
+
+/// Each linked computer's screens, by name and size, as it last answered
+/// (BK7: the window that shows its screen offers the choice).
+static SCREENS: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(Default::default);
+
+/// Ask the computer `device_id` for its screens on its link, when it is up;
+/// its answer is kept for [`screens`].
+pub(crate) fn ask_screens(device_id: &str) {
+    if let Some(link) = live_link(device_id) {
+        link.send(NetworkPacket::new(MONITORS));
+    }
+}
+
+/// The computer `device_id`'s screens as it last said, in its own order;
+/// empty when not known.
+pub(crate) fn screens(device_id: &str) -> Vec<String> {
+    SCREENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The screens a monitors answer names, by their index: "name (WxH)", at
+/// most 16, each name cut as a computer's is.
+fn screens_in(body: &serde_json::Value) -> Vec<String> {
+    let Some(monitors) = body.get("monitors").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+    let mut listed: Vec<(u64, String)> = monitors
+        .iter()
+        .take(16)
+        .enumerate()
+        .map(|(at, m)| {
+            let index = m.get("index").and_then(|v| v.as_u64()).unwrap_or(at as u64);
+            let name = match m.get("name").and_then(|v| v.as_str()) {
+                Some(name) if !name.trim().is_empty() => shown_name(name),
+                _ => format!("Screen {}", index + 1),
+            };
+            let size = match (
+                m.get("width").and_then(|v| v.as_u64()),
+                m.get("height").and_then(|v| v.as_u64()),
+            ) {
+                (Some(w), Some(h)) => format!(" ({w}x{h})"),
+                _ => String::new(),
+            };
+            (index, format!("{name}{size}"))
+        })
+        .collect();
+    listed.sort_by_key(|(index, _)| *index);
+    listed.into_iter().map(|(_, name)| name).collect()
 }
 
 /// Whether `device_id` is a computer this one paired with.
@@ -344,6 +419,7 @@ async fn pair_with(
         name,
         addresses: link.addresses.clone(),
         control_port: link.control_port,
+        stream_port: link.stream_port,
         fingerprint: fingerprint.to_ascii_lowercase(),
         endpoint: pushed.or_else(|| {
             link.endpoint
@@ -577,14 +653,14 @@ fn drop_pins(certs: &CertManager, computer: &PeerComputer, keep: &[String]) {
 
 /// The other computer's iroh endpoint, as its endpoint packet names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct WanTarget {
-    endpoint_id: String,
-    relay_urls: Vec<String>,
-    direct_addrs: Vec<String>,
+pub(crate) struct WanTarget {
+    pub(crate) endpoint_id: String,
+    pub(crate) relay_urls: Vec<String>,
+    pub(crate) direct_addrs: Vec<String>,
 }
 
 impl WanTarget {
-    fn parse(body: &serde_json::Value) -> Option<Self> {
+    pub(crate) fn parse(body: &serde_json::Value) -> Option<Self> {
         let endpoint_id = body.get("endpointId")?.as_str()?;
         endpoint_id.parse::<iroh::EndpointId>().ok()?;
         let strings = |key: &str| -> Vec<String> {
@@ -1182,6 +1258,14 @@ async fn run_link(
 /// and its refusals of a transfer (2h). The rest it pushes to any client
 /// (the HUD, wake info, control) is for phones.
 async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
+    // Its screens, asked for a window that shows them (BK7).
+    if packet.packet_type == MONITORS {
+        SCREENS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(device_id.to_string(), screens_in(&packet.body));
+        return;
+    }
     if packet.packet_type == crate::offers::OFFER {
         tokio::spawn(fetch_offer(device_id.to_string(), packet.body.clone()));
         return;
@@ -1269,7 +1353,7 @@ fn is_refusal(error: &str) -> bool {
 }
 
 /// Hex SHA-256, either case.
-fn parse_fingerprint(hex: &str) -> Option<[u8; 32]> {
+pub(crate) fn parse_fingerprint(hex: &str) -> Option<[u8; 32]> {
     if hex.len() != 64 || !hex.is_ascii() {
         return None;
     }
@@ -1314,6 +1398,26 @@ where
 mod tests {
     use super::*;
 
+    /// BK7: a computer's screens, as its monitors answer names them, in
+    /// its own order, and none from an answer that names none.
+    #[test]
+    fn a_computers_screens_are_read_from_its_answer() {
+        let body = serde_json::json!({"count": 2, "monitors": [
+            {"index": 1, "name": "HDMI-A-1", "width": 2560, "height": 1440, "is_primary": false},
+            {"index": 0, "name": "eDP-1", "width": 1920, "height": 1080, "is_primary": true},
+        ]});
+        assert_eq!(
+            screens_in(&body),
+            ["eDP-1 (1920x1080)", "HDMI-A-1 (2560x1440)"]
+        );
+        assert!(screens_in(&serde_json::json!({})).is_empty());
+        assert_eq!(
+            screens_in(&serde_json::json!({"monitors": [{}]})),
+            ["Screen 1"],
+            "a screen with no name is still one"
+        );
+    }
+
     /// BD1: a computer paired here that this one still lists as one it
     /// paired with (the other way) is asked forgotten, as Unpair does.
     #[test]
@@ -1326,6 +1430,7 @@ mod tests {
                 name: "Desk".to_string(),
                 addresses: vec!["192.0.2.20".to_string()],
                 control_port: 1716,
+                stream_port: 4716,
                 fingerprint: "ab".repeat(32),
                 endpoint: None,
                 paired_unix: 1,
@@ -1383,6 +1488,7 @@ mod tests {
                 .map(str::to_string)
                 .to_vec(),
             control_port: 1716,
+            stream_port: 4716,
             fingerprint: "ab".repeat(32),
             endpoint: None,
             paired_unix: 1,

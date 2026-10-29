@@ -93,6 +93,10 @@ pub fn sound_grant(payload: &[u8]) -> u8 {
 pub const SCREEN_FEATURES_SAID: u8 = 0x80;
 /// The computer takes pen samples ([`super::InputPacket::Pen`]).
 pub const SCREEN_FEATURE_PEN: u8 = 1;
+/// The computer takes this session's input (BK7): without it the session
+/// is view-only (its device's Input permission is off). Computers before
+/// BK7 do not say it; their [`SCREEN_FEATURE_PEN`] meant the same.
+pub const SCREEN_FEATURE_INPUT: u8 = 2;
 
 /// A remote's ready stream carries one byte of what the computer offers
 /// it (G4): this bit marks the byte as said. Computers before G4 send a
@@ -122,6 +126,14 @@ pub fn screen_features(payload: &[u8]) -> u8 {
         .copied()
         .filter(|b| b & SCREEN_FEATURES_SAID != 0)
         .unwrap_or(0)
+}
+
+/// Whether the computer takes a screen session's input, from what its ready
+/// stream said ([`screen_features`]): `None` until it says (BK7). A
+/// computer before BK7 offered a pen exactly when it took input.
+pub fn screen_takes_input(features: u8) -> Option<bool> {
+    (features & SCREEN_FEATURES_SAID != 0)
+        .then_some(features & (SCREEN_FEATURE_INPUT | SCREEN_FEATURE_PEN) != 0)
 }
 
 /// What a session is for.
@@ -1030,6 +1042,17 @@ mod remote_tests {
             screen_features(&[SCREEN_FEATURES_SAID | SCREEN_FEATURE_PEN]) & SCREEN_FEATURE_PEN,
             SCREEN_FEATURE_PEN
         );
+        // BK7: input taken, as said, or as an older computer's pen said it.
+        assert_eq!(
+            screen_takes_input(SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT),
+            Some(true)
+        );
+        assert_eq!(
+            screen_takes_input(SCREEN_FEATURES_SAID | SCREEN_FEATURE_PEN),
+            Some(true)
+        );
+        assert_eq!(screen_takes_input(SCREEN_FEATURES_SAID), Some(false));
+        assert_eq!(screen_takes_input(0), None, "not said yet");
         // Nothing said: no pen offered.
         assert_eq!(screen_features(&[]), 0);
         assert_eq!(screen_features(&[SCREEN_FEATURE_PEN]), 0);

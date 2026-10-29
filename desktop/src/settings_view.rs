@@ -309,6 +309,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_quality",
+        "Quality of a computer's screen here",
+        Section::Computers,
+    ),
+    (
+        "computer_view_only",
+        "Show a computer's screen view-only",
+        Section::Computers,
+    ),
+    (
         "shared_input",
         "Share my keyboard and mouse with my computers",
         Section::SharedInput,
@@ -440,6 +450,16 @@ fn drawn_in(key: &str) -> &str {
     }
 }
 
+/// A computer's window's quality, as the page names it (BK7).
+pub fn computer_quality_label(name: &str) -> &'static str {
+    match name {
+        "quality" => "Best",
+        "balanced" => "Balanced",
+        "economy" => "Economy",
+        _ => "Auto",
+    }
+}
+
 /// Whether this computer's page draws `key`'s row: some are for one
 /// system only (J2 review: on Windows "grant" opened an empty Connection).
 fn drawn_here(key: &str) -> bool {
@@ -525,7 +545,10 @@ fn section_of(key: &str) -> Option<Section> {
 pub fn applies_live(key: &str) -> bool {
     matches!(
         key,
-        "events"
+        // BK7: read by this app as a computer's window opens.
+        "computer_view_quality"
+            | "computer_view_only"
+            | "events"
             | "events_detail"
             | "hooks"
             | "tasks"
@@ -1958,6 +1981,37 @@ impl SettingsForm {
                         "share what I copy with my other paired computers, both ways (turn it on on each)",
                     );
                 });
+                // BK7: "Show its screen" is on each computer's line below.
+                row(ui, "computer_view_quality", |ui| {
+                    let named = e.computer_view_quality.trim().to_ascii_lowercase();
+                    egui::ComboBox::from_id_salt("computer-view-quality")
+                        .selected_text(computer_quality_label(&named))
+                        .show_ui(ui, |ui| {
+                            for (name, _) in pocketdesk_core::local::config::COMPUTER_VIEW_QUALITIES
+                            {
+                                if ui
+                                    .selectable_label(named == name, computer_quality_label(name))
+                                    .clicked()
+                                {
+                                    e.computer_view_quality = name.to_string();
+                                }
+                            }
+                        });
+                    note(
+                        ui,
+                        "Where the window opens with Show its screen: Auto follows the link, Economy suits the internet road. The window's own Quality changes it for that view.",
+                    );
+                });
+                row(ui, "computer_view_only", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_only,
+                        "a computer's screen window starts view-only: it sends no clicks or keys",
+                    );
+                    note(
+                        ui,
+                        "Controlling also needs that computer's Control switch for this one, on its Devices page: it is off until turned on there.",
+                    );
+                });
             }
             Section::SharedInput => {
                 row(ui, "shared_input", |ui| {
@@ -2796,6 +2850,27 @@ mod tests {
         }
         assert_eq!(drawn_here("shared_input_files"), cfg!(windows));
         assert_eq!(drawn_here("shared_input_sound"), cfg!(windows));
+    }
+
+    /// BK7: a computer's window's quality and view-only start are with the
+    /// other computers, apply as the next window opens, and name the
+    /// phone's presets.
+    #[test]
+    fn a_computers_window_settings_are_with_the_computers() {
+        for key in ["computer_view_quality", "computer_view_only"] {
+            assert!(
+                SETTINGS
+                    .iter()
+                    .any(|(k, _, s)| *k == key && *s == Section::Computers),
+                "{key}"
+            );
+            assert!(applies_live(key), "{key}");
+            assert!(drawn_here(key), "{key}");
+        }
+        assert_eq!(computer_quality_label("auto"), "Auto");
+        assert_eq!(computer_quality_label("quality"), "Best");
+        assert_eq!(computer_quality_label("economy"), "Economy");
+        assert_eq!(computer_quality_label("odd"), "Auto");
     }
 
     /// Everything but the key is read again by the running server; the key

@@ -238,12 +238,18 @@ fn profile_carries(capability: Capability, computer: bool) -> bool {
 /// What `capability`'s switch says of itself on a device's page: a phone's
 /// Keyboard and mouse is this computer's onto the phone (BK5).
 fn hint_for(capability: Capability, computer: bool, hint: &'static str) -> &'static str {
-    if capability == Capability::SharedInput && !computer {
+    if capability == Capability::Input && computer {
+        COMPUTER_CONTROL
+    } else if capability == Capability::SharedInput && !computer {
         "This computer may move its keyboard and mouse onto this phone, used as another screen beside it (the phone must allow it too)"
     } else {
         hint
     }
 }
+
+/// What a paired computer's Control switch does (BK7): it can show this
+/// screen in a window there, and with this on, control this computer from it.
+pub(crate) const COMPUTER_CONTROL: &str = "That computer can show this screen in a window (Show its screen, on its Computers page). On, it can also control this one from that window; off, it can only watch.";
 
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.
@@ -402,6 +408,9 @@ pub struct PocketdeskApp {
     tel_ask_read: Option<std::time::Instant>,
     /// The window showing a phone's screen (T10k), started on the first pass.
     cast: Option<crate::cast_view::CastView>,
+    /// The window showing another computer's screen (BK7), from the first
+    /// "Show its screen".
+    computer_view: Option<crate::computer_view::ComputerView>,
     /// M4: the typing window, while it types on a phone.
     type_view: crate::type_view::TypeView,
     /// The Activity tab (ecosystem 1b).
@@ -472,6 +481,7 @@ impl PocketdeskApp {
             tel_ask: None,
             tel_ask_read: None,
             cast: None,
+            computer_view: None,
             type_view: Default::default(),
             activity: Default::default(),
             task_requests: Vec::new(),
@@ -730,6 +740,21 @@ impl PocketdeskApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
+        }
+    }
+
+    /// Open a window on the computer `device_id`'s screen (BK7), at the
+    /// quality and view-only the settings start it with.
+    fn show_computer(&mut self, ctx: &egui::Context, device_id: &str, name: &str) {
+        let (preset, view_only) = self.config.as_ref().map_or(
+            (pocketdesk_core::streaming::input_packet::PRESET_AUTO, false),
+            |c| (c.computer_view_preset(), c.computer_view_only),
+        );
+        let view = self.computer_view.get_or_insert_with(|| {
+            crate::computer_view::ComputerView::new(ctx, self.state_dir.clone())
+        });
+        if let Err(e) = view.open(device_id, name, 0, preset, view_only) {
+            self.notice = crate::notice::Notice::error(e);
         }
     }
 
@@ -2241,6 +2266,15 @@ impl PocketdeskApp {
                         {
                             change = Some((device.id.clone(), capability, allowed));
                         }
+                        // BK7: a computer's Control is also its window's.
+                        if capability == Capability::Input && device.computer {
+                            ui.label(
+                                RichText::new(
+                                    "Also lets that computer control this one from a window showing this screen.",
+                                )
+                                .color(crate::theme::muted(ui)),
+                            );
+                        }
                         // While it is on, what it waits for, in plain sight (E5).
                         if capability == Capability::AwayLock && allowed && unavailable.is_none() {
                             let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
@@ -2690,6 +2724,10 @@ impl PocketdeskApp {
                     {
                         self.computers
                             .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+                        // BK7: "Show its screen" opens its window.
+                        if let Some((device_id, name)) = self.computers.take_view() {
+                            self.show_computer(ui.ctx(), &device_id, &name);
+                        }
                     }
                     crate::settings_view::Section::Notifications
                         if extra(crate::settings_view::EXTRA_MUTED) =>
@@ -3743,6 +3781,10 @@ impl eframe::App for PocketdeskApp {
                 self.config.as_ref().is_none_or(|c| c.cast_control),
                 model::send_target_ids(&self.snapshot),
             );
+        // BK7: another computer's screen, while its window is open.
+        if let Some(view) = &self.computer_view {
+            view.show(ctx);
+        }
         // M4: the typing window, while open.
         if let Some(id) = self.type_view.phone() {
             let control_on = self.config.as_ref().is_none_or(|c| c.cast_control);
@@ -4083,6 +4125,24 @@ mod tests {
         }
         assert!(shown_for(Capability::Clipboard, true));
         assert!(shown_for(Capability::Files, true));
+    }
+
+    /// BK7: a computer's Control switch says it also controls this one from
+    /// a window showing this screen; a phone's says the phone's way.
+    #[test]
+    fn a_computers_control_switch_says_its_window() {
+        let (_, _, phone_hint) = PERMISSIONS
+            .iter()
+            .find(|(c, _, _)| *c == Capability::Input)
+            .copied()
+            .unwrap();
+        assert!(shown_for(Capability::Input, true));
+        assert_eq!(
+            hint_for(Capability::Input, true, phone_hint),
+            COMPUTER_CONTROL
+        );
+        assert!(COMPUTER_CONTROL.contains("window"));
+        assert_eq!(hint_for(Capability::Input, false, phone_hint), phone_hint);
     }
 
     /// The shared keyboard and mouse: a paired computer's page has its

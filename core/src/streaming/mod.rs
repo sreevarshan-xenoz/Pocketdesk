@@ -16,6 +16,7 @@ pub mod encoder_detect;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;
+pub mod h264_sps;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 pub use gpu_frame::GpuFrame;
 pub mod in_flight;
@@ -94,9 +95,9 @@ pub use client::StreamingClient;
 /// [`client::report_samples`].
 pub use client::report_samples;
 pub use client::{
-    REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, SCREEN_FEATURE_PEN, SCREEN_FEATURES_SAID,
-    SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features, screen_features,
-    sound_grant,
+    REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_PEN,
+    SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features,
+    screen_features, screen_takes_input, sound_grant,
 };
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,

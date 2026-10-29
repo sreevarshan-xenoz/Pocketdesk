@@ -2732,6 +2732,7 @@ mod tests {
             name: name.to_string(),
             addresses: Vec::new(),
             control_port: 1716,
+            stream_port: 4716,
             fingerprint: String::new(),
             endpoint: None,
             paired_unix: 0,
