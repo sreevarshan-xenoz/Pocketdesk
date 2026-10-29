@@ -260,10 +260,17 @@ pub struct PairView {
 
 /// Whose phone the next code pairs: the owner's choice just made, else a
 /// live code on file's own (one `pocketdesk pair --grant` wrote while the
-/// page was open is kept, not replaced; I3 review), else the view's.
+/// page was open is kept, not replaced; I3 review), else the view's. The
+/// box for another of the owner's computers (PC1) holds only for the code
+/// made as it was ticked, and that code while it lives: the next is plain
+/// (review M6), so a code for a computer is not left on screen for later.
 pub fn whose_for(chosen_now: bool, view: Whose, on_file: Option<&pin::FilePin>) -> Whose {
     match on_file {
         Some(file) if !chosen_now => Whose::of(file),
+        None if !chosen_now => Whose {
+            mine: false,
+            ..view
+        },
         _ => view,
     }
 }
@@ -752,6 +759,30 @@ mod tests {
         assert!(!theirs.is_owners());
         let link = link_for(&dir, &config, 1_030, addresses(), theirs).unwrap();
         assert!(!link.mine && !pin::read(&dir, 1_030).unwrap().mine);
+    }
+
+    /// PC1 review M6: the box for another of the owner's computers holds
+    /// for the code made when it was ticked, and that code while it lives;
+    /// the next code after it is plain until it is ticked again.
+    #[test]
+    fn the_box_for_another_computer_unticks_after_its_code() {
+        let mine = Whose {
+            mine: true,
+            ..Whose::MINE
+        };
+        assert_eq!(whose_for(true, mine.clone(), None), mine, "just ticked");
+        let mut live = file_pin("123456");
+        live.mine = true;
+        assert_eq!(
+            whose_for(false, mine.clone(), Some(&live)),
+            mine,
+            "its code, drawn again while it lives"
+        );
+        assert_eq!(
+            whose_for(false, mine, None),
+            Whose::MINE,
+            "its code used or run out: the next is plain"
+        );
     }
 
     #[test]
