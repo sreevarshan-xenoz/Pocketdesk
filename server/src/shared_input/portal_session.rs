@@ -14,7 +14,7 @@
 
 use std::sync::mpsc::Sender;
 
-use futures_lite::{Stream, StreamExt};
+use futures_lite::{FutureExt, Stream, StreamExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::barriers::Barrier;
@@ -128,14 +128,16 @@ async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) {
 
 /// The session, from its zones to its end: the glue's asks answered and
 /// what the portal and libei say passed on, until the glue is gone or the
-/// stream closes; then the session is closed.
+/// stream closes. However it ends, a panic too, the capture is then
+/// disabled and the session closed, so this computer's keyboard and mouse
+/// are never left taken.
 pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
     calls: &C,
     mut signals: S,
     mut asked: UnboundedReceiver<Ask>,
     events: &Sender<Portal>,
 ) -> Result<(), String> {
-    let ended = async {
+    let ended = std::panic::AssertUnwindSafe(async {
         let mut zone_set = zones(calls, events).await?;
         // The barriers last asked for, set again for each new zone set.
         let mut armed: Option<Vec<Barrier>> = None;
@@ -190,8 +192,15 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                 },
             }
         }
+    })
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|_| {
+        Err("the input-capture task failed (a panic); its session is closed".to_string())
+    });
+    if let Err(e) = calls.disable().await {
+        tracing::debug!("Shared input: input capture not disabled as it ended: {e}");
     }
-    .await;
     calls.close().await;
     ended
 }
@@ -342,6 +351,7 @@ pub(crate) mod tests {
                 "enable",
                 "release Some(4) at (1595, 500)",
                 "disable",
+                "disable",
                 "close",
             ]
         );
@@ -375,5 +385,36 @@ pub(crate) mod tests {
         .await;
         assert_eq!(ended, Err("the libei stream closed".to_string()));
         assert_eq!(calls.log.borrow().last().map(String::as_str), Some("close"));
+    }
+
+    /// BK8 review C1: a panic in the session task (reis's converter has
+    /// `expect`s) must never leave this computer's keyboard and mouse
+    /// taken: the capture is disabled and the session closed all the same.
+    #[tokio::test]
+    async fn a_panic_in_the_session_task_still_disables_and_closes_it() {
+        let calls = FakeCalls::default();
+        let (_asks, asked) = unbounded_channel();
+        let (sig_tx, sig_rx) = unbounded_channel();
+        let (said, _heard): (Sender<Portal>, Receiver<Portal>) = mpsc::channel();
+        let boom = signals(sig_rx).map(|s| {
+            if s == Signal::Closed("boom".into()) {
+                panic!("a stand-in for a panic in libei's converter");
+            }
+            s
+        });
+        sig_tx
+            .send(Signal::Activated {
+                activation: Some(2),
+                barrier: Some(1),
+                at: None,
+            })
+            .unwrap();
+        sig_tx.send(Signal::Closed("boom".into())).unwrap();
+        let ended = serve(&calls, Box::pin(boom), asked, &said).await;
+        assert!(
+            ended.as_ref().is_err_and(|e| e.contains("panic")),
+            "{ended:?}"
+        );
+        assert_eq!(*calls.log.borrow(), ["zones -> 1", "disable", "close"]);
     }
 }
