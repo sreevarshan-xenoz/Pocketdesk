@@ -119,7 +119,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::Audio,
-        "Hear and change this computer's sound, and its media",
+        "Hear and change this computer's sound",
         "Plays this computer's sound on the phone and sets the volume. Also shows the phone what is playing here (title, artist, app) and lets it pause and skip.",
     ),
     (
@@ -129,7 +129,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::Power,
-        "Lock, sleep, privacy mode and waking others",
+        "Lock, sleep, privacy and wake others",
         "Lock the screen, put the computer to sleep or shut it down, blank it for privacy, and send a wake to another computer on this network.",
     ),
     (
@@ -174,7 +174,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::PhoneActions,
-        "Take screenshots of it, lock it and open its apps from here",
+        "Screenshot, lock and open its apps",
         "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
@@ -214,10 +214,89 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::AwayLock,
-        "Lock this computer when this phone leaves",
+        "Lock this computer when it leaves",
         "When the phone's link on this computer's network has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone linked from away (the internet road or a tailnet) counts as gone. A phone asleep may lose its link, so reading or watching without touching anything can lock too. On Linux it reads the keyboard's idle time from GNOME, KDE, the compositor (Sway, Hyprland and others with ext-idle-notify) or X11 (xprintidle), and never locks on a desktop that says none of these.",
     ),
 ];
+
+/// The Devices page's switches in groups (UX 3), each under its name
+/// with a switch for all of it: every one of [`PERMISSIONS`] once.
+pub(crate) const PERMISSION_GROUPS: [(&str, &[Capability]); 5] = [
+    (
+        "Control",
+        &[
+            Capability::Input,
+            Capability::SharedInput,
+            Capability::Power,
+            Capability::Peek,
+        ],
+    ),
+    (
+        "Screen, sound and media",
+        &[
+            Capability::Cast,
+            Capability::Audio,
+            Capability::Mic,
+            Capability::Media,
+            Capability::PhoneSound,
+        ],
+    ),
+    (
+        "Files and clipboard",
+        &[
+            Capability::Clipboard,
+            Capability::Files,
+            Capability::Browse,
+            Capability::Links,
+            Capability::Notes,
+        ],
+    ),
+    (
+        "Phone on this computer",
+        &[
+            Capability::Notifications,
+            Capability::Texts,
+            Capability::Dial,
+            Capability::PhoneActions,
+            Capability::Ring,
+            Capability::Mute,
+        ],
+    ),
+    (
+        "Automation",
+        &[
+            Capability::Exec,
+            Capability::Command,
+            Capability::Ask,
+            Capability::Tasks,
+            Capability::AwayLock,
+        ],
+    ),
+];
+
+/// What a group's switch turns on (UX 3): its switches a device's page
+/// shows and that can be set here, but Run commands, which is turned on
+/// only by itself. Turning a group off also turns Run commands off.
+pub(crate) fn group_turns_on(capabilities: &[Capability], computer: bool) -> Vec<Capability> {
+    group_turns_off(capabilities, computer)
+        .into_iter()
+        .filter(|c| *c != Capability::Exec)
+        .collect()
+}
+
+/// What a group's switch turns off (UX 3): its switches a device's page
+/// shows and that can be set here.
+pub(crate) fn group_turns_off(capabilities: &[Capability], computer: bool) -> Vec<Capability> {
+    capabilities
+        .iter()
+        .copied()
+        .filter(|c| shown_for(*c, computer))
+        .filter(|c| *c != Capability::AwayLock || away_lock_unavailable().is_none())
+        .collect()
+}
+
+/// A group switch's note: Run commands is never turned on with the rest.
+pub(crate) const EXEC_ALONE: &str = "Run commands turns on only by itself.";
 
 /// The switches a profile sets on a device: those its page shows, and
 /// AwayLock only where it works (Q2 review: the question named one Apply
@@ -275,7 +354,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
         ))
 }
 
-/// Why "Lock this computer when this phone leaves" cannot be turned on
+/// Why "Lock this computer when it leaves" cannot be turned on
 /// here, if it cannot: this computer cannot tell yet whether someone is at
 /// it (E5).
 fn away_lock_unavailable() -> Option<&'static str> {
@@ -1171,6 +1250,33 @@ impl PocketdeskApp {
                 self.notice = crate::notice::Notice::error(format!(
                     "Could not give {label} the {} profile: {e}",
                     profile.name
+                ))
+            }
+        }
+        self.refresh();
+    }
+
+    /// A group's switches set at once (UX 3), in one write, as
+    /// [`Self::set_permission`] sets one.
+    fn set_permissions(&mut self, id: &str, capabilities: &[Capability], allowed: bool) {
+        // P10: a phone's contacts go with its texts.
+        if capabilities.contains(&Capability::Texts) && !allowed {
+            let _ = pocketdesk_core::local::phone_contacts::forget(&self.state_dir, id);
+        }
+        match model::set_permissions(&self.state_dir, id, capabilities, allowed) {
+            Ok(())
+                if !allowed
+                    && capabilities
+                        .iter()
+                        .any(|c| model::fixed_at_session_start(*c)) =>
+            {
+                self.end_sessions_of(id);
+            }
+            Ok(()) => {}
+            Err(e) => {
+                self.notice = crate::notice::Notice::error(format!(
+                    "Could not change {}: {e}",
+                    self.label(id)
                 ))
             }
         }
@@ -2368,6 +2474,7 @@ impl PocketdeskApp {
             .color(crate::theme::muted(ui)),
         );
         let mut change = None;
+        let mut group_change: Option<(String, Vec<Capability>, bool)> = None;
         let mut ask = None;
         let mut rename = None;
         let mut save_profile = None;
@@ -2399,30 +2506,6 @@ impl PocketdeskApp {
             egui::CollapsingHeader::new(format!("What {label} may do"))
                 .id_salt(("permissions", &device.id))
                 .show(ui, |ui| {
-                    // U3: the owner's name for it, which the phone's own
-                    // never replaces; blank goes back to the phone's.
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Name");
-                        let text = self.renaming.entry(device.id.clone()).or_insert_with(|| {
-                            if device.renamed {
-                                device.name.clone().unwrap_or_default()
-                            } else {
-                                String::new()
-                            }
-                        });
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .hint_text(device.name.as_deref().unwrap_or("its own name"))
-                                .desired_width(200.0),
-                        );
-                        if ui
-                            .button("Rename")
-                            .on_hover_text("Blank: the name the phone gives itself.")
-                            .clicked()
-                        {
-                            rename = Some((device.id.clone(), text.clone()));
-                        }
-                    });
                     // P9: these permissions under a name, or a profile's.
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Profile");
@@ -2537,6 +2620,30 @@ impl PocketdeskApp {
                             }
                         });
                     }
+                    // U3: the owner's name for it, which the phone's own
+                    // never replaces; blank goes back to the phone's.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Name");
+                        let text = self.renaming.entry(device.id.clone()).or_insert_with(|| {
+                            if device.renamed {
+                                device.name.clone().unwrap_or_default()
+                            } else {
+                                String::new()
+                            }
+                        });
+                        ui.add(
+                            egui::TextEdit::singleline(text)
+                                .hint_text(device.name.as_deref().unwrap_or("its own name"))
+                                .desired_width(200.0),
+                        );
+                        if ui
+                            .button("Rename")
+                            .on_hover_text("Blank: the name the phone gives itself.")
+                            .clicked()
+                        {
+                            rename = Some((device.id.clone(), text.clone()));
+                        }
+                    });
                     let mut ask_first = device.permissions.ask_first;
                     if ui
                         .checkbox(&mut ask_first, "Ask before each session")
@@ -2548,42 +2655,73 @@ impl PocketdeskApp {
                     {
                         ask = Some((device.id.clone(), ask_first));
                     }
-                    for (capability, label, hint) in PERMISSIONS {
-                        if !shown_for(capability, device.computer) {
+                    // UX 3: the switches in their groups, each with a
+                    // switch for all of it.
+                    for (group, members) in PERMISSION_GROUPS {
+                        let on = group_turns_on(members, device.computer);
+                        let off = group_turns_off(members, device.computer);
+                        if off.is_empty() {
                             continue;
                         }
-                        let mut allowed = device.permissions.allows(capability);
-                        let unavailable = (capability == Capability::AwayLock)
-                            .then(away_lock_unavailable)
-                            .flatten();
-                        let hint = hint_for(capability, device.computer, hint);
+                        ui.add_space(6.0);
+                        let all_on = on.iter().all(|c| device.permissions.allows(*c));
+                        let some_on = off.iter().any(|c| device.permissions.allows(*c));
+                        let mut checked = all_on;
                         if ui
-                            .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
-                            .on_hover_text(hint)
-                            .on_disabled_hover_text(unavailable.unwrap_or(hint))
+                            .add(
+                                egui::Checkbox::new(&mut checked, RichText::new(group).strong())
+                                    .indeterminate(some_on && !all_on),
+                            )
+                            .on_hover_text("Turn every switch in this group on or off.")
                             .changed()
                         {
-                            change = Some((device.id.clone(), capability, allowed));
+                            group_change =
+                                Some((device.id.clone(), if checked { on } else { off }, checked));
                         }
-                        // BK7: a computer's Control is also its window's.
-                        if capability == Capability::Input && device.computer {
-                            ui.label(
-                                RichText::new(
-                                    "Also lets that computer control this one from a window showing this screen.",
-                                )
-                                .color(crate::theme::muted(ui)),
-                            );
-                        }
-                        // While it is on, what it waits for, in plain sight (E5).
-                        if capability == Capability::AwayLock && allowed && unavailable.is_none() {
-                            let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
-                            ui.label(
-                                RichText::new(format!(
-                                    "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
-                                ))
-                                .color(crate::theme::muted(ui)),
-                            );
-                        }
+                        ui.indent(("group", group, &device.id), |ui| {
+                            if members.contains(&Capability::Exec)
+                                && shown_for(Capability::Exec, device.computer)
+                            {
+                                ui.label(RichText::new(EXEC_ALONE).color(crate::theme::muted(ui)));
+                            }
+                            for (capability, label, hint) in PERMISSIONS {
+                                if !members.contains(&capability) || !shown_for(capability, device.computer) {
+                                    continue;
+                                }
+                                let mut allowed = device.permissions.allows(capability);
+                                let unavailable = (capability == Capability::AwayLock)
+                                    .then(away_lock_unavailable)
+                                    .flatten();
+                                let hint = hint_for(capability, device.computer, hint);
+                                if ui
+                                    .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
+                                    .on_hover_text(hint)
+                                    .on_disabled_hover_text(unavailable.unwrap_or(hint))
+                                    .changed()
+                                {
+                                    change = Some((device.id.clone(), capability, allowed));
+                                }
+                                // BK7: a computer's Control is also its window's.
+                                if capability == Capability::Input && device.computer {
+                                    ui.label(
+                                        RichText::new(
+                                            "Also lets that computer control this one from a window showing this screen.",
+                                        )
+                                        .color(crate::theme::muted(ui)),
+                                    );
+                                }
+                                // While it is on, what it waits for, in plain sight (E5).
+                                if capability == Capability::AwayLock && allowed && unavailable.is_none() {
+                                    let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
+                                        ))
+                                        .color(crate::theme::muted(ui)),
+                                    );
+                                }
+                            }
+                        });
                     }
                 });
             // L7: each feature as this computer, the phone and Android stand.
@@ -2595,6 +2733,9 @@ impl PocketdeskApp {
         }
         if let Some((id, capability, allowed)) = change {
             self.set_permission(&id, capability, allowed);
+        }
+        if let Some((id, capabilities, allowed)) = group_change {
+            self.set_permissions(&id, &capabilities, allowed);
         }
         if let Some((id, ask_first)) = ask {
             self.set_ask_first(&id, ask_first);
@@ -4412,6 +4553,46 @@ pub fn kept_page(chosen: Tab) -> Tab {
 #[cfg(test)]
 mod start_tests {
     use super::*;
+
+    /// UX 3: every switch of the Devices page is in one group, once, and
+    /// no group names a switch the page does not have.
+    #[test]
+    fn every_switch_is_in_one_group() {
+        for (capability, label, _) in PERMISSIONS {
+            let groups = PERMISSION_GROUPS
+                .iter()
+                .filter(|(_, members)| members.contains(&capability))
+                .count();
+            assert_eq!(groups, 1, "{label}");
+        }
+        let grouped: usize = PERMISSION_GROUPS.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(grouped, PERMISSIONS.len());
+        for (group, _) in PERMISSION_GROUPS {
+            assert!(group.split_whitespace().count() <= 6, "{group}");
+        }
+    }
+
+    /// UX 3: a switch's label is at most six words.
+    #[test]
+    fn switch_labels_are_short() {
+        for (_, label, _) in PERMISSIONS {
+            assert!(label.split_whitespace().count() <= 6, "{label}");
+        }
+    }
+
+    /// UX 3: a group's switch never turns Run commands on, but does turn
+    /// it off.
+    #[test]
+    fn run_commands_turns_on_only_by_itself() {
+        let (_, automation) = PERMISSION_GROUPS
+            .iter()
+            .find(|(_, m)| m.contains(&Capability::Exec))
+            .expect("a group");
+        assert!(!group_turns_on(automation, false).contains(&Capability::Exec));
+        assert!(group_turns_off(automation, false).contains(&Capability::Exec));
+        // A computer's page hides a phone's switches, and so do its groups.
+        assert!(!group_turns_off(automation, true).contains(&Capability::Ask));
+    }
 
     /// UX 3: each first-run step is done by its own fact, and says so.
     #[test]

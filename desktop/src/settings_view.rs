@@ -1344,7 +1344,7 @@ impl SettingsForm {
                         );
                         note(
                             ui,
-                            "How long a phone with \"Lock this computer when this phone leaves\" on (Devices) must be gone, with nobody at the keyboard or mouse, before this computer locks. A sleeping phone can drop its link, so it can lock while you read.",
+                            "How long a phone with \"Lock this computer when it leaves\" on (Devices) must be gone, with nobody at the keyboard or mouse, before this computer locks. A sleeping phone can drop its link, so it can lock while you read.",
                         );
                         // V5 review: Linux cannot always say how long it
                         // has been idle, and then it never locks.

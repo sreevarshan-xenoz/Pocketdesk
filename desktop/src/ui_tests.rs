@@ -1883,3 +1883,45 @@ fn the_first_run_steps_hide() {
     );
     assert!(app.query_by_label("Pair a phone").is_some());
 }
+
+/// UX 3: each group's switch on Devices saves its switches: all on (but
+/// Run commands) when not all were on, then all off; each saved to the
+/// trust store as a single switch is.
+#[test]
+fn each_permission_group_switch_saves_its_permissions() {
+    use pocketdesk_core::protocol::permissions::Capability;
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let allows = |state: &Path, c: Capability| {
+        TrustStore::read(state.join(TRUST_FILE))
+            .expect("the trust store")
+            .permissions(PHONE)
+            .allows(c)
+    };
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.get_by_label("What Test Phone may do").click();
+    app.run_steps(3);
+    for (group, members) in crate::app::PERMISSION_GROUPS {
+        let on = crate::app::group_turns_on(members, false);
+        let off = crate::app::group_turns_off(members, false);
+        assert!(!off.is_empty(), "{group}");
+        for round in 0..2 {
+            let was_all_on = on.iter().all(|c| allows(fixture.state(), *c));
+            app.get_by_label(group).scroll_to_me();
+            app.run_steps(3);
+            app.get_by_label(group).click();
+            app.run_steps(3);
+            if was_all_on {
+                for c in &off {
+                    assert!(!allows(fixture.state(), *c), "{group} {round}: {c:?} off");
+                }
+            } else {
+                for c in &on {
+                    assert!(allows(fixture.state(), *c), "{group} {round}: {c:?} on");
+                }
+            }
+        }
+        // Run commands is never turned on by its group.
+        assert!(!allows(fixture.state(), Capability::Exec), "{group}");
+    }
+}
