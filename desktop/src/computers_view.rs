@@ -111,11 +111,12 @@ impl ComputersView {
             )
             .weak(),
         );
-        // Shown as it is (PC1 review C1): what a link asks for is read
-        // before Pair, not hidden behind a masked field.
+        // Masked, as it holds the other computer's PIN (PC1 re-review m-1);
+        // what it asks for is read below it, before Pair.
         ui.add(
             egui::TextEdit::singleline(&mut self.link)
                 .hint_text("pocketdesk://pair?...")
+                .password(true)
                 .desired_width(420.0),
         );
         let pasted = self.link.trim().to_string();
@@ -124,14 +125,29 @@ impl ComputersView {
         if self.consent.as_deref().is_some_and(|l| l != pasted) {
             self.consent = None;
         }
-        let asks_both = parsed.as_ref().is_some_and(|l| l.mine);
+        let asks = parsed.as_ref().is_some_and(|l| l.mine);
+        // Both ways needs the other's internet endpoint (PC1 review M4).
+        let asks_both = asks && parsed.as_ref().is_some_and(names_endpoint);
         if let Some(link) = &parsed {
             let name = link_name(&link.name);
-            ui.label(format!("A pairing link from {name}."));
+            // Its name is the link's own word; its addresses show whose it
+            // is (PC1 re-review m-1, m-2).
+            ui.label(format!(
+                "A pairing link from {name}, at {}.",
+                link.addresses.join(", ")
+            ));
+            if asks && !asks_both {
+                ui.label(
+                    RichText::new(format!(
+                        "{name}'s link asks to pair both ways, but names no internet endpoint, so it can pair only one way (its internet path may be off)."
+                    ))
+                    .weak(),
+                );
+            }
             if asks_both {
                 ui.label(
                     RichText::new(format!(
-                        "{name}'s link asks to pair both ways: {name} would see and control this computer at any time without asking, with nobody here. Tick this only if {name} is your own computer and you copied the link yourself."
+                        "{name}'s link asks to pair both ways: {name} would see and control this computer at any time without asking, with nobody here. Tick this only if {name} is your own computer, its addresses above are its own, and you copied the link yourself."
                     ))
                     .color(crate::theme::warn(ui)),
                 );
@@ -151,8 +167,8 @@ impl ComputersView {
         }
         let both = asks_both && self.consent.is_some();
         let ready = looks_like_link(&self.link) && server_running;
-        let pair = match (asks_both, both) {
-            (true, true) => "Pair both ways",
+        let pair = match (asks, both) {
+            (_, true) => "Pair both ways",
             (true, false) => "Pair one way",
             _ => "Pair",
         };
@@ -268,6 +284,15 @@ pub fn consent_label(name: &str) -> String {
     )
 }
 
+/// Whether `link` names an internet endpoint (an `endpointId` in its `ep`),
+/// which pairing both ways needs; the server checks it is a real key.
+fn names_endpoint(link: &pocketdesk_core::local::pair_link::PairLink) -> bool {
+    link.endpoint
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .is_some_and(|ep| ep.get("endpointId").and_then(|id| id.as_str()).is_some())
+}
+
 /// A link's computer name fit to show: one printable line, else
 /// "a computer".
 fn link_name(name: &str) -> String {
@@ -344,15 +369,22 @@ mod tests {
     /// A link for another of the owner's computers, as its Pair page copies
     /// it with the box ticked.
     fn mine_link() -> String {
+        mine_link_with(Some(
+            r#"{"endpointId":"made-up","relayUrls":[],"directAddrs":[]}"#.to_string(),
+        ))
+    }
+
+    /// [`mine_link`] with `endpoint` as its internet endpoint.
+    fn mine_link_with(endpoint: Option<String>) -> String {
         pocketdesk_core::local::pair_link::PairLink {
             name: "Test Tower".to_string(),
             device_id: "00000000-0000-4000-8000-0000000000f1".to_string(),
-            addresses: vec!["192.0.2.70".to_string()],
+            addresses: vec!["192.0.2.70".to_string(), "192.0.2.71".to_string()],
             control_port: 1716,
             stream_port: 4716,
             pin: "123456".to_string(),
             fingerprint: Some("ab".repeat(32)),
-            endpoint: None,
+            endpoint,
             mine: true,
         }
         .to_uri()
@@ -377,10 +409,17 @@ mod tests {
             },
         );
         harness.run_steps(2);
-        // What it asks for is said before anything is pressed, by name.
+        // What it asks for is said before anything is pressed, by name and
+        // by the addresses the link names (PC1 re-review m-1, m-2): a link
+        // wearing one of the owner's computers' names is told by them.
         assert!(
             harness
                 .query_by_label_contains("Test Tower's link asks to pair both ways")
+                .is_some()
+        );
+        assert!(
+            harness
+                .query_by_label_contains("at 192.0.2.70, 192.0.2.71")
                 .is_some()
         );
         let pair = if consent {
@@ -417,6 +456,43 @@ mod tests {
                 link: mine_link(),
                 mine: true
             }
+        );
+    }
+
+    /// PC1 re-review m-3: a link that asks for both ways but names no
+    /// internet endpoint can pair only one way, and says so before Pair:
+    /// no box to tick, and the button says one way.
+    #[test]
+    fn a_link_without_an_endpoint_says_it_pairs_one_way() {
+        use egui_kittest::kittest::Queryable;
+        let dir =
+            std::env::temp_dir().join(format!("pd-computers-view-no-road-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let now = pocketdesk_core::local::pin::now_unix();
+        let state = dir.clone();
+        let link = mine_link_with(None);
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            move |ui, view: &mut ComputersView| view.show(ui, &state, true, now),
+            ComputersView {
+                link: link.clone(),
+                ..ComputersView::default()
+            },
+        );
+        harness.run_steps(2);
+        let said = harness
+            .query_by_label_contains("names no internet endpoint, so it can pair only one way")
+            .is_some();
+        let no_box = harness
+            .query_by_label(&consent_label("Test Tower"))
+            .is_none();
+        harness.get_by_label("Pair one way").click();
+        harness.run_steps(2);
+        let asked = computers::take_all(&dir, now);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(said && no_box);
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::Pair { link, mine: false }]
         );
     }
 
