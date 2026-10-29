@@ -305,6 +305,8 @@ pub struct ComputerView {
     state_dir: PathBuf,
     /// The config file the bar's Stats switch is saved to (none in tests).
     config: Option<PathBuf>,
+    /// For a repaint when Settings changes the window.
+    ctx: egui::Context,
 }
 
 fn lock(shared: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
@@ -317,6 +319,7 @@ impl ComputerView {
     pub fn new(ctx: &egui::Context, state_dir: PathBuf, config: Option<PathBuf>) -> Self {
         let shared = Arc::new(Mutex::new(State::default()));
         let worker = shared.clone();
+        let repaint = ctx.clone();
         let ctx = ctx.clone();
         let watched = state_dir.clone();
         let spawned = std::thread::Builder::new()
@@ -328,6 +331,7 @@ impl ComputerView {
             shared,
             state_dir,
             config,
+            ctx: repaint,
         }
     }
 
@@ -361,6 +365,12 @@ impl ComputerView {
             state.stats_on = stats;
         }
         ask(&self.state_dir, &mut state, wanted)
+    }
+
+    /// Stats switched in Settings (PR #551 review): an open window follows.
+    pub fn set_stats(&self, on: bool) {
+        lock(&self.shared).stats_on = on;
+        self.ctx.request_repaint_of(viewport_id());
     }
 
     /// The bar's Stats switch, saved since the last call (PC2): Settings
@@ -1357,6 +1367,24 @@ mod tests {
                 session_id: Some(41)
             }]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #551 review: Stats switched in Settings reaches a window already
+    /// open; opening the same computer again keeps the window's own.
+    #[test]
+    fn the_settings_stats_reach_an_open_window() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        assert!(!lock(&view.shared).stats_on);
+        view.set_stats(true);
+        assert!(lock(&view.shared).stats_on);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        assert!(lock(&view.shared).stats_on, "the same window keeps it");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

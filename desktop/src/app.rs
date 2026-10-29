@@ -2798,6 +2798,10 @@ impl PocketdeskApp {
                         if history_off {
                             let _ = pocketdesk_core::local::clip_history::clear(&self.state_dir);
                         }
+                        // An open screen window follows its Stats switch.
+                        if let Some(view) = &self.computer_view {
+                            view.set_stats(form.saved_computer_view_stats());
+                        }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }
                     Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),

@@ -743,6 +743,11 @@ impl SettingsForm {
         self.edited != self.saved
     }
 
+    /// Whether a computer's screen window shows its stats, as saved.
+    pub fn saved_computer_view_stats(&self) -> bool {
+        self.saved.computer_view_stats
+    }
+
     /// The screen window's Stats switch saved `computer_view_stats` (PC2):
     /// the form follows, so it neither shows it changed nor saves it back.
     pub fn saved_elsewhere_computer_view_stats(&mut self, on: bool) {
