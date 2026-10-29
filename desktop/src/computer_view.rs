@@ -59,6 +59,10 @@ struct State {
     /// Only a view newer than this one is this window's (one ended, or
     /// replaced by another screen's).
     newer_than: u64,
+    /// Counts the asks (a view asked for, a reconnect, another screen) and
+    /// closes: a view the worker shows is still this window's while it is
+    /// unchanged.
+    asked: u64,
     /// The view being shown.
     session_id: Option<u64>,
     status: ViewStatus,
@@ -223,6 +227,7 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     state.note = None;
     state.asked_at = Some(Instant::now());
     state.wanted = Some(wanted);
+    state.asked += 1;
     Ok(())
 }
 
@@ -266,6 +271,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
         let shown = state.session_id;
         state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
         state.session_id = None;
+        state.asked += 1;
         state.fullscreen = false;
         let _ = computers::request(
             state_dir,
@@ -576,7 +582,7 @@ pub fn file_safe(name: &str) -> String {
 fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     loop {
         std::thread::sleep(POLL);
-        let (wanted, newer_than) = {
+        let (wanted, newer_than, asked) = {
             let mut state = lock(shared);
             let Some(wanted) = state.wanted.clone() else {
                 continue;
@@ -596,7 +602,7 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
                 }
                 continue;
             }
-            (wanted, state.newer_than)
+            (wanted, state.newer_than, state.asked)
         };
         let Some(file) = wire::read(state_dir)
             .filter(|f| f.device_id == wanted.device_id && f.session_id > newer_than)
@@ -609,10 +615,18 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         // The relay dropped this window but the view goes on (its queue
         // was full at a new size, BK7 review M3): it is joined again, with
         // what is held let go meanwhile.
-        let rejoin = ended.is_err()
-            && state.session_id == Some(file.session_id)
-            && state.wanted.as_ref() == Some(&wanted)
-            && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
+        // Only a connection cut once joined: one refused is a relay gone.
+        let cut = matches!(&ended, Err(e) if matches!(
+            e.kind(),
+            io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+        ));
+        // Still the one this window wants (not closed, nor asked again or
+        // for another screen meanwhile).
+        let ours = state.asked == asked && state.wanted.as_ref() == Some(&wanted);
+        let rejoin =
+            cut && ours && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
         if rejoin {
             let release = state.input.release_all();
             send(&mut state, release);
@@ -623,9 +637,9 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
             continue;
         }
         state.newer_than = state.newer_than.max(file.session_id);
-        // Still the one this window wants (not closed, nor another screen
-        // asked for meanwhile): it says why it ended.
-        if state.session_id == Some(file.session_id) && state.wanted.as_ref() == Some(&wanted) {
+        // Still the one this window wants: it says why it ended, a relay
+        // that would not take it too.
+        if ours {
             let why = match ended {
                 Ok(why) if !why.is_empty() => why,
                 Ok(_) => format!("The view of {} ended.", wanted.name),
@@ -940,6 +954,42 @@ mod tests {
             lock(&view.shared).ended.as_deref(),
             Some("Lost the connection to Desk.")
         );
+    }
+
+    /// A relay that is gone (nothing at its port) ends the view with why,
+    /// rather than being tried for ever.
+    #[test]
+    fn a_relay_gone_ends_the_view() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-gone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let port = {
+            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        wire::write(
+            &dir,
+            &ViewFile {
+                session_id: 30,
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                port,
+                token: pocketdesk_core::local::cast::token_hex(&[5u8; 32]),
+            },
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone());
+        view.open("desk", "Desk", 0, 0, false).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lock(&view.shared).ended.is_none() {
+            assert!(Instant::now() < deadline, "the end within 10 s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(lock(&view.shared).ended.as_deref().is_some_and(|why| {
+            why.starts_with("Lost the connection to this computer's Pocketdesk server")
+        }),);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The worker against a stand-in relay: it finds the view the window
