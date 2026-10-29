@@ -106,8 +106,9 @@ async fn zones<C: Calls>(calls: &C, events: &Sender<Portal>) -> Result<u32, Stri
 
 /// Set `barriers` for `zone_set` and enable the capture. One the desktop
 /// refused (not on the zones' outer edge, as it sees them) is logged; the
-/// others still work.
-async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) {
+/// others still work. Whether they were set: if not, the capture is left
+/// disabled.
+async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) -> bool {
     // GNOME's portal sets barriers only on a disabled session.
     let _ = calls.disable().await;
     match calls.set_barriers(barriers, zone_set).await {
@@ -118,12 +119,14 @@ async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) {
         Ok(_) => {}
         Err(e) => {
             tracing::warn!("Shared input: the edges were not set: {e}");
-            return;
+            return false;
         }
     }
     if let Err(e) = calls.enable().await {
         tracing::warn!("Shared input: input capture not enabled: {e}");
+        return false;
     }
+    true
 }
 
 /// The session, from its zones to its end: the glue's asks answered and
@@ -144,7 +147,13 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                 ask = asked.recv() => match ask {
                     // The glue is gone: the session ends with it.
                     None => return Ok(()),
-                    Some(Ask::Arm(barriers)) => arm(calls, &barriers, zone_set).await,
+                    Some(Ask::Arm(barriers)) => {
+                        // Not set: the glue is told the capture is off, and
+                        // sets them again at its next pass.
+                        if !arm(calls, &barriers, zone_set).await {
+                            say(events, Portal::Disabled)?;
+                        }
+                    }
                     Some(Ask::Disarm) => {
                         if let Err(e) = calls.disable().await {
                             tracing::debug!("Shared input: input capture not disabled: {e}");
@@ -444,5 +453,19 @@ pub(crate) mod tests {
                 .count(),
             2
         );
+    }
+
+    /// BK8 review M3: barriers the desktop would not set leave the capture
+    /// disabled; the glue is told so, and sets them again at its next pass
+    /// instead of taking them as set.
+    #[tokio::test]
+    async fn barriers_that_were_not_set_are_said_as_disabled() {
+        let calls = FakeCalls {
+            set_fails: true,
+            ..FakeCalls::default()
+        };
+        let (_, said) = run(&calls, vec![Ok(Ask::Arm(vec![barrier(1)]))], None).await;
+        assert_eq!(said.last(), Some(&Portal::Disabled), "{said:?}");
+        assert!(!calls.log.borrow().iter().any(|c| c == "enable"));
     }
 }
