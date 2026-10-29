@@ -161,7 +161,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
 - Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
-- The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- The desktop app's Devices tab reads "Lock, sleep, privacy and wake others".
 - Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 
 **89. The phone's navigation and feedback (U2)**

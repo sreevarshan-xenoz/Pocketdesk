@@ -1022,7 +1022,7 @@ Owed:
 - [x] Linux: after `pocketdesk start`, the state folder is `700` and the first start said "owner-only" once (the Azure VM, Ubuntu 24.04, 2026-10-24).
 - [ ] Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
 - [ ] Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
-- [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- [ ] The desktop app's Devices tab reads "Lock, sleep, privacy and wake others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
 - [ ] A device-to-device move (Smart Switch) leaves the app unpaired. (where: other hardware)
 - [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
