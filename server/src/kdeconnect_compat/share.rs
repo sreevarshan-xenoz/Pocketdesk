@@ -628,6 +628,7 @@ mod tests {
     /// K1: a KDE device's `lastModified` is the kept file's date.
     #[test]
     fn a_file_offer_reads_its_date() {
+        crate::state::use_test_dirs();
         let offer = offer_of(&offering(
             serde_json::json!({ "filename": "a.jpg", "lastModified": 1_780_000_000_000u64 }),
             Some(5),
@@ -653,6 +654,7 @@ mod tests {
 
     #[test]
     fn a_file_offer_reads_and_its_name_is_made_safe() {
+        crate::state::use_test_dirs();
         let offer = offer_of(&offering(
             serde_json::json!({ "filename": "../../evil.jpg" }),
             Some(5),

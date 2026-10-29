@@ -2190,9 +2190,7 @@ mod control_tls_tests {
     async fn a_kde_connect_devices_packet_goes_to_the_bridge_not_the_refusal() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         // The bridge makes its identity in a throwaway state folder.
-        pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        crate::state::use_test_dirs();
         let addr = control_port().await;
         let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
         let hello = serde_json::json!({
@@ -2250,9 +2248,7 @@ mod control_tls_tests {
         pairing_required: bool,
     ) -> (std::net::SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
         // The gates read a throwaway state folder, never the user's.
-        pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        crate::state::use_test_dirs();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();
@@ -2679,9 +2675,7 @@ mod internet_control_tests {
     }
 
     fn paired_with_iroh_key(device_id: &str, key: Option<&iroh::SecretKey>) {
-        pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        crate::state::use_test_dirs();
         let dir = state::state_dir().unwrap();
         std::fs::create_dir_all(&dir).unwrap();
         TrustStore::update(state::trust_store_path().unwrap(), |store| {
@@ -2764,9 +2758,7 @@ mod vector_tests {
     /// A control port served by the real handler, the real plugins and the
     /// computer's real identity packet, over a throwaway state folder.
     async fn real_port() -> std::net::SocketAddr {
-        pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        crate::state::use_test_dirs();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let desktop = CertManager::new().unwrap();

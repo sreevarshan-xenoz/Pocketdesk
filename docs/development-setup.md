@@ -84,9 +84,12 @@ cargo run --bin pocketdesk -- stop       # with the same variables: stops only t
 Its notifications (a PIN, a session) show on your desktop like the installed
 server's; tell them apart by the port in its log.
 
-The server's tests point the state folder at a throwaway one
-(`core::local::paths::use_state_dir`), so they never read or change your
-real pairings.
+The server's tests point the state and config folders at throwaway ones
+(`core::local::paths::use_test_dirs`), so they never read or change your
+real pairings or settings. The folders are set once per test process, so
+every test that can reach either one calls it first: one that does not uses
+your real folders whenever it runs before the others. The core's own tests
+panic if they reach a real folder.
 
 ## 4. Windows server (the Windows host)
 
