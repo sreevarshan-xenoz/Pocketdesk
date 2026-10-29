@@ -445,7 +445,9 @@ impl WindowInput {
                     self.tap(made, out);
                 }
             }
-            self.down_here.remove(&code);
+            // A press egui kept to itself never came here (BK7 re-review
+            // N1: a letter typed before Ctrl was taken for one).
+            let pressed_here = self.down_here.remove(&code);
             if self.down_there.remove(&code) {
                 out.push(InputPacket::KeyEvent {
                     key: code,
@@ -453,7 +455,7 @@ impl WindowInput {
                 });
             } else if self.clipped.remove(&code) {
                 // Its copy, cut or paste went already.
-            } else if self.swallowed(code) {
+            } else if !pressed_here && self.swallowed(code) {
                 // egui kept its press: the release says which key made the
                 // copy, cut or paste, or that one came with nothing to
                 // paste here, said by nothing else (BK7 review I2).
@@ -915,6 +917,24 @@ mod tests {
                     "KeyEvent { key: 29, pressed: false }".to_string(),
                 ],
                 "the keyboard's own key, with no modifier held"
+            );
+        }
+    }
+
+    /// BK7 re-review N1: a letter typed before Ctrl and let go with it
+    /// held was typed, not swallowed by egui: its release sends nothing,
+    /// never a stray Ctrl+X that cuts the selection there.
+    #[test]
+    fn a_letter_typed_before_ctrl_is_not_a_shortcut_at_its_release() {
+        for letter in [egui::Key::C, egui::Key::X, egui::Key::V] {
+            assert_eq!(
+                run(&[
+                    key(letter, true),
+                    key(egui::Key::ControlLeft, true),
+                    key(letter, false),
+                ]),
+                ["KeyEvent { key: 29, pressed: true }"],
+                "{letter:?}"
             );
         }
     }
