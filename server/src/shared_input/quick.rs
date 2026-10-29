@@ -141,8 +141,9 @@ fn system(on: bool) {
             )
         };
         if let Err(e) = set {
-            // Windows before 10 2004 has no such policy; the timer still
-            // holds there while this process is in view.
+            // Before Windows 11 there is no timer flag to set (the power
+            // throttling policy itself came with 10 1709); there Windows
+            // keeps a process's timer request in any case.
             tracing::debug!("Shared input: Windows kept its timer policy for this process: {e}");
         }
     };
