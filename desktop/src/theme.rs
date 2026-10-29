@@ -87,6 +87,14 @@ const BUTTON_TEXT: Token = Token {
     dark: Color32::from_gray(222),
 };
 
+/// The edge of a button or a checkbox's box at rest (UX 3): at 3:1 on
+/// the panel and on a card, as a control's edge must be (WCAG 1.4.11);
+/// egui's has none, and its light box was 1.1:1 on the panel.
+const EDGE: Token = Token {
+    light: Color32::from_gray(138),
+    dark: Color32::from_gray(110),
+};
+
 /// How much a greyed-out control keeps (egui's own is 0.5, which left
 /// disabled text at under 3:1 in both themes).
 pub const DISABLED_ALPHA: f32 = 0.7;
@@ -122,6 +130,10 @@ pub fn install(ctx: &egui::Context) {
             spacing.item_spacing = egui::vec2(8.0, 6.0);
             spacing.button_padding = egui::vec2(10.0, 4.0);
             spacing.interact_size.y = 26.0;
+            // A checkbox's box big enough that its corners leave it a
+            // square, not a dot like a radio button's.
+            spacing.icon_width = 18.0;
+            spacing.icon_width_inner = 10.0;
 
             let visuals = &mut style.visuals;
             visuals.weak_text_color = Some(pick(MUTED));
@@ -144,6 +156,7 @@ pub fn install(ctx: &egui::Context) {
                 state.corner_radius = egui::CornerRadius::same(CORNER);
             }
             widgets.inactive.fg_stroke.color = pick(BUTTON_TEXT);
+            widgets.inactive.bg_stroke = egui::Stroke::new(1.0, pick(EDGE));
             widgets.open.fg_stroke.color = pick(BUTTON_TEXT);
             // A control with the keyboard's focus (and one held down) is
             // drawn as "active": its ring is the accent's, 2 px.
@@ -352,6 +365,25 @@ mod tests {
                 ),
             ] {
                 assert!(ratio >= 4.5, "{theme:?} {what}: {ratio:.2}");
+            }
+        }
+    }
+
+    /// UX 3: a control's edge at rest shows at 3:1, on the panel and on
+    /// a card, in both themes.
+    #[test]
+    fn a_controls_edge_shows() {
+        let ctx = egui::Context::default();
+        install(&ctx);
+        for (theme, panel, card) in [
+            (egui::Theme::Light, LIGHT_PANEL, CARD.light),
+            (egui::Theme::Dark, DARK_PANEL, CARD.dark),
+        ] {
+            let edge = ctx.style_of(theme).visuals.widgets.inactive.bg_stroke;
+            assert!(edge.width >= 1.0);
+            for under in [panel, card] {
+                let ratio = contrast(edge.color, under);
+                assert!(ratio >= 3.0, "{theme:?} on {under:?}: {ratio:.2}");
             }
         }
     }

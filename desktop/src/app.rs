@@ -4188,6 +4188,8 @@ impl eframe::App for PocketdeskApp {
                     ui.spacing_mut().interact_size.y = 20.0;
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.spacing_mut().button_padding.y = 2.0;
+                    // The selected page is its fill, with no edge round it.
+                    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                         for group in crate::nav::GROUPS {
                             ui.add_space(10.0);
