@@ -1,6 +1,6 @@
 Pocketdesk is a remote desktop for your own computers: an Android app that streams and controls a Linux or Windows desktop, with files both ways, the clipboard, notifications and sound, and now one keyboard and mouse across your computers.
 
-**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. The shared keyboard and mouse, new in this release, has not yet been tried at a desk with a real Windows computer driving a Linux one (see the end of these notes). See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
+**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. The shared keyboard and mouse has not yet been tried at a desk with two real computers, and Linux driving it has run live on Hyprland only (see the end of these notes). See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
 
 ## Install
 
@@ -18,12 +18,34 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.8.1 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux, and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. It updates 0.7.0 in place (same signing key), keeping your saved computers and pairings.
+Pocketdesk 0.8.2 lets a Linux computer drive the shared keyboard and mouse too, takes the lag out of sharing, and fixes what stopped the desktop app's picture and the Pair page's link on a plain Arch Linux laptop. It updates 0.8.1 (or 0.7.0) in place (same signing key), keeping your saved computers and pairings. The phone app has nothing new in this release; it is rebuilt as 0.8.2.
+
+**Linux drives the shared keyboard and mouse too (new)**
+- Push the pointer off the edge of a Linux screen that faces another computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home, as from Windows. Linux asks the desktop's input-capture permission for it: GNOME 45 or later, KDE Plasma 6.1 or later, or Hyprland with xdg-desktop-portal-hyprland 1.4 or later. GNOME and KDE show their permission dialog once; Hyprland asks nothing.
+- To use it, turn on "Share my keyboard and mouse with my computers" and "This computer's keyboard and mouse can move to the others" on the Linux computer (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for it on the other computer's Devices page. It works only while the link between the two is direct, never through a relay.
+- While you work on the Linux computer itself, the computers it drives are not told someone is there (its desktop says nothing of keys made at home), so they stop being kept awake by it after a minute.
+- It ran live on one real desktop only: Hyprland 0.56 with xdg-desktop-portal-hyprland 1.4.1, where a laptop's own touchpad drove a stand-in computer (7 crossings out and back, clicks, the wheel, typing in order, nothing left held). GNOME and KDE are not yet checked.
+
+**No lag while sharing**
+- While you share the keyboard and mouse, keys and moves are no longer held up: Windows' timer runs at 1 ms while you share (the network's share of a key fell from about 16 ms to about 3 ms), and a tiny packet every 50 ms keeps the other computer's Wi-Fi awake, only on your own network (first keys after a quiet spell no longer wait up to a tenth of a second for it). "Keep the connection quick while sharing" in Keyboard and mouse turns it off. How it feels at a real desk is not yet checked.
+
+**Fixes from a real Arch Linux laptop**
+- **The desktop app showed no picture:** FFmpeg 9 dropped `-vsync`, so the picture in the phone's cast window and in another computer's window never appeared. Pocketdesk now asks each ffmpeg which frame-rate flag it knows and uses that one, for the decoder and for the server's encoder alike (FFmpeg 4.4 lacks the new one).
+- **The Pair page had no link** on a computer without the `hostname` program (a stock Arch), and its announcement on the network no address; Pocketdesk now reads this computer's addresses from its network interfaces.
+- **The switch notice names the right computer:** a computer that only takes input (one with driving off) was shown as "this computer"; it now carries the name it was paired under, and says its own name with its screens.
+- **A Linux desktop with neither Hyprland nor X** (Sway with Xwayland off, for one) now reports its screens, read from Wayland, so the keyboard and mouse can cross onto it.
+- **Debug logs for crossings:** the log (at debug level) now says each crossing, release and landing, for finding why a crossing did not happen.
+- **For developers:** running the tests no longer writes into your real Pocketdesk state folder (they used to create a trusted-devices file there).
+- The winget manifests, the F-Droid recipe and the AUR package are brought to 0.8.1's files and checksums.
+
+### New in 0.8, if you are updating from 0.7.0
+
+Pocketdesk 0.8 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux (and now Linux driving too), and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. 0.8.0 was tagged but never published (its release run stopped on a flaky test), so these first reached people in 0.8.1.
 
 The shared keyboard and mouse is new and largely unchecked at a desk. It is unit-tested throughout, and its receiving end ran on a real Linux laptop from a script, but nobody has yet pushed a real Windows mouse onto a Linux screen with it. Everything it does is off until you turn it on. Please try it and tell us how it went.
 
-**One keyboard and mouse across your computers (new)**
-- **Windows drives Linux:** pair two computers, turn on "Share my keyboard and mouse with my computers" on both (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for the Windows computer on the Linux computer's Devices page. Then push the pointer off the edge that faces the other computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home. Linux is driven but does not drive the others yet. It works only while the link between the two is direct (at home), never through a relay.
+**One keyboard and mouse across your computers (new in 0.8)**
+- **Windows drives Linux:** pair two computers, turn on "Share my keyboard and mouse with my computers" on both (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for the Windows computer on the Linux computer's Devices page. Then push the pointer off the edge that faces the other computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home. It works only while the link between the two is direct (at home), never through a relay.
 - **Arrange them:** the Keyboard and mouse page places your computers by dragging, shows each link and both permissions, and Identify flashes each computer's name on its screen. Each switch flashes the name of the computer that has the keyboard and mouse, and the tray says where they are.
 - **Nothing left stuck:** if the other computer stops answering for a second (a Wi-Fi drop, a crash), the keyboard and mouse come home by themselves and every key held there is let go. Win+L while away comes home and then locks this computer, Ctrl+Alt+Del stays with Windows, and stopping or uninstalling the server brings them home first.
 - **Games:** "Stay on this computer while a game runs" (on) keeps them on Windows while a full-screen game or a program you list is in front, with no hook installed at all. The switch key can still take them off a game, except while a kernel anti-cheat runs (Vanguard, FACEIT, Easy Anti-Cheat, BattlEye) or the program in front runs as administrator while the server does not.
@@ -52,11 +74,13 @@ The shared keyboard and mouse is new and largely unchecked at a desk. It is unit
 ### Not yet checked on a device
 
 These work in tests, and some ran on real hardware from a script, but not yet:
+- **Linux driving, beyond Hyprland's stand-in run** (§220): crossing to a real Windows computer and back; keys and modifiers there; the safety nets (Wi-Fi off, the lock screen, a monitor plugged or unplugged); a fractional-scale screen's wall; a full-screen game keeping the pointer; the phone's screen sharing after driving; GNOME 45 or later and KDE Plasma 6.1 or later, the permission dialog included; and GNOME's screen sizes at scale 2.
+- **No lag while sharing**: how it feels over real Wi-Fi at a desk, with a real Windows computer and a real Linux one: whether keys and moves are no longer held up, and a first key after a quiet spell. Nobody has felt it yet.
 - **The shared keyboard and mouse at the desk** (checklist §214 and §215): Windows driving Linux with its real mouse and keyboard, at the edge and by the switch key; typing; Win+L; a pulled network and a server stopped while away; mixed display scales; the gaming lock with real games and anti-cheats; the badges, Identify and the tray; the clipboard and images following both ways; Linux kept awake while driven; the arrangement's crossings; and the latency over real Wi-Fi. What did run: a script typing into a headless Sway on the Linux laptop (102 keys in order, none left down; a killed sender's key let go about a second later; a lock screen typed into).
 - **Files dragged across the edge** (§216): whether Windows' drag finds Pocketdesk's drop target under the parked cursor at all, and drops of several files, folders, and files from a zip or from a phone shown in Explorer.
 - **The phone as a screen with a real mouse** (§217): it was checked on an OPPO phone from a script (taps, swipes, scrolls, Back, Home, typing, a held drag), not yet with a Windows mouse crossing onto it, nor its lag from away.
 - **Sound following the mouse** (§218): not yet heard between two real computers; only a test tone crossed a link on one machine.
 - **Another computer's screen in a window** (§219): it ran between two throwaway servers on one Windows computer, view-only, by both roads, but not yet between two real computers: control, keys, a second monitor, reconnecting, quality, the session list, sound, Linux showing Windows, screenshots and recordings.
-- **Updating:** from 0.7.0 to this release on a phone, and a clean install.
+- **Updating:** from 0.8.1 (and 0.7.0) to this release on a phone, and a clean install.
 
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§214 on are this release's).
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§214 on are the 0.8 series').
