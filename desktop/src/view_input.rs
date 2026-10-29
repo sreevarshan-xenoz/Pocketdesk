@@ -8,8 +8,11 @@
 //! as Linux evdev key codes, the modifiers held as keys. Shift is held on the
 //! other computer only while such a key, a button or the wheel needs it, so
 //! text typed with Shift arrives as its capitals and not shifted twice.
-//! egui turns Ctrl+C, Ctrl+X and Ctrl+V into copy, cut and paste: they go
-//! back to being those keys. Whatever is held is let go when the window
+//! egui turns Ctrl+C, Ctrl+X and Ctrl+V (and on Windows Ctrl+Insert,
+//! Shift+Insert and Shift+Delete, and the keyboard's own Copy, Cut and
+//! Paste keys) into copy, cut and paste, keeping the key's press, and says
+//! paste only when this computer's clipboard holds text: they go back to
+//! being those keys there, whatever this clipboard holds. Whatever is held is let go when the window
 //! loses focus, closes or stops controlling.
 
 use std::collections::BTreeSet;
@@ -37,6 +40,32 @@ pub const RIGHT_META: u16 = 126;
 const KEY_C: u16 = 46;
 const KEY_V: u16 = 47;
 const KEY_X: u16 = 45;
+const KEY_INSERT: u16 = 110;
+const KEY_DELETE: u16 = 111;
+
+/// What egui made of a copy, cut or paste key: it keeps the key's press to
+/// itself, and says only this (BK7 review I2, I3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Clip {
+    Copy,
+    Cut,
+    Paste,
+}
+
+impl Clip {
+    /// The keys it may have been pressed as, with Ctrl or Shift held.
+    fn keys(self) -> [u16; 2] {
+        match self {
+            Clip::Copy => [KEY_C, KEY_INSERT],
+            Clip::Cut => [KEY_X, KEY_DELETE],
+            Clip::Paste => [KEY_V, KEY_INSERT],
+        }
+    }
+
+    fn letter(self) -> u16 {
+        self.keys()[0]
+    }
+}
 
 /// The Linux evdev code of `key` (where it sits on a US keyboard), or
 /// `None` for one with none here.
@@ -246,6 +275,11 @@ pub struct WindowInput {
     pending: Option<(u16, u16)>,
     /// What the wheel turned that is not yet a whole step, each way.
     wheel: egui::Vec2,
+    /// Copies, cuts and pastes said with Ctrl or Shift held, waiting for
+    /// the release that tells which key made them.
+    clips: Vec<Clip>,
+    /// Keys whose copy, cut or paste went already: their release is theirs.
+    clipped: BTreeSet<u16>,
 }
 
 impl WindowInput {
@@ -352,10 +386,10 @@ impl WindowInput {
                     }
                     out.push(InputPacket::Text(text.clone()));
                 }
-                egui::Event::Copy => self.tap(KEY_C, &mut out),
-                egui::Event::Cut => self.tap(KEY_X, &mut out),
+                egui::Event::Copy => self.clip(Clip::Copy, &mut out),
+                egui::Event::Cut => self.clip(Clip::Cut, &mut out),
                 // The other computer pastes its own clipboard.
-                egui::Event::Paste(_) => self.tap(KEY_V, &mut out),
+                egui::Event::Paste(_) => self.clip(Clip::Paste, &mut out),
                 _ => {}
             }
         }
@@ -397,12 +431,43 @@ impl WindowInput {
 
     fn key(&mut self, key: egui::Key, code: u16, pressed: bool, out: &mut Vec<InputPacket>) {
         if !pressed {
+            // A modifier let go first: what it made a copy, cut or paste of
+            // goes now, with it still held there.
+            if (is_shift(code) || is_chord_modifier(code)) && !self.clips.is_empty() {
+                let ctrl = self.ctrl_here();
+                for clip in std::mem::take(&mut self.clips) {
+                    let made = match (ctrl, clip) {
+                        (true, _) => clip.letter(),
+                        (false, Clip::Paste) => KEY_INSERT,
+                        (false, _) => KEY_DELETE,
+                    };
+                    self.clipped.insert(made);
+                    self.tap(made, out);
+                }
+            }
             self.down_here.remove(&code);
             if self.down_there.remove(&code) {
                 out.push(InputPacket::KeyEvent {
                     key: code,
                     pressed: false,
                 });
+            } else if self.clipped.remove(&code) {
+                // Its copy, cut or paste went already.
+            } else if self.swallowed(code) {
+                // egui kept its press: the release says which key made the
+                // copy, cut or paste, or that one came with nothing to
+                // paste here, said by nothing else (BK7 review I2).
+                if let Some(at) = self.clips.iter().position(|c| c.keys().contains(&code)) {
+                    self.clips.remove(at);
+                }
+                self.tap(code, out);
+            }
+            if !self
+                .down_here
+                .iter()
+                .any(|c| is_shift(*c) || is_chord_modifier(*c))
+            {
+                self.clipped.clear();
             }
             return;
         }
@@ -424,6 +489,52 @@ impl WindowInput {
         out.push(InputPacket::KeyEvent {
             key: code,
             pressed: true,
+        });
+    }
+
+    fn ctrl_here(&self) -> bool {
+        self.down_here.contains(&LEFT_CTRL) || self.down_here.contains(&RIGHT_CTRL)
+    }
+
+    fn shift_here(&self) -> bool {
+        self.down_here.contains(&LEFT_SHIFT) || self.down_here.contains(&RIGHT_SHIFT)
+    }
+
+    /// Whether `code`'s release, never pressed there, is one whose press
+    /// egui kept to itself for a copy, cut or paste: C, X or V with Ctrl,
+    /// Insert or Delete with Ctrl or Shift.
+    fn swallowed(&self, code: u16) -> bool {
+        match code {
+            KEY_C | KEY_X | KEY_V => self.ctrl_here(),
+            KEY_INSERT | KEY_DELETE => self.ctrl_here() || self.shift_here(),
+            _ => false,
+        }
+    }
+
+    /// A copy, cut or paste egui made of a key (BK7 review I3). With Ctrl
+    /// or Shift held it was Ctrl and a letter, Ctrl+Insert, Shift+Insert or
+    /// Shift+Delete: which one, the key's release tells, and that key goes
+    /// as itself then. With neither it was the keyboard's own Copy, Cut or
+    /// Paste key: Ctrl and the letter go at once.
+    fn clip(&mut self, clip: Clip, out: &mut Vec<InputPacket>) {
+        let held = self.ctrl_here() || (self.shift_here() && clip != Clip::Copy);
+        if held {
+            self.clips.push(clip);
+            return;
+        }
+        out.push(InputPacket::KeyEvent {
+            key: LEFT_CTRL,
+            pressed: true,
+        });
+        for pressed in [true, false] {
+            out.push(InputPacket::KeyEvent {
+                key: clip.letter(),
+                pressed,
+            });
+        }
+        out.push(InputPacket::KeyEvent {
+            key: LEFT_CTRL,
+            pressed: false,
         });
     }
 
@@ -453,6 +564,8 @@ impl WindowInput {
             pressed: false,
         }));
         self.down_here.clear();
+        self.clips.clear();
+        self.clipped.clear();
         self.pending = None;
         self.wheel = egui::Vec2::ZERO;
         out
@@ -679,6 +792,131 @@ mod tests {
             "Ctrl+S, Ctrl+C and Ctrl+V reach the other computer as keys"
         );
         assert!(!input.holds());
+    }
+
+    fn run(events: &[egui::Event]) -> Vec<String> {
+        words(&WindowInput::default().take(events, picture(), Instant::now()))
+    }
+
+    /// BK7 review I2: egui keeps Ctrl+V's press to itself and says Paste
+    /// only when this computer's clipboard holds text; with an image or
+    /// nothing there, only V's release comes. Ctrl+V still reaches the
+    /// other computer, once, either way.
+    #[test]
+    fn ctrl_v_reaches_the_other_computer_whatever_this_clipboard_holds() {
+        assert_eq!(
+            run(&[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::V, false),
+                key(egui::Key::ControlLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "nothing to paste here"
+        );
+        assert_eq!(
+            run(&[
+                key(egui::Key::ControlLeft, true),
+                egui::Event::Paste("text here".into()),
+                key(egui::Key::V, false),
+                key(egui::Key::ControlLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "text here: one Ctrl+V, not two"
+        );
+        // V let go with no Ctrl held is a key typed as text: nothing.
+        assert!(run(&[key(egui::Key::V, false)]).is_empty());
+    }
+
+    /// BK7 review I3: Shift+Insert, Shift+Delete, Ctrl+Insert and the
+    /// keyboard's own Copy, Cut and Paste keys are those keys there, never
+    /// a letter typed.
+    #[test]
+    fn the_other_copy_cut_and_paste_keys_are_themselves_there() {
+        assert_eq!(
+            run(&[
+                key(egui::Key::ShiftLeft, true),
+                egui::Event::Paste("text here".into()),
+                key(egui::Key::Insert, false),
+                key(egui::Key::ShiftLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 110, pressed: true }",
+                "KeyEvent { key: 110, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+            ],
+            "Shift+Insert pastes"
+        );
+        assert_eq!(
+            run(&[
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::Insert, false),
+                key(egui::Key::ShiftLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 110, pressed: true }",
+                "KeyEvent { key: 110, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+            ],
+            "Shift+Insert with nothing to paste here"
+        );
+        assert_eq!(
+            run(&[
+                key(egui::Key::ShiftLeft, true),
+                egui::Event::Cut,
+                key(egui::Key::Delete, false),
+                key(egui::Key::ShiftLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 111, pressed: true }",
+                "KeyEvent { key: 111, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+            ],
+            "Shift+Delete cuts"
+        );
+        assert_eq!(
+            run(&[
+                key(egui::Key::ControlLeft, true),
+                egui::Event::Copy,
+                key(egui::Key::Insert, false),
+                key(egui::Key::ControlLeft, false),
+            ]),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 110, pressed: true }",
+                "KeyEvent { key: 110, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "Ctrl+Insert copies"
+        );
+        for (event, letter) in [
+            (egui::Event::Copy, 46),
+            (egui::Event::Cut, 45),
+            (egui::Event::Paste("x".into()), 47),
+        ] {
+            assert_eq!(
+                run(&[event]),
+                [
+                    "KeyEvent { key: 29, pressed: true }".to_string(),
+                    format!("KeyEvent {{ key: {letter}, pressed: true }}"),
+                    format!("KeyEvent {{ key: {letter}, pressed: false }}"),
+                    "KeyEvent { key: 29, pressed: false }".to_string(),
+                ],
+                "the keyboard's own key, with no modifier held"
+            );
+        }
     }
 
     #[test]
