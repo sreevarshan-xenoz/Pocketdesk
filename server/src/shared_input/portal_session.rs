@@ -104,27 +104,62 @@ async fn zones<C: Calls>(calls: &C, events: &Sender<Portal>) -> Result<u32, Stri
     Ok(zone_set)
 }
 
+/// A call the desktop keeps refusing: said at warn once a spell, then at
+/// debug until it works again (the glue asks again every few seconds).
+#[derive(Debug, Default)]
+pub struct Spell {
+    failing: bool,
+}
+
+impl Spell {
+    /// It failed: whether to say so at warn (the first of a spell).
+    pub fn failed(&mut self) -> bool {
+        !std::mem::replace(&mut self.failing, true)
+    }
+
+    /// It worked: the next failure starts a new spell.
+    pub fn worked(&mut self) {
+        self.failing = false;
+    }
+}
+
+/// Say `what` failed, at warn the first time of a spell.
+fn refused(spell: &mut Spell, what: &str) {
+    if spell.failed() {
+        tracing::warn!("Shared input: {what}");
+    } else {
+        tracing::debug!("Shared input: {what}");
+    }
+}
+
 /// Set `barriers` for `zone_set` and enable the capture. One the desktop
-/// refused (not on the zones' outer edge, as it sees them) is logged; the
+/// refused (not on the zones' outer edge, as it sees them) is said; the
 /// others still work. Whether they were set: if not, the capture is left
 /// disabled.
-async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) -> bool {
+async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32, spell: &mut Spell) -> bool {
     // GNOME's portal sets barriers only on a disabled session.
     let _ = calls.disable().await;
+    let mut whole = true;
     match calls.set_barriers(barriers, zone_set).await {
-        Ok(failed) if !failed.is_empty() => tracing::warn!(
-            ?failed,
-            "Shared input: the desktop refused some of this computer's edges"
-        ),
+        Ok(failed) if !failed.is_empty() => {
+            whole = false;
+            refused(
+                spell,
+                &format!("the desktop refused some of this computer's edges ({failed:?})"),
+            );
+        }
         Ok(_) => {}
         Err(e) => {
-            tracing::warn!("Shared input: the edges were not set: {e}");
+            refused(spell, &format!("the edges were not set: {e}"));
             return false;
         }
     }
     if let Err(e) = calls.enable().await {
-        tracing::warn!("Shared input: input capture not enabled: {e}");
+        refused(spell, &format!("input capture not enabled: {e}"));
         return false;
+    }
+    if whole {
+        spell.worked();
     }
     true
 }
@@ -142,6 +177,7 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
 ) -> Result<(), String> {
     let ended = std::panic::AssertUnwindSafe(async {
         let mut zone_set = zones(calls, events).await?;
+        let (mut arming, mut releasing) = (Spell::default(), Spell::default());
         loop {
             tokio::select! {
                 ask = asked.recv() => match ask {
@@ -150,7 +186,7 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                     Some(Ask::Arm(barriers)) => {
                         // Not set: the glue is told the capture is off, and
                         // sets them again at its next pass.
-                        if !arm(calls, &barriers, zone_set).await {
+                        if !arm(calls, &barriers, zone_set, &mut arming).await {
                             say(events, Portal::Disabled)?;
                         }
                     }
@@ -161,8 +197,12 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                     }
                     Some(Ask::Release(activation, at)) => {
                         // The glue lets go of it again if input keeps coming.
-                        if let Err(e) = calls.release(activation, at).await {
-                            tracing::warn!("Shared input: input capture not released: {e}");
+                        match calls.release(activation, at).await {
+                            Ok(()) => releasing.worked(),
+                            Err(e) => refused(
+                                &mut releasing,
+                                &format!("input capture not released: {e}"),
+                            ),
                         }
                     }
                 },
@@ -467,5 +507,17 @@ pub(crate) mod tests {
         let (_, said) = run(&calls, vec![Ok(Ask::Arm(vec![barrier(1)]))], None).await;
         assert_eq!(said.last(), Some(&Portal::Disabled), "{said:?}");
         assert!(!calls.log.borrow().iter().any(|c| c == "enable"));
+    }
+
+    /// BK8 re-review N2: a call the desktop keeps refusing (a Release, the
+    /// barriers) is said at warn once a spell, then quietly until it works.
+    #[test]
+    fn a_refusal_is_warned_of_once_a_spell() {
+        let mut spell = Spell::default();
+        assert!(spell.failed(), "the first: warned");
+        assert!(!spell.failed(), "again: quiet");
+        assert!(!spell.failed());
+        spell.worked();
+        assert!(spell.failed(), "a new spell: warned again");
     }
 }
