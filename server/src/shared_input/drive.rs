@@ -316,13 +316,17 @@ impl Driver {
     /// it is on the very computer driving this one: then the two computers
     /// are on each other, and this one goes home when its own input is not
     /// recent (its cursor rested there, and the owner went to the other
-    /// computer's mouse and crossed here; PR #552 review I1).
+    /// computer's mouse and crossed here; PR #552 review I1), or when both
+    /// are used and this one's id sorts after the other's: the two crossed
+    /// onto each other at once, and only one keeps its visit, the same one
+    /// on both sides (the first id, as `computers::keeps_link` picks who
+    /// dials; review I2).
     pub fn set_driven(&mut self, by: Option<&str>, active_here: bool) -> Vec<Action> {
         let mut out = Vec::new();
         self.driven = by.map(str::to_string);
         if let (Some(by), Some(away)) = (by, self.away.clone())
             && away.to == by
-            && !active_here
+            && (!active_here || self.this.as_str() > by)
         {
             let to = self.name_of(by);
             self.go_home(
@@ -2665,12 +2669,38 @@ mod tests {
         assert_eq!(d.mode(), Mode::Off);
     }
 
-    /// With this computer's own input recent, its visit goes on (until a
-    /// tie-break says otherwise).
+    /// Two computers, `this` and `other` to its right, `this` away on
+    /// `other` (crossed off its right edge).
+    fn away_between(this: &str, other: &str) -> Driver {
+        let one = |id: &str| placed(id, vec![screen(0, 0, 1600, 1000)]);
+        let layout = Layout::default_for(one(this), vec![one(other)]);
+        let mut d = Driver::new(this, layout);
+        d.set_reachable(vec![other.to_string()]);
+        d.start();
+        d.on(moved(1590, 500));
+        d.on(moved(1599, 500));
+        assert_eq!(d.away_on(), Some(other));
+        d
+    }
+
+    /// PR #552 review I2: the two computers crossed onto each other at
+    /// once, both used: the one whose id sorts after the other's comes
+    /// home (as only the first dials their link, `computers::keeps_link`),
+    /// the other keeps its visit. Both work it out alike, from the ids.
     #[test]
-    fn active_here_the_visit_on_the_computer_driving_this_one_goes_on() {
-        let mut d = away_on_linux(false);
-        assert_eq!(d.set_driven(Some("L"), true), vec![]);
-        assert_eq!(d.away_on(), Some("L"));
+    fn crossing_onto_each_other_at_once_the_later_id_comes_home() {
+        let mut b = away_between("B", "A");
+        let yields = b.set_driven(Some("A"), true);
+        assert_eq!(sends(&yields), vec![sent("A", Msg::Leave)]);
+        assert_eq!(b.away_on(), None);
+        assert_eq!(b.mode(), Mode::Off);
+        let mut a = away_between("A", "B");
+        assert_eq!(a.set_driven(Some("B"), true), vec![]);
+        assert_eq!(a.away_on(), Some("B"));
+        assert_eq!(a.mode(), Mode::Away);
+        // Idle, the first comes home too (review I1).
+        let home = a.set_driven(Some("B"), false);
+        assert_eq!(sends(&home), vec![sent("B", Msg::Leave)]);
+        assert_eq!(a.away_on(), None);
     }
 }
