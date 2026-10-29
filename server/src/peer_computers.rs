@@ -2025,38 +2025,52 @@ pub(crate) fn stop_waiting(dir: &Path, device_id: &str) {
 }
 
 fn grant_on_link_in(dir: &Path, trust: &Path, device_id: &str) {
-    let file = computers::read(dir);
-    // Waiting, and still listed as paired both ways (third review m-A).
-    let waits = file.pending.iter().any(|id| id == device_id)
-        && file
-            .computers
-            .iter()
-            .any(|c| c.device_id == device_id && c.mine);
-    if !waits {
-        return;
-    }
-    let granted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
-        // Unpaired on Devices meanwhile: nothing is given back.
-        if !(store.is_trusted(device_id) && store.is_computer(device_id)) {
-            return Ok(false);
+    // In one step under the computers file's lock, as the run loop's lapse
+    // is (third review m-C): a wait that ran out lapses here and is never
+    // given; one still waiting, and still listed both ways (m-A), is given,
+    // and leaves `pending` only once its trust is written.
+    let now = pocketdesk_core::local::pin::now_unix();
+    let mut outcome: Option<Result<bool, String>> = None;
+    let saved = computers::update(dir, |file| {
+        if file.lapse_pending(now).iter().any(|id| id == device_id) {
+            tracing::warn!(
+                device_id,
+                "No link came from a computer paired both ways within ten minutes: it stays paired one way here; pair again for both ways"
+            );
+            return;
         }
-        store.trust_computer_as(
-            device_id,
-            pocketdesk_core::protocol::permissions::DevicePermissions::computer_mine(),
-        )?;
-        Ok(true)
+        let waits = file.pending.iter().any(|id| id == device_id)
+            && file
+                .computers
+                .iter()
+                .any(|c| c.device_id == device_id && c.mine);
+        if !waits {
+            return;
+        }
+        let granted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
+            // Unpaired on Devices meanwhile: nothing is given back.
+            if !(store.is_trusted(device_id) && store.is_computer(device_id)) {
+                return Ok(false);
+            }
+            store.trust_computer_as(
+                device_id,
+                pocketdesk_core::protocol::permissions::DevicePermissions::computer_mine(),
+            )?;
+            Ok(true)
+        })
+        .map_err(|e| e.to_string());
+        if granted.is_ok() {
+            file.pending.retain(|id| id != device_id);
+        }
+        outcome = Some(granted);
     });
-    match granted {
-        Ok(given) => {
-            if given {
-                tracing::info!(device_id, "The link is up: paired both ways now");
-            }
-            let saved = computers::update(dir, |file| file.pending.retain(|id| id != device_id));
-            if let Err(e) = saved {
-                tracing::warn!("Could not record the grant to {device_id}: {e}");
-            }
-        }
-        Err(e) => tracing::warn!("Could not give {device_id} what was granted: {e}"),
+    if let Err(e) = saved {
+        tracing::warn!("Could not record the grant to {device_id}: {e}");
+    }
+    match outcome {
+        Some(Ok(true)) => tracing::info!(device_id, "The link is up: paired both ways now"),
+        Some(Err(e)) => tracing::warn!("Could not give {device_id} what was granted: {e}"),
+        _ => {}
     }
 }
 
@@ -2292,8 +2306,16 @@ mod tests {
         })
         .unwrap();
         computers::update(&dir, |file| {
-            file.computers.push(facts().into_peer("waits", "", 1));
-            file.computers.push(facts().into_peer("gone", "", 1));
+            file.computers.push(facts().into_peer(
+                "waits",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
+            file.computers.push(facts().into_peer(
+                "gone",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
             file.pending = vec!["waits".to_string(), "gone".to_string()];
         })
         .unwrap();
@@ -2488,7 +2510,11 @@ mod tests {
         device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
         TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
         computers::update(&dir, |file| {
-            file.computers.push(facts().into_peer("lap", "", 1));
+            file.computers.push(facts().into_peer(
+                "lap",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
             file.pending = vec!["lap".to_string()];
         })
         .unwrap();
@@ -2542,6 +2568,30 @@ mod tests {
         );
         assert!(!file.pending.contains(&"desk".to_string()));
         assert!(!file.lapsed.contains(&"desk".to_string()));
+    }
+
+    /// PC1 third review m-C: a grant whose wait ran out lapses, never
+    /// given, even when the link's word comes before the run loop has let it
+    /// lapse: the lapse and the grant are judged in one step.
+    #[test]
+    fn a_grant_whose_wait_ran_out_is_never_given() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("lapse-or-grant");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        let long_ago = pocketdesk_core::local::pin::now_unix() - computers::PENDING_FOR - 1;
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer("lap", "", long_ago));
+            file.pending = vec!["lap".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "lap");
+        let given = TrustStore::read(&trust).unwrap().permissions("lap");
+        let file = computers::read(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(given, DevicePermissions::computer(), "lapsed, not given");
+        assert!(file.pending.is_empty() && file.lapsed == ["lap"]);
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
