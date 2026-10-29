@@ -417,6 +417,50 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     Ok(())
 }
 
+/// Let go of what is held there, then end the view on the server: the
+/// view this window shows, when it reached one (BK7 review M1). Its end is
+/// no longer this window's to say.
+fn stop_view(state_dir: &Path, state: &mut State) {
+    let release = state.input.release_all();
+    send(state, release);
+    state.writer = None;
+    if let Some(stream) = state.stream.take() {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    let shown = state.session_id;
+    state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
+    state.session_id = None;
+    state.asked += 1;
+    let _ = computers::request(
+        state_dir,
+        ComputerAsk::StopView { session_id: shown },
+        now_unix(),
+    );
+}
+
+/// Cancel, while the server dials the other computer again after a drop
+/// (PC2): the view stops there, and the window says so, with Reconnect.
+fn cancel_reconnect(state_dir: &Path, state: &mut State) {
+    stop_view(state_dir, state);
+    let name = state
+        .wanted
+        .as_ref()
+        .map_or_else(|| "the computer".to_string(), |w| w.name.clone());
+    state.ended = Some(format!("Stopped reconnecting to {name}."));
+}
+
+/// What the window says while the server dials the other computer again
+/// after a drop (PC2), with the try it is on; `None` when it is not.
+pub fn reconnect_words(name: &str, status: &ViewStatus) -> Option<String> {
+    let n = status.reconnecting;
+    (n > 0).then(|| match status.phase {
+        Phase::Waiting => {
+            format!("Reconnecting to {name}\u{2026} ({n}) Waiting for it to let this computer in.")
+        }
+        _ => format!("Reconnecting to {name}\u{2026} ({n})"),
+    })
+}
+
 /// Send `packets` to the other computer through the relay; a broken write
 /// ends input here (the reader sees the relay go).
 fn send(state: &mut State, packets: Vec<InputPacket>) {
@@ -445,25 +489,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
-        // Let go of what is held there, then end the view.
-        let release = state.input.release_all();
-        send(&mut state, release);
+        stop_view(state_dir, &mut state);
         state.wanted = None;
-        state.writer = None;
-        if let Some(stream) = state.stream.take() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
-        // The view this window shows, when it reached one (BK7 review M1).
-        let shown = state.session_id;
-        state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
-        state.session_id = None;
-        state.asked += 1;
         state.fullscreen = false;
-        let _ = computers::request(
-            state_dir,
-            ComputerAsk::StopView { session_id: shown },
-            now_unix(),
-        );
         return;
     }
     if let Some(picture) = state.picture.take() {
@@ -638,6 +666,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
 
     // The toolbar's choices.
     let mut reconnect = false;
+    let mut cancel = false;
     if monitor != wanted.monitor {
         let mut state = lock(shared);
         let next = Wanted {
@@ -676,6 +705,32 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     ui.colored_label(egui::Color32::LIGHT_GRAY, why);
                     ui.add_space(8.0);
                     reconnect = ui.button("Reconnect").clicked();
+                });
+            } else if let Some(words) = reconnect_words(&wanted.name, &status) {
+                // The last picture, dimmed, while it dials again (PC2).
+                if let Some(texture) = &texture {
+                    let [w, h] = texture.size();
+                    ui.painter().image(
+                        texture.id(),
+                        letterbox(area, w, h),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::from_gray(90),
+                    );
+                }
+                ui.vertical_centered(|ui| {
+                    ui.add_space(area.height() / 3.0);
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_black_alpha(200))
+                        .corner_radius(6.0)
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.colored_label(egui::Color32::LIGHT_GRAY, words);
+                            ui.add_space(8.0);
+                            cancel = ui
+                                .button("Cancel")
+                                .on_hover_text("Stop trying; Reconnect tries again")
+                                .clicked();
+                        });
                 });
             } else if let Some(note) = &note {
                 ui.centered_and_justified(|ui| ui.colored_label(egui::Color32::LIGHT_GRAY, note));
@@ -766,6 +821,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 ctx.request_repaint_after(Duration::from_secs(1));
             }
         });
+    if cancel {
+        cancel_reconnect(state_dir, &mut lock(shared));
+    }
     if reconnect {
         let mut state = lock(shared);
         if let Err(e) = ask(state_dir, &mut state, wanted) {
@@ -1241,6 +1299,65 @@ mod tests {
             clock.fed(ms(5000 + n));
         }
         assert!(clock.fed.len() <= 32);
+    }
+
+    /// PC2: while the server dials again after a drop the window says so,
+    /// with the try it is on.
+    #[test]
+    fn the_window_says_it_is_reconnecting() {
+        let mut status = ViewStatus::default();
+        assert_eq!(reconnect_words("Desk", &status), None);
+        status.reconnecting = 2;
+        assert_eq!(
+            reconnect_words("Desk", &status).as_deref(),
+            Some("Reconnecting to Desk\u{2026} (2)")
+        );
+        status.phase = Phase::Waiting;
+        assert!(
+            reconnect_words("Desk", &status)
+                .unwrap()
+                .contains("let this computer in")
+        );
+    }
+
+    /// PC2: Cancel while it reconnects stops the view on the server (its
+    /// StopView names the view), and the window says so, with Reconnect.
+    #[test]
+    fn cancel_stops_the_reconnecting_view() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            session_id: Some(41),
+            status: ViewStatus {
+                reconnecting: 3,
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        let asked = state.asked;
+        cancel_reconnect(&dir, &mut state);
+        assert_eq!(
+            state.ended.as_deref(),
+            Some("Stopped reconnecting to Desk.")
+        );
+        assert!(state.wanted.is_some(), "the window stays, with Reconnect");
+        assert_eq!(state.session_id, None);
+        assert!(state.asked > asked, "the view's end is not this window's");
+        assert_eq!(state.newer_than, 41);
+        let sent = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            sent.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::StopView {
+                session_id: Some(41)
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
