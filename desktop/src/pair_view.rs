@@ -922,7 +922,7 @@ mod tests {
             };
             let state = dir.clone();
             let mut harness = egui_kittest::Harness::new_ui(move |ui| {
-                view.show(ui, &state, None, &devices, 1_000);
+                view.show(ui, &state, None, &devices, 1_000, &mut |_| {});
             });
             harness.run_steps(2);
             assert_eq!(
