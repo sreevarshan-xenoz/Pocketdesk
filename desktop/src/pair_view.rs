@@ -879,9 +879,6 @@ mod tests {
         assert!(!link.mine && !pin::read(&dir, 1_030).unwrap().mine);
     }
 
-    /// PC1 review M6: the box for another of the owner's computers holds
-    /// for the code made when it was ticked, and that code while it lives;
-    /// the next code after it is plain until it is ticked again.
     /// PR #555 review m3: Computer's "Both are mine" is not carried into a
     /// phone's code when the switch goes back to Phone.
     #[test]
@@ -931,6 +928,9 @@ mod tests {
         }
     }
 
+    /// PC1 review M6: the box for another of the owner's computers holds
+    /// for the code made when it was ticked, and that code while it lives;
+    /// the next code after it is plain until it is ticked again.
     #[test]
     fn the_box_for_another_computer_unticks_after_its_code() {
         let mine = Whose {
