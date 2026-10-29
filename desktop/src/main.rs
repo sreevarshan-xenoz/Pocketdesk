@@ -33,6 +33,7 @@ mod theme;
 mod type_view;
 #[cfg(test)]
 mod ui_tests;
+mod video;
 
 use eframe::egui;
 // What the window shares with the tray program (E2).
