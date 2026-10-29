@@ -435,15 +435,25 @@ mod tests {
         nudge.follow(Some("pc"));
         nudge.follow(Some("relayed"));
         nudge.follow(None);
-        std::thread::sleep(NUDGE_EVERY * 2);
-        while catcher.recv(&mut [0u8; 8]).is_ok() {}
+        // Its thread has ended (it may have been between reading the aim
+        // and sending, under a loaded test run), then what it sent before
+        // ending is drained (review M4).
+        let ended = |aim: &Arc<Mutex<Aim>>| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while aim.lock().unwrap().sending {
+                assert!(Instant::now() < deadline, "the sending thread never ended");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            while catcher.recv(&mut [0u8; 8]).is_ok() {}
+        };
+        ended(&nudge.aim);
         assert_eq!(caught(1), 0, "stopped");
         // Again, then dropped.
         nudge.follow(Some("pc"));
         assert_eq!(caught(1), 1);
+        let aim = Arc::clone(&nudge.aim);
         drop(nudge);
-        std::thread::sleep(NUDGE_EVERY * 2);
-        while catcher.recv(&mut [0u8; 8]).is_ok() {}
+        ended(&aim);
         assert_eq!(caught(1), 0, "stopped when dropped");
     }
 
