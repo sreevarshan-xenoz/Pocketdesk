@@ -15,7 +15,9 @@
 //! laptop some battery. So it is held while this computer's keyboard and
 //! mouse are on another computer or a phone, while another computer's
 //! cursor is on this one, and while `share-test` runs. Elsewhere holding
-//! does nothing: Linux's timers are fine-grained already.
+//! does nothing: Linux's timers are fine-grained already. (The Wi-Fi on
+//! either side is kept from dozing by the pings, every
+//! [`super::drive::QUICK_PING_EVERY`] with the same setting.)
 
 use std::sync::{Mutex, PoisonError};
 

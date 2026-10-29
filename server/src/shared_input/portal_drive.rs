@@ -462,6 +462,7 @@ fn drive<B: Backend>(
     let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
         .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    driver.set_quick(config.shared_input_low_latency);
     let actions = driver.on(foreground_now(&runtime, game_lock_on));
     glue.apply(&mut driver, actions);
     let started = driver.start();
@@ -584,6 +585,7 @@ fn drive<B: Backend>(
             let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
             driver.set_clipboard(config.shared_input_clipboard);
+            driver.set_quick(config.shared_input_low_latency);
             glue.sound_on = config.shared_input_sound;
             let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
             glue.apply(&mut driver, actions);

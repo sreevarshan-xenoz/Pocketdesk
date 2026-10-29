@@ -1740,6 +1740,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
         .with_game_lock(game_lock_on, lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
+    driver.set_quick(config.shared_input_low_latency);
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
     let start = driver.start();
@@ -1894,6 +1895,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
+            driver.set_quick(config.shared_input_low_latency);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
             let quick = glue.quick_on && glue.awake.is_held();
