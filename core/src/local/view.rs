@@ -72,6 +72,10 @@ pub struct ViewStatus {
     /// The screen shown.
     #[serde(default)]
     pub monitor: u32,
+    /// What keeps the picture from showing, when the server knows (BK7
+    /// review M6: frames too large for the window).
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// One message.
@@ -294,6 +298,7 @@ mod tests {
                 control: Some(false),
                 monitors: vec!["DP-1".into(), "HDMI-A-1".into()],
                 monitor: 1,
+                note: Some("Its frames are too large to show here.".into()),
             }),
             Message::Status(ViewStatus::default()),
             Message::WantKeyframe,

@@ -461,6 +461,13 @@ async fn session(
                 // A frame the relay cannot carry (BK7 review M6): said once,
                 // and the chain it breaks starts again from a keyframe.
                 if !fits(packet.data.len()) {
+                    // The window says so (BK7 review M6).
+                    if status.note.is_none() {
+                        status.note = Some(format!(
+                            "{name}'s screen comes in frames too large to show here. A lower Quality, or a smaller screen there, may help."
+                        ));
+                        say(Event::Status(status.clone())).await;
+                    }
                     if !said_too_large {
                         said_too_large = true;
                         tracing::warn!(
@@ -482,6 +489,9 @@ async fn session(
                         });
                     }
                     continue;
+                }
+                if status.note.take().is_some() {
+                    say(Event::Status(status.clone())).await;
                 }
                 say(Event::Frame {
                     keyframe: packet.is_keyframe,

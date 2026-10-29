@@ -108,6 +108,15 @@ pub fn waiting_words(name: &str, status: &ViewStatus) -> String {
     }
 }
 
+/// What the window says while there is no picture: what keeps it from
+/// showing when the server says, else how the view stands.
+pub fn shown_words(name: &str, status: &ViewStatus) -> String {
+    status
+        .note
+        .clone()
+        .unwrap_or_else(|| waiting_words(name, status))
+}
+
 /// What the window says of control: `None` while it controls.
 pub fn control_words(name: &str, control: Option<bool>, view_only: bool) -> Option<String> {
     match (control, view_only) {
@@ -416,6 +425,17 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
                     ctx.request_repaint_after(SAVED_NOTE);
                 }
             });
+            // What keeps the picture from showing, over a picture that
+            // stopped (BK7 review M6).
+            if ended.is_none()
+                && texture.is_some()
+                && let Some(note) = &status.note
+            {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY))
+                        .wrap(),
+                );
+            }
             if ended.is_none()
                 && status.phase == Phase::Showing
                 && let Some(words) = control_words(&wanted.name, status.control, view_only)
@@ -508,7 +528,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
                 ui.centered_and_justified(|ui| {
                     ui.colored_label(
                         egui::Color32::LIGHT_GRAY,
-                        waiting_words(&wanted.name, &status),
+                        shown_words(&wanted.name, &status),
                     )
                 });
             }
@@ -843,6 +863,22 @@ mod tests {
         assert_eq!(
             waiting_words("Desk", &status),
             "Waiting for Desk's screen\u{2026}"
+        );
+    }
+
+    /// BK7 review M6: a note from the server takes the waiting words'
+    /// place.
+    #[test]
+    fn the_servers_note_is_said_in_place_of_waiting() {
+        let mut status = ViewStatus {
+            phase: Phase::Showing,
+            ..ViewStatus::default()
+        };
+        assert_eq!(shown_words("Desk", &status), waiting_words("Desk", &status));
+        status.note = Some("Desk's screen comes in frames too large to show here.".into());
+        assert_eq!(
+            shown_words("Desk", &status),
+            "Desk's screen comes in frames too large to show here."
         );
     }
 

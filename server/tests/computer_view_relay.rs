@@ -73,6 +73,16 @@ async fn other_computer(
     input: mpsc::UnboundedSender<InputPacket>,
     hang_up: tokio::sync::oneshot::Receiver<()>,
 ) -> SocketAddr {
+    other_computer_sending(cert, input, hang_up, keyframe()).await
+}
+
+/// [`other_computer`], its frames each `frame`.
+async fn other_computer_sending(
+    cert: Arc<CertManager>,
+    input: mpsc::UnboundedSender<InputPacket>,
+    hang_up: tokio::sync::oneshot::Receiver<()>,
+    frame: Vec<u8>,
+) -> SocketAddr {
     let listen = StreamTransportConfig {
         address: "127.0.0.1:0".parse().unwrap(),
         ..StreamTransportConfig::default()
@@ -138,7 +148,7 @@ async fn other_computer(
             tokio::select! {
                 _ = &mut hang_up => break,
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    if send(STREAM_KIND_VIDEO, seq, true, keyframe()).await.is_err() {
+                    if send(STREAM_KIND_VIDEO, seq, true, frame.clone()).await.is_err() {
                         break;
                     }
                     seq += 1;
@@ -316,6 +326,56 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
     }
     assert_eq!(wire::read(&dir), None, "view.json forgets the view");
 
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BK7 review M6: frames too large for the window are said in the
+/// window, not left at "Waiting for its screen".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn frames_too_large_for_the_window_are_said() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("large");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up_tx, hang_up_rx) = tokio::sync::oneshot::channel();
+    let mut huge = keyframe();
+    huge.resize(pocketdesk_core::local::cast::MAX_MESSAGE + 1024, 0x11);
+    let addr = other_computer_sending(cert.clone(), input_tx, hang_up_rx, huge).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let mut window = join(&file).await;
+    let note = loop {
+        match tokio::time::timeout(Duration::from_secs(20), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::Status(status) if status.note.is_some() => break status.note.unwrap(),
+            Message::Frame { .. } => panic!("a frame too large was sent"),
+            _ => continue,
+        }
+    };
+    assert!(note.contains("too large"), "{note}");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
