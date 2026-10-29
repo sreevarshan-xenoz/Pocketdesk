@@ -1,8 +1,10 @@
-//! Settings → Computers (2f): the owner's other computers this one paired
-//! with, how each one's link is doing, and pairing with another from its
-//! pairing link (its Pair tab's "Copy the link for another computer"). The
-//! server does the pairing and keeps the links; this asks it through
-//! `computers_out/`.
+//! The owner's other computers (2f). Pair → Computer pastes another
+//! computer's pairing link (its own Pair → Computer's "Copy link") and
+//! shows how pairing goes ([`ComputersView::show_pairing`]); Settings →
+//! Other computers lists the computers this one paired with, how each
+//! one's link is doing, Show its screen and Unpair
+//! ([`ComputersView::show_list`]). The server does the pairing and keeps
+//! the links; this asks it through `computers_out/`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -133,7 +135,7 @@ pub fn check_link(text: &str, own_id: Option<&str>) -> LinkCheck {
 }
 
 /// What the line under the box says of a text that is not a link.
-pub const NOT_A_LINK: &str = "This isn't a Pocketdesk computer link. Copy it on the other computer's Pair page (\"Copy the link for another computer\").";
+pub const NOT_A_LINK: &str = "Not a Pocketdesk link. Copy it on the other computer's Pair page.";
 /// Whether a link's certificate fingerprint is whole: 32 bytes in hex, as
 /// the server reads it (its `parse_fingerprint`).
 fn whole_fingerprint(fingerprint: Option<&str>) -> bool {
@@ -249,7 +251,22 @@ impl ComputersView {
         }
     }
 
+    /// Both halves, as one page (the tests' view of them).
+    #[cfg(test)]
     pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        self.show_pairing(ui, state_dir, server_running, now_unix);
+        self.show_list(ui, state_dir, server_running, now_unix);
+    }
+
+    /// Pair → Computer's paste half (UX 2): the other computer's link,
+    /// Pair, its progress and its outcome.
+    pub fn show_pairing(
         &mut self,
         ui: &mut egui::Ui,
         state_dir: &Path,
@@ -265,15 +282,9 @@ impl ComputersView {
             self.pasting = None;
         }
         self.drawn_pass = Some(pass);
-        // Under Settings' "Other computers" heading (U5).
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new(
-                "Your other computers. On the other one, open Pair and copy its link for \
-                 another computer, then paste it here.",
-            )
-            .weak(),
-        );
+        ui.add_space(12.0);
+        ui.label(RichText::new("From the other computer").heading());
+        ui.label("Paste the link copied there.");
         // A pairing from the other side times out with no word why here.
         self.public.show(ui);
         // UX 1: shown as pasted, not masked (PC1 re-review m-1 had masked
@@ -357,7 +368,7 @@ impl ComputersView {
             if asks && !asks_both {
                 ui.label(
                     RichText::new(format!(
-                        "{name}'s link asks to pair both ways, but names no internet endpoint, so it can pair only one way (its internet path may be off)."
+                        "{name} can pair one way only: its link names no internet endpoint."
                     ))
                     .weak(),
                 );
@@ -365,18 +376,18 @@ impl ComputersView {
             if asks_both {
                 ui.label(
                     RichText::new(format!(
-                        "{name}'s link asks to pair both ways: {name} would see and control this computer at any time without asking, with nobody here. Tick this only if {name} is your own computer, its addresses above are its own, and you copied the link yourself."
+                        "{name} would see and control this computer at any time, without asking. Tick only if it's yours and you copied its link."
                     ))
                     .color(crate::theme::warn(ui)),
                 );
                 let mut yes = self.consent.is_some();
-                if ui.checkbox(&mut yes, consent_label(&name)).changed() {
+                if ui.checkbox(&mut yes, CONSENT_BOX).changed() {
                     self.consent = yes.then(|| pasted.clone());
                 }
                 if !yes {
                     ui.label(
                         RichText::new(format!(
-                            "Unticked, it pairs one way: this computer shows {name} and shares with it, and lets it do nothing more here."
+                            "Unticked, it pairs one way: {name} gets no control here."
                         ))
                         .weak(),
                     );
@@ -448,6 +459,18 @@ impl ComputersView {
         {
             show_outcome(ui, last);
         }
+    }
+
+    /// Settings → Other computers' list (UX 2): each computer this one
+    /// paired with, its link, Show its screen and Unpair.
+    pub fn show_list(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        self.refresh(state_dir);
         if self.file.computers.is_empty() {
             ui.label(RichText::new("No other computer paired yet.").weak());
         }
@@ -671,11 +694,7 @@ fn show_outcome(ui: &mut egui::Ui, last: &computers::PairingOutcome) {
 }
 
 /// The box the owner ticks for a link that asks to pair both ways (PC1).
-pub fn consent_label(name: &str) -> String {
-    format!(
-        "{name} is my own computer: let it see and control this computer at any time without asking"
-    )
-}
+pub const CONSENT_BOX: &str = "That one is mine: no prompts";
 
 /// Whether `link` names an internet endpoint (an `endpointId` in its `ep`),
 /// which pairing both ways needs; the server checks it is a real key.
@@ -820,7 +839,9 @@ mod tests {
         // wearing one of the owner's computers' names is told by them.
         assert!(
             harness
-                .query_by_label_contains("Test Tower's link asks to pair both ways")
+                .query_by_label_contains(
+                    "Test Tower would see and control this computer at any time, without asking"
+                )
                 .is_some()
         );
         assert!(
@@ -829,7 +850,7 @@ mod tests {
                 .is_some()
         );
         let pair = if consent {
-            harness.get_by_label(&consent_label("Test Tower")).click();
+            harness.get_by_label(CONSENT_BOX).click();
             harness.run_steps(2);
             "Pair both ways"
         } else {
@@ -886,11 +907,9 @@ mod tests {
         );
         harness.run_steps(2);
         let said = harness
-            .query_by_label_contains("names no internet endpoint, so it can pair only one way")
+            .query_by_label_contains("can pair one way only: its link names no internet endpoint")
             .is_some();
-        let no_box = harness
-            .query_by_label(&consent_label("Test Tower"))
-            .is_none();
+        let no_box = harness.query_by_label(CONSENT_BOX).is_none();
         harness.get_by_label("Pair one way").click();
         harness.run_steps(2);
         let asked = computers::take_all(&dir, now);
@@ -1009,9 +1028,7 @@ mod tests {
         let harness = page(&dir, true, &mine_link());
         let own = harness.query_by_label(OWN_LINK).is_some();
         let off = harness.get_by_label("Pair").accesskit_node().is_disabled();
-        let consent = harness
-            .query_by_label(&consent_label("Test Tower"))
-            .is_some();
+        let consent = harness.query_by_label(CONSENT_BOX).is_some();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(own && off && !consent);
     }

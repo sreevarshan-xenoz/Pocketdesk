@@ -323,6 +323,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         "Show how a computer's screen comes",
         Section::Computers,
     ),
+    // UX 2: drawn on the Keyboard and mouse page, named as there.
     (
         "computer_view_clipboard",
         "Clipboard follows a computer's screen window",
@@ -330,12 +331,12 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     (
         "shared_input",
-        "Share my keyboard and mouse with my computers",
+        crate::arrange_view::SHARE_SWITCH,
         Section::SharedInput,
     ),
     (
         "shared_input_drive",
-        "This computer's keyboard and mouse can move to the others",
+        "Carry this pointer to the others",
         Section::SharedInput,
     ),
     (
@@ -345,12 +346,12 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     (
         "shared_input_game_lock",
-        "Stay on this computer while a game runs",
+        "Stay here while a game runs",
         Section::SharedInput,
     ),
     (
         "shared_input_lock_programs",
-        "Always stay while these programs are in front",
+        "Stay here for these programs",
         Section::SharedInput,
     ),
     (
@@ -365,12 +366,12 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     ),
     (
         "shared_input_sound",
-        "Hear the computer you're driving here",
+        "Hear the computer you're driving",
         Section::SharedInput,
     ),
     (
         "shared_input_low_latency",
-        "Keep the connection quick while sharing",
+        "Keep the connection quick",
         Section::SharedInput,
     ),
     (
@@ -477,7 +478,7 @@ pub fn computer_quality_label(name: &str) -> &'static str {
 
 /// Whether this computer's page draws `key`'s row: some are for one
 /// system only (J2 review: on Windows "grant" opened an empty Connection).
-fn drawn_here(key: &str) -> bool {
+pub(crate) fn drawn_here(key: &str) -> bool {
     match key {
         "remember_screen_grant" => cfg!(target_os = "linux"),
         // P3: Windows says when it is presenting; Linux does not.
@@ -509,13 +510,18 @@ fn drawn_here(key: &str) -> bool {
 
 /// What "Keep the connection quick while sharing" does here: Windows'
 /// timer is Windows' only (BK10 review M8).
-fn quick_note() -> &'static str {
+pub(crate) fn quick_note() -> &'static str {
     if cfg!(windows) {
         "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
     } else {
         "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
     }
 }
+
+/// Settings' Keyboard and mouse section, a pointer (UX 2).
+pub const INPUT_ELSEWHERE: &str = "These are on the Keyboard and mouse page.";
+/// Its button.
+pub const OPEN_KEYBOARD_MOUSE: &str = "Open Keyboard and mouse";
 
 /// A row shows for `query` when each word is in its name or key, a
 /// setting drawn in it, or its section's title (J2 review: "advanced
@@ -763,12 +769,21 @@ impl SettingsForm {
         self.running.computer_view_stats = on;
     }
 
-    /// `shared_input` was saved elsewhere (the Keyboard and mouse page):
-    /// the form says so too, and the server reads it without a restart.
-    pub fn saved_elsewhere_shared_input(&mut self, on: bool) {
-        self.saved.shared_input = on;
-        self.edited.shared_input = on;
-        self.running.shared_input = on;
+    /// `keys`, the shared keyboard and mouse's, were saved elsewhere (the
+    /// Keyboard and mouse page) as `config` has them: the form says so too,
+    /// and the server reads them without a restart (or, for the hotkey, at
+    /// its next start, as Settings' save has it).
+    pub fn saved_elsewhere_input(&mut self, config: &Config, keys: &[&str]) {
+        for key in keys {
+            crate::input_options::copy_key(config, &mut self.saved, key);
+            crate::input_options::copy_key(config, &mut self.edited, key);
+            if applies_live(key) {
+                crate::input_options::copy_key(config, &mut self.running, key);
+            }
+            if *key == "shared_input_lock_programs" {
+                self.lock_programs_text = config.shared_input_lock_programs.join("\n");
+            }
+        }
     }
 
     /// Whether the save bar shows: for changes, or for a problem in what
@@ -2074,144 +2089,17 @@ impl SettingsForm {
                 });
             }
             Section::SharedInput => {
-                row(ui, "shared_input", |ui| {
-                    ui.checkbox(
-                        &mut e.shared_input,
-                        "one keyboard and mouse for this computer and my other paired computers",
-                    );
-                    note(
-                        ui,
-                        "A pointer pushed past the edge of one screen appears on the next computer, and the keys follow it. Turn it on on each computer, and allow \"Keyboard and mouse\" for each in the other's Devices page: it is off until you do.",
-                    );
-                });
-                let on = e.shared_input;
-                // UX 1: why the rows below are off, beside them: once,
-                // under the switch, or in each row when a search hides it.
-                let query: String = ui
-                    .ctx()
-                    .data(|d| d.get_temp(search_id()))
-                    .unwrap_or_default();
-                let switch_shown = drawn_here("shared_input") && row_shown(&query, "shared_input");
-                let mut turn_on = false;
-                if !on && switch_shown {
-                    turn_on |= crate::widgets::why_off(ui, SHARING_OFF, Some(TURN_SHARING_ON));
-                }
-                let mut off = |ui: &mut egui::Ui| {
-                    if !on && !switch_shown {
-                        turn_on |= crate::widgets::why_off(ui, SHARING_OFF, Some(TURN_SHARING_ON));
+                // UX 2: one home, the Keyboard and mouse page; a search for
+                // one of its options finds this pointer.
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(INPUT_ELSEWHERE).weak());
+                    if ui.button(OPEN_KEYBOARD_MOUSE).clicked() {
+                        crate::widgets::ask(
+                            ui.ctx(),
+                            crate::widgets::Ask::Go(crate::app::Tab::KeyboardMouse),
+                        );
                     }
-                };
-                row(ui, "shared_input_drive", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_drive,
-                            "this computer's pointer and keys may be carried onto the others",
-                        ),
-                    );
-                    note(
-                        ui,
-                        "Off, this computer only takes the others' keyboard and mouse: its own stay here.",
-                    );
                 });
-                row(ui, "shared_input_hotkey", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::TextEdit::singleline(&mut e.shared_input_hotkey)
-                            .hint_text("ctrl+alt+right")
-                            .desired_width(160.0),
-                    );
-                    note(
-                        ui,
-                        if cfg!(windows) {
-                            "Pressed anywhere, moves the keyboard and mouse on to the next computer. Empty is off: the screen's edge still switches. Read when the server starts."
-                        } else {
-                            "Pressed while the keyboard and mouse are on another computer, moves them on to the next (or home). Linux's desktop gives Pocketdesk no keys at home, so the screen's edge starts a crossing there. Empty is off. Read when the server starts."
-                        },
-                    );
-                });
-                row(ui, "shared_input_game_lock", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_game_lock,
-                            "the pointer stays here while a game is running",
-                        ),
-                    );
-                    note(
-                        ui,
-                        "So a game's mouse is never carried off by a push at the edge.",
-                    );
-                });
-                let lock_programs = &mut self.lock_programs_text;
-                row(ui, "shared_input_lock_programs", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::TextEdit::multiline(lock_programs)
-                            .desired_rows(2)
-                            .hint_text("one program a line, as Blender.exe or blender"),
-                    );
-                    note(
-                        ui,
-                        "While one of these is the window in front, the pointer stays on this computer. By the program's file name.",
-                    );
-                });
-                row(ui, "shared_input_clipboard", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_clipboard,
-                            "what I copy here is ready to paste where the mouse goes",
-                        ),
-                    );
-                });
-                row(ui, "shared_input_files", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_files,
-                            "files dragged in Explorer and let go on another computer are sent to it",
-                        ),
-                    );
-                    note(
-                        ui,
-                        "They land in its received files folder. \"Files over the internet\" must be on on both computers.",
-                    );
-                });
-                row(ui, "shared_input_sound", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_sound,
-                            "the sound of the computer the mouse is on plays here, while it is there",
-                        ),
-                    );
-                    note(
-                        ui,
-                        "In this computer's speakers or headphones. It stops as the mouse comes home.",
-                    );
-                });
-                row(ui, "shared_input_low_latency", |ui| {
-                    off(ui);
-                    ui.add_enabled(
-                        on,
-                        egui::Checkbox::new(
-                            &mut e.shared_input_low_latency,
-                            "keys and moves go at once while the keyboard and mouse are shared",
-                        ),
-                    );
-                    note(ui, quick_note());
-                });
-                if turn_on {
-                    e.shared_input = true;
-                }
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2538,11 +2426,6 @@ fn quiet_problem(config: &Config) -> Option<&'static str> {
     }
     (days_mask(&config.quiet_days) == 0).then_some("No day is chosen, so nothing is held.")
 }
-
-/// Why the Keyboard and mouse rows are off (UX 1).
-pub const SHARING_OFF: &str = "Off while sharing is off: turn it on to change these.";
-/// Its fix.
-pub const TURN_SHARING_ON: &str = "Turn sharing on";
 
 /// A row's note, small and quiet.
 fn note(ui: &mut egui::Ui, text: impl Into<String>) {
@@ -2919,33 +2802,15 @@ mod tests {
         assert_eq!(
             rows,
             [
-                (
-                    "shared_input",
-                    "Share my keyboard and mouse with my computers"
-                ),
-                (
-                    "shared_input_drive",
-                    "This computer's keyboard and mouse can move to the others"
-                ),
+                ("shared_input", "Share my keyboard and mouse"),
+                ("shared_input_drive", "Carry this pointer to the others"),
                 ("shared_input_hotkey", "Switch computer with a key"),
-                (
-                    "shared_input_game_lock",
-                    "Stay on this computer while a game runs"
-                ),
-                (
-                    "shared_input_lock_programs",
-                    "Always stay while these programs are in front"
-                ),
+                ("shared_input_game_lock", "Stay here while a game runs"),
+                ("shared_input_lock_programs", "Stay here for these programs"),
                 ("shared_input_clipboard", "Clipboard follows the mouse"),
                 ("shared_input_files", "Drag files across the edge"),
-                (
-                    "shared_input_sound",
-                    "Hear the computer you're driving here"
-                ),
-                (
-                    "shared_input_low_latency",
-                    "Keep the connection quick while sharing"
-                ),
+                ("shared_input_sound", "Hear the computer you're driving"),
+                ("shared_input_low_latency", "Keep the connection quick"),
             ]
         );
         for (key, _) in rows
@@ -3017,8 +2882,8 @@ mod tests {
         assert_eq!(
             now,
             [
-                "Share my keyboard and mouse with my computers",
-                "Always stay while these programs are in front"
+                "Share my keyboard and mouse",
+                "Stay here for these programs"
             ]
         );
         assert_eq!(later, ["Switch computer with a key"]);

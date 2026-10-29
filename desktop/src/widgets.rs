@@ -9,12 +9,12 @@ use eframe::egui::{self, RichText};
 pub enum Ask {
     /// Start the server, as the Overview's Start does.
     StartServer,
-    /// Open Settings, found by these words.
-    Settings(&'static str),
     /// Open this page.
     Go(crate::app::Tab),
     /// Open Diagnostics and run its checks.
     RunDiagnostics,
+    /// Open Pair on Computer (UX 2).
+    PairComputer,
 }
 
 fn ask_id() -> egui::Id {

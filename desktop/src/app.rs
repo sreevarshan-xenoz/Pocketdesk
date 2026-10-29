@@ -284,6 +284,11 @@ fn away_lock_unavailable() -> Option<&'static str> {
         .then_some("This system cannot tell whether someone is at the keyboard, so it never locks.")
 }
 
+/// Settings → Other computers' pointer to the Pair page (UX 2).
+pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
+/// Its button, and the fix where no computer is paired.
+pub const PAIR_A_COMPUTER: &str = "Pair a computer";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
@@ -389,8 +394,11 @@ pub struct PocketdeskApp {
     clipboard: crate::clipboard_view::ClipboardView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
-    /// Settings → Other computers (2f).
+    /// Pair → Computer's paste box and Settings → Other computers' list
+    /// (2f, UX 2).
     computers: crate::computers_view::ComputersView,
+    /// The Keyboard and mouse page's options (UX 2).
+    input_options: crate::input_options::InputOptions,
     /// The Keyboard and mouse page (shared input).
     arrange: crate::arrange_view::ArrangeView,
     /// Settings → KDE Connect devices (3a).
@@ -474,6 +482,7 @@ impl PocketdeskApp {
             clipboard: Default::default(),
             notes: Default::default(),
             computers: Default::default(),
+            input_options: Default::default(),
             arrange: Default::default(),
             kdeconnect: Default::default(),
             phone_files: Default::default(),
@@ -556,15 +565,16 @@ impl PocketdeskApp {
                 self.switch_to(tab);
                 self.chosen = tab;
             }
+            Ask::PairComputer => {
+                self.switch_to(Tab::Pair);
+                self.chosen = Tab::Pair;
+                self.pair
+                    .open_for(&self.state_dir, crate::pair_view::PairFor::Computer);
+            }
             Ask::RunDiagnostics => {
                 self.diagnostics.run_now();
                 self.switch_to(Tab::Diagnostics);
                 self.chosen = Tab::Diagnostics;
-            }
-            Ask::Settings(words) => {
-                self.switch_to(Tab::Settings);
-                self.chosen = Tab::Settings;
-                self.settings_query = words.to_string();
             }
         }
     }
@@ -1232,13 +1242,24 @@ impl PocketdeskApp {
                     None => {}
                 }
             }
-            Tab::Pair => self.pair.show(
-                ui,
-                &self.state_dir,
-                self.config.as_ref(),
-                &self.snapshot.devices,
-                now_unix(),
-            ),
+            Tab::Pair => {
+                self.pair.show(
+                    ui,
+                    &self.state_dir,
+                    self.config.as_ref(),
+                    &self.snapshot.devices,
+                    now_unix(),
+                );
+                // UX 2: the other computer's link is pasted here too.
+                if self.pair.mode == crate::pair_view::PairFor::Computer {
+                    self.computers.show_pairing(
+                        ui,
+                        &self.state_dir,
+                        self.snapshot.running,
+                        now_unix(),
+                    );
+                }
+            }
             Tab::Devices => self.devices_tab(ui),
             Tab::KeyboardMouse => self.keyboard_mouse_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
@@ -2481,29 +2502,58 @@ impl PocketdeskApp {
             }
             None => {}
         }
+        // UX 2: its options, here rather than in Settings.
+        if let Some(config) = self.config.as_ref() {
+            let mut edited = config.clone();
+            let changed = self.input_options.show(ui, &mut edited, sharing_on);
+            if !changed.is_empty() {
+                self.save_input_keys(&edited, &changed, None);
+            }
+        }
     }
 
-    /// Turn the shared keyboard and mouse on or off (`shared_input`),
-    /// written as Settings writes it: that key alone, the rest of the file
-    /// as it is. The server reads it within a second.
+    /// Turn the shared keyboard and mouse on or off (`shared_input`).
     fn set_sharing(&mut self, on: bool) {
+        let config = Config {
+            shared_input: on,
+            ..self.config.clone().unwrap_or_default()
+        };
+        let said = if on {
+            "Sharing the keyboard and mouse with your computers."
+        } else {
+            "The keyboard and mouse stay on each computer."
+        };
+        self.save_input_keys(&config, &["shared_input"], Some(said));
+    }
+
+    /// Save the shared keyboard and mouse's `keys` as `edited` has them,
+    /// written as Settings writes them: those keys alone, the rest of the
+    /// file as it is. The server reads them within a second (the hotkey at
+    /// its next start).
+    fn save_input_keys(&mut self, edited: &Config, keys: &[&str], said: Option<&str>) {
         let saved = Config::path().map_err(|e| e.to_string()).and_then(|path| {
             let mut config = Config::load_from(&path).map_err(|e| e.to_string())?;
-            config.shared_input = on;
+            for key in keys {
+                crate::input_options::copy_key(edited, &mut config, key);
+            }
             config
-                .save_keys_to(&path, &["shared_input"])
+                .save_keys_to(&path, keys)
                 .map_err(|e| e.to_string())
+                .map(|()| config)
         });
         match saved {
-            Ok(()) => {
+            Ok(config) => {
                 if let Some(Ok(form)) = self.settings.as_mut() {
-                    form.saved_elsewhere_shared_input(on);
+                    form.saved_elsewhere_input(&config, keys);
                 }
-                self.notice = crate::notice::Notice::done(if on {
-                    "Sharing the keyboard and mouse with your computers."
-                } else {
-                    "The keyboard and mouse stay on each computer."
-                });
+                // The page draws from it: the box shows what was saved at
+                // once, never the old value until the next read (PR #555
+                // review I1).
+                self.config = Some(config);
+                self.notice = crate::notice::Notice::done(said.map_or_else(
+                    || format!("Saved: {}.", crate::settings_view::name(keys[0])),
+                    str::to_string,
+                ));
             }
             Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
         }
@@ -2812,8 +2862,19 @@ impl PocketdeskApp {
                     crate::settings_view::Section::Computers
                         if extra(crate::settings_view::EXTRA_COMPUTERS) =>
                     {
-                        self.computers
-                            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+                        // UX 2: pairing is on the Pair page.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(PAIR_ELSEWHERE).weak());
+                            if ui.button(PAIR_A_COMPUTER).clicked() {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::PairComputer);
+                            }
+                        });
+                        self.computers.show_list(
+                            ui,
+                            &self.state_dir,
+                            self.snapshot.running,
+                            now_unix(),
+                        );
                         // BK7: "Show its screen" opens its window.
                         if let Some((device_id, name)) = self.computers.take_view() {
                             self.show_computer(ui.ctx(), &device_id, &name);
