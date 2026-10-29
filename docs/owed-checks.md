@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-999 open items.
+1000 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 90 |
+| A second computer | 91 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -961,6 +961,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The Linux laptop viewing Windows: Send keys lists Ctrl+Shift+Esc (Task Manager) and Lock (Windows+L) as well; Task Manager opens on Windows, and note whether Lock locks it (Windows may ignore an injected Windows+L; if it does, Lock needs a server action instead). (where: second computer)
 - With View only on, or Control off for this computer there, the bar shows no Send keys and no "Send Win and Alt+Tab there". (where: second computer)
 - Windows viewing the laptop in full screen with the grab on (never press Windows+L here: it still locks this computer, the owner's box, whatever the grab does): Win alone, Win+1 to Win+4 (Hyprland's workspaces), Win+Enter, Alt+Tab, Alt+Esc and Ctrl+Esc act on the laptop, and Windows' Start menu and task switcher never open, nor does Alt let go after Alt+Tab leave the window's own menu waiting for a key; windowed, or with the setting off, they are Windows' again. (where: second computer)
+- In full screen with the grab on, tap Alt+Tab as fast as possible ten times: note how many reach the laptop as a plain Tab (Alt and Tab let go within one pass of the window send the Tab after Alt's release; review M6, left as is unless it shows). (where: second computer)
 - In full screen with the grab on, press and let go of Ctrl+Alt+Shift: Win and Alt+Tab are Windows' again; leave full screen and come back, and they go to the laptop again. Ctrl+Alt+Shift+S still switches the stats without giving the keys back. (where: second computer)
 - In full screen with Win held through the window, Alt+Tab away by a mouse click elsewhere (a second monitor) or a toast: nothing stays held on the laptop, and Windows' own Win key works at once. (where: second computer)
 - With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. With privacy mode turned on here from the phone, Win and Alt+Tab go nowhere (the shield keeps them), not to the laptop. (where: second computer)
