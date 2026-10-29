@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-927 open items.
+937 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 29 |
+| A second computer | 39 |
 | A Linux desktop (the Azure VM serves for some) | 173 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
@@ -849,6 +849,19 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **186. A paired computer found again at a new address (O3)**
 
 - Another computer announcing the first one's id at a new address (its own certificate): no move.
+
+**219. Another computer's screen in a window (BK7)**
+
+- Windows views Linux: Show its screen opens a window with Linux's screen within a few seconds, at its shape, the window's title and bar naming the Linux laptop; with "Ask before each session" on there, the picture waits for Allow once at the Linux laptop. (where: second computer)
+- View-only by default: the window's bar says Linux does not take this computer's clicks and keys and where to turn Control on; clicks and keys in it do nothing there. Turn on "Control the mouse and keyboard" for the Windows laptop on Linux's Devices page, Reconnect: the pointer moves, clicks, drags and scrolls (both ways, a touchpad's too) where they land in the picture, the letterbox bars take nothing. (where: second computer)
+- Keys from the window: typing (capitals with Shift, a non-US character), Enter, Tab, Backspace, Escape, the arrows, Home/End/PgUp/PgDn, Delete, F1 to F12, Shift+arrows selecting, Ctrl+C in a Linux text field then Ctrl+V into another there (Linux's own clipboard, not Windows'), Alt+Tab-like chords; nothing stays held on Linux after the window loses focus mid-press, or closes. (where: second computer)
+- A monitor switch: with two screens on Linux, the bar lists them by name and size; choosing the second shows it, and the window keeps working; Linux's resolution changed mid-view: the picture comes back at the new size without a restart. (where: second computer)
+- Wi-Fi dropped on Linux for a minute mid-view: the window says "Lost the connection" within about 45 s, never a silent black window; Reconnect after the Wi-Fi comes back shows it again, by the internet path when the home network is gone. (where: second computer)
+- Quality: Economy, Balanced, Best and Auto from the bar visibly change the picture within a few seconds (and the bitrate in Linux's session record); the Settings choice is what a new window starts at; View only in Settings starts it sending nothing. (where: second computer)
+- Linux's session list (its desktop app's Sessions, and `pocketdesk sessions`) shows the Windows laptop's session by its name; End there ends it and the window says why; privacy mode, the away lock and one driver at a time behave there as for a phone. (where: second computer)
+- Sound: with "Hear and change this computer's sound" on for the Windows laptop on Linux, Linux's sound plays on Windows while the window is open, and stops with it. (where: second computer)
+- Linux views Windows: the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
+- Screenshot and Record from the window save a PNG and an MKV of Linux's screen; Full screen fills Windows' screen and Exit full screen comes back. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
