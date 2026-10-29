@@ -405,6 +405,17 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
     taken
 }
 
+/// Take back the request `id` before the server takes it (the app's
+/// Cancel): true when it was still waiting, false when the server had
+/// taken it already (or it is gone).
+pub fn withdraw(state_dir: &Path, id: &str) -> io::Result<bool> {
+    match std::fs::remove_file(request_path(state_dir, id)?) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 fn request_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
     if !is_valid_id(id) {
         return Err(io::Error::new(
@@ -418,6 +429,25 @@ fn request_path(state_dir: &Path, id: &str) -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// UX 1: a request taken back before the server takes it never
+    /// reaches it; once taken, there is nothing to take back.
+    #[test]
+    fn a_waiting_request_can_be_withdrawn() {
+        let dir = temp_dir("withdraw");
+        let now = crate::local::pin::now_unix();
+        let ask = ComputerAsk::Forget {
+            device_id: "b".to_string(),
+        };
+        let first = request(&dir, ask.clone(), now).unwrap();
+        assert!(withdraw(&dir, &first.id).unwrap());
+        assert!(take_all(&dir, now).is_empty(), "withdrawn");
+        let second = request(&dir, ask, now).unwrap();
+        assert_eq!(take_all(&dir, now).len(), 1);
+        assert!(!withdraw(&dir, &second.id).unwrap(), "taken already");
+        assert!(withdraw(&dir, "../x").is_err(), "not a request id");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("pd-computers-{name}-{}", std::process::id()));

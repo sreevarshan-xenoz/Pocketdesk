@@ -12,6 +12,21 @@ use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile, PeerCo
 
 /// How often the file is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
+/// How often while a pairing waits for its outcome (UX 1).
+const PAIRING_REFRESH: Duration = Duration::from_millis(500);
+/// How long a pairing's progress waits for its outcome: a request the
+/// server has not taken within its life is dropped, and pairing itself
+/// tries each of the link's addresses for some seconds.
+const PAIRING_WAIT: Duration = Duration::from_secs(computers::REQUEST_TTL_SECS + 60);
+
+/// A pairing asked for, waiting for the server's outcome (UX 1).
+struct Pairing {
+    /// The request's id, which its outcome names.
+    request: String,
+    /// The link's computer, as shown.
+    name: String,
+    since: Instant,
+}
 
 #[derive(Default)]
 pub struct ComputersView {
@@ -33,6 +48,8 @@ pub struct ComputersView {
     pasting: bool,
     /// This computer's own id, read with the file, to tell its own link.
     own_id: Option<String>,
+    /// The pairing under way, until its outcome comes (UX 1).
+    pairing: Option<Pairing>,
 }
 
 /// A link's state in words.
@@ -116,7 +133,12 @@ impl ComputersView {
         self.view.take()
     }
     fn refresh(&mut self, state_dir: &Path) {
-        if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
+        let every = if self.pairing.is_some() {
+            PAIRING_REFRESH
+        } else {
+            REFRESH
+        };
+        if self.read_at.is_some_and(|at| at.elapsed() < every) {
             return;
         }
         self.file = computers::read(state_dir);
@@ -132,6 +154,50 @@ impl ComputersView {
                 self.read_at = None;
             }
             Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
+        }
+    }
+
+    /// The pairing under way, with Cancel, until the server says how it
+    /// went (UX 1).
+    fn pairing_progress(&mut self, ui: &mut egui::Ui, state_dir: &Path) {
+        let Some(pairing) = &self.pairing else {
+            return;
+        };
+        let answered = self
+            .file
+            .last_pairing
+            .as_ref()
+            .is_some_and(|last| last.request == pairing.request);
+        if answered {
+            self.pairing = None;
+            return;
+        }
+        if pairing.since.elapsed() > PAIRING_WAIT {
+            self.notice = crate::notice::Notice::error(format!(
+                "The server didn't say how pairing with {} went. Check it's running, then pair again.",
+                pairing.name
+            ));
+            self.pairing = None;
+            return;
+        }
+        let mut cancel = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.spinner();
+            ui.label(format!("Pairing with {}…", pairing.name));
+            cancel = ui.button("Cancel").clicked();
+        });
+        ui.ctx().request_repaint_after(PAIRING_REFRESH);
+        if cancel {
+            let name = pairing.name.clone();
+            self.notice = match computers::withdraw(state_dir, &pairing.request) {
+                Ok(true) => crate::notice::Notice::done(format!("Pairing with {name} cancelled.")),
+                // Taken already: it goes on, and its outcome shows here.
+                Ok(false) => crate::notice::Notice::done(format!(
+                    "Stopped waiting: the server had begun pairing with {name}, and says how it went here."
+                )),
+                Err(e) => crate::notice::Notice::error(format!("Not cancelled: {e}")),
+            };
+            self.pairing = None;
         }
     }
 
@@ -254,7 +320,7 @@ impl ComputersView {
             }
         }
         let both = asks_both && self.consent.is_some();
-        let ready = parsed.is_some() && server_running;
+        let ready = parsed.is_some() && server_running && self.pairing.is_none();
         let pair = match (asks, both) {
             (_, true) => "Pair both ways",
             (true, false) => "Pair one way",
@@ -271,19 +337,36 @@ impl ComputersView {
         {
             self.link.clear();
             self.consent = None;
-            self.ask(
+            let name = parsed
+                .as_ref()
+                .map_or_else(String::new, |l| link_name(&l.name));
+            let asked = computers::request(
                 state_dir,
                 ComputerAsk::Pair {
                     link: pasted,
                     mine: both,
                 },
                 now_unix,
-                "Asked the other computer to pair.",
             );
+            match asked {
+                // UX 1: its progress shows until the outcome comes.
+                Ok(request) => {
+                    self.pairing = Some(Pairing {
+                        request: request.id,
+                        name,
+                        since: Instant::now(),
+                    });
+                    self.read_at = None;
+                }
+                Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
+            }
         }
+        self.pairing_progress(ui, state_dir);
         // UX 1: why Pair is off, beside it (a link that is not one, or is
         // this computer's own, is said under the box).
-        if !server_running {
+        if self.pairing.is_some() {
+            // Said by its progress.
+        } else if !server_running {
             crate::widgets::why_off_ask(
                 ui,
                 PAIR_NEEDS_SERVER,
@@ -293,14 +376,10 @@ impl ComputersView {
         } else if empty {
             crate::widgets::why_off(ui, PASTE_FIRST, None);
         }
-        if let Some(last) = &self.file.last_pairing {
-            let failed = last.outcome.starts_with("failed");
-            let text = format!("Last pairing, with {}: {}", last.name, last.outcome);
-            ui.label(if failed {
-                RichText::new(text).color(crate::theme::bad(ui))
-            } else {
-                RichText::new(text).weak()
-            });
+        if self.pairing.is_none()
+            && let Some(last) = &self.file.last_pairing
+        {
+            show_outcome(ui, last);
         }
         if self.file.computers.is_empty() {
             ui.label(RichText::new("No other computer paired yet.").weak());
@@ -390,6 +469,126 @@ impl ComputersView {
                 ),
             );
         }
+    }
+}
+
+/// A pairing's outcome in words (UX 1): what happened, its cause and fix,
+/// and whether Run diagnostics may find more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    pub ok: bool,
+    pub said: String,
+    pub diagnostics: bool,
+}
+
+/// What the timeout of a pairing says: the commonest failure.
+pub const NO_ANSWER: &str = "The other computer didn't answer. Check both are on the same network and Pocketdesk is running there.";
+
+/// The server's `outcome` of a pairing with `name` (`paired`, or `failed:
+/// <why>` in the server's words) as the owner reads it.
+pub fn outcome_words(outcome: &str, name: &str) -> Outcome {
+    let failed = |said: String, diagnostics: bool| Outcome {
+        ok: false,
+        said,
+        diagnostics,
+    };
+    if outcome == "paired" {
+        return Outcome {
+            ok: true,
+            said: format!("Paired with {name}."),
+            diagnostics: false,
+        };
+    }
+    let why = outcome
+        .strip_prefix("failed: ")
+        .unwrap_or(outcome)
+        .to_lowercase();
+    let has = |words: &str| why.contains(words);
+    if has("own pairing link") {
+        failed(
+            "That was this computer's own link: paste the one copied on the other computer."
+                .to_string(),
+            false,
+        )
+    } else if has("listed here has that id with another certificate") {
+        failed(
+            format!(
+                "{name} is listed here with another certificate: unpair it first, then pair again."
+            ),
+            false,
+        )
+    } else if has("is not the one in the link") {
+        failed(
+            format!(
+                "A different computer answered at {name}'s address: its certificate isn't the one in the link. Copy a fresh link on {name}."
+            ),
+            true,
+        )
+    } else if has("refused the code") {
+        failed(
+            format!(
+                "{name} didn't take the code: it was wrong, used already or expired. Copy a fresh link on {name} and paste it again."
+            ),
+            false,
+        )
+    } else if has("expired") {
+        failed(
+            format!("The link's code has expired. Copy a fresh link on {name} and paste it again."),
+            false,
+        )
+    } else if has("did not answer the code") {
+        failed(
+            format!(
+                "{name} answered, but not the code in time. Pair again; if it happens again, run diagnostics."
+            ),
+            true,
+        )
+    } else if has("refused") {
+        failed(
+            format!(
+                "{name} turned the connection away: Pocketdesk may not be running there, or a firewall blocks it."
+            ),
+            true,
+        )
+    } else if has("timeout") || has("timed out") || has("did not answer") {
+        failed(NO_ANSWER.to_string(), true)
+    } else if has("not a pairing link") || has("names no address") {
+        failed(
+            format!("The link wasn't a whole one. Copy it again on {name}."),
+            false,
+        )
+    } else {
+        failed(format!("Pairing with {name} didn't work."), true)
+    }
+}
+
+/// The last pairing's outcome in words (UX 1), with its next step: for a
+/// failure the server's own words as details, and Run diagnostics where
+/// it may find more.
+fn show_outcome(ui: &mut egui::Ui, last: &computers::PairingOutcome) {
+    let words = outcome_words(&last.outcome, &link_name(&last.name));
+    ui.horizontal_wrapped(|ui| {
+        if words.ok {
+            ui.label(RichText::new(&words.said).color(crate::theme::good(ui)));
+            if ui.button("Set up keyboard and mouse").clicked() {
+                crate::widgets::ask(
+                    ui.ctx(),
+                    crate::widgets::Ask::Go(crate::app::Tab::KeyboardMouse),
+                );
+            }
+        } else {
+            ui.label(RichText::new(&words.said).color(crate::theme::bad(ui)));
+            if words.diagnostics && ui.button("Run diagnostics").clicked() {
+                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::RunDiagnostics);
+            }
+        }
+    });
+    if !words.ok {
+        ui.label(
+            RichText::new(format!("Details: {}", last.outcome))
+                .small()
+                .color(crate::theme::muted(ui)),
+        );
     }
 }
 
@@ -800,6 +999,126 @@ mod tests {
         let stopped = harness.query_by_label(LIST_NEEDS_SERVER).is_some();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(said && stopped);
+    }
+
+    /// UX 1: each known failure reads as its cause and its fix, the
+    /// network ones with Run diagnostics.
+    #[test]
+    fn a_pairings_outcome_reads_as_cause_and_fix() {
+        let said = |raw: &str| outcome_words(raw, "Test Tower");
+        let paired = said("paired");
+        assert!(paired.ok && paired.said == "Paired with Test Tower.");
+        let timeout =
+            said("failed: it did not answer (192.0.2.70: timeout after 8000ms during connect)");
+        assert_eq!(timeout.said, NO_ANSWER);
+        assert!(!timeout.ok && timeout.diagnostics);
+        let refused = said(
+            "failed: it did not answer (192.0.2.70: connection to 192.0.2.70:1716 failed: No connection could be made because the target machine actively refused it. (os error 10061))",
+        );
+        assert!(refused.said.contains("turned the connection away") && refused.diagnostics);
+        let code = said("failed: it refused the code (a wrong or used PIN)");
+        assert!(code.said.contains("didn't take the code") && !code.diagnostics);
+        let expired = said("failed: the code expired");
+        assert!(expired.said.contains("expired"));
+        let cert = said(
+            "failed: the computer at 192.0.2.70 is not the one in the link (another certificate)",
+        );
+        assert!(cert.said.contains("certificate isn't the one in the link") && cert.diagnostics);
+        let own = said("failed: that is this computer's own pairing link");
+        assert!(own.said.contains("this computer's own link"));
+        let other = said("failed: something new");
+        assert!(other.said.contains("didn't work") && other.diagnostics);
+    }
+
+    /// The page as [`page`] makes it, with what the app was asked.
+    fn pressed(
+        harness: &egui_kittest::Harness<'static, ComputersView>,
+    ) -> Option<crate::widgets::Ask> {
+        crate::widgets::take_ask(&harness.ctx)
+    }
+
+    /// UX 1: Pair shows its progress until the server says how it went,
+    /// then the cause and fix of a failure, with the raw words as details.
+    #[test]
+    fn pairing_shows_its_progress_then_its_outcome_in_words() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("progress");
+        let mut harness = page(&dir, true, &mine_link());
+        harness.get_by_label("Pair one way").click();
+        harness.run_steps(2);
+        let waiting = harness.query_by_label("Pairing with Test Tower…").is_some()
+            && harness.query_by_label("Cancel").is_some();
+        // The server takes the request and answers it.
+        let now = pocketdesk_core::local::pin::now_unix();
+        let taken = computers::take_all(&dir, now);
+        let raw = "failed: it did not answer (192.0.2.70: timeout after 8000ms during connect)";
+        computers::update(&dir, |file| {
+            file.last_pairing = Some(computers::PairingOutcome {
+                name: "Test Tower".to_string(),
+                outcome: raw.to_string(),
+                unix: now,
+                request: taken[0].id.clone(),
+                device_id: String::new(),
+            });
+        })
+        .unwrap();
+        std::thread::sleep(PAIRING_REFRESH + Duration::from_millis(100));
+        harness.run_steps(2);
+        let done = harness.query_by_label("Pairing with Test Tower…").is_none();
+        let words = harness.query_by_label(NO_ANSWER).is_some();
+        let details = harness.query_by_label(&format!("Details: {raw}")).is_some();
+        harness.get_by_label("Run diagnostics").click();
+        harness.run_steps(2);
+        let asked = pressed(&harness);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(waiting && done && words && details);
+        assert_eq!(asked, Some(crate::widgets::Ask::RunDiagnostics));
+    }
+
+    /// UX 1: Cancel takes back a request the server has not taken.
+    #[test]
+    fn cancel_takes_the_pairing_back() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("cancel");
+        let mut harness = page(&dir, true, &mine_link());
+        harness.get_by_label("Pair one way").click();
+        harness.run_steps(2);
+        harness.get_by_label("Cancel").click();
+        harness.run_steps(2);
+        let gone = harness.query_by_label("Pairing with Test Tower…").is_none();
+        let now = pocketdesk_core::local::pin::now_unix();
+        let left = computers::take_all(&dir, now);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(gone);
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// UX 1: a pairing that worked says so, with the next step.
+    #[test]
+    fn a_pairing_that_worked_offers_the_next_step() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("worked");
+        computers::update(&dir, |file| {
+            file.last_pairing = Some(computers::PairingOutcome {
+                name: "Test Tower".to_string(),
+                outcome: "paired".to_string(),
+                unix: 0,
+                request: String::new(),
+                device_id: String::new(),
+            });
+        })
+        .unwrap();
+        let mut harness = page(&dir, true, "");
+        let said = harness.query_by_label("Paired with Test Tower.").is_some();
+        harness.get_by_label("Set up keyboard and mouse").click();
+        harness.run_steps(2);
+        let asked = pressed(&harness);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(said);
+        assert_eq!(
+            asked,
+            Some(crate::widgets::Ask::Go(crate::app::Tab::KeyboardMouse))
+        );
     }
 
     #[test]

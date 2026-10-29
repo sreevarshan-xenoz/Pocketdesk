@@ -525,6 +525,15 @@ impl PocketdeskApp {
         use crate::widgets::Ask;
         match ask {
             Ask::StartServer => self.run_job("Starting the server", crate::restart::start),
+            Ask::Go(tab) => {
+                self.switch_to(tab);
+                self.chosen = tab;
+            }
+            Ask::RunDiagnostics => {
+                self.diagnostics.run_now();
+                self.switch_to(Tab::Diagnostics);
+                self.chosen = Tab::Diagnostics;
+            }
             Ask::Settings(words) => {
                 self.switch_to(Tab::Settings);
                 self.chosen = Tab::Settings;

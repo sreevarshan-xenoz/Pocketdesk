@@ -11,6 +11,10 @@ pub enum Ask {
     StartServer,
     /// Open Settings, found by these words.
     Settings(&'static str),
+    /// Open this page.
+    Go(crate::app::Tab),
+    /// Open Diagnostics and run its checks.
+    RunDiagnostics,
 }
 
 fn ask_id() -> egui::Id {
