@@ -196,6 +196,12 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                         }
                     }
                     Some(Ask::Release(activation, at)) => {
+                        tracing::debug!(
+                            ?activation,
+                            x = at.0,
+                            y = at.1,
+                            "Shared input: input capture released, the cursor put at this position"
+                        );
                         // The glue lets go of it again if input keeps coming.
                         match calls.release(activation, at).await {
                             Ok(()) => releasing.worked(),
@@ -209,12 +215,22 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                 signal = signals.next() => match signal {
                     None => return Err("the input-capture signals ended".to_string()),
                     Some(Signal::Activated { activation, barrier, at }) => {
+                        tracing::debug!(
+                            ?activation,
+                            ?barrier,
+                            ?at,
+                            "Shared input: input capture activated at an edge"
+                        );
                         say(events, Portal::Activated { activation, barrier, at })?;
                     }
                     Some(Signal::Deactivated { activation }) => {
+                        tracing::debug!(?activation, "Shared input: the desktop deactivated input capture");
                         say(events, Portal::Deactivated { activation })?;
                     }
-                    Some(Signal::Disabled) => say(events, Portal::Disabled)?,
+                    Some(Signal::Disabled) => {
+                        tracing::debug!("Shared input: the desktop disabled input capture");
+                        say(events, Portal::Disabled)?;
+                    }
                     // Said to the glue, which sets the new zone set's
                     // barriers once nothing is captured (setting them here
                     // would end a capture behind its back).
@@ -408,6 +424,49 @@ pub(crate) mod tests {
                 Portal::Motion { dx: 1.0, dy: 0.0 },
             ]
         );
+    }
+
+    /// BK8 live: an activation (its barrier and where), the position a
+    /// release sends, and the desktop's ending of a capture are logged at
+    /// debug, so where the cursor crossed and came home can be checked; a
+    /// key never is.
+    #[tokio::test]
+    async fn activations_releases_and_ends_are_logged_and_keys_never() {
+        let calls = FakeCalls::default();
+        let (caught, guard) = super::super::caught_log::catch();
+        let (ended, _) = run(
+            &calls,
+            vec![
+                Ok(Ask::Arm(vec![barrier(1)])),
+                Err(Signal::Activated {
+                    activation: Some(4),
+                    barrier: Some(1),
+                    at: Some((1600.0, 512.0)),
+                }),
+                Err(Signal::Input(vec![Portal::Key {
+                    code: 47,
+                    down: true,
+                }])),
+                Ok(Ask::Release(Some(4), (1595, 513))),
+                Err(Signal::Deactivated {
+                    activation: Some(4),
+                }),
+                Err(Signal::Disabled),
+            ],
+            None,
+        )
+        .await;
+        drop(guard);
+        assert_eq!(ended, Ok(()));
+        let log = caught.text();
+        assert!(
+            log.contains("barrier=Some(1)") && log.contains("512"),
+            "{log}"
+        );
+        assert!(log.contains("x=1595") && log.contains("y=513"), "{log}");
+        assert!(log.contains("deactivated"), "{log}");
+        assert!(log.contains("disabled"), "{log}");
+        assert!(!log.contains("47") && !log.contains("code"), "{log}");
     }
 
     #[tokio::test]

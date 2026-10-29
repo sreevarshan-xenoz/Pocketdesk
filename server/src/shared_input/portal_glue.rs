@@ -487,6 +487,13 @@ impl<B: Backend> PortalGlue<B> {
             return out;
         }
         out.extend(self.tell(driver, push.clone()));
+        if let Some(to) = driver.away_on() {
+            tracing::debug!(
+                to,
+                ?barrier,
+                "Shared input: across the edge onto another computer"
+            );
+        }
         if driver.away_on().is_none() {
             // It led nowhere (that computer stopped answering, or a game):
             // the pointer back where it was.
@@ -516,6 +523,12 @@ impl<B: Backend> PortalGlue<B> {
 
     /// Let go of the capture, the cursor at `at`.
     fn let_go(&mut self, at: (i32, i32)) {
+        tracing::debug!(
+            x = at.0,
+            y = at.1,
+            captured = self.captured.is_some(),
+            "Shared input: the cursor comes home at this position"
+        );
         self.home = Some(at);
         if let Some(activation) = self.captured.take() {
             self.backend.release(activation, at);

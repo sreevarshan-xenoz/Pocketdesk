@@ -96,7 +96,15 @@ impl Inject for InputInjector {
 
 fn inject(injector: &mut InputInjector, packet: InputPacket) {
     if let Err(e) = injector.handle_input_packet(&packet) {
-        tracing::debug!("Shared input: {packet:?} was not injected: {e:#}");
+        // What it was, never which key: no keystroke goes in a log.
+        let what = match packet {
+            InputPacket::KeyEvent { .. } => "a key",
+            InputPacket::MouseClick { .. } => "a button",
+            InputPacket::MouseScroll { .. } => "a wheel turn",
+            InputPacket::MouseMoveAbs { .. } => "a move",
+            _ => "an input",
+        };
+        tracing::debug!("Shared input: {what} was not injected: {e:#}");
     }
 }
 
@@ -268,6 +276,12 @@ impl Receiver {
             self.inputs = 0;
             // An ask is for one visit: it asks again after it arrives.
             self.sound_wanted = false;
+            tracing::debug!(
+                from,
+                x,
+                y,
+                "Shared input: another computer's cursor arrived here at this position (0..=65535)"
+            );
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -286,7 +300,10 @@ impl Receiver {
         }
         let n = self.inputs;
         match msg {
-            Msg::Leave => self.stop(),
+            Msg::Leave => {
+                tracing::debug!(from, "Shared input: the driving computer's cursor left");
+                self.stop();
+            }
             Msg::Move { seq, x, y } => {
                 // Newer by the count, which may wrap.
                 let newer = self
@@ -312,7 +329,13 @@ impl Receiver {
                 self.inject.wheel(dx, dy);
                 self.time(false, n, arrived_us);
             }
-            Msg::ReleaseAll => self.release_held(),
+            Msg::ReleaseAll => {
+                tracing::debug!(
+                    from,
+                    "Shared input: the driving computer let go of everything held"
+                );
+                self.release_held();
+            }
             Msg::SoundWanted { on } => self.sound_wanted = on,
             _ => {}
         }
@@ -1786,6 +1809,25 @@ mod tests {
                 .all(|call| matches!(call, Call::Move(0, 0))),
             "only the arrivals moved"
         );
+    }
+
+    /// BK8 live: where another computer's cursor arrived, its leave and its
+    /// letting go are logged at debug, so "it came home where it crossed"
+    /// can be checked from the log; a key never is (its code or anything).
+    #[test]
+    fn arrivals_leaves_and_letting_go_are_logged_and_keys_never() {
+        let (mut r, _fake) = receiver();
+        let (caught, guard) = super::super::caught_log::catch();
+        r.handle("pc", Msg::Enter { x: 1234, y: 4321 }, true);
+        r.handle("pc", key(47, true), true);
+        r.handle("pc", Msg::ReleaseAll, true);
+        r.handle("pc", Msg::Leave, true);
+        drop(guard);
+        let log = caught.text();
+        assert!(log.contains("x=1234") && log.contains("y=4321"), "{log}");
+        assert!(log.contains("let go of everything"), "{log}");
+        assert!(log.contains("cursor left"), "{log}");
+        assert!(!log.contains("47") && !log.contains("code"), "{log}");
     }
 
     /// BK8 live: a computer that only takes input never says hello, so its

@@ -56,3 +56,44 @@ pub mod share_test;
 pub mod sound;
 pub mod status;
 pub mod wire;
+
+/// What a test logs, caught as text (no times, no colours), from debug up,
+/// on this thread while the guard lives.
+#[cfg(test)]
+pub(crate) mod caught_log {
+    use std::io;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    pub struct Caught(Arc<Mutex<Vec<u8>>>);
+
+    impl Caught {
+        pub fn text(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    impl io::Write for Caught {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Catch this thread's logs until the guard drops.
+    pub fn catch() -> (Caught, tracing::subscriber::DefaultGuard) {
+        let caught = Caught::default();
+        let writer = caught.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        (caught, tracing::subscriber::set_default(subscriber))
+    }
+}
