@@ -3153,7 +3153,7 @@ Built 2026-10-30. The bar of a computer's screen window has **Send keys** while 
 - [ ] In full screen with the grab on, press and let go of Ctrl+Alt+Shift: Win and Alt+Tab are Windows' again; leave full screen and come back, and they go to the laptop again. Ctrl+Alt+Shift+S still switches the stats without giving the keys back. (where: second computer)
 - [ ] In full screen with Win held through the window, Alt+Tab away by a mouse click elsewhere (a second monitor) or a toast: nothing stays held on the laptop, and Windows' own Win key works at once. (where: second computer)
 - [ ] With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. (where: second computer)
-- [ ] On a Windows test machine (never the owner's box), run `cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored`: the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
+- [ ] On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
 ## Recording results
 

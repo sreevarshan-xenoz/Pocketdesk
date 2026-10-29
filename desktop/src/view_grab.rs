@@ -440,13 +440,17 @@ fn own_foreground() -> Option<isize> {
 /// front). The watchdog on that thread takes it out
 /// when the window's beat stops for [`STALL`].
 pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> {
+    install_for(ctx, viewport, own_foreground()?)
+}
+
+/// Put the hook in for the window `window` (its HWND, as a number).
+fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -> Option<Hook> {
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::WindowsAndMessaging::{
         GetMessageW, KillTimer, MSG, PM_NOREMOVE, PeekMessageW, SetTimer, SetWindowsHookExW,
         UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_TIMER,
     };
-    let window = own_foreground()?;
     let (heard_tx, heard) = mpsc::channel();
     let (wake_tx, wake) = mpsc::channel::<()>();
     // The waker: the only thread here that calls into egui. It ends when
@@ -986,13 +990,23 @@ mod tests {
         assert_eq!(refused_here(), before + 1);
     }
 
-    /// Ignored: puts the real hook in on this computer. Never run here (the
-    /// owner's rule); an owed desk check on a Windows test machine.
+    /// The variable that must say this is a test machine before the real
+    /// hook goes in (review M9): `--ignored` alone never puts it in.
+    const HOOK_TEST_MACHINE: &str = "POCKETDESK_HOOK_TEST_MACHINE";
+
+    /// Ignored, and with `POCKETDESK_HOOK_TEST_MACHINE=1` only: puts the
+    /// real hook in on this computer, for no window (it takes no key).
+    /// Never run on the owner's box; an owed desk check on a Windows test
+    /// machine.
     #[test]
-    #[ignore = "installs a real keyboard hook: run only on a test machine (owed device check)"]
+    #[ignore = "installs a real keyboard hook: run only on a test machine, with POCKETDESK_HOOK_TEST_MACHINE=1 (owed device check)"]
     fn the_real_hook_goes_in_and_comes_out() {
+        if std::env::var(HOOK_TEST_MACHINE).as_deref() != Ok("1") {
+            eprintln!("skipped: set {HOOK_TEST_MACHINE}=1 on a test machine");
+            return;
+        }
         let ctx = egui::Context::default();
-        let hook = install(&ctx, egui::ViewportId::ROOT).expect("the hook goes in");
+        let hook = install_for(&ctx, egui::ViewportId::ROOT, -1).expect("the hook goes in");
         assert!(hook.is_alive());
         // No beat: the watchdog takes it out within a second and a beat.
         std::thread::sleep(STALL + BEAT_EVERY * 3);

@@ -514,7 +514,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **230. Keys that reach the other computer (PC4)**
 
-- On a Windows test machine (never the owner's box), run `cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored`: the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
+- On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
 ## A phone with a SIM
 
