@@ -15,7 +15,9 @@
 //! - a file dropped on the window (queued as the window queues it) lands in
 //!   B's Downloads whole, its SHA-256 the same;
 //! - with Files off for A on B, the send is refused at once, by name;
-//! - with `computer_view_clipboard` off on B, a focus moves nothing.
+//! - with `computer_view_clipboard` off on B, a focus moves nothing;
+//! - with Clipboard off for A on B, nothing moves either way;
+//! - view-only (Control off for A on B), nothing moves.
 //!
 //! Ignored: it starts two real servers with a real encoder, which reach
 //! iroh's relays. Run it with
@@ -301,6 +303,58 @@ fn the_clipboard_and_files_follow_the_window() {
     say_focus(&mut window, false);
     stays(&a_state, "pc3 not for B", 4, "nor answers with it off");
     println!("setting off on B: nothing moved");
+
+    // PR #554 review M6: Clipboard off for A on B, the setting on again:
+    // B neither takes A's copy nor answers with its own.
+    set_config(&b_config, "computer_view_clipboard", true);
+    let mut trust = TrustStore::read(&trust_path).unwrap();
+    let mut permissions = trust.permissions(&a_id);
+    permissions.set(Capability::Clipboard, false);
+    trust.set_permissions(&a_id, permissions).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    std::fs::write(clipboard(&a_state), "pc3 not for B either").unwrap();
+    std::fs::write(clipboard(&b_state), "pc3 B with Clipboard off").unwrap();
+    say_focus(&mut window, true);
+    stays(
+        &b_state,
+        "pc3 B with Clipboard off",
+        4,
+        "B takes nothing with Clipboard off",
+    );
+    say_focus(&mut window, false);
+    stays(
+        &a_state,
+        "pc3 not for B either",
+        4,
+        "nor answers with Clipboard off",
+    );
+    println!("Clipboard off for A on B: nothing moved");
+
+    // View-only: Control off for A on B (Clipboard on again). B ends the
+    // session that took input; A dials again and is shown view-only, and
+    // its focus moves nothing.
+    let mut trust = TrustStore::read(&trust_path).unwrap();
+    let mut permissions = trust.permissions(&a_id);
+    permissions.set(Capability::Clipboard, true);
+    permissions.set(Capability::Input, false);
+    trust.set_permissions(&a_id, permissions).unwrap();
+    wait_for(90, "the view again, view-only", || {
+        let heard = heard.lock().unwrap();
+        assert_eq!(heard.ended, None);
+        (heard.showing && heard.control == Some(false)).then_some(())
+    });
+    std::fs::write(clipboard(&a_state), "pc3 not for a view").unwrap();
+    std::fs::write(clipboard(&b_state), "pc3 B viewed only").unwrap();
+    say_focus(&mut window, true);
+    stays(
+        &b_state,
+        "pc3 B viewed only",
+        4,
+        "a view-only window sends nothing",
+    );
+    say_focus(&mut window, false);
+    stays(&a_state, "pc3 not for a view", 4, "nor asks back");
+    println!("view-only: nothing moved");
 
     let frames = heard.lock().unwrap().frames;
     println!("{frames} frames came while the window followed");
