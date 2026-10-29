@@ -506,14 +506,28 @@ impl StreamingServer {
         // the defaults.
         let permissions = match &self.session_gate {
             None => DevicePermissions::default(),
-            Some(gate) => match gate(SessionClaim {
-                device_id: device_id.clone(),
-                peer: connection.remote_address(),
-                peer_key: connection.peer_key(),
-                iroh_id: claim.iroh_id.clone(),
-            })
-            .await
-            {
+            Some(gate) => match {
+                let judged = gate(SessionClaim {
+                    device_id: device_id.clone(),
+                    peer: connection.remote_address(),
+                    peer_key: connection.peer_key(),
+                    iroh_id: claim.iroh_id.clone(),
+                });
+                // A device that goes while its owner is asked takes its
+                // prompt with it (PR #551 review M2): a dropped ask is no
+                // longer listed, so a reconnect's new prompt is not a
+                // second one beside it.
+                tokio::select! {
+                    judged = judged => judged,
+                    () = super::connection::closed(connection.as_ref()) => {
+                        info!(
+                            device_id = device_id.as_deref().unwrap_or("<none announced>"),
+                            "Streaming session gone while it was held"
+                        );
+                        return Err(anyhow::anyhow!("the device went while its session was held"));
+                    }
+                }
+            } {
                 Some(permissions) => permissions,
                 None => {
                     warn!(
