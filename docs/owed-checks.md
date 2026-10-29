@@ -463,7 +463,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Copy an image on Linux (a picture from a browser), come back to Windows, paste into Paint: the picture is there. Cross again with nothing new copied: the log shows no second send of it. (where: owner)
 - An image from a program on "Never send copies from these programs", or one KeePassXC marks private, does not follow; with "Files over the internet" off on either side, no image follows (text still does). (where: owner)
 - A large image (a full-screen screenshot of a 4K screen) does not hold up the pointer as it crosses; push the pointer across and straight back before it lands: the image does not land late on the computer left, and nothing older comes back. (where: owner)
-- The first key after a minute without touching either computer, the pointer resting on the Linux laptop, arrives at once: with "Keep the connection quick while sharing" on (BK10), the laptop sends Windows a byte every 50 ms while it is driven, so its Wi-Fi never dozes; Wi-Fi power saving itself is left on (§221). (where: owner)
+- The first key after a minute without touching either computer, the pointer resting on the Linux laptop, arrives at once: with "Keep the connection quick while sharing" on (BK10), the laptop sends Windows a byte every 50 ms while it is driven and keys or moves come, so its Wi-Fi does not doze, and after ten seconds without input the driver's own pings five times a second mostly keep it awake; Wi-Fi power saving itself is left on (§221). (where: owner)
 - The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
 
 **216. Files dragged across the edge (BK4)**
@@ -505,7 +505,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **221. No lag while sharing (BK10)**
 
-- At the desk, Windows driving the Linux laptop on Wi-Fi: typing in a terminal on the laptop keeps up with the keys, the first key after a minute's pause with the pointer resting there too; with the setting off, the same by comparison. (where: owner)
+- At the desk, Windows driving the Linux laptop on Wi-Fi: typing in a terminal on the laptop keeps up with the keys; after a minute's pause with the pointer resting there (the byte stopped after ten seconds), the first key comes within a tenth of a second and the rest at once; with the setting off, the same by comparison. (where: owner)
 - Windows' timer given back: with no other program holding a finer one (close browsers playing video), a timer tool such as ClockRes reads 1 ms while the pointer is on the laptop, and 15.6 ms within a second of it coming home; with the setting off it stays at 15.6 ms throughout. (where: owner)
 
 ## A phone with a SIM
