@@ -551,14 +551,22 @@ fn untrusted_mine(file: &computers::ComputersFile, trusted: impl Fn(&str) -> boo
 /// Forget each computer paired both ways that the Devices page unpaired
 /// ([`untrusted_mine`]); a trust store that does not read forgets none.
 fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<String, Link>) {
+    if let Ok(trust) = crate::state::trust_store_path() {
+        forget_untrusted_mine_in(dir, &trust, certs, links);
+    }
+}
+
+fn forget_untrusted_mine_in(
+    dir: &Path,
+    trust: &Path,
+    certs: &CertManager,
+    links: &mut HashMap<String, Link>,
+) {
     let file = computers::read(dir);
     if !file.computers.iter().any(|c| c.mine) {
         return;
     }
-    let Some(store) = crate::state::trust_store_path()
-        .ok()
-        .and_then(|path| pocketdesk_core::protocol::kdeconnect::TrustStore::read(path).ok())
-    else {
+    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
         return;
     };
     for device_id in untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id)) {
@@ -569,7 +577,7 @@ fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<St
             device_id,
             "A computer unpaired on Devices is forgotten here too"
         );
-        forget(dir, certs, &device_id);
+        forget_in(dir, Some(trust), certs, &device_id);
     }
 }
 
@@ -1091,6 +1099,12 @@ fn forget_as_listed(dir: &Path, certs: &CertManager, device_id: &str, paired_uni
 }
 
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
+    let trust = crate::state::trust_store_path().ok();
+    forget_in(dir, trust.as_deref(), certs, device_id);
+}
+
+/// [`forget`] with the trust store at `trust`.
+fn forget_in(dir: &Path, trust: Option<&Path>, certs: &CertManager, device_id: &str) {
     let mut gone = None;
     // Its pairing's line goes with it (BD3).
     let saved = computers::update(dir, |file| gone = file.remove(device_id));
@@ -1104,8 +1118,10 @@ fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
     drop_pins(certs, &computer, &[]);
     // Paired both ways (PC1), it is trusted here too: unpaired, it no
     // longer sees or controls this computer either.
-    if computer.mine {
-        untrust_back(dir, device_id);
+    if computer.mine
+        && let Some(trust) = trust
+    {
+        untrust_back_in(dir, trust, device_id);
     }
     tracing::info!(device_id, "Forgot another computer");
 }
@@ -2215,6 +2231,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!stale && kept == 1, "listed again since: stays");
         assert!(current && left == 0, "as it was listed: forgotten");
+    }
+
+    /// PC1 review M7: the run loop's look at the trust store forgets a
+    /// computer paired both ways that Devices unpaired (its link stopped,
+    /// its keys gone), and leaves one still trusted; Other computers'
+    /// Unpair of one paired both ways takes its trust too.
+    #[tokio::test]
+    async fn devices_unpair_and_other_computers_unpair_take_both_halves() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        let dir = temp("devices-unpair");
+        let trust = dir.join("trusted_devices.json");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("kept")).unwrap();
+        device_keys::register(&dir, "unpaired", Slot::Iroh, &"e".repeat(64)).unwrap();
+        computers::update(&dir, |file| {
+            for id in ["kept", "unpaired"] {
+                file.computers.push(facts().into_peer(id, "", 1));
+            }
+        })
+        .unwrap();
+        let mut links: HashMap<String, Link> = HashMap::new();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let watch = task.abort_handle();
+        links.insert("unpaired".to_string(), Link { task, dials: true });
+        forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
+        let listed: Vec<String> = computers::read(&dir)
+            .computers
+            .into_iter()
+            .map(|c| c.device_id)
+            .collect();
+        let keys_left = device_keys::read(&dir).unwrap().contains_key("unpaired");
+        tokio::task::yield_now().await;
+        let stopped = watch.is_finished();
+        // Unpair under Other computers, of one still trusted.
+        forget_in(&dir, Some(&trust), &certs, "kept");
+        let still = TrustStore::read(&trust).unwrap().is_trusted("kept");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(listed, ["kept"]);
+        assert!(!keys_left, "its keys went with it");
+        assert!(
+            stopped && !links.contains_key("unpaired"),
+            "its link stopped"
+        );
+        assert!(!still, "Other computers' Unpair untrusts it too");
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
