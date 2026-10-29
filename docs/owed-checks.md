@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-947 open items.
+951 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 150 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 152 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 45 |
+| A second computer | 46 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -463,7 +463,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Copy an image on Linux (a picture from a browser), come back to Windows, paste into Paint: the picture is there. Cross again with nothing new copied: the log shows no second send of it. (where: owner)
 - An image from a program on "Never send copies from these programs", or one KeePassXC marks private, does not follow; with "Files over the internet" off on either side, no image follows (text still does). (where: owner)
 - A large image (a full-screen screenshot of a 4K screen) does not hold up the pointer as it crosses; push the pointer across and straight back before it lands: the image does not land late on the computer left, and nothing older comes back. (where: owner)
-- The first key after a minute without touching either laptop arrives at once (Wi-Fi power saving held off while sharing is on). (where: owner)
+- The first key after a minute without touching either computer, the pointer resting on the Linux laptop, arrives at once: with "Keep the connection quick while sharing" on (BK10), the laptop sends Windows a byte every 50 ms while it is driven, so its Wi-Fi never dozes; Wi-Fi power saving itself is left on (§221). (where: owner)
 - The arrangement page: drag the laptop to the left of the Windows screens, then below them; the pointer crosses where they now meet, within about two seconds; "Put them in a row" puts it back to the right. (where: owner)
 
 **216. Files dragged across the edge (BK4)**
@@ -502,6 +502,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Linux's sound is the music itself, not noise: the format PipeWire is now offered (16-bit stereo at 48 kHz) is what it sends, on a sink that runs in float (most do). (where: owner)
 - With PipeWire stopped on Linux (`systemctl --user stop pipewire`), push onto it: "No sound from <laptop>" flashes on Windows once, and the keyboard and mouse work as before. (where: owner)
 - The setting turned off mid-visit: the sound stops within about two seconds (the driver reads its settings every 2 s); turned on again mid-visit, it starts within about two seconds. (where: owner)
+
+**221. No lag while sharing (BK10)**
+
+- At the desk, Windows driving the Linux laptop on Wi-Fi: typing in a terminal on the laptop keeps up with the keys, the first key after a minute's pause with the pointer resting there too; with the setting off, the same by comparison. (where: owner)
+- Windows' timer given back: with no other program holding a finer one (close browsers playing video), a timer tool such as ClockRes reads 1 ms while the pointer is on the laptop, and 15.6 ms within a second of it coming home; with the setting off it stays at 15.6 ms throughout. (where: owner)
 
 ## A phone with a SIM
 
@@ -871,6 +876,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The safety nets: Wi-Fi turned off on Windows while driving it brings the keyboard and mouse home within about a second; locking the Linux laptop (its lock screen taking them back) brings them home with nothing held on Windows; plugging in or unplugging a monitor on Linux sets the edges again within a few seconds, and doing it while the pointer is on Windows keeps it there until it comes home (then the new edges are set). (where: second computer)
 - A fractional-scale wall: with a screen scaled to 1.25 on Hyprland, pushing at the edge either crosses normally or, if the portal flips (bug 435), turns that edge into a wall at the third flip, flashing why once and the page saying "Fractional scaling stops crossing"; back to scale 1, the edge crosses again. (where: second computer)
 - A game full screen: with "Stay on this computer while a game runs" on, a full-screen window in front on Hyprland (a game, or mpv with f) keeps the pointer on Linux at the edge; leaving full screen, the edge crosses again within a second. (where: second computer)
+
+**221. No lag while sharing (BK10)**
+
+- The Linux laptop driving Windows (BK8) with the setting on: `share-test <windows>` from the laptop, the network's one way p50 under 5 ms, and a byte every 50 ms from the laptop to Windows while the pointer is there (a capture on Windows' side, counts only). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -2393,3 +2402,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
 
 - The Keyboard and mouse page's links and permission line, both ways: "Won't take input: sharing off there" when sharing is off on the laptop, and "may drive" switched from the computer that pasted the link. (where: by hand)
+
+**221. No lag while sharing (BK10)**
+
+- The setting in the desktop app's Keyboard and mouse section on Windows and Linux; turned off, the next `share-test` says "the link kept quick: no". (where: by hand)
