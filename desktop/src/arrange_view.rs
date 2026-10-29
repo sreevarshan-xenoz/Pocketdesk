@@ -341,6 +341,29 @@ impl ArrangeView {
         self.notice.take()
     }
 
+    /// What Setup's steps are judged by (UX 2).
+    fn facts(&self, devices: &[Device], sharing_on: bool, server_running: bool) -> Facts {
+        let paired_now = self.paired(devices);
+        Facts {
+            server_running,
+            paired: paired_now.len(),
+            sharing_on,
+            linked: paired_now
+                .iter()
+                .filter(|id| self.status.link.get(*id).is_some_and(|l| l == LINK_DIRECT))
+                .count(),
+            // Only computers paired now (PR #555 review m5). Like the
+            // links, it is fresh only while sharing is on (the status is
+            // written every 30 s while off): the steps after Sharing may
+            // lag then, and Sharing's own step comes first.
+            drives: paired_now
+                .iter()
+                .filter(|id| self.status.answered.contains(*id))
+                .count(),
+            arranged: self.saved.is_some(),
+        }
+    }
+
     fn refresh(&mut self, state_dir: &Path) {
         if self.read_at.is_some_and(|at| at.elapsed() < REFRESH) {
             return;
@@ -600,18 +623,7 @@ impl ArrangeView {
         let mut action = None;
         let muted = crate::theme::muted(ui);
         // UX 2: each step, done or not, with its fix.
-        let paired_now = self.paired(devices);
-        let facts = Facts {
-            server_running,
-            paired: paired_now.len(),
-            sharing_on,
-            linked: paired_now
-                .iter()
-                .filter(|id| self.status.link.get(*id).is_some_and(|l| l == LINK_DIRECT))
-                .count(),
-            drives: self.status.answered.len(),
-            arranged: self.saved.is_some(),
-        };
+        let facts = self.facts(devices, sharing_on, server_running);
         ui.label(RichText::new(SETUP).strong());
         for step in checklist(facts) {
             ui.horizontal_wrapped(|ui| {
@@ -1093,6 +1105,26 @@ mod tests {
         for step in none {
             assert!(step.label.split_whitespace().count() <= 6, "{}", step.label);
         }
+    }
+
+    /// PR #555 review m5: a computer that answered but is no longer paired
+    /// does not count as one this computer may drive, nor as linked.
+    #[test]
+    fn setup_counts_only_computers_paired_now() {
+        let mut view = ArrangeView::default();
+        view.status.answered = BTreeSet::from(["gone".to_string(), "laptop".to_string()]);
+        view.status
+            .link
+            .insert("gone".to_string(), LINK_DIRECT.to_string());
+        let none = view.facts(&[], true, true);
+        assert_eq!((none.paired, none.linked, none.drives), (0, 0, 0));
+        let devices = [Device {
+            id: "laptop".to_string(),
+            computer: true,
+            ..Default::default()
+        }];
+        let one = view.facts(&devices, true, true);
+        assert_eq!((one.paired, one.linked, one.drives), (1, 0, 1));
     }
 
     #[test]
