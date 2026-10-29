@@ -12,6 +12,8 @@ use pocketdesk_core::local::computers::{self, ComputerAsk, ComputersFile, PeerCo
 
 /// How often the file is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
+/// How long Paste waits for the clipboard's text (PR #553 review M2).
+const PASTE_WAIT: Duration = Duration::from_secs(2);
 /// How often while a pairing waits for its outcome (UX 1).
 const PAIRING_REFRESH: Duration = Duration::from_millis(500);
 /// How long a pairing's progress waits for its outcome: a request the
@@ -47,7 +49,10 @@ pub struct ComputersView {
     consent: Option<String>,
     /// Paste was pressed: the clipboard's text, which comes as a paste
     /// event, goes in the box (UX 1).
-    pasting: bool,
+    pasting: Option<Instant>,
+    /// The frame this page was last drawn in: a gap is the page left, and
+    /// the link, which holds the other computer's PIN, goes (review M1).
+    drawn_pass: Option<u64>,
     /// This computer's own id, read with the file, to tell its own link.
     own_id: Option<String>,
     /// The pairing under way, until its outcome comes (UX 1).
@@ -94,9 +99,11 @@ pub enum LinkCheck {
     Empty,
     /// A pairing link from another computer.
     Valid(Box<pocketdesk_core::local::pair_link::PairLink>),
-    /// This computer's own pairing link (`own_id` is its id).
+    /// This computer's own pairing link.
     Own,
-    /// Not a pairing link, or not a whole one.
+    /// A pairing link's start, but not a whole one (PR #553 review M4).
+    CutOff,
+    /// Not a pairing link.
     NotALink,
 }
 
@@ -110,14 +117,25 @@ pub fn check_link(text: &str, own_id: Option<&str>) -> LinkCheck {
         return LinkCheck::NotALink;
     }
     match pocketdesk_core::local::pair_link::PairLink::from_uri(text) {
+        // Cut inside its certificate's fingerprint, it still reads.
+        Ok(link) if !whole_fingerprint(link.fingerprint.as_deref()) => LinkCheck::CutOff,
         Ok(link) if own_id == Some(link.device_id.as_str()) => LinkCheck::Own,
         Ok(link) => LinkCheck::Valid(Box::new(link)),
-        Err(_) => LinkCheck::NotALink,
+        Err(_) => LinkCheck::CutOff,
     }
 }
 
 /// What the line under the box says of a text that is not a link.
 pub const NOT_A_LINK: &str = "This isn't a Pocketdesk computer link. Copy it on the other computer's Pair page (\"Copy the link for another computer\").";
+/// Whether a link's certificate fingerprint is whole: 32 bytes in hex, as
+/// the server reads it (its `parse_fingerprint`).
+fn whole_fingerprint(fingerprint: Option<&str>) -> bool {
+    fingerprint.is_some_and(|f| f.len() == 64 && f.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// What it says of a link's start that is not a whole link (PR #553
+/// review M4).
+pub const CUT_OFF: &str = "This link looks cut off: copy it again on the other computer, whole.";
 /// What it says of this computer's own link.
 pub const OWN_LINK: &str =
     "That's this computer's own link: paste the one copied on the other computer.";
@@ -217,6 +235,13 @@ impl ComputersView {
         }
     }
 
+    /// A Paste whose text never came stops waiting (PR #553 review M2).
+    fn expire_paste(&mut self) {
+        if self.pasting.is_some_and(|at| at.elapsed() > PASTE_WAIT) {
+            self.pasting = None;
+        }
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -225,6 +250,14 @@ impl ComputersView {
         now_unix: u64,
     ) {
         self.refresh(state_dir);
+        // Left and come back to: the pasted link is not kept (review M1).
+        let pass = ui.ctx().cumulative_pass_nr();
+        if self.drawn_pass.is_some_and(|at| at + 1 < pass) {
+            self.link.clear();
+            self.consent = None;
+            self.pasting = None;
+        }
+        self.drawn_pass = Some(pass);
         // Under Settings' "Other computers" heading (U5).
         ui.add_space(8.0);
         ui.label(
@@ -250,7 +283,7 @@ impl ComputersView {
                 .on_hover_text("Put the copied link in the box")
                 .clicked()
             {
-                self.pasting = true;
+                self.pasting = Some(Instant::now());
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
             }
@@ -260,7 +293,8 @@ impl ComputersView {
         });
         // The clipboard's text comes as a paste event a frame later, and
         // takes the box's place.
-        if self.pasting {
+        self.expire_paste();
+        if self.pasting.is_some() {
             let pasted = ui.input(|i| {
                 i.events.iter().find_map(|e| match e {
                     egui::Event::Paste(text) => Some(text.clone()),
@@ -269,7 +303,7 @@ impl ComputersView {
             });
             if let Some(text) = pasted {
                 self.link = text;
-                self.pasting = false;
+                self.pasting = None;
             }
         }
         let pasted = self.link.trim().to_string();
@@ -283,6 +317,9 @@ impl ComputersView {
             LinkCheck::Empty | LinkCheck::Valid(_) => {}
             LinkCheck::Own => {
                 ui.label(RichText::new(OWN_LINK).color(crate::theme::warn(ui)));
+            }
+            LinkCheck::CutOff => {
+                ui.label(RichText::new(CUT_OFF).color(crate::theme::bad(ui)));
             }
             LinkCheck::NotALink => {
                 ui.label(RichText::new(NOT_A_LINK).color(crate::theme::bad(ui)));
@@ -855,8 +892,13 @@ mod tests {
         );
         assert_eq!(
             check_link("pocketdesk://pair?v=1", Some("me")),
-            LinkCheck::NotALink,
+            LinkCheck::CutOff,
             "begun, but not a whole link"
+        );
+        let link = mine_link();
+        assert_eq!(
+            check_link(&link[..link.len() / 2], Some("me")),
+            LinkCheck::CutOff
         );
         let link = mine_link();
         assert!(matches!(
@@ -951,6 +993,51 @@ mod tests {
             .is_some();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(own && off && !consent);
+    }
+
+    /// PR #553 review M1: the link, which holds the other computer's PIN,
+    /// goes once the page is left; M2: a Paste that brought nothing stops
+    /// waiting, so a later paste event is not taken for it.
+    #[test]
+    fn the_link_goes_when_the_page_is_left() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("left");
+        let now = pocketdesk_core::local::pin::now_unix();
+        let state = dir.clone();
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            move |ui, (shown, view): &mut (bool, ComputersView)| {
+                if *shown {
+                    view.show(ui, &state, true, now);
+                }
+            },
+            (
+                true,
+                ComputersView {
+                    link: mine_link(),
+                    ..ComputersView::default()
+                },
+            ),
+        );
+        harness.run_steps(2);
+        harness.state_mut().0 = false;
+        harness.run_steps(2);
+        harness.state_mut().0 = true;
+        harness.run_steps(2);
+        let shown = harness
+            .get_all_by_role(egui::accesskit::Role::TextInput)
+            .next()
+            .expect("the link box")
+            .accesskit_node()
+            .value()
+            .unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(shown, "");
+        let mut view = ComputersView {
+            pasting: Some(Instant::now() - PASTE_WAIT - Duration::from_millis(1)),
+            ..ComputersView::default()
+        };
+        view.expire_paste();
+        assert!(view.pasting.is_none());
     }
 
     /// UX 1: Paste puts the clipboard's text in the box, in place of what
