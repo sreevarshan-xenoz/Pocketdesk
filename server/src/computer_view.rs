@@ -26,9 +26,12 @@ use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::paths::VIEW_FILE;
 use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewStatus};
 use pocketdesk_core::streaming::cast::CastChain;
-use pocketdesk_core::streaming::transport::{CertManager, peer_label_for_address};
+use pocketdesk_core::streaming::transport::{
+    CertManager, StreamClient, StreamTransportConfig, peer_label_for_address,
+};
 use pocketdesk_core::streaming::{
-    AudioPacket, EncodedPacket, InputPacket, SessionMode, SharedConnection, StreamingClient,
+    AudioPacket, EncodedPacket, InputPacket, QuinnConnection, SessionMode, SharedConnection,
+    StreamingClient,
 };
 use rand::RngCore;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -54,6 +57,10 @@ const INPUT_QUEUE: usize = 512;
 const HOME_TRY: Duration = Duration::from_secs(3);
 /// A try by the internet road.
 const INTERNET_TRY: Duration = Duration::from_secs(20);
+/// The internet road, up first, waits this long for a home address still
+/// trying (PC2): the home network is preferred when both come up about
+/// together.
+pub const PREFER_HOME: Duration = Duration::from_millis(300);
 /// One input packet's way to the other computer, at most.
 const INPUT_SEND: Duration = Duration::from_secs(2);
 /// A view nobody watches (the app never came, or went without a word) ends.
@@ -205,8 +212,12 @@ impl Dialer {
     }
 }
 
-/// Dial the computer's screen session by [`plan`]'s ways, the first that
-/// answers; why none did.
+/// Dial the computer's screen session by every one of [`plan`]'s ways at
+/// once (PC2), rather than the home network first and the internet after
+/// it gave up: the first road to come up wins, the home network if it comes
+/// within [`PREFER_HOME`] of the internet road, and the others are cancelled
+/// or closed before this computer says who it is on any, so the other
+/// computer starts one session only. Why none did, when none did.
 async fn dial(
     computer: &PeerComputer,
     certs: &Arc<CertManager>,
@@ -223,79 +234,231 @@ async fn dial(
                 .to_string(),
         );
     }
-    let mut why = Vec::new();
-    for route in routes {
-        match route {
-            Route::Home(addr) => {
-                let tried = tokio::time::timeout(
-                    HOME_TRY,
-                    StreamingClient::connect(
-                        &addr.to_string(),
-                        certs.clone(),
-                        Some(monitor),
-                        Some(&me.device_id),
-                        iroh_id.as_deref(),
-                        // H.264 only: the window's decoder reads no HEVC.
-                        None,
-                        SessionMode::Screen,
-                    ),
-                )
-                .await;
-                match tried {
-                    Ok(Ok((client, frames, audio))) => {
-                        return Ok(Dialed {
-                            client,
-                            frames,
-                            audio,
-                            route: route.words(),
-                        });
-                    }
-                    Ok(Err(e)) => why.push(format!("{addr}: {e:#}")),
-                    Err(_) => why.push(format!("{addr}: no answer")),
-                }
-            }
-            Route::Internet => {
-                let (Some(wan), Some(target)) = (
-                    wan,
-                    computer
-                        .endpoint
-                        .as_ref()
-                        .and_then(crate::peer_computers::WanTarget::parse),
-                ) else {
-                    continue;
-                };
-                let dialed = pocketdesk_core::streaming::iroh_connection::dial_stream_from(
-                    wan,
-                    &target.endpoint_id,
-                    &target.relay_urls,
-                    &target.direct_addrs,
-                    INTERNET_TRY,
-                )
-                .await;
-                match dialed {
-                    Ok(conn) => {
-                        let (client, frames, audio) = StreamingClient::attach(
-                            conn,
-                            Some(monitor),
-                            Some(&me.device_id),
-                            iroh_id.as_deref(),
-                            None,
-                            SessionMode::Screen,
-                        )
-                        .await;
-                        return Ok(Dialed {
-                            client,
-                            frames,
-                            audio,
-                            route: route.words(),
-                        });
-                    }
-                    Err(e) => why.push(format!("internet: {e:#}")),
-                }
-            }
+    let dials: Vec<(bool, RoadDial<SharedConnection>)> = routes
+        .iter()
+        .map(|route| match route {
+            Route::Home(addr) => (
+                true,
+                Box::pin(dial_home(*addr, certs.clone())) as RoadDial<SharedConnection>,
+            ),
+            Route::Internet => (
+                false,
+                Box::pin(dial_internet(wan.cloned(), computer.endpoint.clone()))
+                    as RoadDial<SharedConnection>,
+            ),
+        })
+        .collect();
+    let (won, conn) = race(dials, PREFER_HOME, |lost: SharedConnection| {
+        lost.close(0, b"another road won")
+    })
+    .await
+    .map_err(|why| why.join("; "))?;
+    let (client, frames, audio) = StreamingClient::attach(
+        conn,
+        Some(monitor),
+        Some(&me.device_id),
+        iroh_id.as_deref(),
+        // H.264 only: the window's decoder reads no HEVC.
+        None,
+        SessionMode::Screen,
+    )
+    .await;
+    Ok(Dialed {
+        client,
+        frames,
+        audio,
+        route: routes[won].words(),
+    })
+}
+
+/// The home network's road at `addr`: a connection to the certificate
+/// pinned there, or why not.
+async fn dial_home(addr: SocketAddr, certs: Arc<CertManager>) -> Result<SharedConnection, String> {
+    let transport = StreamClient::new(StreamTransportConfig::default(), &certs)
+        .map_err(|e| format!("{addr}: {e:#}"))?;
+    match tokio::time::timeout(HOME_TRY, transport.connect(addr, &addr.ip().to_string())).await {
+        Ok(Ok(conn)) => Ok(QuinnConnection::shared(conn)),
+        Ok(Err(e)) => Err(format!("{addr}: {e:#}")),
+        Err(_) => Err(format!("{addr}: no answer")),
+    }
+}
+
+/// The internet road, from this computer's WAN endpoint to the other's.
+async fn dial_internet(
+    wan: Option<iroh::Endpoint>,
+    endpoint: Option<serde_json::Value>,
+) -> Result<SharedConnection, String> {
+    let (Some(wan), Some(target)) = (
+        wan,
+        endpoint
+            .as_ref()
+            .and_then(crate::peer_computers::WanTarget::parse),
+    ) else {
+        return Err("internet: no endpoint".to_string());
+    };
+    pocketdesk_core::streaming::iroh_connection::dial_stream_from(
+        &wan,
+        &target.endpoint_id,
+        &target.relay_urls,
+        &target.direct_addrs,
+        INTERNET_TRY,
+    )
+    .await
+    .map_err(|e| format!("internet: {e:#}"))
+}
+
+/// What the race between the roads says now (PC2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// Keep waiting: until this instant at most, when a road that came up
+    /// is held for the home network.
+    Wait(Option<Instant>),
+    /// The road at this index wins; the rest are cancelled.
+    Take(usize),
+    /// Every road failed.
+    Lost,
+}
+
+/// The race between the roads to the other computer, dialled at once
+/// (PC2): the home network wins as soon as it comes up; the internet road,
+/// up first, is held [`PREFER_HOME`] for a home address still trying, then
+/// wins.
+#[derive(Debug)]
+pub struct Race {
+    home: Vec<bool>,
+    pending: Vec<bool>,
+    /// The internet road, up and held, and until when.
+    held: Option<(usize, Instant)>,
+    /// A home address that came up: the winner.
+    won: Option<usize>,
+    grace: Duration,
+}
+
+impl Race {
+    /// A race between roads, `home[i]` saying whether road `i` is on the
+    /// home network.
+    pub fn new(home: Vec<bool>, grace: Duration) -> Self {
+        let pending = vec![true; home.len()];
+        Self {
+            home,
+            pending,
+            held: None,
+            won: None,
+            grace,
         }
     }
-    Err(why.join("; "))
+
+    /// Road `i` came up at `now`.
+    pub fn up(&mut self, i: usize, now: Instant) -> Verdict {
+        self.pending[i] = false;
+        if self.home[i] && self.won.is_none() {
+            self.won = Some(i);
+        }
+        if !self.home[i] && self.held.is_none() {
+            self.held = Some((i, now + self.grace));
+        }
+        self.verdict(now)
+    }
+
+    /// Road `i` failed at `now`.
+    pub fn failed(&mut self, i: usize, now: Instant) -> Verdict {
+        self.pending[i] = false;
+        self.verdict(now)
+    }
+
+    /// No road is still trying (one ended without saying).
+    pub fn all_done(&mut self, now: Instant) -> Verdict {
+        self.pending.iter_mut().for_each(|p| *p = false);
+        self.verdict(now)
+    }
+
+    /// The verdict at `now`, with nothing new.
+    pub fn verdict(&self, now: Instant) -> Verdict {
+        if let Some(i) = self.won {
+            return Verdict::Take(i);
+        }
+        let home_trying = self.pending.iter().zip(&self.home).any(|(p, h)| *p && *h);
+        match self.held {
+            Some((i, until)) if now >= until || !home_trying => Verdict::Take(i),
+            Some((_, until)) => Verdict::Wait(Some(until)),
+            None if self.pending.iter().any(|p| *p) => Verdict::Wait(None),
+            None => Verdict::Lost,
+        }
+    }
+}
+
+/// One road's dial: a connection, or why not.
+pub type RoadDial<T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>;
+
+/// Dial every road at once and take the one [`Race`] picks (PC2): its index
+/// and connection, or why each failed. A road that came up and lost is
+/// handed to `close`; one still dialling is cancelled.
+pub async fn race<T: Send + 'static>(
+    dials: Vec<(bool, RoadDial<T>)>,
+    grace: Duration,
+    close: impl Fn(T),
+) -> Result<(usize, T), Vec<String>> {
+    let mut race = Race::new(dials.iter().map(|(home, _)| *home).collect(), grace);
+    let mut ups: Vec<Option<T>> = dials.iter().map(|_| None).collect();
+    let mut why = Vec::new();
+    let mut set = tokio::task::JoinSet::new();
+    for (i, (_, dial)) in dials.into_iter().enumerate() {
+        set.spawn(async move { (i, dial.await) });
+    }
+    let verdict = loop {
+        let wake = match race.verdict(Instant::now()) {
+            Verdict::Wait(until) => until,
+            done => break done,
+        };
+        let sleep = async move {
+            match wake {
+                Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            joined = set.join_next() => match joined {
+                Some(Ok((i, Ok(conn)))) => {
+                    ups[i] = Some(conn);
+                    race.up(i, Instant::now());
+                }
+                Some(Ok((i, Err(e)))) => {
+                    why.push(e);
+                    race.failed(i, Instant::now());
+                }
+                // A dial that panicked: the others decide.
+                Some(Err(_)) => {}
+                None => {
+                    race.all_done(Instant::now());
+                }
+            },
+            () = sleep => {}
+        }
+    };
+    // The losers: cancelled while dialling, closed if they came up.
+    set.abort_all();
+    while let Some(joined) = set.join_next().await {
+        if let Ok((_, Ok(conn))) = joined {
+            close(conn);
+        }
+    }
+    match verdict {
+        Verdict::Take(won) => {
+            for (i, up) in ups.iter_mut().enumerate() {
+                if i != won
+                    && let Some(conn) = up.take()
+                {
+                    close(conn);
+                }
+            }
+            match ups[won].take() {
+                Some(conn) => Ok((won, conn)),
+                None => Err(why),
+            }
+        }
+        _ => Err(why),
+    }
 }
 
 /// What a session tells the relay.
@@ -1407,6 +1570,128 @@ mod tests {
             in_order(true, 0, Some(9)),
             "a rebuilt encoder counts from 0"
         );
+    }
+
+    /// PC2: the home network wins as soon as it comes up; the internet road
+    /// up first is held for a home address still trying, which wins if it
+    /// comes within the grace, else the internet road does; a road alone
+    /// wins as it comes; every road failing is a loss.
+    #[test]
+    fn the_race_prefers_the_home_network_within_the_grace() {
+        let t = Instant::now();
+        let ms = |n: u64| t + Duration::from_millis(n);
+        let grace = Duration::from_millis(300);
+        // Home first: at once.
+        let mut race = Race::new(vec![true, false], grace);
+        assert_eq!(race.verdict(t), Verdict::Wait(None));
+        assert_eq!(race.up(0, ms(50)), Verdict::Take(0));
+        assert_eq!(race.up(1, ms(60)), Verdict::Take(0), "the first stays won");
+        // The internet first, home within the grace: home.
+        let mut race = Race::new(vec![true, false], grace);
+        assert_eq!(race.up(1, ms(0)), Verdict::Wait(Some(ms(300))));
+        assert_eq!(race.up(0, ms(200)), Verdict::Take(0));
+        // The internet first, home too late: the internet.
+        let mut race = Race::new(vec![true, false], grace);
+        race.up(1, ms(0));
+        assert_eq!(race.verdict(ms(299)), Verdict::Wait(Some(ms(300))));
+        assert_eq!(race.verdict(ms(300)), Verdict::Take(1));
+        // The internet first, the home addresses failing meanwhile: the
+        // internet once the last has.
+        let mut race = Race::new(vec![true, true, false], grace);
+        race.up(2, ms(0));
+        assert_eq!(
+            race.failed(0, ms(10)),
+            Verdict::Wait(Some(ms(300))),
+            "another home address still tries"
+        );
+        assert_eq!(race.failed(1, ms(20)), Verdict::Take(2));
+        // Home failing first: the internet as it comes, however late.
+        let mut race = Race::new(vec![true, false], grace);
+        assert_eq!(race.failed(0, ms(0)), Verdict::Wait(None));
+        assert_eq!(race.up(1, ms(4000)), Verdict::Take(1));
+        // Every road failing, or none to dial.
+        let mut race = Race::new(vec![true, false], grace);
+        race.failed(1, ms(0));
+        assert_eq!(race.failed(0, ms(1)), Verdict::Lost);
+        assert_eq!(Race::new(vec![], grace).verdict(t), Verdict::Lost);
+        // Dials that ended without a word: what came up wins, else lost.
+        let mut race = Race::new(vec![true, false], grace);
+        race.up(1, ms(0));
+        assert_eq!(race.all_done(ms(5)), Verdict::Take(1));
+        assert_eq!(Race::new(vec![true], grace).all_done(ms(0)), Verdict::Lost);
+    }
+
+    /// PC2: the race over real tasks. The home network within the grace
+    /// wins and the internet road that came up first is closed; the
+    /// internet road wins at the grace's end over a home dial still trying,
+    /// which is cancelled; every road failing says why each did.
+    #[tokio::test]
+    async fn the_race_closes_and_cancels_the_roads_that_lost() {
+        fn after(ms: u64, road: &'static str) -> RoadDial<&'static str> {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+                Ok(road)
+            })
+        }
+        let grace = Duration::from_millis(300);
+        let closed = std::sync::Mutex::new(Vec::new());
+        let won = race(
+            vec![(true, after(100, "home")), (false, after(0, "internet"))],
+            grace,
+            |lost| closed.lock().unwrap().push(lost),
+        )
+        .await
+        .unwrap();
+        assert_eq!(won, (0, "home"));
+        assert_eq!(*closed.lock().unwrap(), ["internet"]);
+
+        struct Cancelled(Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Cancelled {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let guard = Cancelled(cancelled.clone());
+        let slow_home: RoadDial<&'static str> = Box::pin(async move {
+            let _guard = guard;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok("home")
+        });
+        let started = Instant::now();
+        let won = race(
+            vec![(true, slow_home), (false, after(0, "internet"))],
+            grace,
+            |_| panic!("nothing came up to lose"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(won, (1, "internet"));
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(250) && took < Duration::from_secs(5),
+            "{took:?}"
+        );
+        assert!(
+            cancelled.load(std::sync::atomic::Ordering::SeqCst),
+            "the home dial was cancelled"
+        );
+
+        let fail = |why: &'static str| -> RoadDial<&'static str> {
+            Box::pin(async move { Err(why.to_string()) })
+        };
+        let mut why = race(
+            vec![
+                (true, fail("192.0.2.10: no answer")),
+                (false, fail("internet: no endpoint")),
+            ],
+            grace,
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        why.sort();
+        assert_eq!(why, ["192.0.2.10: no answer", "internet: no endpoint"]);
     }
 
     /// PC2: after a drop the tries wait 1, 2, 4 and 8 s, then 15 s each.

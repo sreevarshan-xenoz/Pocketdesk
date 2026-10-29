@@ -38,6 +38,10 @@ struct Seen {
     route: String,
     control: Option<bool>,
     ended: Option<String>,
+    /// PC2: the first frame after the window joined, and how long the
+    /// winning road's dial took, as the view's stats say.
+    first_frame: Option<Duration>,
+    dial_ms: Option<u32>,
 }
 
 /// Read A's view relay as the window does for `secs`, after the first
@@ -67,11 +71,15 @@ fn watch(a_state: &Path, b_id: &str, secs: u64) -> Seen {
                 if status.phase == Phase::Showing {
                     seen.control = status.control;
                 }
+                if let Some(stats) = status.stats {
+                    seen.dial_ms = stats.dial_ms;
+                }
                 seen.route = status.route;
             }
             Ok(Message::Config { width, height }) => seen.size = Some((width, height)),
             Ok(Message::Frame { keyframe, data, .. }) => {
                 first.get_or_insert_with(Instant::now);
+                seen.first_frame.get_or_insert_with(|| start.elapsed());
                 seen.frames += 1;
                 seen.keyframes += u64::from(keyframe);
                 seen.bytes += data.len() as u64;
@@ -185,21 +193,29 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
     .unwrap();
     let home = watch(&a_state, &b_id, 10);
     println!(
-        "home network: {} frames ({} keyframes, {} KiB) at {:?}, route {:?}, control {:?}",
+        "home network: {} frames ({} keyframes, {} KiB) at {:?}, route {:?}, control {:?}, first frame {:?}, dial {:?} ms",
         home.frames,
         home.keyframes,
         home.bytes / 1024,
         home.size,
         home.route,
-        home.control
+        home.control,
+        home.first_frame,
+        home.dial_ms
     );
     assert_eq!(home.ended, None);
     assert!(home.frames >= 20, "{home:?}");
     assert!(home.keyframes >= 1);
     assert!(home.size.is_some_and(|(w, h)| w > 0 && h > 0));
+    // Both roads were dialled at once (PC2): the home network won, and
+    // the internet road that lost left no session on B.
     assert_eq!(home.route, "home network");
     assert_eq!(home.control, Some(false), "B takes none of A's input");
-    assert_eq!(sessions_from(&b_state, &a_id), 1, "B lists A's session");
+    assert_eq!(
+        sessions_from(&b_state, &a_id),
+        1,
+        "B lists A's session, once"
+    );
     // Closing the window ends it on B.
     stop(&a_state);
     wait_for(30, "A's session gone from B", || {
@@ -225,13 +241,15 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
     .unwrap();
     let internet = watch(&a_state, &b_id, 10);
     println!(
-        "internet road: {} frames ({} keyframes, {} KiB) at {:?}, route {:?}, control {:?}",
+        "internet road: {} frames ({} keyframes, {} KiB) at {:?}, route {:?}, control {:?}, first frame {:?}, dial {:?} ms",
         internet.frames,
         internet.keyframes,
         internet.bytes / 1024,
         internet.size,
         internet.route,
-        internet.control
+        internet.control,
+        internet.first_frame,
+        internet.dial_ms
     );
     assert_eq!(internet.ended, None);
     assert!(internet.frames >= 10, "{internet:?}");
