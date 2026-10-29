@@ -433,6 +433,7 @@ mod tests {
             link: "linked".to_string(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         };
         pocketdesk_core::local::computers::update(&dir, |file| {
             file.computers.push(computer("dialed", "Arch laptop"));

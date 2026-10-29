@@ -226,6 +226,7 @@ mod tests {
             link: link.to_string(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
     }
 

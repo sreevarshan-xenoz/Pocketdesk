@@ -264,6 +264,7 @@ fn unpairing_a_computer_waits_for_the_server() {
                 link: String::new(),
                 link_unix: 0,
                 lets_drive: false,
+                mine: false,
             });
     })
     .expect("a computers file");
@@ -302,6 +303,7 @@ fn keyboard_mouse_computers(state: &Path) {
                 link: "linked".to_string(),
                 link_unix: 0,
                 lets_drive: false,
+                mine: false,
             });
     })
     .expect("a computers file");

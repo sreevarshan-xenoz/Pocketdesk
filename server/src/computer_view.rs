@@ -896,6 +896,7 @@ mod tests {
             link: String::new(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
     }
 

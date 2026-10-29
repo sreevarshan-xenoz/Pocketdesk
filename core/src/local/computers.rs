@@ -55,10 +55,79 @@ pub struct PeerComputer {
     /// paired, again too.
     #[serde(default)]
     pub lets_drive: bool,
+    /// Paired both ways from a link made for another of the owner's
+    /// computers (PC1, "This is another of my computers"): each computer
+    /// lists the other here and trusts it, seeing and controlling it
+    /// without asking. Only one of the two keeps the link between them
+    /// ([`keeps_link`]). Off in files written before.
+    #[serde(default)]
+    pub mine: bool,
 }
 
 fn default_stream_port() -> u16 {
     crate::streaming::client::DEFAULT_STREAMING_PORT
+}
+
+/// Whether this computer (`own_id`) dials and keeps the link to `computer`
+/// (PC1). It always does to one it paired with one way: it pasted that
+/// one's link, and that one does not list it. Of two paired both ways, each
+/// listing the other, only the one whose id sorts first dials; the other
+/// takes that link as the computer it pasted would, and keeps none of its
+/// own. Both work it out alike, from their two ids alone, so they agree
+/// whichever pasted the other's link and in whatever order they start: one
+/// link between them, never two.
+pub fn keeps_link(own_id: &str, computer: &PeerComputer) -> bool {
+    !computer.mine || own_id < computer.device_id.as_str()
+}
+
+/// What a computer pasting a link made for one of the owner's computers
+/// tells the computer it pairs with about itself, inside its pairing ask
+/// (PC1): what that computer needs to list it in turn and reach it. Its
+/// certificate is not among them: the computer it pairs with takes that
+/// from the connection itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerFacts {
+    pub name: String,
+    /// Its addresses, best first.
+    pub addresses: Vec<String>,
+    pub control_port: u16,
+    pub stream_port: u16,
+    /// Its iroh endpoint (`endpointId`, `relayUrls`, `directAddrs`), when
+    /// it has the internet road.
+    #[serde(default)]
+    pub endpoint: Option<serde_json::Value>,
+}
+
+/// The most addresses a computer's facts are taken with.
+const MOST_ADDRESSES: usize = 16;
+
+impl ComputerFacts {
+    /// The computer these facts describe, as the computer it paired with
+    /// lists it: `device_id` from the connection, `fingerprint` (hex) the
+    /// certificate it proved there. Its addresses are put in order (no
+    /// loopback, link-local or IPv6), at most 16; a port of 0 is the
+    /// default one. Its name and endpoint are taken as they are: the
+    /// server cleans the one and checks the other.
+    pub fn into_peer(self, device_id: &str, fingerprint: &str, now_unix: u64) -> PeerComputer {
+        let mut addresses = super::pair_link::order_addresses(self.addresses);
+        addresses.truncate(MOST_ADDRESSES);
+        let or = |port: u16, default: u16| if port == 0 { default } else { port };
+        PeerComputer {
+            device_id: device_id.to_string(),
+            name: self.name,
+            addresses,
+            control_port: or(self.control_port, crate::DEFAULT_CONTROL_PORT),
+            stream_port: or(self.stream_port, default_stream_port()),
+            fingerprint: fingerprint.to_ascii_lowercase(),
+            endpoint: self.endpoint,
+            paired_unix: now_unix,
+            link: "connecting".to_string(),
+            link_unix: now_unix,
+            lets_drive: false,
+            mine: true,
+        }
+    }
 }
 
 /// How the last pairing went, for the app to show.
@@ -307,7 +376,81 @@ mod tests {
             link: String::new(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
+    }
+
+    /// PC1: of two computers paired both ways, exactly one keeps the link,
+    /// the same one whichever pasted the other's link and in whatever
+    /// order they look; to one paired one way, the one that pasted always
+    /// does.
+    #[test]
+    fn one_link_is_kept_between_two_computers_in_every_order() {
+        let ids = ["0a-desk", "7f-laptop", "c3-tower"];
+        for a in ids {
+            for b in ids.iter().copied().filter(|b| *b != a) {
+                let (b_on_a, a_on_b) = (
+                    PeerComputer {
+                        mine: true,
+                        ..computer(b)
+                    },
+                    PeerComputer {
+                        mine: true,
+                        ..computer(a)
+                    },
+                );
+                let dialers = [keeps_link(a, &b_on_a), keeps_link(b, &a_on_b)];
+                assert_eq!(
+                    dialers.iter().filter(|d| **d).count(),
+                    1,
+                    "{a} and {b}: {dialers:?}"
+                );
+                assert_eq!(keeps_link(a, &b_on_a), a < b, "the first id dials");
+                // One way: only the computer that pasted lists the other,
+                // and it dials, whichever id sorts first.
+                assert!(keeps_link(a, &computer(b)));
+            }
+        }
+        // A file from before PC1 reads as one way.
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        let old: PeerComputer = serde_json::from_str(&raw.replace(",\"mine\":false", "")).unwrap();
+        assert!(!old.mine);
+    }
+
+    /// PC1: what a computer says of itself as it pairs both ways becomes
+    /// its entry on the other: its addresses in order (no loopback), a
+    /// port of 0 the default, the certificate the connection proved, and
+    /// the entry marked as paired both ways.
+    #[test]
+    fn a_computers_facts_become_its_entry_on_the_other() {
+        let facts: ComputerFacts = serde_json::from_value(serde_json::json!({
+            "name": "Laptop",
+            "addresses": ["127.0.0.1", "100.80.1.2", "192.0.2.40", "fe80::1"],
+            "controlPort": 1716,
+            "streamPort": 0,
+        }))
+        .unwrap();
+        assert_eq!(facts.endpoint, None, "no internet road");
+        let peer = facts.into_peer("lap", &"AB".repeat(32), 50);
+        assert_eq!(peer.device_id, "lap");
+        assert_eq!(peer.name, "Laptop");
+        assert_eq!(peer.addresses, ["192.0.2.40", "100.80.1.2"]);
+        assert_eq!(peer.control_port, 1716);
+        assert_eq!(
+            peer.stream_port,
+            crate::streaming::client::DEFAULT_STREAMING_PORT
+        );
+        assert_eq!(peer.fingerprint, "ab".repeat(32));
+        assert!(peer.mine && !peer.lets_drive);
+        assert_eq!(peer.link, "connecting");
+        let many = ComputerFacts {
+            name: "Many".to_string(),
+            addresses: (1..=40).map(|n| format!("192.0.2.{n}")).collect(),
+            control_port: 1,
+            stream_port: 2,
+            endpoint: None,
+        };
+        assert_eq!(many.into_peer("m", "", 1).addresses.len(), 16);
     }
 
     #[test]

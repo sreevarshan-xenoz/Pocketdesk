@@ -431,6 +431,7 @@ async fn pair_with(
         link: "connecting".to_string(),
         link_unix: now,
         lets_drive: false,
+        mine: false,
     };
     let mut was = None;
     computers::update(dir, |file| {
@@ -1437,6 +1438,7 @@ mod tests {
                 link: "refused".to_string(),
                 link_unix: 1,
                 lets_drive: false,
+                mine: false,
             })
         })
         .unwrap();
@@ -1495,6 +1497,7 @@ mod tests {
             link: String::new(),
             link_unix: 1,
             lets_drive: false,
+            mine: false,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
