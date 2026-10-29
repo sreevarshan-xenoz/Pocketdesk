@@ -19,6 +19,7 @@ mod keys;
 mod logs_view;
 mod messages_view;
 mod nav;
+mod network_profile;
 mod notes_view;
 mod notice;
 mod pair_view;

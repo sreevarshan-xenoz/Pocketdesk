@@ -57,6 +57,9 @@ pub struct ComputersView {
     own_id: Option<String>,
     /// The pairing under way, until its outcome comes (UX 1).
     pairing: Option<Pairing>,
+    /// Whether Windows treats this computer's network as Public, where
+    /// the other computer cannot reach it.
+    public: crate::network_profile::PublicNetwork,
 }
 
 /// A link's state in words.
@@ -87,9 +90,13 @@ pub fn view_reach(computer: &PeerComputer, server_running: bool) -> Result<(), &
     Ok(())
 }
 
-/// Whether `text` looks like a pairing link (the server checks it fully).
+/// Whether `text` looks like a pairing link (the server checks it fully),
+/// once cleaned of what a paste carries unseen around it
+/// ([`pair_link::clean_link`]: a byte-order mark kept Pair greyed out).
+///
+/// [`pair_link::clean_link`]: pocketdesk_core::local::pair_link::clean_link
 pub fn looks_like_link(text: &str) -> bool {
-    text.trim().starts_with("pocketdesk://pair?")
+    pocketdesk_core::local::pair_link::clean_link(text).starts_with("pocketdesk://pair?")
 }
 
 /// What a pasted text is, as the line under the box says it (UX 1).
@@ -109,7 +116,7 @@ pub enum LinkCheck {
 
 /// Check `text`, pasted on the computer whose id is `own_id`.
 pub fn check_link(text: &str, own_id: Option<&str>) -> LinkCheck {
-    let text = text.trim();
+    let text = pocketdesk_core::local::pair_link::clean_link(text);
     if text.is_empty() {
         return LinkCheck::Empty;
     }
@@ -267,6 +274,8 @@ impl ComputersView {
             )
             .weak(),
         );
+        // A pairing from the other side times out with no word why here.
+        self.public.show(ui);
         // UX 1: shown as pasted, not masked (PC1 re-review m-1 had masked
         // it, as it holds the PIN): a link that cannot be read back cannot
         // be checked. The PIN is short-lived, and the other computer shows
@@ -306,7 +315,9 @@ impl ComputersView {
                 self.pasting = None;
             }
         }
-        let pasted = self.link.trim().to_string();
+        // What is sent, as what is checked: without what the paste
+        // carried unseen around it.
+        let pasted = pocketdesk_core::local::pair_link::clean_link(&self.link).to_string();
         let check = check_link(&pasted, self.own_id.as_deref());
         let parsed = match &check {
             LinkCheck::Valid(link) => Some(link.as_ref().clone()),
@@ -1305,6 +1316,15 @@ mod tests {
     #[test]
     fn only_a_pairing_link_can_be_sent() {
         assert!(looks_like_link("  pocketdesk://pair?v=1&id=b "));
+        // The owner's first live test: a paste that began with a
+        // byte-order mark, and one with a zero-width space and a line break.
+        let bom = char::from_u32(0xFEFF).unwrap();
+        let zwsp = char::from_u32(0x200B).unwrap();
+        assert!(looks_like_link(&format!("{bom}pocketdesk://pair?v=1&id=b")));
+        assert!(looks_like_link(&format!(
+            "{zwsp}pocketdesk://pair?v=1&id=b{zwsp}{}",
+            char::from_u32(10).unwrap()
+        )));
         assert!(!looks_like_link("https://example.org/"));
         assert!(!looks_like_link(""));
     }

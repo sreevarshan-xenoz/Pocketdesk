@@ -100,6 +100,7 @@ windows = { version = "0.62", features = [
     "Win32_Media_Multimedia",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_NetworkListManager",
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Authorization",

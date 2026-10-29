@@ -343,7 +343,7 @@ impl Rect {
 }
 
 /// A pixel `v` of the run `lo..hi` as 0..=65535, the last being 65535.
-fn normalize(v: i64, lo: i64, hi: i64) -> u16 {
+pub(super) fn normalize(v: i64, lo: i64, hi: i64) -> u16 {
     let last = hi - lo - 1;
     if last <= 0 {
         return 0;

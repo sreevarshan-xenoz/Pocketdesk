@@ -256,6 +256,9 @@ pub struct PairView {
     whose_chosen: bool,
     /// When the code's control port was last compared with the server's (T1).
     port_checked: Option<std::time::Instant>,
+    /// Whether Windows treats this computer's network as Public, where a
+    /// phone or computer pairing from the code cannot reach it.
+    public: crate::network_profile::PublicNetwork,
 }
 
 /// Whose phone the next code pairs: the owner's choice just made, else a
@@ -378,6 +381,10 @@ impl PairView {
             }
             return;
         }
+
+        // Said above the code: on a Public network a phone or computer
+        // scanning it would time out with no word why.
+        self.public.show(ui);
 
         // T1 review: a code drawn while the server was starting, or before it
         // moved off a held port, names a port phones cannot reach; it is

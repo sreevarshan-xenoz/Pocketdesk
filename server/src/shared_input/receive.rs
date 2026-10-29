@@ -17,6 +17,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::shared_input;
@@ -26,6 +27,7 @@ use pocketdesk_core::streaming::input_packet::InputPacket;
 use super::awake::KeepAwake;
 use super::badge;
 use super::held::HeldInput;
+use super::layout;
 use super::link::{self, Channel};
 use super::quick::{KeepQuick, Nudge};
 use super::screens;
@@ -124,6 +126,10 @@ const AWAKE_FOR: Duration = Duration::from_secs(10);
 /// Someone idle this long at the driving computer does not.
 const IDLE_MS_AWAKE: u32 = 60_000;
 
+/// How long after the driving computer's last input (or its arrival) this
+/// computer's own edges stay unwatched ([`Receiver::driven_by`]).
+pub const DRIVEN_FOR: Duration = Duration::from_millis(2500);
+
 /// The driving computer silent this long is taken to have gone.
 pub const SILENCE_RELEASE: Duration = Duration::from_secs(1);
 
@@ -153,6 +159,9 @@ pub struct Receiver {
     inputs: u32,
     /// It asked for this computer's sound this visit (BK6).
     sound_wanted: bool,
+    /// This computer's screens as last looked at (none yet: an arrival is
+    /// put where it says).
+    screens: Vec<Screen>,
 }
 
 impl Receiver {
@@ -170,6 +179,15 @@ impl Receiver {
             timed_for: None,
             inputs: 0,
             sound_wanted: false,
+            screens: Vec::new(),
+        }
+    }
+
+    /// This computer's screens, for where an arriving pointer is put
+    /// ([`arrival`]).
+    pub fn set_screens(&mut self, screens: &[Screen]) {
+        if self.screens != screens {
+            self.screens = screens.to_vec();
         }
     }
 
@@ -209,6 +227,17 @@ impl Receiver {
     /// The computer driving this one now.
     pub fn driver(&self) -> Option<&str> {
         self.driver.as_deref()
+    }
+
+    /// The computer driving this one at `now` while it sends input: it
+    /// arrived, or sent a key, a click, the wheel or a move, within
+    /// [`DRIVEN_FOR`]. Pings and activity notes do not count: a cursor left
+    /// resting here lets this computer's own edges lead on again.
+    pub fn driven_by(&self, now: Instant) -> Option<&str> {
+        self.driver.as_deref().filter(|_| {
+            self.input_at
+                .is_some_and(|at| now.saturating_duration_since(at) < DRIVEN_FOR)
+        })
     }
 
     /// The computer that wants this one's sound now: the one driving it,
@@ -290,6 +319,12 @@ impl Receiver {
                 y,
                 "Shared input: another computer's cursor arrived here at this position (0..=65535)"
             );
+            // A few pixels inside the edge it came over, never on it:
+            // this computer's own edge there leads back to that computer.
+            // Its moves after are put where it says (an edge pixel is
+            // there to click), as the driven flag keeps that edge unwatched
+            // while it sends them.
+            let (x, y) = arrival(&self.screens, x, y);
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -421,6 +456,63 @@ impl Receiver {
                 .input_at
                 .is_some_and(|at| now.saturating_duration_since(at) < QUICK_FOR)
     }
+}
+
+/// Pixels inside the edge of the screen it lands on that an arriving
+/// pointer is put.
+pub const ARRIVE_INSIDE: i64 = 4;
+
+/// Where a pointer arriving at (`x`, `y`) (0..=65535 across the box around
+/// `screens`, as [`Msg::Enter`] says it) is put: [`ARRIVE_INSIDE`] pixels
+/// inside the edges of the screen it lands on, never on one. The driving
+/// computer puts it on the first row or column past its own edge, the very
+/// line where this computer's own edge facing it is watched (the portal's
+/// barrier on Linux): a pointer put there, as the compositor's virtual
+/// pointer puts it, could set it off (the owner's first live test). Only a
+/// pixel that is too near an edge moves; with no screens known yet it is
+/// put where it says.
+fn arrival(screens: &[Screen], x: u16, y: u16) -> (u16, u16) {
+    let rects: Vec<(i64, i64, i64, i64)> = screens
+        .iter()
+        .filter(|s| s.width > 0 && s.height > 0)
+        .map(|s| {
+            let (x0, y0) = (i64::from(s.x), i64::from(s.y));
+            (x0, y0, x0 + i64::from(s.width), y0 + i64::from(s.height))
+        })
+        .collect();
+    let Some((bx0, by0, bx1, by1)) = rects
+        .iter()
+        .copied()
+        .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+    else {
+        return (x, y);
+    };
+    // The pixel it names, as `layout::normalize` names a pixel.
+    let pixel = |v: u16, lo: i64, hi: i64| {
+        let last = (hi - lo - 1).max(0);
+        lo + (i64::from(v) * last + 32767) / 65535
+    };
+    let (px, py) = (pixel(x, bx0, bx1), pixel(y, by0, by1));
+    // The screen it is on, else the nearest.
+    let Some(&(x0, y0, x1, y1)) = rects.iter().min_by_key(|r| {
+        let dx = (r.0 - px).max(px - (r.2 - 1)).max(0);
+        let dy = (r.1 - py).max(py - (r.3 - 1)).max(0);
+        dx * dx + dy * dy
+    }) else {
+        return (x, y);
+    };
+    let inside = |v: u16, p: i64, lo: i64, hi: i64, blo: i64, bhi: i64| {
+        let (min, max) = (lo + ARRIVE_INSIDE, hi - 1 - ARRIVE_INSIDE);
+        if min > max || (min..=max).contains(&p) {
+            v
+        } else {
+            layout::normalize(p.clamp(min, max), blo, bhi)
+        }
+    };
+    (
+        inside(x, px, x0, x1, bx0, bx1),
+        inside(y, py, y0, y1, by0, by1),
+    )
 }
 
 /// When something that came off the link at `arrived_us` ([`link::now_us`])
@@ -954,6 +1046,51 @@ fn status_due(on: bool, was_on: Option<bool>, since: Option<Duration>) -> bool {
     on || was_on != Some(false) || since.is_none_or(|since| since >= STATUS_IDLE_EVERY)
 }
 
+/// The computer driving this one now, while its input is recent
+/// ([`Receiver::driven_by`]): this computer's own driver watches no edge
+/// meanwhile ([`driven_by`]).
+static DRIVEN_BY: Mutex<Option<String>> = Mutex::new(None);
+
+/// The computer driving this one now, while it sends input. This
+/// computer's own driver (Windows' hooks, Linux's input-capture portal)
+/// watches no edge meanwhile: the pointer here is that computer's, and put
+/// on the edge facing it, an edge watched would carry this computer's
+/// keyboard and mouse straight back (the owner's first live test, Windows
+/// driving the Linux laptop). Watched again once it leaves, goes home,
+/// falls silent, or sends no input for [`DRIVEN_FOR`], so its cursor left
+/// idle here never keeps this computer's own mouse from its edges (PR #552
+/// review I1: Linux has no switch key at home).
+pub fn driven_by() -> Option<String> {
+    DRIVEN_BY.lock().map(|by| by.clone()).unwrap_or_default()
+}
+
+fn set_driven_by(by: Option<&str>) {
+    let Ok(mut now) = DRIVEN_BY.lock() else {
+        return;
+    };
+    if now.as_deref() != by {
+        tracing::debug!(
+            by,
+            "Shared input: driven by another computer now, or no longer (no edge watched meanwhile)"
+        );
+        *now = by.map(str::to_string);
+    }
+}
+
+/// Whether `msg` from `from` makes it drive this one now, said before it is
+/// acted on so no edge its pointer lands on is watched: its arrival, or
+/// input from the computer whose cursor is here (`driver`).
+fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> bool {
+    allowed
+        && match msg {
+            Msg::Enter { .. } => true,
+            Msg::Move { .. } | Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } => {
+                driver == Some(from)
+            }
+            _ => false,
+        }
+}
+
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
 /// someone drives it, and keep `shared_screens.json`. Not run with
@@ -997,6 +1134,8 @@ pub async fn run() {
         // Whatever changed last time round (an arrival, a leave, a silence,
         // a permission or a link gone), the sound follows it.
         follow_sound(&mut sound, &receiver, &mut channels);
+        // And whether this computer's own driver may watch its edges.
+        set_driven_by(receiver.driven_by(Instant::now()));
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg, arrived_us, link_id)) = arrival else { break };
@@ -1077,6 +1216,11 @@ pub async fn run() {
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
                     driver_link = Some(link_id);
+                }
+                // Said before its pointer is put here or moved, so no edge
+                // it lands on is watched.
+                if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
+                    set_driven_by(Some(&from));
                 }
                 if standing.allowed && matches!(msg, Msg::AskTimings) {
                     let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
@@ -1160,6 +1304,7 @@ pub async fn run() {
             _ = look.tick() => {
                 if !gate.on().await {
                     own.forget();
+                    receiver.set_screens(&[]);
                     // Those that could cross onto this one are told they
                     // cannot now.
                     for (to, mut channel) in channels.drain() {
@@ -1185,6 +1330,7 @@ pub async fn run() {
                     continue;
                 }
                 if own.note(seen) {
+                    receiver.set_screens(own.get());
                     write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
                     for to in told {
@@ -1239,6 +1385,7 @@ pub async fn run() {
             }
         }
     }
+    set_driven_by(None);
 }
 
 #[cfg(test)]
@@ -1367,6 +1514,133 @@ mod tests {
         r.handle("other", key(30, true), true);
         assert_eq!(r.timings_for("pc"), None);
         assert_eq!(r.timings_for("other"), Some(&[][..]));
+    }
+
+    fn screen(x: i32, y: i32, width: u32, height: u32) -> Screen {
+        Screen {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// The owner's first live test: the pointer of the computer arriving
+    /// was put on the very edge facing it, where this computer's own
+    /// barrier sits; it is put a few pixels inside instead.
+    #[test]
+    fn an_arriving_pointer_is_put_inside_the_edge() {
+        let one = [screen(0, 0, 1920, 1080)];
+        let x = |px| layout::normalize(px, 0, 1920);
+        let y = |px| layout::normalize(px, 0, 1080);
+        // The left edge, halfway down: 4 pixels in, the height as it was.
+        assert_eq!(arrival(&one, 0, 32768), (x(4), 32768));
+        // The right edge and the top.
+        assert_eq!(arrival(&one, 65535, 0), (x(1915), y(4)));
+        // The bottom-left corner.
+        assert_eq!(arrival(&one, 0, 65535), (x(4), y(1075)));
+        // Inside already: as it came.
+        assert_eq!(arrival(&one, 32768, 32768), (32768, 32768));
+        assert_eq!(arrival(&one, x(4), y(4)), (x(4), y(4)));
+        // Screens not known yet: as it came.
+        assert_eq!(arrival(&[], 0, 0), (0, 0));
+    }
+
+    /// The edge is that of the screen it lands on, not the box around them:
+    /// a shorter screen to the right of a taller one has its bottom edge
+    /// halfway down the box.
+    #[test]
+    fn an_arrival_is_put_inside_the_screen_it_lands_on() {
+        let two = [screen(0, 0, 1920, 1080), screen(1920, 0, 1280, 720)];
+        let x = |px| layout::normalize(px, 0, 3200);
+        let y = |px| layout::normalize(px, 0, 1080);
+        // Onto the short screen's last row, from below.
+        assert_eq!(arrival(&two, x(2500), y(719)), (x(2500), y(715)));
+        // Onto the tall screen's last row: its own bottom.
+        assert_eq!(arrival(&two, x(100), y(1079)), (x(100), y(1075)));
+    }
+
+    /// PR #552 review M4: a screen left of and above the first (negative
+    /// origins), and a point in the gap beside a shorter screen, which is
+    /// put on the nearest screen's own inside, never onto another.
+    #[test]
+    fn an_arrival_is_put_inside_with_negative_origins_and_gaps() {
+        // A 1280x1024 screen to the left, 200 above the 1920x1080 one.
+        let left = [screen(-1280, -200, 1280, 1024), screen(0, 0, 1920, 1080)];
+        let x = |px| layout::normalize(px, -1280, 1920);
+        let y = |px| layout::normalize(px, -200, 1080);
+        // Onto the left screen's left edge, at its top.
+        assert_eq!(arrival(&left, x(-1280), y(-200)), (x(-1276), y(-196)));
+        // Onto the main screen's top edge, which is 200 below the box's.
+        assert_eq!(arrival(&left, x(500), y(0)), (x(500), y(4)));
+        // In the gap below the left screen (it ends at 824): put on the
+        // left screen's bottom inside, the nearest, not on the main one.
+        assert_eq!(arrival(&left, x(-600), y(1000)), (x(-600), y(819)));
+    }
+
+    #[test]
+    fn the_receiver_puts_an_arrival_inside_but_moves_as_sent() {
+        let (mut r, fake) = receiver();
+        r.set_screens(&[screen(0, 0, 1920, 1080)]);
+        r.handle("pc", Msg::Enter { x: 0, y: 32768 }, true);
+        r.handle(
+            "pc",
+            Msg::Move {
+                seq: 1,
+                x: 0,
+                y: 32768,
+            },
+            true,
+        );
+        let inside = layout::normalize(4, 0, 1920);
+        assert_eq!(
+            fake.take(),
+            vec![Call::Move(inside, 32768), Call::Move(0, 32768)]
+        );
+    }
+
+    /// PR #552 review I1: a cursor left resting here (its computer still
+    /// pinging and saying it is active) stops counting as driving after
+    /// [`DRIVEN_FOR`], so this computer's own edges lead on again; its next
+    /// input counts again.
+    #[test]
+    fn driven_counts_only_while_the_driving_computer_sends_input() {
+        let (mut r, _fake) = receiver();
+        let t0 = Instant::now();
+        assert_eq!(r.driven_by(t0), None);
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        assert_eq!(r.driven_by(t0), Some("pc"));
+        let resting = t0 + DRIVEN_FOR - Duration::from_millis(100);
+        r.handle_at("pc", Msg::Ping { t_us: 1 }, true, resting);
+        r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, resting);
+        assert_eq!(r.driven_by(resting), Some("pc"));
+        let later = t0 + DRIVEN_FOR;
+        assert_eq!(
+            r.driven_by(later),
+            None,
+            "pings and activity notes do not count"
+        );
+        assert_eq!(r.driver(), Some("pc"), "its cursor is still here");
+        r.handle_at("pc", Msg::Move { seq: 1, x: 9, y: 9 }, true, later);
+        assert_eq!(r.driven_by(later), Some("pc"));
+        r.handle_at("pc", Msg::Leave, true, later);
+        assert_eq!(r.driven_by(later), None);
+    }
+
+    /// What says, before it is acted on, that a computer drives this one.
+    #[test]
+    fn its_arrival_and_its_input_say_it_drives_before_they_are_acted_on() {
+        let key = Msg::Key {
+            code: 30,
+            pressed: true,
+        };
+        assert!(drives_now(&Msg::Enter { x: 0, y: 0 }, "pc", true, None));
+        assert!(!drives_now(&Msg::Enter { x: 0, y: 0 }, "pc", false, None));
+        assert!(drives_now(&key, "pc", true, Some("pc")));
+        assert!(!drives_now(&key, "pc", true, Some("other")));
+        assert!(!drives_now(&key, "pc", true, None));
+        assert!(!drives_now(&Msg::Ping { t_us: 1 }, "pc", true, Some("pc")));
+        assert!(!drives_now(&Msg::Leave, "pc", true, Some("pc")));
     }
 
     #[test]

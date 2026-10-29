@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-969 open items.
+975 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 152 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 153 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 62 |
+| A second computer | 67 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -508,6 +508,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - At the desk, Windows driving the Linux laptop on Wi-Fi: typing in a terminal on the laptop keeps up with the keys; after a minute's pause with the pointer resting there (the byte stopped after ten seconds), the first key comes within a tenth of a second and the rest at once; with the setting off, the same by comparison. (where: owner)
 - Windows' timer given back: with no other program holding a finer one (close browsers playing video), a timer tool such as ClockRes reads 1 ms while the pointer is on the laptop, and 15.6 ms within a second of it coming home; with the setting off it stays at 15.6 ms throughout. (where: owner)
 
+**225. Both computers driving at once, and two pairing papercuts (from the owner's first live test)**
+
+- With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -908,7 +912,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The laptop's Wi-Fi off for 30 s mid-view: "Reconnecting… (n)" counting up, then the picture back by itself once the Wi-Fi returns; off for three minutes: the tries stop after about two minutes and the window says it did not come back, with Reconnect, which works once the Wi-Fi is back. (where: second computer)
 - Cancel while it reconnects: the window says it stopped, with Reconnect, and the laptop gets no further sessions from it; End on the laptop's session list mid-view: the window says the laptop ended the view and does not reconnect; with "Ask before each session" on there, a reconnect waits for Allow once again, and a no ends it. (where: second computer)
 
-**225. Pairing and disabled controls say why (Desktop UX 1)**
+**225. Both computers driving at once, and two pairing papercuts (from the owner's first live test)**
+
+- Windows drives the laptop while the laptop also drives: Windows' cursor arrives on the laptop's left edge and stays there; the laptop's log says it is driven ("driven by another computer (true)") and no "Keyboard and mouse: <Windows>" follows; moving around the laptop's screens, the pointer never bounces home, and pushing back off the left edge comes home to Windows as before. (where: second computer)
+- Windows' cursor left resting on the laptop: after about 2.5 s without a key, click or move from Windows, the laptop's own touchpad crosses its edge onto Windows; Windows' cursor comes home there (its badge says the laptop's keyboard and mouse came here), and the laptop's touchpad drives Windows. (where: second computer)
+- Then the laptop drives Windows from its own touchpad: once Windows' cursor left, the laptop's edge facing Windows crosses again within a second or two; Windows' cursor arriving on Windows' right edge stays there too. (where: second computer)
+- Windows' watchdog: the laptop's Wi-Fi off while Windows drives it: Windows' keyboard and mouse come home within about a second, and once the Wi-Fi is back the laptop's edges lead to Windows again. (where: second computer)
+- A pairing link copied with a byte-order mark or a trailing line break (from a text editor) pastes into Settings → Other computers with Pair enabled, and pairs. (where: second computer)
+
+**226. Pairing and disabled controls say why (Desktop UX 1)**
 
 - Paste on Settings → Other computers fills the box from the real clipboard, on Windows and on the Linux laptop, and the line under it names the other computer and its addresses. (where: second computer)
 - Start server in the bar at the top of a page starts the stopped server on the Linux laptop, and the bar goes once it runs. (where: second computer)
