@@ -497,6 +497,16 @@ fn drawn_here(key: &str) -> bool {
     }
 }
 
+/// What "Keep the connection quick while sharing" does here: Windows'
+/// timer is Windows' only (BK10 review M8).
+fn quick_note() -> &'static str {
+    if cfg!(windows) {
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+    } else {
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+    }
+}
+
 /// A row shows for `query` when each word is in its name or key, a
 /// setting drawn in it, or its section's title (J2 review: "advanced
 /// capture" had found nothing, a word on each).
@@ -2130,10 +2140,7 @@ impl SettingsForm {
                             "keys and moves go at once while the keyboard and mouse are shared",
                         ),
                     );
-                    note(
-                        ui,
-                        "While the pointer is on another computer, or this one is driven: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts.",
-                    );
+                    note(ui, quick_note());
                 });
             }
             Section::KdeConnect => {
@@ -2878,6 +2885,9 @@ mod tests {
         }
         assert_eq!(drawn_here("shared_input_files"), cfg!(windows));
         assert_eq!(drawn_here("shared_input_sound"), cfg!(windows));
+        // Windows' timer is named only on Windows (BK10 review M8).
+        assert_eq!(quick_note().contains("Windows' timer"), cfg!(windows));
+        assert!(quick_note().contains("byte every 50 ms"));
     }
 
     /// BK7: a computer's window's quality and view-only start are with the
