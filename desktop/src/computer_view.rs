@@ -1086,7 +1086,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             {
                 let controlling =
                     ended.is_none() && controls(status.control, state.view_only, connected, true);
-                follow_grab(&mut state, state_dir, &ctx, focused, controlling);
+                // Only a focus Windows said (review I1): unknown is not
+                // focused for the grab.
+                let said_focused = ctx.input(|i| i.viewport().focused == Some(true));
+                follow_grab(&mut state, state_dir, &ctx, said_focused, controlling);
             }
             if state.input.waiting() {
                 ctx.request_repaint_after(MOVE_EVERY);
