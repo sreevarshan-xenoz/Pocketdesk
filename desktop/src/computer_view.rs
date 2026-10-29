@@ -12,7 +12,10 @@
 //! View only on, the window only shows. Closing the window ends the view; a
 //! view that ends on its own says why, with Reconnect. The clipboard
 //! follows the window's focus while it controls, and files dropped on it go
-//! to that computer ([`crate::view_follow`], PC3).
+//! to that computer ([`crate::view_follow`], PC3). Its bar's Send keys
+//! menu sends the keys this computer keeps, and on Windows, in full screen,
+//! a keyboard grab sends the Windows key and Alt+Tab there
+//! ([`crate::view_grab`], PC4).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -54,6 +57,9 @@ const SAVED_NOTE: Duration = Duration::from_secs(8);
 const DROP_NOTE: Duration = Duration::from_secs(8);
 /// How often a drop on its way looks at the sent list.
 const DROP_LOOK: Duration = Duration::from_millis(500);
+/// How often the keyboard grab reads where the shared keyboard is (PC4).
+#[cfg(windows)]
+const ACROSS_LOOK: Duration = Duration::from_millis(500);
 
 /// The computer whose screen is wanted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +122,23 @@ struct State {
     drop: Option<DropBatch>,
     drop_note: Option<(String, Instant)>,
     drop_look: Option<Instant>,
+    /// Windows' keyboard grab (PC4).
+    #[cfg(windows)]
+    grab: GrabWindow,
+}
+
+/// The window's keyboard grab on Windows (PC4): the setting, a choice saved
+/// from the bar that Settings has not heard yet, the release, the hook
+/// while it is in, and where the shared keyboard is, read now and then.
+#[cfg(windows)]
+#[derive(Default)]
+struct GrabWindow {
+    setting: bool,
+    saved: Option<bool>,
+    grab: crate::view_grab::Grab,
+    hook: Option<crate::view_grab::Hook>,
+    across: bool,
+    across_read: Option<Instant>,
 }
 
 /// What the window measures itself (PC2): pictures shown a second, and how
@@ -294,11 +317,35 @@ fn switch_stats(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
 /// Save the window's Stats switch as `computer_view_stats` in the config
 /// at `path`, that key alone, as Settings writes it.
 fn save_stats(path: &Path, on: bool) -> Result<(), String> {
+    save_switch(path, "computer_view_stats", |c| c.computer_view_stats = on)
+}
+
+/// Save the bar's switch `key`, set by `set`, in the config at `path`, that
+/// key alone, as Settings writes it.
+fn save_switch(path: &Path, key: &str, set: impl FnOnce(&mut Config)) -> Result<(), String> {
     let mut config = Config::load_from(path).map_err(|e| e.to_string())?;
-    config.computer_view_stats = on;
-    config
-        .save_keys_to(path, &["computer_view_stats"])
-        .map_err(|e| e.to_string())
+    set(&mut config);
+    config.save_keys_to(path, &[key]).map_err(|e| e.to_string())
+}
+
+/// "Send Win and Alt+Tab there" switched from the bar (PC4): at once, and
+/// remembered as `computer_view_grab_keys`.
+#[cfg(windows)]
+fn switch_grab(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
+    let mut state = lock(shared);
+    state.grab.setting = on;
+    let saved = config.map(|path| {
+        save_switch(path, "computer_view_grab_keys", |c| {
+            c.computer_view_grab_keys = on
+        })
+    });
+    match saved {
+        Some(Ok(())) => state.grab.saved = Some(on),
+        Some(Err(e)) => {
+            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
+        }
+        None => {}
+    }
 }
 
 /// What the window says while there is no picture.
@@ -427,6 +474,21 @@ impl ComputerView {
     /// follows it.
     pub fn take_stats_saved(&self) -> Option<bool> {
         lock(&self.shared).stats_saved.take()
+    }
+
+    /// "Send Win and Alt+Tab there" as Settings has it (PC4): an open
+    /// window follows at once.
+    #[cfg(windows)]
+    pub fn set_grab_keys(&self, on: bool) {
+        lock(&self.shared).grab.setting = on;
+        self.ctx.request_repaint_of(viewport_id());
+    }
+
+    /// The bar's "Send Win and Alt+Tab there", saved since the last call
+    /// (PC4): Settings follows it.
+    #[cfg(windows)]
+    pub fn take_grab_saved(&self) -> Option<bool> {
+        lock(&self.shared).grab.saved.take()
     }
 
     /// Call each pass: keeps the window open while a screen is wanted.
@@ -650,6 +712,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         stop_view(state_dir, &mut state);
         state.wanted = None;
         state.fullscreen = false;
+        // The keyboard grab comes out with the window (PC4).
+        #[cfg(windows)]
+        {
+            state.grab.hook = None;
+        }
         return;
     }
     if let Some(picture) = state.picture.take() {
@@ -690,6 +757,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         switch_stats(shared, config, stats_on);
         state = lock(shared);
     }
+    #[cfg(windows)]
+    let grab_setting = state.grab.setting;
     let size = state.size;
     let shown = state.clock.shown(Instant::now());
     let saved = state
@@ -766,6 +835,20 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     })
                     .response
                     .on_hover_text("Send a key or chord this computer would keep to itself");
+                    #[cfg(windows)]
+                    {
+                        let mut grab_on = grab_setting;
+                        let grab = ui
+                            .checkbox(&mut grab_on, "Send Win and Alt+Tab there")
+                            .on_hover_text(format!(
+                                "In full screen, the Windows key, Alt+Tab, Alt+Esc and Ctrl+Esc go to {}. Press and let go of Ctrl+Alt+Shift to keep them here.",
+                                wanted.name
+                            ));
+                        if grab.clicked() {
+                            grab.surrender_focus();
+                            switch_grab(shared, config, grab_on);
+                        }
+                    }
                 }
                 let shot = ui
                     .add_enabled(texture.is_some(), egui::Button::new("Screenshot"))
@@ -999,6 +1082,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 _ => state.input.release_all(),
             };
             send(&mut state, packets);
+            #[cfg(windows)]
+            {
+                let controlling =
+                    ended.is_none() && controls(status.control, state.view_only, connected, true);
+                follow_grab(&mut state, state_dir, &ctx, focused, controlling);
+            }
             if state.input.waiting() {
                 ctx.request_repaint_after(MOVE_EVERY);
             }
@@ -1038,6 +1127,84 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             state.ended = Some(e);
         }
     }
+}
+
+/// Windows' keyboard grab, each pass (PC4): the keys the hook took go to
+/// the other computer after the window's own (Alt before its Tab); the hook
+/// goes in or comes out as [`crate::view_grab::Grab`] decides, and while it
+/// is in the window beats for its watchdog. A hook the watchdog took out,
+/// or the release chord, gives the keys back until the window leaves the
+/// front; whatever the hook sent is let go as it comes out.
+#[cfg(windows)]
+fn follow_grab(
+    state: &mut State,
+    state_dir: &Path,
+    ctx: &egui::Context,
+    focused: bool,
+    controlling: bool,
+) {
+    use crate::view_grab::{BEAT_EVERY, Heard, INSTALL, Situation};
+    let now = Instant::now();
+    if state
+        .grab
+        .across_read
+        .is_none_or(|at| now.saturating_duration_since(at) >= ACROSS_LOOK)
+    {
+        state.grab.across_read = Some(now);
+        state.grab.across = !pocketdesk_core::local::shared_input::read_status(state_dir)
+            .keyboard_on
+            .trim()
+            .is_empty();
+    }
+    let fullscreen = ctx
+        .input(|i| i.viewport().fullscreen)
+        .unwrap_or(state.fullscreen);
+    let heard: Vec<Heard> = state
+        .grab
+        .hook
+        .as_ref()
+        .map(|hook| hook.heard.try_iter().collect())
+        .unwrap_or_default();
+    let mut packets = Vec::new();
+    for heard in heard {
+        match heard {
+            Heard::Key(code, pressed) if focused && controlling => {
+                packets.extend(state.input.grabbed(code, pressed));
+            }
+            Heard::Key(..) => {}
+            Heard::Release => state.grab.grab.release(),
+        }
+    }
+    let died = state
+        .grab
+        .hook
+        .as_ref()
+        .is_some_and(|hook| !hook.is_alive());
+    if died {
+        state.grab.grab.release();
+    }
+    let wanted = state.grab.grab.wanted(Situation {
+        focused,
+        fullscreen,
+        setting: state.grab.setting,
+        controls: controlling,
+        shared_across: state.grab.across,
+    });
+    if wanted && state.grab.hook.is_none() {
+        state.grab.hook = INSTALL(ctx, viewport_id());
+        if state.grab.hook.is_none() {
+            // Not tried again each pass: the keys stay here until the
+            // window leaves the front.
+            state.grab.grab.release();
+        }
+    } else if !wanted && state.grab.hook.take().is_some() {
+        packets.extend(state.input.release_all());
+    }
+    if let Some(hook) = &state.grab.hook {
+        hook.beat();
+        ctx.request_repaint_after(BEAT_EVERY);
+    }
+    send(state, packets);
 }
 
 /// Save the picture shown as a PNG in Pictures\\Pocketdesk, and copy it;
@@ -1565,6 +1732,59 @@ mod tests {
                 session_id: Some(41)
             }]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC4: the keyboard grab is asked for only with the window in front,
+    /// full screen, controlling and the setting on, never with shared input
+    /// across; in a test the stand-in installer is asked, so no hook goes
+    /// in, and one that does not go in is not asked for again each pass.
+    #[cfg(windows)]
+    #[test]
+    fn the_grab_is_asked_for_only_in_front_and_never_hooks_in_a_test() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-grab-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx = egui::Context::default();
+        let asks = crate::view_grab::refused_here;
+        let fresh = |fullscreen: bool, setting: bool| {
+            let mut state = State {
+                fullscreen,
+                ..State::default()
+            };
+            state.grab.setting = setting;
+            state
+        };
+        for (what, mut state, focused, controlling) in [
+            ("windowed", fresh(false, true), true, true),
+            ("setting off", fresh(true, false), true, true),
+            ("no focus", fresh(true, true), false, true),
+            ("not controlling", fresh(true, true), true, false),
+        ] {
+            let before = asks();
+            follow_grab(&mut state, &dir, &ctx, focused, controlling);
+            assert_eq!(asks(), before, "{what}");
+        }
+        let mut state = fresh(true, true);
+        let before = asks();
+        follow_grab(&mut state, &dir, &ctx, true, true);
+        assert_eq!(asks(), before + 1, "in front: asked");
+        assert!(state.grab.hook.is_none(), "and nothing went in");
+        follow_grab(&mut state, &dir, &ctx, true, true);
+        assert_eq!(asks(), before + 1, "not asked again each pass");
+        // Shared input has the keyboard across: the server's hook has it.
+        pocketdesk_core::local::shared_input::write_status(
+            &dir,
+            &pocketdesk_core::local::shared_input::StatusFile {
+                keyboard_on: "laptop".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut state = fresh(true, true);
+        let before = asks();
+        follow_grab(&mut state, &dir, &ctx, true, true);
+        assert_eq!(asks(), before, "shared input across");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

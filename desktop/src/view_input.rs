@@ -622,6 +622,24 @@ impl WindowInput {
         }
     }
 
+    /// A key Windows' keyboard grab took (PC4: the Windows key, Alt+Tab's
+    /// Tab), as `code` going down or up there; a release of one not held
+    /// there is nothing.
+    #[cfg(windows)]
+    pub fn grabbed(&mut self, code: u16, pressed: bool) -> Vec<InputPacket> {
+        let mut out = Vec::new();
+        if pressed {
+            if !is_shift(code) && !is_chord_modifier(code) {
+                self.hold_shift(&mut out);
+            }
+            self.down_there.insert(code);
+            out.push(InputPacket::KeyEvent { key: code, pressed });
+        } else if self.down_there.remove(&code) {
+            out.push(InputPacket::KeyEvent { key: code, pressed });
+        }
+        out
+    }
+
     /// `keys` pressed in order and let go in reverse there, as a chord from
     /// the Send keys menu (PC4); a key held there already stays held.
     pub fn chord(&mut self, keys: &[u16]) -> Vec<InputPacket> {
@@ -1161,6 +1179,44 @@ mod tests {
             ]
         );
         assert!(input.holds(), "Alt is still held there");
+    }
+
+    /// PC4: a key the grab took is held there until let go, Shift held
+    /// here going with it, and is let go with everything else.
+    #[cfg(windows)]
+    #[test]
+    fn a_grabbed_key_is_held_there_until_let_go() {
+        let mut input = WindowInput::default();
+        input.take(
+            &[key(egui::Key::ShiftLeft, true)],
+            picture(),
+            Instant::now(),
+        );
+        assert_eq!(
+            words(&input.grabbed(LEFT_META, true)),
+            ["KeyEvent { key: 125, pressed: true }"]
+        );
+        assert_eq!(
+            words(&input.grabbed(31, true)),
+            [
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 31, pressed: true }",
+            ],
+            "Shift+Win+S: Shift goes before the S"
+        );
+        assert_eq!(
+            words(&input.grabbed(31, false)),
+            ["KeyEvent { key: 31, pressed: false }"]
+        );
+        assert!(input.grabbed(31, false).is_empty(), "once");
+        assert_eq!(
+            words(&input.release_all()),
+            [
+                "KeyEvent { key: 42, pressed: false }",
+                "KeyEvent { key: 125, pressed: false }",
+            ],
+            "the Windows key is let go with the rest"
+        );
     }
 
     /// Focus lost mid-press: the button, the keys and the modifiers are let
