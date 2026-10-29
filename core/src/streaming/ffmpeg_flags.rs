@@ -21,6 +21,11 @@ pub const VSYNC: &str = "-vsync";
 /// `-fps_mode` when neither is (an answer that could not be read is taken to
 /// be a current ffmpeg's).
 pub fn fps_mode_flag_in(help: &str) -> &'static str {
+    listed_fps_mode_flag(help).unwrap_or(FPS_MODE)
+}
+
+/// The frame-rate mode flag `help` lists, if it lists either.
+fn listed_fps_mode_flag(help: &str) -> Option<&'static str> {
     let lists = |flag: &str| {
         help.lines().any(|line| {
             line.trim_start()
@@ -29,13 +34,16 @@ pub fn fps_mode_flag_in(help: &str) -> &'static str {
         })
     };
     if lists(FPS_MODE) {
-        FPS_MODE
+        Some(FPS_MODE)
     } else if lists(VSYNC) {
-        VSYNC
+        Some(VSYNC)
     } else {
-        FPS_MODE
+        None
     }
 }
+
+/// How long `ffmpeg -h long` may take before its answer is given up on.
+const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The frame-rate mode flag `program` takes, asked the first time and
 /// remembered for the rest of the process. A program that cannot be run is
@@ -60,15 +68,43 @@ pub fn fps_mode_flag(program: impl AsRef<OsStr>) -> &'static str {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let Ok(out) = command.output() else {
+    let Some(help) = probe(command) else {
         return FPS_MODE;
     };
-    let flag = fps_mode_flag_in(&String::from_utf8_lossy(&out.stdout));
+    // Only an answer that names a flag is kept: an ffmpeg that started but
+    // failed (a missing library, a wedged run) is asked again next time,
+    // never remembered as a current one.
+    let Some(flag) = listed_fps_mode_flag(&help) else {
+        return FPS_MODE;
+    };
     known
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(program.to_os_string(), flag);
     flag
+}
+
+/// What `command` printed, if it ran and exited well within
+/// [`PROBE_DEADLINE`]; one that takes longer is killed.
+fn probe(mut command: Command) -> Option<String> {
+    use std::io::Read;
+    let mut child = command.spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        let _ = tx.send(out);
+    });
+    let Ok(out) = rx.recv_timeout(PROBE_DEADLINE) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    };
+    let status = child.wait().ok()?;
+    status
+        .success()
+        .then(|| String::from_utf8_lossy(&out).into_owned())
 }
 
 #[cfg(test)]
@@ -118,5 +154,19 @@ avsynctest AVOptions:
     #[test]
     fn a_program_that_cannot_run_gets_the_current_flag() {
         assert_eq!(fps_mode_flag("no-such-program-pocketdesk"), FPS_MODE);
+    }
+
+    /// A run that fails is no answer, so it is never remembered (the PR
+    /// review: an ffmpeg missing a library would otherwise be taken for a
+    /// current one for the whole process).
+    #[test]
+    fn a_failed_run_is_no_answer() {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .arg("--no-such-flag-pocketdesk")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        assert_eq!(probe(command), None);
     }
 }
