@@ -295,13 +295,13 @@ pub fn refused_here() -> usize {
         .count()
 }
 
-/// A message the hook's thread posts itself: the window has keys to read.
-const WM_WAKE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
-
 /// What the hook procedure works with, on the hook's thread.
 struct HookState {
     keys: HookKeys,
     heard: Sender<Heard>,
+    /// Wakes the window, from a small thread of its own: the hook's thread
+    /// never calls into egui (review I2).
+    wake: Sender<()>,
     beat: Arc<AtomicU64>,
     thread_id: u32,
     /// The window the grab is for (its HWND, as a number): with another
@@ -319,8 +319,8 @@ static HOOK_STATE: std::sync::Mutex<Option<HookState>> = std::sync::Mutex::new(N
 /// What the hook procedure does with `stroke`, on the hook's thread `here`
 /// at `now_ms` with the window `foreground` in front (its HWND, as a
 /// number), with the hook's state `slot`: whether to take it from
-/// Windows, and the thread to wake for the window when something was said
-/// to it. A key is Windows' when the state is another thread's (a hook
+/// Windows (the window is woken when something was said to it, by the
+/// waker's thread). A key is Windows' when the state is another thread's (a hook
 /// left from an earlier window, on its way out), another window is in
 /// front (the focus moved before the window's next pass took the hook
 /// out), or the window's beat is stale (the window stopped answering; the
@@ -331,21 +331,21 @@ fn decide(
     now_ms: u64,
     foreground: isize,
     stroke: Stroke,
-) -> (bool, Option<u32>) {
+) -> bool {
     let Some(state) = slot.as_mut().filter(|s| s.thread_id == here) else {
-        return (false, None);
+        return false;
     };
     if state.gone || foreground != state.window {
-        return (false, None);
+        return false;
     }
     if stalled(state.beat.load(Ordering::Acquire), now_ms) {
-        return (false, None);
+        return false;
     }
     // A key is taken only when it was said there: one nobody hears stays
     // Windows' (review I3).
     let (heard, take) = match state.keys.key(stroke) {
-        Verdict::Pass => return (false, None),
-        Verdict::Take(None) => return (true, None),
+        Verdict::Pass => return false,
+        Verdict::Take(None) => return true,
         Verdict::Take(Some((code, down))) => (Heard::Key(code, down), true),
         Verdict::Release => (Heard::Release, false),
     };
@@ -354,9 +354,10 @@ fn decide(
         if stroke.down {
             state.keys.untake(stroke.vk);
         }
-        return (false, None);
+        return false;
     }
-    (take, Some(state.thread_id))
+    let _ = state.wake.send(());
+    take
 }
 
 unsafe extern "system" fn keyboard_hook(
@@ -364,10 +365,10 @@ unsafe extern "system" fn keyboard_hook(
     wparam: windows::Win32::Foundation::WPARAM,
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED,
-        PostThreadMessageW, WM_KEYDOWN, WM_SYSKEYDOWN,
+        CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, LLKHF_INJECTED, WM_KEYDOWN,
+        WM_SYSKEYDOWN,
     };
     if code == HC_ACTION as i32 {
         // SAFETY: for HC_ACTION, lparam points at a KBDLLHOOKSTRUCT.
@@ -386,16 +387,10 @@ unsafe extern "system" fn keyboard_hook(
             let foreground =
                 unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }.0
                     as isize;
-            let (take, woke) = match HOOK_STATE.try_lock() {
+            let take = match HOOK_STATE.try_lock() {
                 Ok(mut slot) => decide(&mut slot, here, clock_ms(), foreground, stroke),
-                Err(_) => (false, None),
+                Err(_) => false,
             };
-            if let Some(thread_id) = woke {
-                // The window is woken off this procedure, which must stay
-                // quick: through this thread's own loop.
-                // SAFETY: a plain message to this thread.
-                let _ = unsafe { PostThreadMessageW(thread_id, WM_WAKE, WPARAM(0), LPARAM(0)) };
-            }
             if take {
                 return LRESULT(1);
             }
@@ -453,6 +448,19 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
     };
     let window = own_foreground()?;
     let (heard_tx, heard) = mpsc::channel();
+    let (wake_tx, wake) = mpsc::channel::<()>();
+    // The waker: the only thread here that calls into egui. It ends when
+    // the hook's state goes, waking the window once more to see that.
+    let ctx = ctx.clone();
+    std::thread::Builder::new()
+        .name("pd-view-grab-wake".into())
+        .spawn(move || {
+            while wake.recv().is_ok() {
+                ctx.request_repaint_of(viewport);
+            }
+            ctx.request_repaint_of(viewport);
+        })
+        .ok()?;
     let (ready_tx, ready) = mpsc::channel::<Option<u32>>();
     let beat = Arc::new(AtomicU64::new(clock_ms()));
     let thread_beat = beat.clone();
@@ -460,7 +468,6 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
     // puts no hook in, or takes it out at its next look.
     let abandoned = Arc::new(AtomicBool::new(false));
     let thread_abandoned = abandoned.clone();
-    let ctx = ctx.clone();
     let thread = std::thread::Builder::new()
         .name("pd-view-grab".into())
         .spawn(move || {
@@ -473,6 +480,7 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
             *HOOK_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(HookState {
                 keys: HookKeys::with_held(modifiers_down()),
                 heard: heard_tx,
+                wake: wake_tx,
                 beat: thread_beat.clone(),
                 thread_id,
                 window,
@@ -507,13 +515,11 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
                 if thread_abandoned.load(Ordering::Acquire) {
                     break;
                 }
-                match msg.message {
-                    WM_WAKE => ctx.request_repaint_of(viewport),
-                    WM_TIMER if stalled(thread_beat.load(Ordering::Acquire), clock_ms()) => {
-                        // The watchdog: the window stopped answering.
-                        break;
-                    }
-                    _ => {}
+                if msg.message == WM_TIMER
+                    && stalled(thread_beat.load(Ordering::Acquire), clock_ms())
+                {
+                    // The watchdog: the window stopped answering.
+                    break;
                 }
             }
             // SAFETY: the hook and timer this thread put in.
@@ -527,9 +533,8 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
             if slot.as_ref().is_some_and(|s| s.thread_id == thread_id) {
                 slot.take();
             }
+            // Its waker ends with it, and the window looks again.
             drop(slot);
-            // The window looks again, and sees the hook gone.
-            ctx.request_repaint_of(viewport);
         })
         .ok()?;
     match ready.recv_timeout(STALL) {
@@ -842,9 +847,11 @@ mod tests {
 
     fn hook_state(thread_id: u32, beat_ms: u64) -> (Option<HookState>, Receiver<Heard>) {
         let (heard, heard_rx) = mpsc::channel();
+        let (wake, _) = mpsc::channel();
         let state = HookState {
             keys: HookKeys::default(),
             heard,
+            wake,
             beat: Arc::new(AtomicU64::new(beat_ms)),
             thread_id,
             window: WINDOW,
@@ -864,16 +871,26 @@ mod tests {
     #[test]
     fn the_procedure_takes_and_says_a_key_on_its_own_thread() {
         let (mut slot, heard) = hook_state(7, 1_000);
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, WINDOW, win(true)),
-            (true, Some(7))
-        );
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(true)));
         assert_eq!(heard.try_recv(), Ok(Heard::Key(125, true)));
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, WINDOW, win(false)),
-            (true, Some(7))
-        );
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(false)));
         assert_eq!(heard.try_recv(), Ok(Heard::Key(125, false)));
+    }
+
+    /// Review I2: the window is woken, through the waker's channel, when
+    /// something was said to it, and only then.
+    #[test]
+    fn the_window_is_woken_only_when_told_something() {
+        let (mut slot, _heard) = hook_state(7, 1_000);
+        let (wake, woken) = mpsc::channel();
+        if let Some(state) = slot.as_mut() {
+            state.wake = wake;
+        }
+        let tab = stroke(TAB.0, TAB.1, TAB.2, true);
+        assert!(!decide(&mut slot, 7, 1_100, WINDOW, tab));
+        assert!(woken.try_recv().is_err(), "a key passed says nothing");
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(true)));
+        assert_eq!(woken.try_recv(), Ok(()));
     }
 
     /// Review I1: another window in front (a toast, a click on a second
@@ -882,20 +899,10 @@ mod tests {
     #[test]
     fn another_window_in_front_has_every_key() {
         let (mut slot, heard) = hook_state(7, 1_000);
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, 0x9999, win(true)),
-            (false, None)
-        );
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, 0, win(true)),
-            (false, None),
-            "none"
-        );
+        assert!(!decide(&mut slot, 7, 1_100, 0x9999, win(true)));
+        assert!(!decide(&mut slot, 7, 1_100, 0, win(true)), "none");
         assert!(heard.try_recv().is_err());
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, WINDOW, win(true)),
-            (true, Some(7))
-        );
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(true)));
     }
 
     /// Review I3: with the window no longer listening, a key is Windows':
@@ -904,18 +911,12 @@ mod tests {
     fn a_key_nobody_hears_is_not_taken() {
         let (mut slot, heard) = hook_state(7, 1_000);
         drop(heard);
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, WINDOW, win(true)),
-            (false, None)
-        );
-        assert_eq!(
-            decide(&mut slot, 7, 1_100, WINDOW, win(false)),
-            (false, None)
-        );
+        assert!(!decide(&mut slot, 7, 1_100, WINDOW, win(true)));
+        assert!(!decide(&mut slot, 7, 1_100, WINDOW, win(false)));
         let alt = stroke(ALT.0, ALT.1, ALT.2, true);
-        assert_eq!(decide(&mut slot, 7, 1_100, WINDOW, alt), (false, None));
+        assert!(!decide(&mut slot, 7, 1_100, WINDOW, alt));
         let tab = stroke(TAB.0, TAB.1, TAB.2, true);
-        assert_eq!(decide(&mut slot, 7, 1_100, WINDOW, tab), (false, None));
+        assert!(!decide(&mut slot, 7, 1_100, WINDOW, tab));
         assert!(slot.as_ref().is_some_and(|s| s.gone));
     }
 
@@ -923,10 +924,7 @@ mod tests {
     #[test]
     fn a_stale_beat_passes_every_key() {
         let (mut slot, heard) = hook_state(7, 1_000);
-        assert_eq!(
-            decide(&mut slot, 7, 2_001, WINDOW, win(true)),
-            (false, None)
-        );
+        assert!(!decide(&mut slot, 7, 2_001, WINDOW, win(true)));
         assert!(heard.try_recv().is_err());
     }
 
@@ -936,15 +934,9 @@ mod tests {
     #[test]
     fn a_hook_from_another_thread_takes_nothing() {
         let (mut slot, heard) = hook_state(7, 1_000);
-        assert_eq!(
-            decide(&mut slot, 8, 1_100, WINDOW, win(true)),
-            (false, None)
-        );
+        assert!(!decide(&mut slot, 8, 1_100, WINDOW, win(true)));
         assert!(heard.try_recv().is_err());
-        assert_eq!(
-            decide(&mut None, 7, 1_100, WINDOW, win(true)),
-            (false, None)
-        );
+        assert!(!decide(&mut None, 7, 1_100, WINDOW, win(true)));
     }
 
     /// The release chord's last key goes on to Windows and is said; a key
@@ -953,35 +945,32 @@ mod tests {
     fn a_release_passes_and_a_key_with_no_code_is_taken_silently() {
         let (mut slot, heard) = hook_state(7, 1_000);
         for key in [CTRL, ALT, SHIFT] {
-            assert_eq!(
-                decide(
-                    &mut slot,
-                    7,
-                    1_000,
-                    WINDOW,
-                    stroke(key.0, key.1, key.2, true)
-                ),
-                (false, None)
-            );
-        }
-        assert_eq!(
-            decide(
+            assert!(!decide(
                 &mut slot,
                 7,
                 1_000,
                 WINDOW,
-                stroke(SHIFT.0, SHIFT.1, SHIFT.2, false)
-            ),
-            (false, Some(7))
-        );
+                stroke(key.0, key.1, key.2, true)
+            ));
+        }
+        assert!(!decide(
+            &mut slot,
+            7,
+            1_000,
+            WINDOW,
+            stroke(SHIFT.0, SHIFT.1, SHIFT.2, false)
+        ));
         assert_eq!(heard.try_recv(), Ok(Heard::Release));
         // Win held: a key with no evdev code is still kept from Windows.
         decide(&mut slot, 7, 1_000, WINDOW, win(true));
         let _ = heard.try_recv();
-        assert_eq!(
-            decide(&mut slot, 7, 1_000, WINDOW, stroke(0xFF, 0x7F, false, true)),
-            (true, None)
-        );
+        assert!(decide(
+            &mut slot,
+            7,
+            1_000,
+            WINDOW,
+            stroke(0xFF, 0x7F, false, true)
+        ));
         assert!(heard.try_recv().is_err());
     }
 
