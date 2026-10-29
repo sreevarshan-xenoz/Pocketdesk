@@ -188,15 +188,16 @@ From `core/src/local/nearby.rs` and `server/src/nearby.rs`. Computer A found com
 |---|---|---|---|
 | `ask` | A | `name` (A's own word for itself), `commit`: hex SHA-256 of `"pocketdesk nearby commitment v1"` and A's 32-byte random nonce | B takes it, or answers `busy` (another ask on its screen) or `unavailable` (asks off, `nearby_pairing = false`, or more than 3 asks from that address in 60 s; one word for both) |
 | `nonce` | B | `nonce`: B's 32-byte random nonce, hex | A reveals its own |
-| `reveal` | A | `nonce`: A's nonce, hex | B checks it against the commitment (and that the connection proved the same certificate); a mismatch ends the ask silently |
-| `accepted` | B | `pin` (6 digits), `deviceId`, `name`, `mine` (B's owner ticked both are theirs), `addresses`, `controlPort`, `streamPort`, `endpoint` (iroh, when B has one) | A pairs as from a pasted link (§2.6) made of these, its `fp` the certificate this connection proved (never one the answer names), its first address the one A dialled; `deviceId` must be the announced id |
-| `declined` | B | — | B's owner declined, or did not answer within 60 s |
+| `reveal` | A | `nonce`: A's nonce, hex | B checks it against the commitment (and that the connection proved the same certificate); a mismatch ends the ask silently. A matching one: B shows its owner the code with Accept and Decline, and A shows its own owner the code with "Same code on both?", Confirm and Cancel |
+| `confirmed` | A | — | A's owner confirmed the code on A's screen. B counts it only once its prompt is shown |
+| `accepted` | B | `pin` (6 digits), `deviceId`, `name`, `mine` (B's owner ticked both are theirs), `addresses`, `controlPort`, `streamPort`, `endpoint` (iroh, when B has one) | Sent only once both owners said yes: B's owner accepted and A's `confirmed` came, in either order. A takes it only after its own owner confirmed (and it sent `confirmed`): an `accepted` before that ends the ask as failed, since a computer in the middle could send one at once. A then pairs as from a pasted link (§2.6) made of these, its `fp` the certificate this connection proved (never one the answer names), its first address the one A dialled; `deviceId` must be the announced id |
+| `declined` | B | — | B's owner declined, or both owners had not said yes within 60 s of the prompt. A cancelling closes the connection, and B takes its prompt down |
 
 **The code.** Both show six digits: the first 8 bytes of SHA-256(`"pocketdesk nearby pairing v1"` ‖ A's certificate hash ‖ B's certificate hash ‖ A's nonce ‖ B's nonce), as a big-endian integer, mod 1,000,000, shown as `482 913`. A computer in the middle sees two TLS sessions with different certificates, so the codes it causes differ unless it makes them agree; the commitment means it must choose its nonce towards A before it learns A's, and its nonce towards B before B's, so they agree by a one-in-a-million chance per try (each try is an ask B's owner sees).
 
 **The PIN B hands A** is minted for that ask only, kept in memory, and pairs only A's device id on a connection proving the certificate whose code was matched, once, within 120 s (`nearby::take_pin`). It reads as the owner's own code: both ways (PC1) when B's owner ticked "Both are mine" and A asks for both ways, which A does only when its owner ticked it too.
 
-**What A learns before Accept**: B's nonce, `busy` or `unavailable`, and what any client of the control channel learns (B's identity line and certificate, limit 7 in SECURITY.md). B's addresses, ports and endpoint come only with `accepted`.
+**What A learns before both said yes**: B's nonce, `busy` or `unavailable`, and what any client of the control channel learns (B's identity line and certificate, limit 7 in SECURITY.md). B's addresses, ports and endpoint come only with `accepted`.
 
 ---
 

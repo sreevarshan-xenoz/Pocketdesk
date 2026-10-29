@@ -11,9 +11,12 @@
 //! pairs of certificates, must choose its nonces before it learns the ones
 //! that make the codes, so the two codes it causes agree only by a one in a
 //! million chance. The code is six digits from both certificates and both
-//! nonces ([`matching_code`]). The other computer's owner compares it with
-//! the requester's screen and accepts; the two then pair as if its link had
-//! been pasted, with a PIN it hands the requester for that certificate only.
+//! nonces ([`matching_code`]). Both owners compare it, as Bluetooth's
+//! numeric comparison has each side do: the requester's owner confirms the
+//! code on its screen, the other's accepts on its own, and only once both
+//! have does the other hand the requester a PIN for that certificate only;
+//! the two then pair as if its link had been pasted. The other's Accept
+//! alone pairs nothing: a computer in the middle could send one.
 //!
 //! What the two keep while it goes on ([`NearbyAsk`], [`NearbyRequest`]) is
 //! in `computers.json`, for the app to show; the other computer's own word
@@ -42,7 +45,10 @@ pub mod step {
     pub const NONCE: &str = "nonce";
     /// Requester: its nonce, which matches the commitment.
     pub const REVEAL: &str = "reveal";
-    /// Host: its owner accepted; the PIN and what pairing needs.
+    /// Requester: its owner confirmed the code on its screen.
+    pub const CONFIRMED: &str = "confirmed";
+    /// Host: its owner accepted and the requester confirmed; the PIN and
+    /// what pairing needs. Sent only after [`CONFIRMED`].
     pub const ACCEPTED: &str = "accepted";
     /// Host: its owner declined, or did not answer in time.
     pub const DECLINED: &str = "declined";
@@ -133,7 +139,10 @@ pub fn from_hex(text: &str) -> Option<[u8; 32]> {
 pub enum AskState {
     /// Reaching it.
     Asking,
-    /// Its owner sees the code; waiting for Accept.
+    /// Both screens show the code: waiting for the owner here to confirm
+    /// it ("Same code on both?"). Nothing pairs before.
+    Confirm,
+    /// Confirmed here; waiting for the other's owner to accept.
     Waiting,
     /// Accepted: pairing as from its link (the last pairing's outcome
     /// says how it went).
@@ -152,7 +161,10 @@ pub enum AskState {
 impl AskState {
     /// Whether it is over.
     pub fn is_over(&self) -> bool {
-        !matches!(self, AskState::Asking | AskState::Waiting)
+        !matches!(
+            self,
+            AskState::Asking | AskState::Confirm | AskState::Waiting
+        )
     }
 }
 
@@ -209,10 +221,26 @@ impl Refusal {
 /// How an answer went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answered {
+    /// Accepted here; it pairs once the requester has confirmed too
+    /// ([`HostDesk::both`]).
     Accepted,
     Declined,
     /// Not the ask on screen now (answered late, or twice).
     Stale,
+}
+
+/// The ask on the host's screen: when it was taken (or shown), and what
+/// each owner said of it.
+#[derive(Debug)]
+struct Shown {
+    id: String,
+    at: Instant,
+    /// Its requester revealed a nonce that matched: the owner sees it.
+    prompted: bool,
+    /// The owner here accepted, and whether both are theirs (PC1).
+    host: Option<bool>,
+    /// The requester's owner confirmed the code there.
+    requester: bool,
 }
 
 /// The asks one address made lately, to take at most [`PACE_MOST`] in
@@ -239,11 +267,11 @@ impl Pace {
     }
 }
 
-/// The host's side: one ask at a time on its screen, answered by its owner
-/// within [`ANSWER_WITHIN`], and the pace per address.
+/// The host's side: one ask at a time on its screen, answered by both
+/// owners within [`ANSWER_WITHIN`], and the pace per address.
 #[derive(Debug, Default)]
 pub struct HostDesk {
-    shown: Option<(String, Instant)>,
+    shown: Option<Shown>,
     pace: Pace,
 }
 
@@ -262,19 +290,46 @@ impl HostDesk {
             return Err(Refusal::TooOften);
         }
         let id = to_hex(&nonce()[..8]);
-        self.shown = Some((id.clone(), now));
+        self.shown = Some(Shown {
+            id: id.clone(),
+            at: now,
+            prompted: false,
+            host: None,
+            requester: false,
+        });
         Ok(id)
     }
 
-    /// The owner's answer to the ask `id`, once.
-    pub fn answer(&mut self, id: &str, accept: bool, now: Instant) -> Answered {
+    fn shown_mut(&mut self, id: &str) -> Option<&mut Shown> {
+        self.shown.as_mut().filter(|s| s.id == id)
+    }
+
+    /// The ask `id`'s requester revealed a nonce that matched: its owner
+    /// sees it now, for [`ANSWER_WITHIN`] from `now`. False when it is not
+    /// the ask on screen, or was shown already.
+    pub fn prompted(&mut self, id: &str, now: Instant) -> bool {
+        match self.shown_mut(id) {
+            Some(shown) if !shown.prompted => {
+                shown.prompted = true;
+                shown.at = now;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The owner's answer to the ask `id`, once. A Decline frees the
+    /// screen; an Accept waits for the requester's confirmation
+    /// ([`HostDesk::both`]).
+    pub fn answer(&mut self, id: &str, accept: bool, mine: bool, now: Instant) -> Answered {
         self.expire(now);
-        match &self.shown {
-            Some((shown, _)) if shown == id => {
-                self.shown = None;
+        match self.shown_mut(id) {
+            Some(shown) if shown.prompted && shown.host.is_none() => {
                 if accept {
+                    shown.host = Some(mine);
                     Answered::Accepted
                 } else {
+                    self.shown = None;
                     Answered::Declined
                 }
             }
@@ -282,10 +337,34 @@ impl HostDesk {
         }
     }
 
-    /// The ask `id` is over without an answer (its requester left, or a
+    /// The ask `id`'s requester said its owner confirmed the code there.
+    /// Only once it is shown here: a confirmation before its nonce was
+    /// even revealed confirms nothing.
+    pub fn confirmed(&mut self, id: &str, now: Instant) -> bool {
+        self.expire(now);
+        match self.shown_mut(id) {
+            Some(shown) if shown.prompted => {
+                shown.requester = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Both owners said yes to the ask `id` (the owner here accepted, the
+    /// requester's confirmed): the screen is free again, and whether both
+    /// are theirs is returned, for the PIN. None until both have.
+    pub fn both(&mut self, id: &str) -> Option<bool> {
+        let shown = self.shown.as_ref().filter(|s| s.id == id)?;
+        let mine = shown.host.filter(|_| shown.requester)?;
+        self.shown = None;
+        Some(mine)
+    }
+
+    /// The ask `id` is over without both answers (its requester left, or a
     /// step failed): the screen is free again.
     pub fn drop_ask(&mut self, id: &str) {
-        if self.shown.as_ref().is_some_and(|(shown, _)| shown == id) {
+        if self.shown.as_ref().is_some_and(|s| s.id == id) {
             self.shown = None;
         }
     }
@@ -296,16 +375,16 @@ impl HostDesk {
         if self
             .shown
             .as_ref()
-            .is_some_and(|(_, at)| now.saturating_duration_since(*at) >= ANSWER_WITHIN)
+            .is_some_and(|s| now.saturating_duration_since(s.at) >= ANSWER_WITHIN)
         {
-            return self.shown.take().map(|(id, _)| id);
+            return self.shown.take().map(|s| s.id);
         }
         None
     }
 
     /// The ask on screen now.
     pub fn shown(&self) -> Option<&str> {
-        self.shown.as_ref().map(|(id, _)| id.as_str())
+        self.shown.as_ref().map(|s| s.id.as_str())
     }
 }
 
@@ -426,16 +505,50 @@ mod tests {
     const HOME: IpAddr = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 10));
     const OTHER: IpAddr = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 11));
 
-    /// Ask, then Accept: accepted once; a second answer is stale.
+    /// Ask, then Accept: accepted once; a second answer is stale. It pairs
+    /// only once the requester's owner has confirmed too, in either order.
     #[test]
-    fn an_ask_is_accepted_once() {
+    fn an_ask_pairs_only_once_both_owners_said_yes() {
         let start = Instant::now();
         let mut desk = HostDesk::default();
         let id = desk.ask(HOME, true, start).expect("taken");
         assert_eq!(desk.shown(), Some(id.as_str()));
-        assert_eq!(desk.answer(&id, true, at(5, start)), Answered::Accepted);
-        assert_eq!(desk.answer(&id, true, at(6, start)), Answered::Stale);
+        assert!(desk.prompted(&id, at(1, start)));
+        assert_eq!(
+            desk.answer(&id, true, true, at(5, start)),
+            Answered::Accepted
+        );
+        assert_eq!(desk.answer(&id, true, true, at(6, start)), Answered::Stale);
+        assert_eq!(desk.both(&id), None, "the requester has not confirmed");
+        assert_eq!(desk.shown(), Some(id.as_str()), "still on screen");
+        assert!(desk.confirmed(&id, at(7, start)));
+        assert_eq!(desk.both(&id), Some(true));
         assert_eq!(desk.shown(), None);
+        assert_eq!(desk.both(&id), None, "once");
+
+        // The requester first, then the owner here.
+        let id = desk.ask(OTHER, true, at(8, start)).expect("taken");
+        assert!(desk.prompted(&id, at(8, start)));
+        assert!(desk.confirmed(&id, at(9, start)));
+        assert_eq!(desk.both(&id), None, "the owner here has not accepted");
+        desk.answer(&id, true, false, at(10, start));
+        assert_eq!(desk.both(&id), Some(false));
+    }
+
+    /// The requester's confirmation counts only once the ask is on screen:
+    /// before its nonce was revealed it confirms nothing, nor can the owner
+    /// here answer an ask not shown yet.
+    #[test]
+    fn a_confirmation_before_the_prompt_confirms_nothing() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        let id = desk.ask(HOME, true, start).expect("taken");
+        assert!(!desk.confirmed(&id, start));
+        assert_eq!(desk.answer(&id, true, false, start), Answered::Stale);
+        assert!(desk.prompted(&id, at(1, start)));
+        assert!(!desk.prompted(&id, at(2, start)), "shown once");
+        desk.answer(&id, true, false, at(3, start));
+        assert_eq!(desk.both(&id), None);
     }
 
     /// Decline frees the screen for the next ask.
@@ -445,20 +558,28 @@ mod tests {
         let mut desk = HostDesk::default();
         let id = desk.ask(HOME, true, start).expect("taken");
         assert_eq!(desk.ask(OTHER, true, start), Err(Refusal::Busy));
-        assert_eq!(desk.answer(&id, false, at(1, start)), Answered::Declined);
+        desk.prompted(&id, start);
+        assert_eq!(
+            desk.answer(&id, false, false, at(1, start)),
+            Answered::Declined
+        );
         assert!(desk.ask(OTHER, true, at(2, start)).is_ok());
     }
 
-    /// No answer within a minute: it runs out, and a late Accept grants
-    /// nothing.
+    /// No answer within a minute of the prompt: it runs out, and a late
+    /// Accept grants nothing.
     #[test]
     fn an_unanswered_ask_runs_out() {
         let start = Instant::now();
         let mut desk = HostDesk::default();
         let id = desk.ask(HOME, true, start).expect("taken");
+        desk.prompted(&id, start);
         assert_eq!(desk.expire(at(59, start)), None);
         assert_eq!(desk.expire(at(60, start)), Some(id.clone()));
-        assert_eq!(desk.answer(&id, true, at(61, start)), Answered::Stale);
+        assert_eq!(
+            desk.answer(&id, true, false, at(61, start)),
+            Answered::Stale
+        );
     }
 
     /// With asks turned off, none is taken.
@@ -477,7 +598,7 @@ mod tests {
         let mut desk = HostDesk::default();
         for i in 0..PACE_MOST as u64 {
             let id = desk.ask(HOME, true, at(i, start)).expect("taken");
-            desk.answer(&id, false, at(i, start));
+            desk.drop_ask(&id);
         }
         assert_eq!(desk.ask(HOME, true, at(10, start)), Err(Refusal::TooOften));
         let other = desk

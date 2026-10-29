@@ -3,9 +3,10 @@
 //! as the app asks for a computer it found (the address and port its
 //! announcement gave; discovery itself is mDNS on the real network, so
 //! the address is given here), and both show the same matching code. A
-//! decline pairs nothing. Asked again and accepted, with both owners
-//! saying both are theirs, the two pair both ways from that one ask: A
-//! pairs as from a pasted link, and each then lists the other.
+//! decline pairs nothing. Asked again, confirmed on A and accepted on B,
+//! with both owners saying both are theirs, the two pair both ways from
+//! that one ask: A pairs as from a pasted link, and each then lists the
+//! other.
 //!
 //! No notification is shown (`POCKETDESK_NEARBY_QUIET`), nothing is
 //! injected and no sound is made. Each server's log goes to its throwaway
@@ -49,13 +50,13 @@ fn ask(a_state: &Path, b_control: u16, mine: bool) -> String {
     .id
 }
 
-/// The code A shows for its ask `request`, and B's ask on screen (its id
-/// and code), once both show one.
+/// The code A shows for its ask `request` (asking its owner to confirm
+/// it), and B's ask on screen (its id and code), once both show one.
 fn codes(a_state: &Path, b_state: &Path, request: &str) -> (String, String, String) {
     wait_for(30, "both codes", || {
         let out = computers::read(a_state)
             .nearby_out
-            .filter(|o| o.request == request && o.state == AskState::Waiting)?;
+            .filter(|o| o.request == request && o.state == AskState::Confirm)?;
         let shown = computers::read(b_state).nearby_in?;
         Some((out.code?, shown.id, shown.code))
     })
@@ -134,10 +135,24 @@ fn two_computers_nearby_pair_with_a_matching_code() {
     let trust = |state: &Path| TrustStore::read(state.join(TRUST_FILE)).unwrap();
     assert!(!trust(&b_state).is_trusted(A_ID), "a decline pairs nothing");
 
-    // Asked again, accepted with both owners' yes: paired both ways.
+    // Asked again, confirmed on A and accepted on B, with both owners'
+    // yes: paired both ways.
     let second = ask(&a_state, b_control, true);
     let (a_code, id, b_code) = codes(&a_state, &b_state, &second);
     assert_eq!(a_code, b_code);
+    computers::request(
+        &a_state,
+        ComputerAsk::ConfirmNearby {
+            nearby: second.clone(),
+        },
+        pin::now_unix(),
+    )
+    .unwrap();
+    wait_for(30, "A's confirmation", || {
+        computers::read(&a_state)
+            .nearby_out
+            .filter(|o| o.request == second && o.state == AskState::Waiting)
+    });
     answer(&b_state, &id, true, true);
     let outcome = wait_for(60, "the pairing's outcome", || {
         computers::read(&a_state)

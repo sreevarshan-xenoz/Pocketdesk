@@ -71,9 +71,11 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     *PAIRED_BACK.lock().unwrap_or_else(|e| e.into_inner()) = Some(back_tx);
     // Another computer's screen in a window here (BK7), from the first ask.
     let mut views: Option<mpsc::Sender<crate::computer_view::Command>> = None;
-    // A nearby computer asked to pair (pair a computer nearby): the ask
-    // under way, to cancel, and the links its accepted asks make.
-    let mut nearby_ask: Option<tokio::sync::watch::Sender<bool>> = None;
+    // This computer asking a nearby one to pair (pair a computer nearby):
+    // the ask under way (its request) and its owner's word on it, to
+    // confirm or cancel, and the links the asks both owners said yes to
+    // make.
+    let mut nearby_ask: Option<(String, tokio::sync::watch::Sender<crate::nearby::Owner>)> = None;
     let (nearby_tx, mut nearby_accepted) = mpsc::unbounded_channel::<(String, bool, String)>();
     // What an earlier run said of its links is not this run's.
     let restarted = computers::update(&dir, |file| {
@@ -103,11 +105,12 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     mine,
                 } => {
                     // A newer ask replaces one under way.
-                    if let Some(cancel) = nearby_ask.take() {
-                        let _ = cancel.send(true);
+                    if let Some((_, owner)) = nearby_ask.take() {
+                        let _ = owner.send(crate::nearby::Owner::Cancelled);
                     }
-                    let (cancel, cancelled) = tokio::sync::watch::channel(false);
-                    nearby_ask = Some(cancel);
+                    let (owner, said) =
+                        tokio::sync::watch::channel(crate::nearby::Owner::Undecided);
+                    nearby_ask = Some((request.id.clone(), owner));
                     let asked = crate::nearby::Asked {
                         request: request.id.clone(),
                         device_id,
@@ -120,14 +123,20 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         (dir.clone(), cert_manager.clone(), nearby_tx.clone());
                     tokio::spawn(async move {
                         let (request, mine) = (asked.request.clone(), asked.mine);
-                        if let Some(link) = crate::nearby::ask(dir, certs, asked, cancelled).await {
+                        if let Some(link) = crate::nearby::ask(dir, certs, asked, said).await {
                             let _ = accepted.send((link, mine, request));
                         }
                     });
                 }
                 ComputerAsk::CancelNearby => {
-                    if let Some(cancel) = nearby_ask.take() {
-                        let _ = cancel.send(true);
+                    if let Some((_, owner)) = nearby_ask.take() {
+                        let _ = owner.send(crate::nearby::Owner::Cancelled);
+                    }
+                }
+                ComputerAsk::ConfirmNearby { nearby } => {
+                    // Only the ask under way, as its code was shown.
+                    if let Some((_, owner)) = nearby_ask.as_ref().filter(|(r, _)| *r == nearby) {
+                        let _ = owner.send(crate::nearby::Owner::Confirmed);
                     }
                 }
                 ComputerAsk::AnswerNearby {
@@ -135,7 +144,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     accept,
                     mine,
                 } => {
-                    crate::nearby::answer(&dir, &nearby, accept, mine);
+                    crate::nearby::answer(&dir, &nearby, accept, mine).await;
                 }
                 ComputerAsk::Forget { device_id } => {
                     if let Some(link) = links.remove(&device_id) {

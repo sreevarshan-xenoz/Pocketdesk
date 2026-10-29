@@ -293,6 +293,10 @@ pub enum ComputerAsk {
     },
     /// Stop this computer's ask of a nearby one.
     CancelNearby,
+    /// The owner here confirmed that both screens show the code of this
+    /// computer's ask `nearby` (its [`super::nearby::NearbyAsk::request`]):
+    /// nothing pairs before, whatever the other computer answers.
+    ConfirmNearby { nearby: String },
     /// The owner's answer to a nearby computer's ask `nearby` (its
     /// [`super::nearby::NearbyRequest::id`]; not `id`, the request's own)
     /// on this one's screen; `mine`, with Accept: both are theirs (PC1).
@@ -496,6 +500,9 @@ mod tests {
                 mine: true,
             },
             ComputerAsk::CancelNearby,
+            ComputerAsk::ConfirmNearby {
+                nearby: "r-1".to_string(),
+            },
             ComputerAsk::AnswerNearby {
                 nearby: "0a1b2c3d4e5f6071".to_string(),
                 accept: true,

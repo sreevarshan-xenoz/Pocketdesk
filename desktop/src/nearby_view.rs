@@ -38,6 +38,10 @@ pub const PROMPT_MINE_BOX: &str = crate::pair_view::MINE_BOX;
 pub const NOT_LISTED: &str = "Not listed? Use a link.";
 /// A row's word for a computer paired already.
 pub const PAIRED: &str = "Paired";
+/// What the asking computer's owner is asked once both show the code.
+pub const SAME_CODE: &str = "Same code on both?";
+/// The button that confirms it.
+pub const CONFIRM: &str = "Confirm";
 
 /// Why a computer may not show, each a line (the plan's reasons).
 pub fn reasons() -> Vec<&'static str> {
@@ -60,7 +64,9 @@ const PUBLIC_FIX: &str =
 /// pairing outcome says the rest).
 pub fn ended_words(state: &AskState, name: &str) -> Option<String> {
     Some(match state {
-        AskState::Asking | AskState::Waiting | AskState::Accepted => return None,
+        AskState::Asking | AskState::Confirm | AskState::Waiting | AskState::Accepted => {
+            return None;
+        }
         AskState::Declined => format!("{name} declined, or didn't answer in time."),
         AskState::Busy => format!("{name} is answering another computer. Try again in a minute."),
         AskState::Unavailable => {
@@ -292,8 +298,25 @@ impl NearbyView {
                         ui.label(format!("Asking {name}…"));
                     });
                 }
+                AskState::Confirm => {
+                    ui.label(RichText::new(SAME_CODE).strong());
+                    ui.label(
+                        RichText::new(format!("Confirm only if {name} shows it too."))
+                            .color(crate::theme::muted(ui)),
+                    );
+                    if ui.button(CONFIRM).clicked() {
+                        let _ = computers::request(
+                            state_dir,
+                            ComputerAsk::ConfirmNearby {
+                                nearby: request.clone(),
+                            },
+                            now_unix,
+                        );
+                        self.read_at = None;
+                    }
+                }
                 AskState::Waiting => {
-                    ui.label(format!("Waiting for {name} to accept."));
+                    ui.label(format!("Confirmed. Waiting for {name} to accept."));
                     ui.label(
                         RichText::new("It must show the same code.").color(crate::theme::muted(ui)),
                     );
@@ -627,24 +650,46 @@ mod tests {
                 mine: true,
             }
         );
-        // The server says it waits, with the code.
-        computers::update(&dir, |file| {
-            file.nearby_out = Some(nearby::NearbyAsk {
-                request: taken[0].id.clone(),
-                device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
-                name: "Test Tower".to_string(),
-                code: Some("482913".to_string()),
-                state: AskState::Waiting,
-                unix: now,
-            });
-        })
-        .unwrap();
+        // The server shows the code: the owner here is asked to confirm it.
+        let says = |state: AskState| {
+            computers::update(&dir, |file| {
+                file.nearby_out = Some(nearby::NearbyAsk {
+                    request: taken[0].id.clone(),
+                    device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
+                    name: "Test Tower".to_string(),
+                    code: Some("482913".to_string()),
+                    state,
+                    unix: now,
+                });
+            })
+            .unwrap();
+        };
+        says(AskState::Confirm);
         std::thread::sleep(REFRESH);
         harness.run_steps(2);
         assert!(harness.query_by_label("482 913").is_some());
+        assert!(harness.query_by_label(SAME_CODE).is_some());
+        harness.get_by_label(CONFIRM).click();
+        harness.run_steps(2);
+        let confirmed: Vec<ComputerAsk> =
+            computers::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .into_iter()
+                .map(|r| r.ask)
+                .collect();
+        assert_eq!(
+            confirmed,
+            [ComputerAsk::ConfirmNearby {
+                nearby: taken[0].id.clone(),
+            }]
+        );
+        // Confirmed: it waits for the other's owner.
+        says(AskState::Waiting);
+        std::thread::sleep(REFRESH);
+        harness.run_steps(2);
+        assert!(harness.query_by_label(CONFIRM).is_none());
         assert!(
             harness
-                .query_by_label("Waiting for Test Tower to accept.")
+                .query_by_label("Confirmed. Waiting for Test Tower to accept.")
                 .is_some()
         );
         let _ = std::fs::remove_dir_all(&dir);
