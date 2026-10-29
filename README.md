@@ -60,7 +60,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 | Rust server, Kotlin phone app | ✅ | ✅ (Rust) | ❌ (C++) | ❌ (C++) |
 | Open Source | ✅ | ✅ | ✅ | ✅ |
 
-**Status: beta.** Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. GNOME and KDE Plasma are supported but not yet checked. The shared keyboard and mouse (new in 0.8.1) is checked only in parts, from scripts: its receiving end on the Linux laptop and the phone as a screen; Windows driving Linux at the desk is not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
+**Status: beta.** Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. GNOME and KDE Plasma are supported but not yet checked. The shared keyboard and mouse (new in 0.8, with Linux driving too from 0.8.2) is checked only in parts: from scripts, its receiving end on the Linux laptop and the phone as a screen, and live on Hyprland, Linux driving through its portal; two real computers at a desk, and Linux driving on GNOME and KDE, are not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
 ## Learn more
 
