@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-951 open items.
+955 open items.
 
 | Where | Items |
 |---|---|
@@ -11,8 +11,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 152 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 37 |
-| A second computer | 46 |
+| Away from home: another network, or through a router | 38 |
+| A second computer | 49 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -782,6 +782,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute. (where: away)
 
+**222. No pacing stall on the computer link (BK11)**
+
+- The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
+
 ## A second computer
 
 **29. Computers on this network**
@@ -880,6 +884,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **221. No lag while sharing (BK10)**
 
 - The Linux laptop driving Windows (BK8) with the setting on: `share-test <windows>` from the laptop, the network's one way p50 under 5 ms, and a byte every 50 ms from the laptop to Windows while the pointer is there (a capture on Windows' side, counts only). (where: second computer)
+
+**222. No pacing stall on the computer link (BK11)**
+
+- At the desk, Windows driving the Linux laptop on Wi-Fi: after a few seconds' pause the next key comes at once (no tenth-of-a-second catch), and fast typing and a fast mouse keep up. (where: second computer)
+- The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
+- Mixed versions: a computer on 0.8.1 and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
