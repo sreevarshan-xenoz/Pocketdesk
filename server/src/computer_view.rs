@@ -729,12 +729,6 @@ impl Sticky {
     }
 }
 
-fn lock_sticky(sticky: &std::sync::Mutex<Sticky>) -> std::sync::MutexGuard<'_, Sticky> {
-    sticky
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// Aborts its task when dropped: the view's input goes when the view does.
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
 
@@ -787,8 +781,7 @@ async fn session(
     // The window's input goes to the session of the moment, for the
     // view's whole life.
     let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
-    let sticky = Arc::new(std::sync::Mutex::new(Sticky::default()));
-    let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx, sticky.clone())));
+    let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx)));
     let mut reconnect = Reconnect::default();
     let mut shown_once = false;
     loop {
@@ -816,7 +809,6 @@ async fn session(
                     &mut status,
                     &say,
                     &conn_now,
-                    &sticky,
                     &mut reconnect,
                 )
                 .await;
@@ -879,32 +871,52 @@ async fn session(
 }
 
 /// The window's input, in order, one stream each as a phone sends it, to
-/// the session of the moment; between two (a reconnect) it goes nowhere.
+/// the session that let this computer in; before one does, and between two
+/// (a reconnect), it goes nowhere (PR #551 review M7: no burst of what was
+/// typed meanwhile). Each session that lets it in hears the window's last
+/// quality and view-only first, from this same task, so a choice made as it
+/// is let in comes after them (review M5).
 async fn forward_input(
     mut input: mpsc::Receiver<InputPacket>,
-    conn: tokio::sync::watch::Receiver<Option<SharedConnection>>,
-    sticky: Arc<std::sync::Mutex<Sticky>>,
+    mut conn: tokio::sync::watch::Receiver<Option<SharedConnection>>,
 ) {
-    while let Some(packet) = input.recv().await {
-        lock_sticky(&sticky).note(&packet);
-        let current = conn.borrow().clone();
-        let Some(conn) = current else {
-            continue;
-        };
-        // A release is tried again on a stalled link (BK7 review M7): left
-        // undone, the key stays held there.
-        let tries = if is_release(&packet) {
-            RELEASE_TRIES
-        } else {
-            1
-        };
-        for _ in 0..tries {
-            let sent = tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
-            if matches!(sent, Ok(Ok(()))) {
-                break;
+    let mut sticky = Sticky::default();
+    let mut current: Option<SharedConnection> = None;
+    loop {
+        tokio::select! {
+            biased;
+            changed = conn.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                current = conn.borrow_and_update().clone();
+                if let Some(conn) = &current {
+                    for packet in sticky.replay() {
+                        deliver(conn, &packet).await;
+                    }
+                }
             }
-            tracing::debug!("An input packet did not reach the other computer");
+            packet = input.recv() => {
+                let Some(packet) = packet else { return };
+                sticky.note(&packet);
+                if let Some(conn) = &current {
+                    deliver(conn, &packet).await;
+                }
+            }
         }
+    }
+}
+
+/// One input packet to the other computer, a release tried again on a
+/// stalled link (BK7 review M7): left undone, the key stays held there.
+async fn deliver(conn: &SharedConnection, packet: &InputPacket) {
+    let tries = if is_release(packet) { RELEASE_TRIES } else { 1 };
+    for _ in 0..tries {
+        let sent = tokio::time::timeout(INPUT_SEND, send_input(conn, packet)).await;
+        if matches!(sent, Ok(Ok(()))) {
+            break;
+        }
+        tracing::debug!("An input packet did not reach the other computer");
     }
 }
 
@@ -917,7 +929,6 @@ async fn attempt(
     status: &mut ViewStatus,
     say: &Say,
     conn_now: &tokio::sync::watch::Sender<Option<SharedConnection>>,
-    sticky: &std::sync::Mutex<Sticky>,
     reconnect: &mut Reconnect,
 ) -> Outcome {
     let name = &computer.name;
@@ -936,7 +947,6 @@ async fn attempt(
     };
     tokio::spawn(async move { client.start().await });
     tokio::spawn(play_sound(audio));
-    conn_now.send_replace(conn.clone());
     status.phase = Phase::Waiting;
     status.route = route.to_string();
     say.say(Event::Status(status.clone())).await;
@@ -1049,19 +1059,12 @@ async fn attempt(
             next.phase = Phase::Showing;
             if !shown {
                 // Let in (again, after a drop): the tries are over, and
-                // the window's quality and view-only go to this session.
+                // the window's input (its choices first) goes to this
+                // session.
                 shown = true;
                 next.reconnecting = 0;
                 reconnect.shown(Instant::now());
-                let replay = lock_sticky(sticky).replay();
-                if let Some(conn) = conn.clone().filter(|_| !replay.is_empty()) {
-                    tokio::spawn(async move {
-                        for packet in replay {
-                            let _ =
-                                tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
-                        }
-                    });
-                }
+                conn_now.send_replace(conn.clone());
             }
         }
         next.monitors = crate::peer_computers::screens(&computer.device_id);
@@ -1824,6 +1827,108 @@ mod tests {
                 .map(|p| format!("{p:?}"))
                 .collect::<Vec<_>>(),
             ["QualityPreset { preset: 3 }", "ViewOnly { enabled: true }"]
+        );
+    }
+
+    /// A connection that keeps the input packets written to it.
+    struct Kept(Arc<std::sync::Mutex<Vec<InputPacket>>>);
+
+    struct KeptStream(Arc<std::sync::Mutex<Vec<InputPacket>>>, Vec<u8>);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::streaming::OutStream for KeptStream {
+        async fn write_all(
+            &mut self,
+            data: &[u8],
+        ) -> Result<(), pocketdesk_core::streaming::ConnectionError> {
+            self.1.extend_from_slice(data);
+            Ok(())
+        }
+        fn finish(&mut self) -> Result<(), pocketdesk_core::streaming::ConnectionError> {
+            let packet = InputPacket::decode(&self.1).expect("an input packet");
+            self.0.lock().unwrap().push(packet);
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::streaming::Connection for Kept {
+        async fn open_uni(
+            &self,
+        ) -> Result<
+            Box<dyn pocketdesk_core::streaming::OutStream>,
+            pocketdesk_core::streaming::ConnectionError,
+        > {
+            Ok(Box::new(KeptStream(self.0.clone(), Vec::new())))
+        }
+        async fn accept_uni(
+            &self,
+        ) -> Result<
+            Box<dyn pocketdesk_core::streaming::InStream>,
+            pocketdesk_core::streaming::ConnectionError,
+        > {
+            Err(pocketdesk_core::streaming::ConnectionError::Closed)
+        }
+        fn remote_address(&self) -> SocketAddr {
+            "192.0.2.10:4716".parse().unwrap()
+        }
+        fn stats(&self) -> pocketdesk_core::streaming::ConnectionStats {
+            pocketdesk_core::streaming::ConnectionStats::default()
+        }
+        fn transport_family(&self) -> pocketdesk_core::streaming::TransportFamily {
+            pocketdesk_core::streaming::TransportFamily::Quinn
+        }
+        fn close(&self, _code: u32, _reason: &[u8]) {}
+    }
+
+    /// PR #551 review M7 and M5: what the window sends before a session
+    /// lets it in goes nowhere (no burst once it is let in), except its
+    /// choices, which are said first to the session that lets it in; and a
+    /// choice made as it is let in comes after them, never overtaken.
+    #[tokio::test]
+    async fn input_waits_for_a_session_that_let_it_in_and_its_choices_go_first() {
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (input, rx) = mpsc::channel(16);
+        let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+        let _forward = AbortOnDrop(tokio::spawn(forward_input(rx, conn_rx)));
+        for packet in [
+            InputPacket::QualityPreset { preset: 3 },
+            InputPacket::KeyEvent {
+                key: 30,
+                pressed: true,
+            },
+            InputPacket::ViewOnly { enabled: true },
+        ] {
+            input.send(packet).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            kept.lock().unwrap().is_empty(),
+            "nothing before it is let in"
+        );
+        let conn: SharedConnection = Arc::new(Kept(kept.clone()));
+        conn_now.send_replace(Some(conn));
+        input
+            .send(InputPacket::ViewOnly { enabled: false })
+            .await
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while kept.lock().unwrap().len() < 3 {
+            assert!(Instant::now() < deadline, "{:?}", kept.lock().unwrap());
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            kept.lock()
+                .unwrap()
+                .iter()
+                .map(|p| format!("{p:?}"))
+                .collect::<Vec<_>>(),
+            [
+                "QualityPreset { preset: 3 }",
+                "ViewOnly { enabled: true }",
+                "ViewOnly { enabled: false }"
+            ]
         );
     }
 
