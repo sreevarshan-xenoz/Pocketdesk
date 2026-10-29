@@ -26,6 +26,7 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.ask` |  | yes |  | ask |
 | `kdeconnect.pocketdesk.ask_answer` | yes |  | Ask | ask |
 | `kdeconnect.pocketdesk.audio` | yes | yes | Audio | audio_control |
+| `kdeconnect.pocketdesk.both_ways` | yes |  | none (any paired phone) | pair |
 | `kdeconnect.pocketdesk.clipboard_image` | yes |  | Clipboard | clipboard |
 | `kdeconnect.pocketdesk.clipboard_image_fetch` | yes |  | Clipboard | clipboard |
 | `kdeconnect.pocketdesk.command` |  | yes |  | links |

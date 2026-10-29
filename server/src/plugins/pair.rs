@@ -744,6 +744,7 @@ impl Plugin for PairPlugin {
             "kdeconnect.pocketdesk.pair",
             "kdeconnect.identity",
             WAN_KEY,
+            crate::peer_computers::BOTH_WAYS,
         ]
     }
 
@@ -780,6 +781,16 @@ impl Plugin for PairPlugin {
                 handle_pair(&conn, packet, sender).await;
             }
             WAN_KEY => register_wan_key(&conn, packet, sender),
+            crate::peer_computers::BOTH_WAYS => {
+                let (key, connection) = (sender.peer_key(), sender.connection_id().to_string());
+                let heard = tokio::task::spawn_blocking(move || {
+                    crate::peer_computers::both_ways_heard(&conn, key.as_ref(), &connection)
+                })
+                .await;
+                if let Err(e) = heard {
+                    tracing::debug!("A computer's word that it paired both ways was lost: {e}");
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -2174,6 +2185,10 @@ forged log line"
             // A computer's iroh key (2f): it holds itself to a paired
             // device's bound TLS key, on the home road.
             "kdeconnect.pocketdesk.wan_key",
+            // PC1: a computer paired both ways says it recorded the
+            // pairing; it gives only what this computer's owner granted, on
+            // its link, held to its iroh key.
+            "kdeconnect.pocketdesk.both_ways",
             // The deck (F1): the listing tells only labels and kinds, and a
             // press is held to the phone's permission for its action.
             "kdeconnect.pocketdesk.deck",

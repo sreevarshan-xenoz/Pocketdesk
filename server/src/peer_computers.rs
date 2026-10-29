@@ -1830,8 +1830,16 @@ async fn run_link(
     // streams) while the link is up, however it ends.
     let _shared_input = crate::shared_input::link::hold(&computer.device_id, stream.connection());
     set_link(dir, &computer.device_id, "linked");
+    // Admitted there, so trusted there: it recorded the pairing both ways,
+    // and what waited for that is given (PC1 review M1).
+    grant_on_link(dir, &computer.device_id);
     let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
+    // Paired both ways and recorded here: said on the link, for the other
+    // to give what it granted (PC1 re-review I-2).
+    if computer.mine {
+        let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
+    }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let _accepting = acceptor.map(|acceptor| {
         AbortOnDrop(tokio::spawn(async move {
@@ -1940,9 +1948,6 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
 
 /// Record how the link to `device_id` is doing, when it changed.
 fn set_link(dir: &Path, device_id: &str, link: &str) {
-    if link == "linked" {
-        grant_on_link(dir, device_id);
-    }
     let now = pocketdesk_core::local::pin::now_unix();
     let saved = computers::update(dir, |file| {
         if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id)
@@ -1957,12 +1962,45 @@ fn set_link(dir: &Path, device_id: &str, link: &str) {
     }
 }
 
-/// The link to `device_id` is up: a grant both ways that waited for it
-/// (PC1 review M1) is given now. The link shows the other computer recorded
-/// the pairing: it dials only one it lists, and admits only one it trusts.
+/// The link this computer dialed to `device_id` is up: a grant both ways
+/// that waited for it (PC1 review M1) is given now. The other admitted this
+/// one, which it does only for a computer it trusts, so it recorded the
+/// pairing. The other way round, the grant waits for its [`BOTH_WAYS`].
 fn grant_on_link(dir: &Path, device_id: &str) {
     if let Ok(trust) = crate::state::trust_store_path() {
         grant_on_link_in(dir, &trust, device_id);
+    }
+}
+
+/// What the computer `device_id` says on its link once it has recorded a
+/// pairing both ways (PC1 re-review I-2): the computer that waits for that
+/// link gives its grant on hearing it, never on a connection alone.
+pub(crate) const BOTH_WAYS: &str = "kdeconnect.pocketdesk.both_ways";
+
+/// The computer `device_id` said [`BOTH_WAYS`] on a connection that proved
+/// `key` (opened before it paired, or not): the grant both ways that waited
+/// for it is given if that connection is its link.
+pub(crate) fn both_ways_heard(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    connection_id: &str,
+) {
+    let (Ok(dir), Ok(trust)) = (crate::state::state_dir(), crate::state::trust_store_path()) else {
+        return;
+    };
+    let before = opened_before_pairing(device_id, connection_id);
+    both_ways_heard_in(&dir, &trust, device_id, key, before);
+}
+
+fn both_ways_heard_in(
+    dir: &Path,
+    trust: &Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    opened_before: bool,
+) {
+    if is_the_link(dir, device_id, key, opened_before) {
+        grant_on_link_in(dir, trust, device_id);
     }
 }
 
@@ -2408,6 +2446,40 @@ mod tests {
         assert_eq!(was.map(|c| c.paired_unix), Some(1));
         assert_eq!(file.computers, [again]);
         assert!(file.pending.is_empty() && file.lapsed.is_empty());
+    }
+
+    /// PC1 re-review I-2: the grant both ways that waits for the other's
+    /// link is given only when the other says it recorded the pairing, on
+    /// its link: a connection that proved its iroh key and was opened since
+    /// it paired.
+    #[test]
+    fn the_grant_is_given_when_the_other_says_so_on_its_link() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = temp("both-ways-heard");
+        let trust = dir.join("trusted_devices.json");
+        let own = iroh::SecretKey::generate().public().to_string();
+        device_keys::replace(&dir, "lap", &"ab".repeat(32)).unwrap();
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer("lap", "", 1));
+            file.pending = vec!["lap".to_string()];
+        })
+        .unwrap();
+        let narrow = || TrustStore::read(&trust).unwrap().permissions("lap");
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Tls([0xab; 32])), false);
+        let on_pairing_connection = narrow();
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Iroh(own.clone())), true);
+        let on_an_earlier_link = narrow();
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Iroh(own)), false);
+        let on_its_link = narrow();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(on_pairing_connection, DevicePermissions::computer());
+        assert_eq!(on_an_earlier_link, DevicePermissions::computer());
+        assert_eq!(on_its_link, DevicePermissions::computer_mine());
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
