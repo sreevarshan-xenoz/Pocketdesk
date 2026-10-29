@@ -10,7 +10,11 @@
 //! the pasting computer then trusts the link's maker with nothing. With
 //! the yes, it pairs both ways, the host's grant waiting for the link. A
 //! link that reuses a listed computer's id with another certificate is
-//! refused, and a computer unpaired on Devices is forgotten there too. Each screen is the test pattern (`POCKETDESK_TEST_PATTERN`), so no
+//! refused, and a computer unpaired on Devices is forgotten there too. The
+//! host's grant is absent until the real link is up (re-review I-2), and a
+//! stranger with one of the host's codes, claiming the paster's id with
+//! another certificate, is refused as a computer and as a phone, the
+//! paster's keys there untouched (re-review I-1). Each screen is the test pattern (`POCKETDESK_TEST_PATTERN`), so no
 //! one's desktop is read; the stand-in windows send nothing at all, so
 //! nothing is injected though control is allowed. No sound is sent (no
 //! Audio permission either way), and any that came would go to a file. No
@@ -166,6 +170,72 @@ fn pair_as(state: &Path, link: &PairLink, yes: bool) -> String {
             .filter(|p| p.request == asked.id)
             .map(|p| p.outcome)
     })
+}
+
+/// Pair with the server at `control` (whose state is `state`) as a stranger
+/// claiming the id `claimed`, with a fresh certificate of its own and the
+/// owner's `code`, as a computer or a phone; whether it said yes.
+fn impostor_pairs(state: &Path, control: u16, claimed: &str, code: &str, computer: bool) -> bool {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let certs = pocketdesk_core::streaming::transport::CertManager::new().unwrap();
+        let fingerprint = identity::cert_fingerprint(state).unwrap();
+        let label =
+            pocketdesk_core::streaming::transport::peer_label_for_address("127.0.0.1").unwrap();
+        certs.pin_peer(&label, fingerprint).unwrap();
+        let manager = pocketdesk_core::protocol::connection::ConnectionManager::new(
+            Duration::from_secs(8),
+            certs.control_client_config(),
+        );
+        let me = pocketdesk_core::protocol::kdeconnect::DeviceIdentity::new(claimed, "Impostor");
+        let stream = manager.connect("127.0.0.1", control, &me).await.unwrap();
+        let (reader, mut writer) = tokio::io::split(stream);
+        let ask = pocketdesk_core::protocol::kdeconnect::NetworkPacket::new("kdeconnect.pair")
+            .with_body(serde_json::json!({"pin": code, "computer": computer}));
+        writer.write_all(&ask.to_wire().unwrap()).await.unwrap();
+        writer.flush().await.unwrap();
+        let mut lines = tokio::io::BufReader::new(reader).lines();
+        let answer = tokio::time::timeout(Duration::from_secs(15), async {
+            while let Ok(Some(line)) = lines.next_line().await {
+                let packet = pocketdesk_core::protocol::kdeconnect::NetworkPacket::from_wire(&line);
+                if let Ok(packet) = packet
+                    && packet.packet_type == "kdeconnect.pair"
+                    && let Some(paired) = packet.body.get("pair").and_then(|v| v.as_bool())
+                {
+                    return paired;
+                }
+            }
+            false
+        })
+        .await;
+        answer.unwrap_or(false)
+    })
+}
+
+/// When the `nth` (from 0) line of `log` holding `needle` was logged: its
+/// timestamp (UTC, ISO 8601, so they compare as text), colours dropped.
+fn stamp_of(log: &Path, needle: &str, nth: usize) -> Option<String> {
+    let raw = std::fs::read_to_string(log).ok()?;
+    let mut plain = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            for c in chars.by_ref() {
+                if c == 'm' {
+                    break;
+                }
+            }
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
+        .lines()
+        .filter(|line| line.contains(needle))
+        .nth(nth)
+        .and_then(|line| line.split_whitespace().next())
+        .map(str::to_string)
 }
 
 fn log_of(state: &Path) -> PathBuf {
@@ -347,6 +417,22 @@ fn both_ways(test: &str, (a_control, b_control): (u16, u16), ids: (&str, &str)) 
         let given = trust(&b_state).permissions(&a_id) == DevicePermissions::computer_mine();
         (given && computers::read(&b_state).pending.is_empty()).then_some(())
     });
+    // Re-review I-2: B gave its grant only once the new link was up, never
+    // on A's pairing connection or a link from before: the link's dial is
+    // logged (by whichever of the two dials it) no later than B's grant.
+    let (dialer, dialed_before) = if a_id < b_id {
+        (&a_state, before.0)
+    } else {
+        (&b_state, before.1)
+    };
+    let linked_at = stamp_of(&log_of(dialer), "Linked to another computer", dialed_before)
+        .expect("the new link's dial is logged");
+    let granted_at =
+        stamp_of(&log_of(&b_state), "paired both ways now", 0).expect("B logs its grant");
+    assert!(
+        linked_at <= granted_at,
+        "B's grant ({granted_at}) came before the link ({linked_at})"
+    );
     std::thread::sleep(Duration::from_secs(5));
     // Since pairing both ways (A's one-way link ended with it).
     let (a_dialed, b_dialed) = (
@@ -402,6 +488,36 @@ fn both_ways(test: &str, (a_control, b_control): (u16, u16), ids: (&str, &str)) 
         device_keys::check(&a_state, &b_id, Slot::Tls, Some(&b_tls)),
         Verdict::Matches,
         "B's keys stand"
+    );
+
+    // Re-review I-1: someone with one of B's codes pairs with B under A's
+    // id and another certificate, as a computer and as a phone: refused
+    // both times, before any key is touched; A keeps its keys on B.
+    let a_endpoint = identity::read_endpoint(&a_state).unwrap()["endpointId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for computer in [true, false] {
+        let code = pin::mint_value();
+        pin::write(&b_state, &code, pin::now_unix(), None).unwrap();
+        assert!(
+            !impostor_pairs(&b_state, b_control, &a_id, &code, computer),
+            "refused as a computer: {computer}"
+        );
+    }
+    assert_eq!(
+        device_keys::check(&b_state, &a_id, Slot::Tls, Some(&a_tls)),
+        Verdict::Matches,
+        "A's certificate stands on B"
+    );
+    assert_eq!(
+        device_keys::check(&b_state, &a_id, Slot::Iroh, Some(&a_endpoint)),
+        Verdict::Matches,
+        "A's iroh key stands on B"
+    );
+    assert_eq!(
+        trust(&b_state).permissions(&a_id),
+        DevicePermissions::computer_mine()
     );
 
     // Review M7: unpaired on B's Devices page, B forgets A too.
