@@ -116,13 +116,20 @@ fn revealed_nonce(
 /// A step of a nearby computer's ask, on its connection. Only on the home
 /// network's TLS road, from a connection that proved a certificate.
 pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    let enabled = crate::events::current_config().nearby_pairing;
+    handle_in(dir, enabled, packet, sender).await;
+}
+
+/// [`handle`], with this computer's state folder `dir` and whether asks
+/// are on (`enabled`, `nearby_pairing`).
+async fn handle_in(dir: PathBuf, enabled: bool, packet: &NetworkPacket, sender: &dyn DeviceSender) {
     let Some(PeerKey::Tls(key)) = sender.peer_key() else {
         return;
     };
     let Some(from) = sender.peer_addr() else {
-        return;
-    };
-    let Ok(dir) = crate::state::state_dir() else {
         return;
     };
     let connection = sender.connection_id().to_string();
@@ -144,7 +151,7 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     .unwrap_or(""),
             );
             // Asks off: turned away before any other work.
-            if !crate::events::current_config().nearby_pairing {
+            if !enabled {
                 let _ = sender
                     .send_packet(&step_packet(nearby::Refusal::Off.step()))
                     .await;
@@ -183,7 +190,7 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             if let Some(why) = &taken_id {
                 tracing::info!("A nearby computer's ask to pair was turned away: {why}");
             }
-            let enabled = crate::events::current_config().nearby_pairing && taken_id.is_none();
+            let enabled = enabled && taken_id.is_none();
             let now = Instant::now();
             let (taken, tried) = {
                 let mut desk = lock(&DESK);
@@ -898,6 +905,98 @@ mod tests {
             revealed_nonce(Some(&hex), &commit, &key, &[0x5b; 32]),
             None,
             "another certificate"
+        );
+    }
+
+    // ---- The asked side, step by step ----
+
+    /// A connection that asks, as the server's packet loop hands it over:
+    /// its id, its address and certificate, and what it was sent.
+    struct Asking {
+        device: &'static str,
+        connection: String,
+        key: [u8; 32],
+        sent: Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Asking {
+        fn device_id(&self) -> &str {
+            self.device
+        }
+        fn connection_id(&self) -> &str {
+            &self.connection
+        }
+        fn peer_addr(&self) -> Option<std::net::SocketAddr> {
+            Some("192.0.2.70:40000".parse().unwrap())
+        }
+        fn peer_key(&self) -> Option<PeerKey> {
+            Some(PeerKey::Tls(self.key))
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> pocketdesk_core::error::Result<()> {
+            lock(&self.sent).push(packet.clone());
+            Ok(())
+        }
+    }
+
+    fn sent_steps(conn: &Asking) -> Vec<String> {
+        lock(&conn.sent)
+            .iter()
+            .map(|p| step_of(p).unwrap_or("").to_string())
+            .collect()
+    }
+
+    /// PR #556 re-review N4: on the asked side, a `confirmed` counts only
+    /// on the connection that asked and revealed. Another connection's
+    /// (the same id and certificate, even) confirms nothing: with the
+    /// owner's Accept, no PIN is minted and the ask stays on screen,
+    /// waiting for its own requester. The state folder is a throwaway.
+    #[tokio::test]
+    async fn a_confirmation_from_another_connection_pairs_nothing() {
+        let dir = std::env::temp_dir().join(format!("pd-nearby-n4-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cert = dir.join(pocketdesk_core::local::paths::CERT_FILE);
+        std::fs::create_dir_all(cert.parent().unwrap()).unwrap();
+        std::fs::write(&cert, b"not a real certificate").unwrap();
+        let device = "00000000-0000-4000-8000-0000000000f4";
+        let key = [0x74; 32];
+        let conn = |name: &str| Asking {
+            device,
+            connection: format!("n4-{name}-{}", std::process::id()),
+            key,
+            sent: Mutex::new(Vec::new()),
+        };
+        let (asker, other) = (conn("asker"), conn("other"));
+        let nonce = [0x47; 32];
+        let mut ask = step_packet(step::ASK);
+        ask.body["name"] = "Test Tower".into();
+        ask.body["commit"] = nearby::to_hex(&nearby::commitment(&nonce)).into();
+        handle_in(dir.clone(), true, &ask, &asker).await;
+        assert_eq!(sent_steps(&asker), [step::NONCE], "taken");
+        let mut reveal = step_packet(step::REVEAL);
+        reveal.body["nonce"] = nearby::to_hex(&nonce).into();
+        handle_in(dir.clone(), true, &reveal, &asker).await;
+        let id = computers::read(&dir).nearby_in.expect("shown").id;
+
+        // Another connection confirms, and the owner here accepts.
+        handle_in(dir.clone(), true, &step_packet(step::CONFIRMED), &other).await;
+        answer(&dir, &id, true, false).await;
+
+        let minted = lock(&PINS).iter().any(|p| p.device_id == device);
+        let shown = lock(&DESK).shown().map(str::to_string);
+        // Leave nothing behind for other tests.
+        lock(&DESK).drop_ask(&id);
+        lock(&TAKEN).remove(&asker.connection);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!minted, "no PIN without its own requester's confirmation");
+        assert_eq!(shown.as_deref(), Some(id.as_str()), "still waiting");
+        assert!(
+            sent_steps(&other).is_empty(),
+            "nothing to the other connection"
+        );
+        assert!(
+            !sent_steps(&asker).iter().any(|s| s == step::ACCEPTED),
+            "nothing accepted"
         );
     }
 
