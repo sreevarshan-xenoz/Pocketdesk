@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-946 open items.
+947 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
 | A second computer | 45 |
-| A Linux desktop (the Azure VM serves for some) | 176 |
+| A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
 
@@ -1348,6 +1348,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The permission dialog, on GNOME and KDE: with no `input_capture.token` in the state folder, turning sharing on shows the desktop's dialog once; allowed, the page says "Ready"; after a server restart it does not ask again (the token replaced, owner-only); said no, the page says "Needs permission" and it does not ask again until sharing is turned off and on. Hyprland asks nothing: xdph 1.4.1 has no input-capture dialog and gives no restore token, so sharing goes straight to "Ready" (about 18 s after driving was turned on, 2026-10-29) and no token is written. (where: linux)
 - The phone's screen sharing still works after driving: with shared input on, turn sharing off and on twice on the Linux laptop, then show its screen on the phone (GNOME or KDE, through the screen-sharing portal; on Hyprland too): it starts within a few seconds, never waiting on a portal call. (where: linux)
+- GNOME at scale 2 in its default physical-layout mode: the computer's own screens in `shared_screens.json` (read from xdg-output where Hyprland's IPC is not there) are its logical size, 1920x1080 for a 4K screen at 200%, not 3840x2160 (mutter's xdg-output may report physical-layout boxes); if not, the screens come from somewhere else on GNOME. (where: linux)
 - GNOME 45 or later and KDE Plasma 6.1 or later (a VM serves): the dialog, a crossing to a second computer and back, keys, and a lock bringing them home; on GNOME 46 a monitor change may need sharing turned off and on (its portal cannot re-enable a disabled session). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
