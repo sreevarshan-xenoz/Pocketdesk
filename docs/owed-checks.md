@@ -889,7 +889,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - At the desk, Windows driving the Linux laptop on Wi-Fi: after a few seconds' pause the next key comes at once (no tenth-of-a-second catch), and fast typing and a fast mouse keep up. (where: second computer)
 - The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
-- Mixed versions: a computer on 0.8.1 and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
+- Mixed versions: a computer on 0.8.2 (or earlier) and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
