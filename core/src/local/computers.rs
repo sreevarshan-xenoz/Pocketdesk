@@ -220,6 +220,11 @@ pub enum ComputerAsk {
     },
     /// Forget a paired computer.
     Forget { device_id: String },
+    /// Forget the computer `device_id` only as it was listed when this was
+    /// asked (its `paired_unix`): the server's own ask when that computer
+    /// paired here the other way (BD1), which a pairing since must outlive
+    /// (PC1 review M5).
+    ForgetPaired { device_id: String, paired_unix: u64 },
     /// Let a computer this one paired with drive this one's keyboard and
     /// mouse, or not ([`PeerComputer::lets_drive`]).
     LetDrive { device_id: String, allow: bool },

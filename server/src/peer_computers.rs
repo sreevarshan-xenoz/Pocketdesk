@@ -107,6 +107,16 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     }
                     forget(&dir, &cert_manager, &device_id);
                 }
+                ComputerAsk::ForgetPaired {
+                    device_id,
+                    paired_unix,
+                } => {
+                    if forget_as_listed(&dir, &cert_manager, &device_id, paired_unix)
+                        && let Some(link) = links.remove(&device_id)
+                    {
+                        link.task.abort();
+                    }
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
@@ -1015,16 +1025,21 @@ pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
         .iter()
         .any(|c| c.device_id == device_id);
     if listed {
+        let mut paired_unix = 0;
         let saved = computers::update(dir, |file| {
             if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
                 c.mine = false;
+                paired_unix = c.paired_unix;
             }
         });
         if let Err(e) = saved {
             tracing::warn!("Could not mark computer {device_id} as paired one way: {e}");
         }
-        let ask = ComputerAsk::Forget {
+        // As listed now: a pairing both ways before the run loop takes this
+        // is not undone by it (PC1 review M5).
+        let ask = ComputerAsk::ForgetPaired {
             device_id: device_id.to_string(),
+            paired_unix,
         };
         match computers::request(dir, ask, now_unix) {
             Ok(_) => tracing::info!(
@@ -1062,6 +1077,19 @@ fn let_drive(dir: &Path, device_id: &str, allow: bool) {
 
 /// Forget a computer: its entry and the pins for its addresses. It keeps
 /// this one until its own owner removes it (its Devices tab).
+/// [`forget`] the computer `device_id` only if it is still listed as it
+/// was when this was asked (`paired_unix`). Whether it was.
+fn forget_as_listed(dir: &Path, certs: &CertManager, device_id: &str, paired_unix: u64) -> bool {
+    let listed = computers::read(dir)
+        .computers
+        .iter()
+        .any(|c| c.device_id == device_id && c.paired_unix == paired_unix);
+    if listed {
+        forget(dir, certs, device_id);
+    }
+    listed
+}
+
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
     let mut gone = None;
     // Its pairing's line goes with it (BD3).
@@ -1981,8 +2009,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
             asked,
-            [ComputerAsk::Forget {
-                device_id: "pc-b".to_string()
+            [ComputerAsk::ForgetPaired {
+                device_id: "pc-b".to_string(),
+                paired_unix: 1,
             }]
         );
     }
@@ -2164,6 +2193,28 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(verdicts, (true, false, true, false));
+    }
+
+    /// PC1 review M5: the forgetting a pairing the other way asked is of
+    /// the computer as it was listed then; listed again since, it stays.
+    #[test]
+    fn a_stale_forget_leaves_a_computer_listed_since() {
+        let dir = temp("forget-as-listed");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..facts().into_peer("lap", "", 5)
+            })
+        })
+        .unwrap();
+        let stale = forget_as_listed(&dir, &certs, "lap", 4);
+        let kept = computers::read(&dir).computers.len();
+        let current = forget_as_listed(&dir, &certs, "lap", 5);
+        let left = computers::read(&dir).computers.len();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!stale && kept == 1, "listed again since: stays");
+        assert!(current && left == 0, "as it was listed: forgotten");
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
