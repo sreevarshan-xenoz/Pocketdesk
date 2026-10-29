@@ -151,7 +151,15 @@ async fn run(
     events: &Sender<Portal>,
     asked: UnboundedReceiver<Ask>,
 ) -> Result<(), String> {
-    let portal = match InputCapture::new().await {
+    // A D-Bus connection of its own: ashpd's shared one would be made on
+    // this thread's runtime, and die with it as the thread ends, leaving
+    // every later portal call in the server (the phone's screen sharing
+    // too) waiting forever. This one goes with the thread, and with it the
+    // session, a panic too.
+    let connection = ashpd::zbus::Connection::session()
+        .await
+        .map_err(|e| format!("no session bus for input capture: {e}"))?;
+    let portal = match InputCapture::with_connection(connection).await {
         Ok(portal) => portal,
         Err(e) => {
             say(events, Portal::Standing(Standing::Unsupported))?;
