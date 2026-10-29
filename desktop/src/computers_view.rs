@@ -161,6 +161,13 @@ impl ComputersView {
     pub fn take_view(&mut self) -> Option<(String, String)> {
         self.view.take()
     }
+    /// The computers this one paired with, read again as the list is
+    /// (UX 3: the Overview lists them).
+    pub fn paired(&mut self, state_dir: &Path) -> &[PeerComputer] {
+        self.refresh(state_dir);
+        &self.file.computers
+    }
+
     fn refresh(&mut self, state_dir: &Path) {
         let every = if self.pairing.is_some() {
             PAIRING_REFRESH
