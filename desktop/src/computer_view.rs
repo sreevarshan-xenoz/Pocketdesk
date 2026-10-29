@@ -241,6 +241,42 @@ pub fn stats_lines(status: &ViewStatus, size: Option<(u16, u16)>, shown: Shown) 
     ]
 }
 
+/// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
+/// here (PR #551 review M8).
+pub fn stats_chord(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Key { key: egui::Key::S, pressed: true, modifiers, .. }
+            if modifiers.ctrl && modifiers.alt && modifiers.shift
+    )
+}
+
+/// `events` without the stats' switch, pressed or let go: it is this
+/// window's, not the other computer's.
+pub fn keep_chord_here(events: &mut Vec<egui::Event>) {
+    events.retain(|event| {
+        !matches!(
+            event,
+            egui::Event::Key { key: egui::Key::S, modifiers, .. }
+                if modifiers.ctrl && modifiers.alt && modifiers.shift
+        )
+    });
+}
+
+/// The stats switched on or off from this window: shown at once, and
+/// remembered for the next (computer_view_stats).
+fn switch_stats(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
+    let mut state = lock(shared);
+    state.stats_on = on;
+    match config.map(|path| save_stats(path, on)) {
+        Some(Ok(())) => state.stats_saved = Some(on),
+        Some(Err(e)) => {
+            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
+        }
+        None => {}
+    }
+}
+
 /// Save the window's Stats switch as `computer_view_stats` in the config
 /// at `path`, that key alone, as Settings writes it.
 fn save_stats(path: &Path, on: bool) -> Result<(), String> {
@@ -535,6 +571,13 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let recording = state.recording.clone();
     let fullscreen = state.fullscreen;
     let mut stats_on = state.stats_on;
+    // Ctrl+Alt+Shift+S, wherever the focus is (PR #551 review M8).
+    if ctx.input(|i| i.events.iter().any(stats_chord)) {
+        stats_on = !stats_on;
+        drop(state);
+        switch_stats(shared, config, stats_on);
+        state = lock(shared);
+    }
     let size = state.size;
     let shown = state.clock.shown(Instant::now());
     let saved = state
@@ -625,20 +668,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
                 let stats = ui.checkbox(&mut stats_on, "Stats").on_hover_text(
-                    "Show how the picture comes: frames, bitrate, round trip, road and decode time",
+                    "Show how the picture comes: frames, bitrate, round trip, road and decode time (Ctrl+Alt+Shift+S)",
                 );
                 if stats.clicked() {
                     stats.surrender_focus();
-                    let mut state = lock(shared);
-                    state.stats_on = stats_on;
-                    // Remembered for the next window (computer_view_stats).
-                    match config.map(|path| save_stats(path, stats_on)) {
-                        Some(Ok(())) => state.stats_saved = Some(stats_on),
-                        Some(Err(e)) => {
-                            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
-                        }
-                        None => {}
-                    }
+                    switch_stats(shared, config, stats_on);
                 }
                 if let Some((_, since)) = &recording {
                     let secs = since.elapsed().as_secs();
@@ -795,7 +829,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             let on = controls(status.control, state.view_only, connected, current) && focused;
             let packets = match picture_rect {
                 Some(rect) if on => {
-                    let events = ctx.input(|i| i.events.clone());
+                    let mut events = ctx.input(|i| i.events.clone());
+                    keep_chord_here(&mut events);
                     state.input.take(&events, rect, Instant::now())
                 }
                 _ => state.input.release_all(),
@@ -1386,6 +1421,42 @@ mod tests {
         view.open("desk", "Desk", 0, 0, false, false).unwrap();
         assert!(lock(&view.shared).stats_on, "the same window keeps it");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #551 review M8: Ctrl+Alt+Shift+S switches the stats, as
+    /// Moonlight's does; it stays here, never reaching the other computer,
+    /// and S alone or with fewer keys is the other computer's.
+    #[test]
+    fn ctrl_alt_shift_s_switches_the_stats_here() {
+        let key = |key, pressed, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let all = egui::Modifiers {
+            alt: true,
+            ctrl: true,
+            shift: true,
+            mac_cmd: false,
+            command: true,
+        };
+        assert!(stats_chord(&key(egui::Key::S, true, all)));
+        assert!(!stats_chord(&key(egui::Key::S, false, all)), "on the press");
+        assert!(!stats_chord(&key(
+            egui::Key::S,
+            true,
+            egui::Modifiers::CTRL
+        )));
+        assert!(!stats_chord(&key(egui::Key::D, true, all)));
+        let mut events = vec![
+            key(egui::Key::S, true, all),
+            key(egui::Key::S, false, all),
+            key(egui::Key::A, true, egui::Modifiers::NONE),
+        ];
+        keep_chord_here(&mut events);
+        assert_eq!(events.len(), 1, "only the A goes on");
     }
 
     #[test]
