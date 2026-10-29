@@ -524,6 +524,134 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Start a view of the stand-in at `addr` through a relay over `dir`, join
+/// it as the window, and read until three frames came.
+async fn shown_view(
+    dir: &Path,
+    addr: SocketAddr,
+    cert: Arc<CertManager>,
+) -> (
+    mpsc::Sender<Command>,
+    tokio::task::JoinHandle<()>,
+    ViewFile,
+    TcpStream,
+) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.to_path_buf(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(dir).await;
+    let mut window = join(&file).await;
+    let mut seen = 0;
+    while seen < 3 {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("frames within 10 s")
+        {
+            Message::Frame { .. } => seen += 1,
+            Message::End { why } => panic!("ended: {why}"),
+            _ => {}
+        }
+    }
+    (commands, relay, file, window)
+}
+
+/// The window's next end, skipping the rest.
+async fn end_of(window: &mut TcpStream) -> String {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(20), read_message(window))
+            .await
+            .expect("the end is said")
+        {
+            Message::End { why } => return why,
+            _ => continue,
+        }
+    }
+}
+
+/// PR #551 review I1: a computer forgotten here while its view tries to
+/// come back is not dialled again; the view ends saying so.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_computer_forgotten_during_the_tries_is_not_dialled_again() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("forgotten-tries");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let (commands, relay, _file, mut window) = shown_view(&dir, addr, cert).await;
+    hang_ups.send(STOPPING).unwrap();
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::Status(status) if status.reconnecting > 0 => break,
+            Message::End { why } => panic!("ended: {why}"),
+            _ => {}
+        }
+    }
+    // Forgotten here before the try (1 s later).
+    computers::update(&dir, |file| file.computers.clear()).unwrap();
+    assert_eq!(end_of(&mut window).await, "Desk is no longer paired here.");
+    assert_eq!(sessions.load(Ordering::SeqCst), 1, "not dialled again");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PR #551 review I1: forgetting the computer shown ends its view at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forgetting_the_computer_shown_ends_its_view() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("forgotten");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, _sessions, _hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let (commands, relay, _file, mut window) = shown_view(&dir, addr, cert).await;
+    // Another computer forgotten: the view goes on.
+    commands
+        .send(Command::Forgotten {
+            device_id: "lap".into(),
+        })
+        .await
+        .unwrap();
+    commands
+        .send(Command::Forgotten {
+            device_id: "desk".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        end_of(&mut window).await,
+        "That computer is no longer paired with this one."
+    );
+    for _ in 0..100 {
+        if wire::read(&dir).is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(wire::read(&dir), None, "view.json forgets the view");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// BK7 review M6: frames too large for the window are said in the
 /// window, not left at "Waiting for its screen".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

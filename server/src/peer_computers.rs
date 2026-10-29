@@ -98,6 +98,11 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         link.task.abort();
                     }
                     forget(&dir, &cert_manager, &device_id);
+                    // Its view, if shown, ends with it (PR #551 review I1).
+                    if let Some(views) = &views {
+                        let forgotten = crate::computer_view::Command::Forgotten { device_id };
+                        let _ = views.send(forgotten).await;
+                    }
                 }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);

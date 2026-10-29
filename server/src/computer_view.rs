@@ -69,6 +69,8 @@ const UNWATCHED: Duration = Duration::from_secs(30);
 const ENDED_KEPT: Duration = Duration::from_secs(60);
 /// How often the session looks at what the other computer said.
 const LOOK: Duration = Duration::from_millis(250);
+/// Why a view of a computer not paired here ends.
+const NOT_PAIRED: &str = "That computer is no longer paired with this one.";
 /// How often the window hears how the picture comes (PC2).
 const STATS_EVERY: Duration = Duration::from_secs(1);
 /// The picture's codec, as the window names it: the view asks for H.264
@@ -83,6 +85,9 @@ pub enum Command {
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one shown now.
     Stop { session_id: Option<u64> },
+    /// The computer `device_id` was forgotten here (PR #551 review I1): its
+    /// view, if shown, ends.
+    Forgotten { device_id: String },
 }
 
 /// Whether a Stop for `asked` ends the view `current`.
@@ -761,7 +766,8 @@ enum Outcome {
 /// window closed aborts it, so it never dials again after one.
 async fn session(
     session_id: u64,
-    computer: PeerComputer,
+    state_dir: PathBuf,
+    mut computer: PeerComputer,
     monitor: u32,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
@@ -851,6 +857,21 @@ async fn session(
         };
         say.say(Event::Status(status.clone())).await;
         tokio::time::sleep(wait).await;
+        // Its record as it is now (PR #551 review I1): new addresses are
+        // tried, and a computer forgotten here meanwhile is not dialled.
+        match computers::read(&state_dir)
+            .computers
+            .into_iter()
+            .find(|c| c.device_id == computer.device_id)
+        {
+            Some(fresh) => computer = fresh,
+            None => {
+                tracing::info!(device_id = %computer.device_id, "Another computer's screen not dialled again: it is no longer paired");
+                say.say(Event::Ended(format!("{name} is no longer paired here.")))
+                    .await;
+                return;
+            }
+        }
     }
 }
 
@@ -1157,10 +1178,18 @@ pub async fn run(
             command = commands.recv() => {
                 let Some(command) = command else { break };
                 let Command::Start { device_id, monitor } = command else {
-                    if let Command::Stop { session_id } = command
-                        && stops(session_id, view.as_ref().map(|v| v.session_id))
-                    {
-                        end(&mut view, &mut viewer, &state_dir, None);
+                    match command {
+                        Command::Stop { session_id }
+                            if stops(session_id, view.as_ref().map(|v| v.session_id)) =>
+                        {
+                            end(&mut view, &mut viewer, &state_dir, None);
+                        }
+                        Command::Forgotten { device_id }
+                            if view.as_ref().is_some_and(|v| v.device_id == device_id) =>
+                        {
+                            end(&mut view, &mut viewer, &state_dir, Some(NOT_PAIRED));
+                        }
+                        _ => {}
                     }
                     continue;
                 };
@@ -1189,6 +1218,7 @@ pub async fn run(
                     Some(computer) => (
                         Some(tokio::spawn(session(
                             session_id,
+                            state_dir.clone(),
                             computer,
                             monitor,
                             dialer.clone(),
@@ -1199,7 +1229,7 @@ pub async fn run(
                     ),
                     None => (
                         None,
-                        Some(("That computer is no longer paired with this one.".to_string(), Instant::now())),
+                        Some((NOT_PAIRED.to_string(), Instant::now())),
                     ),
                 };
                 view = Some(View {
