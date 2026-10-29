@@ -102,7 +102,13 @@ fn sessions_from(b_state: &Path, device_id: &str) -> usize {
 }
 
 fn stop(a_state: &Path) {
-    computers::request(a_state, ComputerAsk::StopView, pin::now_unix()).unwrap();
+    let session_id = wire::read(a_state).map(|v| v.session_id);
+    computers::request(
+        a_state,
+        ComputerAsk::StopView { session_id },
+        pin::now_unix(),
+    )
+    .unwrap();
 }
 
 #[test]

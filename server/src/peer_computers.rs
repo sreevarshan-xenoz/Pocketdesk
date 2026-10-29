@@ -113,9 +113,10 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         );
                     }
                 }
-                ComputerAsk::StopView => {
+                ComputerAsk::StopView { session_id } => {
                     if let Some(views) = &views {
-                        let _ = views.send(crate::computer_view::Command::Stop).await;
+                        let stop = crate::computer_view::Command::Stop { session_id };
+                        let _ = views.send(stop).await;
                     }
                 }
             }

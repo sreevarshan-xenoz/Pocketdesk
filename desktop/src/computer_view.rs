@@ -262,10 +262,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
         if let Some(stream) = state.stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
+        // The view this window shows, when it reached one (BK7 review M1).
+        let shown = state.session_id;
         state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
         state.session_id = None;
         state.fullscreen = false;
-        let _ = computers::request(state_dir, ComputerAsk::StopView, now_unix());
+        let _ = computers::request(
+            state_dir,
+            ComputerAsk::StopView { session_id: shown },
+            now_unix(),
+        );
         return;
     }
     if let Some(picture) = state.picture.take() {

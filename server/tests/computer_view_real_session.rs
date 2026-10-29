@@ -222,7 +222,12 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
     );
 
     // The window closes: the session on the server ends.
-    commands.send(Command::Stop).await.unwrap();
+    commands
+        .send(Command::Stop {
+            session_id: Some(file.session_id),
+        })
+        .await
+        .unwrap();
     tokio::time::timeout(Duration::from_secs(30), session)
         .await
         .expect("the server's session ended")

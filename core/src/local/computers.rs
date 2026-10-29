@@ -139,8 +139,14 @@ pub enum ComputerAsk {
         #[serde(default)]
         monitor: u32,
     },
-    /// Stop showing the computer's screen (its window closed).
-    StopView,
+    /// Stop showing the computer's screen (its window closed): the view
+    /// `session_id` (`view.json`'s) when the window knew it, else the one
+    /// shown now. A Stop for a view since replaced stops nothing (BK7
+    /// review M1).
+    StopView {
+        #[serde(default)]
+        session_id: Option<u64>,
+    },
 }
 
 /// One request, as a file in `computers_out/`.
@@ -150,6 +156,10 @@ pub struct ComputerRequest {
     #[serde(flatten)]
     pub ask: ComputerAsk,
     pub created_unix: u64,
+    /// The milliseconds past `created_unix`, so requests left in one
+    /// second are taken in order (BK7 review M1). 0 in files from before.
+    #[serde(default)]
+    pub created_ms: u16,
 }
 
 /// The computers and the last pairing. A missing or unreadable file is
@@ -193,10 +203,14 @@ pub fn update(state_dir: &Path, change: impl FnOnce(&mut ComputersFile)) -> io::
 
 /// Leave a request for the server (the app's side).
 pub fn request(state_dir: &Path, ask: ComputerAsk, now_unix: u64) -> io::Result<ComputerRequest> {
+    let created_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_millis() as u16);
     let request = ComputerRequest {
         id: uuid::Uuid::new_v4().to_string(),
         ask,
         created_unix: now_unix,
+        created_ms,
     };
     let file = request_path(state_dir, &request.id)?;
     std::fs::create_dir_all(state_dir.join(COMPUTERS_DIR))?;
@@ -255,7 +269,7 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
             taken.push(request);
         }
     }
-    taken.sort_by_key(|r| r.created_unix);
+    taken.sort_by_key(|r| (r.created_unix, r.created_ms));
     taken
 }
 
@@ -374,17 +388,27 @@ mod tests {
             100,
         )
         .unwrap();
-        let stop = request(&dir, ComputerAsk::StopView, 101).unwrap();
+        let stop = request(
+            &dir,
+            ComputerAsk::StopView {
+                session_id: Some(9),
+            },
+            101,
+        )
+        .unwrap();
         assert_eq!(take_all(&dir, 102), [view, stop]);
         let wire = serde_json::to_value(ComputerRequest {
             id: "a".to_string(),
-            ask: ComputerAsk::StopView,
+            ask: ComputerAsk::StopView {
+                session_id: Some(9),
+            },
             created_unix: 1,
+            created_ms: 2,
         })
         .unwrap();
         assert_eq!(
             wire,
-            serde_json::json!({"id": "a", "ask": "stop_view", "created_unix": 1})
+            serde_json::json!({"id": "a", "ask": "stop_view", "session_id": 9, "created_unix": 1, "created_ms": 2})
         );
         let asked: ComputerRequest =
             serde_json::from_str(r#"{"id":"a","ask":"view","device_id":"desk","created_unix":1}"#)
@@ -404,6 +428,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// BK7 review M1: requests left in one second are taken in the order
+    /// they were left, by their milliseconds, so a window closed and opened
+    /// again at once is not ended by its own Stop.
+    #[test]
+    fn requests_in_one_second_keep_their_order() {
+        let dir = temp_dir("order");
+        let mut asked = Vec::new();
+        for n in 0..12 {
+            let ask = if n % 2 == 0 {
+                ComputerAsk::StopView { session_id: None }
+            } else {
+                ComputerAsk::View {
+                    device_id: format!("desk-{n}"),
+                    monitor: 0,
+                }
+            };
+            asked.push(request(&dir, ask, 100).unwrap());
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        assert_eq!(take_all(&dir, 100), asked);
+        // One from before the milliseconds were kept reads as 0 of them.
+        let old: ComputerRequest =
+            serde_json::from_str(r#"{"id":"a","ask":"stop_view","created_unix":1}"#).unwrap();
+        assert_eq!(old.created_ms, 0);
+        assert_eq!(old.ask, ComputerAsk::StopView { session_id: None });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_request_names_what_it_asks_on_disk() {
         let wire = serde_json::to_value(ComputerRequest {
@@ -412,11 +464,12 @@ mod tests {
                 device_id: "desk".to_string(),
             },
             created_unix: 1,
+            created_ms: 0,
         })
         .unwrap();
         assert_eq!(
             wire,
-            serde_json::json!({"id": "a", "ask": "forget", "device_id": "desk", "created_unix": 1})
+            serde_json::json!({"id": "a", "ask": "forget", "device_id": "desk", "created_unix": 1, "created_ms": 0})
         );
     }
 

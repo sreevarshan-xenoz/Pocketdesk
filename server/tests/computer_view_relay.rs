@@ -357,7 +357,10 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
     };
     assert_eq!(why, "That computer is no longer paired with this one.");
     // Stopped, the file goes.
-    commands.send(Command::Stop).await.unwrap();
+    commands
+        .send(Command::Stop { session_id: None })
+        .await
+        .unwrap();
     for _ in 0..100 {
         if wire::read(&dir).is_none() {
             break;

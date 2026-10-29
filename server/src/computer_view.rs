@@ -68,8 +68,14 @@ const LOOK: Duration = Duration::from_millis(250);
 pub enum Command {
     /// Show the computer `device_id`'s screen `monitor`, replacing any view.
     Start { device_id: String, monitor: u32 },
-    /// Stop showing it.
-    Stop,
+    /// Stop showing it: the view `session_id` when given (one since
+    /// replaced is left alone, BK7 review M1), else the one shown now.
+    Stop { session_id: Option<u64> },
+}
+
+/// Whether a Stop for `asked` ends the view `current`.
+pub fn stops(asked: Option<u64>, current: Option<u64>) -> bool {
+    asked.is_none_or(|asked| current == Some(asked))
 }
 
 /// Start the view's relay; the requests the app leaves go to it.
@@ -554,8 +560,15 @@ pub async fn run(
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
+                let Command::Start { device_id, monitor } = command else {
+                    if let Command::Stop { session_id } = command
+                        && stops(session_id, view.as_ref().map(|v| v.session_id))
+                    {
+                        end(&mut view, &mut viewer, &state_dir, None);
+                    }
+                    continue;
+                };
                 end(&mut view, &mut viewer, &state_dir, None);
-                let Command::Start { device_id, monitor } = command else { continue };
                 next_id += 1;
                 let session_id = next_id;
                 let computer = computers::read(&state_dir)
@@ -868,6 +881,16 @@ mod tests {
             ..desk
         };
         assert!(plan(&unreadable, &held, true).is_empty());
+    }
+
+    /// BK7 review M1: a window's Stop names its view; one for a view since
+    /// replaced (the window opened again at once) stops nothing.
+    #[test]
+    fn a_stop_ends_only_the_view_it_names() {
+        assert!(stops(Some(5), Some(5)));
+        assert!(!stops(Some(5), Some(6)), "replaced since");
+        assert!(stops(None, Some(6)), "the window never knew its view");
+        assert!(!stops(Some(5), None));
     }
 
     #[test]
