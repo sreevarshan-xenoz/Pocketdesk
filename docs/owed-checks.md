@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-961 open items.
+966 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 54 |
+| A second computer | 59 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -866,7 +866,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - View-only by default: the window's bar says Linux does not take this computer's clicks and keys and where to turn Control on; clicks and keys in it do nothing there. Turn on "Control the mouse and keyboard" for the Windows laptop on Linux's Devices page, Reconnect: the pointer moves, clicks, drags and scrolls (both ways, a touchpad's too) where they land in the picture, the letterbox bars take nothing. (where: second computer)
 - Keys from the window: typing (capitals with Shift, a non-US character), Enter, Tab, Backspace, Escape, the arrows, Home/End/PgUp/PgDn, Delete, F1 to F12, Shift+arrows selecting, Ctrl+C in a Linux text field then Ctrl+V into another there (Linux's own clipboard, not Windows'), Alt+Tab-like chords; nothing stays held on Linux after the window loses focus mid-press, or closes. (where: second computer)
 - A monitor switch: with two screens on Linux, the bar lists them by name and size; choosing the second shows it, and the window keeps working; Linux's resolution changed mid-view: the picture comes back at the new size without a restart. (where: second computer)
-- Wi-Fi dropped on Linux for a minute mid-view: the window says "Lost the connection" within about 45 s, never a silent black window; Reconnect after the Wi-Fi comes back shows it again, by the internet path when the home network is gone. (where: second computer)
+- Wi-Fi dropped on Linux for a minute mid-view: never a silent black window (since PC2 the window says "Reconnecting… (n)" and comes back by itself, §224); by the internet path when the home network is gone. (where: second computer)
 - Quality: Economy, Balanced, Best and Auto from the bar visibly change the picture within a few seconds (and the bitrate in Linux's session record); the Settings choice is what a new window starts at; View only in Settings starts it sending nothing. (where: second computer)
 - Linux's session list (its desktop app's Sessions, and `pocketdesk sessions`) shows the Windows laptop's session by its name; End there ends it and the window says why; privacy mode, the away lock and one driver at a time behave there as for a phone. (where: second computer)
 - Sound: with "Hear and change this computer's sound" on for the Windows laptop on Linux, Linux's sound plays on Windows while the window is open, and stops with it. (where: second computer)
@@ -899,6 +899,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Each views and drives the other with no prompt: "Show its screen" on Windows shows Linux's screen with control, and on Linux shows Windows' with control, with nobody at the far computer to click Allow or turn Control on; the window's bar says the other takes this computer's clicks and keys. (where: second computer)
 - The shared keyboard and mouse both ways with sharing on at both: Windows drives Linux and Linux drives Windows (BK8) over the one link, never "Waiting for <computer> to answer". (where: second computer)
 - Turned back and unpaired: on Linux's Devices page, "Ask before each session" on and Control off for the Windows laptop; the next "Show its screen" from Windows waits for Allow once there and is view-only. Unpair under Other computers on Linux: the Windows laptop leaves both Linux pages, and Windows says refused or waiting for it. (where: second computer)
+
+**224. The window says how it's doing, and comes back by itself (PC2)**
+
+- Stats: the bar's Stats shows over the picture the road (home network, or internet direct or by a relay), how long it took to reach, the picture's size and H.264, the frames a second that came and were shown (about equal on a moving screen), a bitrate that rises when the screen moves, a round trip of a few ms at home and more over the internet, a decode time of a few ms, and lost, late and dropped at 0 on a good link; the choice holds when the window is closed and opened again, and Settings → Other computers shows it. (where: second computer)
+- The first picture: with the laptop on the same network, the overlay says the home network won; with the laptop's home address unreachable (another network, or its firewall), the internet path's first frame comes sooner than BK7's 3.8 to 4.7 s (note the overlay's "reached in"). (where: second computer)
+- The laptop's Pocketdesk server restarted mid-view (`systemctl --user restart pocketdesk`, or Stop and Start in its desktop app): the window dims the last picture and says "Reconnecting to … (1)", then the picture comes back by itself within a few seconds at the same Quality, with no click; the laptop's session list shows one session for the Windows laptop afterwards, not two. (where: second computer)
+- The laptop's Wi-Fi off for 30 s mid-view: "Reconnecting… (n)" counting up, then the picture back by itself once the Wi-Fi returns; off for three minutes: the tries stop after about two minutes and the window says it did not come back, with Reconnect, which works once the Wi-Fi is back. (where: second computer)
+- Cancel while it reconnects: the window says it stopped, with Reconnect, and the laptop gets no further sessions from it; End on the laptop's session list mid-view: the window says the laptop ended the view and does not reconnect; with "Ask before each session" on there, a reconnect waits for Allow once again, and a no ends it. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

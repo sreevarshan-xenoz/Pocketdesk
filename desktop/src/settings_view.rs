@@ -319,6 +319,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_stats",
+        "Show how a computer's screen comes",
+        Section::Computers,
+    ),
+    (
         "shared_input",
         "Share my keyboard and mouse with my computers",
         Section::SharedInput,
@@ -564,6 +569,7 @@ pub fn applies_live(key: &str) -> bool {
         // BK7: read by this app as a computer's window opens.
         "computer_view_quality"
             | "computer_view_only"
+            | "computer_view_stats"
             | "events"
             | "events_detail"
             | "hooks"
@@ -735,6 +741,19 @@ impl SettingsForm {
 
     pub fn dirty(&self) -> bool {
         self.edited != self.saved
+    }
+
+    /// Whether a computer's screen window shows its stats, as saved.
+    pub fn saved_computer_view_stats(&self) -> bool {
+        self.saved.computer_view_stats
+    }
+
+    /// The screen window's Stats switch saved `computer_view_stats` (PC2):
+    /// the form follows, so it neither shows it changed nor saves it back.
+    pub fn saved_elsewhere_computer_view_stats(&mut self, on: bool) {
+        self.saved.computer_view_stats = on;
+        self.edited.computer_view_stats = on;
+        self.running.computer_view_stats = on;
     }
 
     /// `shared_input` was saved elsewhere (the Keyboard and mouse page):
@@ -2029,6 +2048,13 @@ impl SettingsForm {
                         "Controlling also needs that computer's Control switch for this one, on its Devices page: it is off until turned on there.",
                     );
                 });
+                row(ui, "computer_view_stats", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_stats,
+                        "a computer's screen window shows how the picture comes: frames, bitrate, round trip, road and decode time",
+                    );
+                    note(ui, "The window's own Stats switch changes it too.");
+                });
             }
             Section::SharedInput => {
                 row(ui, "shared_input", |ui| {
@@ -2895,7 +2921,11 @@ mod tests {
     /// phone's presets.
     #[test]
     fn a_computers_window_settings_are_with_the_computers() {
-        for key in ["computer_view_quality", "computer_view_only"] {
+        for key in [
+            "computer_view_quality",
+            "computer_view_only",
+            "computer_view_stats",
+        ] {
             assert!(
                 SETTINGS
                     .iter()

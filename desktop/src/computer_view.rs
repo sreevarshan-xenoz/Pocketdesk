@@ -12,6 +12,7 @@
 //! View only on, the window only shows. Closing the window ends the view; a
 //! view that ends on its own says why, with Reconnect.
 
+use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use pocketdesk_core::local::computers::{self, ComputerAsk};
-use pocketdesk_core::local::config::COMPUTER_VIEW_QUALITIES;
+use pocketdesk_core::local::config::{COMPUTER_VIEW_QUALITIES, Config};
 use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewStatus};
 use pocketdesk_core::streaming::InputPacket;
 
@@ -95,6 +96,195 @@ struct State {
     recording: Option<(PathBuf, Instant)>,
     saved_note: Option<(String, Instant)>,
     fullscreen: bool,
+    /// The stats over the picture (PC2), and a choice saved from the bar
+    /// that the Settings page has not heard yet.
+    stats_on: bool,
+    stats_saved: Option<bool>,
+    /// The decoder's time and the pictures shown.
+    clock: DecodeClock,
+}
+
+/// What the window measures itself (PC2): pictures shown a second, and how
+/// long the decoder takes over one.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    pub fps: u32,
+    pub decode: Option<Duration>,
+}
+
+/// Times the decoder and counts the pictures shown (PC2). The sidecar gives
+/// one picture for each access unit, in the order they went in, so each
+/// picture is timed against the oldest unit still waiting.
+#[derive(Debug, Default)]
+pub struct DecodeClock {
+    fed: VecDeque<Instant>,
+    since: Option<Instant>,
+    pictures: u32,
+    took: Duration,
+    timed: u32,
+    shown: Shown,
+}
+
+impl DecodeClock {
+    /// Past this many units waiting the count has lost its way (the
+    /// decoder dropped some): it starts again.
+    const MOST_WAITING: usize = 32;
+
+    /// An access unit went to the decoder at `at`.
+    pub fn fed(&mut self, at: Instant) {
+        if self.fed.len() >= Self::MOST_WAITING {
+            self.fed.clear();
+        }
+        self.fed.push_back(at);
+    }
+
+    /// A picture came out at `at`.
+    pub fn decoded(&mut self, at: Instant) {
+        if let Some(fed) = self.fed.pop_front() {
+            self.took += at.saturating_duration_since(fed);
+            self.timed += 1;
+        }
+        self.pictures = self.pictures.saturating_add(1);
+        self.roll(at);
+    }
+
+    /// The last whole second's pictures and decode time, as of `now`.
+    pub fn shown(&mut self, now: Instant) -> Shown {
+        self.roll(now);
+        self.shown
+    }
+
+    /// A new decoder: nothing the old one was fed is waiting.
+    pub fn restart(&mut self) {
+        self.fed.clear();
+    }
+
+    fn roll(&mut self, now: Instant) {
+        let since = *self.since.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(since);
+        if elapsed < Duration::from_secs(1) {
+            return;
+        }
+        let ms = elapsed.as_millis().max(1);
+        self.shown = Shown {
+            fps: u32::try_from(u128::from(self.pictures) * 1000 / ms).unwrap_or(u32::MAX),
+            decode: (self.timed > 0).then(|| self.took / self.timed),
+        };
+        self.pictures = 0;
+        self.took = Duration::ZERO;
+        self.timed = 0;
+        self.since = Some(now);
+    }
+}
+
+/// The road the picture comes by, as the overlay says it.
+pub fn road_words(status: &ViewStatus) -> String {
+    let relayed = status.stats.as_ref().is_some_and(|s| s.relayed);
+    match status.route.as_str() {
+        "" => "not yet".to_string(),
+        "internet" if relayed => "internet, by a relay".to_string(),
+        "internet" => "internet, direct".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// A bitrate in words: kb/s, or Mb/s from 1000 kb/s.
+pub fn bitrate_words(kbps: u32) -> String {
+    if kbps >= 1000 {
+        format!("{:.1} Mb/s", f64::from(kbps) / 1000.0)
+    } else {
+        format!("{kbps} kb/s")
+    }
+}
+
+/// The overlay's lines (PC2): the road and how long it took to reach, the
+/// picture's size and codec, the frames that came and were shown, the
+/// bitrate, the round trip, the decoder's time, and the frames lost, late
+/// and dropped.
+pub fn stats_lines(status: &ViewStatus, size: Option<(u16, u16)>, shown: Shown) -> Vec<String> {
+    let stats = status.stats.clone().unwrap_or_default();
+    let mut road = format!("Road: {}", road_words(status));
+    if let Some(ms) = stats.dial_ms {
+        road.push_str(&format!(" (reached in {ms} ms)"));
+    }
+    let codec = if stats.codec.is_empty() {
+        "H.264"
+    } else {
+        stats.codec.as_str()
+    };
+    let picture = match size {
+        Some((w, h)) => format!("Picture: {w}\u{d7}{h} {codec}"),
+        None => "Picture: not yet".to_string(),
+    };
+    vec![
+        road,
+        picture,
+        format!("Frames: {} a second in, {} shown", stats.fps, shown.fps),
+        format!("Bitrate: {}", bitrate_words(stats.kbps)),
+        format!(
+            "Round trip: {}",
+            stats
+                .rtt_ms
+                .map_or_else(|| "not known".to_string(), |ms| format!("{ms} ms"))
+        ),
+        format!(
+            "Decode: {}",
+            shown.decode.map_or_else(
+                || "not yet".to_string(),
+                |d| format!("{:.1} ms", d.as_secs_f64() * 1000.0)
+            )
+        ),
+        format!(
+            "Lost {} \u{b7} late {} \u{b7} dropped {}",
+            stats.lost, stats.late, stats.dropped
+        ),
+    ]
+}
+
+/// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
+/// here (PR #551 review M8).
+pub fn stats_chord(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Key { key: egui::Key::S, pressed: true, modifiers, .. }
+            if modifiers.ctrl && modifiers.alt && modifiers.shift
+    )
+}
+
+/// `events` without the stats' switch, pressed or let go: it is this
+/// window's, not the other computer's.
+pub fn keep_chord_here(events: &mut Vec<egui::Event>) {
+    events.retain(|event| {
+        !matches!(
+            event,
+            egui::Event::Key { key: egui::Key::S, modifiers, .. }
+                if modifiers.ctrl && modifiers.alt && modifiers.shift
+        )
+    });
+}
+
+/// The stats switched on or off from this window: shown at once, and
+/// remembered for the next (computer_view_stats).
+fn switch_stats(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
+    let mut state = lock(shared);
+    state.stats_on = on;
+    match config.map(|path| save_stats(path, on)) {
+        Some(Ok(())) => state.stats_saved = Some(on),
+        Some(Err(e)) => {
+            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
+        }
+        None => {}
+    }
+}
+
+/// Save the window's Stats switch as `computer_view_stats` in the config
+/// at `path`, that key alone, as Settings writes it.
+fn save_stats(path: &Path, on: bool) -> Result<(), String> {
+    let mut config = Config::load_from(path).map_err(|e| e.to_string())?;
+    config.computer_view_stats = on;
+    config
+        .save_keys_to(path, &["computer_view_stats"])
+        .map_err(|e| e.to_string())
 }
 
 /// What the window says while there is no picture.
@@ -149,6 +339,10 @@ pub fn screen_choices(status: &ViewStatus) -> Vec<String> {
 pub struct ComputerView {
     shared: Arc<Mutex<State>>,
     state_dir: PathBuf,
+    /// The config file the bar's Stats switch is saved to (none in tests).
+    config: Option<PathBuf>,
+    /// For a repaint when Settings changes the window.
+    ctx: egui::Context,
 }
 
 fn lock(shared: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
@@ -158,9 +352,10 @@ fn lock(shared: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
 }
 
 impl ComputerView {
-    pub fn new(ctx: &egui::Context, state_dir: PathBuf) -> Self {
+    pub fn new(ctx: &egui::Context, state_dir: PathBuf, config: Option<PathBuf>) -> Self {
         let shared = Arc::new(Mutex::new(State::default()));
         let worker = shared.clone();
+        let repaint = ctx.clone();
         let ctx = ctx.clone();
         let watched = state_dir.clone();
         let spawned = std::thread::Builder::new()
@@ -168,13 +363,19 @@ impl ComputerView {
             .spawn(move || watch(&watched, &worker, &ctx));
         // Without the thread no screen is shown, and nothing else breaks.
         drop(spawned);
-        Self { shared, state_dir }
+        Self {
+            shared,
+            state_dir,
+            config,
+            ctx: repaint,
+        }
     }
 
     /// Show the computer `device_id`'s screen `monitor`: asked of the
     /// server, the window opens at once and fills when the picture comes.
     /// `quality` is the preset it starts at, `view_only` whether it sends
-    /// nothing; the window's own choices then hold.
+    /// nothing and `stats` whether it shows how the picture comes; the
+    /// window's own choices then hold.
     pub fn open(
         &self,
         device_id: &str,
@@ -182,6 +383,7 @@ impl ComputerView {
         monitor: u32,
         quality: u8,
         view_only: bool,
+        stats: bool,
     ) -> Result<(), String> {
         let wanted = Wanted {
             device_id: device_id.to_string(),
@@ -196,8 +398,21 @@ impl ComputerView {
         if !same {
             state.quality = quality;
             state.view_only = view_only;
+            state.stats_on = stats;
         }
         ask(&self.state_dir, &mut state, wanted)
+    }
+
+    /// Stats switched in Settings (PR #551 review): an open window follows.
+    pub fn set_stats(&self, on: bool) {
+        lock(&self.shared).stats_on = on;
+        self.ctx.request_repaint_of(viewport_id());
+    }
+
+    /// The bar's Stats switch, saved since the last call (PC2): Settings
+    /// follows it.
+    pub fn take_stats_saved(&self) -> Option<bool> {
+        lock(&self.shared).stats_saved.take()
     }
 
     /// Call each pass: keeps the window open while a screen is wanted.
@@ -213,8 +428,9 @@ impl ComputerView {
             .with_min_inner_size([320.0, 240.0]);
         let shared = self.shared.clone();
         let state_dir = self.state_dir.clone();
+        let config = self.config.clone();
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
-            draw(&shared, &state_dir, ui);
+            draw(&shared, &state_dir, config.as_deref(), ui);
         });
     }
 }
@@ -247,6 +463,50 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     Ok(())
 }
 
+/// Let go of what is held there, then end the view on the server: the
+/// view this window shows, when it reached one (BK7 review M1). Its end is
+/// no longer this window's to say.
+fn stop_view(state_dir: &Path, state: &mut State) {
+    let release = state.input.release_all();
+    send(state, release);
+    state.writer = None;
+    if let Some(stream) = state.stream.take() {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    let shown = state.session_id;
+    state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
+    state.session_id = None;
+    state.asked += 1;
+    let _ = computers::request(
+        state_dir,
+        ComputerAsk::StopView { session_id: shown },
+        now_unix(),
+    );
+}
+
+/// Cancel, while the server dials the other computer again after a drop
+/// (PC2): the view stops there, and the window says so, with Reconnect.
+fn cancel_reconnect(state_dir: &Path, state: &mut State) {
+    stop_view(state_dir, state);
+    let name = state
+        .wanted
+        .as_ref()
+        .map_or_else(|| "the computer".to_string(), |w| w.name.clone());
+    state.ended = Some(format!("Stopped reconnecting to {name}."));
+}
+
+/// What the window says while the server dials the other computer again
+/// after a drop (PC2), with the try it is on; `None` when it is not.
+pub fn reconnect_words(name: &str, status: &ViewStatus) -> Option<String> {
+    let n = status.reconnecting;
+    (n > 0).then(|| match status.phase {
+        Phase::Waiting => {
+            format!("Reconnecting to {name}\u{2026} ({n}) Waiting for it to let this computer in.")
+        }
+        _ => format!("Reconnecting to {name}\u{2026} ({n})"),
+    })
+}
+
 /// Send `packets` to the other computer through the relay; a broken write
 /// ends input here (the reader sees the relay go).
 fn send(state: &mut State, packets: Vec<InputPacket>) {
@@ -268,32 +528,16 @@ fn send(state: &mut State, packets: Vec<InputPacket>) {
     }
 }
 
-fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
+fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut state = lock(shared);
     let Some(wanted) = state.wanted.clone() else {
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
-        // Let go of what is held there, then end the view.
-        let release = state.input.release_all();
-        send(&mut state, release);
+        stop_view(state_dir, &mut state);
         state.wanted = None;
-        state.writer = None;
-        if let Some(stream) = state.stream.take() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
-        // The view this window shows, when it reached one (BK7 review M1).
-        let shown = state.session_id;
-        state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
-        state.session_id = None;
-        state.asked += 1;
         state.fullscreen = false;
-        let _ = computers::request(
-            state_dir,
-            ComputerAsk::StopView { session_id: shown },
-            now_unix(),
-        );
         return;
     }
     if let Some(picture) = state.picture.take() {
@@ -326,6 +570,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
     let record_want = state.record_want;
     let recording = state.recording.clone();
     let fullscreen = state.fullscreen;
+    let mut stats_on = state.stats_on;
+    // Ctrl+Alt+Shift+S, wherever the focus is (PR #551 review M8).
+    if ctx.input(|i| i.events.iter().any(stats_chord)) {
+        stats_on = !stats_on;
+        drop(state);
+        switch_stats(shared, config, stats_on);
+        state = lock(shared);
+    }
+    let size = state.size;
+    let shown = state.clock.shown(Instant::now());
     let saved = state
         .saved_note
         .clone()
@@ -413,6 +667,13 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
                     lock(shared).fullscreen = !fullscreen;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
                 }
+                let stats = ui.checkbox(&mut stats_on, "Stats").on_hover_text(
+                    "Show how the picture comes: frames, bitrate, round trip, road and decode time (Ctrl+Alt+Shift+S)",
+                );
+                if stats.clicked() {
+                    stats.surrender_focus();
+                    switch_stats(shared, config, stats_on);
+                }
                 if let Some((_, since)) = &recording {
                     let secs = since.elapsed().as_secs();
                     ui.colored_label(
@@ -449,6 +710,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
 
     // The toolbar's choices.
     let mut reconnect = false;
+    let mut cancel = false;
     if monitor != wanted.monitor {
         let mut state = lock(shared);
         let next = Wanted {
@@ -487,6 +749,32 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
                     ui.colored_label(egui::Color32::LIGHT_GRAY, why);
                     ui.add_space(8.0);
                     reconnect = ui.button("Reconnect").clicked();
+                });
+            } else if let Some(words) = reconnect_words(&wanted.name, &status) {
+                // The last picture, dimmed, while it dials again (PC2).
+                if let Some(texture) = &texture {
+                    let [w, h] = texture.size();
+                    ui.painter().image(
+                        texture.id(),
+                        letterbox(area, w, h),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::from_gray(90),
+                    );
+                }
+                ui.vertical_centered(|ui| {
+                    ui.add_space(area.height() / 3.0);
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_black_alpha(200))
+                        .corner_radius(6.0)
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.colored_label(egui::Color32::LIGHT_GRAY, words);
+                            ui.add_space(8.0);
+                            cancel = ui
+                                .button("Cancel")
+                                .on_hover_text("Stop trying; Reconnect tries again")
+                                .clicked();
+                        });
                 });
             } else if let Some(note) = &note {
                 ui.centered_and_justified(|ui| ui.colored_label(egui::Color32::LIGHT_GRAY, note));
@@ -541,7 +829,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
             let on = controls(status.control, state.view_only, connected, current) && focused;
             let packets = match picture_rect {
                 Some(rect) if on => {
-                    let events = ctx.input(|i| i.events.clone());
+                    let mut events = ctx.input(|i| i.events.clone());
+                    keep_chord_here(&mut events);
                     state.input.take(&events, rect, Instant::now())
                 }
                 _ => state.input.release_all(),
@@ -550,7 +839,36 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, ui: &mut egui::Ui) {
             if state.input.waiting() {
                 ctx.request_repaint_after(MOVE_EVERY);
             }
+            drop(state);
+            // How the picture comes, over its corner (PC2).
+            if stats_on && ended.is_none() {
+                let lines = stats_lines(&status, size, shown);
+                egui::Area::new(egui::Id::new("computer-view-stats"))
+                    .fixed_pos(area.min + egui::vec2(8.0, 8.0))
+                    .order(egui::Order::Foreground)
+                    .interactable(false)
+                    .show(&ctx, |ui| {
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_black_alpha(180))
+                            .corner_radius(4.0)
+                            .inner_margin(6.0)
+                            .show(ui, |ui| {
+                                for line in lines {
+                                    ui.label(
+                                        egui::RichText::new(line)
+                                            .monospace()
+                                            .small()
+                                            .color(egui::Color32::from_gray(230)),
+                                    );
+                                }
+                            });
+                    });
+                ctx.request_repaint_after(Duration::from_secs(1));
+            }
         });
+    if cancel {
+        cancel_reconnect(state_dir, &mut lock(shared));
+    }
     if reconnect {
         let mut state = lock(shared);
         if let Err(e) = ask(state_dir, &mut state, wanted) {
@@ -777,6 +1095,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
                 let started = Decoder::start(width, height, publisher(shared, ctx));
                 let mut state = lock(shared);
+                state.clock.restart();
                 state.size = Some((width, height));
                 match started {
                     Ok(d) => {
@@ -810,6 +1129,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     recorder = None;
                     end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
+                lock(shared).clock.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
                     lock(shared).note = Some(format!("The decoder stopped ({e})."));
@@ -844,7 +1164,10 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
     let shared = shared.clone();
     let ctx = ctx.clone();
     Box::new(move |picture| {
-        lock(&shared).picture = Some(picture);
+        let mut state = lock(&shared);
+        state.clock.decoded(Instant::now());
+        state.picture = Some(picture);
+        drop(state);
         ctx.request_repaint_of(viewport_id());
     })
 }
@@ -852,6 +1175,7 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pocketdesk_core::local::view::ViewStats;
 
     #[test]
     fn the_window_says_how_the_view_stands() {
@@ -927,6 +1251,214 @@ mod tests {
         assert_eq!(screen_choices(&status).len(), 2);
     }
 
+    /// PC2: the overlay says the road and how it was reached, the picture,
+    /// the frames that came and were shown, the bitrate, the round trip,
+    /// the decoder's time and the frames lost, late and dropped.
+    #[test]
+    fn the_stats_say_the_road_the_picture_and_the_numbers() {
+        let mut status = ViewStatus {
+            phase: Phase::Showing,
+            route: "internet".into(),
+            stats: Some(ViewStats {
+                fps: 59,
+                kbps: 8_400,
+                rtt_ms: Some(23),
+                relayed: true,
+                dial_ms: Some(640),
+                lost: 2,
+                late: 1,
+                dropped: 0,
+                codec: "H.264".into(),
+            }),
+            ..ViewStatus::default()
+        };
+        let shown = Shown {
+            fps: 58,
+            decode: Some(Duration::from_micros(6_100)),
+        };
+        assert_eq!(
+            stats_lines(&status, Some((1920, 1080)), shown),
+            [
+                "Road: internet, by a relay (reached in 640 ms)",
+                "Picture: 1920\u{d7}1080 H.264",
+                "Frames: 59 a second in, 58 shown",
+                "Bitrate: 8.4 Mb/s",
+                "Round trip: 23 ms",
+                "Decode: 6.1 ms",
+                "Lost 2 \u{b7} late 1 \u{b7} dropped 0",
+            ]
+        );
+        status.stats.as_mut().unwrap().relayed = false;
+        assert_eq!(
+            stats_lines(&status, Some((1920, 1080)), shown)[0],
+            "Road: internet, direct (reached in 640 ms)"
+        );
+        status.route = "home network".into();
+        assert_eq!(
+            stats_lines(&status, Some((1920, 1080)), shown)[0],
+            "Road: home network (reached in 640 ms)"
+        );
+        // Nothing known yet.
+        let lines = stats_lines(&ViewStatus::default(), None, Shown::default());
+        assert_eq!(lines[0], "Road: not yet");
+        assert_eq!(lines[1], "Picture: not yet");
+        assert_eq!(lines[4], "Round trip: not known");
+        assert_eq!(lines[5], "Decode: not yet");
+        assert_eq!(bitrate_words(950), "950 kb/s");
+    }
+
+    /// PC2: each picture is timed against the access unit it came from,
+    /// and the last whole second's pictures and decode time are what the
+    /// overlay says.
+    #[test]
+    fn the_decoder_is_timed_and_the_pictures_counted() {
+        let t = Instant::now();
+        let ms = |n: u64| t + Duration::from_millis(n);
+        let mut clock = DecodeClock::default();
+        assert_eq!(clock.shown(t), Shown::default());
+        for n in 0..30u64 {
+            clock.fed(ms(n * 33));
+            clock.decoded(ms(n * 33 + 5));
+        }
+        clock.fed(ms(1000));
+        clock.decoded(ms(1006));
+        let shown = clock.shown(ms(1006));
+        assert_eq!(shown.fps, 30);
+        assert_eq!(shown.decode.map(|d| d.as_millis()), Some(5));
+        // Nothing for two seconds: none shown, no decode time.
+        assert_eq!(clock.shown(ms(3100)), Shown::default());
+        // A new decoder forgets the units the old one was fed: a picture
+        // with none waiting is counted, not timed.
+        clock.fed(ms(3200));
+        clock.restart();
+        clock.decoded(ms(3900));
+        clock.fed(ms(4000));
+        clock.decoded(ms(4002));
+        clock.decoded(ms(4004));
+        let shown = clock.shown(ms(4200));
+        assert_eq!(shown.fps, 2, "{shown:?}");
+        assert_eq!(shown.decode.map(|d| d.as_millis()), Some(2));
+        // A decoder that drops units does not grow the waiting list for
+        // ever.
+        for n in 0..1000u64 {
+            clock.fed(ms(5000 + n));
+        }
+        assert!(clock.fed.len() <= 32);
+    }
+
+    /// PC2: while the server dials again after a drop the window says so,
+    /// with the try it is on.
+    #[test]
+    fn the_window_says_it_is_reconnecting() {
+        let mut status = ViewStatus::default();
+        assert_eq!(reconnect_words("Desk", &status), None);
+        status.reconnecting = 2;
+        assert_eq!(
+            reconnect_words("Desk", &status).as_deref(),
+            Some("Reconnecting to Desk\u{2026} (2)")
+        );
+        status.phase = Phase::Waiting;
+        assert!(
+            reconnect_words("Desk", &status)
+                .unwrap()
+                .contains("let this computer in")
+        );
+    }
+
+    /// PC2: Cancel while it reconnects stops the view on the server (its
+    /// StopView names the view), and the window says so, with Reconnect.
+    #[test]
+    fn cancel_stops_the_reconnecting_view() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            session_id: Some(41),
+            status: ViewStatus {
+                reconnecting: 3,
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        let asked = state.asked;
+        cancel_reconnect(&dir, &mut state);
+        assert_eq!(
+            state.ended.as_deref(),
+            Some("Stopped reconnecting to Desk.")
+        );
+        assert!(state.wanted.is_some(), "the window stays, with Reconnect");
+        assert_eq!(state.session_id, None);
+        assert!(state.asked > asked, "the view's end is not this window's");
+        assert_eq!(state.newer_than, 41);
+        let sent = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            sent.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::StopView {
+                session_id: Some(41)
+            }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #551 review: Stats switched in Settings reaches a window already
+    /// open; opening the same computer again keeps the window's own.
+    #[test]
+    fn the_settings_stats_reach_an_open_window() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-stats-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        assert!(!lock(&view.shared).stats_on);
+        view.set_stats(true);
+        assert!(lock(&view.shared).stats_on);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        assert!(lock(&view.shared).stats_on, "the same window keeps it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #551 review M8: Ctrl+Alt+Shift+S switches the stats, as
+    /// Moonlight's does; it stays here, never reaching the other computer,
+    /// and S alone or with fewer keys is the other computer's.
+    #[test]
+    fn ctrl_alt_shift_s_switches_the_stats_here() {
+        let key = |key, pressed, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let all = egui::Modifiers {
+            alt: true,
+            ctrl: true,
+            shift: true,
+            mac_cmd: false,
+            command: true,
+        };
+        assert!(stats_chord(&key(egui::Key::S, true, all)));
+        assert!(!stats_chord(&key(egui::Key::S, false, all)), "on the press");
+        assert!(!stats_chord(&key(
+            egui::Key::S,
+            true,
+            egui::Modifiers::CTRL
+        )));
+        assert!(!stats_chord(&key(egui::Key::D, true, all)));
+        let mut events = vec![
+            key(egui::Key::S, true, all),
+            key(egui::Key::S, false, all),
+            key(egui::Key::A, true, egui::Modifiers::NONE),
+        ];
+        keep_chord_here(&mut events);
+        assert_eq!(events.len(), 1, "only the A goes on");
+    }
+
     #[test]
     fn a_name_is_fit_for_a_file() {
         assert_eq!(file_safe("Desk"), "Desk");
@@ -963,8 +1495,8 @@ mod tests {
         )
         .unwrap();
         let ctx = egui::Context::default();
-        let view = ComputerView::new(&ctx, dir.clone());
-        view.open("desk", "Desk", 0, 0, false).unwrap();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
         listener.set_nonblocking(true).unwrap();
         let join = || {
             let deadline = Instant::now() + Duration::from_secs(10);
@@ -1021,7 +1553,7 @@ mod tests {
             },
         )
         .unwrap();
-        view.open("desk", "Desk", 0, 0, false).unwrap();
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
         for _ in 0..4 {
             drop(join());
         }
@@ -1068,8 +1600,8 @@ mod tests {
         )
         .unwrap();
         let ctx = egui::Context::default();
-        let view = ComputerView::new(&ctx, dir.clone());
-        view.open("desk", "Desk", 0, 0, false).unwrap();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while lock(&view.shared).ended.is_none() {
             assert!(Instant::now() < deadline, "the end within 10 s");
@@ -1134,8 +1666,8 @@ mod tests {
         )
         .unwrap();
         let ctx = egui::Context::default();
-        let view = ComputerView::new(&ctx, dir.clone());
-        view.open("desk", "Desk", 0, 3, false).unwrap();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 3, false, false).unwrap();
         let asked = computers::take_all(&dir, now_unix());
         assert_eq!(
             asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),

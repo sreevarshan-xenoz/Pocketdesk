@@ -744,16 +744,30 @@ impl PocketdeskApp {
     }
 
     /// Open a window on the computer `device_id`'s screen (BK7), at the
-    /// quality and view-only the settings start it with.
+    /// quality, view-only and stats the settings start it with.
     fn show_computer(&mut self, ctx: &egui::Context, device_id: &str, name: &str) {
-        let (preset, view_only) = self.config.as_ref().map_or(
-            (pocketdesk_core::streaming::input_packet::PRESET_AUTO, false),
-            |c| (c.computer_view_preset(), c.computer_view_only),
+        let (preset, view_only, stats) = self.config.as_ref().map_or(
+            (
+                pocketdesk_core::streaming::input_packet::PRESET_AUTO,
+                false,
+                false,
+            ),
+            |c| {
+                (
+                    c.computer_view_preset(),
+                    c.computer_view_only,
+                    c.computer_view_stats,
+                )
+            },
         );
         let view = self.computer_view.get_or_insert_with(|| {
-            crate::computer_view::ComputerView::new(ctx, self.state_dir.clone())
+            crate::computer_view::ComputerView::new(
+                ctx,
+                self.state_dir.clone(),
+                Config::path().ok(),
+            )
         });
-        if let Err(e) = view.open(device_id, name, 0, preset, view_only) {
+        if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
             self.notice = crate::notice::Notice::error(e);
         }
     }
@@ -2784,6 +2798,10 @@ impl PocketdeskApp {
                         if history_off {
                             let _ = pocketdesk_core::local::clip_history::clear(&self.state_dir);
                         }
+                        // An open screen window follows its Stats switch.
+                        if let Some(view) = &self.computer_view {
+                            view.set_stats(form.saved_computer_view_stats());
+                        }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }
                     Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
@@ -3784,6 +3802,15 @@ impl eframe::App for PocketdeskApp {
         // BK7: another computer's screen, while its window is open.
         if let Some(view) = &self.computer_view {
             view.show(ctx);
+            // PC2: its Stats switch, saved there, is what Settings shows.
+            if let Some(on) = view.take_stats_saved() {
+                if let Some(config) = self.config.as_mut() {
+                    config.computer_view_stats = on;
+                }
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_computer_view_stats(on);
+                }
+            }
         }
         // M4: the typing window, while open.
         if let Some(id) = self.type_view.phone() {

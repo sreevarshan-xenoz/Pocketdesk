@@ -188,6 +188,16 @@ pub trait Connection: Send + Sync {
     }
 }
 
+/// Completes once `connection` has ended, looked at every 250 ms (its
+/// [`Connection::close_reason`] says so): a step that waits on something
+/// else, such as the owner's answer, can give up with it (PR #551 review
+/// M2).
+pub async fn closed(connection: &dyn Connection) {
+    while connection.close_reason().is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
 /// Shared handle passed around pipeline tasks (quinn::Connection itself is
 /// cheap, but the trait object needs the Arc).
 pub type SharedConnection = Arc<dyn Connection>;
@@ -503,6 +513,46 @@ mod tests {
         );
         assert_eq!(read.len(), 2 * first.len());
         assert_eq!(counted.load(Ordering::Relaxed), read.len() as u64);
+    }
+
+    /// PR #551 review M2: `closed` waits while the connection is open and
+    /// returns soon after the peer closes it, so a session held for the
+    /// owner's answer lets its prompt go with it.
+    #[tokio::test]
+    async fn closed_returns_once_the_peer_closes() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certs = Arc::new(CertManager::new().expect("certs"));
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server_endpoint = quinn::Endpoint::server(
+            certs.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server_endpoint.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let incoming = server_endpoint.accept().await.expect("incoming");
+            QuinnConnection::shared(incoming.await.expect("accept"))
+        });
+        let mut client_endpoint =
+            quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client endpoint");
+        client_endpoint
+            .set_default_client_config(certs.client_config(alpn).expect("client config"));
+        let client = client_endpoint
+            .connect(addr, "pocketdesk.local")
+            .expect("dial")
+            .await
+            .expect("connect");
+        let server = accept.await.expect("accept task");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(600), closed(server.as_ref()))
+                .await
+                .is_err(),
+            "open: still waiting"
+        );
+        client.close(0u32.into(), b"gone");
+        tokio::time::timeout(Duration::from_secs(5), closed(server.as_ref()))
+            .await
+            .expect("returns once closed");
     }
 
     /// Full trait exercise over a real quinn loopback connection: open/accept
