@@ -234,6 +234,8 @@ pub enum Heard {
 pub struct Hook {
     thread_id: u32,
     thread: Option<JoinHandle<()>>,
+    /// Tells the thread to take the hook out at its next message.
+    stop: Arc<AtomicBool>,
     beat: Arc<AtomicU64>,
     pub heard: Receiver<Heard>,
 }
@@ -253,15 +255,25 @@ impl Hook {
 impl Drop for Hook {
     fn drop(&mut self) {
         use windows::Win32::Foundation::{LPARAM, WPARAM};
-        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
-        // SAFETY: a plain message to a thread this owns, whose queue exists
-        // (it made it before saying it was ready).
-        let _ = unsafe { PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+        self.stop.store(true, Ordering::Release);
         if let Some(thread) = self.thread.take() {
+            // Only to a thread still running: a finished one's id may be
+            // another program's thread now (review M3). The message only
+            // wakes it to read the flag.
+            if !thread.is_finished() {
+                // SAFETY: a plain message to a thread this owns, whose
+                // queue exists (it made it before saying it was ready).
+                let _ =
+                    unsafe { PostThreadMessageW(self.thread_id, WM_STOP, WPARAM(0), LPARAM(0)) };
+            }
             let _ = thread.join();
         }
     }
 }
+
+/// Wakes the hook's thread to read its stop flag.
+const WM_STOP: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 
 /// How the window puts the hook in: the system's, or in a test a stand-in
 /// that never does (a test must not hook this computer's keyboard).
@@ -468,8 +480,9 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
     let (ready_tx, ready) = mpsc::channel::<Option<u32>>();
     let beat = Arc::new(AtomicU64::new(clock_ms()));
     let thread_beat = beat.clone();
-    // Set by an install that gave up waiting (review I3): the thread then
-    // puts no hook in, or takes it out at its next look.
+    // Set by an install that gave up waiting (review I3), or as the hook is
+    // dropped (review M3): the thread then puts no hook in, or takes it
+    // out at its next message.
     let abandoned = Arc::new(AtomicBool::new(false));
     let thread_abandoned = abandoned.clone();
     let thread = std::thread::Builder::new()
@@ -545,6 +558,7 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
         Ok(Some(thread_id)) => Some(Hook {
             thread_id,
             thread: Some(thread),
+            stop: abandoned,
             beat,
             heard,
         }),
