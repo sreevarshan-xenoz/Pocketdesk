@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-979 open items.
+981 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 71 |
+| A second computer | 73 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -932,6 +932,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Copy an image on Windows (a screenshot with Win+Shift+S), focus the window: the laptop's clipboard holds the image; with "Files over the internet" off on either, it does not go. A KeePassXC password copied on the laptop does not come back to Windows as the window loses the focus. (where: second computer)
 - With View only on in the window's bar, or Control off for Windows on the laptop's Devices page, focusing the window moves nothing; with "Clipboard follows a computer's screen window" off on either computer, nothing moves; with "Clipboard with my computers" on on both, copies cross as that sync sends them and the window adds no second copy. (where: second computer)
 - Drop three files and a folder from Explorer onto the window: the note says "Sending 3 files and 1 folder to <laptop>…", then "Sent 3 files and 1 folder to <laptop>'s Downloads.", and they are there; with Files off for Windows on the laptop's Devices page, the note says Files is off for this computer there; with the laptop's Wi-Fi off, it says the link is down. (where: second computer)
+
+**228. The always-on computer clipboard asks the Clipboard permission**
+
+- With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
+- With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

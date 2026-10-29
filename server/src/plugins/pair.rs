@@ -219,6 +219,28 @@ pub fn allows(
         .unwrap_or(false)
 }
 
+/// May the computer `device_id` set this computer's clipboard on the link
+/// this computer keeps to it ("Clipboard with my computers")? One paired
+/// into this computer too, by its Clipboard permission here (the switch on
+/// its Devices entry); one this computer paired into alone, yes, as the
+/// owner's setting decides. A store that cannot be read is no.
+pub fn kept_link_clipboard(device_id: &str) -> bool {
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::read(path).ok());
+    kept_link_clipboard_in(store.as_ref(), device_id)
+}
+
+/// [`kept_link_clipboard`] against a given store.
+fn kept_link_clipboard_in(store: Option<&TrustStore>, device_id: &str) -> bool {
+    store.is_some_and(|store| {
+        !store.is_trusted(device_id)
+            || store
+                .permissions(device_id)
+                .allows(pocketdesk_core::protocol::permissions::Capability::Clipboard)
+    })
+}
+
 /// [`permits`] against a given store; without one, nothing that needs a
 /// permission is allowed.
 fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
@@ -2090,6 +2112,32 @@ forged log line"
         let path = std::env::temp_dir().join(format!("ll-perm-{name}-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&path);
         TrustStore::load_or_create(path).unwrap()
+    }
+
+    #[test]
+    fn a_kept_link_takes_the_clipboard_by_the_permission_here() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let mut store = temp_store("kept-link");
+        store.trust_device("computer-1").unwrap();
+        assert!(
+            kept_link_clipboard_in(Some(&store), "computer-1"),
+            "paired into this one, with Clipboard"
+        );
+        let mut permissions = store.permissions("computer-1");
+        permissions.set(Capability::Clipboard, false);
+        store.set_permissions("computer-1", permissions).unwrap();
+        assert!(
+            !kept_link_clipboard_in(Some(&store), "computer-1"),
+            "its Clipboard switch off here is kept"
+        );
+        assert!(
+            kept_link_clipboard_in(Some(&store), "computer-2"),
+            "one this computer paired into alone"
+        );
+        assert!(
+            !kept_link_clipboard_in(None, "computer-2"),
+            "no readable store is no"
+        );
     }
 
     #[test]

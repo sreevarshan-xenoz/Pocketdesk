@@ -864,8 +864,9 @@ fn follow_taken(
 
 /// Whether a clipboard packet's `body` from the computer `device_id` is
 /// taken as one following the mouse, with "Clipboard with my computers"
-/// off here ([`follow_taken`]). Reads files (blocking), but only for a
-/// marked packet.
+/// off here ([`follow_taken`]), and, from a computer paired into this one,
+/// with its Clipboard permission here (PR #557 review). Reads files
+/// (blocking), but only for a marked packet.
 pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
     if !marked(body) {
         return false;
@@ -891,7 +892,7 @@ pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
         },
         || crate::shared_input::receive::may_drive_here(device_id),
         || crate::shared_input::link::answered(device_id),
-    )
+    ) && crate::plugins::pair::kept_link_clipboard(device_id)
 }
 
 /// Whether a push that follows the window (PC3) is taken: with

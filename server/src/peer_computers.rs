@@ -1951,9 +1951,11 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         return;
     }
     if packet.packet_type == "kdeconnect.clipboard" {
-        if !crate::clipboard_push::with_computers()
-            && !crate::clipboard_push::takes_follow(device_id, &packet.body)
-        {
+        // "Clipboard with my computers" asks its Clipboard permission here
+        // too: on this link no other gate does.
+        let always = crate::clipboard_push::with_computers()
+            && crate::plugins::pair::kept_link_clipboard(device_id);
+        if !always && !crate::clipboard_push::takes_follow(device_id, &packet.body) {
             return;
         }
         if let Some(content) = packet.body.get("content").and_then(|v| v.as_str()) {
