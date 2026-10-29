@@ -154,6 +154,8 @@ pub async fn unregister_client(connection_id: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(connection_id);
+    // A nearby computer's ask on it is over (it frees the prompt's slot).
+    crate::nearby::connection_closed(connection_id);
     let mut clients = ACTIVE_CLIENTS.lock().await;
     clients.retain(|c| c.connection_id() != connection_id);
     tracing::info!(

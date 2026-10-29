@@ -68,6 +68,23 @@ pub const PACE_MOST: usize = 3;
 /// The window [`PACE_MOST`] counts in.
 pub const PACE_WINDOW: Duration = Duration::from_secs(60);
 
+/// How long a requester has to reveal its nonce once it has the host's:
+/// an honest one does at once.
+pub const REVEAL_WITHIN: Duration = Duration::from_secs(10);
+
+/// The most failed asks (a wrong reveal, or one that broke off after the
+/// host's nonce) the host takes in [`BUDGET_WINDOW`], from all addresses
+/// together; after them it takes no ask until the window has passed. At
+/// the nonce, a computer in the middle knows every input to the host's
+/// code, so each such try is a guess at matching it: they are counted
+/// host-wide, where a new address does not reset them.
+pub const FAILED_MOST: usize = 3;
+/// The most asks shown to the owner in [`BUDGET_WINDOW`], from all
+/// addresses together.
+pub const PROMPTS_MOST: usize = 3;
+/// The window [`FAILED_MOST`] and [`PROMPTS_MOST`] count in.
+pub const BUDGET_WINDOW: Duration = Duration::from_secs(600);
+
 /// A fresh random nonce.
 pub fn nonce() -> [u8; 32] {
     use rand::RngCore;
@@ -204,8 +221,12 @@ pub enum Refusal {
     Busy,
     /// Asks are off here.
     Off,
-    /// That address asked too often.
+    /// That address asked too often, or the owner was shown
+    /// [`PROMPTS_MOST`] asks lately.
     TooOften,
+    /// [`FAILED_MOST`] asks failed lately (a wrong code was tried): none
+    /// is taken until [`BUDGET_WINDOW`] has passed.
+    Paused,
 }
 
 impl Refusal {
@@ -213,9 +234,15 @@ impl Refusal {
     pub fn step(self) -> &'static str {
         match self {
             Refusal::Busy => step::BUSY,
-            Refusal::Off | Refusal::TooOften => step::UNAVAILABLE,
+            Refusal::Off | Refusal::TooOften | Refusal::Paused => step::UNAVAILABLE,
         }
     }
+}
+
+/// The times within [`BUDGET_WINDOW`] of `now`, kept.
+fn recent(times: &mut Vec<Instant>, now: Instant) -> usize {
+    times.retain(|t| now.saturating_duration_since(*t) < BUDGET_WINDOW);
+    times.len()
 }
 
 /// How an answer went.
@@ -268,16 +295,23 @@ impl Pace {
 }
 
 /// The host's side: one ask at a time on its screen, answered by both
-/// owners within [`ANSWER_WITHIN`], and the pace per address.
+/// owners within [`ANSWER_WITHIN`]; the pace per address, and the budget
+/// of failed asks and of prompts across all addresses.
 #[derive(Debug, Default)]
 pub struct HostDesk {
     shown: Option<Shown>,
     pace: Pace,
+    /// When asks failed lately (a wrong reveal, or none in time).
+    failed: Vec<Instant>,
+    /// When asks were shown to the owner lately.
+    prompts: Vec<Instant>,
+    /// A failure was counted since [`HostDesk::take_tried`] last said.
+    tried: bool,
 }
 
 impl HostDesk {
     /// Take an ask from `from` at `now` (`enabled`: asks are on here); its
-    /// id, to answer by. Nothing can come of an ask but its owner's Accept.
+    /// id, to answer by. Nothing can come of an ask but both owners' yes.
     pub fn ask(&mut self, from: IpAddr, enabled: bool, now: Instant) -> Result<String, Refusal> {
         if !enabled {
             return Err(Refusal::Off);
@@ -285,6 +319,12 @@ impl HostDesk {
         self.expire(now);
         if self.shown.is_some() {
             return Err(Refusal::Busy);
+        }
+        if recent(&mut self.failed, now) >= FAILED_MOST {
+            return Err(Refusal::Paused);
+        }
+        if recent(&mut self.prompts, now) >= PROMPTS_MOST {
+            return Err(Refusal::TooOften);
         }
         if !self.pace.allow(from, now) {
             return Err(Refusal::TooOften);
@@ -312,10 +352,45 @@ impl HostDesk {
             Some(shown) if !shown.prompted => {
                 shown.prompted = true;
                 shown.at = now;
+                self.prompts.push(now);
                 true
             }
             _ => false,
         }
+    }
+
+    /// The ask `id` failed before its owner saw it: a wrong reveal (or a
+    /// commitment that did not match), or its connection closed after the
+    /// host's nonce. It counts against [`FAILED_MOST`] and frees the
+    /// screen. False when it is not the ask on screen, or was shown
+    /// already (closing then is no failure: [`HostDesk::drop_ask`]).
+    pub fn failed(&mut self, id: &str, now: Instant) -> bool {
+        if !self
+            .shown
+            .as_ref()
+            .is_some_and(|s| s.id == id && !s.prompted)
+        {
+            return false;
+        }
+        self.shown = None;
+        self.count_failure(now);
+        true
+    }
+
+    fn count_failure(&mut self, now: Instant) {
+        self.failed.push(now);
+        self.tried = true;
+    }
+
+    /// Whether a failure was counted since this was last asked (for the
+    /// owner's note: "Someone nearby tried a wrong pairing code").
+    pub fn take_tried(&mut self) -> bool {
+        std::mem::take(&mut self.tried)
+    }
+
+    /// Whether asks are paused now, after [`FAILED_MOST`] failures.
+    pub fn paused(&mut self, now: Instant) -> bool {
+        recent(&mut self.failed, now) >= FAILED_MOST
     }
 
     /// The owner's answer to the ask `id`, once. A Decline frees the
@@ -370,13 +445,17 @@ impl HostDesk {
     }
 
     /// The ask on screen, if it has not run out at `now`; one that has is
-    /// dropped, and its id returned.
+    /// dropped, and its id returned. Run out is [`ANSWER_WITHIN`] from the
+    /// prompt, or [`REVEAL_WITHIN`] from the ask with no nonce revealed,
+    /// which counts as a failed ask.
     pub fn expire(&mut self, now: Instant) -> Option<String> {
-        if self
-            .shown
-            .as_ref()
-            .is_some_and(|s| now.saturating_duration_since(s.at) >= ANSWER_WITHIN)
-        {
+        let shown = self.shown.as_ref()?;
+        let age = now.saturating_duration_since(shown.at);
+        if shown.prompted && age >= ANSWER_WITHIN {
+            return self.shown.take().map(|s| s.id);
+        }
+        if !shown.prompted && age >= REVEAL_WITHIN {
+            self.count_failure(now);
             return self.shown.take().map(|s| s.id);
         }
         None
@@ -608,11 +687,90 @@ mod tests {
         assert!(desk.ask(HOME, true, at(61, start)).is_ok());
     }
 
-    /// Busy is said as busy; off and too often alike, as unavailable.
+    /// Busy is said as busy; off, too often and paused alike, as
+    /// unavailable.
     #[test]
     fn a_refusal_says_no_more_than_needed() {
         assert_eq!(Refusal::Busy.step(), step::BUSY);
         assert_eq!(Refusal::Off.step(), Refusal::TooOften.step());
+        assert_eq!(Refusal::Off.step(), Refusal::Paused.step());
+    }
+
+    fn address(last: u8) -> IpAddr {
+        IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, last))
+    }
+
+    /// A wrong reveal is a failed ask, counted across every address: a
+    /// new address does not reset it. After three in ten minutes no ask is
+    /// taken from anyone until the window passes; each is noted once.
+    #[test]
+    fn bad_reveals_count_host_wide_and_pause_asks() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        for i in 0..FAILED_MOST as u8 {
+            let id = desk
+                .ask(address(20 + i), true, at(u64::from(i), start))
+                .expect("taken");
+            assert!(desk.failed(&id, at(u64::from(i), start)));
+            assert!(desk.take_tried(), "noted");
+            assert!(!desk.take_tried(), "once");
+            assert_eq!(desk.shown(), None, "the screen is free");
+        }
+        assert!(desk.paused(at(10, start)));
+        assert_eq!(
+            desk.ask(address(40), true, at(10, start)),
+            Err(Refusal::Paused)
+        );
+        assert_eq!(desk.ask(HOME, true, at(599, start)), Err(Refusal::Paused));
+        assert!(desk.ask(address(41), true, at(602, start)).is_ok());
+    }
+
+    /// An ask whose nonce is never revealed holds the screen only for
+    /// [`REVEAL_WITHIN`], and counts as a failed ask.
+    #[test]
+    fn an_ask_never_revealed_frees_the_screen_and_counts() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        let id = desk.ask(HOME, true, start).expect("taken");
+        assert_eq!(desk.ask(OTHER, true, at(9, start)), Err(Refusal::Busy));
+        assert_eq!(desk.expire(at(10, start)), Some(id.clone()));
+        assert!(desk.take_tried());
+        assert!(desk.ask(OTHER, true, at(11, start)).is_ok(), "free again");
+        assert!(!desk.failed(&id, at(12, start)), "counted once");
+    }
+
+    /// A connection that closes once its ask is shown frees the screen at
+    /// once, and is no failure (its owner may simply have cancelled).
+    #[test]
+    fn closing_after_the_prompt_frees_the_screen() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        let id = desk.ask(HOME, true, start).expect("taken");
+        assert!(desk.prompted(&id, at(1, start)));
+        assert!(!desk.failed(&id, at(2, start)));
+        assert_eq!(desk.shown(), Some(id.as_str()), "still busy");
+        desk.drop_ask(&id);
+        assert!(!desk.take_tried());
+        assert!(desk.ask(OTHER, true, at(3, start)).is_ok());
+    }
+
+    /// At most three asks are shown to the owner in ten minutes, from all
+    /// addresses together.
+    #[test]
+    fn prompts_are_capped_host_wide() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        for i in 0..PROMPTS_MOST as u8 {
+            let now = at(u64::from(i), start);
+            let id = desk.ask(address(50 + i), true, now).expect("taken");
+            assert!(desk.prompted(&id, now));
+            desk.answer(&id, false, false, now);
+        }
+        assert_eq!(
+            desk.ask(address(60), true, at(10, start)),
+            Err(Refusal::TooOften)
+        );
+        assert!(desk.ask(address(60), true, at(601, start)).is_ok());
     }
 
     fn found(id: &str, name: &str) -> Found {

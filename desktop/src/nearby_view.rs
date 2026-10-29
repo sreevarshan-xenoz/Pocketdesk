@@ -60,6 +60,23 @@ pub fn reasons() -> Vec<&'static str> {
 const PUBLIC_FIX: &str =
     "Settings → Network & internet → the network → Network profile type → Private.";
 
+/// The owner's note when someone nearby tried a wrong pairing code here
+/// (at `tried`, unix seconds) within the last ten minutes, while asks may
+/// be paused for it.
+pub fn tried_note(tried: Option<u64>, now_unix: u64) -> Option<String> {
+    let tried = tried?;
+    let ago = now_unix.saturating_sub(tried);
+    (ago < nearby::BUDGET_WINDOW.as_secs()).then(|| {
+        let minutes = ago / 60;
+        let when = match minutes {
+            0 => "just now".to_string(),
+            1 => "a minute ago".to_string(),
+            m => format!("{m} minutes ago"),
+        };
+        format!("Someone nearby tried a wrong pairing code ({when}).")
+    })
+}
+
 /// The words for how an ask from here ended (not Accepted: that one's
 /// pairing outcome says the rest).
 pub fn ended_words(state: &AskState, name: &str) -> Option<String> {
@@ -135,6 +152,9 @@ impl NearbyView {
         }
         ui.ctx().request_repaint_after(Duration::from_secs(1));
         ui.label(RichText::new(NEARBY).heading());
+        if let Some(note) = tried_note(self.file.nearby_tried, now_unix) {
+            ui.label(RichText::new(note).color(crate::theme::warn(ui)));
+        }
         let under_way = self.ask_progress(ui, state_dir, now_unix);
         let paired: Vec<String> = self
             .file
@@ -710,6 +730,23 @@ mod tests {
                 .unwrap()
                 .contains("same network")
         );
+    }
+
+    /// A wrong code tried here shows as a note for ten minutes.
+    #[test]
+    fn a_wrong_code_tried_here_shows_a_note() {
+        assert_eq!(tried_note(None, 1_000), None);
+        assert!(
+            tried_note(Some(1_000), 1_010)
+                .unwrap()
+                .starts_with("Someone nearby tried a wrong pairing code")
+        );
+        assert!(
+            tried_note(Some(1_000), 1_130)
+                .unwrap()
+                .contains("2 minutes ago")
+        );
+        assert_eq!(tried_note(Some(1_000), 1_600), None);
     }
 
     /// The empty list's reasons each fit a line.

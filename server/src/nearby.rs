@@ -24,7 +24,8 @@ use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::computers;
 use pocketdesk_core::local::nearby::{
-    self, ANSWER_WITHIN, Answered, AskState, HostDesk, NearbyAsk, NearbyRequest, STEP, step,
+    self, ANSWER_WITHIN, Answered, AskState, HostDesk, NearbyAsk, NearbyRequest, REVEAL_WITHIN,
+    STEP, step,
 };
 use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::pin as local_pin;
@@ -142,6 +143,13 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     .and_then(|v| v.as_str())
                     .unwrap_or(""),
             );
+            // Asks off: turned away before any other work.
+            if !crate::events::current_config().nearby_pairing {
+                let _ = sender
+                    .send_packet(&step_packet(nearby::Refusal::Off.step()))
+                    .await;
+                return;
+            }
             // A paired phone's id never pairs as a computer this way: the
             // owner's Accept would hand that id to whoever asked.
             let phone = {
@@ -155,7 +163,14 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             };
             let enabled = crate::events::current_config().nearby_pairing && !phone;
             let now = Instant::now();
-            let taken = lock(&DESK).ask(from.ip(), enabled, now);
+            let (taken, tried) = {
+                let mut desk = lock(&DESK);
+                let taken = desk.ask(from.ip(), enabled, now);
+                (taken, desk.take_tried())
+            };
+            if tried {
+                note_tried(&dir);
+            }
             let id = match taken {
                 Ok(id) => id,
                 Err(refusal) => {
@@ -182,7 +197,8 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     },
                 );
             }
-            sweep_after(dir, ANSWER_WITHIN);
+            // Not revealed in time: a failed ask, the screen free again.
+            sweep_after(dir, REVEAL_WITHIN);
             let mut answer = step_packet(step::NONCE);
             answer.body["nonce"] = nearby::to_hex(&nonce).into();
             let _ = sender.send_packet(&answer).await;
@@ -201,13 +217,20 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                 &key,
                 &taken.key,
             );
-            let (Some(theirs), Ok(own)) = (
-                revealed,
-                pocketdesk_core::local::identity::cert_fingerprint(&dir),
-            ) else {
+            let Some(theirs) = revealed else {
+                // A wrong code tried: counted host-wide, and the owner told.
+                lock(&TAKEN).remove(&connection);
+                lock(&DESK).failed(&taken.id, Instant::now());
+                tracing::warn!("A nearby computer's ask failed: its nonce did not match");
+                note_tried(&dir);
+                return;
+            };
+            let Ok(own) = pocketdesk_core::local::identity::cert_fingerprint(&dir) else {
                 lock(&TAKEN).remove(&connection);
                 lock(&DESK).drop_ask(&taken.id);
-                tracing::warn!("A nearby computer's ask broke off: its nonce did not match");
+                tracing::warn!(
+                    "A nearby computer's ask ended: this computer's certificate did not read"
+                );
                 return;
             };
             if !lock(&DESK).prompted(&taken.id, Instant::now()) {
@@ -362,11 +385,14 @@ fn sweep_after(dir: PathBuf, after: Duration) {
 /// Drop what ran out: the ask on screen, if its time is up, and every
 /// entry not on screen any more.
 async fn sweep(dir: &Path) {
-    let shown = {
+    let (shown, tried) = {
         let mut desk = lock(&DESK);
         desk.expire(Instant::now());
-        desk.shown().map(str::to_string)
+        (desk.shown().map(str::to_string), desk.take_tried())
     };
+    if tried {
+        note_tried(dir);
+    }
     let gone: Vec<(String, Taken)> = {
         let mut taken = lock(&TAKEN);
         let gone: Vec<String> = taken
@@ -385,6 +411,55 @@ async fn sweep(dir: &Path) {
         }
     }
 }
+
+/// The connection `connection_id` closed (the server's cleanup of every
+/// connection): its ask, if any, is over. Before its nonce was revealed,
+/// that is a failed ask (a computer in the middle that found the code
+/// would not match leaves this way); once shown, its owner may simply
+/// have cancelled, and the prompt goes.
+pub(crate) fn connection_closed(connection_id: &str) {
+    let Some(taken) = lock(&TAKEN).remove(connection_id) else {
+        return;
+    };
+    let failed = {
+        let mut desk = lock(&DESK);
+        let failed = !taken.revealed && desk.failed(&taken.id, Instant::now());
+        desk.drop_ask(&taken.id);
+        failed
+    };
+    let Ok(dir) = crate::state::state_dir() else {
+        return;
+    };
+    if failed {
+        tracing::warn!("A nearby computer's ask failed: it left before revealing its nonce");
+        note_tried(&dir);
+    } else {
+        clear_prompt(&dir, &taken.id);
+    }
+}
+
+/// Tell the owner someone nearby tried a wrong pairing code: noted in
+/// the computers file for the app, and as a notification.
+fn note_tried(dir: &Path) {
+    let now = local_pin::now_unix();
+    if let Err(e) = computers::update(dir, |file| file.nearby_tried = Some(now)) {
+        tracing::debug!("Could not note a failed nearby ask: {e}");
+    }
+    let paused = lock(&DESK).paused(Instant::now());
+    if std::env::var_os(QUIET).is_none() {
+        let body = if paused {
+            "Nearby asks to pair are paused for 10 minutes."
+        } else {
+            "Nothing was paired."
+        };
+        std::thread::spawn(move || {
+            crate::platform::notify(TRIED, body, ANSWER_WITHIN);
+        });
+    }
+}
+
+/// What the owner is told of a failed ask.
+const TRIED: &str = "Someone nearby tried a wrong pairing code";
 
 /// The PIN `pin`, if this computer handed it to `device_id` once both
 /// owners said yes to its nearby ask, on a connection that proved the
