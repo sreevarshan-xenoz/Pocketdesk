@@ -334,7 +334,10 @@ fn other_computers_point_to_pairing_on_the_pair_page() {
         app.query_by_label("From the other computer").is_none(),
         "no paste box in Settings"
     );
-    app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
+    // Below the section's rows: by the keyboard, which scrolls to it.
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).focus();
+    app.run_steps(2);
+    app.key_press(egui::Key::Enter);
     let both = (0..50).any(|_| {
         app.run_steps(2);
         let found = app.query_by_label(crate::pair_view::COPY_LINK).is_some()

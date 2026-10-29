@@ -50,6 +50,7 @@ pub mod mic_relay;
 #[cfg(windows)]
 #[path = "mic_relay_windows.rs"]
 pub mod mic_relay;
+pub(crate) mod nearby;
 #[cfg(windows)]
 mod notification_listener_windows;
 pub mod notification_monitor;

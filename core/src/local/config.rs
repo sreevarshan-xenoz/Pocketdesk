@@ -184,6 +184,11 @@ pub struct Config {
     /// ways (2g). Off by default: the content crosses machines.
     #[serde(default)]
     pub computer_clipboard: bool,
+    /// Let computers nearby ask to pair (a nearby computer's ask shows its
+    /// matching code here, and only the owner's Accept pairs). On by
+    /// default; off, every ask is turned away unseen.
+    #[serde(default = "default_nearby_pairing")]
+    pub nearby_pairing: bool,
     /// Keep the last this many texts that crossed between this computer and
     /// its phones, either way (D3); 0 keeps none. Off by default: the texts
     /// stay on disk, owner-only.
@@ -492,6 +497,10 @@ fn default_lan_discovery() -> bool {
     true
 }
 
+fn default_nearby_pairing() -> bool {
+    true
+}
+
 fn default_pairing_required() -> bool {
     true
 }
@@ -550,6 +559,7 @@ impl Default for Config {
             clipboard_images: false,
             received_images_clipboard: false,
             computer_clipboard: false,
+            nearby_pairing: true,
             clipboard_history: 0,
             clipboard_never_from: Vec::new(),
             clipboard_never_like: Vec::new(),
@@ -807,6 +817,7 @@ impl Config {
         "typing_hotkey",
         "phone_media_controls",
         "computer_clipboard",
+        "nearby_pairing",
         "clipboard_history",
         "clipboard_never_from",
         "clipboard_never_like",

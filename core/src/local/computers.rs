@@ -176,6 +176,14 @@ pub struct ComputersFile {
     /// way here until it pairs again. Absent in files written before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lapsed: Vec<String>,
+    /// This computer's ask of a nearby one, while it goes and as it ended
+    /// ([`super::nearby`]). Absent in files written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearby_out: Option<super::nearby::NearbyAsk>,
+    /// A nearby computer's ask on this one's screen, until answered or run
+    /// out ([`super::nearby`]). Absent in files written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearby_in: Option<super::nearby::NearbyRequest>,
 }
 
 /// How long a grant both ways waits for the link before it lapses (PC1).
@@ -270,6 +278,29 @@ pub enum ComputerAsk {
         device_id: String,
         #[serde(default)]
         monitor: u32,
+    },
+    /// Ask the nearby computer `device_id` (found by its announcement, at
+    /// `address`, control port `port`) to pair ([`super::nearby`]). `mine`:
+    /// the owner here said both are theirs (PC1), which pairs both ways
+    /// only if its owner says so too.
+    PairNearby {
+        device_id: String,
+        name: String,
+        address: String,
+        port: u16,
+        #[serde(default)]
+        mine: bool,
+    },
+    /// Stop this computer's ask of a nearby one.
+    CancelNearby,
+    /// The owner's answer to a nearby computer's ask `nearby` (its
+    /// [`super::nearby::NearbyRequest::id`]; not `id`, the request's own)
+    /// on this one's screen; `mine`, with Accept: both are theirs (PC1).
+    AnswerNearby {
+        nearby: String,
+        accept: bool,
+        #[serde(default)]
+        mine: bool,
     },
     /// Stop showing the computer's screen (its window closed): the view
     /// `session_id` (`view.json`'s) when the window knew it, else the one
@@ -450,6 +481,34 @@ mod tests {
 
     /// UX 1: a request taken back before the server takes it never
     /// reaches it; once taken, there is nothing to take back.
+    /// Pair a computer nearby: each of its asks is taken as it was left,
+    /// none of its fields mistaken for the request's own id.
+    #[test]
+    fn nearby_asks_are_taken_as_left() {
+        let dir = temp_dir("nearby-asks");
+        let now = crate::local::pin::now_unix();
+        let asks = [
+            ComputerAsk::PairNearby {
+                device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
+                name: "Test Tower".to_string(),
+                address: "192.0.2.40".to_string(),
+                port: 1716,
+                mine: true,
+            },
+            ComputerAsk::CancelNearby,
+            ComputerAsk::AnswerNearby {
+                nearby: "0a1b2c3d4e5f6071".to_string(),
+                accept: true,
+                mine: false,
+            },
+        ];
+        for ask in asks {
+            let left = request(&dir, ask, now).unwrap();
+            assert_eq!(take_all(&dir, now), [left]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_waiting_request_can_be_withdrawn() {
         let dir = temp_dir("withdraw");

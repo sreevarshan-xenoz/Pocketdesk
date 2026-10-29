@@ -71,6 +71,10 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     *PAIRED_BACK.lock().unwrap_or_else(|e| e.into_inner()) = Some(back_tx);
     // Another computer's screen in a window here (BK7), from the first ask.
     let mut views: Option<mpsc::Sender<crate::computer_view::Command>> = None;
+    // A nearby computer asked to pair (pair a computer nearby): the ask
+    // under way, to cancel, and the links its accepted asks make.
+    let mut nearby_ask: Option<tokio::sync::watch::Sender<bool>> = None;
+    let (nearby_tx, mut nearby_accepted) = mpsc::unbounded_channel::<(String, bool, String)>();
     // What an earlier run said of its links is not this run's.
     let restarted = computers::update(&dir, |file| {
         for computer in &mut file.computers {
@@ -84,22 +88,54 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
                 ComputerAsk::Pair { link, mine } => {
-                    // Paired again: the link starts over now, not after the
-                    // back-off a refused or broken one was sleeping out.
                     let asked = Asked {
                         uri: &link,
                         mine,
                         request: &request.id,
                     };
-                    if let Some(paired) = pair(&dir, &cert_manager, wan.as_ref(), asked).await {
-                        if let Some(stale) = links.remove(&paired) {
-                            stale.task.abort();
-                        }
-                        // No link is kept without the road (BD5).
-                        if wan.is_none() {
-                            set_link(&dir, &paired, first_link(false));
-                        }
+                    pair_and_relink(&dir, &cert_manager, wan.as_ref(), asked, &mut links).await;
+                }
+                ComputerAsk::PairNearby {
+                    device_id,
+                    name,
+                    address,
+                    port,
+                    mine,
+                } => {
+                    // A newer ask replaces one under way.
+                    if let Some(cancel) = nearby_ask.take() {
+                        let _ = cancel.send(true);
                     }
+                    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                    nearby_ask = Some(cancel);
+                    let asked = crate::nearby::Asked {
+                        request: request.id.clone(),
+                        device_id,
+                        name,
+                        address,
+                        port,
+                        mine,
+                    };
+                    let (dir, certs, accepted) =
+                        (dir.clone(), cert_manager.clone(), nearby_tx.clone());
+                    tokio::spawn(async move {
+                        let (request, mine) = (asked.request.clone(), asked.mine);
+                        if let Some(link) = crate::nearby::ask(dir, certs, asked, cancelled).await {
+                            let _ = accepted.send((link, mine, request));
+                        }
+                    });
+                }
+                ComputerAsk::CancelNearby => {
+                    if let Some(cancel) = nearby_ask.take() {
+                        let _ = cancel.send(true);
+                    }
+                }
+                ComputerAsk::AnswerNearby {
+                    nearby,
+                    accept,
+                    mine,
+                } => {
+                    crate::nearby::answer(&dir, &nearby, accept, mine);
                 }
                 ComputerAsk::Forget { device_id } => {
                     if let Some(link) = links.remove(&device_id) {
@@ -153,6 +189,15 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
             _ = crate::inbox::wait(COMPUTERS_DIR, POLL) => {}
             Some(computer) = paired_back.recv() => {
                 list_back(&dir, &cert_manager, wan.is_some(), computer, &mut links);
+            }
+            // A nearby computer accepted: paired as from its link.
+            Some((link, mine, request)) = nearby_accepted.recv() => {
+                let asked = Asked {
+                    uri: &link,
+                    mine,
+                    request: &request,
+                };
+                pair_and_relink(&dir, &cert_manager, wan.as_ref(), asked, &mut links).await;
             }
         }
     }
@@ -662,6 +707,26 @@ fn forget_untrusted_mine_in(
     }
 }
 
+/// Pair as [`pair`] does; once paired, the link starts over now, not after
+/// the back-off a refused or broken one was sleeping out.
+async fn pair_and_relink(
+    dir: &Path,
+    certs: &CertManager,
+    wan: Option<&iroh::Endpoint>,
+    asked: Asked<'_>,
+    links: &mut HashMap<String, Link>,
+) {
+    if let Some(paired) = pair(dir, certs, wan, asked).await {
+        if let Some(stale) = links.remove(&paired) {
+            stale.task.abort();
+        }
+        // No link is kept without the road (BD5).
+        if wan.is_none() {
+            set_link(dir, &paired, first_link(false));
+        }
+    }
+}
+
 /// What the app asked to pair with: the link, whether the owner here let
 /// its maker see and control this computer (PC1), and the request's id.
 struct Asked<'a> {
@@ -931,7 +996,7 @@ fn listed_mine(dir: &Path, device_id: &str) -> bool {
 /// What this computer tells one it pairs with both ways about itself
 /// (PC1), for that one to list it in turn: its name, its addresses as its
 /// Pair page names them, its ports and its iroh endpoint.
-async fn own_facts(dir: &Path) -> ComputerFacts {
+pub(crate) async fn own_facts(dir: &Path) -> ComputerFacts {
     let config = crate::events::current_config();
     // External commands (the Tailscale address), off the runtime.
     let addresses = tokio::task::spawn_blocking(|| {
@@ -1127,7 +1192,7 @@ where
 
 /// A computer's name as the link gives it, fit to show: no control or
 /// invisible characters, at most 64 of them, else "Computer".
-fn shown_name(name: &str) -> String {
+pub(crate) fn shown_name(name: &str) -> String {
     let shown: String = name
         .chars()
         .filter(|c| {
@@ -2139,7 +2204,10 @@ pub(crate) fn parse_fingerprint(hex: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-async fn send<W: AsyncWrite + Unpin>(writer: &mut W, packet: &NetworkPacket) -> Result<(), String> {
+pub(crate) async fn send<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    packet: &NetworkPacket,
+) -> Result<(), String> {
     let wire = packet.to_wire().map_err(|e| e.to_string())?;
     writer.write_all(&wire).await.map_err(|e| e.to_string())?;
     writer.flush().await.map_err(|e| e.to_string())
@@ -2147,7 +2215,9 @@ async fn send<W: AsyncWrite + Unpin>(writer: &mut W, packet: &NetworkPacket) -> 
 
 /// The next packet, `None` at the end; a line too long or a packet that
 /// does not read is an error.
-async fn read_packet<R>(reader: &mut BufReader<R>) -> Result<Option<NetworkPacket>, String>
+pub(crate) async fn read_packet<R>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<NetworkPacket>, String>
 where
     R: AsyncRead + Unpin,
 {

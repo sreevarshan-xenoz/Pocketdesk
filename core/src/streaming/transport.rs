@@ -261,6 +261,18 @@ impl CertManager {
         Arc::new(config)
     }
 
+    /// A control channel's TLS client configuration that pins nothing
+    /// (pair a computer nearby): any certificate is taken, its holder still
+    /// proving its key, and nothing is written to the pins. The caller
+    /// reads the certificate the connection proved
+    /// ([`peer_cert_fingerprint`]) and trusts it only once a person has
+    /// matched the code made from it.
+    pub fn control_client_config_unpinned(&self) -> Arc<rustls::ClientConfig> {
+        let mut config = self.client_with_own_cert(Arc::new(AnyServerCert));
+        config.alpn_protocols = vec![crate::protocol::ALPN_CONTROL.to_vec()];
+        Arc::new(config)
+    }
+
     fn tls_server_config_with(&self, verifier: AnyClientCert) -> Result<rustls::ServerConfig> {
         let cert = CertificateDer::from(self.cert_der.clone());
         let key = PrivateKeyDer::try_from(self.key_der.clone())
@@ -838,6 +850,54 @@ impl rustls::server::danger::ClientCertVerifier for AnyClientCert {
         _now: rustls::pki_types::UnixTime,
     ) -> std::result::Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
         Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &signature_algorithms())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        signature_algorithms().supported_schemes()
+    }
+}
+
+/// SHA-256 of the certificate a TLS connection's peer proved: what it is
+/// pinned by, and its [`PeerKey::Tls`](super::connection::PeerKey::Tls).
+pub fn peer_cert_fingerprint(certs: Option<&[CertificateDer<'_>]>) -> Option<[u8; 32]> {
+    certs
+        .and_then(|certs| certs.first())
+        .map(CertManager::cert_hash)
+}
+
+/// Takes any server certificate, pinning nothing, while the server still
+/// proves it holds the certificate's key (pair a computer nearby).
+#[derive(Debug)]
+struct AnyServerCert;
+
+impl rustls::client::danger::ServerCertVerifier for AnyServerCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(

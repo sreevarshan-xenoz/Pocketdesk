@@ -309,6 +309,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "nearby_pairing",
+        "Let computers nearby ask to pair",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -572,8 +577,10 @@ fn section_of(key: &str) -> Option<Section> {
 pub fn applies_live(key: &str) -> bool {
     matches!(
         key,
-        // BK7: read by this app as a computer's window opens.
-        "computer_view_quality"
+        // Read by the server at each nearby computer's ask.
+        "nearby_pairing"
+            // BK7: read by this app as a computer's window opens.
+            | "computer_view_quality"
             | "computer_view_only"
             | "computer_view_stats"
             | "events"
@@ -2030,6 +2037,14 @@ impl SettingsForm {
                     ui.checkbox(
                         &mut e.computer_clipboard,
                         "share what I copy with my other paired computers, both ways (turn it on on each)",
+                    );
+                });
+                // Pair a computer nearby: its ask shows a code here.
+                row(ui, "nearby_pairing", |ui| {
+                    ui.checkbox(&mut e.nearby_pairing, name("nearby_pairing"));
+                    note(
+                        ui,
+                        "Their ask shows a matching code; only your Accept pairs.",
                     );
                 });
                 // BK7: "Show its screen" is on each computer's line below.

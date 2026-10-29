@@ -767,6 +767,10 @@ impl Plugin for PairPlugin {
                     );
                 }
             }
+            // Pair a computer nearby: its steps ride this packet.
+            "kdeconnect.pocketdesk.pair" if crate::nearby::is_step(packet) => {
+                crate::nearby::handle(packet, sender).await;
+            }
             "kdeconnect.pocketdesk.pair" => {
                 if packet
                     .body
@@ -1000,9 +1004,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // this desktop generated itself) keeps trusting permanently.
     // Matching spends it, in one step.
     let live = cli_pin();
-    let cli = live
+    let from_file = live
         .clone()
         .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
+    // Pair a computer nearby: the PIN this computer handed one whose ask
+    // its owner accepted, for that certificate only, reads as the owner's
+    // own code (both ways when the owner said both are theirs).
+    let cli = from_file
+        .clone()
+        .or_else(|| crate::nearby::take_pin(conn, sender.peer_key().as_ref(), pin));
     let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
     // M2b: the Pair page said the phone is someone else's.
     let someone_else = someone_else_for(cli.as_ref(), matches_pending, live.as_ref());
@@ -1016,7 +1026,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         guesses().lock().expect("pair state").reset();
         // One PIN, one phone: a CLI/app PIN that has paired is spent, so a
         // code still on screen (or photographed) cannot pair another.
-        if matches_cli {
+        if from_file.is_some() {
             // Spent for this run (above) even if its file cannot be deleted.
             if let Ok(dir) = state::state_dir()
                 && let Err(e) = local_pin::remove_if(&dir, pin)
