@@ -1592,3 +1592,15 @@ fn a_stopped_server_is_said_at_the_top_of_every_page() {
             .is_none()
     );
 }
+
+/// UX 1: Diagnostics says nothing of the fonts while they are still looked
+/// for (a stray line before any check ran).
+#[test]
+fn diagnostics_say_nothing_of_fonts_still_looked_for() {
+    let fixture = Fixture::new();
+    let app = fixture.open(Some(Tab::Diagnostics));
+    assert!(
+        app.query_by_label_contains("Fonts for other scripts")
+            .is_none()
+    );
+}

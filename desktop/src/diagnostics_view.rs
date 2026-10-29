@@ -90,10 +90,9 @@ impl DiagnosticsView {
         });
         // Said with or without a report: it is about this app, not the
         // checks (U1 review: it showed only after a run).
-        ui.label(
-            egui::RichText::new(crate::fonts::summary(crate::fonts::loaded()))
-                .color(crate::theme::muted(ui)),
-        );
+        if let Some(fonts) = crate::fonts::summary(crate::fonts::loaded()) {
+            ui.label(egui::RichText::new(fonts).color(crate::theme::muted(ui)));
+        }
         let Some(report) = &self.report else {
             return;
         };
