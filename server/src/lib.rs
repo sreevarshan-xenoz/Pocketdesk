@@ -13,6 +13,7 @@ pub mod cast_relay;
 pub mod cli;
 pub(crate) mod clip_history;
 pub(crate) mod clipboard_push;
+pub mod computer_view;
 pub mod config;
 pub mod conn_budget;
 pub mod crash_report;
