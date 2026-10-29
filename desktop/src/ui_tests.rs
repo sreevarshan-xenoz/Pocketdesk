@@ -1575,12 +1575,20 @@ fn the_keyboard_and_mouse_options_are_on_its_page() {
     app.get_by_label(clipboard).focus();
     app.run_steps(2);
     app.key_press(egui::Key::Space);
-    app.run_steps(3);
+    app.run_steps(1);
     assert_eq!(
         load_config(&fixture).shared_input_clipboard,
         !was,
         "saved as it changed"
     );
+    // The box itself shows it on the next frame, not after the next read.
+    assert_eq!(ticked(&app, clipboard), !was, "the box keeps the click");
+}
+
+/// Whether the checkbox labelled `label` is ticked.
+fn ticked(app: &Harness<'static, PocketdeskApp>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
 }
 
 /// The config the fixture's app saves.
