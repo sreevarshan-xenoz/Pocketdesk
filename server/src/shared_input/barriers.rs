@@ -17,8 +17,8 @@
 //! xdg-desktop-portal-hyprland #435: on a fractionally scaled output the
 //! pointer the compositor lets go of lands past the barrier again, and the
 //! capture flips on and off many times a second. [`FlipBreaker`] counts the
-//! activations of each edge: a third within a second makes it a wall until
-//! the screens change.
+//! activations of each edge: a third within a second makes it a wall for
+//! half a minute, or until the screens change.
 //!
 //! Pure: no I/O, tested on every system.
 
@@ -194,6 +194,9 @@ pub const FLIP_WINDOW: Duration = Duration::from_secs(1);
 /// How many activations of one edge within [`FLIP_WINDOW`] make it a wall.
 pub const FLIPS: usize = 3;
 
+/// How long a wall stands before the edge is tried again.
+pub const WALL_FOR: Duration = Duration::from_secs(30);
+
 /// What the breaker makes of an activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flip {
@@ -209,6 +212,8 @@ pub enum Flip {
 pub struct FlipBreaker {
     seen: HashMap<EdgeKey, VecDeque<Instant>>,
     walls: HashSet<EdgeKey>,
+    /// When each wall went up.
+    walled_at: HashMap<EdgeKey, Instant>,
     told: bool,
 }
 
@@ -226,6 +231,7 @@ impl FlipBreaker {
         }
         self.seen.remove(&key);
         self.walls.insert(key);
+        self.walled_at.insert(key, now);
         Flip::Wall {
             first: !std::mem::replace(&mut self.told, true),
         }
@@ -241,10 +247,27 @@ impl FlipBreaker {
         self.told
     }
 
+    /// The time is `now`: walls up for [`WALL_FOR`] lift (someone
+    /// jiggling at an edge can trip one too); one that still flips is
+    /// walled again.
+    pub fn expire(&mut self, now: Instant) {
+        let lifted: Vec<EdgeKey> = self
+            .walled_at
+            .iter()
+            .filter(|(_, at)| now.saturating_duration_since(**at) >= WALL_FOR)
+            .map(|(key, _)| *key)
+            .collect();
+        for key in lifted {
+            self.walls.remove(&key);
+            self.walled_at.remove(&key);
+        }
+    }
+
     /// The screens changed: every edge may be tried again.
     pub fn clear(&mut self) {
         self.seen.clear();
         self.walls.clear();
+        self.walled_at.clear();
     }
 }
 
@@ -474,5 +497,27 @@ mod tests {
         breaker.clear();
         assert!(breaker.walls().is_empty());
         assert_eq!(breaker.activated(right, at(6000)), Flip::Cross);
+    }
+
+    /// BK8 review M1: a wall is not for the rest of the run: someone
+    /// jiggling at an edge can trip it too, so it lifts after a while and
+    /// the edge is tried again (walled again if it still flips).
+    #[test]
+    fn a_wall_lifts_after_a_while() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let right: EdgeKey = ((1600, 0, 1600, 999), (1, 0));
+        let mut breaker = FlipBreaker::default();
+        for ms in [0, 200, 400] {
+            breaker.activated(right, at(ms));
+        }
+        assert!(breaker.walls().contains(&right));
+        breaker.expire(at(400) + WALL_FOR - Duration::from_millis(1));
+        assert!(breaker.walls().contains(&right), "not yet");
+        breaker.expire(at(400) + WALL_FOR);
+        assert!(breaker.walls().is_empty(), "lifted");
+        // Tried again: crossings count anew.
+        let later = at(400) + WALL_FOR;
+        assert_eq!(breaker.activated(right, later), Flip::Cross);
     }
 }

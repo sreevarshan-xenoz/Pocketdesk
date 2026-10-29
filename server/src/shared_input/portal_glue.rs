@@ -242,7 +242,9 @@ impl<B: Backend> PortalGlue<B> {
 
     /// The capture enabled again if the driver watches and it is not (the
     /// desktop disabled it): the loop asks every few seconds.
-    pub fn rearm(&mut self) {
+    pub fn rearm(&mut self, now: Instant) {
+        // A wall up long enough lifts: its edge is set again.
+        self.breaker.expire(now);
         self.disabled = false;
         self.arm();
     }
@@ -977,12 +979,12 @@ mod tests {
                 Portal::Disabled => {
                     // Not enabled again at once (the desktop said no for
                     // now), only when asked.
-                    rig.glue.rearm();
+                    rig.glue.rearm(rig.now);
                     assert_eq!(rig.calls(), vec![Call::Arm(vec![(RIGHT, "W".to_string())])]);
                 }
                 Portal::Closed(_) => assert_eq!(rig.glue.closed(), Some("the libei stream closed")),
                 _ => {
-                    rig.glue.rearm();
+                    rig.glue.rearm(rig.now);
                     assert_eq!(rig.calls(), vec![], "still armed");
                 }
             }
@@ -1148,7 +1150,7 @@ mod tests {
         rig.hit(7, 1, (1600.0, 500.0));
         rig.say(Portal::Zones(vec![screen(0, 0, 1600, 1000)]));
         rig.glue.set_targets(&desk(), &["W".to_string()]);
-        rig.glue.rearm();
+        rig.glue.rearm(rig.now);
         assert_eq!(rig.calls(), vec![], "nothing set mid-capture");
         // Home: let go, then the new zone set's barriers.
         rig.say(Portal::Motion { dx: -30.0, dy: 0.0 });

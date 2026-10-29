@@ -642,7 +642,7 @@ fn drive<B: Backend>(
             glue.apply(&mut driver, actions);
             // The barriers follow the computers there are to go to.
             glue.input.set_targets(&layout, &reachable);
-            glue.input.rearm();
+            glue.input.rearm(Instant::now());
         }
     }
     let actions = driver.shutdown();
