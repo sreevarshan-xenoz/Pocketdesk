@@ -1708,12 +1708,15 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             &linked,
             state_dir.as_deref().and_then(|dir| saved.get(dir)),
         );
-        // One that only takes input never said its name: the badge names
-        // it as it was paired, never "this computer".
-        if layout.computers.iter().any(|c| c.name.trim().is_empty())
-            && let Some(dir) = state_dir.as_deref()
-        {
-            layout.name_unnamed(&status::paired_names(dir));
+        // Each named as the owner paired it, whatever it calls itself
+        // (one that only takes input never said its name): the badge
+        // never says "this computer" of another.
+        if layout.computers.len() > 1 {
+            let paired = state_dir
+                .as_deref()
+                .map(status::paired_names)
+                .unwrap_or_default();
+            layout.name_as_paired(&paired);
         }
         layout
     };
