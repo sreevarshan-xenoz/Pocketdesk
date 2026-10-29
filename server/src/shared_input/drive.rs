@@ -705,7 +705,10 @@ impl Driver {
             self.go_home(out, away.park, true, Some(why));
             return;
         }
-        if self.away.is_none() && held != was && !self.targets().is_empty() {
+        // Driven, the edges lead nowhere whatever is in front: no word that
+        // they lead on again (PR #552 review M5).
+        if self.away.is_none() && self.driven.is_none() && held != was && !self.targets().is_empty()
+        {
             out.push(note(if held {
                 "A game is in front: the keyboard and mouse stay here (the switch key still \
                  moves them)"
@@ -2702,5 +2705,30 @@ mod tests {
         let home = a.set_driven(Some("B"), false);
         assert_eq!(sends(&home), vec![sent("B", Msg::Leave)]);
         assert_eq!(a.away_on(), None);
+    }
+
+    /// PR #552 review M5: while driven, a game coming and going says
+    /// nothing of the edges, which lead nowhere either way.
+    #[test]
+    fn driven_a_game_coming_and_going_says_nothing_of_the_edges() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.set_driven(Some("L"), true);
+        let game = |fullscreen| Captured::Foreground {
+            fg: Foreground {
+                fullscreen,
+                ..Default::default()
+            },
+            kernel_anti_cheat: false,
+        };
+        let came = d.on(game(true));
+        let went = d.on(game(false));
+        for said in [&came, &went] {
+            assert!(
+                !said.iter().any(|a| matches!(a, Action::Badge(_))),
+                "{said:?}"
+            );
+        }
+        assert_eq!(d.mode(), Mode::Off);
     }
 }
