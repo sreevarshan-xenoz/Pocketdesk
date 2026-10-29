@@ -736,17 +736,23 @@ fn keep_heard(file: &mut shared_input::ScreensFile, heard: &Heard, now: u64) {
     }
 }
 
-/// Answer `to`'s hello: this computer's `screens`, then its `name` (which a
-/// computer that only takes input says nowhere else).
+/// Answer `to`'s hello ([`hello_answer`]), on the channel kept for it.
 fn answer_hello(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Screen], name: &str) {
-    tell_screens(channels, to, screens);
-    send_to(
-        channels,
-        to,
-        &Msg::Name {
+    for msg in hello_answer(screens, name) {
+        send_to(channels, to, &msg);
+    }
+}
+
+/// The answer to a hello, in order: this computer's `screens` (the answer
+/// the driving side waits for), then its `name` (which a computer that
+/// only takes input says nowhere else).
+fn hello_answer(screens: &[Screen], name: &str) -> [Msg; 2] {
+    [
+        Msg::Screens(screens.to_vec()),
+        Msg::Name {
             name: name.to_string(),
         },
-    );
+    ]
 }
 
 /// Write `heard` to `shared_screens.json`, and with `own` this computer's
@@ -1861,6 +1867,27 @@ mod tests {
                 .iter()
                 .all(|call| matches!(call, Call::Move(0, 0))),
             "only the arrivals moved"
+        );
+    }
+
+    /// Review M8: a hello is answered with the screens first (the answer
+    /// the driving side waits for) and then the name, in that order.
+    #[test]
+    fn a_hello_is_answered_with_the_screens_then_the_name() {
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            hello_answer(&[screen], "Arch laptop"),
+            [
+                Msg::Screens(vec![screen]),
+                Msg::Name {
+                    name: "Arch laptop".to_string()
+                }
+            ]
         );
     }
 
