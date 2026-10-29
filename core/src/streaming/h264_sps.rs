@@ -193,7 +193,13 @@ fn skip_scaling_list(r: &mut Bits<'_>, size: usize) -> Option<()> {
     let (mut last, mut next) = (8i32, 8i32);
     for _ in 0..size {
         if next != 0 {
-            next = (last + r.se()? + 256).rem_euclid(256);
+            // delta_scale is -128 to 127 (BK7 review M2: a wilder one
+            // overflowed).
+            let delta = r.se()?;
+            if !(-128..=127).contains(&delta) {
+                return None;
+            }
+            next = (last + delta + 256).rem_euclid(256);
         }
         if next != 0 {
             last = next;
@@ -340,6 +346,31 @@ mod tests {
             None,
             "within each side, past the level's frame size"
         );
+    }
+
+    /// BK7 review M2: a scaling list's step past what the standard allows
+    /// (-128 to 127) makes the SPS unreadable, never an overflow.
+    #[test]
+    fn a_scaling_step_out_of_range_is_no_size() {
+        let sps = |step_code: u32| {
+            Writer::default()
+                .bits(100, 8) // High
+                .bits(0, 8)
+                .bits(40, 8)
+                .ue(0) // seq_parameter_set_id
+                .ue(1) // chroma_format_idc
+                .ue(0) // bit_depth_luma_minus8
+                .ue(0) // bit_depth_chroma_minus8
+                .bits(0, 1) // qpprime
+                .bits(1, 1) // seq_scaling_matrix_present
+                .bits(1, 1) // list 0 present
+                .ue(step_code) // its first delta, se as ue
+                .unit()
+        };
+        // se 2^31 - 1, coded as ue 2^32 - 3.
+        assert_eq!(picture_size(&sps(4_294_967_293)), None);
+        // se 128, one past the range.
+        assert_eq!(picture_size(&sps(255)), None);
     }
 
     #[test]
