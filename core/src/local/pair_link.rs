@@ -123,8 +123,7 @@ impl PairLink {
     }
 
     pub fn from_uri(uri: &str) -> Result<Self, PairLinkError> {
-        let query = uri
-            .trim()
+        let query = clean_link(uri)
             .strip_prefix(PREFIX)
             .ok_or_else(|| invalid("not a Pocketdesk pairing link"))?;
         let mut fields = std::collections::HashMap::new();
@@ -219,9 +218,51 @@ pub fn order_addresses(addresses: Vec<String>) -> Vec<String> {
     ranked.into_iter().map(|(_, _, a)| a).collect()
 }
 
+/// A pasted pairing link without what a copy can carry around it unseen:
+/// whitespace and line breaks, a byte-order mark, and zero-width spaces and
+/// joiners (the owner's first live test pasted one with a byte-order mark,
+/// and Pair stayed greyed out). Only the ends are trimmed.
+pub fn clean_link(text: &str) -> &str {
+    text.trim_matches(|c: char| c.is_whitespace() || invisible(c))
+}
+
+/// A character a copy may carry that shows as nothing: the byte-order mark
+/// (U+FEFF), zero-width space, non-joiner and joiner (U+200B to U+200D) and
+/// the word joiner (U+2060).
+fn invisible(c: char) -> bool {
+    matches!(u32::from(c), 0xFEFF | 0x200B..=0x200D | 0x2060)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ch(code: u32) -> char {
+        char::from_u32(code).unwrap()
+    }
+
+    #[test]
+    fn a_pasted_link_is_cleaned_of_what_does_not_show() {
+        let link = "pocketdesk://pair?v=1&a=192.0.2.7&pin=123456";
+        let bom = ch(0xFEFF);
+        for pasted in [
+            format!("{bom}{link}"),
+            format!("  {link}\r\n"),
+            format!("\n{bom}{}{link}{}{}\t", ch(0x200B), ch(0x200D), ch(0x2060)),
+            format!("{}{link}{}", ch(0x200C), ch(0x200B)),
+        ] {
+            assert_eq!(clean_link(&pasted), link, "{pasted:?}");
+            assert_eq!(
+                PairLink::from_uri(&pasted).unwrap().addresses,
+                ["192.0.2.7"],
+                "{pasted:?}"
+            );
+        }
+        // Inside the link nothing is touched.
+        let inner = format!("pocketdesk://pair?v=1{bom}&a=192.0.2.7");
+        assert_eq!(clean_link(&inner), inner);
+        assert_eq!(clean_link(&format!("{bom} ")), "");
+    }
 
     fn sample() -> PairLink {
         PairLink {

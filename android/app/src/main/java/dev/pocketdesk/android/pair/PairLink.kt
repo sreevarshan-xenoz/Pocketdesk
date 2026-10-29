@@ -44,9 +44,19 @@ data class PairLink(
             return if (clean.length > MAX_NAME) clean.take(MAX_NAME) + "…" else clean
         }
 
+        /**
+         * A pasted pairing link without what a copy can carry around it
+         * unseen: whitespace and line breaks, a byte-order mark (U+FEFF) and
+         * zero-width spaces and joiners (U+200B to U+200D, U+2060), at the
+         * ends only, as core's `pair_link::clean_link`.
+         */
+        fun clean(text: String): String =
+            text.trim { it.isWhitespace() || it.code == 0xFEFF || it.code in 0x200B..0x200D || it.code == 0x2060 }
+
         fun parse(uri: String): Result<PairLink> = runCatching {
-            val query = uri.trim().removePrefix(PREFIX)
-            require(query != uri.trim()) { "not a Pocketdesk pairing link" }
+            val cleaned = clean(uri)
+            val query = cleaned.removePrefix(PREFIX)
+            require(query != cleaned) { "not a Pocketdesk pairing link" }
             val fields = query.split('&').filter { it.isNotEmpty() }.associate { pair ->
                 val key = pair.substringBefore('=')
                 key to percentDecode(pair.substringAfter('=', ""))

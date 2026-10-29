@@ -218,6 +218,10 @@ pub struct Driver {
     silent: HashSet<String>,
     /// The arrivals so far: each is a visit of its own.
     visits: u64,
+    /// Another computer drives this one now (its cursor is here): no edge
+    /// is watched, so the pointer it puts on the edge facing it never
+    /// carries this computer's keyboard and mouse back there: which.
+    driven: Option<String>,
 }
 
 impl Driver {
@@ -245,6 +249,7 @@ impl Driver {
             pinged: None,
             silent: HashSet::new(),
             visits: 0,
+            driven: None,
         }
     }
 
@@ -300,6 +305,44 @@ impl Driver {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// The computer driving this one now (`by`: its cursor is here and it
+    /// sends input, as the receiver says), and whether this computer's own
+    /// input is recent (`active_here`). While driven, the edges lead nowhere
+    /// and nothing is watched ([`Mode::Off`]: the portal's barriers
+    /// disabled, Windows' mouse hook out); watched again once it leaves,
+    /// goes home, falls silent or rests. A visit under way goes on, unless
+    /// it is on the very computer driving this one: then the two computers
+    /// are on each other, and this one goes home when its own input is not
+    /// recent (its cursor rested there, and the owner went to the other
+    /// computer's mouse and crossed here; PR #552 review I1), or when both
+    /// are used and this one's id sorts after the other's: the two crossed
+    /// onto each other at once, and only one keeps its visit, the same one
+    /// on both sides (the first id, as `computers::keeps_link` picks who
+    /// dials; review I2).
+    pub fn set_driven(&mut self, by: Option<&str>, active_here: bool) -> Vec<Action> {
+        let mut out = Vec::new();
+        self.driven = by.map(str::to_string);
+        if let (Some(by), Some(away)) = (by, self.away.clone())
+            && away.to == by
+            && (!active_here || self.this.as_str() > by)
+        {
+            let to = self.name_of(by);
+            self.go_home(
+                &mut out,
+                away.park,
+                true,
+                Some(&format!("{to}'s keyboard and mouse came here")),
+            );
+        }
+        self.settle(&mut out);
+        out
+    }
+
+    /// Whether another computer drives this one now.
+    pub fn driven(&self) -> bool {
+        self.driven.is_some()
     }
 
     /// The computer driven now.
@@ -614,7 +657,11 @@ impl Driver {
     fn wanted_mode(&self) -> Mode {
         if self.away.is_some() {
             Mode::Away
-        } else if self.locked || self.game_held || self.targets().is_empty() {
+        } else if self.locked
+            || self.driven.is_some()
+            || self.game_held
+            || self.targets().is_empty()
+        {
             Mode::Off
         } else {
             Mode::Watch
@@ -658,7 +705,10 @@ impl Driver {
             self.go_home(out, away.park, true, Some(why));
             return;
         }
-        if self.away.is_none() && held != was && !self.targets().is_empty() {
+        // Driven, the edges lead nowhere whatever is in front: no word that
+        // they lead on again (PR #552 review M5).
+        if self.away.is_none() && self.driven.is_none() && held != was && !self.targets().is_empty()
+        {
             out.push(note(if held {
                 "A game is in front: the keyboard and mouse stay here (the switch key still \
                  moves them)"
@@ -725,7 +775,10 @@ impl Driver {
     fn cross(&mut self, at: (i32, i32), dx: i32, dy: i32, out: &mut Vec<Action>) {
         // A game in front: the edges lead nowhere (the hooks are out, but a
         // move already on its way may still come).
+        // Driven: the pointer on this computer is the other computer's,
+        // put here by it (BK8 live: put on the edge facing it, it bounced).
         if !self.game_held
+            && self.driven.is_none()
             && !self.foreground_pending
             && let Some(crossing) = self.layout.crossing(&self.this, at, dx, dy)
             && crossing.to != self.this
@@ -2540,5 +2593,142 @@ mod tests {
         assert_eq!(d.mode(), Mode::Watch);
         // At home it is nothing.
         assert_eq!(d.on(Captured::CaptureLost), vec![]);
+    }
+
+    /// The owner's first live test: while another computer drives this
+    /// one, its pointer injected on the edge facing that computer must not
+    /// carry this computer's keyboard and mouse straight back there.
+    #[test]
+    fn being_driven_watches_no_edge_and_crosses_nowhere() {
+        let mut d = driver(desk(false), &["L"]);
+        assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
+        assert_eq!(
+            d.set_driven(Some("L"), true),
+            vec![Action::SetMode(Mode::Off)]
+        );
+        assert!(d.driven());
+        // A move or a barrier hit already on its way goes nowhere.
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        let edge = Captured::Edge {
+            x: 3455,
+            y: 480,
+            dx: 1,
+            dy: 0,
+        };
+        assert_eq!(sends(&d.on(edge)), vec![]);
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Off);
+        // Said again, nothing changes.
+        assert_eq!(d.set_driven(Some("L"), false), vec![]);
+    }
+
+    #[test]
+    fn driven_no_more_the_edges_lead_on_again() {
+        let layout = desk(false);
+        let mut d = driver(layout.clone(), &["L"]);
+        d.start();
+        d.set_driven(Some("L"), true);
+        assert_eq!(d.set_driven(None, true), vec![Action::SetMode(Mode::Watch)]);
+        // The first position watched only marks where it is.
+        assert_eq!(d.on(moved(3455, 480)), vec![]);
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        let (x, y) = layout.normalized("L", (0, 480));
+        assert_eq!(sends(&crossed), vec![sent("L", Msg::Enter { x, y })]);
+    }
+
+    /// Driven by a third computer while away: the visit goes on, and once
+    /// home the edges stay unwatched until that computer rests or leaves.
+    #[test]
+    fn driven_by_another_while_away_stays_away_then_watches_nothing_home() {
+        let mut d = away_on_linux(true);
+        assert_eq!(d.set_driven(Some("M"), false), vec![]);
+        assert_eq!(d.mode(), Mode::Away);
+        d.on(Captured::CaptureLost);
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Off);
+        assert_eq!(
+            d.set_driven(None, false),
+            vec![Action::SetMode(Mode::Watch)]
+        );
+    }
+
+    /// PR #552 review I1: this computer's cursor rested on the laptop, and
+    /// the owner took the laptop's touchpad and crossed here. This one's
+    /// visit, idle, ends: home, letting go there, and driven by it now.
+    #[test]
+    fn the_computer_driven_crossing_here_brings_an_idle_visit_home() {
+        let mut d = away_on_linux(false);
+        let crossed_here = d.set_driven(Some("L"), false);
+        assert_eq!(sends(&crossed_here), vec![sent("L", Msg::Leave)]);
+        assert!(
+            crossed_here.contains(&home_badge(Some(
+                "L computer's keyboard and mouse came here"
+            ))),
+            "{crossed_here:?}"
+        );
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Off);
+    }
+
+    /// Two computers, `this` and `other` to its right, `this` away on
+    /// `other` (crossed off its right edge).
+    fn away_between(this: &str, other: &str) -> Driver {
+        let one = |id: &str| placed(id, vec![screen(0, 0, 1600, 1000)]);
+        let layout = Layout::default_for(one(this), vec![one(other)]);
+        let mut d = Driver::new(this, layout);
+        d.set_reachable(vec![other.to_string()]);
+        d.start();
+        d.on(moved(1590, 500));
+        d.on(moved(1599, 500));
+        assert_eq!(d.away_on(), Some(other));
+        d
+    }
+
+    /// PR #552 review I2: the two computers crossed onto each other at
+    /// once, both used: the one whose id sorts after the other's comes
+    /// home (as only the first dials their link, `computers::keeps_link`),
+    /// the other keeps its visit. Both work it out alike, from the ids.
+    #[test]
+    fn crossing_onto_each_other_at_once_the_later_id_comes_home() {
+        let mut b = away_between("B", "A");
+        let yields = b.set_driven(Some("A"), true);
+        assert_eq!(sends(&yields), vec![sent("A", Msg::Leave)]);
+        assert_eq!(b.away_on(), None);
+        assert_eq!(b.mode(), Mode::Off);
+        let mut a = away_between("A", "B");
+        assert_eq!(a.set_driven(Some("B"), true), vec![]);
+        assert_eq!(a.away_on(), Some("B"));
+        assert_eq!(a.mode(), Mode::Away);
+        // Idle, the first comes home too (review I1).
+        let home = a.set_driven(Some("B"), false);
+        assert_eq!(sends(&home), vec![sent("B", Msg::Leave)]);
+        assert_eq!(a.away_on(), None);
+    }
+
+    /// PR #552 review M5: while driven, a game coming and going says
+    /// nothing of the edges, which lead nowhere either way.
+    #[test]
+    fn driven_a_game_coming_and_going_says_nothing_of_the_edges() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.set_driven(Some("L"), true);
+        let game = |fullscreen| Captured::Foreground {
+            fg: Foreground {
+                fullscreen,
+                ..Default::default()
+            },
+            kernel_anti_cheat: false,
+        };
+        let came = d.on(game(true));
+        let went = d.on(game(false));
+        for said in [&came, &went] {
+            assert!(
+                !said.iter().any(|a| matches!(a, Action::Badge(_))),
+                "{said:?}"
+            );
+        }
+        assert_eq!(d.mode(), Mode::Off);
     }
 }

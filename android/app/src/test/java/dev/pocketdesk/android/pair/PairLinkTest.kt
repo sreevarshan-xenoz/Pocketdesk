@@ -26,6 +26,18 @@ class PairLinkTest {
         assertEquals("""{"endpointId":"x","relayUrls":[],"directAddrs":[]}""", link.endpoint)
     }
 
+    /** The owner's first live test: a pasted link that began with a byte-order mark. */
+    @Test
+    fun aPastedLinkIsCleanedOfWhatDoesNotShow() {
+        val link = "pocketdesk://pair?v=1&a=192.0.2.7&pin=123456"
+        val bom = 0xFEFF.toChar()
+        val zwsp = 0x200B.toChar()
+        for (pasted in listOf("$bom$link", "  $link\r\n", "$zwsp$link${0x2060.toChar()}")) {
+            assertEquals(link, PairLink.clean(pasted))
+            assertEquals(listOf("192.0.2.7"), PairLink.parse(pasted).getOrThrow().addresses)
+        }
+    }
+
     @Test
     fun optionalPartsMayBeAbsentAndPortsDefault() {
         val link = PairLink.parse("pocketdesk://pair?v=1&a=10.0.0.2&pin=123456").getOrThrow()
