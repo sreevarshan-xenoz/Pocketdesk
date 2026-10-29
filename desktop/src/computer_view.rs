@@ -138,6 +138,8 @@ struct GrabWindow {
     grab: crate::view_grab::Grab,
     hook: Option<crate::view_grab::Hook>,
     across: bool,
+    /// The server's privacy mode is on here (review M11).
+    privacy: bool,
     across_read: Option<Instant>,
 }
 
@@ -1158,6 +1160,7 @@ fn follow_grab(
             .keyboard_on
             .trim()
             .is_empty();
+        state.grab.privacy = crate::view_grab::privacy_shown();
     }
     let fullscreen = ctx
         .input(|i| i.viewport().fullscreen)
@@ -1192,6 +1195,7 @@ fn follow_grab(
         setting: state.grab.setting,
         controls: controlling,
         shared_across: state.grab.across,
+        privacy: state.grab.privacy,
     });
     if wanted && state.grab.hook.is_none() {
         state.grab.hook = INSTALL(ctx, viewport_id());

@@ -64,6 +64,9 @@ pub struct Situation {
     /// The shared keyboard and mouse have this keyboard on another
     /// computer: the server's hook has it, and this one stands down.
     pub shared_across: bool,
+    /// The server's privacy mode is on here: its own hook keeps this
+    /// computer's keys from everyone, and this one stands down (review M11).
+    pub privacy: bool,
 }
 
 /// The grab across the window's passes: whether the release chord took the
@@ -80,7 +83,12 @@ impl Grab {
         if !in_front {
             self.released = false;
         }
-        in_front && now.setting && now.controls && !now.shared_across && !self.released
+        in_front
+            && now.setting
+            && now.controls
+            && !now.shared_across
+            && !now.privacy
+            && !self.released
     }
 
     /// Ctrl+Alt+Shift, or the watchdog: the keys stay here until the
@@ -430,6 +438,16 @@ unsafe extern "system" fn keyboard_hook(
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+/// Whether the server's privacy mode is on here: its shield window, which
+/// shows while its hook keeps this computer's keys from everyone.
+pub fn privacy_shown() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    use windows::core::{PCWSTR, w};
+    // SAFETY: looks a window up by its class name; it does not block.
+    unsafe { FindWindowW(w!("PocketdeskPrivacyShield"), PCWSTR::null()) }
+        .is_ok_and(|window| !window.0.is_null())
+}
+
 /// The Ctrl, Alt and Shift keys Windows has down now.
 fn modifiers_down() -> Vec<u32> {
     use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -608,6 +626,7 @@ mod tests {
             setting: true,
             controls: true,
             shared_across: false,
+            privacy: false,
         }
     }
 
@@ -650,6 +669,13 @@ mod tests {
                 "shared input across",
                 Situation {
                     shared_across: true,
+                    ..front()
+                },
+            ),
+            (
+                "privacy mode on",
+                Situation {
+                    privacy: true,
                     ..front()
                 },
             ),

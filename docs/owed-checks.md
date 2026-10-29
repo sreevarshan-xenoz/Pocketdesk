@@ -963,7 +963,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows viewing the laptop in full screen with the grab on: Win alone, Win+1 to Win+4 (Hyprland's workspaces), Win+Enter, Alt+Tab, Alt+Esc and Ctrl+Esc act on the laptop, and Windows' Start menu and task switcher never open, nor does Alt let go after Alt+Tab leave the window's own menu waiting for a key; windowed, or with the setting off, they are Windows' again. (where: second computer)
 - In full screen with the grab on, press and let go of Ctrl+Alt+Shift: Win and Alt+Tab are Windows' again; leave full screen and come back, and they go to the laptop again. Ctrl+Alt+Shift+S still switches the stats without giving the keys back. (where: second computer)
 - In full screen with Win held through the window, Alt+Tab away by a mouse click elsewhere (a second monitor) or a toast: nothing stays held on the laptop, and Windows' own Win key works at once. (where: second computer)
-- With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. (where: second computer)
+- With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. With privacy mode turned on here from the phone, Win and Alt+Tab go nowhere (the shield keeps them), not to the laptop. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
