@@ -60,9 +60,9 @@ pub fn reasons() -> Vec<&'static str> {
 const PUBLIC_FIX: &str =
     "Settings → Network & internet → the network → Network profile type → Private.";
 
-/// The owner's note when someone nearby tried a wrong pairing code here
-/// (at `tried`, unix seconds) within the last ten minutes, while asks may
-/// be paused for it.
+/// The owner's note when a nearby pairing ask failed here (at `tried`,
+/// unix seconds) within the last ten minutes. It accuses nobody: an
+/// honest computer whose connection dropped fails the same way.
 pub fn tried_note(tried: Option<u64>, now_unix: u64) -> Option<String> {
     let tried = tried?;
     let ago = now_unix.saturating_sub(tried);
@@ -73,9 +73,31 @@ pub fn tried_note(tried: Option<u64>, now_unix: u64) -> Option<String> {
             1 => "a minute ago".to_string(),
             m => format!("{m} minutes ago"),
         };
-        format!("Someone nearby tried a wrong pairing code ({when}).")
+        format!("A nearby pairing ask failed (a wrong code or a dropped connection), {when}.")
     })
 }
+
+/// The owner's note while nearby asks are paused here (until `until`, unix
+/// seconds), with when they start again: as a local clock time when this
+/// computer's local time is known (`local_minute`, minutes past midnight
+/// now), else in minutes. And how to turn them off.
+pub fn paused_note(until: Option<u64>, now_unix: u64, local_minute: Option<u16>) -> Option<String> {
+    let left = until?.checked_sub(now_unix).filter(|left| *left > 0)?;
+    let minutes = left.div_ceil(60);
+    let when = match local_minute {
+        Some(at) => {
+            let then = (u64::from(at) + minutes) % (24 * 60);
+            format!("until {:02}:{:02}", then / 60, then % 60)
+        }
+        None => format!("for about {minutes} more minutes"),
+    };
+    Some(format!(
+        "Nearby asks are paused {when}. \"{OFF_SWITCH}\" in Settings turns them off."
+    ))
+}
+
+/// Settings' switch for nearby asks, as the notes name it.
+pub const OFF_SWITCH: &str = "Let computers nearby ask to pair";
 
 /// The words for how an ask from here ended (not Accepted: that one's
 /// pairing outcome says the rest).
@@ -87,7 +109,7 @@ pub fn ended_words(state: &AskState, name: &str) -> Option<String> {
         AskState::Declined => format!("{name} declined, or didn't answer in time."),
         AskState::Busy => format!("{name} is answering another computer. Try again in a minute."),
         AskState::Unavailable => {
-            format!("{name} isn't taking asks now. Its Settings may have them off.")
+            format!("{name} isn't taking asks now (off, or paused). Pair with a link below.")
         }
         AskState::Cancelled => "Cancelled.".to_string(),
         AskState::Failed(_) => {
@@ -153,6 +175,10 @@ impl NearbyView {
         ui.ctx().request_repaint_after(Duration::from_secs(1));
         ui.label(RichText::new(NEARBY).heading());
         if let Some(note) = tried_note(self.file.nearby_tried, now_unix) {
+            ui.label(RichText::new(note).color(crate::theme::warn(ui)));
+        }
+        let local_minute = pocketdesk_core::local::quiet_hours::local_now().map(|t| t.minute);
+        if let Some(note) = paused_note(self.file.nearby_paused_until, now_unix, local_minute) {
             ui.label(RichText::new(note).color(crate::theme::warn(ui)));
         }
         let under_way = self.ask_progress(ui, state_dir, now_unix);
@@ -732,14 +758,14 @@ mod tests {
         );
     }
 
-    /// A wrong code tried here shows as a note for ten minutes.
+    /// A failed ask here shows as a note for ten minutes, accusing nobody.
     #[test]
-    fn a_wrong_code_tried_here_shows_a_note() {
+    fn a_failed_ask_here_shows_a_note() {
         assert_eq!(tried_note(None, 1_000), None);
         assert!(
             tried_note(Some(1_000), 1_010)
                 .unwrap()
-                .starts_with("Someone nearby tried a wrong pairing code")
+                .starts_with("A nearby pairing ask failed (a wrong code or a dropped connection)")
         );
         assert!(
             tried_note(Some(1_000), 1_130)
@@ -747,6 +773,31 @@ mod tests {
                 .contains("2 minutes ago")
         );
         assert_eq!(tried_note(Some(1_000), 1_600), None);
+    }
+
+    /// While asks are paused the note says until when, by the clock when
+    /// it is known, and names the switch that turns them off; none after.
+    #[test]
+    fn a_pause_says_until_when_and_how_to_turn_asks_off() {
+        let note = paused_note(Some(1_600), 1_000, Some(14 * 60 + 5)).unwrap();
+        assert!(note.contains("until 14:15"), "{note}");
+        assert!(note.contains(OFF_SWITCH));
+        let late = paused_note(Some(1_600), 1_000, Some(23 * 60 + 55)).unwrap();
+        assert!(late.contains("until 00:05"), "{late}");
+        let unknown = paused_note(Some(1_600), 1_000, None).unwrap();
+        assert!(unknown.contains("for about 10 more minutes"), "{unknown}");
+        assert_eq!(paused_note(Some(1_600), 1_600, Some(0)), None);
+        assert_eq!(paused_note(None, 1_000, Some(0)), None);
+    }
+
+    /// Refused as unavailable, the asking side points to the link.
+    #[test]
+    fn unavailable_points_to_the_link() {
+        let words = ended_words(&AskState::Unavailable, "Test Tower").unwrap();
+        assert!(
+            words.contains("paused") && words.contains("link"),
+            "{words}"
+        );
     }
 
     /// The empty list's reasons each fit a line.

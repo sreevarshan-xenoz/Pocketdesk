@@ -161,6 +161,9 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                 note_tried(&dir);
             }
             if let Some(refusal) = early {
+                if matches!(refusal, nearby::Refusal::Paused | nearby::Refusal::Full) {
+                    note_pause(&dir);
+                }
                 tracing::info!("A nearby computer's ask to pair was turned away: {refusal:?}");
                 let _ = sender.send_packet(&step_packet(refusal.step())).await;
                 return;
@@ -193,6 +196,9 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
             let id = match taken {
                 Ok(id) => id,
                 Err(refusal) => {
+                    if matches!(refusal, nearby::Refusal::Paused | nearby::Refusal::Full) {
+                        note_pause(&dir);
+                    }
                     tracing::info!("A nearby computer's ask to pair was turned away: {refusal:?}");
                     let _ = sender.send_packet(&step_packet(refusal.step())).await;
                     return;
@@ -301,7 +307,7 @@ fn show(dir: &Path, taken: &Taken, from: std::net::IpAddr, code: &str) {
     );
     // Tests with real servers on the owner's computer show none (a toast
     // may sound there).
-    if std::env::var_os(QUIET).is_none() {
+    if std::env::var_os(QUIET).is_none() && !cfg!(test) {
         std::thread::spawn(move || {
             crate::platform::notify(&summary, &body, ANSWER_WITHIN);
         });
@@ -457,28 +463,51 @@ pub(crate) fn connection_closed(connection_id: &str) {
     }
 }
 
-/// Tell the owner someone nearby tried a wrong pairing code: noted in
-/// the computers file for the app, and as a notification.
+/// Note a failed nearby ask for the owner (the app's note on the Pair
+/// page; it may be an honest computer whose connection dropped), and the
+/// pause it may have started ([`note_pause`]).
 fn note_tried(dir: &Path) {
     let now = local_pin::now_unix();
     if let Err(e) = computers::update(dir, |file| file.nearby_tried = Some(now)) {
         tracing::debug!("Could not note a failed nearby ask: {e}");
     }
-    let paused = lock(&DESK).paused(Instant::now());
-    if std::env::var_os(QUIET).is_none() {
-        let body = if paused {
-            "Nearby asks to pair are paused for 10 minutes."
-        } else {
-            "Nothing was paired."
-        };
+    note_pause(dir);
+}
+
+/// The pause the owner was last told of, so each pause is told once.
+static PAUSE_TOLD: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
+
+/// If nearby asks are paused now (too many failed or shown asks), say
+/// until when: in the computers file for the Pair page, and once per
+/// pause as a notification. Nothing is written while the same pause goes
+/// on, so asks turned away meanwhile cost no file write.
+fn note_pause(dir: &Path) {
+    let now = Instant::now();
+    let Some(until) = lock(&DESK).paused_until(now) else {
+        return;
+    };
+    {
+        let mut told = lock(&PAUSE_TOLD);
+        if *told == Some(until) {
+            return;
+        }
+        *told = Some(until);
+    }
+    let until_unix = local_pin::now_unix() + until.saturating_duration_since(now).as_secs();
+    if let Err(e) = computers::update(dir, |file| file.nearby_paused_until = Some(until_unix)) {
+        tracing::debug!("Could not note a pause of nearby asks: {e}");
+    }
+    tracing::warn!("Nearby asks to pair are paused for a while: too many failed or shown asks");
+    if std::env::var_os(QUIET).is_none() && !cfg!(test) {
         std::thread::spawn(move || {
-            crate::platform::notify(TRIED, body, ANSWER_WITHIN);
+            crate::platform::notify(PAUSED, PAUSED_BODY, ANSWER_WITHIN);
         });
     }
 }
 
-/// What the owner is told of a failed ask.
-const TRIED: &str = "Someone nearby tried a wrong pairing code";
+/// What the owner is told when nearby asks pause.
+const PAUSED: &str = "Nearby pairing asks are paused";
+const PAUSED_BODY: &str = "Too many asks failed or were shown in 10 minutes. \"Let computers nearby ask to pair\" in Settings turns them off.";
 
 /// The PIN `pin`, if this computer handed it to `device_id` once both
 /// owners said yes to its nearby ask, on a connection that proved the

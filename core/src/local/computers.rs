@@ -184,11 +184,17 @@ pub struct ComputersFile {
     /// out ([`super::nearby`]). Absent in files written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nearby_in: Option<super::nearby::NearbyRequest>,
-    /// When someone nearby last tried a wrong pairing code here (a failed
-    /// ask, [`super::nearby::HostDesk::failed`]), for the owner's note.
+    /// When a nearby pairing ask last failed here (a wrong code or a
+    /// dropped connection, [`super::nearby::HostDesk::failed`]), for the
+    /// owner's note.
     /// Absent in files written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nearby_tried: Option<u64>,
+    /// Until when (unix seconds) nearby asks are paused here, after too
+    /// many failed or shown asks ([`super::nearby::HostDesk::paused_until`]).
+    /// Absent in files written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearby_paused_until: Option<u64>,
 }
 
 /// How long a grant both ways waits for the link before it lapses (PC1).

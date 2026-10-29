@@ -221,9 +221,11 @@ pub enum Refusal {
     Busy,
     /// Asks are off here.
     Off,
-    /// That address asked too often, or the owner was shown
-    /// [`PROMPTS_MOST`] asks lately.
+    /// That address asked too often.
     TooOften,
+    /// The owner was shown [`PROMPTS_MOST`] asks lately: none is taken
+    /// until [`BUDGET_WINDOW`] has passed since the first of them.
+    Full,
     /// [`FAILED_MOST`] asks failed lately (a wrong code was tried): none
     /// is taken until [`BUDGET_WINDOW`] has passed.
     Paused,
@@ -234,7 +236,7 @@ impl Refusal {
     pub fn step(self) -> &'static str {
         match self {
             Refusal::Busy => step::BUSY,
-            Refusal::Off | Refusal::TooOften | Refusal::Paused => step::UNAVAILABLE,
+            Refusal::Off | Refusal::TooOften | Refusal::Full | Refusal::Paused => step::UNAVAILABLE,
         }
     }
 }
@@ -334,7 +336,7 @@ impl HostDesk {
             return Err(Refusal::Paused);
         }
         if recent(&mut self.prompts, now) >= PROMPTS_MOST {
-            return Err(Refusal::TooOften);
+            return Err(Refusal::Full);
         }
         if !self.pace.allow(from, now) {
             return Err(Refusal::TooOften);
@@ -364,7 +366,10 @@ impl HostDesk {
         if recent(&mut self.failed, now) >= FAILED_MOST {
             return Some(Refusal::Paused);
         }
-        if recent(&mut self.prompts, now) >= PROMPTS_MOST || !self.pace.would_allow(from, now) {
+        if recent(&mut self.prompts, now) >= PROMPTS_MOST {
+            return Some(Refusal::Full);
+        }
+        if !self.pace.would_allow(from, now) {
             return Some(Refusal::TooOften);
         }
         None
@@ -421,6 +426,21 @@ impl HostDesk {
     /// Whether asks are paused now, after [`FAILED_MOST`] failures.
     pub fn paused(&mut self, now: Instant) -> bool {
         recent(&mut self.failed, now) >= FAILED_MOST
+    }
+
+    /// Until when no ask is taken from anyone: [`BUDGET_WINDOW`] after the
+    /// first of the [`FAILED_MOST`] failed asks, or of the [`PROMPTS_MOST`]
+    /// prompts, that fill their budget now (the later, if both do). None
+    /// while either budget has room.
+    pub fn paused_until(&mut self, now: Instant) -> Option<Instant> {
+        let full = |times: &mut Vec<Instant>, most: usize| {
+            (recent(times, now) >= most)
+                .then(|| times.iter().min().map(|first| *first + BUDGET_WINDOW))
+                .flatten()
+        };
+        let failed = full(&mut self.failed, FAILED_MOST);
+        let prompts = full(&mut self.prompts, PROMPTS_MOST);
+        failed.max(prompts)
     }
 
     /// The owner's answer to the ask `id`, once. A Decline frees the
@@ -724,6 +744,7 @@ mod tests {
         assert_eq!(Refusal::Busy.step(), step::BUSY);
         assert_eq!(Refusal::Off.step(), Refusal::TooOften.step());
         assert_eq!(Refusal::Off.step(), Refusal::Paused.step());
+        assert_eq!(Refusal::Off.step(), Refusal::Full.step());
     }
 
     fn address(last: u8) -> IpAddr {
@@ -747,6 +768,7 @@ mod tests {
             assert_eq!(desk.shown(), None, "the screen is free");
         }
         assert!(desk.paused(at(10, start)));
+        assert_eq!(desk.paused_until(at(10, start)), Some(at(600, start)));
         assert_eq!(
             desk.ask(address(40), true, at(10, start)),
             Err(Refusal::Paused)
@@ -820,9 +842,11 @@ mod tests {
         }
         assert_eq!(
             desk.ask(address(60), true, at(10, start)),
-            Err(Refusal::TooOften)
+            Err(Refusal::Full)
         );
+        assert_eq!(desk.paused_until(at(10, start)), Some(at(600, start)));
         assert!(desk.ask(address(60), true, at(601, start)).is_ok());
+        assert_eq!(desk.paused_until(at(601, start)), None);
     }
 
     fn found(id: &str, name: &str) -> Found {
