@@ -53,8 +53,9 @@ const LOOK_AGAIN_AFTER: Duration = Duration::from_secs(600);
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
 /// How often what is in front is looked at, for the gaming lock.
 const GAME_EVERY: Duration = Duration::from_millis(500);
-/// How long Hyprland may take to say what is in front.
-const PROBE_WAIT: Duration = Duration::from_millis(200);
+/// How long Hyprland may take to say what is in front (it answers in a
+/// millisecond or two; the loop waits on it).
+const PROBE_WAIT: Duration = Duration::from_millis(100);
 /// How long, as a driver ends, what it just sent may take to go.
 const FLUSH_WAIT: Duration = Duration::from_millis(300);
 
@@ -521,7 +522,10 @@ fn drive<B: Backend>(
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
         glue.follow_sound(&mut driver);
-        if game_at.elapsed() >= GAME_EVERY {
+        // Looked at only at home: away, the desktop gives every key and
+        // click to Pocketdesk, so nothing here comes to the front, and the
+        // loop is not held up while it carries input.
+        if driver.away_on().is_none() && game_at.elapsed() >= GAME_EVERY {
             game_at = Instant::now();
             let actions = driver.on(foreground_now(&runtime, game_lock_on));
             glue.apply(&mut driver, actions);
