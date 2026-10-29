@@ -62,6 +62,11 @@ const UNWATCHED: Duration = Duration::from_secs(30);
 const ENDED_KEPT: Duration = Duration::from_secs(60);
 /// How often the session looks at what the other computer said.
 const LOOK: Duration = Duration::from_millis(250);
+/// How often the window hears how the picture comes (PC2).
+const STATS_EVERY: Duration = Duration::from_secs(1);
+/// The picture's codec, as the window names it: the view asks for H.264
+/// alone.
+const CODEC: &str = "H.264";
 
 /// What the Computers page asks of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +334,78 @@ pub fn in_order(keyframe: bool, seq: u64, last: Option<u64>) -> bool {
     keyframe || last.is_none_or(|last| seq > last)
 }
 
+/// What a session counts of its frames, for the window's stats (PC2).
+#[derive(Debug, Default)]
+pub struct FrameCounts {
+    /// This second's frames and bytes.
+    frames: u32,
+    bytes: u64,
+    /// The numbering run now (a rebuilt encoder counts from 0 again): its
+    /// lowest and highest number, and the frames that came in it.
+    lowest: u64,
+    highest: u64,
+    arrived: u64,
+    /// Frames that never came, in the runs before this one.
+    lost_before: u64,
+    /// Frames that came after a newer one, dropped.
+    pub late: u64,
+    /// Frames dropped here: too large for the window.
+    pub dropped: u64,
+}
+
+impl FrameCounts {
+    /// A frame numbered `seq`, of `len` bytes, came.
+    pub fn came(&mut self, seq: u64, len: usize) {
+        if seq == 0 || self.arrived == 0 {
+            self.lost_before += pocketdesk_core::streaming::client::missed_frames_in_window(
+                self.lowest,
+                self.highest,
+                self.arrived,
+            );
+            (self.lowest, self.highest, self.arrived) = (seq, seq, 0);
+        }
+        self.lowest = self.lowest.min(seq);
+        self.highest = self.highest.max(seq);
+        self.arrived += 1;
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(len as u64);
+    }
+
+    /// Frames that never came since the session started.
+    pub fn lost(&self) -> u64 {
+        self.lost_before
+            + pocketdesk_core::streaming::client::missed_frames_in_window(
+                self.lowest,
+                self.highest,
+                self.arrived,
+            )
+    }
+
+    /// The frames a second and kilobits a second over the `elapsed` since
+    /// the last call; the next second starts.
+    pub fn second(&mut self, elapsed: Duration) -> (u32, u32) {
+        let (frames, bytes) = (
+            std::mem::take(&mut self.frames),
+            std::mem::take(&mut self.bytes),
+        );
+        let ms = elapsed.as_millis();
+        if ms == 0 {
+            return (0, 0);
+        }
+        let fps = u128::from(frames) * 1000 / ms;
+        let kbps = u128::from(bytes) * 8 / ms;
+        (
+            u32::try_from(fps).unwrap_or(u32::MAX),
+            u32::try_from(kbps).unwrap_or(u32::MAX),
+        )
+    }
+}
+
+/// `d` in whole milliseconds, as the stats say it.
+fn millis(d: Duration) -> u32 {
+    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
+}
+
 /// How often a release is tried on a link that does not take it.
 const RELEASE_TRIES: usize = 3;
 
@@ -381,6 +458,7 @@ async fn session(
     };
     crate::peer_computers::ask_screens(&computer.device_id);
     say(Event::Status(status.clone())).await;
+    let dial_started = Instant::now();
     let dialed = match dialer.dial(&computer, monitor).await {
         Ok(dialed) => dialed,
         Err(why) => {
@@ -398,7 +476,8 @@ async fn session(
         audio,
         route,
     } = dialed;
-    tracing::info!(device_id = %computer.device_id, route, "Showing another computer's screen");
+    let dial_ms = millis(dial_started.elapsed());
+    tracing::info!(device_id = %computer.device_id, route, dial_ms, "Showing another computer's screen");
     let conn = client.connection().cloned();
     let remote = client.remote();
     let _hangup = Hangup {
@@ -437,12 +516,17 @@ async fn session(
     let mut look = tokio::time::interval(LOOK);
     let mut said_too_large = false;
     let mut too_large_ask: Option<Instant> = None;
+    let mut counts = FrameCounts::default();
+    let mut stats_tick = tokio::time::interval(STATS_EVERY);
+    let mut second = Instant::now();
     loop {
         tokio::select! {
             packet = frames.recv() => {
                 let Some(packet) = packet else { break };
                 admitted = true;
+                counts.came(packet.sequence, packet.data.len());
                 if !in_order(packet.is_keyframe, packet.sequence, last_seq) {
+                    counts.late += 1;
                     continue;
                 }
                 last_seq = Some(packet.sequence);
@@ -461,6 +545,7 @@ async fn session(
                 // A frame the relay cannot carry (BK7 review M6): said once,
                 // and the chain it breaks starts again from a keyframe.
                 if !fits(packet.data.len()) {
+                    counts.dropped += 1;
                     // The window says so (BK7 review M6).
                     if status.note.is_none() {
                         status.note = Some(format!(
@@ -500,6 +585,24 @@ async fn session(
                 }).await;
             }
             _ = look.tick() => {}
+            _ = stats_tick.tick() => {
+                // How the picture comes, for the window's stats (PC2).
+                let (fps, kbps) = counts.second(second.elapsed());
+                second = Instant::now();
+                let link = conn.as_ref().map(|c| c.stats());
+                status.stats = Some(pocketdesk_core::local::view::ViewStats {
+                    fps,
+                    kbps,
+                    rtt_ms: link.as_ref().filter(|l| !l.rtt.is_zero()).map(|l| millis(l.rtt)),
+                    relayed: link.as_ref().is_some_and(|l| l.relayed),
+                    dial_ms: Some(dial_ms),
+                    lost: counts.lost(),
+                    late: counts.late,
+                    dropped: counts.dropped,
+                    codec: CODEC.to_string(),
+                });
+                say(Event::Status(status.clone())).await;
+            }
         }
         // What the other computer said: let in, with or without control,
         // and its screens.
@@ -576,6 +679,8 @@ struct View {
     /// Since when nobody watches it.
     unwatched_since: Option<Instant>,
     asks: CastChain,
+    /// Frames the window was too slow to take, for its stats (PC2).
+    window_dropped: u64,
 }
 
 impl Drop for View {
@@ -685,6 +790,7 @@ pub async fn run(
                     ended,
                     unwatched_since: Some(Instant::now()),
                     asks: CastChain::default(),
+                    window_dropped: 0,
                 });
             }
             Some((session_id, event)) = events.recv() => {
@@ -693,7 +799,10 @@ pub async fn run(
                 };
                 let watching = viewer.as_ref().filter(|v| v.session_id == session_id);
                 match event {
-                    Event::Status(status) => {
+                    Event::Status(mut status) => {
+                        if let Some(stats) = status.stats.as_mut() {
+                            stats.dropped += current.window_dropped;
+                        }
                         current.status = status.clone();
                         if let Some(v) = watching {
                             let _ = v.tx.try_send(Message::Status(status));
@@ -712,9 +821,11 @@ pub async fn run(
                     Event::Frame { keyframe, seq, data } => {
                         if let Some(v) = watching
                             && v.tx.try_send(Message::Frame { keyframe, seq, data }).is_err()
-                            && current.asks.lost(Instant::now())
                         {
-                            let _ = current.input.try_send(InputPacket::RequestKeyframe);
+                            current.window_dropped += 1;
+                            if current.asks.lost(Instant::now()) {
+                                let _ = current.input.try_send(InputPacket::RequestKeyframe);
+                            }
                         }
                     }
                     Event::Ended(why) => {
@@ -1036,6 +1147,31 @@ mod tests {
             in_order(true, 0, Some(9)),
             "a rebuilt encoder counts from 0"
         );
+    }
+
+    /// PC2: the window's stats from the frames that came: per second, and
+    /// the frames lost across a rebuilt encoder's new run.
+    #[test]
+    fn frames_are_counted_for_the_stats() {
+        let mut counts = FrameCounts::default();
+        assert_eq!(counts.lost(), 0, "nothing came yet");
+        for seq in [0, 1, 2, 4, 5] {
+            counts.came(seq, 1_000);
+        }
+        assert_eq!(counts.lost(), 1, "frame 3 never came");
+        // 5 frames of 1000 bytes in half a second: 10 a second, 80 kb/s.
+        assert_eq!(counts.second(Duration::from_millis(500)), (10, 80));
+        assert_eq!(
+            counts.second(Duration::from_secs(1)),
+            (0, 0),
+            "a new second"
+        );
+        // A rebuilt encoder counts from 0: the old run's loss is kept.
+        for seq in [0, 1, 3] {
+            counts.came(seq, 10);
+        }
+        assert_eq!(counts.lost(), 2);
+        assert_eq!(counts.second(Duration::ZERO), (0, 0), "no time, no rate");
     }
 
     #[test]

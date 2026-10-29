@@ -251,6 +251,26 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
     assert_eq!(showing.control, Some(true));
     assert_eq!(showing.route, "home network");
 
+    // PC2: about once a second, how the picture comes.
+    let stats = loop {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("stats within 10 s")
+        {
+            Message::Status(status) => match status.stats {
+                Some(stats) if stats.fps > 0 => break stats,
+                _ => continue,
+            },
+            _ => continue,
+        }
+    };
+    assert_eq!(stats.codec, "H.264");
+    assert!(stats.kbps > 0, "{stats:?}");
+    assert!(stats.rtt_ms.is_some(), "{stats:?}");
+    assert!(stats.dial_ms.is_some(), "{stats:?}");
+    assert!(!stats.relayed, "the home network rides no relay");
+    assert_eq!((stats.lost, stats.late, stats.dropped), (0, 0, 0));
+
     // The window's input reaches the computer; what a window may not send
     // does not.
     for packet in [
