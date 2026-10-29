@@ -1117,6 +1117,35 @@ mod tests {
         }
     }
 
+    /// PR #555 review m6: Setup's fixes do what they say: Turn on turns
+    /// sharing on, Start the server asks the app to start it.
+    #[test]
+    fn setup_fixes_do_what_they_say() {
+        use egui_kittest::kittest::Queryable;
+        let dir = std::env::temp_dir().join(format!("pd-setup-fix-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let acted = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let seen = acted.clone();
+        let state = dir.clone();
+        let mut view = ArrangeView::default();
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+            if let Some(action) = view.show(ui, &state, &[], false, false, 0) {
+                *seen.borrow_mut() = Some(action);
+            }
+        });
+        harness.run();
+        harness.get_by_label("Turn on").click();
+        harness.run();
+        assert_eq!(*acted.borrow(), Some(Action::Sharing(true)));
+        harness.get_by_label(crate::widgets::START).click();
+        harness.run();
+        assert_eq!(
+            crate::widgets::take_ask(&harness.ctx),
+            Some(crate::widgets::Ask::StartServer)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// PR #555 review m5: a computer that answered but is no longer paired
     /// does not count as one this computer may drive, nor as linked.
     #[test]
