@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use eframe::egui;
+use pocketdesk_core::streaming::ffmpeg_flags::fps_mode_flag;
 
 /// An access unit delimiter: ffmpeg's parser emits a frame once the next
 /// one begins, and this begins one at once.
@@ -289,8 +290,9 @@ impl Decoder {
             ])
             // Whatever the stream's crop, frames come out the size read.
             .arg(format!("scale={w}:{h}"))
+            // FFmpeg 9 refuses `-vsync`, 4.4 knows nothing else.
             .args([
-                "-vsync",
+                fps_mode_flag("ffmpeg"),
                 "passthrough",
                 "-threads",
                 "1",

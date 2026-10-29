@@ -517,9 +517,7 @@ mod tests {
     /// Only a paired phone's report is kept, and none is answered.
     #[tokio::test]
     async fn only_a_paired_phones_report_is_kept() {
-        let dir = pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        let dir = crate::state::use_test_dirs();
         std::fs::create_dir_all(dir).unwrap();
         TrustStore::update(dir.join(TRUST_FILE), |store| {
             store.trust_device("media-paired")

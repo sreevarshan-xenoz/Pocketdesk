@@ -1264,9 +1264,7 @@ mod tests {
     /// phone not paired leaves nothing in the store.
     #[test]
     fn a_paired_phones_name_is_kept_and_an_unpaired_ones_is_not() {
-        pocketdesk_core::local::paths::use_state_dir(
-            std::env::temp_dir().join(format!("pd-server-tests-{}", std::process::id())),
-        );
+        crate::state::use_test_dirs();
         let path = state::trust_store_path().unwrap();
         TrustStore::update(&path, |store| store.trust_device("names-paired-phone")).unwrap();
         note_claimed_name("names-paired-phone", "Galaxy\u{202E} A71");
@@ -1945,6 +1943,7 @@ forged log line"
 
     #[test]
     fn unknown_device_is_not_paired() {
+        crate::state::use_test_dirs();
         // QUIC paths lean on this being a strict deny-by-default lookup.
         assert!(!is_paired_device("00000000-0000-0000-0000-00000000dead"));
     }

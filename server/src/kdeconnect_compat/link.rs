@@ -1290,6 +1290,7 @@ mod tests {
 
     #[test]
     fn a_paired_devices_battery_is_kept_while_it_may_share_it() {
+        crate::state::use_test_dirs();
         let mut s = state("battery", false);
         s.device_id = format!("battery{}", uuid::Uuid::new_v4().simple());
         s.packet(&battery(50));
@@ -1405,6 +1406,7 @@ mod tests {
 
     #[test]
     fn a_file_is_fetched_only_from_a_paired_device_allowed_files() {
+        crate::state::use_test_dirs();
         let mut offer = NetworkPacket::new(super::super::share::SHARE)
             .with_body(serde_json::json!({ "filename": "photo.jpg" }));
         offer.payload_size = Some(5);
@@ -1514,6 +1516,7 @@ mod tests {
 
     #[test]
     fn a_battery_sent_while_the_owner_confirms_is_kept_at_pairing() {
+        crate::state::use_test_dirs();
         let mut s = state("held", false);
         s.device_id = format!("held{}", uuid::Uuid::new_v4().simple());
         s.event(Event::PairFromHere);

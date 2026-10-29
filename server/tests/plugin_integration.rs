@@ -60,6 +60,7 @@ async fn test_battery_plugin() {
 
 #[tokio::test]
 async fn test_clipboard_plugin_set() {
+    pocketdesk_core::local::paths::use_test_dirs("server-it");
     let registry = build_test_registry();
     let sender = MockSender::new();
     let request = NetworkPacket::new("kdeconnect.clipboard")
@@ -103,6 +104,7 @@ async fn test_share_plugin_url_is_not_echoed() {
 
 #[tokio::test]
 async fn test_file_browse_plugin() {
+    pocketdesk_core::local::paths::use_test_dirs("server-it");
     let registry = build_test_registry();
     let sender = MockSender::new();
     let request = NetworkPacket::new("kdeconnect.filebrowse.request")
@@ -142,6 +144,7 @@ async fn test_unknown_packet_type() {
 
 #[tokio::test]
 async fn test_clipboard_connect_request() {
+    pocketdesk_core::local::paths::use_test_dirs("server-it");
     let registry = build_test_registry();
     let sender = MockSender::new();
     let request = NetworkPacket::new("kdeconnect.clipboard.connect");

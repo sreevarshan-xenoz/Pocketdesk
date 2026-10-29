@@ -22,6 +22,13 @@ pub fn state_dir() -> Result<PathBuf> {
     pocketdesk_core::local::paths::state_dir().context("unable to determine local state directory")
 }
 
+/// For tests: this process's throwaway state and config folders
+/// ([`pocketdesk_core::local::paths::use_test_dirs`]); returns the state one.
+#[cfg(test)]
+pub(crate) fn use_test_dirs() -> &'static std::path::Path {
+    pocketdesk_core::local::paths::use_test_dirs("server-tests")
+}
+
 /// Where this session keeps the screen-sharing portal's grant (N8), read
 /// from the config as it is now: the state folder when the owner chose to
 /// keep it, else `None`, and a kept one forgotten, so turning the setting

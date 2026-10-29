@@ -13,6 +13,7 @@ pub mod connection;
 #[cfg(feature = "wan")]
 pub mod dht;
 pub mod encoder_detect;
+pub mod ffmpeg_flags;
 mod frame_pool;
 #[cfg(all(windows, feature = "capture", feature = "inproc-windows"))]
 mod gpu_frame;

@@ -169,6 +169,7 @@ pub fn config_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(CONFIG_DIR_VAR, std::env::var_os(CONFIG_DIR_VAR)) {
         return dir;
     }
+    refuse_in_tests("config");
     Ok(app_dir(
         &dirs::config_dir().ok_or_else(|| missing("config"))?,
     ))
@@ -195,6 +196,32 @@ pub fn use_config_dir(dir: PathBuf) -> &'static std::path::Path {
     CONFIG_DIR_OVERRIDE.get_or_init(|| dir)
 }
 
+/// For tests: the state and config folders become throwaways in the temp
+/// folder, `pd-<name>-<pid>` and `pd-<name>-<pid>-config`, for the rest of
+/// this process, so no test reads the owner's settings or writes beside the
+/// owner's pairings. Each test that can reach either folder calls it first:
+/// the folders are set once per process, and a test that skipped it would
+/// use the owner's whenever it ran before every test that did. Returns the
+/// state folder in use, made if missing.
+pub fn use_test_dirs(name: &str) -> &'static std::path::Path {
+    let state = std::env::temp_dir().join(format!("pd-{name}-{}", std::process::id()));
+    let mut config = state.clone().into_os_string();
+    config.push("-config");
+    use_config_dir(PathBuf::from(config));
+    let dir = use_state_dir(state);
+    let _ = std::fs::create_dir_all(dir);
+    dir
+}
+
+/// A test of this crate that reaches the owner's folder fails loudly
+/// instead (the other crates' tests call [`use_test_dirs`]; `cfg(test)` does
+/// not reach them).
+fn refuse_in_tests(what: &str) {
+    if cfg!(test) {
+        panic!("a test reached the owner's {what} folder: call use_test_dirs first");
+    }
+}
+
 /// `<state dir>/pocketdesk`, falling back to local data (`%LOCALAPPDATA%` on
 /// Windows, which has no state dir). `POCKETDESK_STATE_DIR` names another
 /// folder (a portable install, or a separate set of pairings).
@@ -205,6 +232,7 @@ pub fn state_dir() -> io::Result<PathBuf> {
     if let Some(dir) = dir_from_env(STATE_DIR_VAR, std::env::var_os(STATE_DIR_VAR)) {
         return dir;
     }
+    refuse_in_tests("state");
     Ok(app_dir(
         &dirs::state_dir()
             .or_else(dirs::data_local_dir)

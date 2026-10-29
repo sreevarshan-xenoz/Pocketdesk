@@ -61,6 +61,10 @@ regex = { version = "1", optional = true }
 # The adapter a phone reaches this computer on, for waking it (N6); already
 # in the graph through iroh.
 netdev = { version = "0.46", optional = true }
+# This computer's adapter addresses (`tailscale::lan::interface_ips`), read
+# directly on every system: `hostname -I` is missing on a stock Arch. Already
+# in the graph through mdns-sd.
+if-addrs = "0.13"
 serde.workspace = true
 # `fs`: a transfer's partial file is a tokio file (protocol::transfer).
 tokio = { workspace = true, features = ["fs"] }
@@ -154,11 +158,6 @@ windows.workspace = true
 # through a crate of its own (Cargo refuses one crate under two names), so
 # `encode` alone never pulls it in on Windows.
 pocketdesk-ffmpeg = { path = "../ffmpeg-shim", optional = true }
-
-# Adapter enumeration for get_local_ips() off Linux (no `hostname -I`); already
-# in the graph through mdns-sd.
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-if-addrs = "0.13"
 
 [dev-dependencies]
 # A local Mainline DHT for the N3 lookup test (no internet).

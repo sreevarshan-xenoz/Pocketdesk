@@ -403,6 +403,9 @@ mod tests {
     }
 
     fn temp_home(name: &str) -> PathBuf {
+        // Browsing reads where the state and config folders are, to keep
+        // them out: the throwaways, never the owner's.
+        crate::state::use_test_dirs();
         let dir = std::env::temp_dir().join(format!("ll-browse-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("docs")).unwrap();

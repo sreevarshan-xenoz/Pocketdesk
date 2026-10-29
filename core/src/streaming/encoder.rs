@@ -482,7 +482,9 @@ impl SidecarEncoder {
     pub fn new(config: StreamingConfig) -> anyhow::Result<Self> {
         let keyframe_interval = config.fps as u64 * 2; // Keyframe every 2 seconds
 
-        let args = build_ffmpeg_args(&config, keyframe_interval);
+        // The binary FfmpegCommand::new() runs, asked which spelling it takes.
+        let fps_mode = super::ffmpeg_flags::fps_mode_flag(ffmpeg_sidecar::paths::ffmpeg_path());
+        let args = build_ffmpeg_args(&config, keyframe_interval, fps_mode);
         debug!(
             "Spawning FFmpeg encoder: {}x{}@{}fps, profile={:?}, preset={:?}, bitrate={}",
             config.width,
@@ -996,7 +998,11 @@ fn vaapi_device_node() -> String {
 
 /// Input: raw BGRA frames via stdin (pipe:0)
 /// Output: H.264/H.265 access units in FLV tags via stdout (pipe:1)
-fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<String> {
+fn build_ffmpeg_args(
+    config: &StreamingConfig,
+    keyframe_interval: u64,
+    fps_mode_flag: &str,
+) -> Vec<String> {
     // Determine codec type
     let is_hevc = matches!(config.codec, VideoCodec::H265);
 
@@ -1294,7 +1300,8 @@ fn build_ffmpeg_args(config: &StreamingConfig, keyframe_interval: u64) -> Vec<St
     // tag states its length and keyframe flag, so every access unit can ship
     // the moment it is written (see `flv_demux`).
     args.extend(vec![
-        "-fps_mode".to_string(),
+        // `-fps_mode`, or `-vsync` for an ffmpeg older than 5.1.
+        fps_mode_flag.to_string(),
         "passthrough".to_string(),
         "-flush_packets".to_string(),
         "1".to_string(),
@@ -1325,7 +1332,22 @@ mod tests {
         assert!(!seam_names("", Nvenc));
     }
 
+    use super::super::ffmpeg_flags::{FPS_MODE, VSYNC};
     use super::*;
+
+    /// The frame-rate flag is the one the probe chose: FFmpeg 9 has no
+    /// `-vsync`, FFmpeg 4.4 no `-fps_mode`.
+    #[test]
+    fn the_sidecar_takes_the_frame_rate_flag_its_ffmpeg_knows() {
+        let config = StreamingConfig::default();
+        for flag in [FPS_MODE, VSYNC] {
+            let args = build_ffmpeg_args(&config, 60, flag);
+            let at = args.iter().position(|a| a == flag).expect("the flag");
+            assert_eq!(args[at + 1], "passthrough");
+            let other = if flag == FPS_MODE { VSYNC } else { FPS_MODE };
+            assert!(!args.iter().any(|a| a == other), "{args:?}");
+        }
+    }
 
     #[test]
     fn test_find_start_code_4_byte() {
@@ -1414,7 +1436,7 @@ mod tests {
             hardware_encoder: HardwareEncoder::Software,
             monitor_index: 0,
         };
-        let args = build_ffmpeg_args(&config, 60);
+        let args = build_ffmpeg_args(&config, 60, FPS_MODE);
 
         // Verify key arguments are present
         assert!(args.contains(&"rawvideo".to_string()));
@@ -1452,7 +1474,7 @@ mod tests {
             hardware_encoder: HardwareEncoder::Nvenc,
             monitor_index: 0,
         };
-        let args = build_ffmpeg_args(&config, 120);
+        let args = build_ffmpeg_args(&config, 120, FPS_MODE);
 
         assert!(args.contains(&"h264_nvenc".to_string()));
         assert!(args.contains(&"p3".to_string()));
@@ -1479,7 +1501,7 @@ mod tests {
             hardware_encoder: HardwareEncoder::Vaapi,
             monitor_index: 0,
         };
-        let args = build_ffmpeg_args(&config, 60);
+        let args = build_ffmpeg_args(&config, 60, FPS_MODE);
 
         assert!(args.contains(&"hevc_vaapi".to_string()));
         assert!(args.iter().any(|a| a.contains("hwupload")));
@@ -1502,7 +1524,7 @@ mod tests {
             hardware_encoder: HardwareEncoder::Software,
             monitor_index: 0,
         };
-        let args = build_ffmpeg_args(&config, 60);
+        let args = build_ffmpeg_args(&config, 60, FPS_MODE);
 
         assert!(args.contains(&"libx265".to_string()));
         let params = args
@@ -1535,7 +1557,7 @@ mod tests {
             hardware_encoder: HardwareEncoder::Software,
             monitor_index: 0,
         };
-        let args = build_ffmpeg_args(&config, 120);
+        let args = build_ffmpeg_args(&config, 120, FPS_MODE);
 
         assert!(args.contains(&"high".to_string()));
         assert!(args.contains(&"medium".to_string()));
@@ -1859,7 +1881,7 @@ mod tests {
             (HardwareEncoder::Qsv, "h264_qsv"),
             (HardwareEncoder::MediaFoundation, "h264_mf"),
         ] {
-            let args = build_ffmpeg_args(&windows_rung_config(encoder), 120);
+            let args = build_ffmpeg_args(&windows_rung_config(encoder), 120, FPS_MODE);
             assert_eq!(arg_after(&args, "-c:v"), name);
             assert_eq!(arg_after(&args, "-bf"), "0", "{name}");
             assert_eq!(arg_after(&args, "-g"), "120", "{name}");
@@ -1867,12 +1889,16 @@ mod tests {
             assert_eq!(arg_after(&args, "-f"), "rawvideo", "{name}");
             assert_eq!(args.last().map(String::as_str), Some("pipe:1"));
         }
-        let amf = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Amf), 120);
+        let amf = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Amf), 120, FPS_MODE);
         assert_eq!(arg_after(&amf, "-usage"), "ultralowlatency");
         assert_eq!(arg_after(&amf, "-header_insertion_mode"), "idr");
-        let qsv = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Qsv), 120);
+        let qsv = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::Qsv), 120, FPS_MODE);
         assert_eq!(arg_after(&qsv, "-async_depth"), "1");
-        let mf = build_ffmpeg_args(&windows_rung_config(HardwareEncoder::MediaFoundation), 120);
+        let mf = build_ffmpeg_args(
+            &windows_rung_config(HardwareEncoder::MediaFoundation),
+            120,
+            FPS_MODE,
+        );
         assert_eq!(arg_after(&mf, "-scenario"), "display_remoting");
         assert_eq!(arg_after(&mf, "-bsf:v"), "filter_units=remove_types=9|12");
     }
@@ -1881,7 +1907,7 @@ mod tests {
     fn hevc_on_amf_uses_the_hevc_encoder_and_stream_format() {
         let mut config = windows_rung_config(HardwareEncoder::Amf);
         config.codec = VideoCodec::H265;
-        let args = build_ffmpeg_args(&config, 120);
+        let args = build_ffmpeg_args(&config, 120, FPS_MODE);
         assert_eq!(arg_after(&args, "-c:v"), "hevc_amf");
         assert_eq!(arg_after(&args, "-f"), "rawvideo");
         assert_eq!(args[args.len() - 4], "flv");

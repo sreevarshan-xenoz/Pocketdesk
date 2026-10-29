@@ -46,10 +46,34 @@ Builds:
       - sh ../bridge/build-android.sh
     ndk: 29.0.14206865
 
+  - versionName: 0.8.1
+    versionCode: 9
+    commit: 3a722836e0fd12ad011ad12c4e5b52ca0ed02360
+    subdir: android/app
+    # Rust from Debian's rustup, as fdroiddata asks (MR !54623): the
+    # toolchain pinned in the repo, the Android target, cargo-ndk 4.1.2,
+    # then the bridge as CI builds it. The build server's own JDK.
+    sudo:
+      - apt-get update
+      - apt-get install -y cmake gcc libc-dev rustup
+    gradle:
+      - yes
+    prebuild:
+      - rustup set profile minimal
+      - rustup default "$(cat ../bridge/rust-toolchain-version)"
+      - rustup target add aarch64-linux-android
+      - cargo install cargo-ndk@4.1.2 --locked
+    # The library is built in `build`, after F-Droid's scan: built in
+    # `prebuild`, its own target/ output failed the scan (MR !54623).
+    build:
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - sh ../bridge/build-android.sh
+    ndk: 29.0.14206865
+
 # The release key's certificate (SHA-256), as apksigner prints it.
 AllowedAPKSigningKeys: 3a2452b38b4be5ac8493b330a91ed5a43e8490e6c74b8a7934599bc5e8ac3a0f
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
-CurrentVersion: 0.7.0
-CurrentVersionCode: 7
+CurrentVersion: 0.8.1
+CurrentVersionCode: 9
