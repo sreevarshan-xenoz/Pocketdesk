@@ -35,6 +35,10 @@ pub const WANT_KEYFRAME: u8 = 0x11;
 /// ([`InputPacket::encode`]), at most [`MAX_INPUT`] bytes.
 pub const INPUT: u8 = 0x12;
 
+/// App → server: the window gained (`1`) or lost (`0`) the focus while it
+/// controls the other computer (PC3), `[focused u8]`: the clipboard follows.
+pub const FOCUS: u8 = 0x13;
+
 /// The longest input packet the app sends (a pasted text).
 pub const MAX_INPUT: usize = 16 * 1024;
 /// The longest status or reason.
@@ -139,6 +143,7 @@ pub enum Message {
     Status(ViewStatus),
     WantKeyframe,
     Input(Vec<u8>),
+    Focus(bool),
 }
 
 impl Message {
@@ -167,6 +172,7 @@ impl Message {
             Message::Status(status) => (STATUS, serde_json::to_vec(status).unwrap_or_default()),
             Message::WantKeyframe => (WANT_KEYFRAME, Vec::new()),
             Message::Input(packet) => (INPUT, packet.clone()),
+            Message::Focus(focused) => (FOCUS, vec![u8::from(*focused)]),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -215,6 +221,7 @@ impl Message {
             }
             WANT_KEYFRAME if len == 0 => Message::WantKeyframe,
             INPUT if len > 0 && len <= MAX_INPUT => Message::Input(payload),
+            FOCUS if len == 1 && payload[0] <= 1 => Message::Focus(payload[0] == 1),
             _ => return Err(bad()),
         })
     }
@@ -352,6 +359,8 @@ mod tests {
                 }
                 .encode(),
             ),
+            Message::Focus(true),
+            Message::Focus(false),
         ];
         let mut wire = Vec::new();
         for m in &messages {
@@ -378,6 +387,10 @@ mod tests {
         long.extend_from_slice(&((MAX_INPUT + 1) as u32).to_le_bytes());
         long.resize(5 + MAX_INPUT + 1, 0);
         assert!(Message::read(&mut io::Cursor::new(long)).is_err());
+        // PC3: a focus is one byte, 0 or 1.
+        assert!(Message::parse(FOCUS, Vec::new()).is_err());
+        assert!(Message::parse(FOCUS, vec![2]).is_err());
+        assert!(Message::parse(FOCUS, vec![1, 0]).is_err());
         let not_json = Message::parse(STATUS, b"{nope".to_vec());
         assert!(not_json.is_err());
         // A status from a later server, with more to say, still reads.

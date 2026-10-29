@@ -1707,12 +1707,12 @@ const LATER_SWITCH: &str = "a later switch came first";
 /// Send this computer's clipboard image to the computer `device_id` on the
 /// link (BK3), as a phone sends its own (N4): told its size and a key,
 /// that computer opens a stream for it and puts it on its clipboard.
-/// Marked with `follows` when it follows the mouse; `still` says whether it
+/// Marked with `follows` when it follows the mouse or the window; `still` says whether it
 /// is still wanted, asked before it is offered and before its bytes go.
 pub(crate) async fn send_clipboard_image(
     device_id: &str,
     image: Arc<crate::plugins::clipboard::Image>,
-    follows: bool,
+    follows: Option<crate::clipboard_push::Follow>,
     still: impl Fn() -> bool,
 ) -> Result<(), String> {
     // The link is the internet road, at home too, as for files.
@@ -1727,7 +1727,7 @@ pub(crate) async fn send_clipboard_image(
 async fn image_on_link(
     outgoing: &mpsc::Sender<NetworkPacket>,
     png: &[u8],
-    follows: bool,
+    follows: Option<crate::clipboard_push::Follow>,
     still: impl Fn() -> bool,
 ) -> Result<(), String> {
     if !still() {
@@ -1939,6 +1939,14 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             packet.body.get("reason").and_then(|v| v.as_str()),
         ) {
             refused(key, reason.unwrap_or("no reason given"));
+        }
+        return;
+    }
+    // Its window lost the focus and asks for this one's clipboard (PC3).
+    if packet.packet_type == crate::clipboard_push::ASK_BACK {
+        if crate::clipboard_push::takes_window_ask(device_id) {
+            let to = device_id.to_string();
+            tokio::spawn(async move { crate::clipboard_push::answer_window_ask(&to).await });
         }
         return;
     }
@@ -2955,7 +2963,14 @@ mod tests {
             .unwrap();
             got.await.unwrap()
         });
-        image_on_link(&outgoing, &png, true, || true).await.unwrap();
+        image_on_link(
+            &outgoing,
+            &png,
+            Some(crate::clipboard_push::Follow::Mouse),
+            || true,
+        )
+        .await
+        .unwrap();
         assert_eq!(other.await.unwrap(), png, "received whole");
     }
 
@@ -2965,7 +2980,13 @@ mod tests {
     async fn a_clipboard_image_a_later_switch_overtakes_goes_no_further() {
         let png = picture(1000);
         let (outgoing, mut packets) = mpsc::channel::<NetworkPacket>(4);
-        let refused = image_on_link(&outgoing, &png, true, || false).await;
+        let refused = image_on_link(
+            &outgoing,
+            &png,
+            Some(crate::clipboard_push::Follow::Mouse),
+            || false,
+        )
+        .await;
         assert_eq!(refused.unwrap_err(), LATER_SWITCH);
         assert!(packets.try_recv().is_err(), "not offered");
 
@@ -2985,9 +3006,12 @@ mod tests {
             )
             .await
         });
-        let overtaken = image_on_link(&outgoing, &png, true, || {
-            wanted.load(std::sync::atomic::Ordering::SeqCst)
-        })
+        let overtaken = image_on_link(
+            &outgoing,
+            &png,
+            Some(crate::clipboard_push::Follow::Mouse),
+            || wanted.load(std::sync::atomic::Ordering::SeqCst),
+        )
         .await;
         assert_eq!(overtaken.unwrap_err(), LATER_SWITCH);
         assert!(other.await.unwrap().is_err(), "the other end got nothing");

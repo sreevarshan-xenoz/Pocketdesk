@@ -382,6 +382,12 @@ pub struct Config {
     /// time (PC2). Off until chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_stats: bool,
+    /// The clipboard follows the window that shows another computer's
+    /// screen while it controls that computer (PC3): this computer's goes
+    /// there as the window gains the focus, and that computer's comes back
+    /// as it loses it. Taken here too only while on. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_clipboard: bool,
 }
 
 fn default_computer_view_quality() -> String {
@@ -599,6 +605,7 @@ impl Default for Config {
             computer_view_quality: default_computer_view_quality(),
             computer_view_only: false,
             computer_view_stats: false,
+            computer_view_clipboard: true,
         }
     }
 }
@@ -855,6 +862,7 @@ impl Config {
         "computer_view_quality",
         "computer_view_only",
         "computer_view_stats",
+        "computer_view_clipboard",
     ];
 }
 
@@ -1272,6 +1280,28 @@ phone_battery = \"x\"
         assert_eq!(
             upper.computer_view_preset(),
             crate::streaming::input_packet::PRESET_BALANCED
+        );
+    }
+
+    /// PC3: the clipboard follows a computer's window unless turned off,
+    /// and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_clipboard_is_on_until_turned_off() {
+        let path = temp("computer-view-clipboard");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_clipboard);
+        assert!(Config::default().computer_view_clipboard);
+        let chosen = Config {
+            computer_view_clipboard: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_clipboard"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_clipboard);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_clipboard"]
         );
     }
 
