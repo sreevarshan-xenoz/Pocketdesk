@@ -161,6 +161,13 @@ impl ComputersView {
     pub fn take_view(&mut self) -> Option<(String, String)> {
         self.view.take()
     }
+    /// The computers this one paired with, read again as the list is
+    /// (UX 3: the Overview lists them).
+    pub fn paired(&mut self, state_dir: &Path) -> &[PeerComputer] {
+        self.refresh(state_dir);
+        &self.file.computers
+    }
+
     fn refresh(&mut self, state_dir: &Path) {
         let every = if self.pairing.is_some() {
             PAIRING_REFRESH
@@ -476,67 +483,70 @@ impl ComputersView {
         }
         let mut forget = None;
         for computer in &self.file.computers {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(&computer.name).strong());
-                ui.label(RichText::new(link_words(computer)).weak());
-                // PC1: paired both ways, with consent given at pairing; the
-                // grant here waits for the link (review M1).
-                if computer.mine && self.file.lapsed.contains(&computer.device_id) {
-                    ui.label(RichText::new(MINE_LAPSED).color(crate::theme::warn(ui)))
-                        .on_hover_text(MINE_HOVER);
-                } else if computer.mine && self.file.pending.contains(&computer.device_id) {
-                    ui.label(RichText::new(MINE_PENDING).color(crate::theme::warn(ui)))
-                        .on_hover_text(MINE_HOVER);
-                } else if computer.mine {
-                    ui.label(RichText::new(MINE).color(crate::theme::good(ui)))
-                        .on_hover_text(MINE_HOVER);
-                }
-                // BK7: its screen in a window here.
-                let reach = view_reach(computer, server_running);
-                if ui
-                    .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
-                    .on_hover_text(
-                        "Its screen in a window here, controlled from it if it lets this computer (its Devices page's Control switch for this one). It may ask its owner first.",
-                    )
-                    .on_disabled_hover_text(reach.err().unwrap_or_default())
-                    .clicked()
-                {
-                    self.view = Some((computer.device_id.clone(), computer.name.clone()));
-                }
-                // UX 1: why, beside it; a stopped server is said once,
-                // under the list.
-                if server_running && reach.is_err() {
-                    ui.label(
-                        RichText::new(unreachable(&computer.name))
-                            .color(crate::theme::muted(ui)),
-                    );
-                }
-                // U5: "Unpair" for a pairing everywhere, asked by name.
-                if self.forgetting.as_deref() == Some(computer.device_id.as_str()) {
-                    ui.label(format!(
-                        "Unpair {}? It must pair again to share with this one.",
-                        computer.name
-                    ));
+            // UX 3: a card per computer, as Devices draws each device.
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(&computer.name).strong());
+                    ui.label(RichText::new(link_words(computer)).weak());
+                    // PC1: paired both ways, with consent given at pairing; the
+                    // grant here waits for the link (review M1).
+                    if computer.mine && self.file.lapsed.contains(&computer.device_id) {
+                        ui.label(RichText::new(MINE_LAPSED).color(crate::theme::warn(ui)))
+                            .on_hover_text(MINE_HOVER);
+                    } else if computer.mine && self.file.pending.contains(&computer.device_id) {
+                        ui.label(RichText::new(MINE_PENDING).color(crate::theme::warn(ui)))
+                            .on_hover_text(MINE_HOVER);
+                    } else if computer.mine {
+                        ui.label(RichText::new(MINE).color(crate::theme::good(ui)))
+                            .on_hover_text(MINE_HOVER);
+                    }
+                    // BK7: its screen in a window here.
+                    let reach = view_reach(computer, server_running);
                     if ui
-                        .add_enabled(server_running, egui::Button::new("Unpair"))
+                        .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
+                        .on_hover_text(
+                            "Its screen in a window here, controlled from it if it lets this computer (its Devices page's Control switch for this one). It may ask its owner first.",
+                        )
+                        .on_disabled_hover_text(reach.err().unwrap_or_default())
+                        .clicked()
+                    {
+                        self.view = Some((computer.device_id.clone(), computer.name.clone()));
+                    }
+                    // UX 1: why, beside it; a stopped server is said once,
+                    // under the list.
+                    if server_running && reach.is_err() {
+                        ui.label(
+                            RichText::new(unreachable(&computer.name))
+                                .color(crate::theme::muted(ui)),
+                        );
+                    }
+                    // U5: "Unpair" for a pairing everywhere, asked by name.
+                    if self.forgetting.as_deref() == Some(computer.device_id.as_str()) {
+                        ui.label(format!(
+                            "Unpair {}? It must pair again to share with this one.",
+                            computer.name
+                        ));
+                        if ui
+                            .add_enabled(server_running, egui::Button::new("Unpair"))
+                            .on_disabled_hover_text(STOPPED)
+                            .clicked()
+                        {
+                            forget = Some((computer.device_id.clone(), computer.name.clone()));
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.forgetting = None;
+                        }
+                    } else if ui
+                        // The server does the unpairing (BA3): asked with it
+                        // stopped, the request expired unread and the link came
+                        // back at its next start, while this said it was done.
+                        .add_enabled(server_running, egui::Button::new("Unpair…"))
                         .on_disabled_hover_text(STOPPED)
                         .clicked()
                     {
-                        forget = Some((computer.device_id.clone(), computer.name.clone()));
+                        self.forgetting = Some(computer.device_id.clone());
                     }
-                    if ui.button("Cancel").clicked() {
-                        self.forgetting = None;
-                    }
-                } else if ui
-                    // The server does the unpairing (BA3): asked with it
-                    // stopped, the request expired unread and the link came
-                    // back at its next start, while this said it was done.
-                    .add_enabled(server_running, egui::Button::new("Unpair…"))
-                    .on_disabled_hover_text(STOPPED)
-                    .clicked()
-                {
-                    self.forgetting = Some(computer.device_id.clone());
-                }
+                });
             });
         }
         if !server_running && !self.file.computers.is_empty() {

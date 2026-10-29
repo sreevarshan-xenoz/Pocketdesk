@@ -1022,7 +1022,7 @@ Owed:
 - [x] Linux: after `pocketdesk start`, the state folder is `700` and the first start said "owner-only" once (the Azure VM, Ubuntu 24.04, 2026-10-24).
 - [ ] Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
 - [ ] Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
-- [ ] The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- [ ] The desktop app's Devices tab reads "Lock, sleep, privacy and wake others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
 - [ ] A device-to-device move (Smart Switch) leaves the app unpaired. (where: other hardware)
 - [ ] Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
@@ -3142,6 +3142,15 @@ Built 2026-10-30, from the owner's first live test of pairing two computers (the
 - [ ] Windows set to a Public network: the Arch laptop's Nearby list never shows Windows, and after about 10 s says why (the reasons, with how to make it Private on Windows' own list) and offers Run diagnostics. (where: second computer)
 - [ ] The Keyboard and mouse page's Setup on both laptops ticks each step as it becomes true (running, paired, sharing on, linked directly, may drive, arranged), and each fix button does what it says. (where: second computer)
 - [ ] An option changed on the Keyboard and mouse page (Clipboard follows the mouse off) is saved at once and the next crossing follows it; Settings' search for "game" finds the pointer, whose button opens the page. (where: second computer)
+
+## 230. Look and feel (Desktop UX 3)
+
+Built 2026-10-30. Kittest drove the Overview's status card, Details fold and first-run steps, and each Devices group switch against the trust store; the snapshots were drawn by Mesa. Not seen on a real screen: fonts, scaling and the focus ring with a real keyboard.
+- [ ] On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
+- [ ] Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
+- [ ] With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
+- [ ] A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)
+- [ ] On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
 
 ## Recording results
 

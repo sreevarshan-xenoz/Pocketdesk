@@ -655,7 +655,7 @@ pub const FEATURES: &[Feature] = &[
         key: "computer_media",
         what: "This computer's music in its media controls",
         phone_switch: "Computer's music in my media controls",
-        permission_name: "Hear and change this computer's sound, and its media",
+        permission_name: "Hear and change this computer's sound",
         android: "notification access and its notifications",
     },
     Feature {
@@ -704,14 +704,14 @@ pub const FEATURES: &[Feature] = &[
         key: "phone_actions",
         what: "Screenshots of it and locking it from here",
         phone_switch: "Let the computer take screenshots and lock this phone",
-        permission_name: "Take screenshots of it, lock it and open its apps from here",
+        permission_name: "Screenshot, lock and open its apps",
         android: "the Pocketdesk control Accessibility service and notification access",
     },
     Feature {
         key: "apps",
         what: "Opening its apps from here",
         phone_switch: "Let the computer open my apps",
-        permission_name: "Take screenshots of it, lock it and open its apps from here",
+        permission_name: "Screenshot, lock and open its apps",
         android: "notification access",
     },
     Feature {
@@ -728,9 +728,7 @@ pub const FEATURES: &[Feature] = &[
 /// not, as the Overview and the tray say it.
 pub fn phone_action_reach(linked: bool, allowed: bool) -> Result<(), &'static str> {
     if !allowed {
-        Err(
-            "This phone's \"Take screenshots of it, lock it and open its apps from here\" is off in Devices.",
-        )
+        Err("This phone's \"Screenshot, lock and open its apps\" is off in Devices.")
     } else if !linked {
         Err("The phone is not linked now: a session, or one of its background features, links it.")
     } else {
@@ -1312,6 +1310,21 @@ pub fn set_permission(
     allowed: bool,
 ) -> pocketdesk_core::error::Result<()> {
     update_permissions(state_dir, id, |p| p.set(capability, allowed))
+}
+
+/// Set each of `capabilities` to `allowed` for `id`, in one write (UX 3:
+/// a group's switch on the Devices page).
+pub fn set_permissions(
+    state_dir: &Path,
+    id: &str,
+    capabilities: &[Capability],
+    allowed: bool,
+) -> pocketdesk_core::error::Result<()> {
+    update_permissions(state_dir, id, |p| {
+        for capability in capabilities {
+            p.set(*capability, allowed);
+        }
+    })
 }
 
 /// Give `id` a profile's permissions in one write (P9 review: a switch at a

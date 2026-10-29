@@ -119,7 +119,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::Audio,
-        "Hear and change this computer's sound, and its media",
+        "Hear and change this computer's sound",
         "Plays this computer's sound on the phone and sets the volume. Also shows the phone what is playing here (title, artist, app) and lets it pause and skip.",
     ),
     (
@@ -129,7 +129,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::Power,
-        "Lock, sleep, privacy mode and waking others",
+        "Lock, sleep, privacy and wake others",
         "Lock the screen, put the computer to sleep or shut it down, blank it for privacy, and send a wake to another computer on this network.",
     ),
     (
@@ -174,7 +174,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::PhoneActions,
-        "Take screenshots of it, lock it and open its apps from here",
+        "Screenshot, lock and open its apps",
         "Screenshot of the phone and Lock the phone, on the Overview and in the tray, and Open an app on the phone\u{2026} on the Overview. The phone takes a screenshot or locks with \u{201c}Let the computer take screenshots and lock this phone\u{201d} on and its Pocketdesk control service, and opens apps with \u{201c}Let the computer open my apps\u{201d} on; a screenshot arrives as its new screenshots do.",
     ),
     (
@@ -214,10 +214,108 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     ),
     (
         Capability::AwayLock,
-        "Lock this computer when this phone leaves",
+        "Lock this computer when it leaves",
         "When the phone's link on this computer's network has been gone for the time in Settings (Phones) and nobody has used the keyboard or mouse meanwhile, this computer locks, once per departure. A phone linked from away (the internet road or a tailnet) counts as gone. A phone asleep may lose its link, so reading or watching without touching anything can lock too. On Linux it reads the keyboard's idle time from GNOME, KDE, the compositor (Sway, Hyprland and others with ext-idle-notify) or X11 (xprintidle), and never locks on a desktop that says none of these.",
     ),
 ];
+
+/// The Devices page's switches in groups (UX 3), each under its name
+/// with a switch for all of it: every one of [`PERMISSIONS`] once.
+pub(crate) const PERMISSION_GROUPS: [(&str, &[Capability]); 5] = [
+    (
+        "Control",
+        &[
+            Capability::Input,
+            Capability::SharedInput,
+            Capability::Power,
+            Capability::Peek,
+        ],
+    ),
+    (
+        "Screen, sound and media",
+        &[
+            Capability::Cast,
+            Capability::Audio,
+            Capability::Mic,
+            Capability::Media,
+            Capability::PhoneSound,
+        ],
+    ),
+    (
+        "Files and clipboard",
+        &[
+            Capability::Clipboard,
+            Capability::Files,
+            Capability::Browse,
+            Capability::Links,
+            Capability::Notes,
+        ],
+    ),
+    (
+        "Phone on this computer",
+        &[
+            Capability::Notifications,
+            Capability::Texts,
+            Capability::Dial,
+            Capability::PhoneActions,
+            Capability::Ring,
+            Capability::Mute,
+        ],
+    ),
+    (
+        "Automation",
+        &[
+            Capability::Exec,
+            Capability::Command,
+            Capability::Ask,
+            Capability::Tasks,
+            Capability::AwayLock,
+        ],
+    ),
+];
+
+/// What a group's switch turns on (UX 3): its switches a device's page
+/// shows and that can be set here, but Run commands, which is turned on
+/// only by itself. Turning a group off also turns Run commands off.
+pub(crate) fn group_turns_on(capabilities: &[Capability], computer: bool) -> Vec<Capability> {
+    group_turns_off(capabilities, computer)
+        .into_iter()
+        .filter(|c| *c != Capability::Exec)
+        .collect()
+}
+
+/// What a group's switch turns off (UX 3): its switches a device's page
+/// shows and that can be set here.
+pub(crate) fn group_turns_off(capabilities: &[Capability], computer: bool) -> Vec<Capability> {
+    capabilities
+        .iter()
+        .copied()
+        .filter(|c| shown_for(*c, computer))
+        .filter(|c| *c != Capability::AwayLock || away_lock_unavailable().is_none())
+        .collect()
+}
+
+/// A group switch's hover (PR #558 review): what it turns on by name,
+/// and that Run commands stays off.
+pub(crate) fn group_hover(on: &[Capability], off: &[Capability]) -> String {
+    let named = |c: &Capability| {
+        PERMISSIONS
+            .iter()
+            .find(|(p, _, _)| p == c)
+            .map_or_else(|| format!("{c:?}"), |(_, label, _)| label.to_string())
+    };
+    let mut said = format!(
+        "Turns on: {}. Unticked, it turns them all off.",
+        on.iter().map(named).collect::<Vec<_>>().join("; ")
+    );
+    if off.contains(&Capability::Exec) {
+        said.push_str(" Run commands stays off; it turns on only by itself.");
+    }
+    said
+}
+
+/// A group switch's note: Run commands is never turned on with the rest.
+pub(crate) const EXEC_ALONE: &str = "Run commands turns on only by itself.";
 
 /// The switches a profile sets on a device: those its page shows, and
 /// AwayLock only where it works (Q2 review: the question named one Apply
@@ -275,7 +373,7 @@ fn shown_for(capability: Capability, computer: bool) -> bool {
         ))
 }
 
-/// Why "Lock this computer when this phone leaves" cannot be turned on
+/// Why "Lock this computer when it leaves" cannot be turned on
 /// here, if it cannot: this computer cannot tell yet whether someone is at
 /// it (E5).
 fn away_lock_unavailable() -> Option<&'static str> {
@@ -520,12 +618,6 @@ impl PocketdeskApp {
     /// (UX 1), with Start: off, with "Starting…", from a start until the
     /// server says it runs (PR #553 review I2).
     fn stopped_bar(&mut self, ui: &mut egui::Ui) {
-        let busy = self.job.is_some()
-            || starting(
-                self.started_at,
-                self.snapshot.running,
-                std::time::Instant::now(),
-            );
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(
@@ -533,20 +625,32 @@ impl PocketdeskApp {
                     .color(crate::theme::warn(ui))
                     .strong(),
             );
-            if busy {
-                ui.spinner();
-                ui.label("Starting\u{2026}");
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(500));
-            } else if ui
-                .button("Start server")
-                .on_hover_text("Once installed, it starts by itself when you sign in.")
-                .clicked()
-            {
-                self.start_server();
-            }
+            self.start_control(ui);
         });
         ui.add_space(4.0);
+    }
+
+    /// Start server, or "Starting…" from a start until the server
+    /// says it runs: the bar's, and the Overview status card's (UX 3).
+    fn start_control(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some()
+            || starting(
+                self.started_at,
+                self.snapshot.running,
+                std::time::Instant::now(),
+            );
+        if busy {
+            ui.spinner();
+            ui.label("Starting\u{2026}");
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        } else if ui
+            .button(START_SERVER)
+            .on_hover_text("Once installed, it starts by itself when you sign in.")
+            .clicked()
+        {
+            self.start_server();
+        }
     }
 
     /// Start the server off the UI thread, once (PR #553 review I2).
@@ -1183,6 +1287,33 @@ impl PocketdeskApp {
         self.refresh();
     }
 
+    /// A group's switches set at once (UX 3), in one write, as
+    /// [`Self::set_permission`] sets one.
+    fn set_permissions(&mut self, id: &str, capabilities: &[Capability], allowed: bool) {
+        // P10: a phone's contacts go with its texts.
+        if capabilities.contains(&Capability::Texts) && !allowed {
+            let _ = pocketdesk_core::local::phone_contacts::forget(&self.state_dir, id);
+        }
+        match model::set_permissions(&self.state_dir, id, capabilities, allowed) {
+            Ok(())
+                if !allowed
+                    && capabilities
+                        .iter()
+                        .any(|c| model::fixed_at_session_start(*c)) =>
+            {
+                self.end_sessions_of(id);
+            }
+            Ok(()) => {}
+            Err(e) => {
+                self.notice = crate::notice::Notice::error(format!(
+                    "Could not change {}: {e}",
+                    self.label(id)
+                ))
+            }
+        }
+        self.refresh();
+    }
+
     fn set_permission(&mut self, id: &str, capability: Capability, allowed: bool) {
         // P10: a phone's contacts go with its texts.
         if capability == Capability::Texts && !allowed {
@@ -1337,57 +1468,12 @@ impl PocketdeskApp {
         }
     }
 
+    /// The Overview (UX 3): the status card first, then the first-run
+    /// steps while no phone is paired, the phones and computers paired,
+    /// and the ports in a closed Details fold.
     fn status_tab(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        self.pause_row(ui);
-        ui.add_space(4.0);
-        if self.snapshot.running {
-            status_line(ui, crate::theme::GOOD, "The server is running");
-            self.restart_button(ui);
-        } else {
-            // Its Start is in the bar at the top of every page (UX 1).
-            status_line(ui, crate::theme::MUTED, "The server isn't running");
-        }
-        ui.add_space(8.0);
-        egui::Grid::new("status")
-            .num_columns(2)
-            .spacing([24.0, 6.0])
-            .show(ui, |ui| {
-                // Phones, as listed below; other computers are in Settings.
-                ui.label("Paired phones");
-                ui.label(
-                    self.snapshot
-                        .devices
-                        .iter()
-                        .filter(|d| !d.computer)
-                        .count()
-                        .to_string(),
-                );
-                ui.end_row();
-                ui.label("Live sessions");
-                ui.label(self.snapshot.sessions.len().to_string());
-                ui.end_row();
-                if let Some(config) = &self.config {
-                    ui.label("Control port");
-                    let port = self.snapshot.control_port(config.control_port);
-                    if port == config.control_port {
-                        ui.label(format!("TCP {port}"));
-                    } else {
-                        // T1: another program holds the configured one.
-                        ui.label(format!(
-                            "TCP {port} (TCP {} is held by another program)",
-                            config.control_port
-                        ));
-                    }
-                    ui.end_row();
-                    ui.label("Streaming port");
-                    ui.label(format!("UDP {}", config.streaming_port));
-                    ui.end_row();
-                    ui.label("Pairing required");
-                    ui.label(if config.pairing_required { "yes" } else { "no" });
-                    ui.end_row();
-                }
-            });
+        self.status_card(ui);
         // Not a fact among the others: a warning, with the way to change it (I3).
         if self.config.as_ref().is_some_and(|c| !c.pairing_required) {
             ui.add_space(6.0);
@@ -1404,8 +1490,223 @@ impl PocketdeskApp {
                 }
             });
         }
-        ui.add_space(16.0);
-        self.phones_panel(ui);
+        let computers = self.computers.paired(&self.state_dir).to_vec();
+        let phones = self.snapshot.devices.iter().filter(|d| !d.computer).count();
+        // Computers that paired with this one, not with this one's link.
+        let into_here: Vec<model::Device> = self
+            .snapshot
+            .devices
+            .iter()
+            .filter(|d| d.computer && !computers.iter().any(|c| c.device_id == d.id))
+            .cloned()
+            .collect();
+        let steps_shown = phones == 0 && !steps_hidden(ui.ctx());
+        if steps_shown {
+            ui.add_space(8.0);
+            self.first_run_card(ui, computers.len() + into_here.len());
+        }
+        ui.add_space(12.0);
+        self.tel_question(ui);
+        if phones == 0 && computers.is_empty() && into_here.is_empty() {
+            self.overview_link = None;
+            // The steps say how; with them hidden, a line and its button.
+            if !steps_shown {
+                crate::theme::section(ui, YOUR_DEVICES);
+                ui.label("Nothing is paired yet. A phone scans a code from the Pair page.");
+                if ui.button("Pair a phone").clicked() {
+                    self.switch_to(Tab::Pair);
+                    self.chosen = Tab::Pair;
+                }
+            }
+        } else {
+            crate::theme::section(ui, YOUR_DEVICES);
+            if phones > 0 {
+                self.phones_panel(ui);
+            }
+            self.computer_cards(ui, &computers, &into_here);
+        }
+        ui.add_space(12.0);
+        self.details_fold(ui);
+    }
+
+    /// The Overview's status card (UX 3): whether the server runs, with
+    /// Start or Restart, and the pause.
+    fn status_card(&mut self, ui: &mut egui::Ui) {
+        crate::theme::card(ui, |ui| {
+            if self.snapshot.running {
+                ui.horizontal_wrapped(|ui| {
+                    status_line(ui, crate::theme::GOOD, "The server is running");
+                    ui.label(
+                        RichText::new(live_sessions(self.snapshot.sessions.len()))
+                            .color(crate::theme::muted(ui)),
+                    );
+                });
+                self.restart_button(ui);
+            } else {
+                // The bar's words and Start, here instead of the bar.
+                status_line(ui, crate::theme::WARN, STOPPED_BAR);
+                ui.horizontal_wrapped(|ui| self.start_control(ui));
+            }
+            ui.separator();
+            self.pause_row(ui);
+        });
+    }
+
+    /// The first-run steps (UX 3), each ticked as it is done, with the
+    /// way to do it; shown while no phone is paired, until hidden.
+    fn first_run_card(&mut self, ui: &mut egui::Ui, computers: usize) {
+        let steps = first_steps(self.snapshot.running, 0, computers);
+        let mut pair_phone = false;
+        let mut hide = false;
+        crate::theme::card(ui, |ui| {
+            crate::theme::section(ui, "Get started");
+            for (i, (words, done)) in steps.iter().enumerate() {
+                ui.horizontal_wrapped(|ui| {
+                    let label = RichText::new(step_label(i, words, *done));
+                    ui.label(if *done {
+                        label.color(crate::theme::good(ui))
+                    } else {
+                        label.strong()
+                    });
+                    if *done {
+                        return;
+                    }
+                    match i {
+                        0 => {
+                            ui.label(
+                                RichText::new("With Start server, above.")
+                                    .color(crate::theme::muted(ui)),
+                            );
+                        }
+                        1 => pair_phone = ui.button("Pair a phone").clicked(),
+                        _ => {
+                            if ui.button(PAIR_A_COMPUTER).clicked() {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::PairComputer);
+                            }
+                        }
+                    }
+                });
+            }
+            hide = ui.small_button(HIDE_STEPS).clicked();
+        });
+        if pair_phone {
+            self.switch_to(Tab::Pair);
+            self.chosen = Tab::Pair;
+        }
+        if hide {
+            ui.ctx()
+                .data_mut(|d| d.insert_persisted(steps_hidden_id(), true));
+        }
+    }
+
+    /// The Overview's computers (UX 3), a card each: those this one paired
+    /// with, with Show its screen, and those that paired with this one.
+    fn computer_cards(
+        &mut self,
+        ui: &mut egui::Ui,
+        computers: &[pocketdesk_core::local::computers::PeerComputer],
+        into_here: &[model::Device],
+    ) {
+        let mut show = None;
+        for computer in computers {
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        match computer.link.as_str() {
+                            "linked" => crate::theme::GOOD,
+                            "refused" => crate::theme::WARN,
+                            _ => crate::theme::MUTED,
+                        },
+                    );
+                    ui.label(RichText::new(&computer.name).strong());
+                    ui.label(
+                        RichText::new(crate::computers_view::link_words(computer))
+                            .color(crate::theme::muted(ui)),
+                    );
+                });
+                let reach = crate::computers_view::view_reach(computer, self.snapshot.running);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
+                        .on_hover_text("Its screen in a window here.")
+                        .on_disabled_hover_text(reach.err().unwrap_or_default())
+                        .clicked()
+                    {
+                        show = Some((computer.device_id.clone(), computer.name.clone()));
+                    }
+                    if ui.button(SHARE_INPUT).clicked() {
+                        crate::widgets::ask(ui.ctx(), crate::widgets::Ask::Go(Tab::KeyboardMouse));
+                    }
+                });
+                // UX 1's item 2: why it is off, in a line.
+                if let Err(why) = reach {
+                    crate::widgets::why_off(ui, &format!("{why}."), None);
+                }
+            });
+        }
+        for device in into_here {
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let (token, place) = if device.connected {
+                        (crate::theme::GOOD, "In a session")
+                    } else if device.linked {
+                        (crate::theme::GOOD, "Linked")
+                    } else {
+                        (crate::theme::MUTED, "Away")
+                    };
+                    crate::theme::dot(ui, token);
+                    ui.label(
+                        RichText::new(model::device_label(&self.snapshot.devices, &device.id))
+                            .strong(),
+                    );
+                    ui.label(RichText::new(place).color(crate::theme::pick(ui, token)));
+                    ui.label(RichText::new("paired with this one").color(crate::theme::muted(ui)));
+                });
+                if ui.button("What it may do").clicked() {
+                    crate::widgets::ask(ui.ctx(), crate::widgets::Ask::Go(Tab::Devices));
+                }
+            });
+        }
+        if let Some((id, name)) = show {
+            self.show_computer(ui.ctx(), &id, &name);
+        }
+    }
+
+    /// The Overview's ports and pairing rule (UX 3), in a fold closed at
+    /// first: facts for a firewall or a bug report, not for every day.
+    fn details_fold(&mut self, ui: &mut egui::Ui) {
+        let Some(config) = &self.config else {
+            return;
+        };
+        let port = self.snapshot.control_port(config.control_port);
+        egui::CollapsingHeader::new(DETAILS)
+            .id_salt("overview-details")
+            .default_open(false)
+            .show(ui, |ui| {
+                egui::Grid::new("status")
+                    .num_columns(2)
+                    .spacing([24.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label("Control port");
+                        if port == config.control_port {
+                            ui.label(format!("TCP {port}"));
+                        } else {
+                            // T1: another program holds the configured one.
+                            ui.label(format!(
+                                "TCP {port} (TCP {} is held by another program)",
+                                config.control_port
+                            ));
+                        }
+                        ui.end_row();
+                        ui.label("Streaming port");
+                        ui.label(format!("UDP {}", config.streaming_port));
+                        ui.end_row();
+                        ui.label("Pairing required");
+                        ui.label(if config.pairing_required { "yes" } else { "no" });
+                        ui.end_row();
+                    });
+            });
     }
 
     /// Send a press to `id`'s player, saying it was asked (the Sessions
@@ -1687,15 +1988,9 @@ impl PocketdeskApp {
     /// The Overview's phones (N6): where each is, its battery and last
     /// session, and Ring, Send file… and Send link… for it.
     fn phones_panel(&mut self, ui: &mut egui::Ui) {
-        self.tel_question(ui);
-        ui.label(RichText::new("Your phones").strong());
         let now = now_unix();
         let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
         if rows.is_empty() {
-            ui.label("No phone is paired yet. The phone scans a code from the Pair page.");
-            if ui.button("Pair a phone").clicked() {
-                self.switch_to(Tab::Pair);
-            }
             self.overview_link = None;
             return;
         }
@@ -1715,9 +2010,17 @@ impl PocketdeskApp {
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_width(ui.available_width());
+            crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
+                    // UX 3: where it is as a dot too.
+                    crate::theme::dot(
+                        ui,
+                        if row.place == model::Place::Away {
+                            crate::theme::MUTED
+                        } else {
+                            crate::theme::GOOD
+                        },
+                    );
                     ui.label(RichText::new(model::device_label(&self.snapshot.devices, &device.id)).strong())
                         .on_hover_text(&device.id);
                     let (place, why) = match row.place {
@@ -1794,7 +2097,11 @@ impl PocketdeskApp {
                 if let Some(playing) = row.playing {
                     let media = &playing.media;
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(if media.is_playing { "Playing:" } else { "Paused:" });
+                        ui.label(if media.is_playing {
+                            "Playing:"
+                        } else {
+                            "Paused:"
+                        });
                         ui.label(RichText::new(model::media_line(media)).strong());
                         let buttons = [
                             ("Previous", "previous", media.can_previous),
@@ -2129,8 +2436,8 @@ impl PocketdeskApp {
         // E5: a block per device, its parts wrapping, as the Overview's
         // phones are: a grid of six columns ran off a small window.
         for device in &self.snapshot.devices {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
+            // UX 3: a card per device.
+            crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if let Some(name) = &device.name {
                         ui.label(RichText::new(name).strong());
@@ -2207,6 +2514,7 @@ impl PocketdeskApp {
             .color(crate::theme::muted(ui)),
         );
         let mut change = None;
+        let mut group_change: Option<(String, Vec<Capability>, bool)> = None;
         let mut ask = None;
         let mut rename = None;
         let mut save_profile = None;
@@ -2238,30 +2546,6 @@ impl PocketdeskApp {
             egui::CollapsingHeader::new(format!("What {label} may do"))
                 .id_salt(("permissions", &device.id))
                 .show(ui, |ui| {
-                    // U3: the owner's name for it, which the phone's own
-                    // never replaces; blank goes back to the phone's.
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Name");
-                        let text = self.renaming.entry(device.id.clone()).or_insert_with(|| {
-                            if device.renamed {
-                                device.name.clone().unwrap_or_default()
-                            } else {
-                                String::new()
-                            }
-                        });
-                        ui.add(
-                            egui::TextEdit::singleline(text)
-                                .hint_text(device.name.as_deref().unwrap_or("its own name"))
-                                .desired_width(200.0),
-                        );
-                        if ui
-                            .button("Rename")
-                            .on_hover_text("Blank: the name the phone gives itself.")
-                            .clicked()
-                        {
-                            rename = Some((device.id.clone(), text.clone()));
-                        }
-                    });
                     // P9: these permissions under a name, or a profile's.
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Profile");
@@ -2376,6 +2660,30 @@ impl PocketdeskApp {
                             }
                         });
                     }
+                    // U3: the owner's name for it, which the phone's own
+                    // never replaces; blank goes back to the phone's.
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Name");
+                        let text = self.renaming.entry(device.id.clone()).or_insert_with(|| {
+                            if device.renamed {
+                                device.name.clone().unwrap_or_default()
+                            } else {
+                                String::new()
+                            }
+                        });
+                        ui.add(
+                            egui::TextEdit::singleline(text)
+                                .hint_text(device.name.as_deref().unwrap_or("its own name"))
+                                .desired_width(200.0),
+                        );
+                        if ui
+                            .button("Rename")
+                            .on_hover_text("Blank: the name the phone gives itself.")
+                            .clicked()
+                        {
+                            rename = Some((device.id.clone(), text.clone()));
+                        }
+                    });
                     let mut ask_first = device.permissions.ask_first;
                     if ui
                         .checkbox(&mut ask_first, "Ask before each session")
@@ -2387,42 +2695,73 @@ impl PocketdeskApp {
                     {
                         ask = Some((device.id.clone(), ask_first));
                     }
-                    for (capability, label, hint) in PERMISSIONS {
-                        if !shown_for(capability, device.computer) {
+                    // UX 3: the switches in their groups, each with a
+                    // switch for all of it.
+                    for (group, members) in PERMISSION_GROUPS {
+                        let on = group_turns_on(members, device.computer);
+                        let off = group_turns_off(members, device.computer);
+                        if off.is_empty() {
                             continue;
                         }
-                        let mut allowed = device.permissions.allows(capability);
-                        let unavailable = (capability == Capability::AwayLock)
-                            .then(away_lock_unavailable)
-                            .flatten();
-                        let hint = hint_for(capability, device.computer, hint);
+                        ui.add_space(6.0);
+                        let all_on = on.iter().all(|c| device.permissions.allows(*c));
+                        let some_on = off.iter().any(|c| device.permissions.allows(*c));
+                        let mut checked = all_on;
                         if ui
-                            .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
-                            .on_hover_text(hint)
-                            .on_disabled_hover_text(unavailable.unwrap_or(hint))
+                            .add(
+                                egui::Checkbox::new(&mut checked, RichText::new(group).strong())
+                                    .indeterminate(some_on && !all_on),
+                            )
+                            .on_hover_text(group_hover(&on, &off))
                             .changed()
                         {
-                            change = Some((device.id.clone(), capability, allowed));
+                            group_change =
+                                Some((device.id.clone(), if checked { on } else { off }, checked));
                         }
-                        // BK7: a computer's Control is also its window's.
-                        if capability == Capability::Input && device.computer {
-                            ui.label(
-                                RichText::new(
-                                    "Also lets that computer control this one from a window showing this screen.",
-                                )
-                                .color(crate::theme::muted(ui)),
-                            );
-                        }
-                        // While it is on, what it waits for, in plain sight (E5).
-                        if capability == Capability::AwayLock && allowed && unavailable.is_none() {
-                            let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
-                            ui.label(
-                                RichText::new(format!(
-                                    "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
-                                ))
-                                .color(crate::theme::muted(ui)),
-                            );
-                        }
+                        ui.indent(("group", group, &device.id), |ui| {
+                            if members.contains(&Capability::Exec)
+                                && shown_for(Capability::Exec, device.computer)
+                            {
+                                ui.label(RichText::new(EXEC_ALONE).color(crate::theme::muted(ui)));
+                            }
+                            for (capability, label, hint) in PERMISSIONS {
+                                if !members.contains(&capability) || !shown_for(capability, device.computer) {
+                                    continue;
+                                }
+                                let mut allowed = device.permissions.allows(capability);
+                                let unavailable = (capability == Capability::AwayLock)
+                                    .then(away_lock_unavailable)
+                                    .flatten();
+                                let hint = hint_for(capability, device.computer, hint);
+                                if ui
+                                    .add_enabled(unavailable.is_none(), egui::Checkbox::new(&mut allowed, label))
+                                    .on_hover_text(hint)
+                                    .on_disabled_hover_text(unavailable.unwrap_or(hint))
+                                    .changed()
+                                {
+                                    change = Some((device.id.clone(), capability, allowed));
+                                }
+                                // BK7: a computer's Control is also its window's.
+                                if capability == Capability::Input && device.computer {
+                                    ui.label(
+                                        RichText::new(
+                                            "Also lets that computer control this one from a window showing this screen.",
+                                        )
+                                        .color(crate::theme::muted(ui)),
+                                    );
+                                }
+                                // While it is on, what it waits for, in plain sight (E5).
+                                if capability == Capability::AwayLock && allowed && unavailable.is_none() {
+                                    let minutes = self.config.as_ref().map_or(5, |c| c.away_lock_minutes);
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "Locks after {minutes} min away with nobody at the keyboard (Settings, Phones)."
+                                        ))
+                                        .color(crate::theme::muted(ui)),
+                                    );
+                                }
+                            }
+                        });
                     }
                 });
             // L7: each feature as this computer, the phone and Android stand.
@@ -2434,6 +2773,9 @@ impl PocketdeskApp {
         }
         if let Some((id, capability, allowed)) = change {
             self.set_permission(&id, capability, allowed);
+        }
+        if let Some((id, capabilities, allowed)) = group_change {
+            self.set_permissions(&id, &capabilities, allowed);
         }
         if let Some((id, ask_first)) = ask {
             self.set_ask_first(&id, ask_first);
@@ -2722,7 +3064,7 @@ impl PocketdeskApp {
             return;
         }
         ui.add_space(12.0);
-        ui.heading("Recent sessions");
+        crate::theme::section(ui, "Recent sessions");
         let now = now_unix();
         for recent in &self.recent_sessions {
             let who = model::recent_who(recent, &self.snapshot.devices);
@@ -4021,6 +4363,14 @@ impl eframe::App for PocketdeskApp {
                 ui.heading("Pocketdesk");
                 // Scrolls when the window is short (U1 review).
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    // UX 3: the pages' list stays as tight as it was, so
+                    // all of it fits a 480 px window; the pages' own
+                    // controls take the taller buttons.
+                    ui.spacing_mut().interact_size.y = 20.0;
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.spacing_mut().button_padding.y = 2.0;
+                    // The selected page is its fill, with no edge round it.
+                    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                         for group in crate::nav::GROUPS {
                             ui.add_space(10.0);
@@ -4093,7 +4443,8 @@ impl eframe::App for PocketdeskApp {
         }
         // UX 1: a stopped server said once, at the top of every page, with
         // its Start, in place of each page's own words.
-        if !self.snapshot.running {
+        // The Overview says it in its status card instead (UX 3).
+        if !self.snapshot.running && self.tab != Tab::Status {
             egui::Panel::top("stopped").show(ui, |ui| self.stopped_bar(ui));
         }
         egui::CentralPanel::default().show(ui, |ui| {
@@ -4174,13 +4525,65 @@ pub fn away_words(name: &str, running: bool) -> String {
 /// stopped (UX 1).
 pub const STOPPED_BAR: &str = "The server isn't running: phones and computers can't connect.";
 
+/// The bar's button, and the Overview status card's (UX 3).
+pub const START_SERVER: &str = "Start server";
+
+/// The Overview's list of the phones and computers paired (UX 3).
+pub const YOUR_DEVICES: &str = "Your devices";
+
+/// The Overview's fold of ports and the pairing rule (UX 3).
+pub const DETAILS: &str = "Details";
+
+/// The first-run card's way to hide it (UX 3).
+pub const HIDE_STEPS: &str = "Hide these steps";
+
+/// A computer card's way to the Keyboard and mouse page (UX 3).
+pub const SHARE_INPUT: &str = "Share keyboard and mouse";
+
+/// The first-run steps (UX 3), each with whether it is done: the server
+/// running, a phone paired, another computer paired.
+pub fn first_steps(running: bool, phones: usize, computers: usize) -> [(&'static str, bool); 3] {
+    [
+        ("Start the server", running),
+        ("Pair your phone", phones > 0),
+        ("Pair another computer", computers > 0),
+    ]
+}
+
+/// A first-run step's line: a tick once done, else its number.
+pub fn step_label(index: usize, words: &str, done: bool) -> String {
+    if done {
+        format!("\u{2713} {words}")
+    } else {
+        format!("{}. {words}", index + 1)
+    }
+}
+
+fn steps_hidden_id() -> egui::Id {
+    egui::Id::new("pocketdesk-first-run-hidden")
+}
+
+/// Whether the first-run steps were hidden, kept with the window's state.
+fn steps_hidden(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| d.get_persisted::<bool>(steps_hidden_id()))
+        .unwrap_or(false)
+}
+
+/// The live sessions, in words, beside "The server is running".
+fn live_sessions(count: usize) -> String {
+    match count {
+        0 => "no live session".to_string(),
+        1 => "1 live session".to_string(),
+        n => format!("{n} live sessions"),
+    }
+}
+
 /// A coloured dot and a bold line. The dot is painted: the bundled fonts
 /// have no "●" glyph.
 fn status_line(ui: &mut egui::Ui, token: crate::theme::Token, text: &str) {
     let color = crate::theme::pick(ui, token);
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-        ui.painter().circle_filled(rect.center(), 5.0, color);
+        crate::theme::dot(ui, token);
         ui.label(RichText::new(text).color(color).strong());
     });
 }
@@ -4199,6 +4602,81 @@ pub fn kept_page(chosen: Tab) -> Tab {
 #[cfg(test)]
 mod start_tests {
     use super::*;
+
+    /// UX 3: every switch of the Devices page is in one group, once, and
+    /// no group names a switch the page does not have.
+    #[test]
+    fn every_switch_is_in_one_group() {
+        for (capability, label, _) in PERMISSIONS {
+            let groups = PERMISSION_GROUPS
+                .iter()
+                .filter(|(_, members)| members.contains(&capability))
+                .count();
+            assert_eq!(groups, 1, "{label}");
+        }
+        let grouped: usize = PERMISSION_GROUPS.iter().map(|(_, m)| m.len()).sum();
+        assert_eq!(grouped, PERMISSIONS.len());
+        for (group, _) in PERMISSION_GROUPS {
+            assert!(group.split_whitespace().count() <= 6, "{group}");
+        }
+    }
+
+    /// UX 3: a switch's label is at most six words.
+    #[test]
+    fn switch_labels_are_short() {
+        for (_, label, _) in PERMISSIONS {
+            assert!(label.split_whitespace().count() <= 6, "{label}");
+        }
+    }
+
+    /// PR #558 review: a group switch's hover names what it turns on, and
+    /// says Run commands stays off where the group has it.
+    #[test]
+    fn a_group_switch_names_what_it_turns_on() {
+        let on = [Capability::Command, Capability::Tasks];
+        let said = group_hover(&on, &[Capability::Exec, Capability::Command]);
+        assert!(
+            said.contains("Send commands to its automation apps; Start my tasks"),
+            "{said}"
+        );
+        assert!(said.contains("Run commands stays off"), "{said}");
+        let said = group_hover(&[Capability::Clipboard], &[Capability::Clipboard]);
+        assert!(said.starts_with("Turns on: Share the clipboard."), "{said}");
+        assert!(!said.contains("Run commands"), "{said}");
+    }
+
+    /// UX 3: a group's switch never turns Run commands on, but does turn
+    /// it off.
+    #[test]
+    fn run_commands_turns_on_only_by_itself() {
+        let (_, automation) = PERMISSION_GROUPS
+            .iter()
+            .find(|(_, m)| m.contains(&Capability::Exec))
+            .expect("a group");
+        assert!(!group_turns_on(automation, false).contains(&Capability::Exec));
+        assert!(group_turns_off(automation, false).contains(&Capability::Exec));
+        // A computer's page hides a phone's switches, and so do its groups.
+        assert!(!group_turns_off(automation, true).contains(&Capability::Ask));
+    }
+
+    /// UX 3: each first-run step is done by its own fact, and says so.
+    #[test]
+    fn the_first_steps_are_their_facts() {
+        let done = |running, phones, computers| {
+            first_steps(running, phones, computers).map(|(_, done)| done)
+        };
+        assert_eq!(done(false, 0, 0), [false, false, false]);
+        assert_eq!(done(true, 0, 0), [true, false, false]);
+        assert_eq!(done(false, 2, 0), [false, true, false]);
+        assert_eq!(done(false, 0, 1), [false, false, true]);
+        assert_eq!(
+            step_label(1, "Pair your phone", false),
+            "2. Pair your phone"
+        );
+        assert!(step_label(1, "Pair your phone", true).ends_with(" Pair your phone"));
+        assert_eq!(live_sessions(1), "1 live session");
+        assert_eq!(live_sessions(3), "3 live sessions");
+    }
 
     /// PR #553 review M6: an away phone's line names its remote actions,
     /// and a stopped server as the cause when it is one.
