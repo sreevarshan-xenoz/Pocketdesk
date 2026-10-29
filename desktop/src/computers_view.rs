@@ -430,8 +430,10 @@ impl ComputersView {
         } else if empty {
             crate::widgets::why_off(ui, PASTE_FIRST, None);
         }
+        // Not under a link for another computer (PR #553 review M5).
         if self.pairing.is_none()
             && let Some(last) = &self.file.last_pairing
+            && parsed.as_ref().is_none_or(|link| is_of_link(last, link))
         {
             show_outcome(ui, last);
         }
@@ -588,11 +590,6 @@ pub fn outcome_words(outcome: &str, name: &str) -> Outcome {
             ),
             false,
         )
-    } else if has("expired") {
-        failed(
-            format!("The link's code has expired. Copy a fresh link on {name} and paste it again."),
-            false,
-        )
     } else if has("did not answer the code") {
         failed(
             format!(
@@ -616,6 +613,19 @@ pub fn outcome_words(outcome: &str, name: &str) -> Outcome {
         )
     } else {
         failed(format!("Pairing with {name} didn't work."), true)
+    }
+}
+
+/// Whether `last` is the pairing of `link`'s computer: by its id, or by
+/// name for an outcome written before the id was kept.
+fn is_of_link(
+    last: &computers::PairingOutcome,
+    link: &pocketdesk_core::local::pair_link::PairLink,
+) -> bool {
+    if last.device_id.is_empty() {
+        last.name == link.name
+    } else {
+        last.device_id == link.device_id
     }
 }
 
@@ -1125,8 +1135,10 @@ mod tests {
         assert!(refused.said.contains("turned the connection away") && refused.diagnostics);
         let code = said("failed: it refused the code (a wrong or used PIN)");
         assert!(code.said.contains("didn't take the code") && !code.diagnostics);
-        let expired = said("failed: the code expired");
-        assert!(expired.said.contains("expired"));
+        assert!(
+            code.said.contains("expired"),
+            "the server says expired so too"
+        );
         let cert = said(
             "failed: the computer at 192.0.2.70 is not the one in the link (another certificate)",
         );
@@ -1221,6 +1233,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(taken.len(), 1);
         assert!(late && waiting && no_cancel);
+    }
+
+    /// PR #553 review M5: the last pairing's outcome is not shown under a
+    /// link for another computer.
+    #[test]
+    fn the_last_outcome_is_not_shown_for_another_computer() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("stale");
+        computers::update(&dir, |file| {
+            file.last_pairing = Some(computers::PairingOutcome {
+                name: "Test Tower".to_string(),
+                outcome:
+                    "failed: it did not answer (192.0.2.70: timeout after 8000ms during connect)"
+                        .to_string(),
+                unix: 0,
+                request: String::new(),
+                device_id: "00000000-0000-4000-8000-0000000000f1".to_string(),
+            });
+        })
+        .unwrap();
+        let other = pocketdesk_core::local::pair_link::PairLink {
+            name: "Test Desk".to_string(),
+            device_id: "00000000-0000-4000-8000-0000000000f2".to_string(),
+            addresses: vec!["192.0.2.80".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+            pin: "654321".to_string(),
+            fingerprint: Some("cd".repeat(32)),
+            endpoint: None,
+            mine: false,
+        }
+        .to_uri();
+        let empty = page(&dir, true, "").query_by_label(NO_ANSWER).is_some();
+        let same = page(&dir, true, &mine_link())
+            .query_by_label(NO_ANSWER)
+            .is_some();
+        let another = page(&dir, true, &other).query_by_label(NO_ANSWER).is_some();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(empty && same && !another);
     }
 
     /// UX 1: a pairing that worked says so, with the next step.
