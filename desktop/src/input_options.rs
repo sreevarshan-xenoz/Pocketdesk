@@ -11,13 +11,13 @@ use pocketdesk_core::local::config::Config;
 #[cfg(test)]
 const KEYS: [&str; 8] = [
     "shared_input_drive",
-    "shared_input_hotkey",
     "shared_input_game_lock",
-    "shared_input_lock_programs",
     "shared_input_clipboard",
     "shared_input_files",
     "shared_input_sound",
     "shared_input_low_latency",
+    "shared_input_hotkey",
+    "shared_input_lock_programs",
 ];
 
 /// The heading they sit under.
@@ -146,6 +146,11 @@ impl InputOptions {
                     .hint_text("ctrl+alt+right")
                     .desired_width(160.0),
             );
+            let edit = edit.on_hover_text(if cfg!(windows) {
+                "Pressed anywhere, moves the keyboard and mouse on to the next computer; the screen's edge still switches."
+            } else {
+                "Pressed while the keyboard and mouse are on another computer, moves them on to the next (or home). Linux gives Pocketdesk no keys at home, so a crossing starts at the screen's edge there."
+            });
             if edit.lost_focus() && self.hotkey.trim() != config.shared_input_hotkey {
                 config.shared_input_hotkey = self.hotkey.trim().to_string();
                 changed.push("shared_input_hotkey");
@@ -154,9 +159,9 @@ impl InputOptions {
         note(
             ui,
             if cfg!(windows) {
-                "Empty is off. Read when the server starts."
+                "Moves to the next computer. Empty is off. Read at start."
             } else {
-                "Moves on from another computer. Read at start."
+                "Moves on from another computer. Empty is off. Read at start."
             },
         );
         ui.label(crate::settings_view::name("shared_input_lock_programs"));

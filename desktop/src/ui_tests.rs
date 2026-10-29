@@ -334,10 +334,10 @@ fn other_computers_point_to_pairing_on_the_pair_page() {
         app.query_by_label("From the other computer").is_none(),
         "no paste box in Settings"
     );
-    // Below the section's rows: by the keyboard, which scrolls to it.
-    app.get_by_label(crate::app::PAIR_A_COMPUTER).focus();
-    app.run_steps(2);
-    app.key_press(egui::Key::Enter);
+    // Below the section's settings, which can push it past the window.
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).scroll_to_me();
+    app.run_steps(3);
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
     let both = (0..50).any(|_| {
         app.run_steps(2);
         let found = app.query_by_label(crate::pair_view::COPY_LINK).is_some()
@@ -1623,12 +1623,20 @@ fn the_keyboard_and_mouse_options_are_on_its_page() {
     app.get_by_label(clipboard).focus();
     app.run_steps(2);
     app.key_press(egui::Key::Space);
-    app.run_steps(3);
+    app.run_steps(1);
     assert_eq!(
         load_config(&fixture).shared_input_clipboard,
         !was,
         "saved as it changed"
     );
+    // The box itself shows it on the next frame, not after the next read.
+    assert_eq!(ticked(&app, clipboard), !was, "the box keeps the click");
+}
+
+/// Whether the checkbox labelled `label` is ticked.
+fn ticked(app: &Harness<'static, PocketdeskApp>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT;
+    app.get_by_label(label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
 }
 
 /// The config the fixture's app saves.
@@ -1652,14 +1660,96 @@ fn the_keyboard_and_mouse_page_lists_its_setup() {
     for step in crate::arrange_view::checklist(Default::default()) {
         assert!(app.query_by_label(step.label).is_some(), "{}", step.label);
     }
-    app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
+    // Setup's is the first; Identify's fix may carry the same words
+    // (PR #555 review m6).
+    app.get_all_by_label(crate::app::PAIR_A_COMPUTER)
+        .next()
+        .expect("Setup's Pair a computer")
+        .click();
+    let opened = (0..50).any(|_| {
+        app.run_steps(2);
+        let found = app.query_by_label("From the other computer").is_some()
+            && app.query_by_label(crate::pair_view::COPY_LINK).is_some();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        found
+    });
+    assert!(opened, "Pair opened on Computer with both halves");
+}
+
+/// PR #555 review m6: each option the page draws is saved as it changes,
+/// the two text boxes as they are left.
+#[test]
+fn every_keyboard_and_mouse_option_is_saved() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::KeyboardMouse));
     app.run_steps(3);
-    assert!(
-        app.query_by_label(crate::pair_view::COPY_LINK).is_some()
-            || app.query_by_label_contains("pairing code").is_some(),
-        "Pair opened on Computer"
+    app.get_by_label(crate::arrange_view::SHARE_SWITCH).click();
+    app.run_steps(3);
+    let read = |key: &str| -> bool {
+        let c = load_config(&fixture);
+        match key {
+            "shared_input_drive" => c.shared_input_drive,
+            "shared_input_game_lock" => c.shared_input_game_lock,
+            "shared_input_clipboard" => c.shared_input_clipboard,
+            "shared_input_files" => c.shared_input_files,
+            "shared_input_sound" => c.shared_input_sound,
+            "shared_input_low_latency" => c.shared_input_low_latency,
+            other => panic!("{other}"),
+        }
+    };
+    for key in [
+        "shared_input_drive",
+        "shared_input_game_lock",
+        "shared_input_clipboard",
+        "shared_input_files",
+        "shared_input_sound",
+        "shared_input_low_latency",
+    ] {
+        if !crate::settings_view::drawn_here(key) {
+            continue;
+        }
+        let label = crate::settings_view::name(key);
+        let was = read(key);
+        app.get_by_label(label).focus();
+        app.run_steps(2);
+        app.key_press(egui::Key::Space);
+        app.run_steps(1);
+        assert_eq!(read(key), !was, "{key} saved");
+        assert_eq!(ticked(&app, label), !was, "{key}'s box");
+    }
+    // The text boxes: the switch key, then (by Tab, which scrolls to it)
+    // the programs'.
+    app.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("the switch key's box")
+        .focus();
+    app.run_steps(2);
+    app.get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("the switch key's box")
+        .type_text("x");
+    app.run_steps(2);
+    app.key_press(egui::Key::Tab);
+    app.run_steps(3);
+    assert_eq!(
+        load_config(&fixture).shared_input_hotkey,
+        "ctrl+alt+rightx",
+        "saved as it was left"
     );
-    assert!(app.query_by_label("From the other computer").is_some());
+    app.get_all_by_role(egui::accesskit::Role::TextInput)
+        .last()
+        .expect("the programs' box")
+        .type_text("blender");
+    app.run_steps(2);
+    app.key_press(egui::Key::Tab);
+    app.run_steps(3);
+    assert_eq!(
+        load_config(&fixture).shared_input_lock_programs,
+        ["blender"],
+        "saved as it was left"
+    );
 }
 
 /// UX 1: Identify, off, says why beside it: sharing first, with its fix.

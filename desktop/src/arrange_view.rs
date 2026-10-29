@@ -139,6 +139,9 @@ pub fn checklist(facts: Facts) -> Vec<Step> {
     ]
 }
 
+/// The width of a step's mark, a tick or a dot.
+const MARK_WIDTH: f32 = 14.0;
+
 /// The checklist's heading.
 pub const SETUP: &str = "Setup";
 
@@ -339,6 +342,29 @@ impl ArrangeView {
     /// What this page said happened since the last call.
     pub fn take_notice(&mut self) -> Option<crate::notice::Notice> {
         self.notice.take()
+    }
+
+    /// What Setup's steps are judged by (UX 2).
+    fn facts(&self, devices: &[Device], sharing_on: bool, server_running: bool) -> Facts {
+        let paired_now = self.paired(devices);
+        Facts {
+            server_running,
+            paired: paired_now.len(),
+            sharing_on,
+            linked: paired_now
+                .iter()
+                .filter(|id| self.status.link.get(*id).is_some_and(|l| l == LINK_DIRECT))
+                .count(),
+            // Only computers paired now (PR #555 review m5). Like the
+            // links, it is fresh only while sharing is on (the status is
+            // written every 30 s while off): the steps after Sharing may
+            // lag then, and Sharing's own step comes first.
+            drives: paired_now
+                .iter()
+                .filter(|id| self.status.answered.contains(*id))
+                .count(),
+            arranged: self.saved.is_some(),
+        }
     }
 
     fn refresh(&mut self, state_dir: &Path) {
@@ -600,27 +626,23 @@ impl ArrangeView {
         let mut action = None;
         let muted = crate::theme::muted(ui);
         // UX 2: each step, done or not, with its fix.
-        let paired_now = self.paired(devices);
-        let facts = Facts {
-            server_running,
-            paired: paired_now.len(),
-            sharing_on,
-            linked: paired_now
-                .iter()
-                .filter(|id| self.status.link.get(*id).is_some_and(|l| l == LINK_DIRECT))
-                .count(),
-            drives: self.status.answered.len(),
-            arranged: self.saved.is_some(),
-        };
+        let facts = self.facts(devices, sharing_on, server_running);
         ui.label(RichText::new(SETUP).strong());
         for step in checklist(facts) {
             ui.horizontal_wrapped(|ui| {
-                if step.done {
-                    ui.label(RichText::new("✔").color(crate::theme::good(ui)).strong());
-                    ui.label(step.label);
+                // The mark in a box of one width, so the labels line up
+                // (PR #555 review m8).
+                let mark = if step.done {
+                    RichText::new("✔").color(crate::theme::good(ui))
                 } else {
-                    ui.label(RichText::new("•").color(crate::theme::warn(ui)).strong());
-                    ui.label(step.label);
+                    RichText::new("•").color(crate::theme::warn(ui))
+                };
+                ui.add_sized(
+                    [MARK_WIDTH, ui.spacing().interact_size.y],
+                    egui::Label::new(mark.strong()),
+                );
+                ui.label(step.label);
+                if !step.done {
                     ui.label(RichText::new(step.todo).color(muted));
                     if let Some(fix) = step.fix
                         && ui.small_button(fix.label()).clicked()
@@ -1093,6 +1115,55 @@ mod tests {
         for step in none {
             assert!(step.label.split_whitespace().count() <= 6, "{}", step.label);
         }
+    }
+
+    /// PR #555 review m6: Setup's fixes do what they say: Turn on turns
+    /// sharing on, Start the server asks the app to start it.
+    #[test]
+    fn setup_fixes_do_what_they_say() {
+        use egui_kittest::kittest::Queryable;
+        let dir = std::env::temp_dir().join(format!("pd-setup-fix-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let acted = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let seen = acted.clone();
+        let state = dir.clone();
+        let mut view = ArrangeView::default();
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+            if let Some(action) = view.show(ui, &state, &[], false, false, 0) {
+                *seen.borrow_mut() = Some(action);
+            }
+        });
+        harness.run();
+        harness.get_by_label("Turn on").click();
+        harness.run();
+        assert_eq!(*acted.borrow(), Some(Action::Sharing(true)));
+        harness.get_by_label(crate::widgets::START).click();
+        harness.run();
+        assert_eq!(
+            crate::widgets::take_ask(&harness.ctx),
+            Some(crate::widgets::Ask::StartServer)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #555 review m5: a computer that answered but is no longer paired
+    /// does not count as one this computer may drive, nor as linked.
+    #[test]
+    fn setup_counts_only_computers_paired_now() {
+        let mut view = ArrangeView::default();
+        view.status.answered = BTreeSet::from(["gone".to_string(), "laptop".to_string()]);
+        view.status
+            .link
+            .insert("gone".to_string(), LINK_DIRECT.to_string());
+        let none = view.facts(&[], true, true);
+        assert_eq!((none.paired, none.linked, none.drives), (0, 0, 0));
+        let devices = [Device {
+            id: "laptop".to_string(),
+            computer: true,
+            ..Default::default()
+        }];
+        let one = view.facts(&devices, true, true);
+        assert_eq!((one.paired, one.linked, one.drives), (1, 0, 1));
     }
 
     #[test]

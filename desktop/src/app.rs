@@ -2567,6 +2567,10 @@ impl PocketdeskApp {
                 if let Some(Ok(form)) = self.settings.as_mut() {
                     form.saved_elsewhere_input(&config, keys);
                 }
+                // The page draws from it: the box shows what was saved at
+                // once, never the old value until the next read (PR #555
+                // review I1).
+                self.config = Some(config);
                 self.notice = crate::notice::Notice::done(said.map_or_else(
                     || format!("Saved: {}.", crate::settings_view::name(keys[0])),
                     str::to_string,
