@@ -22,6 +22,15 @@
 //! "Clipboard follows the mouse" on there, even with `computer_clipboard`
 //! off ([`takes_follow`]). An image rides the link's transfer streams, as
 //! files do, and a later switch drops one still on its way ([`switch`]).
+//!
+//! The window that shows another computer's screen (BK7) moves it the same
+//! way at its focus (PC3, [`push_for_window`], [`ask_back`]): while it
+//! controls that computer, this computer's clipboard goes there as the
+//! window gains the focus, and that computer's comes back as it loses it.
+//! Those pushes carry [`WINDOW`] beside [`FOLLOWS`], and are taken with
+//! `computer_view_clipboard` on, from the computer that controls this one
+//! through its window now, or from the computer this one asked back
+//! ([`window_taken`]); never by the shared keyboard and mouse's rules.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -272,6 +281,34 @@ pub(crate) fn packet(text: &str) -> NetworkPacket {
 /// The mark on a push that follows the mouse (shared input), in its body.
 pub(crate) const FOLLOWS: &str = "follows";
 
+/// The mark beside [`FOLLOWS`] on a push that follows the window showing
+/// another computer's screen (PC3).
+pub(crate) const WINDOW: &str = "view";
+
+/// What a push at a switch follows: the shared keyboard and mouse's
+/// cursor, or the focus of the window that shows another computer's screen
+/// (PC3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Follow {
+    Mouse,
+    Window,
+}
+
+/// `body` marked as following `follow`.
+fn mark(mut body: serde_json::Value, follow: Follow) -> serde_json::Value {
+    body[FOLLOWS] = true.into();
+    if follow == Follow::Window {
+        body[WINDOW] = true.into();
+    }
+    body
+}
+
+/// Whether a clipboard packet's `body` follows the window (PC3): marked
+/// [`FOLLOWS`] and [`WINDOW`], both JSON `true`.
+pub(crate) fn of_window(body: &serde_json::Value) -> bool {
+    marked(body) && body.get(WINDOW).and_then(|v| v.as_bool()) == Some(true)
+}
+
 /// What the clipboard holds at a switch, as read for another computer:
 /// its text (none a password manager marked private, nor a pairing link),
 /// else its image's id (none marked private), else nothing.
@@ -483,27 +520,30 @@ pub(crate) fn fetch_follows(device_id: &str, id: &str) -> bool {
 /// The packet an image push that follows the mouse sends to a computer
 /// linked to this one as its client: [`image_packet`], marked. It fetches
 /// the image ([`fetch_follows`]).
-fn follow_image_packet(id: &str, size: u64) -> NetworkPacket {
-    NetworkPacket::new("kdeconnect.clipboard")
-        .with_body(serde_json::json!({ "image": { "id": id, "size": size }, FOLLOWS: true }))
+fn follow_image_packet(id: &str, size: u64, follow: Follow) -> NetworkPacket {
+    NetworkPacket::new("kdeconnect.clipboard").with_body(mark(
+        serde_json::json!({ "image": { "id": id, "size": size } }),
+        follow,
+    ))
 }
 
 /// The packet that offers another computer this one's clipboard image on
 /// the link this one keeps to it, as a phone offers its own (N4): the size
 /// and the transfer's key, and no port, since that computer opens a stream
-/// on the link for it. Marked when it follows the mouse.
-pub(crate) fn image_offer_packet(size: u64, key: &str, follows: bool) -> NetworkPacket {
+/// on the link for it. Marked when it follows the mouse or the window.
+pub(crate) fn image_offer_packet(size: u64, key: &str, follows: Option<Follow>) -> NetworkPacket {
     let mut body = serde_json::json!({ "size": size, "key": key });
-    if follows {
-        body[FOLLOWS] = true.into();
+    if let Some(follow) = follows {
+        body = mark(body, follow);
     }
     NetworkPacket::new(pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE).with_body(body)
 }
 
-/// The packet a push that follows the mouse sends: [`packet`], marked.
-fn follow_packet(text: &str) -> NetworkPacket {
+/// The packet a push that follows the mouse or the window sends:
+/// [`packet`], marked.
+fn follow_packet(text: &str, follow: Follow) -> NetworkPacket {
     NetworkPacket::new("kdeconnect.clipboard")
-        .with_body(serde_json::json!({ "content": text, FOLLOWS: true }))
+        .with_body(mark(serde_json::json!({ "content": text }), follow))
 }
 
 /// Push this computer's clipboard to the computer `device_id` now: the
@@ -515,6 +555,28 @@ fn follow_packet(text: &str) -> NetworkPacket {
 /// on a task of its own, off the input thread; an image a later switch
 /// overtakes goes no further ([`switch`]).
 pub(crate) async fn push_now(device_id: &str) {
+    push_following(device_id, Follow::Mouse).await
+}
+
+/// The window showing the computer `device_id`'s screen gained the focus
+/// while it controls that computer (PC3): this computer's clipboard goes
+/// there, as [`push_now`] sends it, marked as following the window. An
+/// answer still awaited from that computer is no longer taken: this
+/// clipboard is the newer.
+pub(crate) async fn push_for_window(device_id: &str) {
+    ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner()).take();
+    push_following(device_id, Follow::Window).await
+}
+
+/// Answer the computer `device_id`'s ask for this computer's clipboard
+/// back (PC3, [`ask_back`]), as [`push_now`] sends it, marked as
+/// following the window.
+pub(crate) async fn answer_window_ask(device_id: &str) {
+    push_following(device_id, Follow::Window).await
+}
+
+/// [`push_now`], following `follow`.
+async fn push_following(device_id: &str, follow: Follow) {
     // That computer's image still on its way here: this clipboard is about
     // to be its own, so nothing older goes back, and the switch drops it.
     let landing = landing_from(device_id);
@@ -542,8 +604,8 @@ pub(crate) async fn push_now(device_id: &str) {
         image_from.as_ref(),
         last_image.as_deref(),
     ) {
-        Held::Text(text) => push_text_now(device_id, &text).await,
-        Held::Image(id) => push_image_now(device_id, &id, at).await,
+        Held::Text(text) => push_text_now(device_id, &text, follow).await,
+        Held::Image(id) => push_image_now(device_id, &id, at, follow).await,
         Held::Nothing => {}
     }
 }
@@ -562,8 +624,8 @@ async fn read_held() -> std::io::Result<Held> {
 }
 
 /// The text of [`push_now`].
-async fn push_text_now(device_id: &str, text: &str) {
-    let packet = follow_packet(text);
+async fn push_text_now(device_id: &str, text: &str, follow: Follow) {
+    let packet = follow_packet(text, follow);
     let client = crate::state::clone_clients()
         .await
         .into_iter()
@@ -602,12 +664,17 @@ async fn push_text_now(device_id: &str, text: &str) {
 /// a computer linked to this one as its client, it is told, and it fetches
 /// the image while no switch has come since ([`fetch_follows`]); to one
 /// this one keeps a link to, it goes on a stream that computer opens.
-async fn push_image_now(device_id: &str, id: &str, at: u64) {
+async fn push_image_now(device_id: &str, id: &str, at: u64, follow: Follow) {
     // Kept as the clipboard was read; gone if it changed since.
     let Some(image) = crate::plugins::clipboard::kept_image(id) else {
         return;
     };
     let size = image.png.len() as u64;
+    // The other computer takes none larger (N4's limit): none is sent.
+    if size > pocketdesk_core::protocol::clipboard::MAX_CLIPBOARD_IMAGE {
+        tracing::debug!("The clipboard image did not follow to {device_id}: {size} bytes");
+        return;
+    }
     let client = crate::state::clone_clients()
         .await
         .into_iter()
@@ -618,7 +685,7 @@ async fn push_image_now(device_id: &str, id: &str, at: u64) {
                 Some((device_id.to_string(), id.to_string(), at));
             note_image_told(device_id, id);
             client
-                .send_packet(&follow_image_packet(id, size))
+                .send_packet(&follow_image_packet(id, size, follow))
                 .await
                 .map(|()| "told")
                 .map_err(|e| e.to_string())
@@ -626,9 +693,11 @@ async fn push_image_now(device_id: &str, id: &str, at: u64) {
         Some(_) => Err("it does not have the Clipboard permission here".to_string()),
         None => {
             note_image_sent(device_id, id);
-            crate::peer_computers::send_clipboard_image(device_id, image, true, || still(at))
-                .await
-                .map(|()| "sent")
+            crate::peer_computers::send_clipboard_image(device_id, image, Some(follow), || {
+                still(at)
+            })
+            .await
+            .map(|()| "sent")
         }
     };
     match sent {
@@ -696,6 +765,15 @@ pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
         return false;
     }
     let config = crate::events::current_config();
+    // One that follows the window, by the window's rules alone (PC3).
+    if of_window(body) {
+        return window_taken(
+            config.computer_view_clipboard,
+            || is_paired_computer(device_id),
+            || controls_here(device_id),
+            || answer_awaited(device_id, std::time::Instant::now()),
+        );
+    }
     follow_taken(
         true,
         config.shared_input,
@@ -707,6 +785,151 @@ pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
         || crate::shared_input::receive::may_drive_here(device_id),
         || crate::shared_input::link::answered(device_id),
     )
+}
+
+/// Whether a push that follows the window (PC3) is taken: with
+/// `computer_view_clipboard` on here (`on`), from one of the owner's paired
+/// computers (`is_computer`) that controls this one through its window now
+/// (`controls`: its screen session here takes its input), or whose answer
+/// this one awaits (`awaited`: this computer's window lost the focus and
+/// asked it back; used once). Each later word is asked only when those
+/// before it hold.
+fn window_taken(
+    on: bool,
+    is_computer: impl FnOnce() -> bool,
+    controls: impl FnOnce() -> bool,
+    awaited: impl FnOnce() -> bool,
+) -> bool {
+    on && is_computer() && (controls() || awaited())
+}
+
+/// Whether the computer `device_id` may ask for this computer's clipboard
+/// back as its window loses the focus (PC3): with `computer_view_clipboard`
+/// on here, a paired computer that controls this one through its window
+/// now.
+pub(crate) fn takes_window_ask(device_id: &str) -> bool {
+    crate::events::current_config().computer_view_clipboard
+        && is_paired_computer(device_id)
+        && controls_here(device_id)
+}
+
+/// One of the owner's paired computers, either way.
+fn is_paired_computer(device_id: &str) -> bool {
+    crate::plugins::pair::is_computer_device(device_id)
+        || crate::peer_computers::is_paired(device_id)
+}
+
+/// Whether the computer `device_id` controls this one through its window
+/// now: a live session of its shows this screen and takes its input.
+fn controls_here(device_id: &str) -> bool {
+    session_controls(&pocketdesk_core::streaming::sessions::list(), device_id)
+}
+
+/// Whether one of `live` is `device_id`'s, showing the screen and taking
+/// its input.
+fn session_controls(
+    live: &[pocketdesk_core::streaming::sessions::LiveSession],
+    device_id: &str,
+) -> bool {
+    live.iter()
+        .any(|s| s.device_id.as_deref() == Some(device_id) && s.streamed.video && s.streamed.input)
+}
+
+/// The packet that asks another computer for its clipboard back (PC3): the
+/// window showing its screen lost the focus. It answers with a push that
+/// follows the window, as [`push_for_window`] sends one.
+pub(crate) const ASK_BACK: &str = pocketdesk_core::protocol::clipboard::CLIPBOARD_VIEW;
+
+/// How long an answer to [`ask_back`] is awaited.
+const ANSWER_WAIT: Duration = Duration::from_secs(15);
+
+/// The computer this one asked for its clipboard back, and when.
+static ASKED_BACK: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+
+/// Whether an answer from `device_id` is awaited at `now`, given the ask
+/// `asked`: from that computer, within [`ANSWER_WAIT`].
+fn awaits(
+    asked: Option<&(String, std::time::Instant)>,
+    device_id: &str,
+    now: std::time::Instant,
+) -> bool {
+    asked.is_some_and(|(from, at)| {
+        from == device_id && now.saturating_duration_since(*at) < ANSWER_WAIT
+    })
+}
+
+/// Whether an answer from `device_id` is awaited now; the ask is used up.
+fn answer_awaited(device_id: &str, now: std::time::Instant) -> bool {
+    let mut asked = ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner());
+    let awaited = awaits(asked.as_ref(), device_id, now);
+    if awaited {
+        *asked = None;
+    }
+    awaited
+}
+
+/// The window showing the computer `device_id`'s screen lost the focus
+/// while it controlled that computer (PC3): ask that computer for its
+/// clipboard, which comes back as a push that follows the window.
+pub(crate) async fn ask_back(device_id: &str) {
+    *ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((device_id.to_string(), std::time::Instant::now()));
+    // An image of this computer's still on its way there goes no further.
+    switch();
+    let ask = NetworkPacket::new(ASK_BACK).with_body(serde_json::json!({}));
+    match send_to_computer(device_id, &ask).await {
+        Ok(()) => tracing::debug!("Asked {device_id} for its clipboard back"),
+        Err(e) => tracing::debug!("Not asked {device_id} for its clipboard back: {e}"),
+    }
+}
+
+/// Send `packet` to the computer `device_id`: on its connection here when it
+/// is linked to this one as its client, else on the link this one keeps to
+/// it.
+async fn send_to_computer(device_id: &str, packet: &NetworkPacket) -> Result<(), String> {
+    let client = crate::state::clone_clients()
+        .await
+        .into_iter()
+        .find(|c| c.device_id() == device_id);
+    match client {
+        Some(client) => client.send_packet(packet).await.map_err(|e| e.to_string()),
+        None => match crate::peer_computers::live_link(device_id) {
+            Some(link) => {
+                link.send(packet.clone());
+                Ok(())
+            }
+            None => Err("no link to it".to_string()),
+        },
+    }
+}
+
+/// What the window's focus does now (PC3), on the side whose window it is:
+/// nothing with `computer_view_clipboard` off (`on`), with "Clipboard with
+/// my computers" on (`sync`: every copy goes both ways already, and the
+/// window does not fight it), or while the other computer does not take
+/// this one's input (`control`).
+pub(crate) fn window_focus_does(
+    focused: bool,
+    on: bool,
+    sync: bool,
+    control: Option<bool>,
+) -> Option<WindowFocus> {
+    if !on || sync || control != Some(true) {
+        return None;
+    }
+    Some(if focused {
+        WindowFocus::Push
+    } else {
+        WindowFocus::AskBack
+    })
+}
+
+/// What the window's focus does: push this computer's clipboard there, or
+/// ask for that computer's back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowFocus {
+    Push,
+    AskBack,
 }
 
 /// One `wl-paste --watch` while a phone could receive the clipboard (R6d):
@@ -1179,7 +1402,7 @@ async fn push_image(
         note_image_sent(&device_id, &id);
         // Its own task: one computer slow to open its stream holds up none.
         tokio::spawn(async move {
-            match crate::peer_computers::send_clipboard_image(&device_id, image, false, || true)
+            match crate::peer_computers::send_clipboard_image(&device_id, image, None, || true)
                 .await
             {
                 Ok(()) => tracing::info!("Clipboard image sent to {device_id} ({size} bytes)"),
@@ -1247,7 +1470,7 @@ mod tests {
         ] {
             assert!(!marked(&body), "{body}");
         }
-        assert!(follow_packet("x").body[FOLLOWS] == true);
+        assert!(follow_packet("x", Follow::Mouse).body[FOLLOWS] == true);
     }
 
     /// A marked push is taken with both settings on, from a paired computer
@@ -1517,7 +1740,7 @@ mod tests {
     /// offered on a kept link with its size and key, never a port.
     #[test]
     fn an_image_that_follows_is_marked_and_offered_without_a_port() {
-        let told = follow_image_packet("ab12", 2048);
+        let told = follow_image_packet("ab12", 2048, Follow::Mouse);
         assert_eq!(told.packet_type, "kdeconnect.clipboard");
         assert_eq!(told.body["image"]["id"], "ab12");
         assert_eq!(told.body["image"]["size"], 2048);
@@ -1526,7 +1749,7 @@ mod tests {
         assert!(!marked(&image_packet("ab12", 2048).body), "M3's is not");
 
         let key = "0123456789abcdef0123456789abcdef";
-        let offer = image_offer_packet(4096, key, true);
+        let offer = image_offer_packet(4096, key, Some(Follow::Mouse));
         assert_eq!(
             offer.packet_type,
             pocketdesk_core::protocol::clipboard::CLIPBOARD_IMAGE
@@ -1535,7 +1758,7 @@ mod tests {
         assert_eq!(offer.body["key"], key);
         assert!(offer.body.get("port").is_none(), "the link, not a dial");
         assert!(marked(&offer.body));
-        let shared = image_offer_packet(4096, key, false);
+        let shared = image_offer_packet(4096, key, None);
         assert!(!marked(&shared.body));
         assert!(shared.body.get(FOLLOWS).is_none());
     }
@@ -1548,7 +1771,7 @@ mod tests {
         let told = |id: &str, size: u64| serde_json::json!({"image": {"id": id, "size": size}});
         assert_eq!(told_image(&told(&id, 9)), Some((id.clone(), 9)));
         assert_eq!(
-            told_image(&follow_image_packet(&id.to_uppercase(), 9).body),
+            told_image(&follow_image_packet(&id.to_uppercase(), 9, Follow::Mouse).body),
             Some((id.clone(), 9)),
             "either case"
         );
@@ -1649,5 +1872,138 @@ mod tests {
         assert_eq!(packet.body["image"]["id"], "ab12");
         assert_eq!(packet.body["image"]["size"], 2048);
         assert!(packet.body.get("content").is_none());
+    }
+
+    /// PC3: a push that follows the window carries both marks; one that
+    /// follows the mouse only its own, and is never read as the window's.
+    #[test]
+    fn a_push_that_follows_the_window_is_marked_as_the_windows() {
+        let text = follow_packet("x", Follow::Window);
+        assert!(marked(&text.body) && of_window(&text.body));
+        assert_eq!(text.body["content"], "x");
+        let image = follow_image_packet("ab12", 9, Follow::Window);
+        assert!(of_window(&image.body));
+        assert_eq!(image.body["image"]["size"], 9);
+        let key = "0123456789abcdef0123456789abcdef";
+        assert!(of_window(
+            &image_offer_packet(9, key, Some(Follow::Window)).body
+        ));
+        for mouse in [
+            follow_packet("x", Follow::Mouse).body,
+            follow_image_packet("ab12", 9, Follow::Mouse).body,
+            image_offer_packet(9, key, Some(Follow::Mouse)).body,
+        ] {
+            assert!(marked(&mouse) && !of_window(&mouse), "{mouse}");
+            assert!(mouse.get(WINDOW).is_none());
+        }
+        // The window's mark alone is not a follow.
+        assert!(!of_window(
+            &serde_json::json!({"content": "x", "view": true})
+        ));
+        assert!(!of_window(
+            &serde_json::json!({"content": "x", "follows": true, "view": 1})
+        ));
+    }
+
+    /// PC3: a push that follows the window is taken with the setting on,
+    /// from a paired computer that controls this one through its window or
+    /// whose answer this one awaits; never with the setting off, nor from a
+    /// phone.
+    #[test]
+    fn a_window_push_is_taken_from_the_computer_that_controls_or_was_asked() {
+        let yes = || true;
+        let no = || false;
+        assert!(window_taken(true, yes, yes, no), "it controls this one");
+        assert!(window_taken(true, yes, no, yes), "this one asked it back");
+        assert!(!window_taken(true, yes, no, no), "neither");
+        assert!(!window_taken(false, yes, yes, yes), "the setting off here");
+        assert!(!window_taken(true, no, yes, yes), "not a computer");
+        // The ask is used up only when the rest holds.
+        let unread = || -> bool { panic!("not asked") };
+        assert!(!window_taken(false, unread, unread, unread));
+        assert!(!window_taken(true, no, unread, unread));
+        assert!(
+            window_taken(true, yes, yes, unread),
+            "controls: no ask used"
+        );
+    }
+
+    /// PC3: an answer is awaited from the computer asked, within the wait,
+    /// and once.
+    #[test]
+    fn an_answer_is_awaited_from_the_computer_asked_for_a_while() {
+        let at = std::time::Instant::now();
+        let asked = ("pc3-desk".to_string(), at);
+        assert!(awaits(Some(&asked), "pc3-desk", at));
+        assert!(awaits(
+            Some(&asked),
+            "pc3-desk",
+            at + ANSWER_WAIT - Duration::from_millis(1)
+        ));
+        assert!(
+            !awaits(Some(&asked), "pc3-desk", at + ANSWER_WAIT),
+            "too late"
+        );
+        assert!(!awaits(Some(&asked), "pc3-other", at), "another computer");
+        assert!(!awaits(None, "pc3-desk", at), "never asked");
+
+        *ASKED_BACK.lock().unwrap() = Some(("pc3-desk-once".to_string(), at));
+        assert!(answer_awaited("pc3-desk-once", at));
+        assert!(!answer_awaited("pc3-desk-once", at), "used up");
+    }
+
+    /// PC3: a computer controls this one through its window when a live
+    /// session of its shows the screen and takes its input.
+    #[test]
+    fn a_computer_controls_this_one_with_a_screen_session_that_takes_input() {
+        use pocketdesk_core::streaming::sessions::{LiveSession, Streamed};
+        let session = |device: &str, video: bool, input: bool| LiveSession {
+            id: 1,
+            streamed: Streamed {
+                video,
+                input,
+                ..Streamed::default()
+            },
+            device_id: Some(device.to_string()),
+            peer: "192.0.2.4:4000".parse().unwrap(),
+            lan: true,
+            started_unix: 0,
+        };
+        assert!(session_controls(&[session("desk", true, true)], "desk"));
+        assert!(
+            !session_controls(&[session("desk", true, false)], "desk"),
+            "view-only"
+        );
+        assert!(
+            !session_controls(&[session("desk", false, true)], "desk"),
+            "a remote"
+        );
+        assert!(!session_controls(&[session("other", true, true)], "desk"));
+        assert!(!session_controls(&[], "desk"));
+    }
+
+    /// PC3: the window's focus pushes as it comes and asks back as it goes,
+    /// only with the setting on, the always-on sharing off, and the other
+    /// computer taking this one's input.
+    #[test]
+    fn the_windows_focus_pushes_or_asks_back_only_while_it_controls() {
+        assert_eq!(
+            window_focus_does(true, true, false, Some(true)),
+            Some(WindowFocus::Push)
+        );
+        assert_eq!(
+            window_focus_does(false, true, false, Some(true)),
+            Some(WindowFocus::AskBack)
+        );
+        for focused in [true, false] {
+            assert_eq!(window_focus_does(focused, false, false, Some(true)), None);
+            assert_eq!(
+                window_focus_does(focused, true, true, Some(true)),
+                None,
+                "Clipboard with my computers carries it already"
+            );
+            assert_eq!(window_focus_does(focused, true, false, Some(false)), None);
+            assert_eq!(window_focus_does(focused, true, false, None), None);
+        }
     }
 }

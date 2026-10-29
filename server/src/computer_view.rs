@@ -14,6 +14,12 @@
 //! window's input comes back as input packets, checked before they go on.
 //! Its sound, when the other computer sends it, plays here through the
 //! shared player ([`crate::remote_sound`]).
+//!
+//! The clipboard follows the window (PC3): as the window gains the focus
+//! while it controls the other computer, this computer's clipboard goes
+//! there; as it loses it, that computer's comes back
+//! ([`crate::clipboard_push::push_for_window`] and `ask_back`), with
+//! `computer_view_clipboard` on.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1207,6 +1213,7 @@ pub async fn run(
     let mut viewer: Option<Viewer> = None;
     let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64);
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
+    let (focus_tx, mut focus_rx) = mpsc::channel::<(u64, bool)>(8);
     let pending = Arc::new(tokio::sync::Semaphore::new(PENDING_VIEWERS));
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     loop {
@@ -1352,7 +1359,7 @@ pub async fn run(
                 let Some(v) = view.as_mut().filter(|v| v.session_id == session_id) else {
                     continue;
                 };
-                let joined = start_viewer(stream, session_id, v.input.clone());
+                let joined = start_viewer(stream, session_id, v.input.clone(), focus_tx.clone());
                 let _ = joined.tx.try_send(Message::Status(v.status.clone()));
                 if let Some((width, height)) = v.config {
                     let _ = joined.tx.try_send(Message::Config { width, height });
@@ -1368,6 +1375,19 @@ pub async fn run(
                 v.unwatched_since = None;
                 tracing::info!(device_id = %v.device_id, "Another computer's screen is being shown");
                 viewer = Some(joined);
+            }
+            Some((session_id, focused)) = focus_rx.recv() => {
+                // The window watching the view now, of a view still going.
+                let Some(v) = view
+                    .as_ref()
+                    .filter(|v| v.session_id == session_id && v.ended.is_none())
+                else {
+                    continue;
+                };
+                if viewer.as_ref().is_none_or(|w| w.session_id != session_id) {
+                    continue;
+                }
+                window_focus(v.device_id.clone(), focused, v.status.control);
             }
             _ = heartbeat.tick() => {
                 if viewer.as_ref().is_some_and(|v| v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed()) {
@@ -1394,6 +1414,26 @@ pub async fn run(
         }
     }
     end(&mut view, &mut viewer, &state_dir, None);
+}
+
+/// The window showing the computer `device_id` gained or lost the focus
+/// (PC3), while that computer said `control` of this one's input: the
+/// clipboard follows, as [`crate::clipboard_push::window_focus_does`] says.
+fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
+    tokio::spawn(async move {
+        // config.toml is a file: read off the loop.
+        let on =
+            tokio::task::spawn_blocking(|| crate::events::current_config().computer_view_clipboard)
+                .await
+                .unwrap_or(false);
+        let sync = crate::clipboard_push::with_computers();
+        use crate::clipboard_push::WindowFocus;
+        match crate::clipboard_push::window_focus_does(focused, on, sync, control) {
+            Some(WindowFocus::Push) => crate::clipboard_push::push_for_window(&device_id).await,
+            Some(WindowFocus::AskBack) => crate::clipboard_push::ask_back(&device_id).await,
+            None => {}
+        }
+    });
 }
 
 /// The view is over: its window is told, and `view.json` forgets it.
@@ -1427,8 +1467,14 @@ async fn authenticate(
 }
 
 /// The viewer's two halves: messages go out in order; its keyframe asks and
-/// the input it may send reach the other computer.
-fn start_viewer(stream: TcpStream, session_id: u64, input: mpsc::Sender<InputPacket>) -> Viewer {
+/// the input it may send reach the other computer, and its focus the
+/// relay's loop (`focus`, PC3).
+fn start_viewer(
+    stream: TcpStream,
+    session_id: u64,
+    input: mpsc::Sender<InputPacket>,
+    focus: mpsc::Sender<(u64, bool)>,
+) -> Viewer {
     let _ = stream.set_nodelay(true);
     let (mut read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::channel::<Message>(VIEWER_QUEUE);
@@ -1448,6 +1494,13 @@ fn start_viewer(stream: TcpStream, session_id: u64, input: mpsc::Sender<InputPac
             match head[0] {
                 wire::WANT_KEYFRAME if len == 0 => {
                     let _ = input.try_send(InputPacket::RequestKeyframe);
+                }
+                wire::FOCUS if len == 1 => {
+                    let mut focused = [0u8; 1];
+                    if read.read_exact(&mut focused).await.is_err() || focused[0] > 1 {
+                        break;
+                    }
+                    let _ = focus.try_send((session_id, focused[0] == 1));
                 }
                 wire::INPUT if len > 0 && len <= wire::MAX_INPUT => {
                     let mut packet = vec![0u8; len];
@@ -1584,7 +1637,8 @@ mod tests {
             .unwrap();
         let (relay_end, _) = listener.accept().await.unwrap();
         let (input, mut queued) = mpsc::channel(1);
-        let _viewer = start_viewer(relay_end, 1, input);
+        let (focus, _) = mpsc::channel(1);
+        let _viewer = start_viewer(relay_end, 1, input, focus);
         let press = |key| InputPacket::KeyEvent { key, pressed: true };
         for packet in [
             press(30),
@@ -1619,6 +1673,35 @@ mod tests {
             pressed: false
         }));
         assert!(!is_release(&press(1)));
+    }
+
+    /// PC3: the window's focus reaches the relay's loop, named with its
+    /// view; a focus byte that is neither 0 nor 1 ends the window's reader.
+    #[tokio::test]
+    async fn the_windows_focus_reaches_the_relay_with_its_view() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, _queued) = mpsc::channel(4);
+        let (focus, mut focused) = mpsc::channel(4);
+        let mut viewer = start_viewer(relay_end, 7, input, focus);
+        for message in [Message::Focus(true), Message::Focus(false)] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        let wait = Duration::from_secs(2);
+        let first = tokio::time::timeout(wait, focused.recv()).await.unwrap();
+        let second = tokio::time::timeout(wait, focused.recv()).await.unwrap();
+        assert_eq!((first, second), (Some((7, true)), Some((7, false))));
+        window
+            .write_all(&[wire::FOCUS, 1, 0, 0, 0, 2])
+            .await
+            .unwrap();
+        tokio::time::timeout(wait, &mut viewer.reader)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     #[test]

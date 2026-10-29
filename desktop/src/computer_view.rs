@@ -10,7 +10,9 @@
 //! (its Devices page's Control switch for this computer), the window's
 //! pointer and keys go to it ([`crate::view_input`]); without it, or with
 //! View only on, the window only shows. Closing the window ends the view; a
-//! view that ends on its own says why, with Reconnect.
+//! view that ends on its own says why, with Reconnect. The clipboard
+//! follows the window's focus while it controls ([`crate::view_follow`],
+//! PC3).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -28,6 +30,7 @@ use pocketdesk_core::streaming::InputPacket;
 use crate::video::{
     Admit, Decoder, KeyGate, Picture, Recorder, free_name, letterbox, now_unix, stamp, user_folder,
 };
+use crate::view_follow::{self, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, WindowInput};
 
 /// The window's id among the app's viewports.
@@ -102,6 +105,8 @@ struct State {
     stats_saved: Option<bool>,
     /// The decoder's time and the pictures shown.
     clock: DecodeClock,
+    /// The window's focus, as said to the server for the clipboard (PC3).
+    edges: FocusEdges,
 }
 
 /// What the window measures itself (PC2): pictures shown a second, and how
@@ -467,6 +472,10 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
 /// view this window shows, when it reached one (BK7 review M1). Its end is
 /// no longer this window's to say.
 fn stop_view(state_dir: &Path, state: &mut State) {
+    // The clipboard comes back as the window goes (PC3).
+    if let Some(edge) = state.edges.leave() {
+        say_focus(state, edge);
+    }
     let release = state.input.release_all();
     send(state, release);
     state.writer = None;
@@ -525,6 +534,17 @@ fn send(state: &mut State, packets: Vec<InputPacket>) {
             state.writer = None;
             return;
         }
+    }
+}
+
+/// Say the window's focus to the server (PC3); a broken write ends input
+/// here, as [`send`]'s.
+fn say_focus(state: &mut State, edge: Edge) {
+    let Some(writer) = state.writer.as_mut() else {
+        return;
+    };
+    if Message::Focus(edge == Edge::Gain).write(writer).is_err() {
+        state.writer = None;
     }
 }
 
@@ -735,6 +755,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 &mut state,
                 vec![InputPacket::QualityPreset { preset: quality }],
             );
+        }
+        // The clipboard follows the focus while the window controls (PC3).
+        let inside = focused && ended.is_none() && status.control == Some(true) && !view_only;
+        if let Some(edge) = state.edges.observe(inside, Instant::now()) {
+            say_focus(&mut state, edge);
+        }
+        if state.edges.pending() {
+            ctx.request_repaint_after(view_follow::SETTLE);
         }
     }
 
@@ -1137,7 +1165,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
             }
             Message::End { why } => return Ok(why),
-            Message::Heartbeat | Message::WantKeyframe | Message::Input(_) => {}
+            Message::Heartbeat | Message::WantKeyframe | Message::Input(_) | Message::Focus(_) => {}
         }
     }
 }

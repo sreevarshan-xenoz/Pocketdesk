@@ -36,6 +36,7 @@ mod type_view;
 #[cfg(test)]
 mod ui_tests;
 mod video;
+mod view_follow;
 mod view_input;
 
 use eframe::egui;
