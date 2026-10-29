@@ -11,7 +11,10 @@
 //! screens it has ([`screens`]) and stays awake meanwhile ([`awake`]).
 //! The computer driving decides where its keyboard and mouse are
 //! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
-//! and, on Windows, captures them (`capture_windows`), staying put while a
+//! and captures them: on Windows by its hooks (`capture_windows`), on Linux
+//! by the input-capture portal and libei (`capture_linux`, through
+//! [`portal_glue`] and [`portal_drive`], this computer's edges as the
+//! portal's [`barriers`], its keys in [`keys_evdev`]), staying put while a
 //! game is in front ([`game_lock`]); files dragged in Explorer and let go
 //! on the computer driven are sent to it ([`drag_files`], caught on Windows
 //! by `drop_windows`). A computer that will not be driven
@@ -25,6 +28,8 @@ pub mod asks;
 pub mod awake;
 pub mod badge;
 pub mod barriers;
+#[cfg(target_os = "linux")]
+pub mod capture_linux;
 pub mod capture_restore;
 #[cfg(windows)]
 pub mod capture_windows;
