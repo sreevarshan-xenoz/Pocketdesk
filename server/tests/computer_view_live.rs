@@ -128,6 +128,13 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
         run.servers.push(
             pocketdesk(config, state)
                 .env(pocketdesk_core::streaming::test_pattern::VAR, "1")
+                // B's entry for A has Audio off, so no sound is captured or
+                // sent; were any to come, A writes it here, never to the
+                // speakers.
+                .env(
+                    pocketdesk_server::computer_view::SOUND_SEAM,
+                    state.parent().unwrap().join("view-sound.wav"),
+                )
                 .arg("start")
                 .spawn()
                 .unwrap(),
@@ -228,5 +235,9 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
     wait_for(30, "A's session gone from B", || {
         (sessions_from(&b_state, &a_id) == 0).then_some(())
     });
+    assert!(
+        !a_state.parent().unwrap().join("view-sound.wav").exists(),
+        "no sound came to A"
+    );
     drop(run);
 }

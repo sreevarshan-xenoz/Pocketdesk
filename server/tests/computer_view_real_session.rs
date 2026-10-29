@@ -5,6 +5,13 @@
 //! session encodes and sends input. The input reaches the server's input
 //! channel, which this test holds: nothing is injected.
 //!
+//! No sound, either way (BK7 review I4: without a gate the session had the
+//! default permissions, Audio among them, so the server captured this
+//! computer's real sound and the relay played it on its speakers). The
+//! session's gate gives Input and takes away Audio and the mic, so the
+//! server starts no sound capture; and the view's sound seam points at a
+//! file in the test's folder, which must never be written.
+//!
 //! Ignored: it runs a real encoder. Run it with
 //! `cargo test -p pocketdesk-server --test computer_view_real_session -- --ignored --nocapture`.
 
@@ -14,6 +21,7 @@ use std::time::Duration;
 
 use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::view::{self as wire, Message, Phase};
+use pocketdesk_core::protocol::permissions::{Capability, DevicePermissions};
 use pocketdesk_core::streaming::transport::{CertManager, StreamServer, StreamTransportConfig};
 use pocketdesk_core::streaming::{InputPacket, QuinnConnection, StreamingConfig, StreamingServer};
 use pocketdesk_server::computer_view::{Command, Dialer, run};
@@ -46,6 +54,10 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
         }
     }
     let _remove = Remove(dir.clone());
+    // A second guard: any sound the view got would go to this file, never
+    // the speakers. SAFETY: as above, the one test, before anything runs.
+    let sound_seam = dir.join("view-sound.wav");
+    unsafe { std::env::set_var(pocketdesk_server::computer_view::SOUND_SEAM, &sound_seam) };
     computers::update(&dir, |file| {
         file.computers.push(PeerComputer {
             device_id: "desk".into(),
@@ -89,6 +101,17 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
         let mut server =
             StreamingServer::new(config, StreamTransportConfig::default(), session_cert);
         server.set_input_channel(input_tx);
+        // Input, and no sound either way: no capture starts.
+        let mut permissions = DevicePermissions::default();
+        permissions.set(Capability::Input, true);
+        permissions.set(Capability::Audio, false);
+        permissions.set(Capability::Mic, false);
+        permissions.ask_first = false;
+        assert!(!permissions.allows(Capability::Audio));
+        server.set_session_gate(move |_claim| {
+            let permissions = permissions.clone();
+            Box::pin(async move { Some(permissions) })
+        });
         server
             .run_on_connection(QuinnConnection::shared(connection))
             .await
@@ -154,7 +177,7 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
     }
     println!("{frames} frames ({keyframes} keyframes) at {size:?}, control {control:?}");
     assert_eq!(size, Some((640, 360)), "the size the session encodes");
-    assert_eq!(control, Some(true), "no gate here: the defaults take input");
+    assert_eq!(control, Some(true), "the gate gives input");
 
     for packet in [
         InputPacket::MouseMoveAbs {
@@ -207,4 +230,8 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
         .ok();
     drop(commands);
     relay.await.unwrap();
+    assert!(
+        !sound_seam.exists(),
+        "no sound came: the session had no Audio permission"
+    );
 }
