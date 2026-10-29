@@ -409,7 +409,14 @@ impl Prompt {
                         .size(32.0)
                         .strong(),
                 );
-                ui.label(format!("Accept only if {} shows the same.", asked.address));
+                ui.label(format!(
+                    "Accept only if {} shows the same code.",
+                    crate::computers_view::shown(&asked.name)
+                ));
+                ui.label(
+                    RichText::new(format!("Asked from {}.", asked.address))
+                        .color(crate::theme::muted(ui)),
+                );
                 ui.checkbox(&mut self.mine, PROMPT_MINE_BOX)
                     .on_hover_text("Both must tick it. Off for others' computers.");
                 ui.label(
