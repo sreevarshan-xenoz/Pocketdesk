@@ -45,6 +45,22 @@ pub const ALPN_V1_STREAM: &[u8] = b"pocketdesk-stream";
 /// it runs the same handshake and packets the control channel always had.
 pub const ALPN_CONTROL: &[u8] = b"pocketdesk-control/1";
 
+/// ALPN for the control channel between two computers over iroh (BK11):
+/// the same channel as [`ALPN_CONTROL`], with the same handshake and the
+/// same trust checks, on a congestion controller that does not pace a quiet
+/// link (Cubic, not BBR), so a key after a pause leaves at once. A
+/// computer dials it first and offers [`ALPN_CONTROL`] beside it, so an
+/// older computer still answers. It grants nothing [`ALPN_CONTROL`] does
+/// not.
+pub const ALPN_COMPUTER: &[u8] = b"pocketdesk-computer/1";
+
+/// Whether a connection that negotiated `alpn` carries the control channel:
+/// a phone's or a computer's ([`ALPN_CONTROL`]), or a computer's on its
+/// own controller ([`ALPN_COMPUTER`]). Both go through the same gates.
+pub fn is_control_alpn(alpn: &[u8]) -> bool {
+    alpn == ALPN_CONTROL || alpn == ALPN_COMPUTER
+}
+
 /// ALPN for a file transfer's own TLS connection (phase C). Version 2 is
 /// the resumable, hash-checked exchange in [`transfer`] (T6a); a peer that
 /// speaks only version 1 fails the handshake instead of misreading it.
