@@ -31,7 +31,7 @@ use crate::video::{
     Admit, Decoder, KeyGate, Picture, Recorder, free_name, letterbox, now_unix, stamp, user_folder,
 };
 use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
-use crate::view_input::{MOVE_EVERY, WindowInput};
+use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
 
 /// The window's id among the app's viewports.
 fn viewport_id() -> egui::ViewportId {
@@ -700,6 +700,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     drop(state);
 
     let mut monitor = wanted.monitor;
+    let mut send_key: Option<SendKey> = None;
     egui::Panel::top("computer-view-bar")
         .frame(
             egui::Frame::NONE
@@ -751,6 +752,20 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     .on_hover_text("Show the computer without sending it clicks or keys");
                 if switch.clicked() {
                     switch.surrender_focus();
+                }
+                // PC4: the keys this computer keeps, or that cannot be
+                // pressed through the window, while it controls.
+                if ended.is_none() && controls(status.control, view_only, connected, true) {
+                    ui.menu_button("Send keys", |ui| {
+                        for key in send_key_choices(status.windows) {
+                            if ui.button(key.label()).clicked() {
+                                send_key = Some(key);
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Send a key or chord this computer would keep to itself");
                 }
                 let shot = ui
                     .add_enabled(texture.is_some(), egui::Button::new("Screenshot"))
@@ -841,6 +856,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             send(&mut state, release);
         }
         state.view_only = view_only;
+        if let Some(key) = send_key
+            && controls(status.control, view_only, connected, true)
+        {
+            let chord = state.input.chord(key.keys());
+            send(&mut state, chord);
+        }
         if quality != state.quality {
             state.quality = quality;
             send(

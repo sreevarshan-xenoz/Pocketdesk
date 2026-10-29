@@ -172,6 +172,75 @@ pub fn evdev(key: egui::Key) -> Option<u16> {
     })
 }
 
+const KEY_ESC: u16 = 1;
+const KEY_TAB: u16 = 15;
+const KEY_L: u16 = 38;
+const KEY_F4: u16 = 62;
+const KEY_SYSRQ: u16 = 99;
+
+/// A chord the window's Send keys menu sends to the other computer (PC4):
+/// the keys this computer keeps to itself, or that a person cannot press
+/// through the window at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendKey {
+    Win,
+    AltTab,
+    AltF4,
+    PrintScreen,
+    /// Linux only: Windows takes Ctrl+Alt+Del only from a SYSTEM service.
+    CtrlAltDel,
+    /// Windows' Task Manager, in place of Ctrl+Alt+Del.
+    CtrlShiftEsc,
+    /// Windows+L.
+    Lock,
+}
+
+impl SendKey {
+    /// The menu's words for it.
+    pub fn label(self) -> &'static str {
+        match self {
+            SendKey::Win => "Windows key (Super)",
+            SendKey::AltTab => "Alt+Tab",
+            SendKey::AltF4 => "Alt+F4",
+            SendKey::PrintScreen => "Print Screen",
+            SendKey::CtrlAltDel => "Ctrl+Alt+Del",
+            SendKey::CtrlShiftEsc => "Ctrl+Shift+Esc (Task Manager)",
+            SendKey::Lock => "Lock (Windows+L)",
+        }
+    }
+
+    /// Its keys as evdev codes, in the order they go down.
+    pub fn keys(self) -> &'static [u16] {
+        match self {
+            SendKey::Win => &[LEFT_META],
+            SendKey::AltTab => &[LEFT_ALT, KEY_TAB],
+            SendKey::AltF4 => &[LEFT_ALT, KEY_F4],
+            SendKey::PrintScreen => &[KEY_SYSRQ],
+            SendKey::CtrlAltDel => &[LEFT_CTRL, LEFT_ALT, KEY_DELETE],
+            SendKey::CtrlShiftEsc => &[LEFT_CTRL, LEFT_SHIFT, KEY_ESC],
+            SendKey::Lock => &[LEFT_META, KEY_L],
+        }
+    }
+}
+
+/// The Send keys menu for a computer that runs Windows (`Some(true)`),
+/// Linux (`Some(false)`), or one that has not said (`None`: only the keys
+/// every system takes).
+pub fn send_key_choices(windows: Option<bool>) -> Vec<SendKey> {
+    let mut keys = vec![
+        SendKey::Win,
+        SendKey::AltTab,
+        SendKey::AltF4,
+        SendKey::PrintScreen,
+    ];
+    match windows {
+        Some(true) => keys.extend([SendKey::CtrlShiftEsc, SendKey::Lock]),
+        Some(false) => keys.push(SendKey::CtrlAltDel),
+        None => {}
+    }
+    keys
+}
+
 /// Whether pressing `key` alone types something (it arrives as text then).
 pub fn types(key: egui::Key) -> bool {
     use egui::Key::*;
@@ -551,6 +620,25 @@ impl WindowInput {
         for pressed in [true, false] {
             out.push(InputPacket::KeyEvent { key: code, pressed });
         }
+    }
+
+    /// `keys` pressed in order and let go in reverse there, as a chord from
+    /// the Send keys menu (PC4); a key held there already stays held.
+    pub fn chord(&mut self, keys: &[u16]) -> Vec<InputPacket> {
+        let pressed: Vec<u16> = keys
+            .iter()
+            .copied()
+            .filter(|code| !self.down_there.contains(code))
+            .collect();
+        let mut out: Vec<InputPacket> = pressed
+            .iter()
+            .map(|&key| InputPacket::KeyEvent { key, pressed: true })
+            .collect();
+        out.extend(pressed.iter().rev().map(|&key| InputPacket::KeyEvent {
+            key,
+            pressed: false,
+        }));
+        out
     }
 
     /// Let go of everything held on the other computer, and forget what is
@@ -991,6 +1079,88 @@ mod tests {
                 "KeyEvent { key: 33, pressed: true }",
             ]
         );
+    }
+
+    /// PC4: every host has Win, Alt+Tab, Alt+F4 and Print Screen; Linux
+    /// Ctrl+Alt+Del, Windows Ctrl+Shift+Esc and Lock in its place, and a
+    /// computer that has not said its system only the keys every one takes.
+    #[test]
+    fn the_send_keys_menu_offers_what_the_system_takes() {
+        let common = [
+            SendKey::Win,
+            SendKey::AltTab,
+            SendKey::AltF4,
+            SendKey::PrintScreen,
+        ];
+        assert_eq!(send_key_choices(None), common);
+        let linux = send_key_choices(Some(false));
+        assert_eq!(linux[..4], common);
+        assert_eq!(linux[4..], [SendKey::CtrlAltDel]);
+        let windows = send_key_choices(Some(true));
+        assert_eq!(windows[..4], common);
+        assert_eq!(windows[4..], [SendKey::CtrlShiftEsc, SendKey::Lock]);
+        assert!(!windows.contains(&SendKey::CtrlAltDel));
+        for key in send_key_choices(Some(true))
+            .into_iter()
+            .chain(send_key_choices(Some(false)))
+        {
+            assert!(!key.label().is_empty());
+            // Every key is one the window already sends, with a Windows
+            // stroke on a Windows host and a code on a Linux one.
+            for code in key.keys() {
+                assert!(pocketdesk_core::local::view::input_allowed(
+                    &InputPacket::KeyEvent {
+                        key: *code,
+                        pressed: true
+                    }
+                ));
+            }
+        }
+    }
+
+    /// A chord goes down in order and comes up in reverse, as fingers
+    /// would; a key held there already is neither pressed nor let go.
+    #[test]
+    fn a_chord_goes_down_in_order_and_up_in_reverse() {
+        let mut input = WindowInput::default();
+        assert_eq!(
+            words(&input.chord(SendKey::CtrlAltDel.keys())),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 56, pressed: true }",
+                "KeyEvent { key: 111, pressed: true }",
+                "KeyEvent { key: 111, pressed: false }",
+                "KeyEvent { key: 56, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+        assert!(!input.holds(), "nothing is left held");
+        assert_eq!(
+            words(&input.chord(SendKey::Lock.keys())),
+            [
+                "KeyEvent { key: 125, pressed: true }",
+                "KeyEvent { key: 38, pressed: true }",
+                "KeyEvent { key: 38, pressed: false }",
+                "KeyEvent { key: 125, pressed: false }",
+            ]
+        );
+        assert_eq!(
+            words(&input.chord(SendKey::PrintScreen.keys())),
+            [
+                "KeyEvent { key: 99, pressed: true }",
+                "KeyEvent { key: 99, pressed: false }",
+            ]
+        );
+        // Alt held through the window: Alt+Tab taps Tab alone.
+        input.take(&[key(egui::Key::AltLeft, true)], picture(), Instant::now());
+        assert_eq!(
+            words(&input.chord(SendKey::AltTab.keys())),
+            [
+                "KeyEvent { key: 15, pressed: true }",
+                "KeyEvent { key: 15, pressed: false }",
+            ]
+        );
+        assert!(input.holds(), "Alt is still held there");
     }
 
     /// Focus lost mid-press: the button, the keys and the modifiers are let
