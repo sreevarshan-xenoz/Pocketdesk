@@ -1150,21 +1150,20 @@ fn follow_grab(
 ) {
     use crate::view_grab::{BEAT_EVERY, Heard, INSTALL, Situation};
     let now = Instant::now();
-    if state
-        .grab
-        .across_read
-        .is_none_or(|at| now.saturating_duration_since(at) >= ACROSS_LOOK)
-    {
-        state.grab.across_read = Some(now);
-        state.grab.across = !pocketdesk_core::local::shared_input::read_status(state_dir)
-            .keyboard_on
-            .trim()
-            .is_empty();
-        state.grab.privacy = crate::view_grab::privacy_shown();
-    }
     let fullscreen = ctx
         .input(|i| i.viewport().fullscreen)
         .unwrap_or(state.fullscreen);
+    // Where the shared keyboard is and whether privacy is on, read only
+    // while the rest would put the hook in, every half second (review M5).
+    let in_reach = focused && fullscreen && state.grab.setting && controlling;
+    if in_reach
+        && state
+            .grab
+            .across_read
+            .is_none_or(|at| now.saturating_duration_since(at) >= ACROSS_LOOK)
+    {
+        look_around(state, state_dir, now);
+    }
     let heard: Vec<Heard> = state
         .grab
         .hook
@@ -1189,14 +1188,21 @@ fn follow_grab(
     if died {
         state.grab.grab.release();
     }
-    let wanted = state.grab.grab.wanted(Situation {
+    let situation = |state: &State| Situation {
         focused,
         fullscreen,
         setting: state.grab.setting,
         controls: controlling,
         shared_across: state.grab.across,
         privacy: state.grab.privacy,
-    });
+    };
+    let mut wanted = state.grab.grab.wanted(situation(state));
+    if wanted && state.grab.hook.is_none() {
+        // Read afresh just before it goes in: a hook put in after shared
+        // input's would come first in the chain (review M5).
+        look_around(state, state_dir, now);
+        wanted = state.grab.grab.wanted(situation(state));
+    }
     if wanted && state.grab.hook.is_none() {
         state.grab.hook = INSTALL(ctx, viewport_id());
         if state.grab.hook.is_none() {
@@ -1212,6 +1218,18 @@ fn follow_grab(
         ctx.request_repaint_after(BEAT_EVERY);
     }
     send(state, packets);
+}
+
+/// Read where the shared keyboard is and whether privacy mode is on here,
+/// for the keyboard grab (PC4).
+#[cfg(windows)]
+fn look_around(state: &mut State, state_dir: &Path, now: Instant) {
+    state.grab.across_read = Some(now);
+    state.grab.across = !pocketdesk_core::local::shared_input::read_status(state_dir)
+        .keyboard_on
+        .trim()
+        .is_empty();
+    state.grab.privacy = crate::view_grab::privacy_shown();
 }
 
 /// Save the picture shown as a PNG in Pictures\\Pocketdesk, and copy it;
@@ -1792,6 +1810,17 @@ mod tests {
         let before = asks();
         follow_grab(&mut state, &dir, &ctx, true, true);
         assert_eq!(asks(), before, "shared input across");
+        // Review M5: read just now as home, it is read again before the
+        // hook would go in.
+        let mut state = fresh(true, true);
+        state.grab.across_read = Some(Instant::now());
+        let before = asks();
+        follow_grab(&mut state, &dir, &ctx, true, true);
+        assert_eq!(asks(), before, "read afresh before going in");
+        // Windowed, the file is not read at all.
+        let mut state = fresh(false, true);
+        follow_grab(&mut state, &dir, &ctx, true, true);
+        assert!(state.grab.across_read.is_none(), "not read while windowed");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
