@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-972 open items.
+976 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 64 |
+| A second computer | 68 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -919,6 +919,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Then the laptop drives Windows from its own touchpad: once Windows' cursor left, the laptop's edge facing Windows crosses again within a second or two; Windows' cursor arriving on Windows' right edge stays there too. (where: second computer)
 - Windows' watchdog: the laptop's Wi-Fi off while Windows drives it: Windows' keyboard and mouse come home within about a second, and once the Wi-Fi is back the laptop's edges lead to Windows again. (where: second computer)
 - A pairing link copied with a byte-order mark or a trailing line break (from a text editor) pastes into Settings → Other computers with Pair enabled, and pairs. (where: second computer)
+
+**226. The clipboard and files follow the window (PC3)**
+
+- Copy a line on Windows, click into the laptop's screen window: within a second the laptop's clipboard holds it (paste it there with Ctrl+V through the window); copy something on the laptop through the window, click back on a Windows app: Windows' clipboard holds the laptop's copy. A quick Alt+Tab through the window and back moves nothing. (where: second computer)
+- Copy an image on Windows (a screenshot with Win+Shift+S), focus the window: the laptop's clipboard holds the image; with "Files over the internet" off on either, it does not go. A KeePassXC password copied on the laptop does not come back to Windows as the window loses the focus. (where: second computer)
+- With View only on in the window's bar, or Control off for Windows on the laptop's Devices page, focusing the window moves nothing; with "Clipboard follows a computer's screen window" off on either computer, nothing moves; with "Clipboard with my computers" on on both, copies cross as that sync sends them and the window adds no second copy. (where: second computer)
+- Drop three files and a folder from Explorer onto the window: the note says "Sending 3 files and 1 folder to <laptop>…", then "Sent 3 files and 1 folder to <laptop>'s Downloads.", and they are there; with Files off for Windows on the laptop's Devices page, the note says Files is off for this computer there; with the laptop's Wi-Fi off, it says the link is down. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
