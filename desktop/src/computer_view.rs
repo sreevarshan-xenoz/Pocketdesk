@@ -11,8 +11,8 @@
 //! pointer and keys go to it ([`crate::view_input`]); without it, or with
 //! View only on, the window only shows. Closing the window ends the view; a
 //! view that ends on its own says why, with Reconnect. The clipboard
-//! follows the window's focus while it controls ([`crate::view_follow`],
-//! PC3).
+//! follows the window's focus while it controls, and files dropped on it go
+//! to that computer ([`crate::view_follow`], PC3).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -30,7 +30,7 @@ use pocketdesk_core::streaming::InputPacket;
 use crate::video::{
     Admit, Decoder, KeyGate, Picture, Recorder, free_name, letterbox, now_unix, stamp, user_folder,
 };
-use crate::view_follow::{self, Edge, FocusEdges};
+use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, WindowInput};
 
 /// The window's id among the app's viewports.
@@ -50,6 +50,10 @@ const REJOINS: usize = 3;
 const REJOIN_WINDOW: Duration = Duration::from_secs(10);
 /// How long a screenshot's or recording's line stays.
 const SAVED_NOTE: Duration = Duration::from_secs(8);
+/// How long a drop's last word stays (PC3).
+const DROP_NOTE: Duration = Duration::from_secs(8);
+/// How often a drop on its way looks at the sent list.
+const DROP_LOOK: Duration = Duration::from_millis(500);
 
 /// The computer whose screen is wanted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +111,11 @@ struct State {
     clock: DecodeClock,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
+    /// Files dropped on the window, on their way; the word on the last
+    /// drop; when the sent list was last read for them.
+    drop: Option<DropBatch>,
+    drop_note: Option<(String, Instant)>,
+    drop_look: Option<Instant>,
 }
 
 /// What the window measures itself (PC2): pictures shown a second, and how
@@ -548,6 +557,89 @@ fn say_focus(state: &mut State, edge: Edge) {
     }
 }
 
+/// Files or folders dropped on the window go to its computer (PC3), as the
+/// Files page sends them: refused at once when they cannot go now, else
+/// queued, and followed on the sent list.
+fn take_drops(
+    shared: &Mutex<State>,
+    ctx: &egui::Context,
+    state_dir: &Path,
+    config: Option<&Path>,
+    wanted: &Wanted,
+) {
+    let dropped = view_follow::dropped_paths(ctx.input(|i| {
+        i.raw
+            .dropped_files
+            .iter()
+            .map(|f| f.path().to_path_buf())
+            .collect::<Vec<_>>()
+    }));
+    if dropped.is_empty() {
+        return;
+    }
+    let link = computers::read(state_dir)
+        .computers
+        .into_iter()
+        .find(|c| c.device_id == wanted.device_id)
+        .map(|c| c.link)
+        .unwrap_or_default();
+    let internet_files = config
+        .and_then(|path| Config::load_from(path).ok())
+        .is_none_or(|c| c.internet_files);
+    let now = Instant::now();
+    let mut state = lock(shared);
+    match view_follow::refusal(&link, internet_files) {
+        Some(refusal) => {
+            state.drop = None;
+            state.drop_note = Some((view_follow::refusal_words(&wanted.name, &refusal), now));
+        }
+        None => {
+            let unix = now_unix();
+            let batch = view_follow::queue_all(&dropped, &wanted.name, now, |path| {
+                crate::model::queue_send_request(state_dir, &wanted.device_id, path, unix)
+                    .map(|(id, _)| id)
+            });
+            state.drop = Some(batch);
+            state.drop_note = None;
+            state.drop_look = Some(now);
+        }
+    }
+    ctx.request_repaint();
+}
+
+/// What the window says of files dropped on it now (PC3): on their way,
+/// where they landed or why not, for a while; `None` otherwise.
+fn drop_words(shared: &Mutex<State>, state_dir: &Path, ctx: &egui::Context) -> Option<String> {
+    let now = Instant::now();
+    let mut state = lock(shared);
+    if let Some(batch) = state.drop.clone() {
+        if state.drop_look.is_none_or(|at| at.elapsed() >= DROP_LOOK) {
+            state.drop_look = Some(now);
+            let sent = pocketdesk_core::local::sent::read(state_dir);
+            if let Some(landed) = view_follow::landed(&batch, &sent, now) {
+                state.drop = None;
+                state.drop_note = Some((view_follow::landed_words(&batch, &landed), now));
+            }
+        }
+        if state.drop.is_some() {
+            ctx.request_repaint_after(DROP_LOOK);
+            return Some(view_follow::sending_words(&batch));
+        }
+    }
+    let note = state
+        .drop_note
+        .clone()
+        .filter(|(_, at)| at.elapsed() < DROP_NOTE)
+        .map(|(note, at)| {
+            ctx.request_repaint_after(DROP_NOTE.saturating_sub(at.elapsed()));
+            note
+        });
+    if note.is_none() {
+        state.drop_note = None;
+    }
+    note
+}
+
 fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let mut state = lock(shared);
@@ -764,6 +856,28 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         if state.edges.pending() {
             ctx.request_repaint_after(view_follow::SETTLE);
         }
+    }
+    take_drops(shared, &ctx, state_dir, config, &wanted);
+    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+    let drop_said = if hovering {
+        Some(format!("Drop to send to {}'s Downloads", wanted.name))
+    } else {
+        drop_words(shared, state_dir, &ctx)
+    };
+    if let Some(words) = drop_said {
+        egui::Area::new(egui::Id::new("computer-view-drop"))
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0))
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(&ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_black_alpha(210))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.colored_label(egui::Color32::from_gray(235), words);
+                    });
+            });
     }
 
     egui::CentralPanel::default()

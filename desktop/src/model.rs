@@ -1272,6 +1272,17 @@ pub fn queue_send(
     path: &Path,
     now_unix: u64,
 ) -> Result<String, String> {
+    queue_send_request(state_dir, device_id, path, now_unix).map(|(_, name)| name)
+}
+
+/// [`queue_send`], with the request's id (the sent list names it), and the
+/// name of what goes (PC3: the screen window follows its drop there).
+pub fn queue_send_request(
+    state_dir: &Path,
+    device_id: &str,
+    path: &Path,
+    now_unix: u64,
+) -> Result<(String, String), String> {
     // A file, or a folder the server sends file by file (T6b).
     if !path.is_file() && !path.is_dir() {
         return Err(format!("{} is not a file or a folder.", path.display()));
@@ -1283,14 +1294,14 @@ pub fn queue_send(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    pocketdesk_core::local::outbox::request(
+    let request = pocketdesk_core::local::outbox::request(
         state_dir,
         device_id,
         &path.display().to_string(),
         now_unix,
     )
     .map_err(|e| format!("Could not queue {name}: {e}"))?;
-    Ok(name)
+    Ok((request.id, name))
 }
 
 /// Allow or deny one capability for `id`, in the store the server reads.
