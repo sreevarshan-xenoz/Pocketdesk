@@ -40,6 +40,10 @@ const POLL: Duration = Duration::from_millis(300);
 const READ_TIMEOUT: Duration = Duration::from_secs(6);
 /// A view asked for that the server never names is given up on.
 const NO_ANSWER: Duration = Duration::from_secs(20);
+/// A window joins its view again at most this many times in
+/// [`REJOIN_WINDOW`].
+const REJOINS: usize = 3;
+const REJOIN_WINDOW: Duration = Duration::from_secs(10);
 /// How long a screenshot's or recording's line stays.
 const SAVED_NOTE: Duration = Duration::from_secs(8);
 
@@ -63,6 +67,8 @@ struct State {
     /// closes: a view the worker shows is still this window's while it is
     /// unchanged.
     asked: u64,
+    /// When this window last joined its view again (BK7 re-review N3).
+    rejoins: Vec<Instant>,
     /// The view being shown.
     session_id: Option<u64>,
     status: ViewStatus,
@@ -228,6 +234,7 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     state.asked_at = Some(Instant::now());
     state.wanted = Some(wanted);
     state.asked += 1;
+    state.rejoins.clear();
     Ok(())
 }
 
@@ -625,9 +632,14 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         // Still the one this window wants (not closed, nor asked again or
         // for another screen meanwhile).
         let ours = state.asked == asked && state.wanted.as_ref() == Some(&wanted);
-        let rejoin =
+        let dropped =
             cut && ours && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
+        // At most this often, then the view ends (BK7 re-review N3): a
+        // relay that drops the window each time is not joined for ever.
+        state.rejoins.retain(|at| at.elapsed() < REJOIN_WINDOW);
+        let rejoin = dropped && state.rejoins.len() < REJOINS;
         if rejoin {
+            state.rejoins.push(Instant::now());
             let release = state.input.release_all();
             send(&mut state, release);
             state.stream = None;
@@ -641,6 +653,10 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         // that would not take it too.
         if ours {
             let why = match ended {
+                _ if dropped => format!(
+                    "The view of {} kept dropping this window. Reconnect to try again.",
+                    wanted.name
+                ),
                 Ok(why) if !why.is_empty() => why,
                 Ok(_) => format!("The view of {} ended.", wanted.name),
                 Err(e) => {
@@ -953,6 +969,43 @@ mod tests {
         assert_eq!(
             lock(&view.shared).ended.as_deref(),
             Some("Lost the connection to Desk.")
+        );
+
+        // BK7 re-review N3: a relay that drops the window each time it
+        // joins is joined at most three times in ten seconds, then the view
+        // ends, saying so.
+        wire::write(
+            &dir,
+            &ViewFile {
+                session_id: 21,
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                port: listener.local_addr().unwrap().port(),
+                token: pocketdesk_core::local::cast::token_hex(&token),
+            },
+        )
+        .unwrap();
+        view.open("desk", "Desk", 0, 0, false).unwrap();
+        for _ in 0..4 {
+            drop(join());
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lock(&view.shared).ended.is_none() {
+            assert!(Instant::now() < deadline, "the end within 10 s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            lock(&view.shared)
+                .ended
+                .as_deref()
+                .is_some_and(|why| why.contains("kept dropping")),
+            "{:?}",
+            lock(&view.shared).ended
+        );
+        std::thread::sleep(Duration::from_millis(1000));
+        assert!(
+            matches!(listener.accept(), Err(e) if e.kind() == io::ErrorKind::WouldBlock),
+            "not joined a fifth time"
         );
     }
 
