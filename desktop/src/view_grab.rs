@@ -121,6 +121,15 @@ pub enum Verdict {
     Release,
 }
 
+/// The evdev code of the key `stroke` is.
+fn code_of(stroke: Stroke) -> Option<u16> {
+    evdev_from_scan(stroke.scan, stroke.extended).or(match stroke.vk {
+        VK_LWIN => Some(125),
+        VK_RWIN => Some(126),
+        _ => None,
+    })
+}
+
 fn is_win(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
 }
@@ -174,27 +183,25 @@ impl HookKeys {
     /// `stroke` went to Windows while the grab took nothing (the beat
     /// stale, another window in front): the modifiers held and the keys
     /// taken stay in step, so a taken key let go meanwhile is not taken
-    /// for ever after (review M4).
-    pub fn pass(&mut self, stroke: Stroke) {
+    /// for ever after (review M4). A taken key let go comes back as its
+    /// code, for its release to be said there still (round 2's N1).
+    pub fn pass(&mut self, stroke: Stroke) -> Option<u16> {
         let vk = stroke.vk;
         self.chord = false;
         if stroke.down {
             if is_ctrl(vk) || is_alt(vk) || is_shift(vk) {
                 self.held.insert(vk);
             }
+            None
         } else {
             self.held.remove(&vk);
-            self.taken.remove(&vk);
+            self.taken.remove(&vk).then(|| code_of(stroke)).flatten()
         }
     }
 
     /// What to do with `stroke`.
     pub fn key(&mut self, stroke: Stroke) -> Verdict {
-        let code = evdev_from_scan(stroke.scan, stroke.extended).or(match stroke.vk {
-            VK_LWIN => Some(125),
-            VK_RWIN => Some(126),
-            _ => None,
-        });
+        let code = code_of(stroke);
         let vk = stroke.vk;
         if !stroke.down {
             if self.taken.remove(&vk) {
@@ -376,7 +383,17 @@ fn decide(
         || foreground != state.window
         || stalled(state.beat.load(Ordering::Acquire), now_ms)
     {
-        state.keys.pass(stroke);
+        // A taken key let go meanwhile is still let go there, while the
+        // window listens: the Windows key never stays held there (N1).
+        if let Some(code) = state.keys.pass(stroke)
+            && !state.gone
+        {
+            if state.heard.send(Heard::Key(code, false)).is_ok() {
+                let _ = state.wake.send(());
+            } else {
+                state.gone = true;
+            }
+        }
         return false;
     }
     // A key is taken only when it was said there: one nobody hears stays
@@ -1008,7 +1025,33 @@ mod tests {
         let tab = stroke(TAB.0, TAB.1, TAB.2, true);
         assert!(decide(&mut slot, 7, 3_000, WINDOW, tab), "Alt+Tab");
         let said: Vec<Heard> = heard.try_iter().collect();
-        assert_eq!(said, [Heard::Key(125, true), Heard::Key(15, true)]);
+        assert_eq!(
+            said,
+            [
+                Heard::Key(125, true),
+                Heard::Key(125, false),
+                Heard::Key(15, true)
+            ],
+            "the Windows key let go while stale is still let go there (N1)"
+        );
+    }
+
+    /// Round 2's N1: a taken key let go while another window is in front
+    /// goes to Windows and its release is still said there; a key never
+    /// taken says nothing.
+    #[test]
+    fn a_taken_key_let_go_elsewhere_is_let_go_there() {
+        let (mut slot, heard) = hook_state(7, 1_000);
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(true)));
+        assert!(!decide(&mut slot, 7, 1_100, 0x9999, win(false)));
+        let e = stroke(KEY_E.0, KEY_E.1, KEY_E.2, false);
+        assert!(!decide(&mut slot, 7, 1_100, 0x9999, e));
+        let said: Vec<Heard> = heard.try_iter().collect();
+        assert_eq!(said, [Heard::Key(125, true), Heard::Key(125, false)]);
+        let mut keys = HookKeys::default();
+        assert_eq!(keys.key(win(true)), Verdict::Take(Some((125, true))));
+        assert_eq!(keys.pass(win(false)), Some(125));
+        assert_eq!(keys.pass(win(false)), None, "once");
     }
 
     /// A stale beat: every key is Windows', nothing said.
