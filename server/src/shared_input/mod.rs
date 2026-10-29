@@ -126,8 +126,13 @@ pub(crate) mod caught_log {
                 .with_ansi(false)
                 .with_writer(|| ThisThread)
                 .finish();
-            // Another test's global subscriber would do as well.
+            // Set once. Should another global subscriber have been set
+            // first, nothing reaches the buffers and the catching tests
+            // fail with an empty log, never pass falsely.
             let _ = tracing::subscriber::set_global_default(subscriber);
+            // A callsite first met on another thread while the subscriber
+            // was being set may have kept "never": asked again now.
+            tracing::callsite::rebuild_interest_cache();
         });
         let buffer = Buffer::default();
         CATCHING
