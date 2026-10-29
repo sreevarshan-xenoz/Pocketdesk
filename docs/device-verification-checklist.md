@@ -3078,6 +3078,7 @@ Owed:
 - [ ] The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
 - [ ] Mixed versions: a computer on 0.8.2 (or earlier) and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
 - [ ] The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
+- [ ] Files between computers on Cubic: a large file (1 GB or more) sent from one computer to the other with 0.8.2 on both, then with this build on both, over a lossy or internet path (another network, or Wi-Fi far from the router), timed both ways; this build is not much slower. If it is, the transfers could ride a connection of their own on BBR. (where: away)
 
 ## Recording results
 

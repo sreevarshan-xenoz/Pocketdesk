@@ -388,10 +388,13 @@ pub fn iroh_transport_with(choice: CongestionChoice) -> iroh::endpoint::QuicTran
 /// The congestion controller of the link between two computers (BK11).
 /// BBR paces a quiet link at the low rate it has seen, so a key that
 /// follows a ping waited for the pacer, about 25 ms on a LAN (BK10's
-/// measurement). Cubic sends what its window allows at once. The link
-/// carries keys, moves, the clipboard and files, not video, so BBR's gain
-/// on a lossy link (BG4) does not apply; phones, and a computer's screen
-/// viewed from another (BK7), stay on the endpoint's own.
+/// measurement). Cubic sends what its window allows at once. This trades
+/// throughput for latency: the link also carries files and clipboard
+/// images between the computers (2c, 2d, 2h, BK3), and those now take Cubic's
+/// way with loss, a smaller window after each one, where BBR kept its rate
+/// on a lossy link (BG4), so a large file over a lossy or long internet
+/// path may go slower than it did (owed, checklist §222). Phones, and a
+/// computer's screen viewed from another (BK7), stay on the endpoint's own.
 pub const COMPUTER_LINK_CONGESTION: CongestionChoice = CongestionChoice::Cubic;
 
 /// [`iroh_transport`] for the link between two computers: the same limits

@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-955 open items.
+956 open items.
 
 | Where | Items |
 |---|---|
@@ -11,7 +11,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 152 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 38 |
+| Away from home: another network, or through a router | 39 |
 | A second computer | 49 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
@@ -785,6 +785,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **222. No pacing stall on the computer link (BK11)**
 
 - The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
+- Files between computers on Cubic: a large file (1 GB or more) sent from one computer to the other with 0.8.2 on both, then with this build on both, over a lossy or internet path (another network, or Wi-Fi far from the router), timed both ways; this build is not much slower. If it is, the transfers could ride a connection of their own on BBR. (where: away)
 
 ## A second computer
 
