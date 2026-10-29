@@ -33,6 +33,7 @@ pub mod drive;
 pub mod drop_windows;
 pub mod game_lock;
 pub mod held;
+pub mod keys_evdev;
 pub mod keys_windows;
 pub mod layout;
 pub mod link;
