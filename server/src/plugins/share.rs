@@ -745,10 +745,32 @@ impl Plugin for SharePlugin {
     }
 }
 
+/// Why another of the owner's computers' file is refused while Files is off
+/// for it here (PC3): its sender says so, in place of waiting out the link.
+pub(crate) const FILES_OFF_FOR_COMPUTER: &str = "Files is turned off for that computer here";
+
+/// The transfer key a file share names (`payloadTransferInfo.key`), when it
+/// names a valid one.
+fn share_key(packet: &NetworkPacket) -> Option<String> {
+    (packet.packet_type == "kdeconnect.share.request")
+        .then(|| packet.body.get("payloadTransferInfo")?.get("key")?.as_str())
+        .flatten()
+        .filter(|key| is_transfer_key(key))
+        .map(str::to_string)
+}
+
 /// Answer a packet the owner's permissions denied, when its sender waits for
 /// an answer: a folder request is told why, so the phone does not wait on
-/// silence. Every other denied packet stays unanswered.
+/// silence, and another computer's file is refused by its key (PC3), so it
+/// does not wait on the link for a stream that never comes. Every other
+/// denied packet stays unanswered.
 pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSender) {
+    if let Some(key) = share_key(packet) {
+        if crate::plugins::pair::is_computer_device(sender.device_id()) {
+            refuse(sender, &key, FILES_OFF_FOR_COMPUTER).await;
+        }
+        return;
+    }
     if packet.packet_type != FOLDER_FETCH {
         return;
     }
@@ -3164,6 +3186,33 @@ mod tests {
             "{}",
             reply.body["reason"]
         );
+    }
+
+    /// PC3: a denied file share names the key its refusal goes to; one
+    /// without a valid key, or another packet, names none.
+    #[test]
+    fn a_denied_share_names_its_transfer_key() {
+        let share = |body| NetworkPacket::new("kdeconnect.share.request").with_body(body);
+        assert_eq!(
+            share_key(&share(serde_json::json!({
+                "filename": "a.txt",
+                "payloadTransferInfo": {"key": KEY},
+            }))),
+            Some(KEY.to_string())
+        );
+        assert_eq!(
+            share_key(&share(
+                serde_json::json!({"payloadTransferInfo": {"key": "short"}})
+            )),
+            None
+        );
+        assert_eq!(
+            share_key(&share(serde_json::json!({"text": "hello"}))),
+            None
+        );
+        let fetch = NetworkPacket::new(FETCH)
+            .with_body(serde_json::json!({"payloadTransferInfo": {"key": KEY}}));
+        assert_eq!(share_key(&fetch), None);
     }
 
     #[tokio::test]
