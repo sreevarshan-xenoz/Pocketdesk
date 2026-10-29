@@ -96,6 +96,12 @@ impl Bits<'_> {
     }
 }
 
+/// The most macroblocks a frame has at H.264's largest level (6.2's MaxFS).
+pub const MAX_FRAME_MBS: u64 = 139_264;
+/// The longest side read, in pixels: 8K's width. A side past it is no
+/// screen this window shows.
+pub const MAX_SIDE: u64 = 8192;
+
 /// The profiles whose SPS says its chroma format and bit depths.
 const HIGH_PROFILES: [u32; 13] = [100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135];
 
@@ -170,9 +176,14 @@ fn sps_size(rbsp: &[u8]) -> Option<(u16, u16)> {
         2 => (2, fields),
         _ => (1, fields),
     };
+    // No level allows more (BK7 review I1): a host's bogus size must not
+    // make the window ask for gigabytes.
+    if width_mbs * height_units * fields > MAX_FRAME_MBS {
+        return None;
+    }
     let width = (width_mbs * 16).checked_sub(crop_x * (left + right))?;
     let height = (height_units * 16 * fields).checked_sub(crop_y * (top + bottom))?;
-    if width == 0 || height == 0 {
+    if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
         return None;
     }
     Some((u16::try_from(width).ok()?, u16::try_from(height).ok()?))
@@ -247,6 +258,88 @@ mod tests {
         for end in 0..12 {
             assert_eq!(picture_size(&whole[..end]), None, "{end} bytes");
         }
+    }
+
+    /// Writes bits and exp-Golomb codes, for SPSes made here.
+    #[derive(Default)]
+    struct Writer {
+        bits: Vec<bool>,
+    }
+
+    impl Writer {
+        fn bits(&mut self, value: u32, n: u32) -> &mut Self {
+            for i in (0..n).rev() {
+                self.bits.push((value >> i) & 1 == 1);
+            }
+            self
+        }
+
+        fn ue(&mut self, value: u32) -> &mut Self {
+            let coded = u64::from(value) + 1;
+            let len = 64 - coded.leading_zeros();
+            for _ in 1..len {
+                self.bits.push(false);
+            }
+            for i in (0..len).rev() {
+                self.bits.push((coded >> i) & 1 == 1);
+            }
+            self
+        }
+
+        /// An access unit holding this SPS, its bits padded with the stop bit.
+        fn unit(&mut self) -> Vec<u8> {
+            self.bits.push(true);
+            while !self.bits.len().is_multiple_of(8) {
+                self.bits.push(false);
+            }
+            let mut out = vec![0, 0, 0, 1, 0x67];
+            out.extend(
+                self.bits
+                    .chunks(8)
+                    .map(|byte| byte.iter().fold(0u8, |acc, b| (acc << 1) | u8::from(*b))),
+            );
+            out
+        }
+    }
+
+    /// A Baseline SPS of `width_mbs` by `height_mbs` macroblocks, uncropped.
+    fn baseline(width_mbs: u32, height_mbs: u32) -> Vec<u8> {
+        Writer::default()
+            .bits(66, 8)
+            .bits(0, 8)
+            .bits(62, 8)
+            .ue(0) // seq_parameter_set_id
+            .ue(0) // log2_max_frame_num_minus4
+            .ue(2) // pic_order_cnt_type
+            .ue(1) // max_num_ref_frames
+            .bits(0, 1) // gaps
+            .ue(width_mbs - 1)
+            .ue(height_mbs - 1)
+            .bits(1, 1) // frame_mbs_only
+            .bits(1, 1) // direct_8x8_inference
+            .bits(0, 1) // no cropping
+            .unit()
+    }
+
+    /// BK7 review I1: a size no H.264 level allows (one a host could send
+    /// to make the window ask for gigabytes) is no size; the largest Level
+    /// 6.2 allows is.
+    #[test]
+    fn a_picture_larger_than_any_level_allows_has_no_size() {
+        assert_eq!(picture_size(&baseline(40, 23)), Some((640, 368)));
+        assert_eq!(
+            picture_size(&baseline(512, 270)),
+            Some((8192, 4320)),
+            "8K, within Level 6.2"
+        );
+        assert_eq!(picture_size(&baseline(4096, 4096)), None, "65536 x 65536");
+        assert_eq!(picture_size(&baseline(1024, 16)), None, "16384 wide");
+        assert_eq!(picture_size(&baseline(16, 1024)), None, "16384 high");
+        assert_eq!(
+            picture_size(&baseline(500, 500)),
+            None,
+            "within each side, past the level's frame size"
+        );
     }
 
     #[test]
