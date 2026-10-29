@@ -27,6 +27,7 @@ use pocketdesk_core::streaming::input_packet::InputPacket;
 use super::awake::KeepAwake;
 use super::badge;
 use super::held::HeldInput;
+use super::layout;
 use super::link::{self, Channel};
 use super::quick::{KeepQuick, Nudge};
 use super::screens;
@@ -154,6 +155,9 @@ pub struct Receiver {
     inputs: u32,
     /// It asked for this computer's sound this visit (BK6).
     sound_wanted: bool,
+    /// This computer's screens as last looked at (none yet: an arrival is
+    /// put where it says).
+    screens: Vec<Screen>,
 }
 
 impl Receiver {
@@ -171,6 +175,15 @@ impl Receiver {
             timed_for: None,
             inputs: 0,
             sound_wanted: false,
+            screens: Vec::new(),
+        }
+    }
+
+    /// This computer's screens, for where an arriving pointer is put
+    /// ([`arrival`]).
+    pub fn set_screens(&mut self, screens: &[Screen]) {
+        if self.screens != screens {
+            self.screens = screens.to_vec();
         }
     }
 
@@ -291,6 +304,9 @@ impl Receiver {
                 y,
                 "Shared input: another computer's cursor arrived here at this position (0..=65535)"
             );
+            // A few pixels inside the edge it came over, never on it:
+            // this computer's own edge there leads back to that computer.
+            let (x, y) = arrival(&self.screens, x, y);
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -422,6 +438,63 @@ impl Receiver {
                 .input_at
                 .is_some_and(|at| now.saturating_duration_since(at) < QUICK_FOR)
     }
+}
+
+/// Pixels inside the edge of the screen it lands on that an arriving
+/// pointer is put.
+pub const ARRIVE_INSIDE: i64 = 4;
+
+/// Where a pointer arriving at (`x`, `y`) (0..=65535 across the box around
+/// `screens`, as [`Msg::Enter`] says it) is put: [`ARRIVE_INSIDE`] pixels
+/// inside the edges of the screen it lands on, never on one. The driving
+/// computer puts it on the first row or column past its own edge, the very
+/// line where this computer's own edge facing it is watched (the portal's
+/// barrier on Linux): a pointer put there, as the compositor's virtual
+/// pointer puts it, could set it off (the owner's first live test). Only a
+/// pixel that is too near an edge moves; with no screens known yet it is
+/// put where it says.
+fn arrival(screens: &[Screen], x: u16, y: u16) -> (u16, u16) {
+    let rects: Vec<(i64, i64, i64, i64)> = screens
+        .iter()
+        .filter(|s| s.width > 0 && s.height > 0)
+        .map(|s| {
+            let (x0, y0) = (i64::from(s.x), i64::from(s.y));
+            (x0, y0, x0 + i64::from(s.width), y0 + i64::from(s.height))
+        })
+        .collect();
+    let Some((bx0, by0, bx1, by1)) = rects
+        .iter()
+        .copied()
+        .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+    else {
+        return (x, y);
+    };
+    // The pixel it names, as `layout::normalize` names a pixel.
+    let pixel = |v: u16, lo: i64, hi: i64| {
+        let last = (hi - lo - 1).max(0);
+        lo + (i64::from(v) * last + 32767) / 65535
+    };
+    let (px, py) = (pixel(x, bx0, bx1), pixel(y, by0, by1));
+    // The screen it is on, else the nearest.
+    let Some(&(x0, y0, x1, y1)) = rects.iter().min_by_key(|r| {
+        let dx = (r.0 - px).max(px - (r.2 - 1)).max(0);
+        let dy = (r.1 - py).max(py - (r.3 - 1)).max(0);
+        dx * dx + dy * dy
+    }) else {
+        return (x, y);
+    };
+    let inside = |v: u16, p: i64, lo: i64, hi: i64, blo: i64, bhi: i64| {
+        let (min, max) = (lo + ARRIVE_INSIDE, hi - 1 - ARRIVE_INSIDE);
+        if min > max || (min..=max).contains(&p) {
+            v
+        } else {
+            layout::normalize(p.clamp(min, max), blo, bhi)
+        }
+    };
+    (
+        inside(x, px, x0, x1, bx0, bx1),
+        inside(y, py, y0, y1, by0, by1),
+    )
 }
 
 /// When something that came off the link at `arrived_us` ([`link::now_us`])
@@ -1189,6 +1262,7 @@ pub async fn run() {
             _ = look.tick() => {
                 if !gate.on().await {
                     own.forget();
+                    receiver.set_screens(&[]);
                     // Those that could cross onto this one are told they
                     // cannot now.
                     for (to, mut channel) in channels.drain() {
@@ -1214,6 +1288,7 @@ pub async fn run() {
                     continue;
                 }
                 if own.note(seen) {
+                    receiver.set_screens(own.get());
                     write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
                     for to in told {
@@ -1397,6 +1472,71 @@ mod tests {
         r.handle("other", key(30, true), true);
         assert_eq!(r.timings_for("pc"), None);
         assert_eq!(r.timings_for("other"), Some(&[][..]));
+    }
+
+    fn screen(x: i32, y: i32, width: u32, height: u32) -> Screen {
+        Screen {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// The owner's first live test: the pointer of the computer arriving
+    /// was put on the very edge facing it, where this computer's own
+    /// barrier sits; it is put a few pixels inside instead.
+    #[test]
+    fn an_arriving_pointer_is_put_inside_the_edge() {
+        let one = [screen(0, 0, 1920, 1080)];
+        let x = |px| layout::normalize(px, 0, 1920);
+        let y = |px| layout::normalize(px, 0, 1080);
+        // The left edge, halfway down: 4 pixels in, the height as it was.
+        assert_eq!(arrival(&one, 0, 32768), (x(4), 32768));
+        // The right edge and the top.
+        assert_eq!(arrival(&one, 65535, 0), (x(1915), y(4)));
+        // The bottom-left corner.
+        assert_eq!(arrival(&one, 0, 65535), (x(4), y(1075)));
+        // Inside already: as it came.
+        assert_eq!(arrival(&one, 32768, 32768), (32768, 32768));
+        assert_eq!(arrival(&one, x(4), y(4)), (x(4), y(4)));
+        // Screens not known yet: as it came.
+        assert_eq!(arrival(&[], 0, 0), (0, 0));
+    }
+
+    /// The edge is that of the screen it lands on, not the box around them:
+    /// a shorter screen to the right of a taller one has its bottom edge
+    /// halfway down the box.
+    #[test]
+    fn an_arrival_is_put_inside_the_screen_it_lands_on() {
+        let two = [screen(0, 0, 1920, 1080), screen(1920, 0, 1280, 720)];
+        let x = |px| layout::normalize(px, 0, 3200);
+        let y = |px| layout::normalize(px, 0, 1080);
+        // Onto the short screen's last row, from below.
+        assert_eq!(arrival(&two, x(2500), y(719)), (x(2500), y(715)));
+        // Onto the tall screen's last row: its own bottom.
+        assert_eq!(arrival(&two, x(100), y(1079)), (x(100), y(1075)));
+    }
+
+    #[test]
+    fn the_receiver_puts_an_arrival_inside_but_moves_as_sent() {
+        let (mut r, fake) = receiver();
+        r.set_screens(&[screen(0, 0, 1920, 1080)]);
+        r.handle("pc", Msg::Enter { x: 0, y: 32768 }, true);
+        r.handle(
+            "pc",
+            Msg::Move {
+                seq: 1,
+                x: 0,
+                y: 32768,
+            },
+            true,
+        );
+        let inside = layout::normalize(4, 0, 1920);
+        assert_eq!(
+            fake.take(),
+            vec![Call::Move(inside, 32768), Call::Move(0, 32768)]
+        );
     }
 
     #[test]
