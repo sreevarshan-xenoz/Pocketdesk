@@ -521,7 +521,12 @@ impl WindowInput {
     fn clip(&mut self, clip: Clip, out: &mut Vec<InputPacket>) {
         let held = self.ctrl_here() || (self.shift_here() && clip != Clip::Copy);
         if held {
-            self.clips.push(clip);
+            // Held, the key repeats its copy, cut or paste: one a press
+            // (BK7 re-review N5), as with nothing to paste here, where egui
+            // says none.
+            if !self.clips.contains(&clip) {
+                self.clips.push(clip);
+            }
             return;
         }
         out.push(InputPacket::KeyEvent {
@@ -935,6 +940,34 @@ mod tests {
                 ]),
                 ["KeyEvent { key: 29, pressed: true }"],
                 "{letter:?}"
+            );
+        }
+    }
+
+    /// BK7 re-review N5: Ctrl+V held repeats egui's paste (when this
+    /// clipboard holds text) but not its release: one paste a press, as
+    /// with nothing to paste here, never a burst at the release.
+    #[test]
+    fn a_held_paste_is_one_paste() {
+        for release_first in [false, true] {
+            let mut events = vec![key(egui::Key::ControlLeft, true)];
+            events.extend((0..4).map(|_| egui::Event::Paste("text here".into())));
+            if release_first {
+                events.push(key(egui::Key::ControlLeft, false));
+                events.push(key(egui::Key::V, false));
+            } else {
+                events.push(key(egui::Key::V, false));
+                events.push(key(egui::Key::ControlLeft, false));
+            }
+            assert_eq!(
+                run(&events),
+                [
+                    "KeyEvent { key: 29, pressed: true }",
+                    "KeyEvent { key: 47, pressed: true }",
+                    "KeyEvent { key: 47, pressed: false }",
+                    "KeyEvent { key: 29, pressed: false }",
+                ],
+                "Ctrl let go first: {release_first}"
             );
         }
     }
