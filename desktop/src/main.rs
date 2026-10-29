@@ -20,6 +20,7 @@ mod keys;
 mod logs_view;
 mod messages_view;
 mod nav;
+mod nearby_view;
 mod network_profile;
 mod notes_view;
 mod notice;

@@ -411,6 +411,7 @@ impl PairView {
         config: Option<&Config>,
         devices: &[Device],
         now_unix: u64,
+        nearby: &mut dyn FnMut(&mut egui::Ui),
     ) {
         self.switch(ui, state_dir);
         let known = self
@@ -464,6 +465,10 @@ impl PairView {
         // Said above the code: on a Public network a phone or computer
         // scanning it would time out with no word why.
         self.public.show(ui);
+        // Pair a computer nearby: the list first, the link below it.
+        if self.mode == PairFor::Computer {
+            nearby(ui);
+        }
 
         // T1 review: a code drawn while the server was starting, or before it
         // moved off a held port, names a port phones cannot reach; it is
@@ -1064,7 +1069,7 @@ mod tests {
     /// One frame of the Pair tab, headless.
     fn frame(ctx: &egui::Context, view: &mut PairView, dir: &std::path::Path, now: u64) {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            view.show(ui, dir, None, &[], now);
+            view.show(ui, dir, None, &[], now, &mut |_| {});
         });
         // No renderer uploads the QR texture here.
         output.textures_delta.clear();

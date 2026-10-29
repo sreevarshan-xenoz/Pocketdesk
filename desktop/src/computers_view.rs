@@ -707,6 +707,12 @@ fn names_endpoint(link: &pocketdesk_core::local::pair_link::PairLink) -> bool {
         .is_some_and(|ep| ep.get("endpointId").and_then(|id| id.as_str()).is_some())
 }
 
+/// A computer's name as another computer gave it, fit to show (a link's,
+/// or a nearby one's).
+pub fn shown(name: &str) -> String {
+    link_name(name)
+}
+
 /// A link's computer name fit to show: one printable line, else
 /// "a computer".
 fn link_name(name: &str) -> String {
