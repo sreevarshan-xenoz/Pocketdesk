@@ -329,6 +329,18 @@ pub fn in_order(keyframe: bool, seq: u64, last: Option<u64>) -> bool {
     keyframe || last.is_none_or(|last| seq > last)
 }
 
+/// How often a release is tried on a link that does not take it.
+const RELEASE_TRIES: usize = 3;
+
+/// Whether `packet` lets go of a key or a button.
+pub fn is_release(packet: &InputPacket) -> bool {
+    matches!(
+        packet,
+        InputPacket::KeyEvent { pressed: false, .. }
+            | InputPacket::MouseClick { pressed: false, .. }
+    )
+}
+
 /// Whether a frame of `len` bytes fits in one relay message, its header
 /// and all.
 pub fn fits(len: usize) -> bool {
@@ -396,8 +408,18 @@ async fn session(
     if let Some(conn) = conn.clone() {
         tokio::spawn(async move {
             while let Some(packet) = input.recv().await {
-                let sent = tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
-                if !matches!(sent, Ok(Ok(()))) {
+                // A release is tried again on a stalled link (BK7 review M7):
+                // left undone, the key stays held there.
+                let tries = if is_release(&packet) {
+                    RELEASE_TRIES
+                } else {
+                    1
+                };
+                for _ in 0..tries {
+                    let sent = tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
+                    if matches!(sent, Ok(Ok(()))) {
+                        break;
+                    }
                     tracing::debug!("An input packet did not reach the other computer");
                 }
             }
@@ -819,7 +841,16 @@ fn start_viewer(stream: TcpStream, session_id: u64, input: mpsc::Sender<InputPac
                     // Only what the window may send; the rest is dropped.
                     match InputPacket::decode(&packet) {
                         Ok(packet) if wire::input_allowed(&packet) => {
-                            let _ = input.try_send(packet);
+                            // A release waits for room (BK7 review M7): a
+                            // key or button let go of here must be let go of
+                            // there. The rest may be dropped.
+                            if is_release(&packet) {
+                                if input.send(packet).await.is_err() {
+                                    break;
+                                }
+                            } else {
+                                let _ = input.try_send(packet);
+                            }
                         }
                         _ => tracing::debug!("Dropped input the view's window may not send"),
                     }
@@ -924,6 +955,53 @@ mod tests {
         assert!(!stops(Some(5), Some(6)), "replaced since");
         assert!(stops(None, Some(6)), "the window never knew its view");
         assert!(!stops(Some(5), None));
+    }
+
+    /// BK7 review M7: with the queue to the other computer full, a press
+    /// or a move may be dropped, a release never (a key left held there).
+    #[tokio::test]
+    async fn a_release_waits_for_room_where_a_press_is_dropped() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, mut queued) = mpsc::channel(1);
+        let _viewer = start_viewer(relay_end, 1, input);
+        let press = |key| InputPacket::KeyEvent { key, pressed: true };
+        for packet in [
+            press(30),
+            press(31),
+            InputPacket::KeyEvent {
+                key: 30,
+                pressed: false,
+            },
+        ] {
+            window
+                .write_all(&Message::Input(packet.encode()).encode())
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let mut got = Vec::new();
+        while let Ok(Some(packet)) =
+            tokio::time::timeout(Duration::from_millis(500), queued.recv()).await
+        {
+            got.push(format!("{packet:?}"));
+        }
+        assert_eq!(
+            got,
+            [
+                "KeyEvent { key: 30, pressed: true }",
+                "KeyEvent { key: 30, pressed: false }"
+            ],
+            "the second press found no room; the release waited for it"
+        );
+        assert!(is_release(&InputPacket::MouseClick {
+            button: 0,
+            pressed: false
+        }));
+        assert!(!is_release(&press(1)));
     }
 
     #[test]
