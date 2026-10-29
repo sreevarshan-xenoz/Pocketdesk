@@ -832,7 +832,8 @@ impl InputInjector {
             InputBackend::Enigo(_) => match keycode_to_enigo(code) {
                 Some(key) => self.key(key, pressed),
                 None => {
-                    debug!(code, "no enigo key for this evdev keycode, not injecting");
+                    // That a key had none, never which: no keystroke in a log.
+                    debug!("no enigo key for a key, not injecting it");
                     Ok(())
                 }
             },

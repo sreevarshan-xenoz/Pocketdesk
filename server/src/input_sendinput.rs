@@ -271,10 +271,8 @@ impl SendInputBackend {
         match stroke_for(code) {
             Some(stroke) => self.send(&[stroke_input(stroke, pressed)], "key"),
             None => {
-                debug!(
-                    code,
-                    "no Windows stroke for this evdev keycode, not injecting"
-                );
+                // That a key had none, never which: no keystroke in a log.
+                debug!("no Windows stroke for a key, not injecting it");
                 Ok(())
             }
         }
@@ -309,6 +307,20 @@ mod tests {
     fn key_flags(input: &INPUT) -> (u16, u16, u32) {
         let ki = unsafe { input.Anonymous.ki };
         (ki.wVk.0, ki.wScan, ki.dwFlags.0)
+    }
+
+    /// A key with no stroke is logged as one, never by its code (no
+    /// keystroke goes in a log); nothing is sent for it.
+    #[test]
+    fn a_key_with_no_stroke_is_logged_without_its_code() {
+        let unmapped = 0x2fe;
+        assert!(stroke_for(unmapped).is_none());
+        let (caught, guard) = crate::shared_input::caught_log::catch();
+        SendInputBackend::default().key(unmapped, true).unwrap();
+        drop(guard);
+        let log = caught.text();
+        assert!(log.contains("no Windows stroke"), "{log}");
+        assert!(!log.contains("766") && !log.contains("code"), "{log}");
     }
 
     #[test]
