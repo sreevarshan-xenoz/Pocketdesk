@@ -381,7 +381,7 @@ impl ComputersView {
                     .color(crate::theme::warn(ui)),
                 );
                 let mut yes = self.consent.is_some();
-                if ui.checkbox(&mut yes, consent_label(&name)).changed() {
+                if ui.checkbox(&mut yes, CONSENT_BOX).changed() {
                     self.consent = yes.then(|| pasted.clone());
                 }
                 if !yes {
@@ -694,9 +694,7 @@ fn show_outcome(ui: &mut egui::Ui, last: &computers::PairingOutcome) {
 }
 
 /// The box the owner ticks for a link that asks to pair both ways (PC1).
-pub fn consent_label(_name: &str) -> String {
-    crate::pair_view::MINE_BOX.to_string()
-}
+pub const CONSENT_BOX: &str = "That one is mine: no prompts";
 
 /// Whether `link` names an internet endpoint (an `endpointId` in its `ep`),
 /// which pairing both ways needs; the server checks it is a real key.
@@ -852,7 +850,7 @@ mod tests {
                 .is_some()
         );
         let pair = if consent {
-            harness.get_by_label(&consent_label("Test Tower")).click();
+            harness.get_by_label(CONSENT_BOX).click();
             harness.run_steps(2);
             "Pair both ways"
         } else {
@@ -911,9 +909,7 @@ mod tests {
         let said = harness
             .query_by_label_contains("can pair one way only: its link names no internet endpoint")
             .is_some();
-        let no_box = harness
-            .query_by_label(&consent_label("Test Tower"))
-            .is_none();
+        let no_box = harness.query_by_label(CONSENT_BOX).is_none();
         harness.get_by_label("Pair one way").click();
         harness.run_steps(2);
         let asked = computers::take_all(&dir, now);
@@ -1032,9 +1028,7 @@ mod tests {
         let harness = page(&dir, true, &mine_link());
         let own = harness.query_by_label(OWN_LINK).is_some();
         let off = harness.get_by_label("Pair").accesskit_node().is_disabled();
-        let consent = harness
-            .query_by_label(&consent_label("Test Tower"))
-            .is_some();
+        let consent = harness.query_by_label(CONSENT_BOX).is_some();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(own && off && !consent);
     }

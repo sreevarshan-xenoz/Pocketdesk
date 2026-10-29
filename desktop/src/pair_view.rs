@@ -814,7 +814,9 @@ mod tests {
     #[test]
     fn both_sides_ask_for_both_ways_in_the_same_short_words() {
         assert!(MINE_BOX.split_whitespace().count() <= 6, "{MINE_BOX}");
-        assert_eq!(crate::computers_view::consent_label("Test Tower"), MINE_BOX);
+        let paste = crate::computers_view::CONSENT_BOX;
+        assert!(paste.split_whitespace().count() <= 6, "{paste}");
+        assert_ne!(paste, MINE_BOX, "the two boxes say whose");
         assert!(MINE_LINE.contains("without asking"));
     }
 
