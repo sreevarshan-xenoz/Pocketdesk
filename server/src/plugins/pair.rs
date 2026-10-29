@@ -781,7 +781,8 @@ impl Plugin for PairPlugin {
                 handle_pair(&conn, packet, sender).await;
             }
             WAN_KEY => register_wan_key(&conn, packet, sender),
-            crate::peer_computers::BOTH_WAYS => {
+            // Only from one of the owner's computers (third review).
+            crate::peer_computers::BOTH_WAYS if is_computer_device(&conn) => {
                 let (key, connection) = (sender.peer_key(), sender.connection_id().to_string());
                 let heard = tokio::task::spawn_blocking(move || {
                     crate::peer_computers::both_ways_heard(&conn, key.as_ref(), &connection)
