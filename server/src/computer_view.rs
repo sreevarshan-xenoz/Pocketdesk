@@ -329,6 +329,12 @@ pub fn in_order(keyframe: bool, seq: u64, last: Option<u64>) -> bool {
     keyframe || last.is_none_or(|last| seq > last)
 }
 
+/// Whether a frame of `len` bytes fits in one relay message, its header
+/// and all.
+pub fn fits(len: usize) -> bool {
+    len.saturating_add(16) <= pocketdesk_core::local::cast::MAX_MESSAGE
+}
+
 /// The words for a session that ended: before the other computer let this
 /// one in (it refused, or its owner said no), or after.
 fn ended_words(name: &str, admitted: bool, reason: Option<&str>) -> String {
@@ -404,6 +410,8 @@ async fn session(
     let mut last_seq: Option<u64> = None;
     let mut admitted = false;
     let mut look = tokio::time::interval(LOOK);
+    let mut said_too_large = false;
+    let mut too_large_ask: Option<Instant> = None;
     loop {
         tokio::select! {
             packet = frames.recv() => {
@@ -422,7 +430,32 @@ async fn session(
                     size = Some(read);
                     say(Event::Config(read.0, read.1)).await;
                 }
-                if size.is_none() || packet.data.len() + 16 > pocketdesk_core::local::cast::MAX_MESSAGE {
+                if size.is_none() {
+                    continue;
+                }
+                // A frame the relay cannot carry (BK7 review M6): said once,
+                // and the chain it breaks starts again from a keyframe.
+                if !fits(packet.data.len()) {
+                    if !said_too_large {
+                        said_too_large = true;
+                        tracing::warn!(
+                            device_id = %computer.device_id,
+                            bytes = packet.data.len(),
+                            "A frame of another computer's screen too large for the window; dropped"
+                        );
+                    }
+                    if too_large_ask.is_none_or(|at: Instant| at.elapsed() >= Duration::from_secs(1))
+                        && let Some(conn) = conn.clone()
+                    {
+                        too_large_ask = Some(Instant::now());
+                        tokio::spawn(async move {
+                            let _ = tokio::time::timeout(
+                                INPUT_SEND,
+                                send_input(&conn, &InputPacket::RequestKeyframe),
+                            )
+                            .await;
+                        });
+                    }
                     continue;
                 }
                 say(Event::Frame {
@@ -891,6 +924,15 @@ mod tests {
         assert!(!stops(Some(5), Some(6)), "replaced since");
         assert!(stops(None, Some(6)), "the window never knew its view");
         assert!(!stops(Some(5), None));
+    }
+
+    #[test]
+    fn a_frame_fits_the_relay_or_is_too_large() {
+        let max = pocketdesk_core::local::cast::MAX_MESSAGE;
+        assert!(fits(0));
+        assert!(fits(max - 16));
+        assert!(!fits(max - 15));
+        assert!(!fits(usize::MAX));
     }
 
     #[test]
