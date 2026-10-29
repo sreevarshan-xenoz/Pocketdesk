@@ -1564,7 +1564,7 @@ fn an_away_phones_actions_say_why_they_are_off() {
     pair_phone(fixture.state(), PHONE, "Test Phone");
     let app = fixture.open(None);
     assert!(
-        app.query_by_label("Test Phone is away: these come back when it connects.")
+        app.query_by_label(&crate::app::away_words("Test Phone", false))
             .is_some()
     );
 }

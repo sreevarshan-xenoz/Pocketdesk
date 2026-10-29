@@ -2522,11 +2522,12 @@ fn quiet_problem(config: &Config) -> Option<&'static str> {
     (days_mask(&config.quiet_days) == 0).then_some("No day is chosen, so nothing is held.")
 }
 
-/// A row's note, small and quiet.
-/// Why the Keyboard and mouse rows are off (UX 1), and its fix.
+/// Why the Keyboard and mouse rows are off (UX 1).
 pub const SHARING_OFF: &str = "Off while sharing is off: turn it on to change these.";
+/// Its fix.
 pub const TURN_SHARING_ON: &str = "Turn sharing on";
 
+/// A row's note, small and quiet.
 fn note(ui: &mut egui::Ui, text: impl Into<String>) {
     ui.label(RichText::new(text.into()).small().weak());
 }

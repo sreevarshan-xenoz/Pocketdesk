@@ -1304,7 +1304,7 @@ impl PocketdeskApp {
             self.restart_button(ui);
         } else {
             // Its Start is in the bar at the top of every page (UX 1).
-            status_line(ui, crate::theme::MUTED, "The server is not running");
+            status_line(ui, crate::theme::MUTED, "The server isn't running");
         }
         ui.add_space(8.0);
         egui::Grid::new("status")
@@ -1921,14 +1921,14 @@ impl PocketdeskApp {
                         ));
                     }
                 });
-                // UX 1: an away phone's actions are all off; why, in a
-                // line and not only on hover.
+                // UX 1: an away phone's remote actions are off; why, in
+                // a line and not only on hover.
                 if row.place == model::Place::Away {
                     crate::widgets::why_off(
                         ui,
-                        &format!(
-                            "{} is away: these come back when it connects.",
-                            model::device_label(&self.snapshot.devices, &device.id)
+                        &away_words(
+                            &model::device_label(&self.snapshot.devices, &device.id),
+                            self.snapshot.running,
                         ),
                         None,
                     );
@@ -4069,9 +4069,19 @@ fn starting(
     !running && started_at.is_some_and(|at| now.saturating_duration_since(at) < START_WAIT)
 }
 
+/// Why an away phone's remote actions are off (UX 1): `running` says
+/// whether the server runs, else that is the cause (PR #553 review M6).
+pub fn away_words(name: &str, running: bool) -> String {
+    if running {
+        format!("{name} is away: its remote actions come back when it connects.")
+    } else {
+        format!("{name}'s remote actions come back once the server runs and it connects.")
+    }
+}
+
 /// What the bar at the top of every page says while the server is
 /// stopped (UX 1).
-pub const STOPPED_BAR: &str = "Pocketdesk isn't running: phones and computers can't connect.";
+pub const STOPPED_BAR: &str = "The server isn't running: phones and computers can't connect.";
 
 /// A coloured dot and a bold line. The dot is painted: the bundled fonts
 /// have no "●" glyph.
@@ -4098,6 +4108,20 @@ pub fn kept_page(chosen: Tab) -> Tab {
 #[cfg(test)]
 mod start_tests {
     use super::*;
+
+    /// PR #553 review M6: an away phone's line names its remote actions,
+    /// and a stopped server as the cause when it is one.
+    #[test]
+    fn an_away_phone_says_why_by_the_cause() {
+        assert_eq!(
+            away_words("Test Phone", true),
+            "Test Phone is away: its remote actions come back when it connects."
+        );
+        assert_eq!(
+            away_words("Test Phone", false),
+            "Test Phone's remote actions come back once the server runs and it connects."
+        );
+    }
 
     /// PR #553 review I2: Start stays off a while after a start, until the
     /// server says it runs, and no longer than that.
