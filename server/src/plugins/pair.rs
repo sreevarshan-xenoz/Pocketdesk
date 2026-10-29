@@ -1009,10 +1009,14 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         .filter(|cli| cli.pin == pin && spend_pin(pin, cli.minted_unix));
     // Pair a computer nearby: the PIN this computer handed one whose ask
     // its owner accepted, for that certificate only, reads as the owner's
-    // own code (both ways when the owner said both are theirs).
-    let cli = from_file
-        .clone()
-        .or_else(|| crate::nearby::take_pin(conn, sender.peer_key().as_ref(), pin));
+    // own code (both ways when the owner said both are theirs). It was
+    // handed to a computer, and pairs only as one (PR #556 review C3).
+    let nearby_pin = from_file
+        .is_none()
+        .then(|| crate::nearby::take_pin(conn, sender.peer_key().as_ref(), pin))
+        .flatten();
+    let nearby = nearby_pin.is_some();
+    let cli = from_file.clone().or(nearby_pin);
     let cli_grant: Option<Option<u64>> = cli.as_ref().map(|cli| cli.grant_secs);
     // M2b: the Pair page said the phone is someone else's.
     let someone_else = someone_else_for(cli.as_ref(), matches_pending, live.as_ref());
@@ -1035,7 +1039,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         let grant_secs = cli_grant.flatten();
-        let asked_computer = packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        let packet_computer = packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        if let Some(why) = nearby_as_phone(nearby, packet_computer) {
+            tracing::warn!("Pairing refused: {why}");
+            respond_pair(sender, false, "").await;
+            return;
+        }
+        // A nearby PIN pairs a computer, with a computer's narrow
+        // permissions, whatever the packet says.
+        let asked_computer = packet_computer || nearby;
         // Before any key is bound (PC1 re-review I-1): an id that is a
         // computer listed here, with another certificate, is refused, as a
         // computer or a phone, and that computer keeps its keys.
@@ -1220,6 +1232,16 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     }
 }
 
+/// Why a pairing with a PIN handed to a nearby computer (`nearby`) is
+/// refused: it did not ask as a computer (PR #556 review C3). The owner
+/// accepted a computer's ask, with a computer's narrow permissions; the
+/// same PIN must never trust a phone with a phone's full ones.
+fn nearby_as_phone(nearby: bool, asked_computer: bool) -> Option<&'static str> {
+    (nearby && !asked_computer).then_some(
+        "a PIN handed to a nearby computer pairs only as a computer, and this pairing asked as a phone",
+    )
+}
+
 /// Bind the keys of the owner's pairing of `phone_id` on a connection that
 /// proved `key`, as a computer or a phone (`computer`).
 fn pairing_keys_in(
@@ -1401,6 +1423,36 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// PR #556 review C3: a PIN handed to a nearby computer never pairs a
+    /// phone. A pairing with it that does not ask as a computer is
+    /// refused; one that does pairs as a computer, with a computer's narrow
+    /// permissions and none narrowed further; any other PIN is unaffected.
+    #[test]
+    fn a_nearby_pin_pairs_only_as_a_computer() {
+        use super::nearby_as_phone;
+        assert!(nearby_as_phone(true, false).is_some(), "asked as a phone");
+        assert_eq!(nearby_as_phone(true, true), None);
+        assert_eq!(nearby_as_phone(false, false), None, "the owner's own PIN");
+        // Forced to a computer: trusted with a computer's permissions,
+        // never a phone's full ones (Input, Exec, Power and the rest).
+        let computer = true;
+        assert_eq!(
+            super::preset_permissions(false, false, computer, None, None),
+            None
+        );
+        let mut store = temp_store("nearby-c3");
+        store.trust_computer("nearby-desk").unwrap();
+        assert!(store.is_computer("nearby-desk"));
+        assert_eq!(
+            store.permissions("nearby-desk"),
+            pocketdesk_core::protocol::permissions::DevicePermissions::computer()
+        );
+        assert_ne!(
+            store.permissions("nearby-desk"),
+            pocketdesk_core::protocol::permissions::DevicePermissions::default()
+        );
+    }
 
     /// PC1 re-review I-1: a pairing under the id of a computer listed here
     /// with another certificate is refused before any key is touched,
