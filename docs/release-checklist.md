@@ -6,7 +6,7 @@ What has to be true before a `vX.Y.Z` (or `vX.Y.Z-beta.N`) tag is pushed. The ta
 
 - [ ] `main` is green in CI on the commit to be tagged: `rust`, every `profiles` job, `windows`, `android`, `bench` and `audit`. The release workflow audits again before it builds, so an advisory that must stay is ignored in `.cargo/audit.toml` with its reason, never left to fail.
 - [ ] The version is the same in `Cargo.toml` (the workspace) and `android/app/build.gradle.kts` (`versionName`), and `versionCode` went up. The workflow refuses a tag that does not match them.
-- [ ] `docs/capabilities.md` was regenerated on Linux and `docs/capabilities-windows.md` on Windows (`cargo run -q -p pocketdesk-server -- capabilities --markdown > <that file>`; on Windows from Git Bash, since PowerShell's `>` writes UTF-16 or a BOM). `server/tests/capabilities_doc.rs` fails if either is stale for its own OS, but each OS checks only its own file.
+- [ ] `docs/capabilities.md` was regenerated on Linux and `docs/capabilities-windows.md` on Windows (`cargo run -q -p pocketdesk-server --bin pocketdesk -- capabilities --markdown > <that file>`; on Windows from Git Bash, since PowerShell's `>` writes UTF-16 or a BOM). `server/tests/capabilities_doc.rs` fails if either is stale for its own OS, but each OS checks only its own file.
 - [ ] `.github/release-notes.md` says what changed for a person using it, and lists what is **not** device-checked in this release (from the checklist's open items).
 
 ## 2. The docs

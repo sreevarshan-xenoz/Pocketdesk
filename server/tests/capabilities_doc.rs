@@ -31,6 +31,6 @@ fn capabilities_doc_matches_the_build_that_reports_it() {
         actual.trim_end(),
         "{DOC} is stale. Regenerate it on the OS it describes (capabilities.md on Linux, \
          capabilities-windows.md on Windows) with:\n    \
-         cargo run -q -p pocketdesk-server -- capabilities --markdown > <that file>"
+         cargo run -q -p pocketdesk-server --bin pocketdesk -- capabilities --markdown > <that file>"
     );
 }
