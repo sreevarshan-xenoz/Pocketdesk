@@ -178,6 +178,9 @@ fn pair_ticks_another_of_my_computers_into_a_new_code() {
     let fixture = Fixture::new();
     let mut app = fixture.open(None);
     go_to(&app, Tab::Pair);
+    app.run_steps(2);
+    // UX 2: on Pair's Computer side.
+    app.get_by_label(crate::pair_view::FOR_COMPUTER).click();
     let shown = (0..50).any(|_| {
         app.run_steps(2);
         let found = app.query_by_label(crate::pair_view::MINE_BOX).is_some();
@@ -313,6 +316,38 @@ fn unpairing_a_computer_waits_for_the_server() {
     assert!(
         app.get_by_label("Unpair…").accesskit_node().is_disabled(),
         "no server here, so no Unpair"
+    );
+}
+
+/// UX 2: Settings → Other computers points to the Pair page, whose
+/// Computer side has both halves: this computer's link and the box for the
+/// other's.
+#[test]
+fn other_computers_point_to_pairing_on_the_pair_page() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("Other computers");
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::app::PAIR_ELSEWHERE).is_some());
+    assert!(
+        app.query_by_label("From the other computer").is_none(),
+        "no paste box in Settings"
+    );
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
+    let both = (0..50).any(|_| {
+        app.run_steps(2);
+        let found = app.query_by_label(crate::pair_view::COPY_LINK).is_some()
+            && app.query_by_label("From the other computer").is_some();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        found
+    });
+    assert!(both, "Pair opened on Computer with both halves");
+    assert!(
+        app.query_by_label("Pair a phone").is_none(),
+        "not the phone's half"
     );
 }
 

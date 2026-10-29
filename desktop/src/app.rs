@@ -284,6 +284,11 @@ fn away_lock_unavailable() -> Option<&'static str> {
         .then_some("This system cannot tell whether someone is at the keyboard, so it never locks.")
 }
 
+/// Settings → Other computers' pointer to the Pair page (UX 2).
+pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
+/// Its button, and the fix where no computer is paired.
+pub const PAIR_A_COMPUTER: &str = "Pair a computer";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
@@ -389,7 +394,8 @@ pub struct PocketdeskApp {
     clipboard: crate::clipboard_view::ClipboardView,
     /// The Notifications tab (T10c).
     notes: crate::notes_view::NotesView,
-    /// Settings → Other computers (2f).
+    /// Pair → Computer's paste box and Settings → Other computers' list
+    /// (2f, UX 2).
     computers: crate::computers_view::ComputersView,
     /// The Keyboard and mouse page (shared input).
     arrange: crate::arrange_view::ArrangeView,
@@ -555,6 +561,12 @@ impl PocketdeskApp {
             Ask::Go(tab) => {
                 self.switch_to(tab);
                 self.chosen = tab;
+            }
+            Ask::PairComputer => {
+                self.switch_to(Tab::Pair);
+                self.chosen = Tab::Pair;
+                self.pair
+                    .open_for(&self.state_dir, crate::pair_view::PairFor::Computer);
             }
             Ask::RunDiagnostics => {
                 self.diagnostics.run_now();
@@ -1232,13 +1244,24 @@ impl PocketdeskApp {
                     None => {}
                 }
             }
-            Tab::Pair => self.pair.show(
-                ui,
-                &self.state_dir,
-                self.config.as_ref(),
-                &self.snapshot.devices,
-                now_unix(),
-            ),
+            Tab::Pair => {
+                self.pair.show(
+                    ui,
+                    &self.state_dir,
+                    self.config.as_ref(),
+                    &self.snapshot.devices,
+                    now_unix(),
+                );
+                // UX 2: the other computer's link is pasted here too.
+                if self.pair.mode == crate::pair_view::PairFor::Computer {
+                    self.computers.show_pairing(
+                        ui,
+                        &self.state_dir,
+                        self.snapshot.running,
+                        now_unix(),
+                    );
+                }
+            }
             Tab::Devices => self.devices_tab(ui),
             Tab::KeyboardMouse => self.keyboard_mouse_tab(ui),
             Tab::Sessions => self.sessions_tab(ui),
@@ -2812,8 +2835,19 @@ impl PocketdeskApp {
                     crate::settings_view::Section::Computers
                         if extra(crate::settings_view::EXTRA_COMPUTERS) =>
                     {
-                        self.computers
-                            .show(ui, &self.state_dir, self.snapshot.running, now_unix());
+                        // UX 2: pairing is on the Pair page.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(PAIR_ELSEWHERE).weak());
+                            if ui.button(PAIR_A_COMPUTER).clicked() {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::PairComputer);
+                            }
+                        });
+                        self.computers.show_list(
+                            ui,
+                            &self.state_dir,
+                            self.snapshot.running,
+                            now_unix(),
+                        );
                         // BK7: "Show its screen" opens its window.
                         if let Some((device_id, name)) = self.computers.take_view() {
                             self.show_computer(ui.ctx(), &device_id, &name);

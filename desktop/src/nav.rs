@@ -83,7 +83,7 @@ impl Tab {
     pub fn purpose(self) -> &'static str {
         match self {
             Tab::Status => "Whether the server runs, and how phones reach this computer.",
-            Tab::Pair => "Pair a phone with a code it scans, or a PIN.",
+            Tab::Pair => "Pair a phone or another computer.",
             Tab::Devices => "The phones and computers paired with this one, and what each may do.",
             Tab::KeyboardMouse => {
                 "One keyboard and mouse across your computers: where each sits, and who may drive whom."

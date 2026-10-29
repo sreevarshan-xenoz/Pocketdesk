@@ -1,5 +1,7 @@
-//! The Pair tab: a QR code (and the same PIN in digits) a phone scans to
-//! find, trust and pair with this desktop.
+//! The Pair tab (UX 2: one place to pair). Phone: a QR code (and the same
+//! PIN in digits) a phone scans to find, trust and pair with this desktop.
+//! Computer: the link another computer pastes, made here; the app draws the
+//! box for pasting the other computer's link below it.
 
 use std::io;
 use std::path::Path;
@@ -227,9 +229,19 @@ fn next_step(shown: Option<&Shown>, on_file: Option<&pin::FilePin>, now_unix: u6
     }
 }
 
+/// What the Pair page pairs (UX 2): a phone, or another computer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PairFor {
+    #[default]
+    Phone,
+    Computer,
+}
+
 /// The Pair tab's state between frames.
 #[derive(Default)]
 pub struct PairView {
+    /// Phone or computer (UX 2).
+    pub mode: PairFor,
     /// When the link for another computer was last copied, for "Copied.".
     copied: Option<std::time::Instant>,
     link: Option<PairLink>,
@@ -308,9 +320,27 @@ pub fn profile_allows(
 
 /// The box that makes the link for another computer one of the owner's own
 /// (PC1), and its line.
-pub const MINE_BOX: &str =
-    "This is another of my computers (let it see and control this one without asking)";
-const MINE_LINE: &str = "Ticked, the two computers pair both ways: each lists the other, and either shows and controls the other with no prompt. Leave it off for a computer that is not yours.";
+pub const MINE_BOX: &str = "Both are mine (full control, no prompts)";
+const MINE_LINE: &str = "Each then controls the other without asking. Off for others' computers.";
+/// What the box does, on hover.
+const MINE_HOVER: &str = "A new link is made for it. Each computer lists the other and trusts it with control and the shared keyboard and mouse; neither asks first. Turn either back on its Devices page.";
+/// Said while the server has not made its certificate yet.
+const NO_CERTIFICATE: &str = "Start the server once first: it makes its certificate.";
+
+/// A PIN as shown: its digits spaced.
+fn spaced_pin(pin: &str) -> String {
+    pin.chars()
+        .flat_map(|c| [c, ' '])
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// The Pair page's switch (UX 2).
+pub const FOR_PHONE: &str = "Phone";
+pub const FOR_COMPUTER: &str = "Computer";
+/// The button that copies the link for another computer (UX 2).
+pub const COPY_LINK: &str = "Copy link";
 
 /// The choices of whose phone a code pairs (M2b), a guest's for a while (I3).
 const WHOSE: [(Whose, &str); 5] = [
@@ -327,10 +357,37 @@ impl PairView {
     /// is looking at; a fresh look starts over.
     pub fn reset(&mut self, state_dir: &Path) {
         self.withdraw(state_dir);
-        // The choice of whose phone it pairs stays for the next code.
-        let whose = self.whose.clone();
+        // The choice of whose phone it pairs, and phone or computer, stay
+        // for the next code.
+        let (whose, mode) = (self.whose.clone(), self.mode);
         *self = Self::default();
         self.whose = whose;
+        self.mode = mode;
+    }
+
+    /// Open on `mode` (UX 2: Settings' "Pair a computer" opens Computer).
+    /// A link for a computer is the owner's own code: one made for someone
+    /// else's phone goes, and one is made for it.
+    pub fn open_for(&mut self, state_dir: &Path, mode: PairFor) {
+        self.mode = mode;
+        if mode == PairFor::Computer && !self.whose.is_owners() {
+            self.withdraw(state_dir);
+            self.whose = Whose::MINE;
+            self.whose_chosen = true;
+        }
+    }
+
+    /// The Phone | Computer switch (UX 2).
+    fn switch(&mut self, ui: &mut egui::Ui, state_dir: &Path) {
+        let mut mode = self.mode;
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut mode, PairFor::Phone, FOR_PHONE);
+            ui.selectable_value(&mut mode, PairFor::Computer, FOR_COMPUTER);
+        });
+        if mode != self.mode {
+            self.open_for(state_dir, mode);
+        }
+        ui.add_space(6.0);
     }
 
     /// Whether the app should refresh its snapshot now (asked once).
@@ -355,6 +412,7 @@ impl PairView {
         devices: &[Device],
         now_unix: u64,
     ) {
+        self.switch(ui, state_dir);
         let known = self
             .known
             .get_or_insert_with(|| devices.iter().map(|d| d.id.clone()).collect());
@@ -368,16 +426,37 @@ impl PairView {
         }
 
         if let Some(id) = &self.paired {
+            let computer = devices.iter().find(|d| d.id == *id).filter(|d| d.computer);
+            let name = match computer {
+                Some(d) => crate::model::device_label(devices, &d.id),
+                None => crate::app::short(id),
+            };
             ui.label(
-                RichText::new(format!("Paired ✓  {}", crate::app::short(id)))
+                RichText::new(format!("Paired ✓  {name}"))
                     .color(crate::theme::good(ui))
                     .strong()
                     .size(18.0),
             );
-            ui.label("The phone can connect now.");
-            ui.add_space(8.0);
-            if ui.button("Pair another phone").clicked() {
-                self.reset(state_dir);
+            if computer.is_some() {
+                ui.label("It can share with this computer now.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Set up keyboard and mouse").clicked() {
+                        crate::widgets::ask(
+                            ui.ctx(),
+                            crate::widgets::Ask::Go(crate::app::Tab::KeyboardMouse),
+                        );
+                    }
+                    if ui.button("Pair another").clicked() {
+                        self.reset(state_dir);
+                    }
+                });
+            } else {
+                ui.label("The phone can connect now.");
+                ui.add_space(8.0);
+                if ui.button("Pair another phone").clicked() {
+                    self.reset(state_dir);
+                }
             }
             return;
         }
@@ -468,6 +547,14 @@ impl PairView {
         let (Some(link), Some(texture)) = (&self.link, &self.texture) else {
             return;
         };
+        let remaining = pin::read(state_dir, now_unix)
+            .map(|p| pin::remaining(&p, now_unix))
+            .map_or(0, |d| d.as_secs());
+        let valid = format!("Valid for {}:{:02}.", remaining / 60, remaining % 60);
+        if self.mode == PairFor::Computer {
+            self.computer_half(ui, state_dir, &valid);
+            return;
+        }
         let mut grant_changed = None;
         ui.horizontal_top(|ui| {
             ui.add(
@@ -478,9 +565,7 @@ impl PairView {
             ui.add_space(16.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new("Pair a phone").heading());
-                ui.label(
-                    "In the Pocketdesk app, tap \"Scan pairing code\" and point the camera here.",
-                );
+                ui.label("In the app, tap \"Scan pairing code\".");
                 ui.add_space(10.0);
                 // M2b: someone else's phone, or a guest's for a while (I3,
                 // Devices counts it down), pairs with files and links only.
@@ -545,71 +630,71 @@ impl PairView {
                         .small(),
                     );
                 }
-                // PC1: a phone's choice keeps the box for another of the
-                // owner's computers only while the code is the owner's own.
-                let owners = chosen.is_owners();
-                chosen.mine = owners && self.whose.mine;
+                // PC1: the box for another of the owner's computers is
+                // Computer's; a phone's choice keeps it only while the code
+                // is the owner's own.
+                chosen.mine = chosen.is_owners() && self.whose.mine;
                 ui.add_space(6.0);
                 ui.label("Or enter this PIN:");
-                let spaced: String = link
-                    .pin
-                    .chars()
-                    .flat_map(|c| [c, ' '])
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string();
-                ui.label(RichText::new(spaced).monospace().size(30.0).strong());
-                let remaining = pin::read(state_dir, now_unix)
-                    .map(|p| pin::remaining(&p, now_unix))
-                    .map_or(0, |d| d.as_secs());
-                ui.label(
-                    RichText::new(format!(
-                        "Valid for {}:{:02}; a new code appears when it runs out.",
-                        remaining / 60,
-                        remaining % 60
-                    ))
-                    .weak(),
-                );
+                ui.label(RichText::new(spaced_pin(&link.pin)).monospace().size(30.0).strong());
+                ui.label(RichText::new(format!("{valid} A new code then appears.")).weak());
                 ui.add_space(10.0);
                 ui.label(
                     RichText::new(format!("Reachable at {}", link.addresses.join(", "))).weak(),
                 );
-                // Another of the owner's computers pairs from the link
-                // itself (2f), pasted in its Settings → Computers; both
-                // ways, with consent given here, when it is ticked (PC1).
-                ui.add_enabled(owners, egui::Checkbox::new(&mut chosen.mine, MINE_BOX))
-                    .on_hover_text(
-                        "A new code is made for it. The other computer pairs both ways from the link: each lists the other under Other computers and trusts it with control and the shared keyboard and mouse, and neither asks before the other's sessions. Turn either back on its Devices page.",
-                    )
-                    .on_disabled_hover_text("Only with your own code: choose Mine above.");
-                ui.label(RichText::new(MINE_LINE).small());
+                if link.fingerprint.is_none() {
+                    ui.label(RichText::new(NO_CERTIFICATE).weak());
+                }
                 if chosen != self.whose {
                     grant_changed = Some(chosen.clone());
-                }
-                if ui
-                    .button("Copy the link for another computer")
-                    .on_hover_text(
-                        "Paste it in the other computer's Settings, under Other computers. It holds the code: Pocketdesk sends it to no phone, but copy something else after",
-                    )
-                    .clicked()
-                {
-                    ui.ctx().copy_text(link.to_uri());
-                    self.copied = Some(std::time::Instant::now());
-                }
-                crate::notice::copied(ui, &mut self.copied);
-                if link.fingerprint.is_none() {
-                    ui.label(
-                        RichText::new(
-                            "Start the server once before pairing: until it has made its \
-                             certificate, the phone has to trust it on first use.",
-                        )
-                        .weak(),
-                    );
                 }
             });
         });
         // Another choice of time: this code goes, and one for it is made.
         if let Some(chosen) = grant_changed {
+            self.withdraw(state_dir);
+            self.whose = chosen;
+            self.whose_chosen = true;
+        }
+    }
+
+    /// Pair → Computer's own half (UX 2): the link the other computer
+    /// pastes, and whether both are the owner's (PC1). The app draws the
+    /// box for the other computer's link below it.
+    fn computer_half(&mut self, ui: &mut egui::Ui, state_dir: &Path, valid: &str) {
+        let Some(link) = &self.link else {
+            return;
+        };
+        let (uri, no_certificate) = (link.to_uri(), link.fingerprint.is_none());
+        ui.label(RichText::new("On this computer").heading());
+        ui.label("Copy this link, then paste it on the other computer.");
+        let mut chosen = self.whose.clone();
+        // A computer pairs with the owner's own code (open_for).
+        ui.add_enabled(
+            chosen.is_owners(),
+            egui::Checkbox::new(&mut chosen.mine, MINE_BOX),
+        )
+        .on_hover_text(MINE_HOVER);
+        ui.label(RichText::new(MINE_LINE).small());
+        ui.horizontal(|ui| {
+            if ui
+                .button(COPY_LINK)
+                .on_hover_text(
+                    "It holds the code: Pocketdesk sends it to no phone, but copy something else after",
+                )
+                .clicked()
+            {
+                ui.ctx().copy_text(uri);
+                self.copied = Some(std::time::Instant::now());
+            }
+            ui.label(RichText::new(valid).weak());
+        });
+        crate::notice::copied(ui, &mut self.copied);
+        if no_certificate {
+            ui.label(RichText::new(NO_CERTIFICATE).weak());
+        }
+        // Another choice: this link goes, and one for it is made.
+        if chosen != self.whose {
             self.withdraw(state_dir);
             self.whose = chosen;
             self.whose_chosen = true;

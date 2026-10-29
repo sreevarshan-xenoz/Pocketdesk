@@ -15,6 +15,8 @@ pub enum Ask {
     Go(crate::app::Tab),
     /// Open Diagnostics and run its checks.
     RunDiagnostics,
+    /// Open Pair on Computer (UX 2).
+    PairComputer,
 }
 
 fn ask_id() -> egui::Id {
