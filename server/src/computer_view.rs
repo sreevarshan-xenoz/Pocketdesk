@@ -422,7 +422,10 @@ pub async fn race<T: Send + 'static>(
                 None => std::future::pending().await,
             }
         };
+        // Results first (PR #551 review M4): a home road that came up as
+        // the grace ran out still wins.
         tokio::select! {
+            biased;
             joined = set.join_next() => match joined {
                 Some(Ok((i, Ok(conn)))) => {
                     ups[i] = Some(conn);
