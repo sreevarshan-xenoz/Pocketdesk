@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-960 open items.
+961 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 53 |
+| A second computer | 54 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -891,6 +891,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - At the desk, Windows driving the Linux laptop on Wi-Fi: after a few seconds' pause the next key comes at once (no tenth-of-a-second catch), and fast typing and a fast mouse keep up. (where: second computer)
 - The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
 - Mixed versions: a computer on 0.8.2 (or earlier) and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
+- A computer's answers follow its new link: with the throwaway pair of the runs above, restart the Windows server and run `share-test <laptop> --keys 20` as soon as the link is direct again: the timings come back on the first run, not after about 50 s; and restart the laptop's server while Windows' cursor is home: the next crossing from Windows reaches it (its screens answered at once). (where: second computer)
 
 **223. Both are mine (PC1)**
 
