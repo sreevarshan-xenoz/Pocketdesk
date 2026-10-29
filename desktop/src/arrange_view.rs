@@ -510,14 +510,7 @@ impl ArrangeView {
         {
             action = Some(Action::Sharing(on));
         }
-        if !server_running {
-            ui.label(
-                RichText::new(
-                    "The server is not running: start it on the Overview for any of this to work.",
-                )
-                .color(crate::theme::warn(ui)),
-            );
-        }
+        // A stopped server is said by the bar at the top (UX 1).
         // Linux drives through its desktop's input capture (BK8): how that
         // stands, while sharing is on.
         if !cfg!(windows)

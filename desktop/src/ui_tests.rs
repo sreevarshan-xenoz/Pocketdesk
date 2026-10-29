@@ -680,22 +680,12 @@ fn the_save_bar_comes_with_a_change_and_goes_with_undo_or_save() {
 #[test]
 fn empty_sessions_and_files_say_what_to_do_next() {
     let fixture = Fixture::new();
-    // No server runs here, so Sessions sends the owner to start it.
+    // No server runs here: the bar at the top says so (UX 1), not the page.
     let mut app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
     assert!(
-        app.query_by_label(
-            "The server is not running, so no phone is connected. Start it from Overview."
-        )
-        .is_some()
-    );
-    app.get_all_by_label("Overview")
-        .last()
-        .expect("the page's own Overview button")
-        .click();
-    app.run_steps(3);
-    assert!(
-        app.query_by_label(Tab::Status.purpose()).is_some(),
-        "Overview opened"
+        app.query_by_label_contains("Start it from Overview")
+            .is_none()
     );
 
     go_to(&app, Tab::Files);
@@ -985,10 +975,7 @@ fn the_sessions_page_lists_the_recent_sessions() {
     .expect("log");
     let mut app = fixture.open(Some(Tab::Sessions));
     app.run_steps(3);
-    assert!(
-        app.query_by_label_contains("The server is not running")
-            .is_some()
-    );
+    assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
     assert!(app.query_by_label("Recent sessions").is_some());
     assert!(
         app.query_by_label("2 h ago · for 2m 5s · on this network · 38 ms capture to arrival")
@@ -1579,5 +1566,29 @@ fn an_away_phones_actions_say_why_they_are_off() {
     assert!(
         app.query_by_label("Test Phone is away: these come back when it connects.")
             .is_some()
+    );
+}
+
+/// UX 1: a stopped server is said once, in a bar at the top of every page,
+/// with its Start; not by each page in its own words.
+#[test]
+fn a_stopped_server_is_said_at_the_top_of_every_page() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    for page in Tab::ALL {
+        go_to(&app, page);
+        app.run_steps(3);
+        assert!(
+            app.query_by_label(crate::app::STOPPED_BAR).is_some(),
+            "{page:?}"
+        );
+        // The bar's Start; never pressed here, as it would start a server.
+        assert!(app.query_by_label("Start server").is_some(), "{page:?}");
+    }
+    go_to(&app, Tab::KeyboardMouse);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label_contains("start it on the Overview")
+            .is_none()
     );
 }

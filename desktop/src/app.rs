@@ -496,6 +496,30 @@ impl PocketdeskApp {
     }
 
     /// Run a start or restart off the UI thread; one at a time.
+    /// The bar at the top of every page while the server is stopped
+    /// (UX 1), with Start.
+    fn stopped_bar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(STOPPED_BAR)
+                    .color(crate::theme::warn(ui))
+                    .strong(),
+            );
+            if ui
+                .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
+                .on_hover_text("Once installed, it starts by itself when you sign in.")
+                .clicked()
+            {
+                self.run_job("Starting the server", crate::restart::start);
+            }
+            if self.job.is_some() {
+                ui.spinner();
+            }
+        });
+        ui.add_space(4.0);
+    }
+
     /// What a page asked for (UX 1).
     fn do_ask(&mut self, ask: crate::widgets::Ask) {
         use crate::widgets::Ask;
@@ -1238,16 +1262,8 @@ impl PocketdeskApp {
             status_line(ui, crate::theme::GOOD, "The server is running");
             self.restart_button(ui);
         } else {
+            // Its Start is in the bar at the top of every page (UX 1).
             status_line(ui, crate::theme::MUTED, "The server is not running");
-            ui.label(
-                "Phones cannot connect until it starts. Once installed, it starts when you sign in.",
-            );
-            if ui
-                .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
-                .clicked()
-            {
-                self.run_job("Starting the server", crate::restart::start);
-            }
         }
         ui.add_space(8.0);
         egui::Grid::new("status")
@@ -2454,14 +2470,8 @@ impl PocketdeskApp {
     }
 
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
-        if !self.snapshot.running {
-            ui.label(
-                "The server is not running, so no phone is connected. Start it from Overview.",
-            );
-            if ui.button("Overview").clicked() {
-                self.switch_to(Tab::Status);
-            }
-        } else if self.snapshot.sessions.is_empty() {
+        // A stopped server is said by the bar at the top (UX 1).
+        if self.snapshot.sessions.is_empty() {
             ui.label(
                 "No phone is viewing this computer right now. On the phone, tap Connect on this \
                  computer's card.",
@@ -3958,6 +3968,11 @@ impl eframe::App for PocketdeskApp {
         } else {
             self.notice = None;
         }
+        // UX 1: a stopped server said once, at the top of every page, with
+        // its Start, in place of each page's own words.
+        if !self.snapshot.running {
+            egui::Panel::top("stopped").show(ui, |ui| self.stopped_bar(ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(self.tab.name());
             ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
@@ -3998,6 +4013,10 @@ impl eframe::App for PocketdeskApp {
         self.task_prompt(ui);
     }
 }
+
+/// What the bar at the top of every page says while the server is
+/// stopped (UX 1).
+pub const STOPPED_BAR: &str = "Pocketdesk isn't running: phones and computers can't connect.";
 
 /// A coloured dot and a bold line. The dot is painted: the bundled fonts
 /// have no "●" glyph.
