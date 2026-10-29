@@ -434,6 +434,17 @@ mod tests {
     #[test]
     fn requests_in_one_second_keep_their_order() {
         let dir = temp_dir("order");
+        // The milliseconds come from the clock while the second is the
+        // test's own, so start early in a second: twelve requests 3 ms
+        // apart must not cross into the next one.
+        while std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_millis()
+            > 500
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         let mut asked = Vec::new();
         for n in 0..12 {
             let ask = if n % 2 == 0 {
