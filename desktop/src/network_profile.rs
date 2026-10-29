@@ -125,7 +125,10 @@ impl PublicNetwork {
         changed
     }
 
-    #[cfg(windows)]
+    /// Not under test: the UI tests' pages never depend on the network of
+    /// the computer they run on (a CI runner's is Public, and its line
+    /// appearing mid-test moved the Pair page under a click).
+    #[cfg(all(windows, not(test)))]
     fn ask(&self, ctx: &eframe::egui::Context) {
         if !self.begin() {
             return;
@@ -145,7 +148,7 @@ impl PublicNetwork {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(any(not(windows), test))]
     fn ask(&self, _ctx: &eframe::egui::Context) {}
 
     /// Show the notice, if any, as a warning line under `ui`'s cursor.
