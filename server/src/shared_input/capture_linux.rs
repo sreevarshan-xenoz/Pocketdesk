@@ -1,77 +1,48 @@
 //! Driving another computer from Linux (BK8): the input-capture portal
 //! (`org.freedesktop.portal.InputCapture`, through ashpd) and its libei
-//! stream (through reis, as a receiver), behind the [`Backend`] seam that
-//! [`PortalGlue`](super::portal_glue::PortalGlue) asks.
+//! stream (through reis, as a receiver): the real [`Calls`] and
+//! [`Signal`]s behind the session task ([`portal_session`]).
 //!
 //! The session is created (version 2's `CreateSession2` and `Start`, with
 //! the restore token kept from the last start so the desktop's permission
 //! dialog shows once; version 1's `CreateSession` where that is all there
 //! is), its signals subscribed, the libei stream connected and greeted as a
-//! receiver, and the zones read. Then one task answers the glue's asks (set
-//! the barriers for the zone set and enable, disable, release with a
-//! position) and passes on what the portal says ([`Portal`]): activations,
-//! their ends, the session disabled, new zones (the barriers set again for
-//! the new zone set at once), and libei's pointer, buttons, scroll (one
-//! [`Portal::Scroll`] a frame) and keys. The stream closing, or the session
-//! failing, ends it ([`Portal::Closed`]). Desktops: GNOME 45 and later,
-//! KDE Plasma 6.1 and later, Hyprland with xdg-desktop-portal-hyprland 1.4
-//! and later.
+//! receiver; then [`portal_session::serve`] runs it. libei's pointer,
+//! buttons, scroll (one [`Portal::Scroll`] a frame) and keys go to the
+//! glue. Desktops: GNOME 45 and later, KDE Plasma 6.1 and later, Hyprland
+//! with xdg-desktop-portal-hyprland 1.4 and later.
 //!
 //! Nothing here runs in the tests but the libei half, against a stand-in
 //! EIS server on a socket pair: no portal, no desktop, no input device.
+//!
+//! [`portal_session`]: super::portal_session
 
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
-use ashpd::desktop::PersistMode;
 use ashpd::desktop::input_capture::{
     ActivatedBarrier, Barrier as PortalBarrier, BarrierID, Capabilities, ConnectToEISOptions,
     CreateSession2Options, CreateSessionOptions, InputCapture, ReleaseOptions, StartOptions,
 };
+use ashpd::desktop::{PersistMode, Session};
 use futures_lite::StreamExt;
 use reis::ei;
 use reis::event::{DeviceCapability, EiEvent};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::barriers::Barrier;
 use super::capture_restore::{self, RestoreToken};
-use super::portal_glue::{Backend, Portal, Standing};
+use super::portal_glue::{Portal, Standing};
+use super::portal_session::{self, Ask, Calls, PortalBackend, Signal, say};
 use super::wire::Screen;
-
-/// What the glue asks of the portal's task.
-#[derive(Debug)]
-enum Ask {
-    Arm(Vec<Barrier>),
-    Disarm,
-    Release(Option<u32>, (i32, i32)),
-}
-
-/// The portal, as the glue asks it: each ask goes to the session's task.
-pub struct PortalBackend {
-    asks: UnboundedSender<Ask>,
-}
-
-impl Backend for PortalBackend {
-    fn arm(&mut self, barriers: &[Barrier]) {
-        let _ = self.asks.send(Ask::Arm(barriers.to_vec()));
-    }
-
-    fn disarm(&mut self) {
-        let _ = self.asks.send(Ask::Disarm);
-    }
-
-    fn release(&mut self, activation: Option<u32>, at: (i32, i32)) {
-        let _ = self.asks.send(Ask::Release(activation, at));
-    }
-}
 
 /// Start the session on a thread of its own (libei's stream is not `Send`,
 /// so it runs on a single-threaded runtime there): what it says goes to
 /// `events`, the restore token is kept in `state_dir`. Dropping the
 /// backend ends it; `None` if the thread did not start.
 pub fn start(state_dir: Option<PathBuf>, events: Sender<Portal>) -> Option<PortalBackend> {
-    let (asks, asked) = unbounded_channel();
+    let (backend, asked) = PortalBackend::new();
     let thread = std::thread::Builder::new()
         .name("pd-input-capture".into())
         .spawn(move || {
@@ -90,7 +61,7 @@ pub fn start(state_dir: Option<PathBuf>, events: Sender<Portal>) -> Option<Porta
             }
         });
     match thread {
-        Ok(_) => Some(PortalBackend { asks }),
+        Ok(_) => Some(backend),
         Err(e) => {
             tracing::warn!("Shared input: the input-capture thread did not start: {e}");
             None
@@ -98,18 +69,87 @@ pub fn start(state_dir: Option<PathBuf>, events: Sender<Portal>) -> Option<Porta
     }
 }
 
-/// Tell the glue `event`; an error once it is gone.
-fn say(events: &Sender<Portal>, event: Portal) -> Result<(), String> {
-    events
-        .send(event)
-        .map_err(|_| "the driver stopped".to_string())
+/// The portal's calls on one session.
+struct AshpdCalls {
+    portal: InputCapture,
+    session: Session<InputCapture>,
+}
+
+impl Calls for AshpdCalls {
+    async fn zones(&self) -> Result<(Vec<Screen>, u32), String> {
+        let zones = self
+            .portal
+            .zones(&self.session, Default::default())
+            .await
+            .and_then(|request| request.response())
+            .map_err(|e| format!("the input-capture zones: {e}"))?;
+        let screens = zones
+            .regions()
+            .iter()
+            .map(|r| Screen {
+                x: r.x_offset(),
+                y: r.y_offset(),
+                width: r.width(),
+                height: r.height(),
+            })
+            .filter(Screen::is_sound)
+            .collect();
+        Ok((screens, zones.zone_set()))
+    }
+
+    async fn disable(&self) -> Result<(), String> {
+        self.portal
+            .disable(&self.session, Default::default())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn set_barriers(&self, barriers: &[Barrier], zone_set: u32) -> Result<Vec<u32>, String> {
+        let barriers: Vec<PortalBarrier> = barriers
+            .iter()
+            .filter_map(|b| Some(PortalBarrier::new(BarrierID::new(b.id)?, b.line)))
+            .collect();
+        self.portal
+            .set_pointer_barriers(&self.session, &barriers, zone_set, Default::default())
+            .await
+            .and_then(|request| request.response())
+            .map(|response| {
+                response
+                    .failed_barriers()
+                    .iter()
+                    .map(|id| id.get())
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    async fn enable(&self) -> Result<(), String> {
+        self.portal
+            .enable(&self.session, Default::default())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn release(&self, activation: Option<u32>, (x, y): (i32, i32)) -> Result<(), String> {
+        let options = ReleaseOptions::default()
+            .set_activation_id(activation)
+            .set_cursor_position((f64::from(x), f64::from(y)));
+        self.portal
+            .release(&self.session, options)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn close(&self) {
+        let _ = self.session.close().await;
+    }
 }
 
 /// The session, from its start to its end.
 async fn run(
     state_dir: Option<PathBuf>,
     events: &Sender<Portal>,
-    mut asked: UnboundedReceiver<Ask>,
+    asked: UnboundedReceiver<Ask>,
 ) -> Result<(), String> {
     let portal = match InputCapture::new().await {
         Ok(portal) => portal,
@@ -175,19 +215,15 @@ async fn run(
             return Err(format!("no input-capture session: {e}"));
         }
     };
-    let signals = |e: ashpd::Error| format!("the input-capture signals: {e}");
-    let activated = portal.receive_activated().await.map_err(signals)?;
-    let deactivated = portal.receive_deactivated().await.map_err(signals)?;
-    let disabled = portal.receive_disabled().await.map_err(signals)?;
-    let zones_changed = portal.receive_zones_changed().await.map_err(signals)?;
-    let (mut activated, mut deactivated, mut disabled, mut zones_changed) = (
-        std::pin::pin!(activated),
-        std::pin::pin!(deactivated),
-        std::pin::pin!(disabled),
-        std::pin::pin!(zones_changed),
-    );
+    let calls = AshpdCalls { portal, session };
+    let failed = |e: ashpd::Error| format!("the input-capture signals: {e}");
+    let portal = &calls.portal;
+    let activated = portal.receive_activated().await.map_err(failed)?;
+    let deactivated = portal.receive_deactivated().await.map_err(failed)?;
+    let disabled = portal.receive_disabled().await.map_err(failed)?;
+    let zones_changed = portal.receive_zones_changed().await.map_err(failed)?;
     let fd = portal
-        .connect_to_eis(&session, ConnectToEISOptions::default())
+        .connect_to_eis(&calls.session, ConnectToEISOptions::default())
         .await
         .map_err(|e| format!("no libei stream: {e}"))?;
     let context = ei::Context::new(UnixStream::from(fd)).map_err(|e| format!("libei: {e}"))?;
@@ -195,133 +231,41 @@ async fn run(
         .handshake_tokio("pocketdesk", ei::handshake::ContextType::Receiver)
         .await
         .map_err(|e| format!("the libei greeting: {e}"))?;
-    let mut ei_events = std::pin::pin!(ei_events);
-    let mut zone_set = zones(&portal, &session, events).await?;
     let mut scroll = ScrollFrame::default();
-    // The barriers last asked for, set again for each new zone set.
-    let mut armed: Option<Vec<Barrier>> = None;
-    let ended = loop {
-        tokio::select! {
-            ask = asked.recv() => match ask {
-                // The glue is gone: the session ends with it.
-                None => break Ok(()),
-                Some(Ask::Arm(barriers)) => {
-                    arm(&portal, &session, &barriers, zone_set).await;
-                    armed = Some(barriers);
-                }
-                Some(Ask::Disarm) => {
-                    armed = None;
-                    if let Err(e) = portal.disable(&session, Default::default()).await {
-                        tracing::debug!("Shared input: input capture not disabled: {e}");
-                    }
-                }
-                Some(Ask::Release(activation, (x, y))) => {
-                    let options = ReleaseOptions::default()
-                        .set_activation_id(activation)
-                        .set_cursor_position((f64::from(x), f64::from(y)));
-                    if let Err(e) = portal.release(&session, options).await {
-                        tracing::debug!("Shared input: input capture not released: {e}");
-                    }
-                }
-            },
-            Some(a) = activated.next() => say(events, Portal::Activated {
-                activation: a.activation_id(),
-                barrier: match a.barrier_id() {
-                    Some(ActivatedBarrier::Barrier(id)) => Some(id.get()),
-                    _ => None,
-                },
-                at: a.cursor_position().map(|(x, y)| (f64::from(x), f64::from(y))),
-            })?,
-            Some(d) = deactivated.next() => say(events, Portal::Deactivated {
-                activation: d.activation_id(),
-            })?,
-            Some(_) = disabled.next() => {
-                armed = None;
-                say(events, Portal::Disabled)?;
+    let input = ei_events
+        .map(move |event| match event {
+            Ok(event) => {
+                let said = translate(event, &mut scroll);
+                // The seat's binding goes out at once.
+                let _ = context.flush();
+                Signal::Input(said)
             }
-            Some(_) = zones_changed.next() => {
-                zone_set = zones(&portal, &session, events).await?;
-                // The barriers belong to a zone set: set again for this one
-                // (the glue sets new ones once the layout follows).
-                if let Some(barriers) = &armed {
-                    arm(&portal, &session, barriers, zone_set).await;
-                }
-            }
-            event = ei_events.next() => match event {
-                None => break Err("the libei stream closed".to_string()),
-                Some(Err(e)) => break Err(format!("the libei stream failed: {e}")),
-                Some(Ok(event)) => {
-                    for event in translate(event, &mut scroll) {
-                        say(events, event)?;
-                    }
-                    let _ = context.flush();
-                }
-            },
-        }
-    };
-    let _ = session.close().await;
-    ended
-}
-
-/// Read the zones and tell the glue; the zone set they belong to.
-async fn zones(
-    portal: &InputCapture,
-    session: &ashpd::desktop::Session<InputCapture>,
-    events: &Sender<Portal>,
-) -> Result<u32, String> {
-    let zones = portal
-        .zones(session, Default::default())
-        .await
-        .and_then(|request| request.response())
-        .map_err(|e| format!("the input-capture zones: {e}"))?;
-    let screens = zones
-        .regions()
-        .iter()
-        .map(|r| Screen {
-            x: r.x_offset(),
-            y: r.y_offset(),
-            width: r.width(),
-            height: r.height(),
+            Err(e) => Signal::Closed(format!("the libei stream failed: {e}")),
         })
-        .filter(Screen::is_sound)
-        .collect();
-    say(events, Portal::Zones(screens))?;
-    Ok(zones.zone_set())
-}
-
-/// Set `barriers` for `zone_set` and enable the capture. One the
-/// compositor refused (not on the zones' outer edge, as it sees them) is
-/// logged; the others still work.
-async fn arm(
-    portal: &InputCapture,
-    session: &ashpd::desktop::Session<InputCapture>,
-    barriers: &[Barrier],
-    zone_set: u32,
-) {
-    let barriers: Vec<PortalBarrier> = barriers
-        .iter()
-        .filter_map(|b| Some(PortalBarrier::new(BarrierID::new(b.id)?, b.line)))
-        .collect();
-    // GNOME's portal sets barriers only on a disabled session.
-    let _ = portal.disable(session, Default::default()).await;
-    match portal
-        .set_pointer_barriers(session, &barriers, zone_set, Default::default())
-        .await
-        .and_then(|request| request.response())
-    {
-        Ok(response) if !response.failed_barriers().is_empty() => tracing::warn!(
-            failed = ?response.failed_barriers(),
-            "Shared input: the desktop refused some of this computer's edges"
-        ),
-        Ok(_) => {}
-        Err(e) => {
-            tracing::warn!("Shared input: the edges were not set: {e}");
-            return;
-        }
-    }
-    if let Err(e) = portal.enable(session, Default::default()).await {
-        tracing::warn!("Shared input: input capture not enabled: {e}");
-    }
+        .chain(futures_lite::stream::once(Signal::Closed(
+            "the libei stream closed".to_string(),
+        )));
+    let signals = activated
+        .map(|a| Signal::Activated {
+            activation: a.activation_id(),
+            barrier: match a.barrier_id() {
+                Some(ActivatedBarrier::Barrier(id)) => Some(id.get()),
+                _ => None,
+            },
+            at: a
+                .cursor_position()
+                .map(|(x, y)| (f64::from(x), f64::from(y))),
+        })
+        .fuse()
+        .or(deactivated
+            .map(|d| Signal::Deactivated {
+                activation: d.activation_id(),
+            })
+            .fuse())
+        .or(disabled.map(|_| Signal::Disabled).fuse())
+        .or(zones_changed.map(|_| Signal::ZonesChanged).fuse())
+        .or(input);
+    portal_session::serve(&calls, Box::pin(signals), asked, events).await
 }
 
 /// One libei frame's scroll, said once at its end.
@@ -393,7 +337,7 @@ mod tests {
     use super::*;
     use crate::shared_input::drive::{Action, Driver};
     use crate::shared_input::layout::{Layout, Placed};
-    use crate::shared_input::portal_glue::PortalGlue;
+    use crate::shared_input::portal_glue::{Backend, PortalGlue};
     use crate::shared_input::wire::Msg;
     use reis::eis;
     use reis::handshake::EisHandshaker;

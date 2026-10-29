@@ -47,6 +47,7 @@ pub mod phone;
 pub mod phone_test;
 pub mod portal_drive;
 pub mod portal_glue;
+pub mod portal_session;
 pub mod receive;
 pub mod screens;
 pub mod share_test;

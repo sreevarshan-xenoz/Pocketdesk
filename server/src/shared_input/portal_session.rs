@@ -1,0 +1,379 @@
+//! The input-capture portal's session task (BK8), behind a seam over the
+//! portal's calls ([`Calls`]) and what it and libei say ([`Signal`]), so
+//! the order of its calls is tested on every system.
+//!
+//! [`PortalBackend`] is what the glue asks ([`Backend`]); each ask goes to
+//! the task ([`Ask`]). [`serve`] reads the zones and tells the glue, then
+//! answers the asks: arming is disable, set the barriers for the zone set,
+//! enable (GNOME's portal sets barriers only on a disabled session);
+//! disarming is disable; a release is a release with a position. What the
+//! portal says (activations, their ends, the session disabled, new zones)
+//! and libei's input go on to the glue ([`Portal`]). It ends when the glue
+//! is gone or the stream closes, and then closes the session. The real
+//! calls and signals are `capture_linux`'s (ashpd and reis).
+
+use std::sync::mpsc::Sender;
+
+use futures_lite::{Stream, StreamExt};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+use super::barriers::Barrier;
+use super::portal_glue::{Backend, Portal};
+use super::wire::Screen;
+
+/// What the glue asks of the session's task.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ask {
+    Arm(Vec<Barrier>),
+    Disarm,
+    Release(Option<u32>, (i32, i32)),
+}
+
+/// The portal, as the glue asks it: each ask goes to the session's task.
+pub struct PortalBackend {
+    asks: UnboundedSender<Ask>,
+}
+
+impl PortalBackend {
+    /// A backend and the asks it sends, for the session's task.
+    pub fn new() -> (PortalBackend, UnboundedReceiver<Ask>) {
+        let (asks, asked) = unbounded_channel();
+        (PortalBackend { asks }, asked)
+    }
+}
+
+impl Backend for PortalBackend {
+    fn arm(&mut self, barriers: &[Barrier]) {
+        let _ = self.asks.send(Ask::Arm(barriers.to_vec()));
+    }
+
+    fn disarm(&mut self) {
+        let _ = self.asks.send(Ask::Disarm);
+    }
+
+    fn release(&mut self, activation: Option<u32>, at: (i32, i32)) {
+        let _ = self.asks.send(Ask::Release(activation, at));
+    }
+}
+
+/// What the portal and libei say to the task.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Signal {
+    Activated {
+        activation: Option<u32>,
+        barrier: Option<u32>,
+        at: Option<(f64, f64)>,
+    },
+    Deactivated {
+        activation: Option<u32>,
+    },
+    Disabled,
+    /// The zones changed: read them again.
+    ZonesChanged,
+    /// libei's input, for the glue.
+    Input(Vec<Portal>),
+    /// The libei stream is gone (why).
+    Closed(String),
+}
+
+/// The portal's calls on the session. Its futures run on the session's
+/// own thread, so none needs to be `Send`.
+#[allow(async_fn_in_trait)]
+pub trait Calls {
+    /// The zones and the zone set they belong to.
+    async fn zones(&self) -> Result<(Vec<Screen>, u32), String>;
+    async fn disable(&self) -> Result<(), String>;
+    /// Set `barriers` for `zone_set`: the ids the desktop refused.
+    async fn set_barriers(&self, barriers: &[Barrier], zone_set: u32) -> Result<Vec<u32>, String>;
+    async fn enable(&self) -> Result<(), String>;
+    async fn release(&self, activation: Option<u32>, at: (i32, i32)) -> Result<(), String>;
+    async fn close(&self);
+}
+
+/// Tell the glue `event`; an error once it is gone.
+pub fn say(events: &Sender<Portal>, event: Portal) -> Result<(), String> {
+    events
+        .send(event)
+        .map_err(|_| "the driver stopped".to_string())
+}
+
+/// Read the zones and tell the glue; the zone set they belong to.
+async fn zones<C: Calls>(calls: &C, events: &Sender<Portal>) -> Result<u32, String> {
+    let (screens, zone_set) = calls.zones().await?;
+    say(events, Portal::Zones(screens))?;
+    Ok(zone_set)
+}
+
+/// Set `barriers` for `zone_set` and enable the capture. One the desktop
+/// refused (not on the zones' outer edge, as it sees them) is logged; the
+/// others still work.
+async fn arm<C: Calls>(calls: &C, barriers: &[Barrier], zone_set: u32) {
+    // GNOME's portal sets barriers only on a disabled session.
+    let _ = calls.disable().await;
+    match calls.set_barriers(barriers, zone_set).await {
+        Ok(failed) if !failed.is_empty() => tracing::warn!(
+            ?failed,
+            "Shared input: the desktop refused some of this computer's edges"
+        ),
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!("Shared input: the edges were not set: {e}");
+            return;
+        }
+    }
+    if let Err(e) = calls.enable().await {
+        tracing::warn!("Shared input: input capture not enabled: {e}");
+    }
+}
+
+/// The session, from its zones to its end: the glue's asks answered and
+/// what the portal and libei say passed on, until the glue is gone or the
+/// stream closes; then the session is closed.
+pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
+    calls: &C,
+    mut signals: S,
+    mut asked: UnboundedReceiver<Ask>,
+    events: &Sender<Portal>,
+) -> Result<(), String> {
+    let ended = async {
+        let mut zone_set = zones(calls, events).await?;
+        // The barriers last asked for, set again for each new zone set.
+        let mut armed: Option<Vec<Barrier>> = None;
+        loop {
+            tokio::select! {
+                ask = asked.recv() => match ask {
+                    // The glue is gone: the session ends with it.
+                    None => return Ok(()),
+                    Some(Ask::Arm(barriers)) => {
+                        arm(calls, &barriers, zone_set).await;
+                        armed = Some(barriers);
+                    }
+                    Some(Ask::Disarm) => {
+                        armed = None;
+                        if let Err(e) = calls.disable().await {
+                            tracing::debug!("Shared input: input capture not disabled: {e}");
+                        }
+                    }
+                    Some(Ask::Release(activation, at)) => {
+                        if let Err(e) = calls.release(activation, at).await {
+                            tracing::debug!("Shared input: input capture not released: {e}");
+                        }
+                    }
+                },
+                signal = signals.next() => match signal {
+                    None => return Err("the input-capture signals ended".to_string()),
+                    Some(Signal::Activated { activation, barrier, at }) => {
+                        say(events, Portal::Activated { activation, barrier, at })?;
+                    }
+                    Some(Signal::Deactivated { activation }) => {
+                        say(events, Portal::Deactivated { activation })?;
+                    }
+                    Some(Signal::Disabled) => {
+                        armed = None;
+                        say(events, Portal::Disabled)?;
+                    }
+                    Some(Signal::ZonesChanged) => {
+                        zone_set = zones(calls, events).await?;
+                        // The barriers belong to a zone set: set again for
+                        // this one (the glue sets new ones once the layout
+                        // follows).
+                        if let Some(barriers) = &armed {
+                            arm(calls, barriers, zone_set).await;
+                        }
+                    }
+                    Some(Signal::Input(input)) => {
+                        for event in input {
+                            say(events, event)?;
+                        }
+                    }
+                    Some(Signal::Closed(why)) => return Err(why),
+                },
+            }
+        }
+    }
+    .await;
+    calls.close().await;
+    ended
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::mpsc::{self, Receiver};
+
+    /// A stand-in portal: its calls written down in order.
+    #[derive(Default)]
+    pub(crate) struct FakeCalls {
+        pub log: RefCell<Vec<String>>,
+        /// The zone set each zones call says, from 1 up.
+        pub zone_sets: RefCell<u32>,
+        /// Setting barriers fails.
+        pub set_fails: bool,
+    }
+
+    impl Calls for FakeCalls {
+        async fn zones(&self) -> Result<(Vec<Screen>, u32), String> {
+            let set = {
+                let mut n = self.zone_sets.borrow_mut();
+                *n += 1;
+                *n
+            };
+            self.log.borrow_mut().push(format!("zones -> {set}"));
+            let screen = Screen {
+                x: 0,
+                y: 0,
+                width: 1600,
+                height: 1000,
+            };
+            Ok((vec![screen], set))
+        }
+        async fn disable(&self) -> Result<(), String> {
+            self.log.borrow_mut().push("disable".into());
+            Ok(())
+        }
+        async fn set_barriers(
+            &self,
+            barriers: &[Barrier],
+            zone_set: u32,
+        ) -> Result<Vec<u32>, String> {
+            let ids: Vec<u32> = barriers.iter().map(|b| b.id).collect();
+            self.log
+                .borrow_mut()
+                .push(format!("set {ids:?} for {zone_set}"));
+            if self.set_fails {
+                Err("refused".into())
+            } else {
+                Ok(Vec::new())
+            }
+        }
+        async fn enable(&self) -> Result<(), String> {
+            self.log.borrow_mut().push("enable".into());
+            Ok(())
+        }
+        async fn release(&self, activation: Option<u32>, at: (i32, i32)) -> Result<(), String> {
+            self.log
+                .borrow_mut()
+                .push(format!("release {activation:?} at {at:?}"));
+            Ok(())
+        }
+        async fn close(&self) {
+            self.log.borrow_mut().push("close".into());
+        }
+    }
+
+    pub(crate) fn barrier(id: u32) -> Barrier {
+        Barrier {
+            id,
+            line: (1600, 0, 1600, 999),
+            from: ((1599, 0), (1599, 999)),
+            way: (1, 0),
+            to: "W".to_string(),
+        }
+    }
+
+    /// A signal stream fed from a channel.
+    pub(crate) fn signals(
+        rx: UnboundedReceiver<Signal>,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Signal>>> {
+        Box::pin(futures_lite::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|s| (s, rx))
+        }))
+    }
+
+    /// Run `serve` over `steps` (an ask or a signal each, in order) with
+    /// `calls`; the asks then end. What it returned and what it said.
+    pub(crate) async fn run(
+        calls: &FakeCalls,
+        steps: Vec<Result<Ask, Signal>>,
+        end_with_signal: Option<Signal>,
+    ) -> (Result<(), String>, Vec<Portal>) {
+        let (asks, asked) = unbounded_channel();
+        let (sig_tx, sig_rx) = unbounded_channel();
+        let (said, heard): (Sender<Portal>, Receiver<Portal>) = mpsc::channel();
+        // Both kept until the end, so it ends the way the test says.
+        let asks = RefCell::new(Some(asks));
+        let feed = async {
+            for step in steps {
+                match step {
+                    Ok(ask) => asks.borrow().as_ref().unwrap().send(ask).unwrap(),
+                    Err(signal) => sig_tx.send(signal).unwrap(),
+                }
+                // One step at a time, as they would come.
+                for _ in 0..8 {
+                    tokio::task::yield_now().await;
+                }
+            }
+            match end_with_signal {
+                Some(signal) => sig_tx.send(signal).unwrap(),
+                None => drop(asks.borrow_mut().take()),
+            }
+        };
+        let (ended, ()) = tokio::join!(serve(calls, signals(sig_rx), asked, &said), feed);
+        (ended, heard.try_iter().collect())
+    }
+
+    #[tokio::test]
+    async fn the_portals_calls_go_in_order_and_the_session_closes() {
+        let calls = FakeCalls::default();
+        let (ended, said) = run(
+            &calls,
+            vec![
+                Ok(Ask::Arm(vec![barrier(1)])),
+                Err(Signal::Activated {
+                    activation: Some(4),
+                    barrier: Some(1),
+                    at: Some((1600.0, 500.0)),
+                }),
+                Err(Signal::Input(vec![Portal::Motion { dx: 1.0, dy: 0.0 }])),
+                Ok(Ask::Release(Some(4), (1595, 500))),
+                Ok(Ask::Disarm),
+            ],
+            None,
+        )
+        .await;
+        assert_eq!(ended, Ok(()));
+        assert_eq!(
+            *calls.log.borrow(),
+            [
+                "zones -> 1",
+                "disable",
+                "set [1] for 1",
+                "enable",
+                "release Some(4) at (1595, 500)",
+                "disable",
+                "close",
+            ]
+        );
+        assert_eq!(
+            said,
+            vec![
+                Portal::Zones(vec![Screen {
+                    x: 0,
+                    y: 0,
+                    width: 1600,
+                    height: 1000
+                }]),
+                Portal::Activated {
+                    activation: Some(4),
+                    barrier: Some(1),
+                    at: Some((1600.0, 500.0)),
+                },
+                Portal::Motion { dx: 1.0, dy: 0.0 },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_stream_ends_the_session() {
+        let calls = FakeCalls::default();
+        let (ended, _) = run(
+            &calls,
+            vec![Ok(Ask::Arm(vec![barrier(1)]))],
+            Some(Signal::Closed("the libei stream closed".into())),
+        )
+        .await;
+        assert_eq!(ended, Err("the libei stream closed".to_string()));
+        assert_eq!(calls.log.borrow().last().map(String::as_str), Some("close"));
+    }
+}
