@@ -324,6 +324,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_clipboard",
+        "Clipboard follows a computer's screen window",
+        Section::Computers,
+    ),
+    (
         "shared_input",
         "Share my keyboard and mouse with my computers",
         Section::SharedInput,
@@ -570,6 +575,8 @@ pub fn applies_live(key: &str) -> bool {
         "computer_view_quality"
             | "computer_view_only"
             | "computer_view_stats"
+            // PC3: read by the server at each focus of the window.
+            | "computer_view_clipboard"
             | "events"
             | "events_detail"
             | "hooks"
@@ -2055,6 +2062,16 @@ impl SettingsForm {
                     );
                     note(ui, "The window's own Stats switch changes it too.");
                 });
+                row(ui, "computer_view_clipboard", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_clipboard,
+                        "the clipboard follows a computer's screen window: what I copied here goes there as the window gets the focus, and what I copied there comes back as it loses it",
+                    );
+                    note(
+                        ui,
+                        "Only while the window controls that computer, and with this on on both. Never a password manager's copy, nor one Never send keeps here. With Clipboard with my computers on here, the window leaves copies to that sync: turn it on on the other computer too, or nothing crosses. Files dropped on the window go to its Downloads either way.",
+                    );
+                });
             }
             Section::SharedInput => {
                 row(ui, "shared_input", |ui| {
@@ -2957,6 +2974,7 @@ mod tests {
             "computer_view_quality",
             "computer_view_only",
             "computer_view_stats",
+            "computer_view_clipboard",
         ] {
             assert!(
                 SETTINGS

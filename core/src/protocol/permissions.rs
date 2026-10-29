@@ -154,6 +154,7 @@ pub fn capability_for(packet_type: &str) -> Option<Capability> {
         | "kdeconnect.clipboard.connect"
         | "kdeconnect.pocketdesk.clipboard_image"
         | "kdeconnect.pocketdesk.clipboard_image_fetch"
+        | crate::protocol::clipboard::CLIPBOARD_VIEW
         | "kdeconnect.pocketdesk.notification_reply" => Capability::Clipboard,
         // Browsing this computer, and a folder from it (M2b). A file fetched
         // by its path needs Browse too, which the share plugin checks: the
