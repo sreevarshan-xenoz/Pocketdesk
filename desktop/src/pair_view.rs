@@ -111,6 +111,7 @@ pub fn link_for(
             .ok()
             .map(identity::fingerprint_hex),
         endpoint: identity::read_endpoint(state_dir).map(|e| e.to_string()),
+        mine: false,
     })
 }
 
@@ -740,6 +741,7 @@ mod tests {
             minted_unix: 0,
             grant_secs: Some(3600),
             someone_else: false,
+            mine: false,
         };
         assert_eq!(
             whose_for(false, Whose::MINE, Some(&on_file)),
@@ -795,6 +797,7 @@ mod tests {
             minted_unix: 1_000,
             grant_secs: None,
             someone_else: false,
+            mine: false,
         }
     }
 

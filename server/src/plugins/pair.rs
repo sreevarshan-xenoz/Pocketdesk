@@ -1214,6 +1214,7 @@ mod tests {
             minted_unix: 0,
             grant_secs,
             someone_else,
+            mine: false,
         };
         // The code itself says it.
         assert!(someone_else_for(Some(&file(true, None)), false, None));

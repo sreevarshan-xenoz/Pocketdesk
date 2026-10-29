@@ -5,8 +5,10 @@
 //! value per line: the six digits, the unix second it was minted, and an
 //! optional grant length in seconds (R4 D3: pairing with this PIN trusts the
 //! phone only for that long), and the word `someone-else` when the phone is
-//! not the owner's (M2b: it pairs with files and links only). The lines after
-//! the time are read in any order. A file with no timestamp line holds no
+//! not the owner's (M2b: it pairs with files and links only), or the word
+//! `mine` when the link made with it is for another of the owner's
+//! computers, which may then see and control this one without asking (PC1).
+//! The lines after the time are read in any order. A file with no timestamp line holds no
 //! PIN: it would never expire.
 
 use std::io;
@@ -35,7 +37,16 @@ pub struct FilePin {
     /// P9: the profile whose permissions it pairs with, as someone else's
     /// phone does otherwise.
     pub profile: Option<String>,
+    /// PC1: the owner minted it for another of their own computers, which
+    /// pairs both ways with it, seeing and controlling this one without
+    /// asking, when its pairing asks for that too. Never with a grant,
+    /// someone else's or a profile: those words win.
+    pub mine: bool,
 }
+
+/// The PIN file's word for a code minted for another of the owner's
+/// computers (PC1).
+const MINE: &str = "mine";
 
 /// The PIN file's word for a phone that is someone else's (M2b).
 const SOMEONE_ELSE: &str = "someone-else";
@@ -101,6 +112,24 @@ pub fn write_preset(
     )
 }
 
+/// [`write`] a PIN for another of the owner's computers (PC1): one that
+/// pairs it both ways, seeing and controlling this one without asking,
+/// when the pairing link it pastes asks for that too. Owner-only, as every
+/// PIN file.
+pub fn write_mine(state_dir: &Path, pin: &str, now_unix: u64) -> io::Result<()> {
+    if !is_valid(pin) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PIN must be exactly 6 numeric digits",
+        ));
+    }
+    std::fs::create_dir_all(state_dir)?;
+    crate::secure_fs::write_private(
+        &state_dir.join(PIN_FILE),
+        format!("{pin}\n{now_unix}\n{MINE}\n").as_bytes(),
+    )
+}
+
 /// The PIN in `<state_dir>/pairing.pin` if there is one and it is still
 /// valid at `now_unix`.
 pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
@@ -122,6 +151,9 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
         .find_map(|s| s.strip_prefix(PROFILE))
         .and_then(super::permission_profiles::valid_name);
     let someone_else = rest.contains(&SOMEONE_ELSE) || profile.is_some();
+    // Someone else's, a guest's or a profile's code is never also the
+    // owner's own computer's.
+    let mine = rest.contains(&MINE) && !someone_else && grant_secs.is_none();
     if minted > now_unix.saturating_add(MAX_FUTURE_SECS) {
         return None;
     }
@@ -134,6 +166,7 @@ pub fn read(state_dir: &Path, now_unix: u64) -> Option<FilePin> {
         grant_secs,
         someone_else,
         profile,
+        mine,
     })
 }
 
@@ -202,6 +235,25 @@ mod tests {
         // state folder) would otherwise be a PIN that never expires.
         std::fs::write(dir.join(super::super::paths::PIN_FILE), "654321\n").unwrap();
         assert!(read(&dir, 60).is_none());
+    }
+
+    /// PC1: a code for another of the owner's computers says so, and only
+    /// an owner's code can: with someone else's word or a grant beside it,
+    /// it is not.
+    #[test]
+    fn a_code_for_another_of_my_computers_says_so() {
+        let dir = temp_dir("mine");
+        write_mine(&dir, "123456", 1_000).unwrap();
+        let file = read(&dir, 1_010).unwrap();
+        assert!(file.mine);
+        assert!(!file.someone_else);
+        assert_eq!(file.grant_secs, None);
+        write(&dir, "123456", 1_000, None).unwrap();
+        assert!(!read(&dir, 1_010).unwrap().mine, "a plain code");
+        std::fs::write(dir.join(PIN_FILE), "123456\n1000\nsomeone-else\nmine\n").unwrap();
+        assert!(!read(&dir, 1_010).unwrap().mine, "someone else's wins");
+        std::fs::write(dir.join(PIN_FILE), "123456\n1000\n900\nmine\n").unwrap();
+        assert!(!read(&dir, 1_010).unwrap().mine, "a guest's wins");
     }
 
     #[test]

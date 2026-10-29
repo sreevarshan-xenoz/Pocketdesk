@@ -111,6 +111,7 @@ pub fn pairing_link(state: &Path, control: u16, streaming: u16, pin: &str) -> Pa
             identity::cert_fingerprint(state).unwrap(),
         )),
         endpoint: identity::read_endpoint(state).map(|e| e.to_string()),
+        mine: false,
     }
 }
 
