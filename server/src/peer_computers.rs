@@ -1100,6 +1100,22 @@ fn drop_pins(certs: &CertManager, computer: &PeerComputer, keep: &[String]) {
     }
 }
 
+/// Whether `target`, the endpoint this computer would dial for `computer`,
+/// is the iroh key that computer is held to here (PC1 review M3): for one
+/// paired both ways, the endpoint it named must be the key it is admitted
+/// by, or this computer would hand its link, its window's input and its
+/// files to another node. One paired one way is not held here, as before.
+pub(crate) fn endpoint_bound(dir: &Path, computer: &PeerComputer, target: &WanTarget) -> bool {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    !computer.mine
+        || device_keys::check(
+            dir,
+            &computer.device_id,
+            Slot::Iroh,
+            Some(&target.endpoint_id),
+        ) == Verdict::Matches
+}
+
 /// The other computer's iroh endpoint, as its endpoint packet names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WanTarget {
@@ -1162,6 +1178,19 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
             tokio::time::sleep(BACKOFF_MOST).await;
             continue;
         };
+        if !endpoint_bound(&dir, &computer, &target) {
+            tracing::warn!(
+                device_id,
+                "Not dialed: its endpoint is not the key it paired with"
+            );
+            set_link(
+                &dir,
+                &device_id,
+                "away: its internet endpoint is not the key it paired with; pair again",
+            );
+            tokio::time::sleep(BACKOFF_MOST).await;
+            continue;
+        }
         let end = run_link(&dir, &wan, &computer, &target, &me).await;
         let wait = match &end {
             LinkEnd::Closed(lasted) => {
@@ -2099,6 +2128,42 @@ mod tests {
             "untrusted meanwhile: nothing given"
         );
         assert!(pending.is_empty(), "{pending:?}");
+    }
+
+    /// PC1 review M3: a computer paired both ways is dialed over the
+    /// internet only at the iroh key it is held to here; one paired one way
+    /// as before.
+    #[test]
+    fn a_computer_paired_both_ways_is_dialed_only_at_its_own_key() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        let dir = temp("endpoint-bound");
+        let (own, other) = (
+            iroh::SecretKey::generate().public().to_string(),
+            iroh::SecretKey::generate().public().to_string(),
+        );
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        let target = |id: &str| WanTarget {
+            endpoint_id: id.to_string(),
+            relay_urls: Vec::new(),
+            direct_addrs: Vec::new(),
+        };
+        let mine = facts().into_peer("lap", "", 1);
+        let one_way = PeerComputer {
+            mine: false,
+            ..mine.clone()
+        };
+        let unbound = PeerComputer {
+            device_id: "desk".to_string(),
+            ..mine.clone()
+        };
+        let verdicts = (
+            endpoint_bound(&dir, &mine, &target(&own)),
+            endpoint_bound(&dir, &mine, &target(&other)),
+            endpoint_bound(&dir, &one_way, &target(&other)),
+            endpoint_bound(&dir, &unbound, &target(&own)),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(verdicts, (true, false, true, false));
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,

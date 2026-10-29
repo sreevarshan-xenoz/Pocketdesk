@@ -1102,6 +1102,22 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         match outcome {
             Ok(()) => {
                 if let Some(listed) = both_ways {
+                    // The endpoint it is listed at is the key it is admitted
+                    // by from now (PC1 review M3); its WAN key names the same.
+                    if let (Some(target), Ok(dir)) = (
+                        listed
+                            .endpoint
+                            .as_ref()
+                            .and_then(crate::peer_computers::WanTarget::parse),
+                        state::state_dir(),
+                    ) && let Err(e) = pocketdesk_core::local::device_keys::register(
+                        &dir,
+                        &phone_id,
+                        pocketdesk_core::local::device_keys::Slot::Iroh,
+                        &target.endpoint_id,
+                    ) {
+                        tracing::warn!("Could not bind {phone_id}'s internet key: {e}");
+                    }
                     tracing::info!(
                         "Paired computer {phone_id} both ways on connection {conn}: it sees and controls this one without asking"
                     );
