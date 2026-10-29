@@ -479,10 +479,11 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
             .await
             .unwrap_or(false);
     quick.set(outcome.quick);
+    // Following the computer as the drivers do: its address looked up
+    // again as the script goes on (review M5).
     let mut nudge = Nudge::default();
-    if outcome.quick {
-        nudge.follow(Some(device_id.as_str()));
-    }
+    let following = outcome.quick.then_some(device_id.as_str());
+    nudge.follow(following);
     tracing::info!(device_id, "share-test: sending a script of shared input");
     let me = crate::kde::host_identity();
     let hello = Msg::Hello {
@@ -518,6 +519,7 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
             if let Some(every) = pinging {
                 while ping_due < due {
                     tokio::time::sleep_until(ping_due).await;
+                    nudge.follow(following);
                     ping(&mut channel, &mut outcome)?;
                     ping_due += every;
                     let now = tokio::time::Instant::now();
@@ -529,6 +531,7 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
                 }
             }
             tokio::time::sleep_until(due).await;
+            nudge.follow(following);
             if pinging.is_none() && i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
             }
