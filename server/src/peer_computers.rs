@@ -790,7 +790,7 @@ async fn pair_with(
     uri: &str,
     consent: bool,
 ) -> Result<PeerComputer, String> {
-    let link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
+    let mut link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
     let fingerprint = link
         .fingerprint
         .as_deref()
@@ -822,6 +822,17 @@ async fn pair_with(
         );
     }
     let name = shown_name(&link.name);
+    // Never another listed computer's pin (PR #556 review I2): an address
+    // it is listed at keeps its certificate; this pairing neither pins nor
+    // dials it.
+    let named = !link.addresses.is_empty();
+    link.addresses = free_addresses(&computers::read(dir), &link.device_id, &link.addresses);
+    if named && link.addresses.is_empty() {
+        return Err(
+            "every address it names is another paired computer's: unpair that one first"
+                .to_string(),
+        );
+    }
     let labels: Vec<String> = link
         .addresses
         .iter()
@@ -922,6 +933,28 @@ async fn pair_with(
         drop_pins(certs, &was, &labels);
     }
     Ok(computer)
+}
+
+/// The addresses of `addresses` that no computer listed in `file` other
+/// than `device_id` is listed at (by the pin label each address takes):
+/// pinning one of those would put this pairing's certificate in that
+/// computer's place there.
+fn free_addresses(
+    file: &computers::ComputersFile,
+    device_id: &str,
+    addresses: &[String],
+) -> Vec<String> {
+    let held: std::collections::HashSet<String> = file
+        .computers
+        .iter()
+        .filter(|c| c.device_id != device_id)
+        .flat_map(|c| c.addresses.iter().filter_map(|a| peer_label_for_address(a)))
+        .collect();
+    addresses
+        .iter()
+        .filter(|a| peer_label_for_address(a).is_none_or(|label| !held.contains(&label)))
+        .cloned()
+        .collect()
 }
 
 /// Whether this computer asks `link`'s maker to pair both ways (PC1): the
@@ -2331,6 +2364,37 @@ mod tests {
             stream_port: 4716,
             endpoint: None,
         }
+    }
+
+    /// PR #556 review I2: a pairing never takes another listed computer's
+    /// address (and so its pin there); its own listed addresses, and new
+    /// ones, stay.
+    #[test]
+    fn a_pairing_takes_no_other_computers_address() {
+        let mut file = computers::ComputersFile::default();
+        file.computers.push(facts().into_peer("lap", "", 1));
+        let desk = ComputerFacts {
+            addresses: vec!["192.0.2.42".to_string(), "192.0.2.44".to_string()],
+            ..facts()
+        };
+        file.computers.push(desk.into_peer("desk", "", 1));
+        let asked = [
+            "192.0.2.41".to_string(),
+            "192.0.2.42".to_string(),
+            "192.0.2.44".to_string(),
+            "192.0.2.43".to_string(),
+        ];
+        assert_eq!(
+            free_addresses(&file, "newcomer", &asked),
+            ["192.0.2.43"],
+            "another computer's addresses are left out"
+        );
+        assert_eq!(
+            free_addresses(&file, "desk", &asked),
+            ["192.0.2.42", "192.0.2.44", "192.0.2.43"],
+            "its own stay"
+        );
+        assert!(free_addresses(&file, "newcomer", &asked[..1]).is_empty());
     }
 
     /// The other computer's side of a pairing: read the ask, answer it with

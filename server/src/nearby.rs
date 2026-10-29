@@ -713,7 +713,7 @@ where
 
 /// The pairing link an accepted ask's answer makes: the computer as found
 /// (the id must be the one announced), its certificate the one this
-/// connection proved (`theirs`), the address it was reached at first.
+/// connection proved (`theirs`), at the address it was reached at.
 fn link_from(
     body: &serde_json::Value,
     asked: &Asked,
@@ -727,14 +727,10 @@ fn link_from(
     if !local_pin::is_valid(pin) {
         return Err("its answer held no code".to_string());
     }
-    let mut addresses = vec![asked.address.clone()];
-    if let Some(more) = body.get("addresses").and_then(|v| v.as_array()) {
-        for a in more.iter().filter_map(|v| v.as_str()).take(16) {
-            if !addresses.iter().any(|have| have == a) {
-                addresses.push(a.to_string());
-            }
-        }
-    }
+    // Only the address dialled, where the certificate whose code was matched
+    // was seen: the answer's own list is the other side's word, and pinning
+    // it would let it re-pin any address (PR #556 review I2).
+    let addresses = vec![asked.address.clone()];
     let port = |key: &str, default: u16| {
         body.get(key)
             .and_then(|v| v.as_u64())
@@ -774,8 +770,9 @@ mod tests {
     }
 
     /// An accepted answer makes the link the server pairs with: the
-    /// certificate this connection proved, never one the answer names; the
-    /// address reached first; its PIN; both ways only if it said so.
+    /// certificate this connection proved, never one the answer names; only
+    /// the address dialled, never those the answer lists; its PIN; both
+    /// ways only if it said so.
     #[test]
     fn an_accepted_answer_makes_the_link_for_the_proved_certificate() {
         let theirs = [0xab; 32];
@@ -792,7 +789,7 @@ mod tests {
         });
         let link = link_from(&body, &asked(), &theirs).expect("a link");
         assert_eq!(link.fingerprint.as_deref(), Some("ab".repeat(32).as_str()));
-        assert_eq!(link.addresses, ["192.0.2.30", "192.0.2.31"]);
+        assert_eq!(link.addresses, ["192.0.2.30"]);
         assert_eq!((link.control_port, link.stream_port), (1717, 4717));
         assert_eq!(link.pin, "012345");
         assert!(link.mine);
