@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-937 open items.
+945 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 39 |
-| A Linux desktop (the Azure VM serves for some) | 173 |
+| A second computer | 46 |
+| A Linux desktop (the Azure VM serves for some) | 174 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
 
@@ -863,6 +863,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Linux views Windows (pairing is one way: unpair on both, then paste Windows' pairing link on Linux): the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
 - Screenshot and Record from the window save a PNG and an MKV of Linux's screen; Full screen fills Windows' screen and Exit full screen comes back. (where: second computer)
 
+**220. Linux drives too (BK8)**
+
+- Before anything: `pacman -Q xdg-desktop-portal-hyprland xdg-desktop-portal hyprland` names xdph 1.4.0 or later, and `hyprctl monitors` names each screen's scale; the Keyboard and mouse page on the Linux laptop says "Ready" (or "Fractional scaling stops crossing" with a scale like 1.25), never "doesn't offer input capture". (where: second computer)
+- The permission dialog: with no `input_capture.token` in the state folder, turning sharing on shows the desktop's dialog once; allowed, the page says "Ready"; after a server restart it does not ask again (the token replaced, owner-only); said no, the page says "Needs permission" and it does not ask again until sharing is turned off and on. (where: second computer)
+- Cross to Windows and back: the pointer pushed off the Linux laptop's edge that faces Windows on the Keyboard and mouse page appears on Windows at the same height, Linux's own cursor hidden and still; moves, clicks, drags, the wheel and a touchpad's two-finger scroll work there; pushed back off Windows' facing edge, the pointer comes home where it crossed, and the other edges are walls. (where: second computer)
+- Keys and modifiers: typing, Shift for capitals, Ctrl+C and Ctrl+V in a Windows text field, Alt+Tab there, the arrows, F-keys; Shift or Ctrl held while crossing in either direction is never left held on either computer (xdph bug 436); the switch key (ctrl+alt+right) while on Windows comes home, and pressed at home on Linux does nothing (no keys at home). (where: second computer)
+- The safety nets: Wi-Fi turned off on Windows while driving it brings the keyboard and mouse home within about a second; locking the Linux laptop (its lock screen taking them back) brings them home with nothing held on Windows; plugging in or unplugging a monitor on Linux sets the edges again within a few seconds. (where: second computer)
+- A fractional-scale wall: with a screen scaled to 1.25 on Hyprland, pushing at the edge either crosses normally or, if the portal flips (bug 435), turns that edge into a wall at the third flip, flashing why once and the page saying "Fractional scaling stops crossing"; back to scale 1, the edge crosses again. (where: second computer)
+- A game full screen: with "Stay on this computer while a game runs" on, a full-screen window in front on Hyprland (a game, or mpv with f) keeps the pointer on Linux at the edge; leaving full screen, the edge crosses again within a second. (where: second computer)
+
 ## A Linux desktop (the Azure VM serves for some)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -1334,6 +1344,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - `pocketdesk share-test <laptop> --keys 2000 --moves 2000` over the home Wi-Fi: Pocketdesk's share under 5 ms at the 95th percentile; the result on the desktop app's Diagnostics page. (where: linux)
 - Linux kept awake while driven: its screensaver and idle lock do not start while typing goes on from Windows for longer than the idle time. (where: linux)
+
+**220. Linux drives too (BK8)**
+
+- GNOME 45 or later and KDE Plasma 6.1 or later (a VM serves): the dialog, a crossing to a second computer and back, keys, and a lock bringing them home; on GNOME 46 a monitor change may need sharing turned off and on (its portal cannot re-enable a disabled session). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 
