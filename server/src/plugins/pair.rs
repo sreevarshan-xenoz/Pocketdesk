@@ -1048,6 +1048,20 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // A nearby PIN pairs a computer, with a computer's narrow
         // permissions, whatever the packet says.
         let asked_computer = packet_computer || nearby;
+        // A nearby PIN claims no id already paired here, either way, nor one
+        // bound to another key, checked now as it pairs (PR #556 review
+        // I2b): the owner accepted a new computer, never a takeover.
+        if nearby {
+            let taken = match state::state_dir() {
+                Ok(dir) => nearby_id_taken_in(&dir, &phone_id, sender.peer_key().as_ref()),
+                Err(_) => Some("the state folder is unknown".to_string()),
+            };
+            if let Some(why) = taken {
+                tracing::warn!("Pairing refused: {why}");
+                respond_pair(sender, false, "").await;
+                return;
+            }
+        }
         // Before any key is bound (PC1 re-review I-1): an id that is a
         // computer listed here, with another certificate, is refused, as a
         // computer or a phone, and that computer keeps its keys.
@@ -1242,6 +1256,48 @@ fn nearby_as_phone(nearby: bool, asked_computer: bool) -> Option<&'static str> {
     )
 }
 
+/// Why a nearby computer's pairing (or ask) under `device_id`, on a
+/// connection that proved `key`, is refused (PR #556 review I2b): the id
+/// is already paired here, as a phone or a computer, or listed as a
+/// computer this one paired with, or bound to another key. A nearby ask is
+/// for a computer new to this one; an id in use is someone else's, and the
+/// owner's Accept must never hand it over. None when the id is free.
+pub(crate) fn nearby_id_taken_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> Option<String> {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    let trusted = TrustStore::read(dir.join(pocketdesk_core::local::paths::TRUST_FILE))
+        .map(|store| store.is_trusted(device_id))
+        // Unreadable: refused, as nothing can be said of the id.
+        .unwrap_or(true);
+    if trusted {
+        return Some(format!(
+            "{device_id} is already paired here (a nearby ask is for a new computer)"
+        ));
+    }
+    let listed = pocketdesk_core::local::computers::read(dir)
+        .computers
+        .iter()
+        .any(|c| c.device_id == device_id);
+    if listed {
+        return Some(format!(
+            "{device_id} is a computer this one paired with (a nearby ask is for a new computer)"
+        ));
+    }
+    let presented = match key {
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => Some(hex(hash)),
+        _ => None,
+    };
+    match device_keys::check(dir, device_id, Slot::Tls, presented.as_deref()) {
+        Verdict::Refused(why) => Some(format!(
+            "{device_id} is bound to another key here ({why:?})"
+        )),
+        Verdict::Matches | Verdict::FirstUse | Verdict::Unbound => None,
+    }
+}
+
 /// Bind the keys of the owner's pairing of `phone_id` on a connection that
 /// proved `key`, as a computer or a phone (`computer`).
 fn pairing_keys_in(
@@ -1423,6 +1479,50 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// PR #556 review I2b: a nearby ask or pairing never takes an id in
+    /// use: one paired here as a phone or as a computer, one listed as a
+    /// computer this one paired with, or one bound to another key. A new id
+    /// (or one bound to this very key) is free.
+    #[test]
+    fn a_nearby_pairing_takes_no_id_in_use() {
+        use pocketdesk_core::local::computers::{self, ComputerFacts};
+        use pocketdesk_core::local::device_keys;
+        use pocketdesk_core::local::paths::TRUST_FILE;
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = std::env::temp_dir().join(format!("pd-nearby-i2b-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = PeerKey::Tls([0x5a; 32]);
+        let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
+        store.trust_device("phone").unwrap();
+        store.trust_computer("paired-in").unwrap();
+        computers::update(&dir, |file| {
+            let facts = ComputerFacts {
+                name: "Desk".to_string(),
+                addresses: vec!["192.0.2.80".to_string()],
+                control_port: 1716,
+                stream_port: 4716,
+                endpoint: None,
+            };
+            file.computers
+                .push(facts.into_peer("paired-out", &"ab".repeat(32), 1));
+        })
+        .unwrap();
+        device_keys::replace(&dir, "bound", &"cd".repeat(32)).unwrap();
+        device_keys::replace(&dir, "mine-already", &"5a".repeat(32)).unwrap();
+        let taken = |id: &str| super::nearby_id_taken_in(&dir, id, Some(&key)).is_some();
+        let seen = [
+            taken("phone"),
+            taken("paired-in"),
+            taken("paired-out"),
+            taken("bound"),
+            taken("new-desk"),
+            taken("mine-already"),
+        ];
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(seen, [true, true, true, true, false, false]);
+    }
 
     /// PR #556 review C3: a PIN handed to a nearby computer never pairs a
     /// phone. A pairing with it that does not ask as a computer is

@@ -150,18 +150,22 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     .await;
                 return;
             }
-            // A paired phone's id never pairs as a computer this way: the
-            // owner's Accept would hand that id to whoever asked.
-            let phone = {
-                let id = sender.device_id().to_string();
+            // An id paired here either way (a phone or a computer), or
+            // bound to another key, never asks: the owner's Accept would
+            // hand that id to whoever asked. Checked again as it pairs.
+            let taken_id = {
+                let (dir, id) = (dir.clone(), sender.device_id().to_string());
+                let key = PeerKey::Tls(key);
                 tokio::task::spawn_blocking(move || {
-                    crate::plugins::pair::is_paired_device(&id)
-                        && !crate::plugins::pair::is_computer_device(&id)
+                    crate::plugins::pair::nearby_id_taken_in(&dir, &id, Some(&key))
                 })
                 .await
-                .unwrap_or(true)
+                .unwrap_or_else(|_| Some("the check did not run".to_string()))
             };
-            let enabled = crate::events::current_config().nearby_pairing && !phone;
+            if let Some(why) = &taken_id {
+                tracing::info!("A nearby computer's ask to pair was turned away: {why}");
+            }
+            let enabled = crate::events::current_config().nearby_pairing && taken_id.is_none();
             let now = Instant::now();
             let (taken, tried) = {
                 let mut desk = lock(&DESK);
