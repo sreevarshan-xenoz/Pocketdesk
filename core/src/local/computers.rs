@@ -192,8 +192,15 @@ impl ComputersFile {
 #[serde(tag = "ask", rename_all = "snake_case")]
 pub enum ComputerAsk {
     /// Pair with the computer whose pairing link (`pocketdesk://pair?...`)
-    /// this is.
-    Pair { link: String },
+    /// this is. `mine`: the owner confirmed here, for a link that asks to
+    /// pair both ways (PC1), that the computer it names may see and control
+    /// this one at any time without asking. Without it such a link pairs one
+    /// way, and this computer trusts nothing of the link's maker.
+    Pair {
+        link: String,
+        #[serde(default)]
+        mine: bool,
+    },
     /// Forget a paired computer.
     Forget { device_id: String },
     /// Let a computer this one paired with drive this one's keyboard and
@@ -478,6 +485,7 @@ mod tests {
             &dir,
             ComputerAsk::Pair {
                 link: "pocketdesk://pair?v=1".to_string(),
+                mine: false,
             },
             100,
         )
@@ -612,6 +620,33 @@ mod tests {
             serde_json::from_str(r#"{"id":"a","ask":"stop_view","created_unix":1}"#).unwrap();
         assert_eq!(old.created_ms, 0);
         assert_eq!(old.ask, ComputerAsk::StopView { session_id: None });
+    }
+
+    /// PC1 review C1: a pairing ask says whether the owner here let the
+    /// link's maker see and control this computer; one from before says not.
+    #[test]
+    fn a_pairing_ask_carries_the_owners_consent_here() {
+        let old: ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"pair","link":"pocketdesk://pair?v=1&mine=1","created_unix":1}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old.ask,
+            ComputerAsk::Pair {
+                link: "pocketdesk://pair?v=1&mine=1".to_string(),
+                mine: false,
+            },
+            "a link's own mine=1 is not this owner's consent"
+        );
+        let wire = serde_json::to_value(ComputerAsk::Pair {
+            link: "l".to_string(),
+            mine: true,
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"ask": "pair", "link": "l", "mine": true})
+        );
     }
 
     #[test]

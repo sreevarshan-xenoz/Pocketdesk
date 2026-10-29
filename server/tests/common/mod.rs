@@ -121,6 +121,7 @@ pub fn pair(a_state: &Path, link: &PairLink) -> String {
         a_state,
         ComputerAsk::Pair {
             link: link.to_uri(),
+            mine: link.mine,
         },
         pin::now_unix(),
     )

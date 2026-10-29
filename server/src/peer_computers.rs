@@ -83,12 +83,15 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     loop {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
-                ComputerAsk::Pair { link } => {
+                ComputerAsk::Pair { link, mine } => {
                     // Paired again: the link starts over now, not after the
                     // back-off a refused or broken one was sleeping out.
-                    if let Some(paired) =
-                        pair(&dir, &cert_manager, wan.as_ref(), &link, &request.id).await
-                    {
+                    let asked = Asked {
+                        uri: &link,
+                        mine,
+                        request: &request.id,
+                    };
+                    if let Some(paired) = pair(&dir, &cert_manager, wan.as_ref(), asked).await {
                         if let Some(stale) = links.remove(&paired) {
                             stale.task.abort();
                         }
@@ -555,19 +558,27 @@ fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<St
     }
 }
 
-/// Pair with the computer whose pairing link `uri` is, and say how it went;
-/// its id once paired.
+/// What the app asked to pair with: the link, whether the owner here let
+/// its maker see and control this computer (PC1), and the request's id.
+struct Asked<'a> {
+    uri: &'a str,
+    mine: bool,
+    request: &'a str,
+}
+
+/// Pair with the computer whose pairing link the ask holds, and say how it
+/// went; its id once paired.
 async fn pair(
     dir: &Path,
     certs: &CertManager,
     wan: Option<&iroh::Endpoint>,
-    uri: &str,
-    request: &str,
+    asked: Asked<'_>,
 ) -> Option<String> {
+    let (uri, request) = (asked.uri, asked.request);
     let (name, device_id) = PairLink::from_uri(uri)
         .map(|link| (link.name, link.device_id))
         .unwrap_or_default();
-    let (outcome, paired) = match pair_with(dir, certs, wan, uri).await {
+    let (outcome, paired) = match pair_with(dir, certs, wan, uri, asked.mine).await {
         Ok(computer) => {
             tracing::info!(device_id = %computer.device_id, "Paired with another computer");
             ("paired".to_string(), Some(computer.device_id))
@@ -592,12 +603,14 @@ async fn pair(
     paired
 }
 
-/// Pair as [`pair`] says, and record the computer.
+/// Pair as [`pair`] says, and record the computer. `consent`: the owner
+/// here let the link's maker see and control this computer (PC1).
 async fn pair_with(
     dir: &Path,
     certs: &CertManager,
     wan: Option<&iroh::Endpoint>,
     uri: &str,
+    consent: bool,
 ) -> Result<PeerComputer, String> {
     let link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
     let fingerprint = link
@@ -640,8 +653,8 @@ async fn pair_with(
             .map_err(|e| format!("could not pin its certificate: {e:#}"))?;
     }
     // What it lists this computer by, when the link is for another of the
-    // owner's computers (PC1).
-    let facts = match link.mine {
+    // owner's computers and the owner here said so too (PC1).
+    let facts = match asks_both_ways(&link, consent) {
         true => Some(own_facts(dir).await),
         false => None,
     };
@@ -667,21 +680,22 @@ async fn pair_with(
     }
     let answer = paired?;
     // Its endpoint as it said once paired, else as the link said.
-    let endpoint = answer.endpoint.or_else(|| {
-        link.endpoint
-            .as_deref()
-            .and_then(|raw| serde_json::from_str(raw).ok())
-            .filter(|body| WanTarget::parse(body).is_some())
-    });
+    let endpoint = answer.endpoint.or_else(|| link_endpoint(&link));
     // PC1: it lists this computer in turn, and this one trusts it as it is
-    // trusted there, as the owner asked by pasting a link made for that.
-    let mut mine = answer.mine && link.mine;
+    // trusted there, as the owner here confirmed for a link made for that
+    // (pair_on takes its answer only when it was asked). Its iroh key, by
+    // which it is admitted on the link it may be the one to dial, is needed.
+    let iroh = endpoint
+        .as_ref()
+        .and_then(WanTarget::parse)
+        .map(|t| t.endpoint_id);
+    let mut mine = answer.mine && facts.is_some();
     if mine {
-        let iroh = endpoint
-            .as_ref()
-            .and_then(WanTarget::parse)
-            .map(|t| t.endpoint_id);
-        if let Err(e) = trust_back(dir, &link.device_id, fingerprint, iroh.as_deref()) {
+        let trusted = match &iroh {
+            Some(iroh) => trust_back(dir, &link.device_id, fingerprint, Some(iroh)),
+            None => Err("it named no internet key".to_string()),
+        };
+        if let Err(e) = trusted {
             tracing::warn!("Paired both ways, but could not trust that computer here: {e}");
             mine = false;
         }
@@ -705,7 +719,7 @@ async fn pair_with(
         mine,
     };
     let mut was = None;
-    computers::update(dir, |file| {
+    let recorded = computers::update(dir, |file| {
         if let Some(at) = file
             .computers
             .iter()
@@ -714,14 +728,35 @@ async fn pair_with(
             was = Some(file.computers.remove(at));
         }
         file.computers.push(computer.clone());
-    })
-    .map_err(|e| format!("paired, but could not record it: {e}"))?;
+    });
+    if let Err(e) = recorded {
+        // Not listed, so not trusted either (PC1 review M1).
+        if mine {
+            untrust_back(dir, &link.device_id);
+        }
+        return Err(format!("paired, but could not record it: {e}"));
+    }
     // Paired again at new addresses, the old ones' pins go (BD6: they
     // stayed for good, and read as a changed certificate to a dial there).
     if let Some(was) = was {
         drop_pins(certs, &was, &labels);
     }
     Ok(computer)
+}
+
+/// Whether this computer asks `link`'s maker to pair both ways (PC1): the
+/// link asks for it, and the owner here confirmed it (`consent`). The link
+/// alone is never enough: anyone can make one, or edit one on its way.
+fn asks_both_ways(link: &PairLink, consent: bool) -> bool {
+    link.mine && consent && link_endpoint(link).is_some()
+}
+
+/// The internet endpoint `link` names, when it names a real one.
+fn link_endpoint(link: &PairLink) -> Option<serde_json::Value> {
+    link.endpoint
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .filter(|body| WanTarget::parse(body).is_some())
 }
 
 /// Whether this computer lists `device_id` as one paired both ways (PC1).
@@ -1927,6 +1962,42 @@ mod tests {
         let ask = other.await.unwrap();
         assert!(ask.body.get("mine").is_none() && ask.body.get("facts").is_none());
         assert!(!answer.mine, "never asked");
+    }
+
+    /// PC1 review C1: a link asking for both ways is asked so only with the
+    /// owner's consent here, and only when it names the other's internet
+    /// endpoint (without it, the other could never be admitted on the link
+    /// it may dial, M4); a hostile `mine=1` alone asks nothing.
+    #[test]
+    fn a_link_asks_both_ways_only_with_the_owners_consent_here() {
+        let endpoint = serde_json::json!({
+            "endpointId": iroh::SecretKey::generate().public().to_string(),
+            "relayUrls": [],
+            "directAddrs": [],
+        });
+        let link = PairLink {
+            name: "Desk".to_string(),
+            device_id: "desk".to_string(),
+            addresses: vec!["192.0.2.60".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+            pin: "123456".to_string(),
+            fingerprint: Some("ab".repeat(32)),
+            endpoint: Some(endpoint.to_string()),
+            mine: true,
+        };
+        assert!(asks_both_ways(&link, true));
+        assert!(!asks_both_ways(&link, false), "the link alone");
+        let plain = PairLink {
+            mine: false,
+            ..link.clone()
+        };
+        assert!(!asks_both_ways(&plain, true), "the owner's yes alone");
+        let no_road = PairLink {
+            endpoint: None,
+            ..link
+        };
+        assert!(!asks_both_ways(&no_road, true), "no endpoint to bind");
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,

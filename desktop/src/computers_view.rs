@@ -128,7 +128,7 @@ impl ComputersView {
                 let link = std::mem::take(&mut self.link).trim().to_string();
                 self.ask(
                     state_dir,
-                    ComputerAsk::Pair { link },
+                    ComputerAsk::Pair { link, mine: false },
                     now_unix,
                     "Asked the other computer to pair.",
                 );
