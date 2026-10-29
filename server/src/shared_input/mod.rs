@@ -8,7 +8,9 @@
 //! ([`link`], tried out with `pocketdesk share-test`, [`share_test`]) carries
 //! them. The computer being driven acts on what arrives ([`receive`]): it
 //! types and moves what a computer allowed to drive it sends, says what
-//! screens it has ([`screens`]) and stays awake meanwhile ([`awake`]).
+//! screens it has ([`screens`]) and stays awake meanwhile ([`awake`]),
+//! the link kept quick while either side's keyboard and mouse are elsewhere
+//! ([`quick`]).
 //! The computer driving decides where its keyboard and mouse are
 //! ([`drive`], keys named as Windows' hook names them in [`keys_windows`])
 //! and captures them: on Windows by its hooks (`capture_windows`), on Linux
@@ -48,6 +50,7 @@ pub mod phone_test;
 pub mod portal_drive;
 pub mod portal_glue;
 pub mod portal_session;
+pub mod quick;
 pub mod receive;
 pub mod screens;
 #[cfg(target_os = "linux")]

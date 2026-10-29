@@ -359,6 +359,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::SharedInput,
     ),
     (
+        "shared_input_low_latency",
+        "Keep the connection quick while sharing",
+        Section::SharedInput,
+    ),
+    (
         "kdeconnect_compat",
         "KDE Connect devices",
         Section::KdeConnect,
@@ -481,13 +486,24 @@ fn drawn_here(key: &str) -> bool {
         | "shared_input_hotkey"
         | "shared_input_game_lock"
         | "shared_input_lock_programs"
-        | "shared_input_clipboard" => cfg!(any(windows, target_os = "linux")),
+        | "shared_input_clipboard"
+        | "shared_input_low_latency" => cfg!(any(windows, target_os = "linux")),
         // BK4: only Windows drives with Explorer's drag. BK6: the sound
         // follows the mouse to the computer driving, Windows.
         "shared_input_files" | "shared_input_sound" => cfg!(windows),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
+    }
+}
+
+/// What "Keep the connection quick while sharing" does here: Windows'
+/// timer is Windows' only (BK10 review M8).
+fn quick_note() -> &'static str {
+    if cfg!(windows) {
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
+    } else {
+        "While the pointer is on another computer, or this one is driven, and keys or moves keep coming: this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts."
     }
 }
 
@@ -600,6 +616,7 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_clipboard"
             | "shared_input_files"
             | "shared_input_sound"
+            | "shared_input_low_latency"
     )
 }
 
@@ -2115,6 +2132,16 @@ impl SettingsForm {
                         "In this computer's speakers or headphones. It stops as the mouse comes home.",
                     );
                 });
+                row(ui, "shared_input_low_latency", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_low_latency,
+                            "keys and moves go at once while the keyboard and mouse are shared",
+                        ),
+                    );
+                    note(ui, quick_note());
+                });
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2840,6 +2867,10 @@ mod tests {
                     "shared_input_sound",
                     "Hear the computer you're driving here"
                 ),
+                (
+                    "shared_input_low_latency",
+                    "Keep the connection quick while sharing"
+                ),
             ]
         );
         for (key, _) in rows
@@ -2854,6 +2885,9 @@ mod tests {
         }
         assert_eq!(drawn_here("shared_input_files"), cfg!(windows));
         assert_eq!(drawn_here("shared_input_sound"), cfg!(windows));
+        // Windows' timer is named only on Windows (BK10 review M8).
+        assert_eq!(quick_note().contains("Windows' timer"), cfg!(windows));
+        assert!(quick_note().contains("byte every 50 ms"));
     }
 
     /// BK7: a computer's window's quality and view-only start are with the
@@ -2889,6 +2923,7 @@ mod tests {
             "shared_input_clipboard",
             "shared_input_files",
             "shared_input_sound",
+            "shared_input_low_latency",
         ] {
             assert!(applies_live(key), "{key}");
         }

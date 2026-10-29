@@ -5723,6 +5723,7 @@ dependencies = [
  "enigo",
  "evdev",
  "futures-lite",
+ "if-addrs",
  "image",
  "iroh",
  "iroh-mainline-address-lookup",

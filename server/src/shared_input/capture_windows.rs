@@ -80,6 +80,7 @@ use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::phone::{self, PhoneChannel};
+use super::quick::{KeepQuick, Nudge};
 use super::screens::{Desktop, Motion};
 use super::sound;
 use super::status;
@@ -1081,6 +1082,13 @@ struct Glue {
     parking: Option<Instant>,
     motion: Motion,
     awake: KeepAwake,
+    /// The quick link (BK10), held with the keep-awake while the setting
+    /// is on.
+    quick: KeepQuick,
+    quick_on: bool,
+    /// Keeps this computer's Wi-Fi awake toward the computer driven while
+    /// the link is kept quick (BK10).
+    nudge: Nudge,
     /// Files dragged across the edge (BK4): the setting, the catcher's
     /// state, its window's thread (running while the setting is on), and
     /// where its drops come in.
@@ -1265,8 +1273,14 @@ impl Glue {
                 }
                 Action::HideCursor(true) => hide_cursors(),
                 Action::HideCursor(false) => restore_cursors(),
-                Action::KeepAwake(true) => self.awake.hold(),
-                Action::KeepAwake(false) => self.awake.release(),
+                Action::KeepAwake(true) => {
+                    self.awake.hold();
+                    self.quick.set(self.quick_on);
+                }
+                Action::KeepAwake(false) => {
+                    self.awake.release();
+                    self.quick.set(false);
+                }
                 // Only ever after the keyboard and mouse came home.
                 Action::LockHere => {
                     if let Err(e) = crate::privacy::lock_screen() {
@@ -1664,6 +1678,9 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         parking: None,
         motion: Motion::default(),
         awake: KeepAwake::default(),
+        quick: KeepQuick::default(),
+        quick_on: config.shared_input_low_latency,
+        nudge: Nudge::default(),
         files_on: false,
         catcher: Catcher::default(),
         drop_catcher: None,
@@ -1813,6 +1830,13 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
+        // The quick link while away and someone types or moves here, let
+        // go after ten seconds without (BK10 review M3).
+        let quick = glue.quick_on
+            && glue.awake.is_held()
+            && last_input.elapsed() < super::receive::QUICK_FOR;
+        glue.quick.set(quick);
+        glue.nudge.follow(driver.away_on().filter(|_| quick));
         // The sound of the computer driven follows the cursor (BK6).
         glue.follow_sound(&mut driver);
         // A game in front keeps the keyboard and mouse here with no hooks;
@@ -1882,6 +1906,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
+            glue.quick_on = config.shared_input_low_latency;
             if config.shared_input_files != glue.files_on {
                 glue.files_setting(config.shared_input_files);
             }

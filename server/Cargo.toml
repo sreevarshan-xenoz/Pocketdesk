@@ -73,6 +73,9 @@ notify = { version = "8.2", default-features = false }
 # Home Assistant over MQTT (ecosystem 1e): plain TCP, no TLS stack of its own.
 rumqttc = { version = "0.25", default-features = false }
 dashmap = "6.1.0"
+# BK10: whether the computer driven is on this computer's own network,
+# before a byte goes to it; already in the graph through core.
+if-addrs = "0.13"
 xcap.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

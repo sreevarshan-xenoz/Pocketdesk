@@ -27,6 +27,7 @@ use super::awake::KeepAwake;
 use super::badge;
 use super::held::HeldInput;
 use super::link::{self, Channel};
+use super::quick::{KeepQuick, Nudge};
 use super::screens;
 use super::sound;
 use super::status;
@@ -114,6 +115,9 @@ const KEY_MAX: u16 = 0x2ff;
 /// The highest button there is (forward).
 const BUTTON_MAX: u8 = 4;
 
+/// Input from the computer driving this recent keeps the link quick (BK10).
+pub const QUICK_FOR: Duration = Duration::from_secs(10);
+
 /// An activity note this recent keeps this computer awake.
 const AWAKE_FOR: Duration = Duration::from_secs(10);
 
@@ -134,6 +138,8 @@ pub struct Receiver {
     last_seq: Option<u32>,
     /// When the last note came that someone is at a driving computer.
     active_at: Option<Instant>,
+    /// When the computer driving last sent input (or arrived).
+    input_at: Option<Instant>,
     /// When anything last came off the link from the driving computer.
     heard_at: Option<Instant>,
     /// This computer's name, for its badge.
@@ -157,6 +163,7 @@ impl Receiver {
             held: HeldInput::default(),
             last_seq: None,
             active_at: None,
+            input_at: None,
             heard_at: None,
             name: String::new(),
             timings: Vec::new(),
@@ -270,6 +277,7 @@ impl Receiver {
             self.release_held();
             self.driver = Some(from.to_string());
             self.heard_at = Some(now);
+            self.input_at = Some(now);
             self.last_seq = None;
             self.timings.clear();
             self.timed_for = Some(from.to_string());
@@ -297,6 +305,12 @@ impl Receiver {
             Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. }
         ) {
             self.inputs = self.inputs.wrapping_add(1);
+        }
+        if matches!(
+            msg,
+            Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } | Msg::Move { .. }
+        ) {
+            self.input_at = self.input_at.max(Some(now));
         }
         let n = self.inputs;
         match msg {
@@ -374,6 +388,7 @@ impl Receiver {
         self.release_held();
         self.driver = None;
         self.heard_at = None;
+        self.input_at = None;
         self.last_seq = None;
         self.sound_wanted = false;
     }
@@ -394,6 +409,17 @@ impl Receiver {
     pub fn wants_awake(&self, now: Instant) -> bool {
         self.active_at
             .is_some_and(|at| now.saturating_duration_since(at) < AWAKE_FOR)
+    }
+
+    /// Whether the link is kept quick at `now` (BK10): a computer drives
+    /// this one and sent a key, a click, the wheel or a move (or arrived)
+    /// within [`QUICK_FOR`]. A pointer left resting here lets go, and the
+    /// next input takes it again.
+    pub fn wants_quick(&self, now: Instant) -> bool {
+        self.driver.is_some()
+            && self
+                .input_at
+                .is_some_and(|at| now.saturating_duration_since(at) < QUICK_FOR)
     }
 }
 
@@ -568,13 +594,14 @@ pub(crate) fn may_drive_here(device_id: &str) -> bool {
 /// [`RECHECK`] (they are files: config.toml and the trust store).
 #[derive(Default)]
 struct Gate {
-    /// `shared_input` and `shared_input_clipboard`, and when read.
-    on: Option<((bool, bool), Instant)>,
+    /// `shared_input`, `shared_input_clipboard` and
+    /// `shared_input_low_latency`, and when read.
+    on: Option<((bool, bool, bool), Instant)>,
     standings: HashMap<String, (Standing, Instant)>,
 }
 
 impl Gate {
-    async fn settings(&mut self) -> (bool, bool) {
+    async fn settings(&mut self) -> (bool, bool, bool) {
         if let Some((on, at)) = self.on
             && at.elapsed() < RECHECK
         {
@@ -582,10 +609,14 @@ impl Gate {
         }
         let on = tokio::task::spawn_blocking(|| {
             let config = crate::events::current_config();
-            (config.shared_input, config.shared_input_clipboard)
+            (
+                config.shared_input,
+                config.shared_input_clipboard,
+                config.shared_input_low_latency,
+            )
         })
         .await
-        .unwrap_or((false, false));
+        .unwrap_or((false, false, false));
         self.on = Some((on, Instant::now()));
         on
     }
@@ -597,6 +628,11 @@ impl Gate {
     /// The clipboard follows the mouse here (`shared_input_clipboard`).
     async fn clipboard_follows(&mut self) -> bool {
         self.settings().await.1
+    }
+
+    /// The link is kept quick while driven (`shared_input_low_latency`).
+    async fn low_latency(&mut self) -> bool {
+        self.settings().await.2
     }
 
     /// Why `device_id` may not drive this one, as a [`Msg::Refuse`] says
@@ -920,6 +956,9 @@ pub async fn run() {
     let mut receiver = Receiver::new(Box::<LazyInjector>::default());
     receiver.set_name(&crate::kde::host_device_name());
     let mut awake = KeepAwake::default();
+    // Held while another computer's cursor is on this one (BK10).
+    let mut quick = KeepQuick::default();
+    let mut nudge = Nudge::default();
     let mut gate = Gate::default();
     // This computer's screens as last looked at (none while shared input
     // is off), and the computers told them.
@@ -1101,6 +1140,11 @@ pub async fn run() {
                 } else {
                     awake.release();
                 }
+                // Held while the computer driving sends input, let go
+                // after ten seconds without (BK10 review M3).
+                let quick_now = receiver.wants_quick(Instant::now()) && gate.low_latency().await;
+                quick.set(quick_now);
+                nudge.follow(receiver.driver().filter(|_| quick_now));
                 if !heard.is_empty() {
                     write_screens(state_dir.as_ref(), std::mem::take(&mut heard), None).await;
                 }
@@ -1562,6 +1606,29 @@ mod tests {
         assert_eq!(r.driver(), Some("b"));
         r.handle("a", key(30, true), true);
         assert_eq!(fake.take(), vec![]);
+    }
+
+    /// BK10 review M3: the quick link is held while the computer driving
+    /// sends input, let go after ten seconds without any (a pointer left
+    /// resting here overnight), taken again by the next input, and let go
+    /// as it leaves.
+    #[test]
+    fn the_quick_link_lets_go_after_ten_idle_seconds() {
+        let (mut r, _fake) = receiver();
+        let t0 = Instant::now();
+        assert!(!r.wants_quick(t0));
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        assert!(r.wants_quick(t0));
+        r.handle_at("pc", key(30, true), true, t0 + Duration::from_secs(5));
+        // Pings and activity notes are not input.
+        r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, t0 + QUICK_FOR);
+        assert!(r.wants_quick(t0 + QUICK_FOR));
+        let idle = t0 + Duration::from_secs(5) + QUICK_FOR;
+        assert!(!r.wants_quick(idle));
+        r.handle_at("pc", Msg::Move { seq: 1, x: 5, y: 5 }, true, idle);
+        assert!(r.wants_quick(idle));
+        r.handle_at("pc", Msg::Leave, true, idle);
+        assert!(!r.wants_quick(idle));
     }
 
     #[test]
