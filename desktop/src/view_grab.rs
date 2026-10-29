@@ -588,6 +588,15 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
             };
             // SAFETY: a timer of this thread's own (no window).
             let timer = unsafe { SetTimer(None, 0, BEAT_EVERY.as_millis() as u32, None) };
+            if timer == 0 {
+                // No timer, no watchdog: the hook does not stay in (round
+                // 2's N2).
+                // SAFETY: the hook this thread put in.
+                let _ = unsafe { UnhookWindowsHookEx(hook) };
+                clear_own(thread_id);
+                let _ = ready_tx.send(None);
+                return;
+            }
             let _ = ready_tx.send(Some(thread_id));
             loop {
                 // SAFETY: this thread's queue.
@@ -607,10 +616,8 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
             }
             // SAFETY: the hook and timer this thread put in.
             let _ = unsafe { UnhookWindowsHookEx(hook) };
-            if timer != 0 {
-                // SAFETY: as above.
-                let _ = unsafe { KillTimer(None, timer) };
-            }
+            // SAFETY: as above.
+            let _ = unsafe { KillTimer(None, timer) };
             // Its waker ends with its state, and the window looks again.
             clear_own(thread_id);
         })
