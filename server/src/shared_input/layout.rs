@@ -7,6 +7,8 @@
 //! edge to edge. A [`Crossing`] is in the receiving computer's own space, the
 //! one it will move its cursor in.
 
+use std::collections::HashMap;
+
 use super::wire::Screen;
 
 /// One computer in the layout.
@@ -162,6 +164,22 @@ impl Layout {
             })
             .min_by_key(|(distance, _)| *distance)
             .map_or(at, |(_, near)| (near.0 as i32, near.1 as i32))
+    }
+}
+
+impl Layout {
+    /// Name each computer that has no name yet (BK8 live: one that only
+    /// takes input never says hello, so never says its name) by `paired`,
+    /// the names this computer paired them as. One that said its own keeps
+    /// it.
+    pub fn name_unnamed(&mut self, paired: &HashMap<String, String>) {
+        for computer in &mut self.computers {
+            if computer.name.trim().is_empty()
+                && let Some(name) = paired.get(&computer.device_id)
+            {
+                computer.name = name.clone();
+            }
+        }
     }
 }
 
@@ -614,5 +632,28 @@ mod tests {
             Layout::default_for(windows(), vec![linux()]).crossing("W", (3455, 480), 5, 0),
             crossing("L", (0, 480))
         );
+    }
+
+    /// BK8 live: a computer that only takes input never says hello, so
+    /// never its name; it is named as this computer paired it.
+    #[test]
+    fn a_computer_with_no_name_is_named_as_it_was_paired() {
+        let mut unnamed = linux();
+        unnamed.name = " ".to_string();
+        let mut named = placed("N", (0, 2000), vec![screen(0, 0, 800, 600)]);
+        named.name = "Said".to_string();
+        let mut stranger = placed("S", (0, 3000), vec![screen(0, 0, 800, 600)]);
+        stranger.name = String::new();
+        let mut layout = Layout {
+            computers: vec![windows(), unnamed, named, stranger],
+        };
+        let paired = HashMap::from([
+            ("L".to_string(), "Arch laptop".to_string()),
+            ("N".to_string(), "Paired as".to_string()),
+        ]);
+        layout.name_unnamed(&paired);
+        let names: Vec<&str> = layout.computers.iter().map(|c| c.name.as_str()).collect();
+        // The name a computer said itself stays; one not paired stays unnamed.
+        assert_eq!(names, ["W", "Arch laptop", "Said", ""]);
     }
 }

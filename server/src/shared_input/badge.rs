@@ -74,26 +74,33 @@ pub fn fallback(event: &Event) -> Fallback {
 }
 
 /// The badge's text for `event`: a line, and for a return the owner did
-/// not make, why on a second.
+/// not make, why on a second. A computer with no name yet is still said:
+/// this one as "this computer", another as "another computer" (never
+/// "this computer" as the keyboard and mouse leave it).
 pub fn text(event: &Event) -> String {
-    let name = |name: &str| {
+    let name = |name: &str, unnamed: &str| {
         let name = clip(name, NAME_CHARS);
         if name.is_empty() {
-            "this computer".to_string()
+            unnamed.to_string()
         } else {
             name
         }
     };
+    let here = |here: &str| name(here, "this computer");
     match *event {
-        Event::Arrived { here } | Event::Home { here, why: None } => {
-            format!("Keyboard and mouse: {}", name(here))
+        Event::Arrived { here: at }
+        | Event::Home {
+            here: at,
+            why: None,
+        } => {
+            format!("Keyboard and mouse: {}", here(at))
         }
-        Event::Went { to } => format!("Keyboard and mouse: {}", name(to)),
+        Event::Went { to } => format!("Keyboard and mouse: {}", name(to, "another computer")),
         Event::Home {
-            here,
+            here: at,
             why: Some(why),
-        } => format!("Keyboard and mouse: {}\n{why}", name(here)),
-        Event::Identify { here } => format!("This is {}", name(here)),
+        } => format!("Keyboard and mouse: {}\n{why}", here(at)),
+        Event::Identify { here: at } => format!("This is {}", here(at)),
         Event::Note(note) => note.to_string(),
     }
 }
@@ -147,6 +154,16 @@ mod tests {
             "Keyboard and mouse: this computer"
         );
         assert_eq!(text(&Event::Identify { here: "" }), "This is this computer");
+        // Another computer with no name yet is never "this computer" (BK8
+        // live: one that only takes input never says its name).
+        assert_eq!(
+            text(&Event::Went { to: "" }),
+            "Keyboard and mouse: another computer"
+        );
+        assert_eq!(
+            text(&Event::Went { to: " \u{200B} " }),
+            "Keyboard and mouse: another computer"
+        );
     }
 
     #[test]

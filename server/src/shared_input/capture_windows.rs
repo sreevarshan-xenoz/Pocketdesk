@@ -1700,14 +1700,22 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
                 .filter(|id| phone::is_linked(id))
                 .cloned(),
         );
-        layout_for(
+        let mut layout = layout_for(
             &me.device_id,
             &me.device_name,
             glue.own.clone(),
             &file,
             &linked,
             state_dir.as_deref().and_then(|dir| saved.get(dir)),
-        )
+        );
+        // One that only takes input never said its name: the badge names
+        // it as it was paired, never "this computer".
+        if layout.computers.iter().any(|c| c.name.trim().is_empty())
+            && let Some(dir) = state_dir.as_deref()
+        {
+            layout.name_unnamed(&status::paired_names(dir));
+        }
+        layout
     };
     // What is in front is weighed before anything else, so a game already
     // there never sees a hook.
