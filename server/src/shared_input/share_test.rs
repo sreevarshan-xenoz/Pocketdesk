@@ -57,6 +57,11 @@ const GAP: Duration = Duration::from_millis(1);
 /// clocks up by.
 const PING_EVERY: usize = 5;
 
+/// The longest pause between events `--pause` takes: a Wi-Fi card saving
+/// power dozes within a tenth of a second, so a longer one shows nothing
+/// more, and the server runs one test at a time.
+const PAUSE_MOST_MS: u32 = 5_000;
+
 /// How often an activity note goes while the script runs, as a driving
 /// computer sends one: the receiver lets go of a driver silent for a second.
 const ACTIVE_EVERY: Duration = Duration::from_millis(200);
@@ -155,7 +160,21 @@ struct Request {
     computer: String,
     keys: u32,
     moves: u32,
+    /// Milliseconds between events; 0 is [`GAP`]. With a pause, pings go
+    /// as a driver's do while away ([`pinging_every`]), not with every
+    /// [`PING_EVERY`] events.
+    #[serde(default)]
+    pause_ms: u32,
     created_unix: u64,
+}
+
+/// How often pings go between the events of a script paused `pause_ms`
+/// between them, the link kept `quick` or not: as a computer driving
+/// another pings it while away. None for a script without a pause, whose
+/// pings go with its events.
+fn pinging_every(pause_ms: u32, quick: bool) -> Option<Duration> {
+    use super::drive::{PING_EVERY, QUICK_PING_EVERY};
+    (pause_ms > 0).then_some(if quick { QUICK_PING_EVERY } else { PING_EVERY })
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,7 +234,7 @@ pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
 /// The command: ask the running server to send `computer` the script, and
 /// print what came of it. The exit code: 0 sent, 1 failed, 3 no server
 /// running, 4 no answer from it in time.
-pub fn run_cli(computer: &str, keys: u32, moves: u32) -> i32 {
+pub fn run_cli(computer: &str, keys: u32, moves: u32, pause_ms: u32) -> i32 {
     let dir = match crate::state::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -232,18 +251,21 @@ pub fn run_cli(computer: &str, keys: u32, moves: u32) -> i32 {
         computer: computer.to_string(),
         keys,
         moves,
+        pause_ms: pause_ms.min(PAUSE_MOST_MS),
         created_unix: now_unix(),
     };
     if let Err(e) = leave(&dir, &request) {
         eprintln!("share-test: the request could not be left for the server: {e}");
         return exit::FAILED;
     }
-    // The script takes a millisecond an event, more where timers are coarse.
-    let events = u64::from(keys.max(moves));
+    // The script takes a millisecond an event, more where timers are
+    // coarse, or its pause.
+    let events = u64::from(keys.max(moves)) * 2 + 3;
+    let each = 4 + u64::from(request.pause_ms);
     let deadline = std::time::Instant::now()
         + OUTCOME_WAIT
         + DIRECT_WAIT
-        + Duration::from_millis(events.saturating_mul(4));
+        + Duration::from_millis(events.saturating_mul(each));
     loop {
         if let Some(outcome) = take_outcome(&dir, &request.id) {
             print!("{}", report(&outcome));
@@ -457,15 +479,35 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         outcome.pings += 1;
         Ok::<(), String>(())
     };
+    let gap = match request.pause_ms {
+        0 => GAP,
+        ms => Duration::from_millis(u64::from(ms.min(PAUSE_MOST_MS))),
+    };
+    let pinging = pinging_every(request.pause_ms, outcome.quick);
     let sending = async {
         channel.send(&hello)?;
         outcome.sent += 1;
         let started = tokio::time::Instant::now();
         let mut active_due = started;
+        let mut ping_due = started;
         for (i, msg) in script(request.keys, request.moves).iter().enumerate() {
-            let due = started + GAP * u32::try_from(i).unwrap_or(u32::MAX);
+            let due = started + gap * u32::try_from(i).unwrap_or(u32::MAX);
+            // Paused: pinged meanwhile as a driver pings while away.
+            if let Some(every) = pinging {
+                while ping_due < due {
+                    tokio::time::sleep_until(ping_due).await;
+                    ping(&mut channel, &mut outcome)?;
+                    ping_due += every;
+                    let now = tokio::time::Instant::now();
+                    if now >= active_due {
+                        channel.send(&Msg::Active { idle_ms: 0 })?;
+                        outcome.sent += 1;
+                        active_due = now + ACTIVE_EVERY;
+                    }
+                }
+            }
             tokio::time::sleep_until(due).await;
-            if i % PING_EVERY == 0 {
+            if pinging.is_none() && i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
             }
             let now = tokio::time::Instant::now();
@@ -711,6 +753,22 @@ mod tests {
         assert!(err.contains("more than one"), "{err}");
     }
 
+    /// BK10: a paused script pings between its events as a driver pings
+    /// while away, often with the link kept quick; one without a pause
+    /// pings with its events. A request from before the pause has none.
+    #[test]
+    fn a_paused_script_pings_as_a_driver_away() {
+        use super::super::drive::{PING_EVERY as AWAY, QUICK_PING_EVERY};
+        assert_eq!(pinging_every(0, true), None);
+        assert_eq!(pinging_every(1_000, true), Some(QUICK_PING_EVERY));
+        assert_eq!(pinging_every(1_000, false), Some(AWAY));
+        let old: Request = serde_json::from_str(
+            r#"{"id":"a","computer":"L","keys":1,"moves":0,"created_unix":5}"#,
+        )
+        .unwrap();
+        assert_eq!(old.pause_ms, 0);
+    }
+
     #[test]
     fn requests_are_taken_once_and_stale_ones_dropped() {
         let dir = std::env::temp_dir().join(format!("pd-share-requests-{}", std::process::id()));
@@ -720,6 +778,7 @@ mod tests {
             computer: "Laptop".to_string(),
             keys: 1,
             moves: 1,
+            pause_ms: 0,
             created_unix,
         };
         leave(&dir, &request("new", 1_000)).unwrap();
