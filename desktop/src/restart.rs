@@ -138,8 +138,29 @@ fn run(mut command: Command, what: &str) -> Result<(), String> {
     }
 }
 
-/// Start the server.
-pub fn start() -> Result<(), String> {
+/// What a start says when the server already runs (PR #553 review I2).
+pub const ALREADY_RUNNING: &str = "it is already running";
+
+/// Start the server, unless it already runs: started by the logon task,
+/// systemd, the tray or the command line meanwhile, a second one would
+/// spawn beside it (PR #553 review I2).
+pub fn start(state_dir: &Path) -> Result<(), String> {
+    start_unless_running(server::is_running(state_dir), start_now)
+}
+
+/// `start`, unless `running`.
+fn start_unless_running(
+    running: bool,
+    start: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if running {
+        return Err(ALREADY_RUNNING.to_string());
+    }
+    start()
+}
+
+/// Start the server, running or not.
+fn start_now() -> Result<(), String> {
     let os = Os::current();
     match start_plan(os, installed(os), server_exe(&app_dir())) {
         #[cfg(windows)]
@@ -177,7 +198,7 @@ pub fn restart(state_dir: &Path) -> Result<(), String> {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
-    start()
+    start_now()
 }
 
 #[cfg(test)]
@@ -190,6 +211,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// PR #553 review I2: a server already running is not started again,
+    /// and says so; one not running is.
+    #[test]
+    fn a_running_server_is_not_started_again() {
+        let mut started = false;
+        let said = start_unless_running(true, || {
+            started = true;
+            Ok(())
+        });
+        assert_eq!(said, Err(ALREADY_RUNNING.to_string()));
+        assert!(!started);
+        assert_eq!(start_unless_running(false, || Ok(())), Ok(()));
     }
 
     #[test]
