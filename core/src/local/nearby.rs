@@ -278,6 +278,16 @@ pub struct Pace {
 }
 
 impl Pace {
+    /// Whether an ask from `from` at `now` would be taken, counting none.
+    pub fn would_allow(&self, from: IpAddr, now: Instant) -> bool {
+        self.asks.get(&from).is_none_or(|at| {
+            at.iter()
+                .filter(|t| now.saturating_duration_since(**t) < PACE_WINDOW)
+                .count()
+                < PACE_MOST
+        })
+    }
+
     /// Whether an ask from `from` at `now` is taken; if so it counts.
     pub fn allow(&mut self, from: IpAddr, now: Instant) -> bool {
         self.asks.retain(|_, at| {
@@ -338,6 +348,26 @@ impl HostDesk {
             requester: false,
         });
         Ok(id)
+    }
+
+    /// Why an ask from `from` at `now` would be turned away, without
+    /// taking it or counting it: the cheap checks, run before any file is
+    /// read for the ask ([`HostDesk::ask`] decides).
+    pub fn refusal(&mut self, from: IpAddr, enabled: bool, now: Instant) -> Option<Refusal> {
+        if !enabled {
+            return Some(Refusal::Off);
+        }
+        self.expire(now);
+        if self.shown.is_some() {
+            return Some(Refusal::Busy);
+        }
+        if recent(&mut self.failed, now) >= FAILED_MOST {
+            return Some(Refusal::Paused);
+        }
+        if recent(&mut self.prompts, now) >= PROMPTS_MOST || !self.pace.would_allow(from, now) {
+            return Some(Refusal::TooOften);
+        }
+        None
     }
 
     fn shown_mut(&mut self, id: &str) -> Option<&mut Shown> {
@@ -723,6 +753,28 @@ mod tests {
         );
         assert_eq!(desk.ask(HOME, true, at(599, start)), Err(Refusal::Paused));
         assert!(desk.ask(address(41), true, at(602, start)).is_ok());
+    }
+
+    /// The cheap look ahead says what an ask would hear, and takes or
+    /// counts nothing: an address may still ask its three times after it.
+    #[test]
+    fn a_look_ahead_takes_and_counts_nothing() {
+        let start = Instant::now();
+        let mut desk = HostDesk::default();
+        assert_eq!(desk.refusal(HOME, false, start), Some(Refusal::Off));
+        for _ in 0..10 {
+            assert_eq!(desk.refusal(HOME, true, start), None);
+        }
+        for i in 0..PACE_MOST as u64 {
+            let id = desk.ask(HOME, true, at(i, start)).expect("taken");
+            assert_eq!(desk.refusal(OTHER, true, at(i, start)), Some(Refusal::Busy));
+            desk.drop_ask(&id);
+        }
+        assert_eq!(
+            desk.refusal(HOME, true, at(5, start)),
+            Some(Refusal::TooOften)
+        );
+        assert_eq!(desk.refusal(OTHER, true, at(5, start)), None);
     }
 
     /// An ask whose nonce is never revealed holds the screen only for

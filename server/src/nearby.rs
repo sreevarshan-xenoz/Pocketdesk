@@ -150,6 +150,21 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     .await;
                 return;
             }
+            // The cheap refusals (busy, paused, too many) before any file
+            // is read for an ask that would be turned away anyway.
+            let (early, tried) = {
+                let mut desk = lock(&DESK);
+                let early = desk.refusal(from.ip(), true, Instant::now());
+                (early, desk.take_tried())
+            };
+            if tried {
+                note_tried(&dir);
+            }
+            if let Some(refusal) = early {
+                tracing::info!("A nearby computer's ask to pair was turned away: {refusal:?}");
+                let _ = sender.send_packet(&step_packet(refusal.step())).await;
+                return;
+            }
             // An id paired here either way (a phone or a computer), or
             // bound to another key, never asks: the owner's Accept would
             // hand that id to whoever asked. Checked again as it pairs.
