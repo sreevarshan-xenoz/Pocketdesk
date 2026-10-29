@@ -259,6 +259,14 @@ async fn dial(
                 ) else {
                     continue;
                 };
+                // Only at the key it is held to (PC1 review M3).
+                let bound = crate::state::state_dir().is_ok_and(|dir| {
+                    crate::peer_computers::endpoint_bound(&dir, computer, &target)
+                });
+                if !bound {
+                    why.push("internet: its endpoint is not the key it paired with".to_string());
+                    continue;
+                }
                 let dialed = pocketdesk_core::streaming::iroh_connection::dial_stream_from(
                     wan,
                     &target.endpoint_id,
@@ -896,6 +904,7 @@ mod tests {
             link: String::new(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
     }
 

@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
-use pocketdesk_core::local::computers::{self, ComputerAsk, PairingOutcome, PeerComputer};
+use pocketdesk_core::local::computers::{
+    self, ComputerAsk, ComputerFacts, PairingOutcome, PeerComputer,
+};
 use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::paths::COMPUTERS_DIR;
 use pocketdesk_core::protocol::connection::ConnectionManager;
@@ -64,6 +66,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         return;
     };
     let mut links: HashMap<String, Link> = HashMap::new();
+    // The computers that paired here both ways, to list in turn (PC1).
+    let (back_tx, mut paired_back) = mpsc::unbounded_channel();
+    *PAIRED_BACK.lock().unwrap_or_else(|e| e.into_inner()) = Some(back_tx);
     // Another computer's screen in a window here (BK7), from the first ask.
     let mut views: Option<mpsc::Sender<crate::computer_view::Command>> = None;
     // What an earlier run said of its links is not this run's.
@@ -78,12 +83,15 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     loop {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
-                ComputerAsk::Pair { link } => {
+                ComputerAsk::Pair { link, mine } => {
                     // Paired again: the link starts over now, not after the
                     // back-off a refused or broken one was sleeping out.
-                    if let Some(paired) =
-                        pair(&dir, &cert_manager, wan.as_ref(), &link, &request.id).await
-                    {
+                    let asked = Asked {
+                        uri: &link,
+                        mine,
+                        request: &request.id,
+                    };
+                    if let Some(paired) = pair(&dir, &cert_manager, wan.as_ref(), asked).await {
                         if let Some(stale) = links.remove(&paired) {
                             stale.task.abort();
                         }
@@ -98,6 +106,16 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         link.task.abort();
                     }
                     forget(&dir, &cert_manager, &device_id);
+                }
+                ComputerAsk::ForgetPaired {
+                    device_id,
+                    paired_unix,
+                } => {
+                    if forget_as_listed(&dir, &cert_manager, &device_id, paired_unix)
+                        && let Some(link) = links.remove(&device_id)
+                    {
+                        link.task.abort();
+                    }
                 }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
@@ -121,11 +139,171 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 }
             }
         }
+        forget_untrusted_mine(&dir, &cert_manager, &mut links);
+        lapse_pending(&dir);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
         }
-        crate::inbox::wait(COMPUTERS_DIR, POLL).await;
+        tokio::select! {
+            _ = crate::inbox::wait(COMPUTERS_DIR, POLL) => {}
+            Some(computer) = paired_back.recv() => {
+                list_back(&dir, &cert_manager, wan.is_some(), computer, &mut links);
+            }
+        }
     }
+}
+
+/// Where the pair plugin hands a computer that paired here both ways
+/// (PC1), for the run loop to list in turn: it holds the certificate pins.
+type PairedBack = mpsc::UnboundedSender<PeerComputer>;
+
+static PAIRED_BACK: Mutex<Option<PairedBack>> = Mutex::new(None);
+
+/// Whether a computer that pairs here both ways can be listed now (the run
+/// loop is up); else it pairs one way.
+pub(crate) fn takes_paired_back() -> bool {
+    PAIRED_BACK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|tx| !tx.is_closed())
+}
+
+/// The connection of each computer that paired here both ways that was up
+/// as it paired (the newest per device, in practice its pairing
+/// connection): never the link that shows it recorded the pairing (PC1
+/// re-review I-2). What proves that is its both-ways word on a link
+/// ([`BOTH_WAYS`]), sent only once it has recorded the pairing. Entries are
+/// a few bytes per pairing, kept for the run.
+static BEFORE_PAIRING: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
+    LazyLock::new(Default::default);
+
+/// Whether the connection `connection_id` of `device_id` was up as it
+/// paired here both ways.
+fn opened_before_pairing(device_id: &str, connection_id: &str) -> bool {
+    BEFORE_PAIRING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .is_some_and(|before| before.iter().any(|c| c == connection_id))
+}
+
+/// List `computer`, which just paired here both ways (PC1), as one this
+/// computer paired with too; `before`, the ids of its connections up as it
+/// paired, are never taken for its link. Whether the run loop took it.
+pub(crate) fn paired_back(computer: PeerComputer, before: Vec<String>) -> bool {
+    BEFORE_PAIRING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(computer.device_id.clone(), before);
+    PAIRED_BACK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|tx| tx.send(computer).is_ok())
+}
+
+/// The computer `device_id` that paired here both ways, from what it said
+/// of itself (`facts`) and the certificate (`fingerprint`, hex) its
+/// connection proved: its name cleaned as a link's is, and its endpoint
+/// only if it names a real iroh key.
+pub(crate) fn listed_from(
+    device_id: &str,
+    facts: ComputerFacts,
+    fingerprint: &str,
+    now_unix: u64,
+) -> PeerComputer {
+    let mut computer = facts.into_peer(device_id, fingerprint, now_unix);
+    computer.name = shown_name(&computer.name);
+    computer.endpoint = computer
+        .endpoint
+        .filter(|body| WanTarget::parse(body).is_some());
+    computer
+}
+
+/// Which of `labels`, the addresses a computer that paired here both ways
+/// gave, its certificate `hash` is pinned for (PC1): each but those pinned
+/// already to another listed computer's certificate (`others`), whose pins
+/// it may not take, whatever it says its addresses are.
+fn pinnable(
+    labels: &[String],
+    known: &HashMap<String, [u8; 32]>,
+    others: &[[u8; 32]],
+    hash: &[u8; 32],
+) -> Vec<String> {
+    labels
+        .iter()
+        .filter(|label| {
+            known
+                .get(*label)
+                .is_none_or(|pinned| pinned == hash || !others.contains(pinned))
+        })
+        .cloned()
+        .collect()
+}
+
+/// List `computer`, which paired here both ways (PC1): its certificate
+/// pinned for its addresses, as pairing with its link pins it, its entry
+/// in `computers.json` (replacing any older one, whose other addresses'
+/// pins go, BD6), and its link started over.
+fn list_back(
+    dir: &Path,
+    certs: &CertManager,
+    road: bool,
+    mut computer: PeerComputer,
+    links: &mut HashMap<String, Link>,
+) {
+    let labels: Vec<String> = computer
+        .addresses
+        .iter()
+        .filter_map(|a| peer_label_for_address(a))
+        .collect();
+    if let Some(hash) = parse_fingerprint(&computer.fingerprint) {
+        // Its addresses are its own word: one another listed computer's
+        // certificate is pinned for keeps that pin (that computer is dialed
+        // there, never this one).
+        let others: Vec<[u8; 32]> = computers::read(dir)
+            .computers
+            .iter()
+            .filter(|c| c.device_id != computer.device_id)
+            .filter_map(|c| parse_fingerprint(&c.fingerprint))
+            .collect();
+        let known: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
+        for label in pinnable(&labels, &known, &others, &hash) {
+            if let Err(e) = certs.pin_peer(&label, hash) {
+                tracing::warn!("Could not pin another computer's certificate: {e:#}");
+            }
+        }
+    }
+    computer.link = first_link(road).to_string();
+    let mut was = None;
+    let saved = computers::update(dir, |file| {
+        if let Some(at) = file
+            .computers
+            .iter()
+            .position(|c| c.device_id == computer.device_id)
+        {
+            was = Some(file.computers.remove(at));
+        }
+        file.computers.push(computer.clone());
+        // Given what was granted once the link shows the other recorded it
+        // too (PC1 review M1).
+        if !file.pending.contains(&computer.device_id) {
+            file.pending.push(computer.device_id.clone());
+        }
+        file.lapsed.retain(|id| *id != computer.device_id);
+    });
+    if let Err(e) = saved {
+        tracing::warn!("Could not list a computer paired both ways: {e}");
+        return;
+    }
+    if let Some(was) = was {
+        drop_pins(certs, &was, &labels);
+    }
+    if let Some(stale) = links.remove(&computer.device_id) {
+        stale.task.abort();
+    }
+    tracing::info!(device_id = %computer.device_id, "Listed a computer paired both ways");
 }
 
 /// What a computer's link says before it is tried: "connecting", or, with
@@ -142,6 +320,8 @@ fn first_link(road: bool) -> &'static str {
 /// One kept link's task.
 struct Link {
     task: tokio::task::JoinHandle<()>,
+    /// It dials the link; else it waits for the other's (PC1).
+    dials: bool,
 }
 
 /// The links that are up, by the other computer's id: the way to send on
@@ -195,11 +375,41 @@ pub(crate) const MONITORS: &str = "kdeconnect.pocketdesk.monitors";
 static SCREENS: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(Default::default);
 
 /// Ask the computer `device_id` for its screens on its link, when it is up;
-/// its answer is kept for [`screens`].
+/// its answer is kept for [`screens`]. On a link the other computer keeps
+/// (PC1: paired both ways, it dialed), it is asked as one of this
+/// computer's devices, connected here.
 pub(crate) fn ask_screens(device_id: &str) {
     if let Some(link) = live_link(device_id) {
         link.send(NetworkPacket::new(MONITORS));
+        return;
     }
+    let device_id = device_id.to_string();
+    tokio::spawn(async move {
+        let client = crate::state::clone_clients()
+            .await
+            .into_iter()
+            .find(|c| c.device_id() == device_id);
+        if let Some(client) = client
+            && let Err(e) = client.send_packet(&NetworkPacket::new(MONITORS)).await
+        {
+            tracing::debug!(device_id, "Its screens were not asked: {e}");
+        }
+    });
+}
+
+/// Keep what the computer `device_id` said of its screens (`body`, a
+/// monitors answer), for [`screens`].
+pub(crate) fn keep_screens(device_id: &str, body: &serde_json::Value) {
+    SCREENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(device_id.to_string(), screens_in(body));
+}
+
+/// Whether a monitors packet is an answer (it names screens), not a
+/// question.
+pub(crate) fn is_screens_answer(body: &serde_json::Value) -> bool {
+    body.get("monitors").is_some()
 }
 
 /// The computer `device_id`'s screens as it last said, in its own order;
@@ -290,41 +500,184 @@ impl Drop for LiveLink {
 }
 
 /// A link for every paired computer, and none for one forgotten. A file
-/// that does not read leaves the links as they are.
+/// that does not read leaves the links as they are. Of two computers
+/// paired both ways (PC1), only the one [`computers::keeps_link`] names
+/// dials; the other waits for that link and says how it is.
 fn keep_links(dir: &Path, wan: &iroh::Endpoint, links: &mut HashMap<String, Link>) {
     let Ok(file) = computers::try_read(dir) else {
         return;
     };
-    let paired: Vec<String> = file.computers.into_iter().map(|c| c.device_id).collect();
+    let me = crate::kde::host_identity().device_id;
+    let paired: Vec<(String, bool)> = file
+        .computers
+        .iter()
+        .map(|c| (c.device_id.clone(), computers::keeps_link(&me, c)))
+        .collect();
     links.retain(|id, link| {
-        let keep = paired.contains(id) && !link.task.is_finished();
+        let keep = paired.contains(&(id.clone(), link.dials)) && !link.task.is_finished();
         if !keep {
             link.task.abort();
         }
         keep
     });
-    for id in paired {
+    for (id, dials) in paired {
         if let std::collections::hash_map::Entry::Vacant(slot) = links.entry(id) {
             let id = slot.key().clone();
-            let task = tokio::spawn(keep_link(dir.to_path_buf(), wan.clone(), id));
-            slot.insert(Link { task });
+            let task = if dials {
+                tokio::spawn(keep_link(dir.to_path_buf(), wan.clone(), id))
+            } else {
+                tokio::spawn(await_link(dir.to_path_buf(), id))
+            };
+            slot.insert(Link { task, dials });
         }
     }
 }
 
-/// Pair with the computer whose pairing link `uri` is, and say how it went;
-/// its id once paired.
+/// How often a computer that waits for the other's link (PC1) looks.
+const AWAIT_LOOK: Duration = Duration::from_secs(2);
+
+/// What a computer that waits for the other's link (PC1) says of it while
+/// that one is not linked to this one.
+const AWAITING: &str = "away: waiting for it to link to this one";
+
+/// Say how the link to `device_id`, a computer paired both ways that keeps
+/// the link itself (PC1), is doing while it is listed: "linked" while it is
+/// connected here by that link ([`is_the_link`]: files, the clipboard and
+/// shared input ride it as they ride a link this one dials), else waiting
+/// for it.
+async fn await_link(dir: PathBuf, device_id: String) {
+    loop {
+        let listed = computers::read(&dir)
+            .computers
+            .iter()
+            .any(|c| c.device_id == device_id);
+        if !listed {
+            return;
+        }
+        let linked = crate::state::clone_clients().await.iter().any(|c| {
+            c.device_id() == device_id
+                && is_the_link(
+                    &dir,
+                    &device_id,
+                    c.peer_key().as_ref(),
+                    opened_before_pairing(&device_id, c.connection_id()),
+                )
+        });
+        set_link(&dir, &device_id, if linked { "linked" } else { AWAITING });
+        tokio::time::sleep(AWAIT_LOOK).await;
+    }
+}
+
+/// Let each grant both ways that waited too long for the link lapse
+/// ([`computers::ComputersFile::lapse_pending`]): that computer stays paired
+/// one way here, its trust as narrow as it was, and Other computers says so.
+fn lapse_pending(dir: &Path) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    if !computers::read(dir).pending.is_empty() {
+        let mut lapsed = Vec::new();
+        let saved = computers::update(dir, |file| lapsed = file.lapse_pending(now));
+        match saved {
+            Ok(()) => {
+                for device_id in lapsed {
+                    tracing::warn!(
+                        device_id,
+                        "No link came from a computer paired both ways within ten minutes: it stays paired one way here; pair again for both ways"
+                    );
+                }
+            }
+            Err(e) => tracing::debug!("Could not let a waiting grant lapse: {e}"),
+        }
+    }
+}
+
+/// Whether a connection of the computer `device_id`, which proved `key`,
+/// is the link between the two (PC1 re-review I-2): one over the internet
+/// road that proved the iroh key the computer is held to here, as the link
+/// it dials does. Its pairing connection, still open a moment after its
+/// answer, proved only a certificate, and is not.
+fn is_the_link(
+    dir: &Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    opened_before: bool,
+) -> bool {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    if opened_before {
+        return false;
+    }
+    match key {
+        Some(pocketdesk_core::streaming::PeerKey::Iroh(id)) => {
+            device_keys::check(dir, device_id, Slot::Iroh, Some(id)) == Verdict::Matches
+        }
+        _ => false,
+    }
+}
+
+/// The computers paired both ways (PC1) that are no longer trusted here as
+/// computers (`trusted`): unpaired on the Devices page, which takes away
+/// what they may do here, so they are forgotten here too.
+fn untrusted_mine(file: &computers::ComputersFile, trusted: impl Fn(&str) -> bool) -> Vec<String> {
+    file.computers
+        .iter()
+        .filter(|c| c.mine && !trusted(&c.device_id))
+        .map(|c| c.device_id.clone())
+        .collect()
+}
+
+/// Forget each computer paired both ways that the Devices page unpaired
+/// ([`untrusted_mine`]); a trust store that does not read forgets none.
+fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<String, Link>) {
+    if let Ok(trust) = crate::state::trust_store_path() {
+        forget_untrusted_mine_in(dir, &trust, certs, links);
+    }
+}
+
+fn forget_untrusted_mine_in(
+    dir: &Path,
+    trust: &Path,
+    certs: &CertManager,
+    links: &mut HashMap<String, Link>,
+) {
+    let file = computers::read(dir);
+    if !file.computers.iter().any(|c| c.mine) {
+        return;
+    }
+    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
+        return;
+    };
+    for device_id in untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id)) {
+        if let Some(link) = links.remove(&device_id) {
+            link.task.abort();
+        }
+        tracing::info!(
+            device_id,
+            "A computer unpaired on Devices is forgotten here too"
+        );
+        forget_in(dir, Some(trust), certs, &device_id);
+    }
+}
+
+/// What the app asked to pair with: the link, whether the owner here let
+/// its maker see and control this computer (PC1), and the request's id.
+struct Asked<'a> {
+    uri: &'a str,
+    mine: bool,
+    request: &'a str,
+}
+
+/// Pair with the computer whose pairing link the ask holds, and say how it
+/// went; its id once paired.
 async fn pair(
     dir: &Path,
     certs: &CertManager,
     wan: Option<&iroh::Endpoint>,
-    uri: &str,
-    request: &str,
+    asked: Asked<'_>,
 ) -> Option<String> {
+    let (uri, request) = (asked.uri, asked.request);
     let (name, device_id) = PairLink::from_uri(uri)
         .map(|link| (link.name, link.device_id))
         .unwrap_or_default();
-    let (outcome, paired) = match pair_with(dir, certs, wan, uri).await {
+    let (outcome, paired) = match pair_with(dir, certs, wan, uri, asked.mine).await {
         Ok(computer) => {
             tracing::info!(device_id = %computer.device_id, "Paired with another computer");
             ("paired".to_string(), Some(computer.device_id))
@@ -349,12 +702,14 @@ async fn pair(
     paired
 }
 
-/// Pair as [`pair`] says, and record the computer.
+/// Pair as [`pair`] says, and record the computer. `consent`: the owner
+/// here let the link's maker see and control this computer (PC1).
 async fn pair_with(
     dir: &Path,
     certs: &CertManager,
     wan: Option<&iroh::Endpoint>,
     uri: &str,
+    consent: bool,
 ) -> Result<PeerComputer, String> {
     let link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
     let fingerprint = link
@@ -370,9 +725,22 @@ async fn pair_with(
         return Err("the link's computer id is not a valid one".to_string());
     }
     // One id, one device: a computer by a paired phone's id would take that
-    // phone's sends.
-    if crate::plugins::pair::is_paired_device(&link.device_id) {
+    // phone's sends. One paired both ways is trusted here too, and pairs
+    // again (PC1).
+    let taken = || {
+        crate::plugins::pair::is_paired_device(&link.device_id)
+            && !listed_mine(dir, &link.device_id)
+    };
+    if taken() {
         return Err("the link's id is one of this computer's paired devices".to_string());
+    }
+    // One listed under that id with another certificate is not this one:
+    // a link reusing it would take that computer's place (PC1 review C1).
+    if computers::read(dir).listed_with_other_certificate(&link.device_id, fingerprint) {
+        return Err(
+            "a computer listed here has that id with another certificate: unpair it first"
+                .to_string(),
+        );
     }
     let name = shown_name(&link.name);
     let labels: Vec<String> = link
@@ -391,16 +759,22 @@ async fn pair_with(
             .pin_peer(label, hash)
             .map_err(|e| format!("could not pin its certificate: {e:#}"))?;
     }
-    let paired = dial_and_pair(certs, &link, &me, wan)
+    // What it lists this computer by, when the link is for another of the
+    // owner's computers and the owner here said so too (PC1).
+    let facts = match asks_both_ways(&link, consent) {
+        true => Some(own_facts(dir).await),
+        false => None,
+    };
+    let paired = dial_and_pair(certs, &link, &me, wan, facts.as_ref())
         .await
-        .and_then(|pushed| {
+        .and_then(|answer| {
             // Paired here meanwhile, the other way (BD1 review: both at
             // once), it is one of this computer's devices, not one it
             // paired with.
-            if crate::plugins::pair::is_paired_device(&link.device_id) {
+            if taken() {
                 Err("that computer paired with this one meanwhile".to_string())
             } else {
-                Ok(pushed)
+                Ok(answer)
             }
         });
     if paired.is_err() {
@@ -411,8 +785,34 @@ async fn pair_with(
             };
         }
     }
+    let answer = paired?;
     // Its endpoint as it said once paired, else as the link said.
-    let pushed = paired?;
+    let endpoint = answer.endpoint.or_else(|| link_endpoint(&link));
+    // PC1: it lists this computer in turn, and this one trusts it as it is
+    // trusted there, as the owner here confirmed for a link made for that
+    // (pair_on takes its answer only when it was asked). Its iroh key, by
+    // which it is admitted on the link it may be the one to dial, is needed.
+    let iroh = endpoint
+        .as_ref()
+        .and_then(WanTarget::parse)
+        .map(|t| t.endpoint_id);
+    let mut mine = answer.mine && facts.is_some();
+    // Its links are refused until it is trusted and recorded here (third
+    // review m-E): one let in between could be granted there first.
+    let _recording = Recording::begin(&link.device_id);
+    if mine {
+        let trusted = match &iroh {
+            Some(iroh) => trust_back(dir, &link.device_id, fingerprint, Some(iroh)),
+            None => Err("it named no internet key".to_string()),
+        };
+        if let Err(e) = trusted {
+            tracing::warn!("Paired both ways, but could not trust that computer here: {e}");
+            mine = false;
+        }
+    } else if listed_mine(dir, &link.device_id) {
+        // Paired again one way: what it was trusted with here goes.
+        untrust_back(dir, &link.device_id);
+    }
     let now = pocketdesk_core::local::pin::now_unix();
     let computer = PeerComputer {
         device_id: link.device_id.clone(),
@@ -421,29 +821,22 @@ async fn pair_with(
         control_port: link.control_port,
         stream_port: link.stream_port,
         fingerprint: fingerprint.to_ascii_lowercase(),
-        endpoint: pushed.or_else(|| {
-            link.endpoint
-                .as_deref()
-                .and_then(|raw| serde_json::from_str(raw).ok())
-                .filter(|body| WanTarget::parse(body).is_some())
-        }),
+        endpoint,
         paired_unix: now,
         link: "connecting".to_string(),
         link_unix: now,
         lets_drive: false,
+        mine,
     };
     let mut was = None;
-    computers::update(dir, |file| {
-        if let Some(at) = file
-            .computers
-            .iter()
-            .position(|c| c.device_id == computer.device_id)
-        {
-            was = Some(file.computers.remove(at));
+    let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
+    if let Err(e) = recorded {
+        // Not listed, so not trusted either (PC1 review M1).
+        if mine {
+            untrust_back(dir, &link.device_id);
         }
-        file.computers.push(computer.clone());
-    })
-    .map_err(|e| format!("paired, but could not record it: {e}"))?;
+        return Err(format!("paired, but could not record it: {e}"));
+    }
     // Paired again at new addresses, the old ones' pins go (BD6: they
     // stayed for good, and read as a changed certificate to a dial there).
     if let Some(was) = was {
@@ -452,20 +845,189 @@ async fn pair_with(
     Ok(computer)
 }
 
+/// Whether this computer asks `link`'s maker to pair both ways (PC1): the
+/// link asks for it, and the owner here confirmed it (`consent`). The link
+/// alone is never enough: anyone can make one, or edit one on its way.
+fn asks_both_ways(link: &PairLink, consent: bool) -> bool {
+    link.mine && consent && link_endpoint(link).is_some()
+}
+
+/// The internet endpoint `link` names, when it names a real one.
+fn link_endpoint(link: &PairLink) -> Option<serde_json::Value> {
+    link.endpoint
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .filter(|body| WanTarget::parse(body).is_some())
+}
+
+/// Record `computer`, which this one just paired with by its link, in
+/// place of any entry it had; what it had.
+fn record_pasted(
+    file: &mut computers::ComputersFile,
+    computer: &PeerComputer,
+) -> Option<PeerComputer> {
+    let was = file
+        .computers
+        .iter()
+        .position(|c| c.device_id == computer.device_id)
+        .map(|at| file.computers.remove(at));
+    file.computers.push(computer.clone());
+    // Its pairing here both ways, if any, is over (PC1 re-review m-4).
+    file.pending.retain(|id| *id != computer.device_id);
+    file.lapsed.retain(|id| *id != computer.device_id);
+    was
+}
+
+/// The computers this one is trusting, then recording, as paired both
+/// ways (PC1 third review m-E): until both are written, a link from one is
+/// refused, so it cannot be granted there before this one has listed it.
+static RECORDING: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// A computer being recorded, while held.
+struct Recording(String);
+
+impl Recording {
+    fn begin(device_id: &str) -> Self {
+        RECORDING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(device_id.to_string());
+        Self(device_id.to_string())
+    }
+}
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        RECORDING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Whether this computer is trusting and recording `device_id` now: its
+/// links are refused meanwhile.
+pub(crate) fn being_recorded(device_id: &str) -> bool {
+    RECORDING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(device_id)
+}
+
+/// Whether this computer lists `device_id` as one paired both ways (PC1).
+fn listed_mine(dir: &Path, device_id: &str) -> bool {
+    computers::read(dir)
+        .computers
+        .iter()
+        .any(|c| c.device_id == device_id && c.mine)
+}
+
+/// What this computer tells one it pairs with both ways about itself
+/// (PC1), for that one to list it in turn: its name, its addresses as its
+/// Pair page names them, its ports and its iroh endpoint.
+async fn own_facts(dir: &Path) -> ComputerFacts {
+    let config = crate::events::current_config();
+    // External commands (the Tailscale address), off the runtime.
+    let addresses = tokio::task::spawn_blocking(|| {
+        let mut addresses = pocketdesk_core::local::network::local_ips();
+        addresses.extend(pocketdesk_core::local::network::tailscale_ip());
+        addresses
+    })
+    .await
+    .unwrap_or_default();
+    ComputerFacts {
+        name: crate::kde::host_identity().device_name,
+        addresses: pocketdesk_core::local::pair_link::order_addresses(addresses),
+        control_port: pocketdesk_core::local::listening::control_port(dir, config.control_port),
+        stream_port: config.streaming_port,
+        endpoint: pocketdesk_core::local::identity::read_endpoint(dir),
+    }
+}
+
+/// Trust the computer `device_id`, which this one just paired with both
+/// ways (PC1), as it trusts this one: its certificate (`fingerprint`, hex,
+/// the one pinned for it) bound as its key, its iroh key registered when it
+/// has one, and then it is trusted, with a computer's permissions and
+/// control, unasked. The keys first: an id trusted with no key bound would
+/// bind the first that came.
+fn trust_back(
+    dir: &Path,
+    device_id: &str,
+    fingerprint: &str,
+    iroh: Option<&str>,
+) -> Result<(), String> {
+    let trust = crate::state::trust_store_path().map_err(|e| e.to_string())?;
+    trust_back_in(dir, &trust, device_id, fingerprint, iroh)
+}
+
+fn trust_back_in(
+    dir: &Path,
+    trust: &Path,
+    device_id: &str,
+    fingerprint: &str,
+    iroh: Option<&str>,
+) -> Result<(), String> {
+    use pocketdesk_core::local::device_keys::{self, Slot};
+    device_keys::replace(dir, device_id, &fingerprint.to_ascii_lowercase())
+        .map_err(|e| e.to_string())?;
+    if let Some(key) = iroh {
+        device_keys::register(dir, device_id, Slot::Iroh, key).map_err(|e| e.to_string())?;
+    }
+    pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
+        store.trust_computer_as(
+            device_id,
+            pocketdesk_core::protocol::permissions::DevicePermissions::computer_mine(),
+        )
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// No longer trust the computer `device_id` that was paired both ways
+/// (PC1): paired again one way, or unpaired here.
+fn untrust_back(dir: &Path, device_id: &str) {
+    let Ok(trust) = crate::state::trust_store_path() else {
+        return;
+    };
+    untrust_back_in(dir, &trust, device_id);
+}
+
+fn untrust_back_in(dir: &Path, trust: &Path, device_id: &str) {
+    let untrusted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
+        store.untrust_device(device_id)
+    });
+    if let Err(e) = untrusted {
+        tracing::warn!("Could not stop trusting computer {device_id}: {e}");
+    }
+    let _ = pocketdesk_core::local::device_keys::clear(dir, device_id);
+}
+
+/// What the other computer answered a pairing with.
+#[derive(Debug, Default, PartialEq)]
+struct Answer {
+    /// Its endpoint, when it pushed one meanwhile.
+    endpoint: Option<serde_json::Value>,
+    /// It paired this one both ways (PC1).
+    mine: bool,
+}
+
 /// Dial the link's addresses in order over TLS and pair on the first that
-/// answers.
+/// answers, telling it `facts` of this computer when the link is for
+/// another of the owner's computers.
 async fn dial_and_pair(
     certs: &CertManager,
     link: &PairLink,
     me: &DeviceIdentity,
     wan: Option<&iroh::Endpoint>,
-) -> Result<Option<serde_json::Value>, String> {
+    facts: Option<&ComputerFacts>,
+) -> Result<Answer, String> {
     let manager = ConnectionManager::new(Duration::from_secs(8), certs.control_client_config());
     let mut last = String::new();
     for address in &link.addresses {
         match manager.connect(address, link.control_port, me).await {
             Ok(stream) => {
-                return pair_on(stream, &link.pin, wan.map(|e| e.id().to_string())).await;
+                let wan_key = wan.map(|e| e.id().to_string());
+                return pair_on(stream, &link.pin, wan_key, facts).await;
             }
             // Someone answers there, but not the computer in the link: no
             // other address is tried with its PIN either.
@@ -487,13 +1049,15 @@ fn is_pin_mismatch(error: &str) -> bool {
 }
 
 /// Pair on a control connection: the PIN, as a computer, then this
-/// computer's iroh key once paired. The other's endpoint, when it pushed
-/// one meanwhile.
+/// computer's iroh key once paired. With `facts`, it asks to be paired both
+/// ways (PC1), telling the other what to list it by. The other's endpoint,
+/// when it pushed one meanwhile, and whether it paired both ways.
 async fn pair_on<S>(
     stream: S,
     pin: &str,
     wan_key: Option<String>,
-) -> Result<Option<serde_json::Value>, String>
+    facts: Option<&ComputerFacts>,
+) -> Result<Answer, String>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -507,15 +1071,20 @@ where
     };
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = BufReader::new(reader);
-    let ask = NetworkPacket::new("kdeconnect.pair")
-        .with_body(serde_json::json!({"pin": pin, "computer": true}));
+    let mut body = serde_json::json!({"pin": pin, "computer": true});
+    if let Some(facts) = facts {
+        body["mine"] = true.into();
+        body["facts"] = serde_json::to_value(facts).map_err(|e| e.to_string())?;
+    }
+    let ask = NetworkPacket::new("kdeconnect.pair").with_body(body);
     send(&mut writer, &ask).await?;
-    let answer = tokio::time::timeout(PAIR_ANSWER, async {
+    let (answer, mine) = tokio::time::timeout(PAIR_ANSWER, async {
         loop {
             match read_packet(&mut reader).await? {
                 Some(packet) if packet.packet_type == "kdeconnect.pair" => {
                     if let Some(paired) = packet.body.get("pair").and_then(|v| v.as_bool()) {
-                        return Ok(paired);
+                        let mine = packet.body.get("mine").and_then(|v| v.as_bool());
+                        return Ok((paired, mine == Some(true)));
                     }
                 }
                 // What it pushes to any client.
@@ -544,7 +1113,11 @@ where
         }
     })
     .await;
-    Ok(endpoint)
+    Ok(Answer {
+        endpoint,
+        // Only when it was asked.
+        mine: mine && facts.is_some(),
+    })
 }
 
 /// A computer's name as the link gives it, fit to show: no control or
@@ -565,22 +1138,41 @@ fn shown_name(name: &str) -> String {
     }
 }
 
-/// A computer that just paired here (one of this one's devices now) and
-/// that this one still lists as one it paired with, the other way (BD1):
-/// unpaired there and paired back this way, its stale entry took every
-/// send to it by the computer road, ending "not linked now" though it was
-/// connected, and it was redialed every five minutes. Pairing is one way
-/// (a link from a computer already trusted here is refused), so it is
-/// forgotten as the app's Unpair does, by the run loop. Whether it was
-/// listed.
+/// A computer that just paired here one way (one of this one's devices
+/// now) and that this one still lists as one it paired with, the other way
+/// (BD1): unpaired there and paired back this way, its stale entry took
+/// every send to it by the computer road, ending "not linked now" though it
+/// was connected, and it was redialed every five minutes. A plain pairing
+/// is one way (a link from a computer already trusted here is refused), so
+/// it is forgotten as the app's Unpair does, by the run loop. One paired
+/// both ways before (PC1) is forgotten too, but no longer as one paired
+/// both ways: it was just trusted again, one way, and stays so. A pairing
+/// both ways never comes here: it lists the computer in turn
+/// ([`paired_back`]), and the two keep one link ([`keeps_link`]). Whether
+/// it was listed.
+///
+/// [`keeps_link`]: computers::keeps_link
 pub(crate) fn paired_here(dir: &Path, device_id: &str, now_unix: u64) -> bool {
     let listed = computers::read(dir)
         .computers
         .iter()
         .any(|c| c.device_id == device_id);
     if listed {
-        let ask = ComputerAsk::Forget {
+        let mut paired_unix = 0;
+        let saved = computers::update(dir, |file| {
+            if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+                c.mine = false;
+                paired_unix = c.paired_unix;
+            }
+        });
+        if let Err(e) = saved {
+            tracing::warn!("Could not mark computer {device_id} as paired one way: {e}");
+        }
+        // As listed now: a pairing both ways before the run loop takes this
+        // is not undone by it (PC1 review M5).
+        let ask = ComputerAsk::ForgetPaired {
             device_id: device_id.to_string(),
+            paired_unix,
         };
         match computers::request(dir, ask, now_unix) {
             Ok(_) => tracing::info!(
@@ -618,7 +1210,26 @@ fn let_drive(dir: &Path, device_id: &str, allow: bool) {
 
 /// Forget a computer: its entry and the pins for its addresses. It keeps
 /// this one until its own owner removes it (its Devices tab).
+/// [`forget`] the computer `device_id` only if it is still listed as it
+/// was when this was asked (`paired_unix`). Whether it was.
+fn forget_as_listed(dir: &Path, certs: &CertManager, device_id: &str, paired_unix: u64) -> bool {
+    let listed = computers::read(dir)
+        .computers
+        .iter()
+        .any(|c| c.device_id == device_id && c.paired_unix == paired_unix);
+    if listed {
+        forget(dir, certs, device_id);
+    }
+    listed
+}
+
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
+    let trust = crate::state::trust_store_path().ok();
+    forget_in(dir, trust.as_deref(), certs, device_id);
+}
+
+/// [`forget`] with the trust store at `trust`.
+fn forget_in(dir: &Path, trust: Option<&Path>, certs: &CertManager, device_id: &str) {
     let mut gone = None;
     // Its pairing's line goes with it (BD3).
     let saved = computers::update(dir, |file| gone = file.remove(device_id));
@@ -630,6 +1241,13 @@ fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
         return;
     };
     drop_pins(certs, &computer, &[]);
+    // Paired both ways (PC1), it is trusted here too: unpaired, it no
+    // longer sees or controls this computer either.
+    if computer.mine
+        && let Some(trust) = trust
+    {
+        untrust_back_in(dir, trust, device_id);
+    }
     tracing::info!(device_id, "Forgot another computer");
 }
 
@@ -649,6 +1267,22 @@ fn drop_pins(certs: &CertManager, computer: &PeerComputer, keep: &[String]) {
             let _ = certs.remove_peer(&label);
         }
     }
+}
+
+/// Whether `target`, the endpoint this computer would dial for `computer`,
+/// is the iroh key that computer is held to here (PC1 review M3): for one
+/// paired both ways, the endpoint it named must be the key it is admitted
+/// by, or this computer would hand its link, its window's input and its
+/// files to another node. One paired one way is not held here, as before.
+pub(crate) fn endpoint_bound(dir: &Path, computer: &PeerComputer, target: &WanTarget) -> bool {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    !computer.mine
+        || device_keys::check(
+            dir,
+            &computer.device_id,
+            Slot::Iroh,
+            Some(&target.endpoint_id),
+        ) == Verdict::Matches
 }
 
 /// The other computer's iroh endpoint, as its endpoint packet names it.
@@ -713,6 +1347,19 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
             tokio::time::sleep(BACKOFF_MOST).await;
             continue;
         };
+        if !endpoint_bound(&dir, &computer, &target) {
+            tracing::warn!(
+                device_id,
+                "Not dialed: its endpoint is not the key it paired with"
+            );
+            set_link(
+                &dir,
+                &device_id,
+                "away: its internet endpoint is not the key it paired with; pair again",
+            );
+            tokio::time::sleep(BACKOFF_MOST).await;
+            continue;
+        }
         let end = run_link(&dir, &wan, &computer, &target, &me).await;
         let wait = match &end {
             LinkEnd::Closed(lasted) => {
@@ -1225,8 +1872,16 @@ async fn run_link(
     // streams) while the link is up, however it ends.
     let _shared_input = crate::shared_input::link::hold(&computer.device_id, stream.connection());
     set_link(dir, &computer.device_id, "linked");
+    // Admitted there, so trusted there: it recorded the pairing both ways,
+    // and what waited for that is given (PC1 review M1).
+    grant_on_link(dir, &computer.device_id);
     let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
+    // Paired both ways and recorded here: said on the link, for the other
+    // to give what it granted (PC1 re-review I-2).
+    if computer.mine {
+        let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
+    }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let _accepting = acceptor.map(|acceptor| {
         AbortOnDrop(tokio::spawn(async move {
@@ -1260,10 +1915,13 @@ async fn run_link(
 async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
     // Its screens, asked for a window that shows them (BK7).
     if packet.packet_type == MONITORS {
-        SCREENS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(device_id.to_string(), screens_in(&packet.body));
+        if is_screens_answer(&packet.body) {
+            keep_screens(device_id, &packet.body);
+        } else if let Some(outgoing) = live(device_id) {
+            // Asked by a computer this one keeps the link to, paired both
+            // ways (PC1): it shows this one's screen too.
+            let _ = outgoing.send(crate::plugins::monitors::answer()).await;
+        }
         return;
     }
     if packet.packet_type == crate::offers::OFFER {
@@ -1343,6 +2001,118 @@ fn set_link(dir: &Path, device_id: &str, link: &str) {
     });
     if let Err(e) = saved {
         tracing::debug!("Could not record the link's state: {e}");
+    }
+}
+
+/// The link this computer dialed to `device_id` is up: a grant both ways
+/// that waited for it (PC1 review M1) is given now. The other admitted this
+/// one, which it does only for a computer it trusts, so it recorded the
+/// pairing. The other way round, the grant waits for its [`BOTH_WAYS`].
+fn grant_on_link(dir: &Path, device_id: &str) {
+    if let Ok(trust) = crate::state::trust_store_path() {
+        grant_on_link_in(dir, &trust, device_id);
+    }
+}
+
+/// What the computer `device_id` says on its link once it has recorded a
+/// pairing both ways (PC1 re-review I-2): the computer that waits for that
+/// link gives its grant on hearing it, never on a connection alone.
+pub(crate) const BOTH_WAYS: &str = "kdeconnect.pocketdesk.both_ways";
+
+/// The computer `device_id` said [`BOTH_WAYS`] on a connection that proved
+/// `key` (opened before it paired, or not): the grant both ways that waited
+/// for it is given if that connection is its link.
+pub(crate) fn both_ways_heard(
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    connection_id: &str,
+) {
+    let (Ok(dir), Ok(trust)) = (crate::state::state_dir(), crate::state::trust_store_path()) else {
+        return;
+    };
+    let before = opened_before_pairing(device_id, connection_id);
+    both_ways_heard_in(&dir, &trust, device_id, key, before);
+}
+
+fn both_ways_heard_in(
+    dir: &Path,
+    trust: &Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    opened_before: bool,
+) {
+    if is_the_link(dir, device_id, key, opened_before) {
+        grant_on_link_in(dir, trust, device_id);
+    }
+}
+
+/// Stop `device_id` waiting for a grant both ways (or saying it lapsed):
+/// it is about to be trusted again one way (PC1 third review m-A).
+pub(crate) fn stop_waiting(dir: &Path, device_id: &str) {
+    let waits = computers::read(dir)
+        .pending
+        .iter()
+        .chain(computers::read(dir).lapsed.iter())
+        .any(|id| id == device_id);
+    if !waits {
+        return;
+    }
+    let saved = computers::update(dir, |file| {
+        file.pending.retain(|id| id != device_id);
+        file.lapsed.retain(|id| id != device_id);
+    });
+    if let Err(e) = saved {
+        tracing::warn!("Could not stop {device_id} waiting for a grant: {e}");
+    }
+}
+
+fn grant_on_link_in(dir: &Path, trust: &Path, device_id: &str) {
+    // In one step under the computers file's lock, as the run loop's lapse
+    // is (third review m-C): a wait that ran out lapses here and is never
+    // given; one still waiting, and still listed both ways (m-A), is given,
+    // and leaves `pending` only once its trust is written.
+    let now = pocketdesk_core::local::pin::now_unix();
+    let mut outcome: Option<Result<bool, String>> = None;
+    let saved = computers::update(dir, |file| {
+        if file.lapse_pending(now).iter().any(|id| id == device_id) {
+            tracing::warn!(
+                device_id,
+                "No link came from a computer paired both ways within ten minutes: it stays paired one way here; pair again for both ways"
+            );
+            return;
+        }
+        let waits = file.pending.iter().any(|id| id == device_id)
+            && file
+                .computers
+                .iter()
+                .any(|c| c.device_id == device_id && c.mine);
+        if !waits {
+            return;
+        }
+        let granted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
+            // Unpaired on Devices meanwhile: nothing is given back.
+            if !(store.is_trusted(device_id) && store.is_computer(device_id)) {
+                return Ok(false);
+            }
+            store.trust_computer_as(
+                device_id,
+                pocketdesk_core::protocol::permissions::DevicePermissions::computer_mine(),
+            )?;
+            Ok(true)
+        })
+        .map_err(|e| e.to_string());
+        if granted.is_ok() {
+            file.pending.retain(|id| id != device_id);
+        }
+        outcome = Some(granted);
+    });
+    if let Err(e) = saved {
+        tracing::warn!("Could not record the grant to {device_id}: {e}");
+    }
+    match outcome {
+        Some(Ok(true)) => tracing::info!(device_id, "The link is up: paired both ways now"),
+        Some(Err(e)) => tracing::warn!("Could not give {device_id} what was granted: {e}"),
+        _ => {}
     }
 }
 
@@ -1437,6 +2207,7 @@ mod tests {
                 link: "refused".to_string(),
                 link_unix: 1,
                 lets_drive: false,
+                mine: true,
             })
         })
         .unwrap();
@@ -1444,6 +2215,9 @@ mod tests {
         assert!(!paired_here(&dir, "pc-c", now), "not listed");
         assert!(computers::take_all(&dir, now).is_empty());
         assert!(paired_here(&dir, "pc-b", now));
+        // PC1: one paired both ways before is forgotten as one paired one
+        // way, so its forgetting leaves it trusted (it just paired here).
+        assert!(!computers::read(&dir).computers[0].mine);
         let asked: Vec<_> = computers::take_all(&dir, now)
             .into_iter()
             .map(|r| r.ask)
@@ -1451,10 +2225,530 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
             asked,
-            [ComputerAsk::Forget {
-                device_id: "pc-b".to_string()
+            [ComputerAsk::ForgetPaired {
+                device_id: "pc-b".to_string(),
+                paired_unix: 1,
             }]
         );
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pd-pc1-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn facts() -> ComputerFacts {
+        ComputerFacts {
+            name: "Laptop".to_string(),
+            addresses: vec!["192.0.2.41".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+            endpoint: None,
+        }
+    }
+
+    /// The other computer's side of a pairing: read the ask, answer it with
+    /// `answer`, then read to the end. The ask.
+    async fn answered(theirs: tokio::io::DuplexStream, answer: serde_json::Value) -> NetworkPacket {
+        let (reader, mut writer) = tokio::io::split(theirs);
+        let mut reader = BufReader::new(reader);
+        let ask = read_packet(&mut reader).await.unwrap().unwrap();
+        let packet = NetworkPacket::new("kdeconnect.pair").with_body(answer);
+        send(&mut writer, &packet).await.unwrap();
+        while read_packet(&mut reader).await.unwrap().is_some() {}
+        ask
+    }
+
+    /// PC1: a link for another of the owner's computers asks to pair both
+    /// ways, with what this computer is listed by, and the answer says
+    /// whether the other did; a plain ask says neither, and an answer that
+    /// says mine to a plain ask is not believed.
+    #[tokio::test]
+    async fn pairing_both_ways_asks_with_this_computers_facts() {
+        let both = serde_json::json!({"pair": true, "serverId": "b", "mine": true});
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let other = tokio::spawn(answered(theirs, both.clone()));
+        let answer = pair_on(ours, "123456", None, Some(&facts())).await.unwrap();
+        let ask = other.await.unwrap();
+        assert_eq!(ask.body["computer"], true);
+        assert_eq!(ask.body["mine"], true);
+        assert_eq!(ask.body["facts"]["name"], "Laptop");
+        assert_eq!(ask.body["facts"]["streamPort"], 4716);
+        assert!(answer.mine, "paired both ways");
+
+        // The other computer paired it one way (its code was not minted
+        // for one of the owner's computers, or it is older).
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let one_way = serde_json::json!({"pair": true, "serverId": "b"});
+        let other = tokio::spawn(answered(theirs, one_way));
+        let answer = pair_on(ours, "123456", None, Some(&facts())).await.unwrap();
+        other.await.unwrap();
+        assert!(!answer.mine);
+
+        // A plain ask: no facts, and a "mine" answer is not taken.
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        let other = tokio::spawn(answered(theirs, both));
+        let answer = pair_on(ours, "123456", None, None).await.unwrap();
+        let ask = other.await.unwrap();
+        assert!(ask.body.get("mine").is_none() && ask.body.get("facts").is_none());
+        assert!(!answer.mine, "never asked");
+    }
+
+    /// PC1 review C1: a link asking for both ways is asked so only with the
+    /// owner's consent here, and only when it names the other's internet
+    /// endpoint (without it, the other could never be admitted on the link
+    /// it may dial, M4); a hostile `mine=1` alone asks nothing.
+    #[test]
+    fn a_link_asks_both_ways_only_with_the_owners_consent_here() {
+        let endpoint = serde_json::json!({
+            "endpointId": iroh::SecretKey::generate().public().to_string(),
+            "relayUrls": [],
+            "directAddrs": [],
+        });
+        let link = PairLink {
+            name: "Desk".to_string(),
+            device_id: "desk".to_string(),
+            addresses: vec!["192.0.2.60".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+            pin: "123456".to_string(),
+            fingerprint: Some("ab".repeat(32)),
+            endpoint: Some(endpoint.to_string()),
+            mine: true,
+        };
+        assert!(asks_both_ways(&link, true));
+        assert!(!asks_both_ways(&link, false), "the link alone");
+        let plain = PairLink {
+            mine: false,
+            ..link.clone()
+        };
+        assert!(!asks_both_ways(&plain, true), "the owner's yes alone");
+        let no_road = PairLink {
+            endpoint: None,
+            ..link
+        };
+        assert!(!asks_both_ways(&no_road, true), "no endpoint to bind");
+    }
+
+    /// PC1 review M1: a computer that paired here both ways is trusted as
+    /// one paired one way until the link between the two comes up; then it
+    /// is given what was granted, once. One no longer trusted here as a
+    /// computer, or not waiting, is given nothing.
+    #[test]
+    fn a_grant_both_ways_waits_for_the_link() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("grant-on-link");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| {
+            store.trust_computer("waits")?;
+            store.trust_computer("one-way")
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer(
+                "waits",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
+            file.computers.push(facts().into_peer(
+                "gone",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
+            file.pending = vec!["waits".to_string(), "gone".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "one-way");
+        grant_on_link_in(&dir, &trust, "gone");
+        grant_on_link_in(&dir, &trust, "waits");
+        let store = TrustStore::read(&trust).unwrap();
+        let pending = computers::read(&dir).pending;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            store.permissions("waits"),
+            DevicePermissions::computer_mine()
+        );
+        assert_eq!(
+            store.permissions("one-way"),
+            DevicePermissions::computer(),
+            "not waiting"
+        );
+        assert!(
+            !store.is_trusted("gone"),
+            "untrusted meanwhile: nothing given"
+        );
+        assert!(pending.is_empty(), "{pending:?}");
+    }
+
+    /// PC1 review M3: a computer paired both ways is dialed over the
+    /// internet only at the iroh key it is held to here; one paired one way
+    /// as before.
+    #[test]
+    fn a_computer_paired_both_ways_is_dialed_only_at_its_own_key() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        let dir = temp("endpoint-bound");
+        let (own, other) = (
+            iroh::SecretKey::generate().public().to_string(),
+            iroh::SecretKey::generate().public().to_string(),
+        );
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        let target = |id: &str| WanTarget {
+            endpoint_id: id.to_string(),
+            relay_urls: Vec::new(),
+            direct_addrs: Vec::new(),
+        };
+        let mine = facts().into_peer("lap", "", 1);
+        let one_way = PeerComputer {
+            mine: false,
+            ..mine.clone()
+        };
+        let unbound = PeerComputer {
+            device_id: "desk".to_string(),
+            ..mine.clone()
+        };
+        let verdicts = (
+            endpoint_bound(&dir, &mine, &target(&own)),
+            endpoint_bound(&dir, &mine, &target(&other)),
+            endpoint_bound(&dir, &one_way, &target(&other)),
+            endpoint_bound(&dir, &unbound, &target(&own)),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(verdicts, (true, false, true, false));
+    }
+
+    /// PC1 review M5: the forgetting a pairing the other way asked is of
+    /// the computer as it was listed then; listed again since, it stays.
+    #[test]
+    fn a_stale_forget_leaves_a_computer_listed_since() {
+        let dir = temp("forget-as-listed");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..facts().into_peer("lap", "", 5)
+            })
+        })
+        .unwrap();
+        let stale = forget_as_listed(&dir, &certs, "lap", 4);
+        let kept = computers::read(&dir).computers.len();
+        let current = forget_as_listed(&dir, &certs, "lap", 5);
+        let left = computers::read(&dir).computers.len();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!stale && kept == 1, "listed again since: stays");
+        assert!(current && left == 0, "as it was listed: forgotten");
+    }
+
+    /// PC1 review M7: the run loop's look at the trust store forgets a
+    /// computer paired both ways that Devices unpaired (its link stopped,
+    /// its keys gone), and leaves one still trusted; Other computers'
+    /// Unpair of one paired both ways takes its trust too.
+    #[tokio::test]
+    async fn devices_unpair_and_other_computers_unpair_take_both_halves() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        let dir = temp("devices-unpair");
+        let trust = dir.join("trusted_devices.json");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("kept")).unwrap();
+        device_keys::register(&dir, "unpaired", Slot::Iroh, &"e".repeat(64)).unwrap();
+        computers::update(&dir, |file| {
+            for id in ["kept", "unpaired"] {
+                file.computers.push(facts().into_peer(id, "", 1));
+            }
+        })
+        .unwrap();
+        let mut links: HashMap<String, Link> = HashMap::new();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let watch = task.abort_handle();
+        links.insert("unpaired".to_string(), Link { task, dials: true });
+        forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
+        let listed: Vec<String> = computers::read(&dir)
+            .computers
+            .into_iter()
+            .map(|c| c.device_id)
+            .collect();
+        let keys_left = device_keys::read(&dir).unwrap().contains_key("unpaired");
+        tokio::task::yield_now().await;
+        let stopped = watch.is_finished();
+        // Unpair under Other computers, of one still trusted.
+        forget_in(&dir, Some(&trust), &certs, "kept");
+        let still = TrustStore::read(&trust).unwrap().is_trusted("kept");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(listed, ["kept"]);
+        assert!(!keys_left, "its keys went with it");
+        assert!(
+            stopped && !links.contains_key("unpaired"),
+            "its link stopped"
+        );
+        assert!(!still, "Other computers' Unpair untrusts it too");
+    }
+
+    /// PC1 re-review I-2: only a connection that proved the iroh key the
+    /// computer is held to is the link between the two; its pairing
+    /// connection (a certificate), another key, or none, is not.
+    #[test]
+    fn only_the_link_proves_the_other_recorded_the_pairing() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = temp("is-the-link");
+        let (own, other) = (
+            iroh::SecretKey::generate().public().to_string(),
+            iroh::SecretKey::generate().public().to_string(),
+        );
+        device_keys::replace(&dir, "lap", &"ab".repeat(32)).unwrap();
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        let verdicts = [
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own.clone())), false),
+            is_the_link(&dir, "lap", Some(&PeerKey::Tls([0xab; 32])), false),
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(other)), false),
+            is_the_link(&dir, "lap", None, false),
+            is_the_link(&dir, "desk", Some(&PeerKey::Iroh(own.clone())), false),
+            // A link up when it paired (an earlier one-way link, not yet
+            // gone) proves nothing of this pairing.
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own)), true),
+        ];
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(verdicts, [true, false, false, false, false, false]);
+    }
+
+    /// PC1 re-review m-4: a computer this one pairs with again by its link
+    /// leaves no grant waiting, or lapsed, from when it paired here both
+    /// ways: that pairing is over.
+    #[test]
+    fn pairing_again_by_a_link_leaves_no_grant_waiting() {
+        let mut file = computers::ComputersFile {
+            computers: vec![facts().into_peer("lap", "", 1)],
+            pending: vec!["lap".to_string()],
+            lapsed: vec!["lap".to_string()],
+            ..computers::ComputersFile::default()
+        };
+        let again = PeerComputer {
+            mine: false,
+            ..facts().into_peer("lap", "", 2)
+        };
+        let was = record_pasted(&mut file, &again);
+        assert_eq!(was.map(|c| c.paired_unix), Some(1));
+        assert_eq!(file.computers, [again]);
+        assert!(file.pending.is_empty() && file.lapsed.is_empty());
+    }
+
+    /// PC1 re-review I-2: the grant both ways that waits for the other's
+    /// link is given only when the other says it recorded the pairing, on
+    /// its link: a connection that proved its iroh key and was opened since
+    /// it paired.
+    #[test]
+    fn the_grant_is_given_when_the_other_says_so_on_its_link() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = temp("both-ways-heard");
+        let trust = dir.join("trusted_devices.json");
+        let own = iroh::SecretKey::generate().public().to_string();
+        device_keys::replace(&dir, "lap", &"ab".repeat(32)).unwrap();
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer(
+                "lap",
+                "",
+                pocketdesk_core::local::pin::now_unix(),
+            ));
+            file.pending = vec!["lap".to_string()];
+        })
+        .unwrap();
+        let narrow = || TrustStore::read(&trust).unwrap().permissions("lap");
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Tls([0xab; 32])), false);
+        let on_pairing_connection = narrow();
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Iroh(own.clone())), true);
+        let on_an_earlier_link = narrow();
+        both_ways_heard_in(&dir, &trust, "lap", Some(&PeerKey::Iroh(own)), false);
+        let on_its_link = narrow();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(on_pairing_connection, DevicePermissions::computer());
+        assert_eq!(on_an_earlier_link, DevicePermissions::computer());
+        assert_eq!(on_its_link, DevicePermissions::computer_mine());
+    }
+
+    /// PC1 third review m-A: a computer paired again one way is no longer
+    /// waiting for anything: its waiting grant is cleared before it is
+    /// trusted narrowly again, and a grant is given only to a computer still
+    /// listed as paired both ways.
+    #[test]
+    fn a_computer_paired_again_one_way_is_given_nothing() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("one-way-again");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| {
+            store.trust_computer("lap")?;
+            store.trust_computer("desk")
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..facts().into_peer("lap", "", 1)
+            });
+            file.computers.push(facts().into_peer("desk", "", 1));
+            file.pending = vec!["lap".to_string(), "desk".to_string()];
+            file.lapsed = vec!["desk".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "lap");
+        let lap = TrustStore::read(&trust).unwrap().permissions("lap");
+        stop_waiting(&dir, "desk");
+        let file = computers::read(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            lap,
+            DevicePermissions::computer(),
+            "listed one way: nothing"
+        );
+        assert!(!file.pending.contains(&"desk".to_string()));
+        assert!(!file.lapsed.contains(&"desk".to_string()));
+    }
+
+    /// PC1 third review m-C: a grant whose wait ran out lapses, never
+    /// given, even when the link's word comes before the run loop has let it
+    /// lapse: the lapse and the grant are judged in one step.
+    #[test]
+    fn a_grant_whose_wait_ran_out_is_never_given() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("lapse-or-grant");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        let long_ago = pocketdesk_core::local::pin::now_unix() - computers::PENDING_FOR - 1;
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer("lap", "", long_ago));
+            file.pending = vec!["lap".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "lap");
+        let given = TrustStore::read(&trust).unwrap().permissions("lap");
+        let file = computers::read(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(given, DevicePermissions::computer(), "lapsed, not given");
+        assert!(file.pending.is_empty() && file.lapsed == ["lap"]);
+    }
+
+    /// PC1 third review m-E: while this computer trusts and records a
+    /// computer it paired with both ways, that computer's links are refused;
+    /// once done, or given up, they are not.
+    #[test]
+    fn a_computer_being_recorded_is_not_let_in_meanwhile() {
+        assert!(!being_recorded("rec-lap"));
+        let held = Recording::begin("rec-lap");
+        assert!(being_recorded("rec-lap"));
+        assert!(!being_recorded("rec-desk"), "another computer");
+        drop(held);
+        assert!(!being_recorded("rec-lap"));
+    }
+
+    /// PC1: the computer that pasted the link trusts the other in turn,
+    /// with a computer's permissions and control, unasked, and the keys it
+    /// was pinned and paired by bound; unpaired, all of it goes.
+    #[test]
+    fn the_computer_that_pasted_trusts_the_other_in_turn() {
+        use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("trust-back");
+        let trust = dir.join("trusted_devices.json");
+        let iroh = "e".repeat(64);
+        trust_back_in(&dir, &trust, "desk", &"AB".repeat(32), Some(&iroh)).unwrap();
+        let store = TrustStore::read(&trust).unwrap();
+        assert!(store.is_trusted("desk") && store.is_computer("desk"));
+        assert_eq!(
+            store.permissions("desk"),
+            DevicePermissions::computer_mine()
+        );
+        let tls = "ab".repeat(32);
+        assert_eq!(
+            device_keys::check(&dir, "desk", Slot::Tls, Some(&tls)),
+            Verdict::Matches
+        );
+        assert_eq!(
+            device_keys::check(&dir, "desk", Slot::Iroh, Some(&iroh)),
+            Verdict::Matches
+        );
+        assert_ne!(
+            device_keys::check(&dir, "desk", Slot::Tls, Some(&"cd".repeat(32))),
+            Verdict::Matches,
+            "another certificate is not it"
+        );
+        untrust_back_in(&dir, &trust, "desk");
+        let store = TrustStore::read(&trust).unwrap();
+        let keys = device_keys::read(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!store.is_trusted("desk") && !store.is_computer("desk"));
+        assert!(!keys.contains_key("desk"), "its keys go with it");
+    }
+
+    /// PC1: a computer paired both ways that the Devices page unpaired is
+    /// forgotten here too; one paired one way, or still trusted, is not.
+    #[test]
+    fn a_computer_paired_both_ways_unpaired_on_devices_is_forgotten() {
+        let entry = |id: &str, mine: bool| PeerComputer {
+            mine,
+            ..facts().into_peer(id, "", 1)
+        };
+        let file = computers::ComputersFile {
+            computers: vec![
+                entry("kept", true),
+                entry("unpaired", true),
+                entry("one-way", false),
+            ],
+            ..computers::ComputersFile::default()
+        };
+        assert_eq!(untrusted_mine(&file, |id| id == "kept"), ["unpaired"]);
+    }
+
+    /// PC1: a computer that paired both ways is pinned at the addresses it
+    /// gave, but never over another listed computer's pin; its own old pin,
+    /// or one no listed computer holds, is replaced.
+    #[test]
+    fn a_computer_paired_both_ways_takes_no_other_computers_pin() {
+        let label = |a: &str| peer_label_for_address(a).unwrap();
+        let labels: Vec<String> = ["192.0.2.50", "192.0.2.51", "192.0.2.52", "192.0.2.53"]
+            .map(label)
+            .to_vec();
+        let known: HashMap<String, [u8; 32]> = [
+            (label("192.0.2.51"), [0xcd; 32]),
+            (label("192.0.2.52"), [0xab; 32]),
+            (label("192.0.2.53"), [0xee; 32]),
+        ]
+        .into();
+        let others = [[0xcd; 32]];
+        assert_eq!(
+            pinnable(&labels, &known, &others, &[0xab; 32]),
+            [
+                label("192.0.2.50"),
+                label("192.0.2.52"),
+                label("192.0.2.53")
+            ],
+            "another computer's pin at .51 stays"
+        );
+    }
+
+    /// PC1: what a computer that paired both ways said of itself lists it,
+    /// its endpoint kept when it names a real iroh key.
+    #[test]
+    fn a_computer_paired_both_ways_keeps_a_real_endpoint() {
+        let id = iroh::SecretKey::generate().public().to_string();
+        let endpoint = serde_json::json!({"endpointId": id, "relayUrls": [], "directAddrs": []});
+        let with_endpoint = ComputerFacts {
+            endpoint: Some(endpoint.clone()),
+            ..facts()
+        };
+        let listed = listed_from("lap", with_endpoint, &"ab".repeat(32), 5);
+        assert_eq!(listed.endpoint, Some(endpoint));
+        assert_eq!(listed.paired_unix, 5);
+        assert!(listed.mine);
     }
 
     /// BD5: with the internet road off, no link is kept, and its computers
@@ -1495,6 +2789,7 @@ mod tests {
             link: String::new(),
             link_unix: 1,
             lets_drive: false,
+            mine: false,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
@@ -1756,9 +3051,10 @@ mod tests {
             send(&mut writer, &endpoint).await.unwrap();
             while read_packet(&mut reader).await.unwrap().is_some() {}
         });
-        let pushed = pair_on(ours, "123456", None).await.unwrap();
+        let answer = pair_on(ours, "123456", None, None).await.unwrap();
         other.await.unwrap();
-        assert_eq!(pushed.unwrap()["endpointId"], id);
+        assert_eq!(answer.endpoint.unwrap()["endpointId"], id);
+        assert!(!answer.mine);
     }
 
     #[test]
@@ -1800,9 +3096,11 @@ mod tests {
                 "then closed"
             );
         });
-        let pushed = pair_on(ours, "123456", Some("e".repeat(64))).await.unwrap();
+        let answer = pair_on(ours, "123456", Some("e".repeat(64)), None)
+            .await
+            .unwrap();
         other.await.unwrap();
-        assert_eq!(pushed, None, "no endpoint pushed in this one");
+        assert_eq!(answer, Answer::default(), "no endpoint pushed in this one");
     }
 
     #[tokio::test]
@@ -1820,7 +3118,7 @@ mod tests {
                 tokio::time::timeout(Duration::from_millis(300), read_packet(&mut reader)).await;
             assert!(!matches!(rest, Ok(Ok(Some(_)))), "{rest:?}");
         });
-        let refused = pair_on(ours, "000000", Some("e".repeat(64))).await;
+        let refused = pair_on(ours, "000000", Some("e".repeat(64)), None).await;
         assert!(refused.unwrap_err().contains("refused"));
         other.await.unwrap();
     }

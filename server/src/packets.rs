@@ -197,6 +197,7 @@ mod tests {
             // Sent as another computer's client (2f, 2h), on the link this
             // one dials: never to a phone, so not announced to one.
             "kdeconnect.pocketdesk.wan_key",
+            "kdeconnect.pocketdesk.both_ways",
             "kdeconnect.pocketdesk.file_fetch",
             "kdeconnect.pocketdesk.file_offer_declined",
             // This computer's KDE identity (3a), broadcast and sent on a KDE

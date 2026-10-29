@@ -4,7 +4,16 @@
 //! Keys: `v` (format, 1), `name`, `id` (desktop device id), `a` (addresses,
 //! comma-separated, best first), `cp`/`sp` (control/stream ports), `pin`,
 //! `fp` (SHA-256 of the desktop's TLS certificate, hex), `ep` (the iroh
-//! endpoint JSON, base64url). Values are percent-encoded.
+//! endpoint JSON, base64url), and `mine=1` on a link for another of the
+//! owner's computers that may see and control this one without asking
+//! (PC1). Values are percent-encoded.
+//!
+//! The link itself is not signed: anyone holding it can change it. So
+//! `mine` is only a request. The computer that made the link pairs both
+//! ways only when its own PIN file says the PIN was minted for that
+//! (`pin::FilePin::mine`), and the computer that pastes it only when the
+//! link asked: adding `mine=1` to a link, or taking it off, gives a plain
+//! one-way pairing.
 
 use std::fmt;
 use std::net::Ipv4Addr;
@@ -29,6 +38,10 @@ pub struct PairLink {
     pub fingerprint: Option<String>,
     /// The iroh endpoint JSON, for WAN; absent until the server records it.
     pub endpoint: Option<String>,
+    /// The link is for another of the owner's computers, which may see and
+    /// control this one without asking, and this one it (PC1). A request
+    /// only: see the module's note.
+    pub mine: bool,
 }
 
 /// Why a link could not be read.
@@ -103,6 +116,9 @@ impl PairLink {
         if let Some(ep) = &self.endpoint {
             parts.push(format!("ep={}", URL_SAFE_NO_PAD.encode(ep)));
         }
+        if self.mine {
+            parts.push("mine=1".to_string());
+        }
         format!("{PREFIX}{}", parts.join("&"))
     }
 
@@ -161,6 +177,8 @@ impl PairLink {
             pin,
             fingerprint: fields.remove("fp"),
             endpoint,
+            // Only `1` asks; anything else, or none, is a plain pairing.
+            mine: fields.get("mine").map(String::as_str) == Some("1"),
         })
     }
 }
@@ -215,6 +233,7 @@ mod tests {
             pin: "012345".into(),
             fingerprint: Some("ab".repeat(32)),
             endpoint: Some(r#"{"endpointId":"x","relayUrls":[],"directAddrs":[]}"#.into()),
+            mine: false,
         }
     }
 
@@ -244,6 +263,23 @@ mod tests {
             ..sample()
         };
         assert_eq!(PairLink::from_uri(&link.to_uri()).unwrap(), link);
+    }
+
+    /// PC1: a link for another of the owner's computers says so, and reads
+    /// back; one without the word, or with another value, does not ask.
+    #[test]
+    fn a_link_for_another_of_my_computers_says_so_and_reads_back() {
+        let link = PairLink {
+            mine: true,
+            ..sample()
+        };
+        let uri = link.to_uri();
+        assert!(uri.ends_with("&mine=1"), "{uri}");
+        assert_eq!(PairLink::from_uri(&uri).unwrap(), link);
+        assert!(!PairLink::from_uri(FIXTURE).unwrap().mine, "an old link");
+        assert!(!sample().to_uri().contains("mine"), "said only when asked");
+        let other = format!("{FIXTURE}&mine=yes");
+        assert!(!PairLink::from_uri(&other).unwrap().mine);
     }
 
     #[test]
