@@ -5,8 +5,12 @@
 //! link between them, and each shows the other's screen with no prompt.
 //!
 //! A link that says `mine=1` when the code was not minted for that pairs
-//! one way, as before; pairing again with a code minted for it pairs both
-//! ways. Each screen is the test pattern (`POCKETDESK_TEST_PATTERN`), so no
+//! one way, as before; so does a link for both ways pasted without the
+//! pasting owner's yes (a hostile link looks just like it: review C1), and
+//! the pasting computer then trusts the link's maker with nothing. With
+//! the yes, it pairs both ways, the host's grant waiting for the link. A
+//! link that reuses a listed computer's id with another certificate is
+//! refused, and a computer unpaired on Devices is forgotten there too. Each screen is the test pattern (`POCKETDESK_TEST_PATTERN`), so no
 //! one's desktop is read; the stand-in windows send nothing at all, so
 //! nothing is injected though control is allowed. No sound is sent (no
 //! Audio permission either way), and any that came would go to a file. No
@@ -27,6 +31,7 @@ use std::time::{Duration, Instant};
 use common::{Cleanup, folders, pair, pairing_link, pocketdesk, wait_for};
 use pocketdesk_core::local::computers::{self, ComputerAsk};
 use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::paths::{LIVE_FILE, PENDING_APPROVALS_FILE, TRUST_FILE};
 use pocketdesk_core::local::view::{self as wire, Message, Phase};
 use pocketdesk_core::local::{identity, pin, sessions};
@@ -143,6 +148,26 @@ fn nothing_asked(state: &Path, device_id: &str) -> bool {
         .contains(device_id)
 }
 
+/// Ask `state`'s server to pair with `link` as the app asks, with its
+/// owner's yes to pairing both ways or not; the outcome.
+fn pair_as(state: &Path, link: &PairLink, yes: bool) -> String {
+    let asked = computers::request(
+        state,
+        ComputerAsk::Pair {
+            link: link.to_uri(),
+            mine: yes,
+        },
+        pin::now_unix(),
+    )
+    .unwrap();
+    wait_for(60, "a pairing outcome", || {
+        computers::read(state)
+            .last_pairing
+            .filter(|p| p.request == asked.id)
+            .map(|p| p.outcome)
+    })
+}
+
 fn log_of(state: &Path) -> PathBuf {
     state.parent().unwrap().join("server.log")
 }
@@ -238,18 +263,44 @@ fn both_ways(test: &str, (a_control, b_control): (u16, u16), ids: (&str, &str)) 
 
     // The owner ticks the box on B's Pair page: a code minted for another
     // of the owner's computers, and its link says so.
+    let mine_link = |code: &str| {
+        let mut link = pairing_link(&b_state, b_control, b_control + 1, code);
+        link.mine = true;
+        link
+    };
     let code = pin::mint_value();
     pin::write_mine(&b_state, &code, pin::now_unix()).unwrap();
-    let mut link = pairing_link(&b_state, b_control, b_control + 1, &code);
-    link.mine = true;
+    let link = mine_link(&code);
     assert!(link.to_uri().contains("mine=1"));
-    assert_eq!(pair(&a_state, &link), "paired");
 
-    // Each trusts the other to see and control it without asking.
+    // Review C1: pasted on A without A's owner saying it is their own (a
+    // hostile link would look just like this one), it pairs one way: A
+    // trusts B with nothing, B keeps A narrow and lists nothing.
+    assert_eq!(pair_as(&a_state, &link, false), "paired");
+    assert!(!trust(&a_state).is_trusted(&b_id), "no trust without a yes");
+    assert!(!computers::read(&a_state).computers[0].mine);
     assert_eq!(
         trust(&b_state).permissions(&a_id),
-        DevicePermissions::computer_mine()
+        DevicePermissions::computer()
     );
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(computers::read(&b_state).computers.is_empty());
+
+    // Paired one way again, A dials again: counted from here.
+    wait_for(60, "the one-way link again", || {
+        (computers::read(&a_state).computers.first()?.link == "linked").then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(1));
+    let before = (dialed(&log_of(&a_state)), dialed(&log_of(&b_state)));
+
+    // With A's owner's yes, both ways.
+    let code = pin::mint_value();
+    pin::write_mine(&b_state, &code, pin::now_unix()).unwrap();
+    let link = mine_link(&code);
+    assert_eq!(pair_as(&a_state, &link, true), "paired");
+
+    // A trusts B at once, by its own owner's yes; B's grant waits for the
+    // link between them (review M1).
     let a_trust = trust(&a_state);
     assert!(a_trust.is_trusted(&b_id) && a_trust.is_computer(&b_id));
     assert_eq!(
@@ -291,6 +342,11 @@ fn both_ways(test: &str, (a_control, b_control): (u16, u16), ids: (&str, &str)) 
             (computers::read(state).computers.first()?.link == "linked").then_some(())
         });
     }
+    // The link is up: B gives A what was granted.
+    wait_for(15, "B's grant", || {
+        let given = trust(&b_state).permissions(&a_id) == DevicePermissions::computer_mine();
+        (given && computers::read(&b_state).pending.is_empty()).then_some(())
+    });
     std::thread::sleep(Duration::from_secs(5));
     // Since pairing both ways (A's one-way link ended with it).
     let (a_dialed, b_dialed) = (
@@ -334,6 +390,28 @@ fn both_ways(test: &str, (a_control, b_control): (u16, u16), ids: (&str, &str)) 
     assert!(on_b.frames >= 10, "{on_b:?}");
     assert_eq!(on_b.control, Some(true), "A lets B control it, unasked");
     assert!(nothing_asked(&a_state, &b_id) && nothing_asked(&b_state, &a_id));
+
+    // Review C1: a link reusing B's id with another certificate is refused
+    // on A, and takes nothing of B's place.
+    let mut impostor = mine_link(&pin::mint_value());
+    impostor.fingerprint = Some("cd".repeat(32));
+    let outcome = pair_as(&a_state, &impostor, true);
+    assert!(outcome.contains("another certificate"), "{outcome}");
+    assert_eq!(computers::read(&a_state).computers[0].fingerprint, b_tls);
+    assert_eq!(
+        device_keys::check(&a_state, &b_id, Slot::Tls, Some(&b_tls)),
+        Verdict::Matches,
+        "B's keys stand"
+    );
+
+    // Review M7: unpaired on B's Devices page, B forgets A too.
+    TrustStore::update(b_state.join(TRUST_FILE), |store| {
+        store.untrust_device(&a_id)
+    })
+    .unwrap();
+    wait_for(30, "A forgotten on B", || {
+        computers::read(&b_state).computers.is_empty().then_some(())
+    });
 
     // Unpaired on A: both halves go there.
     computers::request(
