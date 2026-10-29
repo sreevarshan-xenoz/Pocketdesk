@@ -433,27 +433,42 @@ mod tests {
     /// again at once is not ended by its own Stop.
     #[test]
     fn requests_in_one_second_keep_their_order() {
-        let dir = temp_dir("order");
-        let mut asked = Vec::new();
-        for n in 0..12 {
-            let ask = if n % 2 == 0 {
-                ComputerAsk::StopView { session_id: None }
-            } else {
-                ComputerAsk::View {
-                    device_id: format!("desk-{n}"),
-                    monitor: 0,
-                }
-            };
-            asked.push(request(&dir, ask, 100).unwrap());
-            std::thread::sleep(std::time::Duration::from_millis(3));
+        // The milliseconds come from the clock while the second is the
+        // test's own, so a run that crosses into the clock's next second (a
+        // slow machine's sleeps can take 15 ms) cannot keep its order: such
+        // a run is tried again, and one that stays in its second must.
+        let mut kept = false;
+        for attempt in 0..10 {
+            let dir = temp_dir(&format!("order-{attempt}"));
+            let mut asked = Vec::new();
+            for n in 0..12 {
+                let ask = if n % 2 == 0 {
+                    ComputerAsk::StopView { session_id: None }
+                } else {
+                    ComputerAsk::View {
+                        device_id: format!("desk-{n}"),
+                        monitor: 0,
+                    }
+                };
+                asked.push(request(&dir, ask, 100).unwrap());
+                std::thread::sleep(std::time::Duration::from_millis(3));
+            }
+            let in_one_second = asked.windows(2).all(|w| w[0].created_ms < w[1].created_ms);
+            if in_one_second {
+                assert_eq!(take_all(&dir, 100), asked);
+                kept = true;
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+            if kept {
+                break;
+            }
         }
-        assert_eq!(take_all(&dir, 100), asked);
+        assert!(kept, "ten runs each crossed a second");
         // One from before the milliseconds were kept reads as 0 of them.
         let old: ComputerRequest =
             serde_json::from_str(r#"{"id":"a","ask":"stop_view","created_unix":1}"#).unwrap();
         assert_eq!(old.created_ms, 0);
         assert_eq!(old.ask, ComputerAsk::StopView { session_id: None });
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
