@@ -1,5 +1,6 @@
 //! Linux driving through the input-capture portal (BK8): this computer's
-//! edges that lead to another computer, as the portal's pointer barriers.
+//! edges that lead to another computer, as the portal's pointer barriers,
+//! and the breaker that turns an edge that keeps flipping into a wall.
 //!
 //! The portal says this computer's screens as *zones* (logical pixels, in
 //! the space its own [`Layout`] entry has them); a barrier is a line on the
@@ -13,9 +14,16 @@
 //! none. [`Barrier::push`] turns the portal's word back into the
 //! [`Captured::Edge`] the driver crosses on.
 //!
+//! xdg-desktop-portal-hyprland #435: on a fractionally scaled output the
+//! pointer the compositor lets go of lands past the barrier again, and the
+//! capture flips on and off many times a second. [`FlipBreaker`] counts the
+//! activations of each edge: a third within a second makes it a wall until
+//! the screens change.
+//!
 //! Pure: no I/O, tested on every system.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use super::drive::Captured;
 use super::layout::Layout;
@@ -44,7 +52,7 @@ pub type Line = (i32, i32, i32, i32);
 /// A way across an edge: (1, 0) right, (-1, 0) left, (0, 1) down, (0, -1) up.
 pub type Way = (i32, i32);
 
-/// An edge as it is known across armings (ids change).
+/// An edge as the breaker remembers it across armings (ids change).
 pub type EdgeKey = (Line, Way);
 
 impl Barrier {
@@ -178,6 +186,66 @@ pub fn activated(
     barriers
         .iter()
         .min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)))
+}
+
+/// Activations of one edge within this long that make it a wall.
+pub const FLIP_WINDOW: Duration = Duration::from_secs(1);
+
+/// How many activations of one edge within [`FLIP_WINDOW`] make it a wall.
+pub const FLIPS: usize = 3;
+
+/// What the breaker makes of an activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flip {
+    /// Cross as usual.
+    Cross,
+    /// The edge flips: it is a wall from now on. `first`: the first edge
+    /// walled this run, to be said (and logged) once.
+    Wall { first: bool },
+}
+
+/// Counts each edge's activations, and walls one that flips (xdph #435).
+#[derive(Debug, Default)]
+pub struct FlipBreaker {
+    seen: HashMap<EdgeKey, VecDeque<Instant>>,
+    walls: HashSet<EdgeKey>,
+    told: bool,
+}
+
+impl FlipBreaker {
+    /// The edge `key` was activated at `now`.
+    pub fn activated(&mut self, key: EdgeKey, now: Instant) -> Flip {
+        if self.walls.contains(&key) {
+            return Flip::Wall { first: false };
+        }
+        let times = self.seen.entry(key).or_default();
+        times.retain(|at| now.saturating_duration_since(*at) < FLIP_WINDOW);
+        times.push_back(now);
+        if times.len() < FLIPS {
+            return Flip::Cross;
+        }
+        self.seen.remove(&key);
+        self.walls.insert(key);
+        Flip::Wall {
+            first: !std::mem::replace(&mut self.told, true),
+        }
+    }
+
+    /// The edges walled now, left out of the barriers.
+    pub fn walls(&self) -> &HashSet<EdgeKey> {
+        &self.walls
+    }
+
+    /// Whether an edge has been walled this run.
+    pub fn any(&self) -> bool {
+        self.told
+    }
+
+    /// The screens changed: every edge may be tried again.
+    pub fn clear(&mut self) {
+        self.seen.clear();
+        self.walls.clear();
+    }
 }
 
 #[cfg(test)]
@@ -366,5 +434,45 @@ mod tests {
             Some("P")
         );
         assert_eq!(activated(&b, None, None), None);
+    }
+
+    #[test]
+    fn an_edge_that_flips_three_times_in_a_second_is_a_wall() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let right: EdgeKey = ((1600, 0, 1600, 999), (1, 0));
+        let left: EdgeKey = ((0, 0, 0, 999), (-1, 0));
+        let mut breaker = FlipBreaker::default();
+        // Crossings a person makes, seconds apart, never wall it.
+        for s in 0..10 {
+            assert_eq!(breaker.activated(right, at(s * 1500)), Flip::Cross);
+        }
+        // Three quick ones over a full second: still fine.
+        let mut breaker = FlipBreaker::default();
+        assert_eq!(breaker.activated(right, at(0)), Flip::Cross);
+        assert_eq!(breaker.activated(right, at(400)), Flip::Cross);
+        assert_eq!(breaker.activated(right, at(1000)), Flip::Cross);
+        // The third within a second of the first: a wall, said once.
+        assert_eq!(
+            breaker.activated(right, at(1100)),
+            Flip::Wall { first: true }
+        );
+        assert!(breaker.walls().contains(&right));
+        assert_eq!(
+            breaker.activated(right, at(5000)),
+            Flip::Wall { first: false }
+        );
+        // Another edge counts on its own, and its wall is not said again.
+        assert_eq!(breaker.activated(left, at(5000)), Flip::Cross);
+        assert_eq!(breaker.activated(left, at(5100)), Flip::Cross);
+        assert_eq!(
+            breaker.activated(left, at(5200)),
+            Flip::Wall { first: false }
+        );
+        assert!(breaker.any());
+        // New screens: every edge is tried again.
+        breaker.clear();
+        assert!(breaker.walls().is_empty());
+        assert_eq!(breaker.activated(right, at(6000)), Flip::Cross);
     }
 }
