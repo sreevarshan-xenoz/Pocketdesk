@@ -666,6 +666,27 @@ impl IrohControlStream {
     }
 }
 
+/// Dial a computer's screen session from `endpoint`, one this process
+/// already runs (BK7: another computer's screen in a window here rides this
+/// server's own WAN endpoint, as its link does; a second endpoint with the
+/// same key could not use a relay, 2b). The connection, for
+/// [`super::StreamingClient::attach`].
+pub async fn dial_stream_from(
+    endpoint: &iroh::Endpoint,
+    endpoint_id: &str,
+    relay_urls: &[String],
+    direct_addrs: &[String],
+    timeout: Duration,
+) -> Result<SharedConnection> {
+    let (addr, _) = endpoint_addr(endpoint_id, relay_urls, direct_addrs)?;
+    let alpn = StreamTransportConfig::default().alpn;
+    let conn = tokio::time::timeout(timeout, endpoint.connect(addr, &alpn))
+        .await
+        .context("iroh dial timed out")?
+        .context("iroh dial failed")?;
+    Ok(IrohConnection::shared(conn))
+}
+
 /// Accepts the streams a computer opens on an internet control connection,
 /// one per transfer (2c, 2d).
 #[derive(Clone)]
