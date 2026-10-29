@@ -21,9 +21,11 @@
 //! awake. A Wi-Fi card saving power dozes after about 100 ms without
 //! sending, and what comes for it meanwhile waits at the access point for
 //! its next wake, up to a beacon's 102 ms: the first key after a pause
-//! was held up by as much. A byte sent to the other computer's discard
-//! port every 50 ms keeps the card awake, through whichever card carries
-//! the link, without changing any setting of the system's (Wi-Fi's own
+//! was held up by as much. A byte sent every 50 ms to the other computer,
+//! at the address and port its link reaches it at, keeps the card awake,
+//! through whichever card carries the link: that port is one its firewall
+//! lets through, and its QUIC stack drops a byte that is not QUIC without
+//! a word back. No setting of the system's is changed (Wi-Fi's own
 //! power saving is left on, so nothing needs putting back, even after a
 //! crash). It goes outside the link on purpose: on the link it would spend
 //! the link's pacing, which on a quiet link held the next key back. It
@@ -166,10 +168,6 @@ fn system(_on: bool) {}
 /// before it dozes, a Windows timer's coarse tick (62 ms) included.
 pub const NUDGE_EVERY: Duration = Duration::from_millis(50);
 
-/// The discard service's port: nothing answers there, and a firewall in
-/// front of it drops the byte.
-const DISCARD_PORT: u16 = 9;
-
 /// How long the address a computer is nudged at is trusted before it is
 /// looked up again (its link may move to another path).
 const LOOK_AGAIN: Duration = Duration::from_secs(1);
@@ -238,12 +236,11 @@ pub struct Nudge {
     aim: Arc<Mutex<Aim>>,
     /// The computer followed, and when its address was looked up.
     following: Option<(String, Instant)>,
-    /// Where a computer's link reaches it ([`super::link::peer_ip`]), this
-    /// computer's networks ([`local_networks`]), and the port: a test's
+    /// Where a computer's link reaches it ([`super::link::peer_addr`]),
+    /// and this computer's networks ([`local_networks`]): a test's
     /// stand-ins.
-    look_up: fn(&str) -> Option<IpAddr>,
+    look_up: fn(&str) -> Option<SocketAddr>,
     networks: fn() -> Vec<(IpAddr, u8)>,
-    port: u16,
 }
 
 /// Where the bytes go now (none ends the sending thread), and whether a
@@ -260,15 +257,14 @@ impl Default for Nudge {
         Nudge {
             aim: Arc::default(),
             following: None,
-            look_up: super::link::peer_ip,
+            look_up: super::link::peer_addr,
             networks: local_networks,
-            port: DISCARD_PORT,
         }
     }
 }
 
 impl Nudge {
-    /// Nudge toward `computer` (its link's address, looked up again every
+    /// Nudge toward `computer` (its link's address and port, looked up again every
     /// [`LOOK_AGAIN`]), or stop with none. Cheap to call as often as a
     /// loop goes round.
     pub fn follow(&mut self, computer: Option<&str>) {
@@ -287,9 +283,13 @@ impl Nudge {
         }
         self.following = Some((computer.to_string(), Instant::now()));
         // Only on this computer's own network (BK10 review I1).
+        // An IPv4 address iroh holds as IPv6 (`::ffff:a.b.c.d`) goes as IPv4.
         let to = (self.look_up)(computer)
-            .filter(|&ip| may_nudge(ip, &(self.networks)()))
-            .map(|ip| SocketAddr::new(ip, self.port));
+            .map(|to| match to.ip().to_canonical() {
+                ip @ IpAddr::V4(_) => SocketAddr::new(ip, to.port()),
+                IpAddr::V6(_) => to,
+            })
+            .filter(|to| may_nudge(to.ip(), &(self.networks)()));
         self.aim(to);
     }
 
@@ -373,7 +373,7 @@ mod tests {
         }
     }
 
-    /// A nudge follows a computer to its link's address, a byte every
+    /// A nudge follows a computer to its link's address and port, a byte every
     /// 50 ms, and stops when it follows none or is dropped; a computer with
     /// no direct link gets nothing.
     #[test]
@@ -382,12 +382,14 @@ mod tests {
         catcher
             .set_read_timeout(Some(Duration::from_millis(300)))
             .unwrap();
+        // The catcher stands in for the other computer's link port.
+        static CATCHER: Mutex<Option<SocketAddr>> = Mutex::new(None);
+        *CATCHER.lock().unwrap() = Some(catcher.local_addr().unwrap());
         let mut nudge = Nudge {
             aim: Arc::default(),
             following: None,
-            look_up: |id| (id == "pc").then_some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            look_up: |id| CATCHER.lock().unwrap().filter(|_| id == "pc"),
             networks: Vec::new,
-            port: catcher.local_addr().unwrap().port(),
         };
         let caught = |n: usize| {
             let mut got = 0;
@@ -406,9 +408,8 @@ mod tests {
         let mut public = Nudge {
             aim: Arc::default(),
             following: None,
-            look_up: |_| Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+            look_up: |_| Some(SocketAddr::from(([203, 0, 113, 9], 4433))),
             networks: Vec::new,
-            port: 9,
         };
         public.follow(Some("far"));
         assert!(!public.aim.lock().unwrap().sending);
