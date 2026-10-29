@@ -578,11 +578,73 @@ pub(crate) async fn answer_window_ask(device_id: &str) {
         tracing::debug!("Not answered {device_id}'s ask for the clipboard back");
         return;
     }
-    push_following(device_id, Follow::Window).await
+    // At most once each ANSWER_EVERY (PR #554 review I2): nothing on this
+    // side shows that the window's focus moved, so asks in a loop are not
+    // read for.
+    let may = ANSWERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .may_answer(device_id, std::time::Instant::now());
+    if !may {
+        tracing::debug!("Not answered {device_id}'s ask for the clipboard back: too soon");
+        return;
+    }
+    push_following_answer(device_id).await
 }
+
+/// How often a computer's asks for this clipboard back are answered, at
+/// most (PR #554 review I2).
+const ANSWER_EVERY: Duration = Duration::from_secs(2);
+
+/// The answers given to each computer's asks: when it was last tried, and
+/// what the last answer held (a hash), so the same copy is not sent again.
+#[derive(Debug, Default)]
+struct Answers {
+    last: HashMap<String, (Option<std::time::Instant>, Option<u64>)>,
+}
+
+impl Answers {
+    /// Whether an ask from `device_id` may be answered at `now`: not within
+    /// [`ANSWER_EVERY`] of its last try. A try is noted either way it ends.
+    fn may_answer(&mut self, device_id: &str, now: std::time::Instant) -> bool {
+        let entry = self.last.entry(device_id.to_string()).or_default();
+        let may = entry
+            .0
+            .is_none_or(|at| now.saturating_duration_since(at) >= ANSWER_EVERY);
+        if may {
+            entry.0 = Some(now);
+        }
+        may
+    }
+
+    /// Whether `held` (a hash of what the clipboard holds) is new for
+    /// `device_id` since its last answer; noted when it is.
+    fn fresh(&mut self, device_id: &str, held: u64) -> bool {
+        let entry = self.last.entry(device_id.to_string()).or_default();
+        if entry.1 == Some(held) {
+            return false;
+        }
+        entry.1 = Some(held);
+        true
+    }
+}
+
+static ANSWERS: LazyLock<Mutex<Answers>> = LazyLock::new(Default::default);
 
 /// [`push_now`], following `follow`.
 async fn push_following(device_id: &str, follow: Follow) {
+    push_held(device_id, follow, false).await
+}
+
+/// An answer to an ask for this clipboard back: [`push_held`] following the
+/// window, only with something new since the last answer to that computer.
+async fn push_following_answer(device_id: &str) {
+    push_held(device_id, Follow::Window, true).await
+}
+
+/// [`push_now`], following `follow`; when `answering` an ask, only what is
+/// new for that computer since its last answer ([`Answers::fresh`]).
+async fn push_held(device_id: &str, follow: Follow, answering: bool) {
     // That computer's image still on its way here: this clipboard is about
     // to be its own, so nothing older goes back, and the switch drops it.
     let landing = landing_from(device_id);
@@ -603,13 +665,29 @@ async fn push_following(device_id: &str, follow: Follow) {
     let text_from = FROM_PHONE.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let image_from = IMAGE_FROM.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let last_image = image_sent_last(device_id);
-    match what_follows(
+    let follows = what_follows(
         held,
         device_id,
         text_from.as_ref(),
         image_from.as_ref(),
         last_image.as_deref(),
-    ) {
+    );
+    if answering {
+        let key = match &follows {
+            Held::Text(text) => hash(text),
+            Held::Image(id) => hash(&image_key(id)),
+            Held::Nothing => return,
+        };
+        let fresh = ANSWERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .fresh(device_id, key);
+        if !fresh {
+            tracing::debug!("Not answered {device_id}: nothing new copied since the last answer");
+            return;
+        }
+    }
+    match follows {
         Held::Text(text) => push_text_now(device_id, &text, follow).await,
         Held::Image(id) => push_image_now(device_id, &id, at, follow).await,
         Held::Nothing => {}
@@ -1988,6 +2066,33 @@ mod tests {
         let unread = || -> bool { panic!("not asked") };
         assert!(!window_ask_taken(false, unread, unread, unread));
         assert!(!window_ask_taken(true, yes, no, unread));
+    }
+
+    /// PR #554 review I2: a computer's asks are answered at most once each
+    /// ANSWER_EVERY, and only with something new since its last answer.
+    #[test]
+    fn asks_are_answered_now_and_then_and_only_with_something_new() {
+        let t = std::time::Instant::now();
+        let mut answers = Answers::default();
+        assert!(answers.may_answer("desk", t), "the first");
+        assert!(answers.fresh("desk", 7));
+        assert!(
+            !answers.may_answer("desk", t + Duration::from_millis(500)),
+            "too soon"
+        );
+        assert!(answers.may_answer("other", t), "each computer its own");
+        assert!(
+            answers.may_answer("desk", t + ANSWER_EVERY),
+            "after the wait"
+        );
+        assert!(!answers.fresh("desk", 7), "the same again: no answer");
+        assert!(answers.fresh("desk", 8), "a new copy");
+        assert!(
+            answers.fresh("other", 7),
+            "another computer's last is its own"
+        );
+        // A refused try still counts against the wait.
+        assert!(!answers.may_answer("desk", t + ANSWER_EVERY + Duration::from_millis(1)));
     }
 
     /// PC3: an answer is awaited from the computer asked, within the wait,
