@@ -72,6 +72,11 @@ pub enum Captured {
         extended: bool,
         down: bool,
     },
+    /// A key as its evdev code (Linux's libei gives these): sent as it is.
+    EvKey {
+        code: u16,
+        down: bool,
+    },
     /// 0 left, 1 middle, 2 right, 3 back, 4 forward.
     Button {
         button: u8,
@@ -369,19 +374,11 @@ impl Driver {
                 extended,
                 down,
             } => {
-                if let (Some(away), Some(code)) = (&self.away, evdev_from_scan(scan, extended)) {
-                    // A key held down repeats on the other computer by
-                    // itself, and one never sent down is not let go of.
-                    if down != self.held.holds_key(code) {
-                        let msg = Msg::Key {
-                            code,
-                            pressed: down,
-                        };
-                        self.held.note(&msg);
-                        out.push(Action::Send(away.to.clone(), msg));
-                    }
+                if let Some(code) = evdev_from_scan(scan, extended) {
+                    self.key(code, down, &mut out);
                 }
             }
+            Captured::EvKey { code, down } => self.key(code, down, &mut out),
             Captured::Button { button, down } => {
                 if let Some(away) = &self.away
                     && down != self.held.holds_button(button)
@@ -404,6 +401,22 @@ impl Driver {
             Captured::Hotkey => self.hotkey(&mut out),
         }
         out
+    }
+
+    /// Away, the key `code` (evdev) went down or up: sent to the computer
+    /// driven. A key held down repeats there by itself, and one never sent
+    /// down is not let go of.
+    fn key(&mut self, code: u16, down: bool, out: &mut Vec<Action>) {
+        if let Some(away) = &self.away
+            && down != self.held.holds_key(code)
+        {
+            let msg = Msg::Key {
+                code,
+                pressed: down,
+            };
+            self.held.note(&msg);
+            out.push(Action::Send(away.to.clone(), msg));
+        }
     }
 
     /// The time is `now` (called several times a second): away, the
@@ -2379,5 +2392,43 @@ mod tests {
         let mut expected = desk(false);
         expected.computers[1].origin = (3456 + 800, 0);
         assert_eq!(layout, expected);
+    }
+
+    /// BK8: Linux's libei gives evdev codes, sent as they are while away
+    /// (no scancode on the way), held and let go of as a scancode's are.
+    #[test]
+    fn an_evdev_key_while_away_is_sent_as_it_is() {
+        let ev = |code: u16, down: bool| Captured::EvKey { code, down };
+        let mut home = driver(desk(false), &["L"]);
+        home.start();
+        assert_eq!(
+            home.on(ev(30, true)),
+            vec![],
+            "at home, this computer's own"
+        );
+
+        let mut d = away_on_linux(false);
+        assert_eq!(sends(&d.on(ev(30, true))), vec![sent("L", evdev(30, true))]);
+        assert_eq!(
+            sends(&d.on(ev(30, true))),
+            vec![],
+            "repeats are L's to make"
+        );
+        assert_eq!(
+            sends(&d.on(ev(30, false))),
+            vec![sent("L", evdev(30, false))]
+        );
+        assert_eq!(
+            sends(&d.on(ev(30, false))),
+            vec![],
+            "never down: not let go"
+        );
+        // Held when it leaves: let go of there, as a scancode's key is.
+        d.on(ev(29, true));
+        let back = d.on(moved(PARK.0 - 20, PARK.1));
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(29, false)), sent("L", Msg::Leave)]
+        );
     }
 }
