@@ -334,6 +334,9 @@ fn other_computers_point_to_pairing_on_the_pair_page() {
         app.query_by_label("From the other computer").is_none(),
         "no paste box in Settings"
     );
+    // Below the section's settings, which can push it past the window.
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).scroll_to_me();
+    app.run_steps(3);
     app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
     let both = (0..50).any(|_| {
         app.run_steps(2);
