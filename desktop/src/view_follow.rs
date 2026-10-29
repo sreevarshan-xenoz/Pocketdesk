@@ -122,21 +122,31 @@ pub struct DropBatch {
     pub ids: Vec<String>,
     /// Why each one not queued was not.
     pub not_queued: Vec<String>,
+    /// Those past [`MOST_ITEMS`], not sent.
+    pub left_out: usize,
     pub at: Instant,
 }
+
+/// The most items of one drop that go (PR #554 review M1), as the shared
+/// keyboard and mouse's drag (BK4): a drop of thousands would write as many
+/// requests from the window's thread.
+pub const MOST_ITEMS: usize = 100;
 
 /// How long a drop waits for the server to take and send it before the
 /// window says it did not: past the outbox's own wait, and a file's tries.
 pub const DROP_WAIT: Duration = Duration::from_secs(180);
 
-/// Queue each of `paths` for the computer `device_id` with `queue` (the
-/// outbox's request: an id, or why not), into a batch for `name`.
+/// Queue each of the first [`MOST_ITEMS`] of `paths` for the computer
+/// `device_id` with `queue` (the outbox's request: an id, or why not), into
+/// a batch for `name`; the rest are counted.
 pub fn queue_all(
     paths: &[PathBuf],
     name: &str,
     now: Instant,
     mut queue: impl FnMut(&Path) -> Result<String, String>,
 ) -> DropBatch {
+    let left_out = paths.len().saturating_sub(MOST_ITEMS);
+    let paths = &paths[..paths.len() - left_out];
     let (files, folders) = count(paths);
     let mut ids = Vec::new();
     let mut not_queued = Vec::new();
@@ -152,6 +162,7 @@ pub fn queue_all(
         folders,
         ids,
         not_queued,
+        left_out,
         at: now,
     }
 }
@@ -203,9 +214,21 @@ pub fn refusal_words(name: &str, refusal: &Refusal) -> String {
 /// What the window says while a drop is on its way.
 pub fn sending_words(batch: &DropBatch) -> String {
     format!(
-        "Sending {} to {}\u{2026}",
+        "Sending {} to {}\u{2026}{}",
         crate::model::files_and_folders(batch.files, batch.folders),
-        batch.name
+        batch.name,
+        left_out_words(batch)
+    )
+}
+
+/// What a drop left out, after the rest of its words: nothing when nothing.
+fn left_out_words(batch: &DropBatch) -> String {
+    if batch.left_out == 0 {
+        return String::new();
+    }
+    format!(
+        " ({} more left out: at most {MOST_ITEMS} at a time)",
+        batch.left_out
     )
 }
 
@@ -249,11 +272,12 @@ pub fn landed_words(batch: &DropBatch, landed: &Landed) -> String {
         }
     }
     let total = batch.ids.len() + batch.not_queued.len();
+    let left = left_out_words(batch);
     match (landed.sent, landed.failed.len()) {
-        (_, 0) => format!("Sent {what} to {}'s Downloads.", batch.name),
-        (0, _) => format!("Not sent to {}: {}.", batch.name, reasons.join("; ")),
+        (_, 0) => format!("Sent {what} to {}'s Downloads{left}.", batch.name),
+        (0, _) => format!("Not sent to {}: {}{left}.", batch.name, reasons.join("; ")),
         (sent, _) => format!(
-            "Sent {sent} of {total} to {}'s Downloads; not sent: {}.",
+            "Sent {sent} of {total} to {}'s Downloads; not sent: {}{left}.",
             batch.name,
             reasons.join("; ")
         ),
@@ -397,8 +421,39 @@ mod tests {
             folders,
             ids: ids.iter().map(|s| s.to_string()).collect(),
             not_queued: Vec::new(),
+            left_out: 0,
             at,
         }
+    }
+
+    /// PR #554 review M1: at most MOST_ITEMS of a drop go, as the shared
+    /// keyboard and mouse's drag does (BK4), and the rest are counted.
+    #[test]
+    fn a_drop_of_more_than_a_hundred_sends_the_first_hundred_and_says_so() {
+        let paths: Vec<PathBuf> = (0..MOST_ITEMS + 3)
+            .map(|n| PathBuf::from(format!("pd-pc3-none-{n}.txt")))
+            .collect();
+        let mut asked = 0;
+        let t = Instant::now();
+        let b = queue_all(&paths, "Desk", t, |_| {
+            asked += 1;
+            Ok(format!("id-{asked}"))
+        });
+        assert_eq!(asked, MOST_ITEMS, "only the first hundred are queued");
+        assert_eq!((b.ids.len(), b.left_out), (MOST_ITEMS, 3));
+        assert_eq!(b.files + b.folders, MOST_ITEMS);
+        assert!(sending_words(&b).ends_with("(3 more left out: at most 100 at a time)"));
+        let done = Landed {
+            sent: MOST_ITEMS,
+            failed: Vec::new(),
+        };
+        assert_eq!(
+            landed_words(&b, &done),
+            "Sent 100 files to Desk's Downloads (3 more left out: at most 100 at a time)."
+        );
+        let small = queue_all(&paths[..2], "Desk", t, |_| Ok("x".into()));
+        assert_eq!(small.left_out, 0);
+        assert!(!sending_words(&small).contains("left out"));
     }
 
     #[test]
