@@ -182,6 +182,7 @@ async fn serve(
 /// of sessions it took goes up as each comes.
 async fn other_computer_again_and_again(
     cert: Arc<CertManager>,
+    refuse_after: Option<usize>,
 ) -> (
     SocketAddr,
     Arc<AtomicUsize>,
@@ -205,7 +206,12 @@ async fn other_computer_again_and_again(
                 continue;
             };
             let Ok(conn) = connecting.await else { continue };
-            counted.fetch_add(1, Ordering::SeqCst);
+            let n = counted.fetch_add(1, Ordering::SeqCst) + 1;
+            // Past `refuse_after`, its owner says no at once.
+            if refuse_after.is_some_and(|after| n > after) {
+                conn.close(0u32.into(), b"session refused");
+                continue;
+            }
             let (this_tx, this_rx) = tokio::sync::oneshot::channel();
             let (input, _ignored) = mpsc::unbounded_channel();
             let session = tokio::spawn(serve(conn, input, keyframe(), this_rx));
@@ -423,7 +429,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
     let dir = temp_dir("again");
     paired(&dir);
     let cert = Arc::new(CertManager::new().expect("cert manager"));
-    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone(), None).await;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let (commands, rx) = mpsc::channel(4);
     let relay = tokio::spawn(run(
@@ -592,7 +598,7 @@ async fn a_computer_forgotten_during_the_tries_is_not_dialled_again() {
     let dir = temp_dir("forgotten-tries");
     paired(&dir);
     let cert = Arc::new(CertManager::new().expect("cert manager"));
-    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone(), None).await;
     let (commands, relay, _file, mut window) = shown_view(&dir, addr, cert).await;
     hang_ups.send(STOPPING).unwrap();
     loop {
@@ -621,7 +627,7 @@ async fn forgetting_the_computer_shown_ends_its_view() {
     let dir = temp_dir("forgotten");
     paired(&dir);
     let cert = Arc::new(CertManager::new().expect("cert manager"));
-    let (addr, _sessions, _hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let (addr, _sessions, _hang_ups) = other_computer_again_and_again(cert.clone(), None).await;
     let (commands, relay, _file, mut window) = shown_view(&dir, addr, cert).await;
     // Another computer forgotten: the view goes on.
     commands
@@ -647,6 +653,29 @@ async fn forgetting_the_computer_shown_ends_its_view() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(wire::read(&dir), None, "view.json forgets the view");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PR #551 review M10: a computer that refuses the view as it comes back
+/// (its owner said no) ends it, and is not dialled again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refusal_during_the_tries_ends_the_view() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("refused-tries");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone(), Some(1)).await;
+    let (commands, relay, _file, mut window) = shown_view(&dir, addr, cert).await;
+    hang_ups.send(STOPPING).unwrap();
+    let why = end_of(&mut window).await;
+    assert!(
+        why.starts_with("Desk did not let this computer in (session refused)"),
+        "{why}"
+    );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(sessions.load(Ordering::SeqCst), 2, "not dialled again");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
