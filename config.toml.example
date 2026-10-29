@@ -162,6 +162,11 @@ video_quality = "balanced"
 # Windows: the sound of the computer the mouse is on plays here, while it is
 # there (off until chosen).
 # shared_input_sound = true
+# Keep the connection quick while sharing: while the keyboard and mouse are on
+# another computer, or this one is driven, Windows' timer runs at 1 ms for
+# Pocketdesk and the computer driven is pinged often enough that Wi-Fi does
+# not doze between keys (a little more battery while it lasts).
+# shared_input_low_latency = true
 
 # Windows only: the playback device the phone's microphone is played into,
 # matched by (part of) its name. Windows needs a virtual audio cable for a

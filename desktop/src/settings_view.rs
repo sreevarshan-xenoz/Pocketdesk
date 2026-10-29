@@ -359,6 +359,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::SharedInput,
     ),
     (
+        "shared_input_low_latency",
+        "Keep the connection quick while sharing",
+        Section::SharedInput,
+    ),
+    (
         "kdeconnect_compat",
         "KDE Connect devices",
         Section::KdeConnect,
@@ -481,7 +486,8 @@ fn drawn_here(key: &str) -> bool {
         | "shared_input_hotkey"
         | "shared_input_game_lock"
         | "shared_input_lock_programs"
-        | "shared_input_clipboard" => cfg!(any(windows, target_os = "linux")),
+        | "shared_input_clipboard"
+        | "shared_input_low_latency" => cfg!(any(windows, target_os = "linux")),
         // BK4: only Windows drives with Explorer's drag. BK6: the sound
         // follows the mouse to the computer driving, Windows.
         "shared_input_files" | "shared_input_sound" => cfg!(windows),
@@ -600,6 +606,7 @@ pub fn applies_live(key: &str) -> bool {
             | "shared_input_clipboard"
             | "shared_input_files"
             | "shared_input_sound"
+            | "shared_input_low_latency"
     )
 }
 
@@ -2115,6 +2122,19 @@ impl SettingsForm {
                         "In this computer's speakers or headphones. It stops as the mouse comes home.",
                     );
                 });
+                row(ui, "shared_input_low_latency", |ui| {
+                    ui.add_enabled(
+                        on,
+                        egui::Checkbox::new(
+                            &mut e.shared_input_low_latency,
+                            "keys and moves go at once while the keyboard and mouse are shared",
+                        ),
+                    );
+                    note(
+                        ui,
+                        "While the pointer is on another computer, or this one is driven: Windows' timer runs finer for Pocketdesk, and the computers stay in touch often enough that Wi-Fi does not doze between keys. A little more battery while it lasts.",
+                    );
+                });
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2840,6 +2860,10 @@ mod tests {
                     "shared_input_sound",
                     "Hear the computer you're driving here"
                 ),
+                (
+                    "shared_input_low_latency",
+                    "Keep the connection quick while sharing"
+                ),
             ]
         );
         for (key, _) in rows
@@ -2889,6 +2913,7 @@ mod tests {
             "shared_input_clipboard",
             "shared_input_files",
             "shared_input_sound",
+            "shared_input_low_latency",
         ] {
             assert!(applies_live(key), "{key}");
         }

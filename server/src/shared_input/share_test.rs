@@ -22,6 +22,7 @@ use pocketdesk_core::local::pin::now_unix;
 use serde::{Deserialize, Serialize};
 
 use super::link::{self, Channel, Pong};
+use super::quick::KeepQuick;
 use super::wire::{self, Msg, Timing};
 use crate::local_api::exit;
 
@@ -176,6 +177,10 @@ struct Outcome {
     /// Why there is no `latency`.
     #[serde(default)]
     unmeasured: Option<String>,
+    /// The link was kept quick meanwhile, as a crossing keeps it
+    /// (`shared_input_low_latency`, BK10).
+    #[serde(default)]
+    quick: bool,
 }
 
 /// What `share-test` sends after its `Hello` (pings and activity notes,
@@ -267,8 +272,10 @@ fn report(outcome: &Outcome) -> String {
         return out;
     }
     out.push_str(&format!(
-        "sent {} messages to {}\n",
-        outcome.sent, outcome.computer
+        "sent {} messages to {}, the link kept quick: {}\n",
+        outcome.sent,
+        outcome.computer,
+        if outcome.quick { "yes" } else { "no" }
     ));
     let mut sorted = outcome.round_trips_us.clone();
     sorted.sort_unstable();
@@ -425,6 +432,13 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
             return outcome;
         }
     };
+    // Held as a crossing holds it, so the test measures what one gets.
+    let mut quick = KeepQuick::default();
+    outcome.quick =
+        tokio::task::spawn_blocking(|| crate::events::current_config().shared_input_low_latency)
+            .await
+            .unwrap_or(false);
+    quick.set(outcome.quick);
     tracing::info!(device_id, "share-test: sending a script of shared input");
     let me = crate::kde::host_identity();
     let hello = Msg::Hello {
@@ -734,9 +748,13 @@ mod tests {
                 measured_unix: 1,
             }),
             unmeasured: None,
+            quick: true,
         };
         let said = report(&outcome);
-        assert!(said.contains("sent 10 messages to bbbb"), "{said}");
+        assert!(
+            said.contains("sent 10 messages to bbbb, the link kept quick: yes"),
+            "{said}"
+        );
         assert!(said.contains("round trips (µs): 900 300 600"), "{said}");
         assert!(
             said.contains("3 of 3 pings answered; least 300 µs, median 600 µs, most 900 µs"),

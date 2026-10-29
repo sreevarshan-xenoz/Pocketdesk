@@ -27,6 +27,7 @@ use super::awake::KeepAwake;
 use super::badge;
 use super::held::HeldInput;
 use super::link::{self, Channel};
+use super::quick::KeepQuick;
 use super::screens;
 use super::sound;
 use super::status;
@@ -568,13 +569,14 @@ pub(crate) fn may_drive_here(device_id: &str) -> bool {
 /// [`RECHECK`] (they are files: config.toml and the trust store).
 #[derive(Default)]
 struct Gate {
-    /// `shared_input` and `shared_input_clipboard`, and when read.
-    on: Option<((bool, bool), Instant)>,
+    /// `shared_input`, `shared_input_clipboard` and
+    /// `shared_input_low_latency`, and when read.
+    on: Option<((bool, bool, bool), Instant)>,
     standings: HashMap<String, (Standing, Instant)>,
 }
 
 impl Gate {
-    async fn settings(&mut self) -> (bool, bool) {
+    async fn settings(&mut self) -> (bool, bool, bool) {
         if let Some((on, at)) = self.on
             && at.elapsed() < RECHECK
         {
@@ -582,10 +584,14 @@ impl Gate {
         }
         let on = tokio::task::spawn_blocking(|| {
             let config = crate::events::current_config();
-            (config.shared_input, config.shared_input_clipboard)
+            (
+                config.shared_input,
+                config.shared_input_clipboard,
+                config.shared_input_low_latency,
+            )
         })
         .await
-        .unwrap_or((false, false));
+        .unwrap_or((false, false, false));
         self.on = Some((on, Instant::now()));
         on
     }
@@ -597,6 +603,11 @@ impl Gate {
     /// The clipboard follows the mouse here (`shared_input_clipboard`).
     async fn clipboard_follows(&mut self) -> bool {
         self.settings().await.1
+    }
+
+    /// The link is kept quick while driven (`shared_input_low_latency`).
+    async fn low_latency(&mut self) -> bool {
+        self.settings().await.2
     }
 
     /// Why `device_id` may not drive this one, as a [`Msg::Refuse`] says
@@ -920,6 +931,8 @@ pub async fn run() {
     let mut receiver = Receiver::new(Box::<LazyInjector>::default());
     receiver.set_name(&crate::kde::host_device_name());
     let mut awake = KeepAwake::default();
+    // Held while another computer's cursor is on this one (BK10).
+    let mut quick = KeepQuick::default();
     let mut gate = Gate::default();
     // This computer's screens as last looked at (none while shared input
     // is off), and the computers told them.
@@ -1101,6 +1114,8 @@ pub async fn run() {
                 } else {
                     awake.release();
                 }
+                let driven = receiver.driver().is_some();
+                quick.set(driven && gate.low_latency().await);
                 if !heard.is_empty() {
                     write_screens(state_dir.as_ref(), std::mem::take(&mut heard), None).await;
                 }
