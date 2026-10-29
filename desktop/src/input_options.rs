@@ -79,7 +79,7 @@ impl InputOptions {
         }
         let mut changed = Vec::new();
         ui.add_space(8.0);
-        ui.heading(OPTIONS);
+        crate::theme::section(ui, OPTIONS);
         if !on {
             crate::widgets::why_off(ui, SHARING_OFF, None);
         }

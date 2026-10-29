@@ -1694,8 +1694,7 @@ impl PocketdeskApp {
         // One short block per phone, so it fits a narrow window (N6).
         for row in &rows {
             let device = row.device;
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_width(ui.available_width());
+            crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(model::device_label(&self.snapshot.devices, &device.id)).strong())
                         .on_hover_text(&device.id);
@@ -1773,7 +1772,11 @@ impl PocketdeskApp {
                 if let Some(playing) = row.playing {
                     let media = &playing.media;
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(if media.is_playing { "Playing:" } else { "Paused:" });
+                        ui.label(if media.is_playing {
+                            "Playing:"
+                        } else {
+                            "Paused:"
+                        });
                         ui.label(RichText::new(model::media_line(media)).strong());
                         let buttons = [
                             ("Previous", "previous", media.can_previous),
@@ -2108,8 +2111,8 @@ impl PocketdeskApp {
         // E5: a block per device, its parts wrapping, as the Overview's
         // phones are: a grid of six columns ran off a small window.
         for device in &self.snapshot.devices {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
+            // UX 3: a card per device.
+            crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if let Some(name) = &device.name {
                         ui.label(RichText::new(name).strong());
@@ -2701,7 +2704,7 @@ impl PocketdeskApp {
             return;
         }
         ui.add_space(12.0);
-        ui.heading("Recent sessions");
+        crate::theme::section(ui, "Recent sessions");
         let now = now_unix();
         for recent in &self.recent_sessions {
             let who = model::recent_who(recent, &self.snapshot.devices);
@@ -4000,6 +4003,12 @@ impl eframe::App for PocketdeskApp {
                 ui.heading("Pocketdesk");
                 // Scrolls when the window is short (U1 review).
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    // UX 3: the pages' list stays as tight as it was, so
+                    // all of it fits a 480 px window; the pages' own
+                    // controls take the taller buttons.
+                    ui.spacing_mut().interact_size.y = 20.0;
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.spacing_mut().button_padding.y = 2.0;
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                         for group in crate::nav::GROUPS {
                             ui.add_space(10.0);
@@ -4149,8 +4158,7 @@ pub const STOPPED_BAR: &str = "The server isn't running: phones and computers ca
 fn status_line(ui: &mut egui::Ui, token: crate::theme::Token, text: &str) {
     let color = crate::theme::pick(ui, token);
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-        ui.painter().circle_filled(rect.center(), 5.0, color);
+        crate::theme::dot(ui, token);
         ui.label(RichText::new(text).color(color).strong());
     });
 }
