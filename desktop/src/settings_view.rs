@@ -2047,7 +2047,11 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Pressed anywhere, moves the keyboard and mouse on to the next computer. Empty is off: the screen's edge still switches. Read when the server starts.",
+                        if cfg!(windows) {
+                            "Pressed anywhere, moves the keyboard and mouse on to the next computer. Empty is off: the screen's edge still switches. Read when the server starts."
+                        } else {
+                            "Pressed while the keyboard and mouse are on another computer, moves them on to the next (or home). Linux's desktop gives Pocketdesk no keys at home, so the screen's edge starts a crossing there. Empty is off. Read when the server starts."
+                        },
                     );
                 });
                 row(ui, "shared_input_game_lock", |ui| {

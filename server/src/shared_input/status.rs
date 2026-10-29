@@ -40,6 +40,24 @@ fn keyboard_on() -> String {
         .clone()
 }
 
+/// How Linux's input-capture portal stands for driving (BK8), in the
+/// status file's words: empty while nothing is known.
+static INPUT_CAPTURE: Mutex<&'static str> = Mutex::new("");
+
+/// Note how the input-capture portal stands (`None`: nothing known, as
+/// with driving off).
+pub fn set_input_capture(standing: Option<super::portal_glue::Standing>) {
+    *INPUT_CAPTURE.lock().unwrap_or_else(|e| e.into_inner()) =
+        standing.map_or("", super::portal_glue::Standing::word);
+}
+
+fn input_capture() -> String {
+    INPUT_CAPTURE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .to_string()
+}
+
 /// What one computer's link is, in the file's words: none is away; a
 /// computer refusing to be driven says why (`refused`, as
 /// [`Msg::Refuse`](super::wire::Msg::Refuse) gave it); else direct or
@@ -86,6 +104,7 @@ pub fn status_from(
         answered,
         sharing_on: false,
         phones: BTreeMap::new(),
+        input_capture: String::new(),
     }
 }
 
@@ -103,7 +122,10 @@ pub fn now(paired: &BTreeSet<String>) -> StatusFile {
         .map(|(id, (reason, _))| (id, reason))
         .collect();
     let answered = link::screens_heard().into_keys().collect();
-    status_from(paired, keyboard_on(), &links, &refused, &answered)
+    StatusFile {
+        input_capture: input_capture(),
+        ..status_from(paired, keyboard_on(), &links, &refused, &answered)
+    }
 }
 
 /// The owner's other computers paired now, either way: those that paired
@@ -467,5 +489,26 @@ mod tests {
         assert_eq!(keyboard_on(), "L");
         set_keyboard_on(None);
         assert_eq!(keyboard_on(), "");
+    }
+
+    /// BK8: how Linux's input-capture portal stands goes into the status
+    /// as the desktop app reads it; nothing said is nothing shown.
+    #[test]
+    fn the_input_captures_standing_is_in_the_status() {
+        use super::super::portal_glue::Standing;
+        use pocketdesk_core::local::shared_input::{
+            CAPTURE_FRACTIONAL_SCALE, CAPTURE_NEEDS_PERMISSION, CAPTURE_READY, CAPTURE_UNSUPPORTED,
+        };
+        for (standing, word) in [
+            (Some(Standing::Ready), CAPTURE_READY),
+            (Some(Standing::NeedsPermission), CAPTURE_NEEDS_PERMISSION),
+            (Some(Standing::Unsupported), CAPTURE_UNSUPPORTED),
+            (Some(Standing::FractionalScale), CAPTURE_FRACTIONAL_SCALE),
+            (Some(Standing::Starting), ""),
+            (None, ""),
+        ] {
+            set_input_capture(standing);
+            assert_eq!(now(&BTreeSet::new()).input_capture, word, "{standing:?}");
+        }
     }
 }

@@ -400,8 +400,7 @@ pub(crate) fn still(at: u64) -> bool {
 }
 
 /// The keyboard and mouse came home (the driving side): an image still on
-/// its way to the computer they left is dropped. Only Windows drives.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// its way to the computer they left is dropped.
 pub(crate) fn came_home() {
     switch();
 }
