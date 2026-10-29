@@ -448,7 +448,8 @@ fn service_info_to_peer(info: &ServiceInfo) -> Option<PeerInfo> {
 /// shows it ([`crate::local::nearby::Found`]): its id, name, addresses
 /// (IPv4 first), control port and stream port, from the record this
 /// server's [`announcement_properties`] makes. None without an id or an
-/// address. Nothing is read that the announcement did not say before.
+/// address on this network ([`on_this_network`]). Nothing is read that the
+/// announcement did not say before.
 #[cfg(feature = "local")]
 pub fn found_from(info: &ServiceInfo) -> Option<crate::local::nearby::Found> {
     let text = |key: &str| {
@@ -465,7 +466,14 @@ pub fn found_from(info: &ServiceInfo) -> Option<crate::local::nearby::Found> {
             .unwrap_or("A computer")
             .to_string()
     });
-    let mut addresses: Vec<std::net::IpAddr> = info.get_addresses().iter().copied().collect();
+    // Only addresses on this network: an announcement is anyone's word,
+    // and a Pair here dials its first address.
+    let mut addresses: Vec<std::net::IpAddr> = info
+        .get_addresses()
+        .iter()
+        .copied()
+        .filter(|a| on_this_network(*a))
+        .collect();
     // IPv4 first: link-local IPv6 needs a scope a dial cannot name here.
     addresses.sort_by_key(|a| (a.is_ipv6(), *a));
     let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
@@ -481,6 +489,28 @@ pub fn found_from(info: &ServiceInfo) -> Option<crate::local::nearby::Found> {
             .and_then(|s| s.parse().ok())
             .unwrap_or(crate::streaming::client::DEFAULT_STREAMING_PORT),
     })
+}
+
+/// Whether `ip` is on this computer's own network, as the LAN's other
+/// rules judge it: a private or link-local IPv4 address, or a unique-local
+/// or link-local IPv6 one. A tailnet's (100.64/10, `fd7a:115c:a1e0::/48`)
+/// reaches from anywhere, and loopback is this computer: neither counts,
+/// nor does any public address.
+#[cfg(feature = "local")]
+pub fn on_this_network(ip: std::net::IpAddr) -> bool {
+    match ip.to_canonical() {
+        std::net::IpAddr::V4(v4) => {
+            let tailnet = v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64;
+            !tailnet && (v4.is_private() || v4.is_link_local())
+        }
+        std::net::IpAddr::V6(v6) => {
+            let s = v6.segments();
+            let tailnet = s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0;
+            let unique_local = (s[0] & 0xfe00) == 0xfc00;
+            let link_local = (s[0] & 0xffc0) == 0xfe80;
+            !tailnet && (unique_local || link_local)
+        }
+    }
 }
 
 /// A live look for Pocketdesk computers on this network (the Pair page's
@@ -865,8 +895,9 @@ mod tests {
     }
 
     /// A computer's announcement reads back as the Nearby list's row: its
-    /// id, name, ports and addresses, IPv4 first; one with no id is not a
-    /// computer to pair with.
+    /// id, name, ports and its addresses on this network, IPv4 first; one
+    /// with no id, or no address on this network, is not a computer to
+    /// pair with.
     #[cfg(feature = "local")]
     #[test]
     fn an_announcement_reads_as_a_nearby_computer() {
@@ -875,7 +906,12 @@ mod tests {
             "00000000-0000-4000-8000-0000000000e1",
             1716,
             4716,
-            &["2001:db8::5".to_string(), "192.0.2.5".to_string()],
+            &[
+                "fd00:db8::5".to_string(),
+                "2001:db8::5".to_string(),
+                "192.0.2.5".to_string(),
+                "169.254.10.5".to_string(),
+            ],
         )
         .expect("a record");
         let found = found_from(&info).expect("a computer");
@@ -883,7 +919,16 @@ mod tests {
         assert_eq!(found.name, "Test Tower");
         assert_eq!(found.control_port, 1716);
         assert_eq!(found.stream_port, 4716);
-        assert_eq!(found.addresses, ["192.0.2.5", "2001:db8::5"]);
+        assert_eq!(found.addresses, ["169.254.10.5", "fd00:db8::5"]);
+        let elsewhere = service_info(
+            "Far Tower",
+            "00000000-0000-4000-8000-0000000000e2",
+            1716,
+            4716,
+            &["192.0.2.6".to_string(), "2001:db8::6".to_string()],
+        )
+        .expect("a record");
+        assert_eq!(found_from(&elsewhere), None, "no address on this network");
         let no_id = ServiceInfo::new(
             SERVICE_TYPE,
             "phone",
@@ -894,6 +939,29 @@ mod tests {
         )
         .expect("a record");
         assert_eq!(found_from(&no_id), None);
+    }
+
+    /// Only this network's addresses count: private and link-local IPv4,
+    /// unique-local and link-local IPv6; never loopback, a tailnet's or a
+    /// public one.
+    #[cfg(feature = "local")]
+    #[test]
+    fn only_this_networks_addresses_are_nearby() {
+        let on = |a: &str| on_this_network(a.parse().unwrap());
+        for here in ["169.254.10.5", "fe80::5", "fd00:db8::5"] {
+            assert!(on(here), "{here}");
+        }
+        for away in [
+            "127.0.0.1",
+            "::1",
+            "192.0.2.5",
+            "2001:db8::5",
+            "100.64.0.5",
+            "fd7a:115c:a1e0::5",
+            "::ffff:192.0.2.5",
+        ] {
+            assert!(!on(away), "{away}");
+        }
     }
 
     #[test]
