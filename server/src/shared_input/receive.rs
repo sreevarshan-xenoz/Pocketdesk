@@ -17,6 +17,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::shared_input;
@@ -954,6 +955,29 @@ fn status_due(on: bool, was_on: Option<bool>, since: Option<Duration>) -> bool {
     on || was_on != Some(false) || since.is_none_or(|since| since >= STATUS_IDLE_EVERY)
 }
 
+/// Set while another computer drives this one (its cursor is here): this
+/// computer's own driver watches no edge meanwhile ([`driven_here`]).
+static DRIVEN: AtomicBool = AtomicBool::new(false);
+
+/// Whether another computer drives this one now. This computer's own
+/// driver (Windows' hooks, Linux's input-capture portal) watches no edge
+/// while it does: the pointer here is that computer's, and put on the edge
+/// facing it, an edge watched would carry this computer's keyboard and
+/// mouse straight back (the owner's first live test, Windows driving the
+/// Linux laptop). Watched again once it leaves, goes home or falls silent.
+pub fn driven_here() -> bool {
+    DRIVEN.load(Ordering::SeqCst)
+}
+
+fn set_driven(on: bool) {
+    if DRIVEN.swap(on, Ordering::SeqCst) != on {
+        tracing::debug!(
+            on,
+            "Shared input: driven by another computer (this one's edges are not watched meanwhile)"
+        );
+    }
+}
+
 /// The receiving side, for the server's life: take what other computers
 /// send ([`link::incoming`]) and act on it, keep this computer awake while
 /// someone drives it, and keep `shared_screens.json`. Not run with
@@ -997,6 +1021,8 @@ pub async fn run() {
         // Whatever changed last time round (an arrival, a leave, a silence,
         // a permission or a link gone), the sound follows it.
         follow_sound(&mut sound, &receiver, &mut channels);
+        // And whether this computer's own driver may watch its edges.
+        set_driven(receiver.driver().is_some());
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg, arrived_us, link_id)) = arrival else { break };
@@ -1077,6 +1103,9 @@ pub async fn run() {
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
                     driver_link = Some(link_id);
+                    // Said before its pointer is put here, so no edge it
+                    // lands on is watched.
+                    set_driven(true);
                 }
                 if standing.allowed && matches!(msg, Msg::AskTimings) {
                     let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
@@ -1239,6 +1268,7 @@ pub async fn run() {
             }
         }
     }
+    set_driven(false);
 }
 
 #[cfg(test)]

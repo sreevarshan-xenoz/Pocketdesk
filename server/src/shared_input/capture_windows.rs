@@ -1327,6 +1327,23 @@ impl Glue {
         }
     }
 
+    /// Whether another computer drives this one, as the receiver says:
+    /// while it does, the mouse is not watched (no hooks but the switch
+    /// key's), as on Linux, so no edge carries the keyboard and mouse back
+    /// to it (its injected input is skipped by the hook anyway).
+    fn follow_driven(&mut self, driver: &mut Driver) {
+        let driven = super::receive::driven_here();
+        if driven == driver.driven() {
+            return;
+        }
+        tracing::info!(
+            driven,
+            "Shared input: driven by another computer (true) or no longer; no edge is watched meanwhile"
+        );
+        let actions = driver.set_driven(driven);
+        self.apply(driver, actions);
+    }
+
     /// The sound of the computer driven plays here while the cursor is on
     /// it, with "Hear the computer you're driving here" on (BK6): asked
     /// for after each arrival, played while asked, and let go of as the
@@ -1786,6 +1803,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             // fresh driver after a pause.
             return;
         }
+        glue.follow_driven(&mut driver);
         match captured.recv_timeout(Duration::from_millis(50)) {
             // Looked at at once (and again for a while), before any move
             // queued behind it can cross an edge.
@@ -1800,6 +1818,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             }
             Ok(event) => {
                 last_input = Instant::now();
+                // A move queued as another computer arrived crosses nowhere.
+                glue.follow_driven(&mut driver);
                 if let Some(event) = glue.logical(&driver, event) {
                     let actions = driver.on(event);
                     glue.apply(&mut driver, actions);

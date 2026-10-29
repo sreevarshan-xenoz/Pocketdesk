@@ -300,6 +300,22 @@ impl<B: Backend> Glue<B> {
         }
     }
 
+    /// Whether another computer drives this one, as the receiver says:
+    /// while it does, no barrier is set, so the pointer it puts on the edge
+    /// facing it never carries this computer's keyboard and mouse back.
+    fn follow_driven(&mut self, driver: &mut Driver) {
+        let driven = super::receive::driven_here();
+        if driven == driver.driven() {
+            return;
+        }
+        tracing::info!(
+            driven,
+            "Shared input: driven by another computer (true) or no longer; no edge is watched meanwhile"
+        );
+        let actions = driver.set_driven(driven);
+        self.apply(driver, actions);
+    }
+
     /// The sound of the computer driven plays here while the cursor is on
     /// it (BK6), as on Windows.
     fn follow_sound(&mut self, driver: &mut Driver) {
@@ -492,8 +508,12 @@ fn drive<B: Backend>(
     let mut greeted_at: Option<Instant> = None;
     let mut fractional_screen = false;
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
+        glue.follow_driven(&mut driver);
         match events.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
+                // Looked at again as the event comes: a barrier hit by the
+                // pointer of a computer that just arrived is let go of.
+                glue.follow_driven(&mut driver);
                 if matches!(
                     event,
                     Portal::Motion { .. }

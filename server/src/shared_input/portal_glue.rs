@@ -464,9 +464,10 @@ impl<B: Backend> PortalGlue<B> {
             .as_deref()
             .and_then(|armed| barriers::activated(armed, barrier, at))
             .cloned();
-        let Some(hit) = hit.filter(|_| self.mode == Mode::Watch) else {
+        let Some(hit) = hit.filter(|_| self.mode == Mode::Watch && !driver.driven()) else {
             // Nothing armed that it could be (a stale arming, a game in
-            // front): let go where it is.
+            // front), or another computer drives this one and the pointer
+            // on the edge is its own: let go where it is.
             let at = at.map_or((0, 0), |(x, y)| (x as i32, y as i32));
             self.let_go(at);
             return out;
@@ -1047,6 +1048,50 @@ mod tests {
             vec![]
         );
         assert_eq!(rig.driver.away_on(), Some("W"));
+    }
+
+    /// The owner's first live test: Windows drove this laptop, its pointer
+    /// was put on the left edge, which faces Windows, and the barrier there
+    /// carried the keyboard and mouse straight back.
+    #[test]
+    fn while_driven_no_barrier_is_set_and_a_late_hit_is_let_go_of() {
+        let mut rig = Rig::new(&["W"]);
+        rig.calls();
+        let actions = rig.driver.set_driven(true);
+        assert_eq!(rig.glue.act(actions), vec![]);
+        assert_eq!(rig.calls(), vec![Call::Disarm]);
+        // The rearm every few seconds sets none meanwhile.
+        rig.glue.set_targets(&desk(), &["W".to_string()]);
+        rig.glue.rearm(rig.now);
+        assert_eq!(rig.calls(), vec![]);
+        // A hit already on its way: let go of at once where the other
+        // computer's pointer is, never crossed.
+        let hit = rig.hit(4, 1, (1599.0, 300.0));
+        assert_eq!(sends(&hit), vec![]);
+        assert_eq!(rig.calls(), vec![Call::Release(Some(4), (1599, 300))]);
+        assert!(!rig.glue.captured());
+        assert_eq!(rig.driver.away_on(), None);
+        // It left: the barriers are set again.
+        let actions = rig.driver.set_driven(false);
+        assert_eq!(rig.glue.act(actions), vec![]);
+        assert_eq!(rig.calls(), vec![Call::Arm(vec![(RIGHT, "W".to_string())])]);
+        // And a hit crosses again.
+        let crossed = rig.hit(5, 2, (1600.0, 300.0));
+        assert_eq!(rig.driver.away_on(), Some("W"), "{crossed:?}");
+    }
+
+    /// An activation while driven is let go of even should the barriers
+    /// still be set (the driven word reached the driver after the hit).
+    #[test]
+    fn a_hit_while_driven_is_let_go_of_even_with_barriers_set() {
+        let mut rig = Rig::new(&["W"]);
+        rig.calls();
+        // Driven, the glue not told yet: its barriers are still set.
+        let _late = rig.driver.set_driven(true);
+        let hit = rig.hit(6, 1, (1600.0, 300.0));
+        assert_eq!(sends(&hit), vec![]);
+        assert_eq!(rig.calls(), vec![Call::Release(Some(6), (1600, 300))]);
+        assert_eq!(rig.driver.away_on(), None);
     }
 
     #[test]
