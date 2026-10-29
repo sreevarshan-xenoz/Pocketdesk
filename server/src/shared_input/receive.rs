@@ -321,6 +321,9 @@ impl Receiver {
             );
             // A few pixels inside the edge it came over, never on it:
             // this computer's own edge there leads back to that computer.
+            // Its moves after are put where it says (an edge pixel is
+            // there to click), as the driven flag keeps that edge unwatched
+            // while it sends them.
             let (x, y) = arrival(&self.screens, x, y);
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
@@ -1555,6 +1558,24 @@ mod tests {
         assert_eq!(arrival(&two, x(2500), y(719)), (x(2500), y(715)));
         // Onto the tall screen's last row: its own bottom.
         assert_eq!(arrival(&two, x(100), y(1079)), (x(100), y(1075)));
+    }
+
+    /// PR #552 review M4: a screen left of and above the first (negative
+    /// origins), and a point in the gap beside a shorter screen, which is
+    /// put on the nearest screen's own inside, never onto another.
+    #[test]
+    fn an_arrival_is_put_inside_with_negative_origins_and_gaps() {
+        // A 1280x1024 screen to the left, 200 above the 1920x1080 one.
+        let left = [screen(-1280, -200, 1280, 1024), screen(0, 0, 1920, 1080)];
+        let x = |px| layout::normalize(px, -1280, 1920);
+        let y = |px| layout::normalize(px, -200, 1080);
+        // Onto the left screen's left edge, at its top.
+        assert_eq!(arrival(&left, x(-1280), y(-200)), (x(-1276), y(-196)));
+        // Onto the main screen's top edge, which is 200 below the box's.
+        assert_eq!(arrival(&left, x(500), y(0)), (x(500), y(4)));
+        // In the gap below the left screen (it ends at 824): put on the
+        // left screen's bottom inside, the nearest, not on the main one.
+        assert_eq!(arrival(&left, x(-600), y(1000)), (x(-600), y(819)));
     }
 
     #[test]
