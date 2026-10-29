@@ -119,7 +119,18 @@ pub(crate) async fn handle(packet: &NetworkPacket, sender: &dyn DeviceSender) {
                     .and_then(|v| v.as_str())
                     .unwrap_or(""),
             );
-            let enabled = crate::events::current_config().nearby_pairing;
+            // A paired phone's id never pairs as a computer this way: the
+            // owner's Accept would hand that id to whoever asked.
+            let phone = {
+                let id = sender.device_id().to_string();
+                tokio::task::spawn_blocking(move || {
+                    crate::plugins::pair::is_paired_device(&id)
+                        && !crate::plugins::pair::is_computer_device(&id)
+                })
+                .await
+                .unwrap_or(true)
+            };
+            let enabled = crate::events::current_config().nearby_pairing && !phone;
             let now = Instant::now();
             let taken = lock(&DESK).ask(from.ip(), enabled, now);
             let id = match taken {
