@@ -22,7 +22,7 @@
 //! here; the hook itself ([`install`]) is never installed by a test.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
@@ -155,6 +155,12 @@ impl HookKeys {
 
     fn holds(&self, which: fn(u32) -> bool) -> bool {
         self.held.iter().any(|vk| which(*vk))
+    }
+
+    /// A press taken that could not be said there: Windows has it after
+    /// all, and its release too (review I3).
+    fn untake(&mut self, vk: u32) {
+        self.taken.remove(&vk);
     }
 
     /// What to do with `stroke`.
@@ -301,6 +307,9 @@ struct HookState {
     /// The window the grab is for (its HWND, as a number): with another
     /// window in front, every key is Windows' (review I1).
     window: isize,
+    /// The window stopped listening (its end of `heard` is gone): every key
+    /// is Windows' from then on (review I3).
+    gone: bool,
 }
 
 /// The hook's state, for its procedure: only the hook's thread touches it
@@ -326,21 +335,28 @@ fn decide(
     let Some(state) = slot.as_mut().filter(|s| s.thread_id == here) else {
         return (false, None);
     };
-    if foreground != state.window {
+    if state.gone || foreground != state.window {
         return (false, None);
     }
     if stalled(state.beat.load(Ordering::Acquire), now_ms) {
         return (false, None);
     }
+    // A key is taken only when it was said there: one nobody hears stays
+    // Windows' (review I3).
     let (heard, take) = match state.keys.key(stroke) {
-        Verdict::Pass => (None, false),
-        Verdict::Take(sent) => (sent.map(|(c, down)| Heard::Key(c, down)), true),
-        Verdict::Release => (Some(Heard::Release), false),
+        Verdict::Pass => return (false, None),
+        Verdict::Take(None) => return (true, None),
+        Verdict::Take(Some((code, down))) => (Heard::Key(code, down), true),
+        Verdict::Release => (Heard::Release, false),
     };
-    let woke = heard
-        .is_some_and(|heard| state.heard.send(heard).is_ok())
-        .then_some(state.thread_id);
-    (take, woke)
+    if state.heard.send(heard).is_err() {
+        state.gone = true;
+        if stroke.down {
+            state.keys.untake(stroke.vk);
+        }
+        return (false, None);
+    }
+    (take, Some(state.thread_id))
 }
 
 unsafe extern "system" fn keyboard_hook(
@@ -440,6 +456,10 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
     let (ready_tx, ready) = mpsc::channel::<Option<u32>>();
     let beat = Arc::new(AtomicU64::new(clock_ms()));
     let thread_beat = beat.clone();
+    // Set by an install that gave up waiting (review I3): the thread then
+    // puts no hook in, or takes it out at its next look.
+    let abandoned = Arc::new(AtomicBool::new(false));
+    let thread_abandoned = abandoned.clone();
     let ctx = ctx.clone();
     let thread = std::thread::Builder::new()
         .name("pd-view-grab".into())
@@ -456,12 +476,17 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
                 beat: thread_beat.clone(),
                 thread_id,
                 window,
+                gone: false,
             });
             // SAFETY: this module's handle.
             let Ok(module) = (unsafe { GetModuleHandleW(None) }) else {
                 let _ = ready_tx.send(None);
                 return;
             };
+            if thread_abandoned.load(Ordering::Acquire) {
+                let _ = ready_tx.send(None);
+                return;
+            }
             // SAFETY: a hook procedure of this module, on this thread, which
             // runs a message loop below.
             let Ok(hook) = (unsafe {
@@ -477,6 +502,9 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
                 // SAFETY: this thread's queue.
                 let got = unsafe { GetMessageW(&mut msg, None, 0, 0) };
                 if got.0 <= 0 {
+                    break;
+                }
+                if thread_abandoned.load(Ordering::Acquire) {
                     break;
                 }
                 match msg.message {
@@ -511,9 +539,12 @@ pub fn install(ctx: &egui::Context, viewport: egui::ViewportId) -> Option<Hook> 
             beat,
             heard,
         }),
-        // It could not go in, or did not say: the thread ends by itself
-        // (no hook), or is never told anything.
-        _ => None,
+        // It could not go in, or did not say in time: told to give up, the
+        // thread puts no hook in, or takes it out at its next look.
+        _ => {
+            abandoned.store(true, Ordering::Release);
+            None
+        }
     }
 }
 
@@ -817,6 +848,7 @@ mod tests {
             beat: Arc::new(AtomicU64::new(beat_ms)),
             thread_id,
             window: WINDOW,
+            gone: false,
         };
         (Some(state), heard_rx)
     }
@@ -864,6 +896,27 @@ mod tests {
             decide(&mut slot, 7, 1_100, WINDOW, win(true)),
             (true, Some(7))
         );
+    }
+
+    /// Review I3: with the window no longer listening, a key is Windows':
+    /// the press it would have taken, its release, and every key after.
+    #[test]
+    fn a_key_nobody_hears_is_not_taken() {
+        let (mut slot, heard) = hook_state(7, 1_000);
+        drop(heard);
+        assert_eq!(
+            decide(&mut slot, 7, 1_100, WINDOW, win(true)),
+            (false, None)
+        );
+        assert_eq!(
+            decide(&mut slot, 7, 1_100, WINDOW, win(false)),
+            (false, None)
+        );
+        let alt = stroke(ALT.0, ALT.1, ALT.2, true);
+        assert_eq!(decide(&mut slot, 7, 1_100, WINDOW, alt), (false, None));
+        let tab = stroke(TAB.0, TAB.1, TAB.2, true);
+        assert_eq!(decide(&mut slot, 7, 1_100, WINDOW, tab), (false, None));
+        assert!(slot.as_ref().is_some_and(|s| s.gone));
     }
 
     /// A stale beat: every key is Windows', nothing said.
