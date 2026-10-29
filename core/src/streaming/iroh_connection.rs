@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::dht::DhtAddressLookup;
+use super::transport::CongestionChoice;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use iroh::endpoint::presets::Minimal;
@@ -324,13 +325,15 @@ fn relay_set_name(announced: &[iroh::RelayUrl], use_relays: bool) -> String {
     }
 }
 
-/// The congestion controller for an iroh endpoint (BG4): the home road's
-/// choice ([`super::transport::configured_congestion`]), BBR unless
-/// `POCKETDESK_CC` names another.
-pub fn congestion_factory()
--> std::sync::Arc<dyn iroh::endpoint::ControllerFactory + Send + Sync + 'static> {
-    use super::transport::CongestionChoice;
-    match super::transport::configured_congestion() {
+/// The congestion controller `choice` names, for an iroh connection (BG4).
+/// An endpoint's own is the home road's choice
+/// ([`super::transport::configured_congestion`]), BBR unless
+/// `POCKETDESK_CC` names another; the link between two computers takes
+/// [`COMPUTER_LINK_CONGESTION`] (BK11).
+pub fn congestion_factory(
+    choice: CongestionChoice,
+) -> std::sync::Arc<dyn iroh::endpoint::ControllerFactory + Send + Sync + 'static> {
+    match choice {
         CongestionChoice::Bbr => std::sync::Arc::new(noq_proto::congestion::Bbr3Config::default()),
         CongestionChoice::Cubic => {
             std::sync::Arc::new(noq_proto::congestion::CubicConfig::default())
@@ -358,8 +361,15 @@ pub fn selected_path<'a>(
 /// end lets the other open 1024 at once; the default, 100, ran out on a
 /// lossy link while frames waited on lost packets, and the video stalled
 /// behind it. The connection outlives 45 s of silence, as on the home road;
-/// iroh's own keepalive (every 5 s) holds the paths open meanwhile.
+/// iroh's own keepalive (every 5 s) holds the paths open meanwhile. Its
+/// congestion controller is the home road's (BBR unless `POCKETDESK_CC`
+/// names another).
 pub fn iroh_transport() -> iroh::endpoint::QuicTransportConfig {
+    iroh_transport_with(super::transport::configured_congestion())
+}
+
+/// [`iroh_transport`] on the congestion controller `choice` names.
+pub fn iroh_transport_with(choice: CongestionChoice) -> iroh::endpoint::QuicTransportConfig {
     const IDLE_TIMEOUT_SECS: u64 = 45;
     iroh::endpoint::QuicTransportConfig::builder()
         .max_concurrent_uni_streams(1024u32.into())
@@ -371,8 +381,104 @@ pub fn iroh_transport() -> iroh::endpoint::QuicTransportConfig {
                 .try_into()
                 .expect("idle timeout fits IdleTimeout"),
         ))
-        .congestion_controller_factory(congestion_factory())
+        .congestion_controller_factory(congestion_factory(choice))
         .build()
+}
+
+/// The congestion controller of the link between two computers (BK11).
+/// BBR paces a quiet link at the low rate it has seen, so a key that
+/// follows a ping waited for the pacer, about 25 ms on a LAN (BK10's
+/// measurement). Cubic sends what its window allows at once. This trades
+/// throughput for latency: the link also carries files and clipboard
+/// images between the computers (2c, 2d, 2h, BK3), and those now take Cubic's
+/// way with loss, a smaller window after each one, where BBR kept its rate
+/// on a lossy link (BG4), so a large file over a lossy or long internet
+/// path may go slower than it did (owed, checklist §222). Phones, and a
+/// computer's screen viewed from another (BK7), stay on the endpoint's own.
+pub const COMPUTER_LINK_CONGESTION: CongestionChoice = CongestionChoice::Cubic;
+
+/// [`iroh_transport`] for the link between two computers: the same limits
+/// and timeouts on [`COMPUTER_LINK_CONGESTION`], whatever `POCKETDESK_CC`
+/// says (BK11).
+pub fn computer_link_transport() -> iroh::endpoint::QuicTransportConfig {
+    iroh_transport_with(COMPUTER_LINK_CONGESTION)
+}
+
+/// The ALPNs a computer's link is accepted on, in the order the accepting
+/// end prefers them: [`ALPN_COMPUTER`](crate::protocol::ALPN_COMPUTER),
+/// then the control channel's, which an older computer dials (BK11). The
+/// dialing end offers the same two.
+pub fn computer_link_alpns() -> Vec<Vec<u8>> {
+    vec![
+        crate::protocol::ALPN_COMPUTER.to_vec(),
+        crate::protocol::ALPN_CONTROL.to_vec(),
+    ]
+}
+
+/// Whether a dialer that `offered` these ALPNs asks for the link between
+/// computers (BK11).
+pub fn offers_computer_link<A: AsRef<[u8]>>(offered: impl IntoIterator<Item = A>) -> bool {
+    offered
+        .into_iter()
+        .any(|alpn| alpn.as_ref() == crate::protocol::ALPN_COMPUTER)
+}
+
+/// How `endpoint` accepts a computer's link: [`computer_link_alpns`] on
+/// [`computer_link_transport`] (BK11). Built once, for
+/// [`accept_incoming`].
+pub fn computer_link_server_config(endpoint: &Endpoint) -> Arc<iroh::endpoint::ServerConfig> {
+    Arc::new(
+        endpoint
+            .create_server_config_builder(computer_link_alpns())
+            .set_transport_config(computer_link_transport())
+            .build(),
+    )
+}
+
+/// Accept `incoming`: on `computer_link` when its dialer offers
+/// [`ALPN_COMPUTER`](crate::protocol::ALPN_COMPUTER), on the endpoint's
+/// own configuration otherwise (BK11). The offered ALPNs are read from the
+/// dialer's first packet before the handshake. That read is best effort:
+/// when it fails, the connection is accepted on the endpoint's own
+/// configuration, so a dialer offering both ALPNs, as every computer does,
+/// gets the control channel's on the endpoint's controller, as before (one
+/// offering only the computer link's would get that one on it). Either way
+/// the connection
+/// meets the same checks after the handshake; the ALPN only picks the
+/// controller.
+pub fn accept_incoming(
+    incoming: iroh::endpoint::Incoming,
+    computer_link: Option<&Arc<iroh::endpoint::ServerConfig>>,
+) -> std::result::Result<iroh::endpoint::Accepting, NoqError> {
+    let Some(config) = computer_link else {
+        return incoming.accept();
+    };
+    // The read needs the dialer's ClientHello in its first packet, as it is
+    // with iroh's ring TLS (no post-quantum key share); with aws-lc-rs and
+    // X25519MLKEM768 it could span two, every read would fail and the link
+    // fall back to BBR (`a_new_computer_links_to_a_new_one_on_cubic` fails).
+    let offered = incoming
+        .decrypt()
+        .and_then(|initial| initial.alpns())
+        .map(|alpns| offers_computer_link(alpns.map_while(|alpn| alpn.ok())));
+    match offered {
+        Some(true) => {
+            tracing::debug!("Accepted another computer's link on its own controller (Cubic)");
+            incoming.accept_with(Arc::clone(config))
+        }
+        Some(false) => {
+            tracing::debug!(
+                "Accepted a connection on the endpoint's own controller: no computer link offered"
+            );
+            incoming.accept()
+        }
+        None => {
+            tracing::debug!(
+                "Accepted a connection on the endpoint's own controller: its offered ALPNs could not be read"
+            );
+            incoming.accept()
+        }
+    }
 }
 
 /// The endpoint to dial from: the live one for this key and relays, or a
@@ -632,6 +738,11 @@ impl IrohControlStream {
     /// Dial the control channel from `endpoint`, one this process already
     /// runs (2f: a computer's link to another rides its own WAN endpoint;
     /// a second endpoint with the same key could not use a relay, 2b).
+    ///
+    /// The link between computers (BK11): it asks for
+    /// [`ALPN_COMPUTER`](crate::protocol::ALPN_COMPUTER) and offers the
+    /// control channel's ALPN beside it for an older computer, and this end
+    /// sends on [`computer_link_transport`] whichever the other picks.
     pub async fn dial_from(
         endpoint: &iroh::Endpoint,
         endpoint_id: &str,
@@ -640,10 +751,16 @@ impl IrohControlStream {
         timeout: Duration,
     ) -> Result<Self> {
         let (addr, _) = endpoint_addr(endpoint_id, relay_urls, direct_addrs)?;
-        let conn = tokio::time::timeout(
-            timeout,
-            endpoint.connect(addr, crate::protocol::ALPN_CONTROL),
-        )
+        let options = iroh::endpoint::ConnectOptions::new()
+            .with_transport_config(computer_link_transport())
+            .with_additional_alpns(vec![crate::protocol::ALPN_CONTROL.to_vec()]);
+        let conn = tokio::time::timeout(timeout, async {
+            endpoint
+                .connect_with_opts(addr, crate::protocol::ALPN_COMPUTER, options)
+                .await?
+                .await
+                .map_err(anyhow::Error::from)
+        })
         .await
         .context("iroh dial timed out")?
         .context("iroh dial failed")?;
@@ -1354,5 +1471,236 @@ mod tests {
         drop(accepted);
         dial.close().await;
         desktop.close().await;
+    }
+
+    /// BK11: the link between computers asks for its own ALPN, which the
+    /// accepting end prefers, and rides Cubic whatever `POCKETDESK_CC` says;
+    /// both ALPNs carry the control channel.
+    #[test]
+    fn the_computer_link_has_its_own_alpn_on_cubic() {
+        use crate::protocol::{ALPN_COMPUTER, ALPN_CONTROL, is_control_alpn};
+        let stream = StreamTransportConfig::default().alpn;
+        assert!(offers_computer_link([ALPN_COMPUTER, ALPN_CONTROL]));
+        assert!(offers_computer_link([ALPN_CONTROL, ALPN_COMPUTER]));
+        assert!(offers_computer_link([ALPN_COMPUTER]));
+        assert!(
+            !offers_computer_link([ALPN_CONTROL]),
+            "a phone, or an older computer"
+        );
+        assert!(
+            !offers_computer_link([stream.as_slice()]),
+            "a screen session"
+        );
+        assert!(!offers_computer_link(Vec::<Vec<u8>>::new()));
+        assert!(
+            !offers_computer_link([b"pocketdesk-computer/1x".as_slice()]),
+            "only the exact ALPN"
+        );
+        assert_eq!(
+            computer_link_alpns(),
+            vec![ALPN_COMPUTER.to_vec(), ALPN_CONTROL.to_vec()],
+            "the computer's ALPN first: the accepting end picks by its own order"
+        );
+        assert!(is_control_alpn(ALPN_CONTROL));
+        assert!(is_control_alpn(ALPN_COMPUTER));
+        assert!(!is_control_alpn(&stream));
+        assert!(!is_control_alpn(crate::protocol::ALPN_TRANSFER));
+        assert_eq!(COMPUTER_LINK_CONGESTION, CongestionChoice::Cubic);
+        let built = |choice| {
+            congestion_factory(choice)
+                .build(std::time::Instant::now(), 1200)
+                .into_any()
+        };
+        assert!(built(CongestionChoice::Cubic).is::<noq_proto::congestion::Cubic>());
+        assert!(built(CongestionChoice::Bbr).is::<noq_proto::congestion::Bbr3>());
+        assert!(built(CongestionChoice::NewReno).is::<noq_proto::congestion::NewReno>());
+    }
+
+    /// The controller sending on `conn`'s first path.
+    fn controller(conn: &iroh::endpoint::Connection) -> Box<dyn std::any::Any> {
+        conn.congestion_state(PathId::ZERO)
+            .expect("the first path's controller")
+            .into_any()
+    }
+
+    /// An endpoint on loopback as the server binds its WAN one: the home
+    /// road's transport, taking `alpns`.
+    async fn link_endpoint(alpns: Vec<Vec<u8>>) -> Endpoint {
+        Endpoint::builder(Minimal)
+            .secret_key(iroh::SecretKey::generate())
+            .alpns(alpns)
+            .relay_mode(RelayMode::Disabled)
+            .transport_config(iroh_transport())
+            .bind_addr(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap()
+            .bind()
+            .await
+            .unwrap()
+    }
+
+    /// The server's WAN endpoint after BK11: the stream's ALPN, the
+    /// control channel's, and the computer link's, accepted through
+    /// [`accept_incoming`].
+    async fn new_acceptor() -> (
+        Endpoint,
+        tokio::task::JoinHandle<iroh::endpoint::Connection>,
+    ) {
+        let acceptor = link_endpoint(vec![
+            StreamTransportConfig::default().alpn,
+            crate::protocol::ALPN_CONTROL.to_vec(),
+            crate::protocol::ALPN_COMPUTER.to_vec(),
+        ])
+        .await;
+        let config = computer_link_server_config(&acceptor);
+        let accepting = acceptor.clone();
+        let accepted = tokio::spawn(async move {
+            let incoming = accepting.accept().await.expect("incoming");
+            accept_incoming(incoming, Some(&config))
+                .expect("accepted")
+                .await
+                .expect("handshake")
+        });
+        (acceptor, accepted)
+    }
+
+    async fn dial_link(dialing: &Endpoint, to: &Endpoint) -> IrohControlStream {
+        IrohControlStream::dial_from(
+            dialing,
+            &to.id().to_string(),
+            &[],
+            &[to.bound_sockets()[0].to_string()],
+            Duration::from_secs(10),
+        )
+        .await
+        .expect("the link dials")
+    }
+
+    /// BK11: a computer dialing a computer gets the computer link's ALPN,
+    /// and both ends send on Cubic, so neither paces a quiet link.
+    #[tokio::test]
+    async fn a_new_computer_links_to_a_new_one_on_cubic() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (acceptor, accepted) = new_acceptor().await;
+        let dialing = link_endpoint(vec![crate::protocol::ALPN_CONTROL.to_vec()]).await;
+        let stream = dial_link(&dialing, &acceptor).await;
+        let accepted = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("accepted in time")
+            .unwrap();
+        assert_eq!(stream.connection().alpn(), crate::protocol::ALPN_COMPUTER);
+        assert_eq!(accepted.alpn(), crate::protocol::ALPN_COMPUTER);
+        assert!(controller(&stream.connection()).is::<noq_proto::congestion::Cubic>());
+        assert!(
+            controller(&accepted).is::<noq_proto::congestion::Cubic>(),
+            "the accepting end sends on Cubic too"
+        );
+        drop(stream);
+        drop(accepted);
+        dialing.close().await;
+        acceptor.close().await;
+    }
+
+    /// BK11: a new computer still links to an older one, which takes only
+    /// the control channel's ALPN; this end sends on Cubic, the older one
+    /// on its own controller.
+    #[tokio::test]
+    async fn a_new_computer_links_to_an_older_one_on_the_control_alpn() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let older = link_endpoint(vec![
+            StreamTransportConfig::default().alpn,
+            crate::protocol::ALPN_CONTROL.to_vec(),
+        ])
+        .await;
+        let accepted = {
+            let older = older.clone();
+            tokio::spawn(async move {
+                let incoming = older.accept().await.expect("incoming");
+                incoming
+                    .accept()
+                    .expect("accepted")
+                    .await
+                    .expect("handshake")
+            })
+        };
+        let dialing = link_endpoint(vec![crate::protocol::ALPN_CONTROL.to_vec()]).await;
+        let stream = dial_link(&dialing, &older).await;
+        let accepted = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("accepted in time")
+            .unwrap();
+        assert_eq!(stream.connection().alpn(), crate::protocol::ALPN_CONTROL);
+        assert_eq!(accepted.alpn(), crate::protocol::ALPN_CONTROL);
+        assert!(controller(&stream.connection()).is::<noq_proto::congestion::Cubic>());
+        assert!(controller(&accepted).is::<noq_proto::congestion::Bbr3>());
+        drop(stream);
+        drop(accepted);
+        dialing.close().await;
+        older.close().await;
+    }
+
+    /// BK11: a computer's link, which offers both ALPNs, accepted on the
+    /// endpoint's own configuration (its offered ALPNs not read in time)
+    /// gets the control channel's ALPN, which the server's list puts first,
+    /// and the endpoint's controller: the same as before BK11, never the
+    /// computer link's ALPN on BBR. The dialing end still sends on Cubic.
+    #[tokio::test]
+    async fn a_link_accepted_without_reading_its_alpns_gets_the_control_alpn() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let acceptor = link_endpoint(vec![
+            StreamTransportConfig::default().alpn,
+            crate::protocol::ALPN_CONTROL.to_vec(),
+            crate::protocol::ALPN_COMPUTER.to_vec(),
+        ])
+        .await;
+        let accepted = {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let incoming = acceptor.accept().await.expect("incoming");
+                accept_incoming(incoming, None)
+                    .expect("accepted")
+                    .await
+                    .expect("handshake")
+            })
+        };
+        let dialing = link_endpoint(vec![crate::protocol::ALPN_CONTROL.to_vec()]).await;
+        let stream = dial_link(&dialing, &acceptor).await;
+        let accepted = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("accepted in time")
+            .unwrap();
+        assert_eq!(stream.connection().alpn(), crate::protocol::ALPN_CONTROL);
+        assert_eq!(accepted.alpn(), crate::protocol::ALPN_CONTROL);
+        assert!(controller(&stream.connection()).is::<noq_proto::congestion::Cubic>());
+        assert!(controller(&accepted).is::<noq_proto::congestion::Bbr3>());
+        drop(stream);
+        drop(accepted);
+        dialing.close().await;
+        acceptor.close().await;
+    }
+
+    /// BK11: an older computer, or a phone, dialing the control channel's
+    /// ALPN alone is accepted as before, on BBR at both ends.
+    #[tokio::test]
+    async fn an_older_dialer_links_to_a_new_computer_on_bbr() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (acceptor, accepted) = new_acceptor().await;
+        let dialing = link_endpoint(vec![crate::protocol::ALPN_CONTROL.to_vec()]).await;
+        let addr = EndpointAddr::new(acceptor.id()).with_ip_addr(acceptor.bound_sockets()[0]);
+        let dialed = dialing
+            .connect(addr, crate::protocol::ALPN_CONTROL)
+            .await
+            .expect("the older dial");
+        let accepted = tokio::time::timeout(Duration::from_secs(10), accepted)
+            .await
+            .expect("accepted in time")
+            .unwrap();
+        assert_eq!(dialed.alpn(), crate::protocol::ALPN_CONTROL);
+        assert_eq!(accepted.alpn(), crate::protocol::ALPN_CONTROL);
+        assert!(controller(&dialed).is::<noq_proto::congestion::Bbr3>());
+        assert!(controller(&accepted).is::<noq_proto::congestion::Bbr3>());
+        drop(dialed);
+        drop(accepted);
+        dialing.close().await;
+        acceptor.close().await;
     }
 }
