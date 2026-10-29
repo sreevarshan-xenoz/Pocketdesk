@@ -28,6 +28,7 @@ A **pure Rust** server for Linux (Wayland-native, Hyprland first) and Windows 10
 - **Control from the phone:** touch, a trackpad with gestures, a pen with pressure, a gamepad, an air mouse and a full keyboard, with the desktop's sound on the phone.
 - **The KDE Connect set, both ways:** the clipboard, files and a remote file browser, the phone's notifications, texts and calls on the computer, ringing either one to find it, and waking the computer.
 - **The phone on the computer:** its screen or camera in a window you can drive with the mouse, its photos and folders, its music in the computer's media controls.
+- **Your computers together:** one keyboard and mouse across them (Windows driving Linux), with the clipboard, files and sound following the pointer, the phone as another screen, and one computer's screen in a window on another.
 - **From anywhere:** on your network, through Tailscale, or over the internet with no port forward and no VPN (iroh punches a direct path, or uses a relay).
 - **Yours alone:** no account and no Pocketdesk server. Each end holds the other to its key (TLS 1.3), and each phone has its own permissions.
 
@@ -59,7 +60,7 @@ Something not working? The desktop app's **Diagnostics** page checks the server,
 | Rust server, Kotlin phone app | ✅ | ✅ (Rust) | ❌ (C++) | ❌ (C++) |
 | Open Source | ✅ | ✅ | ✅ | ✅ |
 
-**Status: beta.** Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. GNOME and KDE Plasma are supported but not yet checked. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
+**Status: beta.** Partly device-checked: Hyprland on a laptop and Sway in a VM (on Linux, not yet files, notifications or sound), and Windows with a Galaxy A71 and an OPPO phone. GNOME and KDE Plasma are supported but not yet checked. The shared keyboard and mouse (new in 0.8.0) is checked only in parts, from scripts: its receiving end on the Linux laptop and the phone as a screen; Windows driving Linux at the desk is not yet. [What works where](docs/guide.md#what-works-where) has the details, and [the checklist](docs/device-verification-checklist.md) every check still open.
 
 ## Learn more
 
