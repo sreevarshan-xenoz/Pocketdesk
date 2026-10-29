@@ -629,16 +629,16 @@ pub fn may_reconnect(reason: Option<&str>) -> bool {
     !ENDED_ON_PURPOSE.iter().any(|word| reason.contains(word))
 }
 
-/// The words for a session that ended: before the other computer let this
-/// one in (it refused, or its owner said no), or after (that computer ended
-/// it, or the link went).
+/// The words for a session that ended for good: before the other computer
+/// let this one in (it refused, or its owner said no), or after (that
+/// computer ended it).
 fn ended_words(name: &str, admitted: bool, reason: Option<&str>) -> String {
     if admitted {
-        if may_reconnect(reason) {
-            return format!("Lost the connection to {name}.");
-        }
-        let reason = reason.unwrap_or_default();
-        return format!("{name} ended the view ({reason}).");
+        // A link gone is dialled again, never said here.
+        return match reason.filter(|r| !r.is_empty()) {
+            Some(reason) => format!("{name} ended the view ({reason})."),
+            None => format!("{name} ended the view."),
+        };
     }
     let reason = reason.filter(|r| !r.is_empty()).unwrap_or("it closed");
     format!(
@@ -2007,10 +2007,13 @@ mod tests {
 
     #[test]
     fn an_end_says_whether_the_computer_let_this_one_in() {
+        // Said only for an end the other computer chose (a link gone is
+        // dialled again, PR #551 review M9).
         assert_eq!(
-            ended_words("Desk", true, Some("closed")),
-            "Lost the connection to Desk."
+            ended_words("Desk", true, Some("kicked by user")),
+            "Desk ended the view (kicked by user)."
         );
+        assert_eq!(ended_words("Desk", true, None), "Desk ended the view.");
         let refused = ended_words("Desk", false, Some("session refused"));
         assert!(refused.starts_with("Desk did not let this computer in (session refused)"));
         assert!(ended_words("Desk", false, None).contains("(it closed)"));
