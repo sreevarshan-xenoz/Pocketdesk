@@ -429,6 +429,15 @@ fn modifiers_down() -> Vec<u32> {
     .collect()
 }
 
+/// Take the hook's state out, if it is the thread `thread_id`'s: a later
+/// hook's is that hook's.
+fn clear_own(thread_id: u32) {
+    let mut slot = HOOK_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|s| s.thread_id == thread_id) {
+        slot.take();
+    }
+}
+
 /// The window in front, when it is one of this program's (the computer
 /// window, as the grab goes in only while it has the focus): its HWND, as
 /// a number.
@@ -494,15 +503,6 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
             let mut msg = MSG::default();
             // SAFETY: as above.
             let _ = unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE) };
-            *HOOK_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(HookState {
-                keys: HookKeys::with_held(modifiers_down()),
-                heard: heard_tx,
-                wake: wake_tx,
-                beat: thread_beat.clone(),
-                thread_id,
-                window,
-                gone: false,
-            });
             // SAFETY: this module's handle.
             let Ok(module) = (unsafe { GetModuleHandleW(None) }) else {
                 let _ = ready_tx.send(None);
@@ -512,11 +512,24 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
                 let _ = ready_tx.send(None);
                 return;
             }
+            // The state goes in just before the hook (the procedure needs
+            // it from its first key), and out again if the hook does not
+            // (review M2).
+            *HOOK_STATE.lock().unwrap_or_else(|e| e.into_inner()) = Some(HookState {
+                keys: HookKeys::with_held(modifiers_down()),
+                heard: heard_tx,
+                wake: wake_tx,
+                beat: thread_beat.clone(),
+                thread_id,
+                window,
+                gone: false,
+            });
             // SAFETY: a hook procedure of this module, on this thread, which
             // runs a message loop below.
             let Ok(hook) = (unsafe {
                 SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), Some(module.into()), 0)
             }) else {
+                clear_own(thread_id);
                 let _ = ready_tx.send(None);
                 return;
             };
@@ -545,13 +558,8 @@ fn install_for(ctx: &egui::Context, viewport: egui::ViewportId, window: isize) -
                 // SAFETY: as above.
                 let _ = unsafe { KillTimer(None, timer) };
             }
-            // Its own state only: a later hook's is that hook's.
-            let mut slot = HOOK_STATE.lock().unwrap_or_else(|e| e.into_inner());
-            if slot.as_ref().is_some_and(|s| s.thread_id == thread_id) {
-                slot.take();
-            }
-            // Its waker ends with it, and the window looks again.
-            drop(slot);
+            // Its waker ends with its state, and the window looks again.
+            clear_own(thread_id);
         })
         .ok()?;
     match ready.recv_timeout(STALL) {
