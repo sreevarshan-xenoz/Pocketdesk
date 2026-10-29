@@ -3129,6 +3129,15 @@ Built 2026-10-30. A unit test covers the decision; the link itself was not run.
 - [ ] With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
 - [ ] With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
 
+## 229. Look and feel (Desktop UX 3)
+
+Built 2026-10-30. Kittest drove the Overview's status card, Details fold and first-run steps, and each Devices group switch against the trust store; the snapshots were drawn by Mesa. Not seen on a real screen: fonts, scaling and the focus ring with a real keyboard.
+- [ ] On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
+- [ ] Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
+- [ ] With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
+- [ ] A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)
+- [ ] On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

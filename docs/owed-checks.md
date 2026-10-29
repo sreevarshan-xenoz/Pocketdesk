@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-981 open items.
+986 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 153 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 155 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 73 |
+| A second computer | 75 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -122,6 +122,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **162. The phone's state on the computer (L9)**
 
 - The phone away: the line is gone.
+
+**229. Look and feel (Desktop UX 3)**
+
+- On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -511,6 +515,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **225. Both computers driving at once, and two pairing papercuts (from the owner's first live test)**
 
 - With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
+
+**229. Look and feel (Desktop UX 3)**
+
+- On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
+- Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
 
 ## A phone with a SIM
 
@@ -937,6 +946,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
 - With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
+
+**229. Look and feel (Desktop UX 3)**
+
+- With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
+- A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
