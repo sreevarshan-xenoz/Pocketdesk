@@ -2135,7 +2135,7 @@ impl SettingsForm {
                         );
                         note(
                             ui,
-                            "Press and let go of Ctrl+Alt+Shift to keep them here until the window leaves full screen or loses the focus. The window's Send keys menu sends them too, and Ctrl+Alt+Del or Task Manager.",
+                            "Press and let go of Ctrl+Alt+Shift to keep them here until the window leaves full screen or loses the focus. The window's Send keys menu sends them too, and Task Manager to a Windows computer.",
                         );
                     });
                 }

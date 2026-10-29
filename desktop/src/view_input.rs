@@ -186,10 +186,12 @@ pub enum SendKey {
     Win,
     AltTab,
     AltF4,
+    /// Print Screen, never with Alt held there (Alt+SysRq is Linux's magic
+    /// SysRq).
     PrintScreen,
-    /// Linux only: Windows takes Ctrl+Alt+Del only from a SYSTEM service.
-    CtrlAltDel,
-    /// Windows' Task Manager, in place of Ctrl+Alt+Del.
+    /// Windows' Task Manager: Windows takes Ctrl+Alt+Del only from a
+    /// SYSTEM service. No Ctrl+Alt+Del for Linux either: on a text console
+    /// it reboots the computer (PR #559 review I4).
     CtrlShiftEsc,
     /// Windows+L.
     Lock,
@@ -203,7 +205,6 @@ impl SendKey {
             SendKey::AltTab => "Alt+Tab",
             SendKey::AltF4 => "Alt+F4",
             SendKey::PrintScreen => "Print Screen",
-            SendKey::CtrlAltDel => "Ctrl+Alt+Del",
             SendKey::CtrlShiftEsc => "Ctrl+Shift+Esc (Task Manager)",
             SendKey::Lock => "Lock (Windows+L)",
         }
@@ -216,7 +217,6 @@ impl SendKey {
             SendKey::AltTab => &[LEFT_ALT, KEY_TAB],
             SendKey::AltF4 => &[LEFT_ALT, KEY_F4],
             SendKey::PrintScreen => &[KEY_SYSRQ],
-            SendKey::CtrlAltDel => &[LEFT_CTRL, LEFT_ALT, KEY_DELETE],
             SendKey::CtrlShiftEsc => &[LEFT_CTRL, LEFT_SHIFT, KEY_ESC],
             SendKey::Lock => &[LEFT_META, KEY_L],
         }
@@ -224,8 +224,8 @@ impl SendKey {
 }
 
 /// The Send keys menu for a computer that runs Windows (`Some(true)`),
-/// Linux (`Some(false)`), or one that has not said (`None`: only the keys
-/// every system takes).
+/// Linux (`Some(false)`), or one that has not said (`None`): the keys every
+/// system takes, and Windows' Task Manager and Lock.
 pub fn send_key_choices(windows: Option<bool>) -> Vec<SendKey> {
     let mut keys = vec![
         SendKey::Win,
@@ -233,10 +233,8 @@ pub fn send_key_choices(windows: Option<bool>) -> Vec<SendKey> {
         SendKey::AltF4,
         SendKey::PrintScreen,
     ];
-    match windows {
-        Some(true) => keys.extend([SendKey::CtrlShiftEsc, SendKey::Lock]),
-        Some(false) => keys.push(SendKey::CtrlAltDel),
-        None => {}
+    if windows == Some(true) {
+        keys.extend([SendKey::CtrlShiftEsc, SendKey::Lock]);
     }
     keys
 }
@@ -641,21 +639,45 @@ impl WindowInput {
     }
 
     /// `keys` pressed in order and let go in reverse there, as a chord from
-    /// the Send keys menu (PC4); a key held there already stays held.
+    /// the Send keys menu (PC4); a key held there already stays held. Print
+    /// Screen goes with no Alt held there: Alt held is let go first and
+    /// pressed again after, so it is never Alt+SysRq, Linux's magic SysRq
+    /// (PR #559 review I4).
     pub fn chord(&mut self, keys: &[u16]) -> Vec<InputPacket> {
+        let lifted: Vec<u16> = if keys.contains(&KEY_SYSRQ) {
+            [LEFT_ALT, RIGHT_ALT]
+                .into_iter()
+                .filter(|alt| self.down_there.contains(alt))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let pressed: Vec<u16> = keys
             .iter()
             .copied()
             .filter(|code| !self.down_there.contains(code))
             .collect();
-        let mut out: Vec<InputPacket> = pressed
+        let mut out: Vec<InputPacket> = lifted
             .iter()
-            .map(|&key| InputPacket::KeyEvent { key, pressed: true })
+            .map(|&key| InputPacket::KeyEvent {
+                key,
+                pressed: false,
+            })
             .collect();
+        out.extend(
+            pressed
+                .iter()
+                .map(|&key| InputPacket::KeyEvent { key, pressed: true }),
+        );
         out.extend(pressed.iter().rev().map(|&key| InputPacket::KeyEvent {
             key,
             pressed: false,
         }));
+        out.extend(
+            lifted
+                .iter()
+                .map(|&key| InputPacket::KeyEvent { key, pressed: true }),
+        );
         out
     }
 
@@ -1099,9 +1121,10 @@ mod tests {
         );
     }
 
-    /// PC4: every host has Win, Alt+Tab, Alt+F4 and Print Screen; Linux
-    /// Ctrl+Alt+Del, Windows Ctrl+Shift+Esc and Lock in its place, and a
-    /// computer that has not said its system only the keys every one takes.
+    /// PC4: every host has Win, Alt+Tab, Alt+F4 and Print Screen, and a
+    /// Windows one Ctrl+Shift+Esc and Lock too; no host has Ctrl+Alt+Del
+    /// (Windows' takes it only from a system service, and on a Linux text
+    /// console it reboots, PR #559 review I4).
     #[test]
     fn the_send_keys_menu_offers_what_the_system_takes() {
         let common = [
@@ -1111,13 +1134,19 @@ mod tests {
             SendKey::PrintScreen,
         ];
         assert_eq!(send_key_choices(None), common);
-        let linux = send_key_choices(Some(false));
-        assert_eq!(linux[..4], common);
-        assert_eq!(linux[4..], [SendKey::CtrlAltDel]);
+        assert_eq!(send_key_choices(Some(false)), common, "Linux");
         let windows = send_key_choices(Some(true));
         assert_eq!(windows[..4], common);
         assert_eq!(windows[4..], [SendKey::CtrlShiftEsc, SendKey::Lock]);
-        assert!(!windows.contains(&SendKey::CtrlAltDel));
+        for key in send_key_choices(Some(true)) {
+            let keys = key.keys();
+            assert!(
+                !(keys.contains(&LEFT_CTRL)
+                    && keys.contains(&LEFT_ALT)
+                    && keys.contains(&KEY_DELETE)),
+                "no Ctrl+Alt+Del"
+            );
+        }
         for key in send_key_choices(Some(true))
             .into_iter()
             .chain(send_key_choices(Some(false)))
@@ -1142,13 +1171,13 @@ mod tests {
     fn a_chord_goes_down_in_order_and_up_in_reverse() {
         let mut input = WindowInput::default();
         assert_eq!(
-            words(&input.chord(SendKey::CtrlAltDel.keys())),
+            words(&input.chord(SendKey::CtrlShiftEsc.keys())),
             [
                 "KeyEvent { key: 29, pressed: true }",
-                "KeyEvent { key: 56, pressed: true }",
-                "KeyEvent { key: 111, pressed: true }",
-                "KeyEvent { key: 111, pressed: false }",
-                "KeyEvent { key: 56, pressed: false }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 1, pressed: true }",
+                "KeyEvent { key: 1, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
                 "KeyEvent { key: 29, pressed: false }",
             ]
         );
@@ -1179,6 +1208,18 @@ mod tests {
             ]
         );
         assert!(input.holds(), "Alt is still held there");
+        // Review I4: Print Screen with Alt held there lets Alt go first and
+        // presses it again after, never Alt+SysRq.
+        assert_eq!(
+            words(&input.chord(SendKey::PrintScreen.keys())),
+            [
+                "KeyEvent { key: 56, pressed: false }",
+                "KeyEvent { key: 99, pressed: true }",
+                "KeyEvent { key: 99, pressed: false }",
+                "KeyEvent { key: 56, pressed: true }",
+            ]
+        );
+        assert!(input.holds(), "Alt is held there again, as it is here");
     }
 
     /// PC4: a key the grab took is held there until let go, Shift held
