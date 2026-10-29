@@ -40,6 +40,7 @@ pub mod layout;
 pub mod link;
 pub mod phone;
 pub mod phone_test;
+pub mod portal_glue;
 pub mod receive;
 pub mod screens;
 pub mod share_test;
