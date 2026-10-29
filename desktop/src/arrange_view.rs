@@ -139,6 +139,9 @@ pub fn checklist(facts: Facts) -> Vec<Step> {
     ]
 }
 
+/// The width of a step's mark, a tick or a dot.
+const MARK_WIDTH: f32 = 14.0;
+
 /// The checklist's heading.
 pub const SETUP: &str = "Setup";
 
@@ -627,12 +630,19 @@ impl ArrangeView {
         ui.label(RichText::new(SETUP).strong());
         for step in checklist(facts) {
             ui.horizontal_wrapped(|ui| {
-                if step.done {
-                    ui.label(RichText::new("✔").color(crate::theme::good(ui)).strong());
-                    ui.label(step.label);
+                // The mark in a box of one width, so the labels line up
+                // (PR #555 review m8).
+                let mark = if step.done {
+                    RichText::new("✔").color(crate::theme::good(ui))
                 } else {
-                    ui.label(RichText::new("•").color(crate::theme::warn(ui)).strong());
-                    ui.label(step.label);
+                    RichText::new("•").color(crate::theme::warn(ui))
+                };
+                ui.add_sized(
+                    [MARK_WIDTH, ui.spacing().interact_size.y],
+                    egui::Label::new(mark.strong()),
+                );
+                ui.label(step.label);
+                if !step.done {
                     ui.label(RichText::new(step.todo).color(muted));
                     if let Some(fix) = step.fix
                         && ui.small_button(fix.label()).clicked()
