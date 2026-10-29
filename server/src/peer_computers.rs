@@ -183,6 +183,27 @@ pub(crate) fn listed_from(
     computer
 }
 
+/// Which of `labels`, the addresses a computer that paired here both ways
+/// gave, its certificate `hash` is pinned for (PC1): each but those pinned
+/// already to another listed computer's certificate (`others`), whose pins
+/// it may not take, whatever it says its addresses are.
+fn pinnable(
+    labels: &[String],
+    known: &HashMap<String, [u8; 32]>,
+    others: &[[u8; 32]],
+    hash: &[u8; 32],
+) -> Vec<String> {
+    labels
+        .iter()
+        .filter(|label| {
+            known
+                .get(*label)
+                .is_none_or(|pinned| pinned == hash || !others.contains(pinned))
+        })
+        .cloned()
+        .collect()
+}
+
 /// List `computer`, which paired here both ways (PC1): its certificate
 /// pinned for its addresses, as pairing with its link pins it, its entry
 /// in `computers.json` (replacing any older one, whose other addresses'
@@ -200,8 +221,18 @@ fn list_back(
         .filter_map(|a| peer_label_for_address(a))
         .collect();
     if let Some(hash) = parse_fingerprint(&computer.fingerprint) {
-        for label in &labels {
-            if let Err(e) = certs.pin_peer(label, hash) {
+        // Its addresses are its own word: one another listed computer's
+        // certificate is pinned for keeps that pin (that computer is dialed
+        // there, never this one).
+        let others: Vec<[u8; 32]> = computers::read(dir)
+            .computers
+            .iter()
+            .filter(|c| c.device_id != computer.device_id)
+            .filter_map(|c| parse_fingerprint(&c.fingerprint))
+            .collect();
+        let known: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
+        for label in pinnable(&labels, &known, &others, &hash) {
+            if let Err(e) = certs.pin_peer(&label, hash) {
                 tracing::warn!("Could not pin another computer's certificate: {e:#}");
             }
         }
@@ -1955,6 +1986,33 @@ mod tests {
             last_pairing: None,
         };
         assert_eq!(untrusted_mine(&file, |id| id == "kept"), ["unpaired"]);
+    }
+
+    /// PC1: a computer that paired both ways is pinned at the addresses it
+    /// gave, but never over another listed computer's pin; its own old pin,
+    /// or one no listed computer holds, is replaced.
+    #[test]
+    fn a_computer_paired_both_ways_takes_no_other_computers_pin() {
+        let label = |a: &str| peer_label_for_address(a).unwrap();
+        let labels: Vec<String> = ["192.0.2.50", "192.0.2.51", "192.0.2.52", "192.0.2.53"]
+            .map(label)
+            .to_vec();
+        let known: HashMap<String, [u8; 32]> = [
+            (label("192.0.2.51"), [0xcd; 32]),
+            (label("192.0.2.52"), [0xab; 32]),
+            (label("192.0.2.53"), [0xee; 32]),
+        ]
+        .into();
+        let others = [[0xcd; 32]];
+        assert_eq!(
+            pinnable(&labels, &known, &others, &[0xab; 32]),
+            [
+                label("192.0.2.50"),
+                label("192.0.2.52"),
+                label("192.0.2.53")
+            ],
+            "another computer's pin at .51 stays"
+        );
     }
 
     /// PC1: what a computer that paired both ways said of itself lists it,
