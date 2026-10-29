@@ -77,7 +77,9 @@ pub struct HyprWindow {
     pub size: [i32; 2],
     #[serde(default)]
     pub monitor: i32,
-    /// 0 none, 1 regular fullscreen, 2 maximize (j/clients).
+    /// Its full-screen mode (j/clients, j/activewindow): 0 none; since
+    /// Hyprland 0.42, 1 maximized, 2 full screen, 3 both (before it, 1 was
+    /// full screen and 2 maximized).
     #[serde(default)]
     pub fullscreen: u8,
     #[serde(default)]
