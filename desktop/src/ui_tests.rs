@@ -1929,44 +1929,111 @@ fn the_first_run_steps_hide() {
     assert!(app.query_by_label("Pair a phone").is_some());
 }
 
-/// UX 3: each group's switch on Devices saves its switches: all on (but
-/// Run commands) when not all were on, then all off; each saved to the
-/// trust store as a single switch is.
+/// UX 3: each group's switch on Devices saves its own switches and no
+/// others: the groups spelled out here, not taken from the app's helpers.
+/// Every other switch and "Ask before each session" stay as they were, a
+/// part-on group shows as mixed, and Automation never turns Run commands
+/// on but does turn it off (PR #558 review).
 #[test]
 fn each_permission_group_switch_saves_its_permissions() {
-    use pocketdesk_core::protocol::permissions::Capability;
+    use egui_kittest::kittest::NodeT;
+    use pocketdesk_core::protocol::permissions::{Capability as C, DevicePermissions};
+    // AwayLock can be set on Windows and Linux, where these tests run.
+    let groups: [(&str, Vec<C>); 5] = [
+        ("Control", vec![C::Input, C::SharedInput, C::Power, C::Peek]),
+        (
+            "Screen, sound and media",
+            vec![C::Cast, C::Audio, C::Mic, C::Media, C::PhoneSound],
+        ),
+        (
+            "Files and clipboard",
+            vec![C::Clipboard, C::Files, C::Browse, C::Links, C::Notes],
+        ),
+        (
+            "Phone on this computer",
+            vec![
+                C::Notifications,
+                C::Texts,
+                C::Dial,
+                C::PhoneActions,
+                C::Ring,
+                C::Mute,
+            ],
+        ),
+        (
+            "Automation",
+            vec![C::Command, C::Ask, C::Tasks, C::AwayLock],
+        ),
+    ];
     let fixture = Fixture::new();
     pair_phone(fixture.state(), PHONE, "Test Phone");
-    let allows = |state: &Path, c: Capability| {
+    // Not the defaults: Run commands on, one switch off in each group, and
+    // each session asked for.
+    let mut start = DevicePermissions::default();
+    start.set(C::Exec, true);
+    for c in [C::Input, C::Audio, C::Clipboard, C::Texts, C::Tasks] {
+        start.set(c, false);
+    }
+    // And one on in each, so each shows part-on.
+    for c in [C::Power, C::Cast, C::Files, C::Notifications, C::Command] {
+        start.set(c, true);
+    }
+    start.ask_first = true;
+    TrustStore::update(fixture.state().join(TRUST_FILE), |store| {
+        store.set_permissions(PHONE, start.clone())
+    })
+    .expect("set");
+    let read = |state: &Path| {
         TrustStore::read(state.join(TRUST_FILE))
             .expect("the trust store")
             .permissions(PHONE)
-            .allows(c)
     };
     let mut app = fixture.open(Some(Tab::Devices));
     app.get_by_label("What Test Phone may do").click();
     app.run_steps(3);
-    for (group, members) in crate::app::PERMISSION_GROUPS {
-        let on = crate::app::group_turns_on(members, false);
-        let off = crate::app::group_turns_off(members, false);
-        assert!(!off.is_empty(), "{group}");
-        for round in 0..2 {
-            let was_all_on = on.iter().all(|c| allows(fixture.state(), *c));
-            app.get_by_label(group).scroll_to_me();
-            app.run_steps(3);
-            app.get_by_label(group).click();
-            app.run_steps(3);
-            if was_all_on {
-                for c in &off {
-                    assert!(!allows(fixture.state(), *c), "{group} {round}: {c:?} off");
-                }
-            } else {
-                for c in &on {
-                    assert!(allows(fixture.state(), *c), "{group} {round}: {c:?} on");
-                }
+    let click = |app: &mut Harness<'static, PocketdeskApp>, label: &str| {
+        app.get_by_label(label).scroll_to_me();
+        app.run_steps(3);
+        app.get_by_label(label).click();
+        app.run_steps(3);
+    };
+    // Every switch outside `members` (and ask_first) as `before` had it.
+    let others_kept = |before: &DevicePermissions, members: &[C], what: &str| {
+        let now = read(fixture.state());
+        assert_eq!(now.ask_first, before.ask_first, "{what}: ask_first");
+        for c in C::ALL {
+            if !members.contains(&c) {
+                assert_eq!(now.allows(c), before.allows(c), "{what}: {c:?} kept");
             }
         }
-        // Run commands is never turned on by its group.
-        assert!(!allows(fixture.state(), Capability::Exec), "{group}");
+    };
+    for (group, members) in &groups {
+        // Part-on at first: one of each group was turned off above.
+        assert_eq!(
+            app.get_by_label(group).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::Mixed),
+            "{group} shows part-on"
+        );
+        let before = read(fixture.state());
+        click(&mut app, group);
+        for c in members {
+            assert!(read(fixture.state()).allows(*c), "{group}: {c:?} on");
+        }
+        // Run commands is kept as it was: on.
+        let mut kept = members.clone();
+        others_kept(&before, &kept, group);
+        assert!(read(fixture.state()).allows(C::Exec), "{group}: Exec kept");
+
+        let before = read(fixture.state());
+        click(&mut app, group);
+        if *group == "Automation" {
+            // Off takes Run commands with the rest.
+            kept.push(C::Exec);
+            assert!(!read(fixture.state()).allows(C::Exec), "Exec off");
+        }
+        for c in members {
+            assert!(!read(fixture.state()).allows(*c), "{group}: {c:?} off");
+        }
+        others_kept(&before, &kept, group);
     }
 }
