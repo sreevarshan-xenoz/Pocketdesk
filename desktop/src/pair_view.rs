@@ -377,6 +377,13 @@ impl PairView {
             self.whose = Whose::MINE;
             self.whose_chosen = true;
         }
+        // Computer's "Both are mine" is not carried, unseen, into a phone's
+        // code (PR #555 review m3).
+        if mode == PairFor::Phone && self.whose.mine {
+            self.withdraw(state_dir);
+            self.whose.mine = false;
+            self.whose_chosen = true;
+        }
     }
 
     /// The Phone | Computer switch (UX 2).
@@ -427,7 +434,13 @@ impl PairView {
             self.withdraw(state_dir);
         }
 
-        if let Some(id) = &self.paired {
+        // A phone's card shows under Phone, a computer's under Computer
+        // (PR #555 review m4).
+        let kind_shown = self.paired.as_ref().is_some_and(|id| {
+            let computer = devices.iter().any(|d| d.id == *id && d.computer);
+            computer == (self.mode == PairFor::Computer)
+        });
+        if let Some(id) = self.paired.as_ref().filter(|_| kind_shown) {
             let computer = devices.iter().find(|d| d.id == *id).filter(|d| d.computer);
             let name = match computer {
                 Some(d) => crate::model::device_label(devices, &d.id),
@@ -867,6 +880,55 @@ mod tests {
     /// PC1 review M6: the box for another of the owner's computers holds
     /// for the code made when it was ticked, and that code while it lives;
     /// the next code after it is plain until it is ticked again.
+    /// PR #555 review m3: Computer's "Both are mine" is not carried into a
+    /// phone's code when the switch goes back to Phone.
+    #[test]
+    fn switching_to_phone_drops_both_are_mine() {
+        let dir = temp_dir("mine-to-phone");
+        let mut view = PairView::default();
+        view.open_for(&dir, PairFor::Computer);
+        view.whose.mine = true;
+        view.open_for(&dir, PairFor::Phone);
+        assert!(!view.whose.mine);
+        assert!(view.whose.is_owners(), "still the owner's own code");
+    }
+
+    /// PR #555 review m4: a phone's Paired card shows under Phone only, a
+    /// computer's under Computer only.
+    #[test]
+    fn a_paired_card_shows_only_under_its_kind() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp_dir("card-kind");
+        for (computer, mode, shown) in [
+            (false, PairFor::Phone, true),
+            (false, PairFor::Computer, false),
+            (true, PairFor::Computer, true),
+            (true, PairFor::Phone, false),
+        ] {
+            let devices = vec![Device {
+                id: "00000000-0000-4000-8000-0000000000c9".to_string(),
+                name: Some("Test Device".to_string()),
+                computer,
+                ..Default::default()
+            }];
+            let mut view = PairView {
+                mode,
+                known: Some(Vec::new()),
+                ..PairView::default()
+            };
+            let state = dir.clone();
+            let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+                view.show(ui, &state, None, &devices, 1_000);
+            });
+            harness.run_steps(2);
+            assert_eq!(
+                harness.query_by_label_contains("Paired ✓").is_some(),
+                shown,
+                "computer {computer}, {mode:?}"
+            );
+        }
+    }
+
     #[test]
     fn the_box_for_another_computer_unticks_after_its_code() {
         let mine = Whose {
