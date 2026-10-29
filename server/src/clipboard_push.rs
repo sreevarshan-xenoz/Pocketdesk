@@ -294,6 +294,16 @@ pub(crate) enum Follow {
     Window,
 }
 
+impl Follow {
+    /// What it followed, as the log says it.
+    fn words(self) -> &'static str {
+        match self {
+            Follow::Mouse => "the mouse",
+            Follow::Window => "the window",
+        }
+    }
+}
+
 /// `body` marked as following `follow`.
 fn mark(mut body: serde_json::Value, follow: Follow) -> serde_json::Value {
     body[FOLLOWS] = true.into();
@@ -651,14 +661,18 @@ async fn push_held(device_id: &str, follow: Follow, answering: bool) {
     let at = switch();
     if landing {
         tracing::debug!(
-            "The clipboard did not follow the mouse to {device_id}: its image was still on its way here"
+            "The clipboard did not follow {} to {device_id}: its image was still on its way here",
+            follow.words()
         );
         return;
     }
     let held = match read_held().await {
         Ok(held) => held,
         Err(e) => {
-            tracing::debug!("The clipboard did not follow the mouse: not read: {e}");
+            tracing::debug!(
+                "The clipboard did not follow {}: not read: {e}",
+                follow.words()
+            );
             return;
         }
     };
@@ -736,11 +750,15 @@ async fn push_text_now(device_id: &str, text: &str, follow: Follow) {
             forget_image_sent(device_id);
             crate::clip_history::note(text, None);
             tracing::info!(
-                "Clipboard followed the mouse to {device_id} ({} chars)",
+                "Clipboard followed {} to {device_id} ({} chars)",
+                follow.words(),
                 text.chars().count()
             );
         }
-        Err(e) => tracing::debug!("The clipboard did not follow the mouse to {device_id}: {e}"),
+        Err(e) => tracing::debug!(
+            "The clipboard did not follow {} to {device_id}: {e}",
+            follow.words()
+        ),
     }
 }
 
@@ -787,11 +805,15 @@ async fn push_image_now(device_id: &str, id: &str, at: u64, follow: Follow) {
     match sent {
         // Who and how large, never the image.
         Ok(how) => tracing::info!(
-            "Clipboard image followed the mouse to {device_id} ({size} bytes, {how})"
+            "Clipboard image followed {} to {device_id} ({size} bytes, {how})",
+            follow.words()
         ),
         Err(e) => {
             forget_image_sent_if(device_id, id);
-            tracing::debug!("The clipboard image did not follow the mouse to {device_id}: {e}")
+            tracing::debug!(
+                "The clipboard image did not follow {} to {device_id}: {e}",
+                follow.words()
+            )
         }
     }
 }
@@ -2066,6 +2088,13 @@ mod tests {
         let unread = || -> bool { panic!("not asked") };
         assert!(!window_ask_taken(false, unread, unread, unread));
         assert!(!window_ask_taken(true, yes, no, unread));
+    }
+
+    /// PR #554 review M5: the log says what a push followed.
+    #[test]
+    fn the_log_says_whether_the_mouse_or_the_window_was_followed() {
+        assert_eq!(Follow::Mouse.words(), "the mouse");
+        assert_eq!(Follow::Window.words(), "the window");
     }
 
     /// PR #554 review I2: a computer's asks are answered at most once each
