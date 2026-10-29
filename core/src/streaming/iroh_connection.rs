@@ -439,8 +439,11 @@ pub fn computer_link_server_config(endpoint: &Endpoint) -> Arc<iroh::endpoint::S
 /// [`ALPN_COMPUTER`](crate::protocol::ALPN_COMPUTER), on the endpoint's
 /// own configuration otherwise (BK11). The offered ALPNs are read from the
 /// dialer's first packet before the handshake. That read is best effort:
-/// when it fails, the connection is accepted as before, on the control
-/// channel's ALPN and the endpoint's controller. Either way the connection
+/// when it fails, the connection is accepted on the endpoint's own
+/// configuration, so a dialer offering both ALPNs, as every computer does,
+/// gets the control channel's on the endpoint's controller, as before (one
+/// offering only the computer link's would get that one on it). Either way
+/// the connection
 /// meets the same checks after the handshake; the ALPN only picks the
 /// controller.
 pub fn accept_incoming(
@@ -1631,11 +1634,11 @@ mod tests {
         older.close().await;
     }
 
-    /// BK11: a computer's link accepted on the endpoint's own configuration
-    /// (its offered ALPNs not read in time) gets the control channel's
-    /// ALPN, which the server's list puts first, and the endpoint's
-    /// controller: the same as before BK11, never the computer link's ALPN
-    /// on BBR.
+    /// BK11: a computer's link, which offers both ALPNs, accepted on the
+    /// endpoint's own configuration (its offered ALPNs not read in time)
+    /// gets the control channel's ALPN, which the server's list puts first,
+    /// and the endpoint's controller: the same as before BK11, never the
+    /// computer link's ALPN on BBR. The dialing end still sends on Cubic.
     #[tokio::test]
     async fn a_link_accepted_without_reading_its_alpns_gets_the_control_alpn() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1663,6 +1666,7 @@ mod tests {
             .unwrap();
         assert_eq!(stream.connection().alpn(), crate::protocol::ALPN_CONTROL);
         assert_eq!(accepted.alpn(), crate::protocol::ALPN_CONTROL);
+        assert!(controller(&stream.connection()).is::<noq_proto::congestion::Cubic>());
         assert!(controller(&accepted).is::<noq_proto::congestion::Bbr3>());
         drop(stream);
         drop(accepted);

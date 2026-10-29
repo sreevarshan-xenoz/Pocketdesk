@@ -723,9 +723,11 @@ pub async fn spawn_wan_endpoint(
 /// channel's when there is a control loop to take it (T10a), then the link
 /// between computers' (BK11). That link is normally accepted on its own
 /// configuration, which prefers its ALPN; on this list it comes after the
-/// control channel's, so a dialer offering both, accepted here when its
-/// ALPNs could not be read first, gets the control channel's on this
-/// endpoint's controller, as before BK11.
+/// control channel's. So a dialer offering both, as every computer does,
+/// accepted here when its ALPNs could not be read first, gets the control
+/// channel's on this endpoint's controller, as before BK11; one offering
+/// only the computer link's would get that one on this controller, the
+/// same channel and the same gates either way.
 fn alpns(control: bool) -> Vec<Vec<u8>> {
     let mut alpns = vec![StreamTransportConfig::default().alpn];
     if control {
