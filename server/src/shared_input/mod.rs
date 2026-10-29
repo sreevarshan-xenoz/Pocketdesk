@@ -50,6 +50,8 @@ pub mod portal_glue;
 pub mod portal_session;
 pub mod receive;
 pub mod screens;
+#[cfg(target_os = "linux")]
+pub mod screens_wayland;
 pub mod share_test;
 pub mod sound;
 pub mod status;

@@ -7,8 +7,10 @@ use super::wire::Screen;
 use crate::hyprland::HyprMonitor;
 
 /// This computer's screens now: Windows' monitors, in logical pixels
-/// ([`Desktop`]); Hyprland's, at their logical size; else the one rectangle
-/// the capture's layout spans. Empty when none can be read.
+/// ([`Desktop`]); Hyprland's, at their logical size; else the Wayland
+/// compositor's outputs as it lays them out (BK8 live: sway without
+/// Xwayland has no X for xcap); else the one rectangle the capture's
+/// layout spans. Empty when none can be read.
 pub async fn current() -> Vec<Screen> {
     #[cfg(windows)]
     {
@@ -17,10 +19,17 @@ pub async fn current() -> Vec<Screen> {
     #[cfg(not(windows))]
     {
         #[cfg(target_os = "linux")]
-        if let Ok(ipc) = crate::hyprland::HyprlandIpc::from_env()
-            && let Ok(monitors) = ipc.monitors().await
         {
-            return logical(&monitors);
+            if let Ok(ipc) = crate::hyprland::HyprlandIpc::from_env()
+                && let Ok(monitors) = ipc.monitors().await
+            {
+                return logical(&monitors);
+            }
+            if let Ok(Some(screens)) =
+                tokio::task::spawn_blocking(super::screens_wayland::screens).await
+            {
+                return screens;
+            }
         }
         let layout = tokio::task::spawn_blocking(pocketdesk_core::streaming::capture::layout_rect)
             .await
@@ -68,6 +77,55 @@ pub fn logical(monitors: &[HyprMonitor]) -> Vec<Screen> {
                 height,
             })
         })
+        .filter(Screen::is_sound)
+        .collect()
+}
+
+/// What a Wayland output said of itself: `wl_output`'s place, current
+/// mode, whole scale and whether it is turned a quarter, and
+/// `xdg_output`'s logical box where the compositor offers it
+/// ([`super::screens_wayland`], Linux). Pure, so measured on every system.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WaylandOutput {
+    pub at: (i32, i32),
+    pub mode: (i32, i32),
+    pub scale: i32,
+    pub turned: bool,
+    pub logical_at: Option<(i32, i32)>,
+    pub logical_size: Option<(i32, i32)>,
+}
+
+impl WaylandOutput {
+    /// The output as laid out, in logical pixels: xdg-output's box (which
+    /// knows a fractional scale), else the mode over the whole scale, on
+    /// its side when turned. `None` before it said a size.
+    fn screen(&self) -> Option<Screen> {
+        let size = |(w, h): (i32, i32)| {
+            let w = u32::try_from(w).ok().filter(|w| *w > 0)?;
+            let h = u32::try_from(h).ok().filter(|h| *h > 0)?;
+            Some((w, h))
+        };
+        let (width, height) = self.logical_size.and_then(size).or_else(|| {
+            let scale = self.scale.max(1);
+            let (w, h) = size((self.mode.0 / scale, self.mode.1 / scale))?;
+            Some(if self.turned { (h, w) } else { (w, h) })
+        })?;
+        let (x, y) = self.logical_at.unwrap_or(self.at);
+        Some(Screen {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+}
+
+/// Wayland's `outputs` as screens, in the compositor's order; one that
+/// said no size yet is left out.
+pub fn from_wayland(outputs: &[WaylandOutput]) -> Vec<Screen> {
+    outputs
+        .iter()
+        .filter_map(WaylandOutput::screen)
         .filter(Screen::is_sound)
         .collect()
 }
@@ -532,5 +590,58 @@ mod tests {
         assert_eq!(Motion::default().step((7, -3), 1.0), (7, -3));
         // No scale is taken as 1.
         assert_eq!(Motion::default().step((4, 4), 0.0), (4, 4));
+    }
+
+    /// BK8 live: a Wayland output as laid out, by xdg-output's logical box
+    /// where the compositor says it, else wl_output's mode over its scale
+    /// (on its side when turned); one that said no size is left out.
+    #[test]
+    fn wayland_outputs_are_measured_as_laid_out() {
+        // A headless sway at 1920x1080, scale 1, said both ways.
+        let headless = WaylandOutput {
+            at: (0, 0),
+            mode: (1920, 1080),
+            scale: 1,
+            turned: false,
+            logical_at: Some((0, 0)),
+            logical_size: Some((1920, 1080)),
+        };
+        // A fractional 1.5 screen to its right: only xdg-output knows its
+        // logical size (wl_output's scale is a whole 2).
+        let fractional = WaylandOutput {
+            at: (1920, 0),
+            mode: (2560, 1600),
+            scale: 2,
+            turned: false,
+            logical_at: Some((1920, 0)),
+            logical_size: Some((1707, 1067)),
+        };
+        // No xdg-output: the mode over the scale, turned on its side.
+        let turned = WaylandOutput {
+            at: (-1080, 0),
+            mode: (3840, 2160),
+            scale: 2,
+            turned: true,
+            ..Default::default()
+        };
+        // An xdg-output box of no size is no box.
+        let zero = WaylandOutput {
+            at: (0, 1080),
+            mode: (1280, 1024),
+            scale: 0,
+            logical_size: Some((0, 0)),
+            ..Default::default()
+        };
+        let unsized_yet = WaylandOutput::default();
+        assert_eq!(
+            from_wayland(&[headless, fractional, turned, zero, unsized_yet]),
+            vec![
+                screen(0, 0, 1920, 1080),
+                screen(1920, 0, 1707, 1067),
+                screen(-1080, 0, 1080, 1920),
+                screen(0, 1080, 1280, 1024),
+            ]
+        );
+        assert!(from_wayland(&[]).is_empty());
     }
 }
