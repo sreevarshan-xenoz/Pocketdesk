@@ -149,7 +149,7 @@ impl Calls for AshpdCalls {
 async fn run(
     state_dir: Option<PathBuf>,
     events: &Sender<Portal>,
-    asked: UnboundedReceiver<Ask>,
+    mut asked: UnboundedReceiver<Ask>,
 ) -> Result<(), String> {
     // A D-Bus connection of its own: ashpd's shared one would be made on
     // this thread's runtime, and die with it as the thread ends, leaving
@@ -184,9 +184,27 @@ async fn run(
                 .set_capabilities(Capabilities::Keyboard | Capabilities::Pointer)
                 .set_persist_mode(PersistMode::ExplicitlyRevoked)
                 .set_restore_token(token.map(|t| t.as_str().to_string()));
-            let started = match portal.start(&session, None, options).await {
-                Ok(request) => request.response(),
-                Err(e) => Err(e),
+            // The dialog may wait on the owner a long while: sharing
+            // turned off meanwhile (the glue gone) ends it, so turning it
+            // on again never brings a second dialog.
+            let started = {
+                let start = portal.start(&session, None, options);
+                let mut start = std::pin::pin!(start);
+                loop {
+                    tokio::select! {
+                        started = &mut start => break match started {
+                            Ok(request) => request.response(),
+                            Err(e) => Err(e),
+                        },
+                        ask = asked.recv() => {
+                            if ask.is_none() {
+                                let _ = session.close().await;
+                                return Ok(());
+                            }
+                            // Nothing is armed before the zones are said.
+                        }
+                    }
+                }
             };
             match started {
                 Ok(response) => {
