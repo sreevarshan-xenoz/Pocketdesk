@@ -439,14 +439,15 @@ impl<B: Backend> PortalGlue<B> {
     ) -> Vec<Action> {
         let mut out = Vec::new();
         self.stray = None;
-        // What was down before the capture is not this computer's to send.
-        self.keys.switched();
-        self.reset_rests();
         if self.captured.is_some() && driver.away_on().is_some() {
-            // A new activation mid-capture: the same capture goes on.
+            // A new activation mid-capture: the same capture goes on, the
+            // keys held with it.
             self.captured = Some(activation);
             return out;
         }
+        // What was down before the capture is not this computer's to send.
+        self.keys.switched();
+        self.reset_rests();
         self.captured = Some(activation);
         let hit = self
             .armed
@@ -1225,5 +1226,33 @@ mod tests {
         assert_eq!(rig.calls(), vec![]);
         rig.hit(6, 3, (600.0, 1000.0));
         assert_eq!(rig.driver.away_on(), Some("P"));
+    }
+
+    /// BK8 review M11: a second activation mid-capture is the same capture:
+    /// the modifiers held stay known, so the switch key still works.
+    #[test]
+    fn a_second_activation_mid_capture_keeps_the_keys_held() {
+        let mut rig = Rig::new(&["W"]);
+        rig.hit(7, 1, (1600.0, 500.0));
+        rig.say(Portal::Key {
+            code: 29,
+            down: true,
+        });
+        rig.say(Portal::Key {
+            code: 56,
+            down: true,
+        });
+        rig.say(Portal::Activated {
+            activation: Some(8),
+            barrier: None,
+            at: None,
+        });
+        rig.calls();
+        rig.say(Portal::Key {
+            code: 106,
+            down: true,
+        });
+        assert_eq!(rig.driver.away_on(), None, "the switch key came home");
+        assert_eq!(rig.calls(), vec![Call::Release(Some(8), PARK)]);
     }
 }
