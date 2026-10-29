@@ -522,24 +522,44 @@ pub struct FrameCounts {
     pub late: u64,
     /// Frames dropped here: too large for the window.
     pub dropped: u64,
+    /// Whether the run now followed another (the encoder was rebuilt).
+    rebuilt: bool,
 }
 
 impl FrameCounts {
+    /// Frames a run has before a 0 starts another, and how far past a
+    /// young run's newest a frame of the old run is told apart.
+    const NEW_RUN: u64 = 32;
+
     /// A frame numbered `seq`, of `len` bytes, came.
     pub fn came(&mut self, seq: u64, len: usize) {
-        if seq == 0 || self.arrived == 0 {
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(len as u64);
+        // A rebuilt encoder counts from 0 again: a new run, once the old
+        // one is long enough that a 0 is not just the first frame come late
+        // (PR #551 review M6).
+        let new_run = self.arrived == 0 || (seq == 0 && self.highest >= Self::NEW_RUN);
+        if new_run {
             self.lost_before += pocketdesk_core::streaming::client::missed_frames_in_window(
                 self.lowest,
                 self.highest,
                 self.arrived,
             );
-            (self.lowest, self.highest, self.arrived) = (seq, seq, 0);
+            self.rebuilt = self.arrived > 0;
+            (self.lowest, self.highest, self.arrived) = (seq, seq, 1);
+            return;
+        }
+        // A frame of the old run, come after the new one started: late.
+        if self.rebuilt
+            && self.arrived < Self::NEW_RUN
+            && seq > self.highest.saturating_add(Self::NEW_RUN)
+        {
+            self.late += 1;
+            return;
         }
         self.lowest = self.lowest.min(seq);
         self.highest = self.highest.max(seq);
         self.arrived += 1;
-        self.frames = self.frames.saturating_add(1);
-        self.bytes = self.bytes.saturating_add(len as u64);
     }
 
     /// Frames that never came since the session started.
@@ -1259,8 +1279,11 @@ pub async fn run(
                 let watching = viewer.as_ref().filter(|v| v.session_id == session_id);
                 match event {
                     Event::Status(mut status) => {
-                        if let Some(stats) = status.stats.as_mut() {
-                            stats.dropped += current.window_dropped;
+                        match status.stats.as_mut() {
+                            Some(stats) => stats.dropped += current.window_dropped,
+                            // A new session's counts start again, the
+                            // window's too (PR #551 review M6).
+                            None => current.window_dropped = 0,
                         }
                         current.status = status.clone();
                         if let Some(v) = watching {
@@ -1949,12 +1972,37 @@ mod tests {
             (0, 0),
             "a new second"
         );
-        // A rebuilt encoder counts from 0: the old run's loss is kept.
+        // A run long enough, then a rebuilt encoder counting from 0: the
+        // old run's loss is kept.
+        for seq in 6..=40 {
+            counts.came(seq, 10);
+        }
         for seq in [0, 1, 3] {
             counts.came(seq, 10);
         }
         assert_eq!(counts.lost(), 2);
         assert_eq!(counts.second(Duration::ZERO), (0, 0), "no time, no rate");
+    }
+
+    /// PR #551 review M6: frame 1 before frame 0 at the start is no loss;
+    /// a frame of the old run that comes after a rebuilt encoder's new one
+    /// is late, not a gap the size of the old numbers.
+    #[test]
+    fn frames_out_of_order_at_a_run_s_start_or_end_are_not_lost() {
+        let mut counts = FrameCounts::default();
+        for seq in [1, 0, 2, 3] {
+            counts.came(seq, 10);
+        }
+        assert_eq!(counts.lost(), 0, "0 came after 1");
+        for seq in 4..=100 {
+            counts.came(seq, 10);
+        }
+        // Rebuilt: 0, 1, then a straggler of the old run.
+        for seq in [0, 1, 99, 2] {
+            counts.came(seq, 10);
+        }
+        assert_eq!(counts.lost(), 0);
+        assert_eq!(counts.late, 1, "the straggler");
     }
 
     #[test]
