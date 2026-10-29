@@ -169,10 +169,12 @@ pub(crate) fn takes_paired_back() -> bool {
         .is_some_and(|tx| !tx.is_closed())
 }
 
-/// The connections of each computer that paired here both ways that were
-/// up as it paired (its pairing connection, an earlier one-way link not yet
-/// gone): never the link that shows it recorded the pairing (PC1
-/// re-review I-2).
+/// The connection of each computer that paired here both ways that was up
+/// as it paired (the newest per device, in practice its pairing
+/// connection): never the link that shows it recorded the pairing (PC1
+/// re-review I-2). What proves that is its both-ways word on a link
+/// ([`BOTH_WAYS`]), sent only once it has recorded the pairing. Entries are
+/// a few bytes per pairing, kept for the run.
 static BEFORE_PAIRING: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
     LazyLock::new(Default::default);
 

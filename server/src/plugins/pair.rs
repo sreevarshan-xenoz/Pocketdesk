@@ -1147,8 +1147,11 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                     );
                     // Listed here in turn (PC1), not forgotten as one paired
                     // the other way (BD1): the two keep one link between them.
-                    // Its connections up now (this one, an earlier link)
-                    // are not the link that shows it recorded the pairing.
+                    // Its connection up now is not the link that shows it
+                    // recorded the pairing: the newest per device (third
+                    // review m-B), in practice this pairing connection. An
+                    // older link is no proof either way: the grant needs the
+                    // computer's both-ways word, sent only once recorded.
                     let before: Vec<String> = state::clone_answer_targets()
                         .await
                         .iter()
