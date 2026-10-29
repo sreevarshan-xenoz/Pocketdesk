@@ -621,6 +621,11 @@ pub async fn spawn_wan_endpoint(
     spawn_endpoint_recorder(endpoint.clone(), dht_publish, dht_check);
 
     let accept = endpoint.clone();
+    // Another computer's link, on its own congestion controller (BK11),
+    // when there is a control loop to take it.
+    let computer_link = control.is_some().then(|| {
+        pocketdesk_core::streaming::iroh_connection::computer_link_server_config(&endpoint)
+    });
     // The WAN listener holds no more connections than the LAN one does in
     // all: each runs a session before the gate has judged it, and any iroh
     // key may dial. Per address means nothing here (a relay's, or a key's,
@@ -647,8 +652,12 @@ pub async fn spawn_wan_endpoint(
             let mic_relay_device = mic_relay_device.clone();
             let cast = cast.clone();
             let control = control.clone();
+            let computer_link = computer_link.clone();
             tokio::spawn(async move {
-                let conn = match incoming.accept() {
+                let conn = match pocketdesk_core::streaming::iroh_connection::accept_incoming(
+                    incoming,
+                    computer_link.as_ref(),
+                ) {
                     Ok(accepting) => match accepting.await {
                         Ok(conn) => conn,
                         Err(e) => {
@@ -661,7 +670,9 @@ pub async fn spawn_wan_endpoint(
                         return;
                     }
                 };
-                if conn.alpn() == pocketdesk_core::protocol::ALPN_CONTROL {
+                // A computer's link on its own ALPN (BK11) is the control
+                // channel too, and meets the same gates there.
+                if pocketdesk_core::protocol::is_control_alpn(conn.alpn()) {
                     if let Some(control) = control {
                         let _ = control.send((conn, slot)).await;
                     }
@@ -709,13 +720,44 @@ pub async fn spawn_wan_endpoint(
 }
 
 /// The ALPNs the WAN endpoint offers: the stream's, and the control
-/// channel's when there is a control loop to take it (T10a).
+/// channel's when there is a control loop to take it (T10a), then the link
+/// between computers' (BK11). That link is normally accepted on its own
+/// configuration, which prefers its ALPN; on this list it comes after the
+/// control channel's, so a dialer offering both, accepted here when its
+/// ALPNs could not be read first, gets the control channel's on this
+/// endpoint's controller, as before BK11.
 fn alpns(control: bool) -> Vec<Vec<u8>> {
     let mut alpns = vec![StreamTransportConfig::default().alpn];
     if control {
         alpns.push(pocketdesk_core::protocol::ALPN_CONTROL.to_vec());
+        alpns.push(pocketdesk_core::protocol::ALPN_COMPUTER.to_vec());
     }
     alpns
+}
+
+#[cfg(test)]
+mod alpn_tests {
+    use super::alpns;
+    use pocketdesk_core::protocol::{ALPN_COMPUTER, ALPN_CONTROL};
+    use pocketdesk_core::streaming::transport::StreamTransportConfig;
+
+    /// BK11: with a control loop, the WAN endpoint takes the control
+    /// channel's ALPN before the computer link's, so a link accepted
+    /// without its ALPNs read gets the control channel's, as before; with
+    /// none, it takes only the stream's.
+    #[test]
+    fn the_computer_link_comes_after_the_control_channel() {
+        let stream = StreamTransportConfig::default().alpn;
+        assert_eq!(
+            alpns(true),
+            vec![
+                stream.clone(),
+                ALPN_CONTROL.to_vec(),
+                ALPN_COMPUTER.to_vec()
+            ]
+        );
+        assert_eq!(alpns(false), vec![stream]);
+    }
 }
 
 #[cfg(test)]
