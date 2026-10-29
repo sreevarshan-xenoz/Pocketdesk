@@ -22,6 +22,7 @@ use pocketdesk_core::local::pin::now_unix;
 use serde::{Deserialize, Serialize};
 
 use super::link::{self, Channel, Pong};
+use super::quick::{KeepQuick, Nudge};
 use super::wire::{self, Msg, Timing};
 use crate::local_api::exit;
 
@@ -55,6 +56,11 @@ const GAP: Duration = Duration::from_millis(1);
 /// A ping goes with every this many events: enough answers to line the
 /// clocks up by.
 const PING_EVERY: usize = 5;
+
+/// The longest pause between events `--pause` takes: a Wi-Fi card saving
+/// power dozes within a tenth of a second, so a longer one shows nothing
+/// more, and the server runs one test at a time.
+const PAUSE_MOST_MS: u32 = 5_000;
 
 /// How often an activity note goes while the script runs, as a driving
 /// computer sends one: the receiver lets go of a driver silent for a second.
@@ -100,6 +106,22 @@ fn clock_offset(pongs: &[Pong]) -> Option<i64> {
     i64::try_from(i128::from(best.at_us) - halfway).ok()
 }
 
+/// How near a key or move, on this computer's clock, the pings are that
+/// line the two clocks up for it: two computers' clocks drift apart by
+/// milliseconds over a minute, which a paused script lasts.
+const CLOCKS_NEAR_US: u64 = 2_000_000;
+
+/// [`clock_offset`] from the pings sent within [`CLOCKS_NEAR_US`] of
+/// `at_us`, or from them all when none was.
+fn offset_near(pongs: &[Pong], at_us: u64) -> Option<i64> {
+    let near: Vec<Pong> = pongs
+        .iter()
+        .filter(|p| p.sent_us.abs_diff(at_us) <= CLOCKS_NEAR_US)
+        .copied()
+        .collect();
+    clock_offset(&near).or_else(|| clock_offset(pongs))
+}
+
 /// The `pct`th percentile of `sorted` (nearest rank); 0 for none.
 fn percentile(sorted: &[u64], pct: usize) -> u64 {
     let rank = (sorted.len() * pct).div_ceil(100).max(1);
@@ -107,19 +129,23 @@ fn percentile(sorted: &[u64], pct: usize) -> u64 {
 }
 
 /// The report for the keys and moves `sent` and the `timings` the other
-/// computer sent back, its clock `offset_us` ahead of this one's: each key
+/// computer sent back, its clock lined up by the answers to the `pongs`
+/// sent near each ([`offset_near`]): each key
 /// and move timed on both sides (a move by its `seq`, a key by its count)
 /// is Pocketdesk's share (taken to handed to the link here, plus off the
 /// link to injected there) and the network's (handed to the link here to
 /// off it there, one way; under 0, by the clocks' error, is 0). None when
 /// nothing was timed on both sides.
-fn split(sent: &[Sent], timings: &[Timing], offset_us: i64, now_unix: u64) -> Option<Report> {
+fn split(sent: &[Sent], timings: &[Timing], pongs: &[Pong], now_unix: u64) -> Option<Report> {
     let there: std::collections::HashMap<(bool, u32), &Timing> =
         timings.iter().map(|t| ((t.moved, t.n), t)).collect();
     let (mut ours, mut network, mut sending, mut receiving) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for s in sent {
         let Some(t) = there.get(&(s.moved, s.n)) else {
+            continue;
+        };
+        let Some(offset_us) = offset_near(pongs, s.sent_us) else {
             continue;
         };
         let here = s.sent_us.saturating_sub(s.taken_us);
@@ -154,7 +180,19 @@ struct Request {
     computer: String,
     keys: u32,
     moves: u32,
+    /// Milliseconds between events; 0 is [`GAP`]. With a pause, pings go
+    /// as a driver's do while away ([`pinging_every`]), not with every
+    /// [`PING_EVERY`] events.
+    #[serde(default)]
+    pause_ms: u32,
     created_unix: u64,
+}
+
+/// How often pings go between the events of a script paused `pause_ms`
+/// between them: as a computer driving another pings it while away. None
+/// for a script without a pause, whose pings go with its events.
+fn pinging_every(pause_ms: u32) -> Option<Duration> {
+    (pause_ms > 0).then_some(super::drive::PING_EVERY)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +214,10 @@ struct Outcome {
     /// Why there is no `latency`.
     #[serde(default)]
     unmeasured: Option<String>,
+    /// The link was kept quick meanwhile, as a crossing keeps it
+    /// (`shared_input_low_latency`, BK10).
+    #[serde(default)]
+    quick: bool,
 }
 
 /// What `share-test` sends after its `Hello` (pings and activity notes,
@@ -210,7 +252,7 @@ pub fn script(keys: u32, moves: u32) -> Vec<Msg> {
 /// The command: ask the running server to send `computer` the script, and
 /// print what came of it. The exit code: 0 sent, 1 failed, 3 no server
 /// running, 4 no answer from it in time.
-pub fn run_cli(computer: &str, keys: u32, moves: u32) -> i32 {
+pub fn run_cli(computer: &str, keys: u32, moves: u32, pause_ms: u32) -> i32 {
     let dir = match crate::state::state_dir() {
         Ok(dir) => dir,
         Err(e) => {
@@ -227,18 +269,21 @@ pub fn run_cli(computer: &str, keys: u32, moves: u32) -> i32 {
         computer: computer.to_string(),
         keys,
         moves,
+        pause_ms: pause_ms.min(PAUSE_MOST_MS),
         created_unix: now_unix(),
     };
     if let Err(e) = leave(&dir, &request) {
         eprintln!("share-test: the request could not be left for the server: {e}");
         return exit::FAILED;
     }
-    // The script takes a millisecond an event, more where timers are coarse.
-    let events = u64::from(keys.max(moves));
+    // The script takes a millisecond an event, more where timers are
+    // coarse, or its pause.
+    let events = u64::from(keys.max(moves)) * 2 + 3;
+    let each = 4 + u64::from(request.pause_ms);
     let deadline = std::time::Instant::now()
         + OUTCOME_WAIT
         + DIRECT_WAIT
-        + Duration::from_millis(events.saturating_mul(4));
+        + Duration::from_millis(events.saturating_mul(each));
     loop {
         if let Some(outcome) = take_outcome(&dir, &request.id) {
             print!("{}", report(&outcome));
@@ -267,8 +312,10 @@ fn report(outcome: &Outcome) -> String {
         return out;
     }
     out.push_str(&format!(
-        "sent {} messages to {}\n",
-        outcome.sent, outcome.computer
+        "sent {} messages to {}, the link kept quick: {}\n",
+        outcome.sent,
+        outcome.computer,
+        if outcome.quick { "yes" } else { "no" }
     ));
     let mut sorted = outcome.round_trips_us.clone();
     sorted.sort_unstable();
@@ -425,6 +472,18 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
             return outcome;
         }
     };
+    // Held as a crossing holds it, so the test measures what one gets.
+    let mut quick = KeepQuick::default();
+    outcome.quick =
+        tokio::task::spawn_blocking(|| crate::events::current_config().shared_input_low_latency)
+            .await
+            .unwrap_or(false);
+    quick.set(outcome.quick);
+    // Following the computer as the drivers do: its address looked up
+    // again as the script goes on (review M5).
+    let mut nudge = Nudge::default();
+    let following = outcome.quick.then_some(device_id.as_str());
+    nudge.follow(following);
     tracing::info!(device_id, "share-test: sending a script of shared input");
     let me = crate::kde::host_identity();
     let hello = Msg::Hello {
@@ -443,15 +502,37 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         outcome.pings += 1;
         Ok::<(), String>(())
     };
+    let gap = match request.pause_ms {
+        0 => GAP,
+        ms => Duration::from_millis(u64::from(ms.min(PAUSE_MOST_MS))),
+    };
+    let pinging = pinging_every(request.pause_ms);
     let sending = async {
         channel.send(&hello)?;
         outcome.sent += 1;
         let started = tokio::time::Instant::now();
         let mut active_due = started;
+        let mut ping_due = started;
         for (i, msg) in script(request.keys, request.moves).iter().enumerate() {
-            let due = started + GAP * u32::try_from(i).unwrap_or(u32::MAX);
+            let due = started + gap * u32::try_from(i).unwrap_or(u32::MAX);
+            // Paused: pinged meanwhile as a driver pings while away.
+            if let Some(every) = pinging {
+                while ping_due < due {
+                    tokio::time::sleep_until(ping_due).await;
+                    nudge.follow(following);
+                    ping(&mut channel, &mut outcome)?;
+                    ping_due += every;
+                    let now = tokio::time::Instant::now();
+                    if now >= active_due {
+                        channel.send(&Msg::Active { idle_ms: 0 })?;
+                        outcome.sent += 1;
+                        active_due = now + ACTIVE_EVERY;
+                    }
+                }
+            }
             tokio::time::sleep_until(due).await;
-            if i % PING_EVERY == 0 {
+            nudge.follow(following);
+            if pinging.is_none() && i % PING_EVERY == 0 {
                 ping(&mut channel, &mut outcome)?;
             }
             let now = tokio::time::Instant::now();
@@ -513,7 +594,7 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
              records it, or runs an older Pocketdesk)"
                 .to_string(),
         ),
-        (Some(offset), Some(timings)) => split(&sent, &timings, offset, now_unix())
+        (Some(_), Some(timings)) => split(&sent, &timings, &pongs, now_unix())
             .ok_or_else(|| "no key or move was timed on both computers".to_string()),
     };
     match measured {
@@ -697,6 +778,21 @@ mod tests {
         assert!(err.contains("more than one"), "{err}");
     }
 
+    /// BK10: a paused script pings between its events as a driver pings
+    /// while away; one without a pause pings with its events. A request
+    /// from before the pause has none.
+    #[test]
+    fn a_paused_script_pings_as_a_driver_away() {
+        use super::super::drive::PING_EVERY as AWAY;
+        assert_eq!(pinging_every(0), None);
+        assert_eq!(pinging_every(1_000), Some(AWAY));
+        let old: Request = serde_json::from_str(
+            r#"{"id":"a","computer":"L","keys":1,"moves":0,"created_unix":5}"#,
+        )
+        .unwrap();
+        assert_eq!(old.pause_ms, 0);
+    }
+
     #[test]
     fn requests_are_taken_once_and_stale_ones_dropped() {
         let dir = std::env::temp_dir().join(format!("pd-share-requests-{}", std::process::id()));
@@ -706,6 +802,7 @@ mod tests {
             computer: "Laptop".to_string(),
             keys: 1,
             moves: 1,
+            pause_ms: 0,
             created_unix,
         };
         leave(&dir, &request("new", 1_000)).unwrap();
@@ -734,9 +831,13 @@ mod tests {
                 measured_unix: 1,
             }),
             unmeasured: None,
+            quick: true,
         };
         let said = report(&outcome);
-        assert!(said.contains("sent 10 messages to bbbb"), "{said}");
+        assert!(
+            said.contains("sent 10 messages to bbbb, the link kept quick: yes"),
+            "{said}"
+        );
         assert!(said.contains("round trips (µs): 900 300 600"), "{said}");
         assert!(
             said.contains("3 of 3 pings answered; least 300 µs, median 600 µs, most 900 µs"),
@@ -807,6 +908,12 @@ mod tests {
     #[test]
     fn report_splits_network_and_ours() {
         let offset = 7_000_000i64;
+        // One ping, even both ways, puts the other clock `offset` ahead.
+        let pongs = [Pong {
+            sent_us: 100_000,
+            back_us: 102_000,
+            at_us: 101_000u64.checked_add_signed(offset).unwrap(),
+        }];
         let mut sent = Vec::new();
         let mut timings = Vec::new();
         for i in 1..=20u32 {
@@ -853,7 +960,7 @@ mod tests {
             arrived_us: 0,
             took_us: 1,
         });
-        let report = split(&sent, &timings, offset, 1_700_000_000).expect("timed");
+        let report = split(&sent, &timings, &pongs, 1_700_000_000).expect("timed");
         // Ours: keys 15, 20, .. 110 µs, the move 2020; the network: keys
         // 1010 .. 1200 µs, the move 3000.
         assert_eq!(report.samples, 21);
@@ -865,7 +972,42 @@ mod tests {
         assert_eq!(report.receiving_p95_us, 100);
         assert_eq!(report.measured_unix, 1_700_000_000);
         // Nothing timed on both sides: no report.
-        assert_eq!(split(&sent, &[], offset, 0), None);
+        assert_eq!(split(&sent, &[], &pongs, 0), None);
+        assert_eq!(split(&sent, &timings, &[], 0), None, "no clock to line up");
+    }
+
+    /// BK10: over a paused script the clocks drift apart, so each key is
+    /// lined up by the pings sent near it, not by the fastest of the run.
+    #[test]
+    fn each_key_is_lined_up_by_the_pings_near_it() {
+        // The other clock 1 ms ahead at first, 21 ms ahead a minute on;
+        // the first ping the fastest of all.
+        let pong = |sent_us: u64, rtt: u64, ahead: u64| Pong {
+            sent_us,
+            back_us: sent_us + rtt,
+            at_us: sent_us + rtt / 2 + ahead,
+        };
+        let pongs = [pong(1_000_000, 800, 1_000), pong(61_000_000, 1_200, 21_000)];
+        assert_eq!(offset_near(&pongs, 1_500_000), Some(1_000));
+        assert_eq!(offset_near(&pongs, 60_000_000), Some(21_000));
+        // None near: the fastest of them all.
+        assert_eq!(offset_near(&pongs, 30_000_000), Some(1_000));
+        assert_eq!(offset_near(&[], 0), None);
+        // A key sent at 61 s that took 2 ms reads as 2 ms, not 22.
+        let sent = [Sent {
+            moved: false,
+            n: 1,
+            taken_us: 61_000_000,
+            sent_us: 61_000_000,
+        }];
+        let timings = [Timing {
+            moved: false,
+            n: 1,
+            arrived_us: 61_000_000 + 2_000 + 21_000,
+            took_us: 50,
+        }];
+        let report = split(&sent, &timings, &pongs, 0).unwrap();
+        assert_eq!(report.network_p50_us, 2_000);
     }
 
     /// A recorded line reads back as the message it was.

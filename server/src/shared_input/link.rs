@@ -204,6 +204,20 @@ pub fn is_direct(conn: &Connection) -> bool {
         .is_some_and(|path| !path.is_relay())
 }
 
+/// The address and port the link to `device_id` reaches it at now, while
+/// it is up and direct (an IPv6 link-local one with its scope): where the
+/// link's packets to it go, so through the network device that carries the
+/// link, and a port its firewall lets through.
+pub fn peer_addr(device_id: &str) -> Option<std::net::SocketAddr> {
+    let conn = connection(device_id)?;
+    let paths = conn.paths();
+    let path = pocketdesk_core::streaming::iroh_connection::selected_path(&paths)?;
+    match path.remote_addr() {
+        iroh::TransportAddr::Ip(addr) => Some(*addr),
+        _ => None,
+    }
+}
+
 /// A connection registered while this is held, and unregistered however
 /// its holder ends (a link's task aborted too), unless a newer connection
 /// to that computer took its place meanwhile.
@@ -725,6 +739,47 @@ pub(crate) mod tests {
         let out = dialing.connect(addr, ALPN_CONTROL).await.unwrap();
         let back = accepting.await.unwrap();
         (dialing, dialed, out, back)
+    }
+
+    /// BK10 review I2: the Wi-Fi's byte goes to the other computer's own
+    /// link port, which its firewall lets through. A byte that is not QUIC
+    /// there is dropped without a word: nothing comes back to the sender,
+    /// nothing above debug is logged, and the link goes on as before. And
+    /// the address the byte is aimed at is that port (`peer_addr`).
+    #[tokio::test]
+    async fn a_stray_byte_at_a_link_port_is_dropped_quietly() {
+        let (caught, _guard) = super::super::caught_log::catch();
+        let (a, b, out, back) = linked_pair().await;
+        register("test-stray", out.clone());
+        let port = b.bound_sockets()[0];
+        assert_eq!(peer_addr("test-stray"), Some(port));
+        let before = caught.text().len();
+        let stray = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        stray
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        for _ in 0..5 {
+            stray.send_to(&[0], port).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let mut reply = [0u8; 64];
+        assert!(stray.recv_from(&mut reply).is_err(), "nothing comes back");
+        // The link still carries a datagram both ways.
+        out.send_datagram(b"still".to_vec().into()).unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(5), back.read_datagram())
+            .await
+            .expect("in time")
+            .unwrap();
+        assert_eq!(&got[..], b"still");
+        assert!(out.close_reason().is_none() && back.close_reason().is_none());
+        let said = caught.text()[before..].to_string();
+        assert!(
+            !said.contains("WARN") && !said.contains("ERROR"),
+            "the stray bytes said: {said}"
+        );
+        unregister("test-stray");
+        a.close().await;
+        b.close().await;
     }
 
     #[tokio::test]

@@ -361,6 +361,13 @@ pub struct Config {
     /// chosen.
     #[serde(default)]
     pub shared_input_sound: bool,
+    /// With `shared_input`, the link is kept quick while the keyboard and
+    /// mouse are on another computer or this one is driven (BK10): on
+    /// Windows a 1 ms timer for this process, and on any system a byte to
+    /// the other computer every 50 ms so this one's Wi-Fi does not doze
+    /// between keys.
+    #[serde(default = "default_true")]
+    pub shared_input_low_latency: bool,
     /// Another computer's screen in a window here (BK7): the quality its
     /// window starts at, `auto`, `quality`, `balanced` or `economy` (the
     /// phone's presets). The window's own choice then holds for its view.
@@ -583,6 +590,7 @@ impl Default for Config {
             shared_input_clipboard: true,
             shared_input_files: true,
             shared_input_sound: false,
+            shared_input_low_latency: true,
             computer_view_quality: default_computer_view_quality(),
             computer_view_only: false,
         }
@@ -837,6 +845,7 @@ impl Config {
         "shared_input_clipboard",
         "shared_input_files",
         "shared_input_sound",
+        "shared_input_low_latency",
         "computer_view_quality",
         "computer_view_only",
     ];
@@ -1211,6 +1220,7 @@ phone_battery = \"x\"
             assert!(config.shared_input_clipboard);
             assert!(config.shared_input_files, "BK4: on by default");
             assert!(!config.shared_input_sound, "BK6: off until chosen");
+            assert!(config.shared_input_low_latency, "BK10: on by default");
         }
     }
 
@@ -1270,6 +1280,7 @@ phone_battery = \"x\"
         config.shared_input_clipboard = false;
         config.shared_input_files = false;
         config.shared_input_sound = true;
+        config.shared_input_low_latency = false;
         config.save_to(&path).unwrap();
         let back = Config::load_from(&path).unwrap();
         assert!(back.shared_input);
@@ -1280,6 +1291,7 @@ phone_battery = \"x\"
         assert!(!back.shared_input_clipboard);
         assert!(!back.shared_input_files);
         assert!(back.shared_input_sound);
+        assert!(!back.shared_input_low_latency);
         // An empty key (the switch by key off) saves too, rather than
         // reading back as the default.
         let mut off = back.clone();
@@ -1296,6 +1308,7 @@ phone_battery = \"x\"
             "shared_input_clipboard",
             "shared_input_files",
             "shared_input_sound",
+            "shared_input_low_latency",
         ] {
             assert!(Config::KNOWN_KEYS.contains(&key), "{key}");
         }
@@ -1310,6 +1323,7 @@ phone_battery = \"x\"
                 "shared_input_clipboard",
                 "shared_input_files",
                 "shared_input_sound",
+                "shared_input_low_latency",
             ]
         );
     }

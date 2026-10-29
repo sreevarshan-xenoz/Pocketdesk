@@ -250,7 +250,10 @@ async fn run(command: cli::Commands, config: config::Config) -> Result<()> {
             computer,
             keys,
             moves,
-        } => std::process::exit(shared_input::share_test::run_cli(&computer, keys, moves)),
+            pause,
+        } => std::process::exit(shared_input::share_test::run_cli(
+            &computer, keys, moves, pause,
+        )),
         cli::Commands::PhoneScreenTest { phone, script } => {
             std::process::exit(shared_input::phone_test::run_cli(&phone, &script))
         }

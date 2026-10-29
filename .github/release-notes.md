@@ -27,7 +27,7 @@ Pocketdesk 0.8.2 lets a Linux computer drive the shared keyboard and mouse too, 
 - It ran live on one real desktop only: Hyprland 0.56 with xdg-desktop-portal-hyprland 1.4.1, where a laptop's own touchpad drove a stand-in computer (7 crossings out and back, clicks, the wheel, typing in order, nothing left held). GNOME and KDE are not yet checked.
 
 **No lag while sharing**
-- While you share the keyboard and mouse, Windows' timer runs at 1 ms and Linux holds Wi-Fi power saving off, so keys and moves are not held up (the network's share of the delay fell from about 16 ms; first keys after a quiet spell no longer wait for Wi-Fi to wake). How it feels at a real desk is not yet checked.
+- While you share the keyboard and mouse, keys and moves are no longer held up: Windows' timer runs at 1 ms while you share (the network's share of a key fell from about 16 ms to about 3 ms), and a tiny packet every 50 ms keeps the other computer's Wi-Fi awake, only on your own network (first keys after a quiet spell no longer wait up to a tenth of a second for it). "Keep the connection quick while sharing" in Keyboard and mouse turns it off. How it feels at a real desk is not yet checked.
 
 **Fixes from a real Arch Linux laptop**
 - **The desktop app showed no picture:** FFmpeg 9 dropped `-vsync`, so the picture in the phone's cast window and in another computer's window never appeared. Pocketdesk now asks each ffmpeg which frame-rate flag it knows and uses that one, for the decoder and for the server's encoder alike (FFmpeg 4.4 lacks the new one).
