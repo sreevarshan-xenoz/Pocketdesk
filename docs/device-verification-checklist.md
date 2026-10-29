@@ -3127,6 +3127,7 @@ Built 2026-10-30. While a computer's screen window controls that computer, its f
 
 Built 2026-10-30. A unit test covers the decision; the link itself was not run.
 - [ ] With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
+- [ ] With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
 
 ## Recording results
 
