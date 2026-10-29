@@ -627,6 +627,47 @@ impl Gate {
     }
 }
 
+/// This computer's screens, read on a task of their own (review M3): a
+/// compositor slow to answer (up to the Wayland read's deadline) never
+/// holds up the loop that injects another computer's input. The loop asks
+/// for a look ([`ScreensLook::ask`]) and takes what was seen when it comes
+/// ([`ScreensLook::seen`]); an ask made while a look is on its way is
+/// dropped, so no queue builds behind a slow one.
+struct ScreensLook {
+    ask: tokio::sync::mpsc::Sender<()>,
+    seen: tokio::sync::mpsc::Receiver<Vec<Screen>>,
+}
+
+impl ScreensLook {
+    /// Looking with [`screens::current`].
+    fn start() -> Self {
+        Self::start_with(screens::current)
+    }
+
+    /// Looking with `look`; its task ends with this.
+    fn start_with<F, Fut>(look: F) -> Self
+    where
+        F: Fn() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Vec<Screen>> + Send + 'static,
+    {
+        let (ask, mut asked) = tokio::sync::mpsc::channel::<()>(1);
+        let (tell, seen) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            while asked.recv().await.is_some() {
+                if tell.send(look().await).await.is_err() {
+                    break;
+                }
+            }
+        });
+        ScreensLook { ask, seen }
+    }
+
+    /// Ask for a look, unless one is already on its way. Never waits.
+    fn ask(&self) {
+        let _ = self.ask.try_send(());
+    }
+}
+
 /// This computer's own screens as last read, so they are written to
 /// `shared_screens.json` (and told) when they are first read, whichever
 /// way that is, and again only when they change.
@@ -883,6 +924,8 @@ pub async fn run() {
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut look = tokio::time::interval(SCREENS_EVERY);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Read off this loop: a slow compositor never delays an injection.
+    let mut looks = ScreensLook::start();
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status: Option<shared_input::StatusFile> = None;
@@ -951,9 +994,12 @@ pub async fn run() {
                     Msg::Hello { version, name, screens } if standing.computer => {
                         note_heard(&mut heard, &from, Some(name), screens);
                         if standing.allowed && *version == wire::VERSION {
-                            if own.is_unread() && own.note(screens::current().await) {
-                                write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec()))
-                                    .await;
+                            // Not looked at since sharing came on: a look
+                            // is asked for, and its screens go to every
+                            // computer told when it comes. This answer
+                            // says what is known now.
+                            if own.is_unread() {
+                                looks.ask();
                             }
                             let name = crate::kde::host_device_name();
                             answer_hello(&mut channels, &from, own.get(), &name);
@@ -1073,7 +1119,14 @@ pub async fn run() {
                 receiver.prepare();
                 // The name its badge shows, kept to a rename.
                 receiver.set_name(&crate::kde::host_device_name());
-                if own.note(screens::current().await) {
+                looks.ask();
+            }
+            Some(seen) = looks.seen.recv() => {
+                // Looked at while sharing was on; off since, it is no news.
+                if !gate.on().await {
+                    continue;
+                }
+                if own.note(seen) {
                     write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
                     for to in told {
@@ -1809,6 +1862,42 @@ mod tests {
                 .all(|call| matches!(call, Call::Move(0, 0))),
             "only the arrivals moved"
         );
+    }
+
+    /// Review M3: this computer's screens are read on a task of their own,
+    /// so asking never waits on the compositor, and asks made while a look
+    /// is on its way make no queue behind it.
+    #[tokio::test]
+    async fn a_look_at_the_screens_never_holds_up_the_asker() {
+        let looked = Arc::new(Mutex::new(0u32));
+        let counted = looked.clone();
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let mut looks = ScreensLook::start_with(move || {
+            let counted = counted.clone();
+            async move {
+                *counted.lock().unwrap() += 1;
+                // A compositor slow to answer.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                vec![screen]
+            }
+        });
+        let asked = Instant::now();
+        for _ in 0..5 {
+            looks.ask();
+        }
+        assert!(asked.elapsed() < Duration::from_millis(50), "asking waited");
+        let seen = tokio::time::timeout(Duration::from_secs(2), looks.seen.recv())
+            .await
+            .unwrap();
+        assert_eq!(seen, Some(vec![screen]));
+        // The asks made while it looked were one at most, not five.
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(*looked.lock().unwrap() <= 2, "{}", *looked.lock().unwrap());
     }
 
     /// BK8 live: where another computer's cursor arrived, its leave and its

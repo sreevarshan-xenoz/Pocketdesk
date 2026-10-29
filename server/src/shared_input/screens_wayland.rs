@@ -5,11 +5,15 @@
 //! one, where xcap finds no screens and nothing could cross onto this
 //! computer.
 //!
-//! Bounded: two round trips (the globals, then the outputs) under one
+//! Bounded: a connect that never waits (a full backlog is no compositor)
+//! and two round trips (the globals, then the outputs) under one
 //! [`DEADLINE`], each waiting on the socket with `poll`, so a compositor
-//! that never answers costs at most that, never a hang.
+//! that never answers costs at most that, never a hang. It runs off the
+//! receive loop anyway (`receive::ScreensLook`).
 
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use wayland_client::backend::WaylandError;
@@ -41,8 +45,70 @@ struct State {
 /// Blocking.
 pub fn screens() -> Option<Vec<Screen>> {
     let deadline = Instant::now() + DEADLINE;
-    let conn = Connection::connect_to_env().ok()?;
+    let conn = Connection::from_socket(connect()?).ok()?;
     screens_on(&conn, deadline)
+}
+
+/// The compositor's socket as `Connection::connect_to_env` finds it
+/// (`WAYLAND_DISPLAY`, absolute or under `XDG_RUNTIME_DIR`; `wayland-0`
+/// when unset), connected without waiting. `WAYLAND_SOCKET` is never
+/// taken: that fd is the process's to use once.
+fn connect() -> Option<UnixStream> {
+    let name =
+        PathBuf::from(std::env::var_os("WAYLAND_DISPLAY").unwrap_or_else(|| "wayland-0".into()));
+    let path = if name.is_absolute() {
+        name
+    } else {
+        let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+        if !dir.is_absolute() {
+            return None;
+        }
+        dir.join(name)
+    };
+    connect_now(&path)
+}
+
+/// Connect to the Unix socket at `path` without waiting: a blocking
+/// connect waits while the listener's backlog is full, a non-blocking one
+/// fails at once (`EAGAIN`; Linux never leaves a Unix connect in
+/// progress). `None` when it is not taken now. The stream stays
+/// non-blocking, as the Wayland backend reads and writes it anyway.
+fn connect_now(path: &Path) -> Option<UnixStream> {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = path.as_os_str().as_bytes();
+    // SAFETY: an all-zero sockaddr_un is a valid one.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.len() >= addr.sun_path.len() || bytes.contains(&0) {
+        return None;
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (to, from) in addr.sun_path.iter_mut().zip(bytes) {
+        *to = *from as libc::c_char;
+    }
+    // SAFETY: a plain socket call; its fd is checked before use.
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: a new socket that nothing else owns.
+    let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+    let len = std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1;
+    // SAFETY: `addr` is a sockaddr_un holding the path and its NUL within
+    // `len` bytes.
+    let connected = unsafe {
+        libc::connect(
+            socket.as_raw_fd(),
+            std::ptr::from_ref(&addr).cast(),
+            len as libc::socklen_t,
+        )
+    };
+    (connected == 0).then(|| UnixStream::from(socket))
 }
 
 /// [`screens`] on `conn`, answered by `deadline`.
@@ -257,6 +323,38 @@ mod tests {
         let started = Instant::now();
         assert_eq!(screens_on(&conn, started + Duration::from_secs(5)), None);
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// Review M3: the connect never waits either. A Unix socket's connect
+    /// blocks while the listener's backlog is full; this one says so at
+    /// once. A path with no listener is no compositor.
+    #[test]
+    fn a_full_backlog_is_no_wait() {
+        let dir = std::env::temp_dir().join(format!("pd-wl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wayland-test");
+        assert!(connect_now(&path).is_none(), "no listener");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        // SAFETY: the listener's own fd; a backlog of none.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let started = Instant::now();
+        let mut kept = Vec::new();
+        let mut refused = false;
+        for _ in 0..16 {
+            match connect_now(&path) {
+                Some(stream) => kept.push(stream),
+                None => {
+                    refused = true;
+                    break;
+                }
+            }
+        }
+        assert!(refused, "the backlog never filled");
+        assert!(!kept.is_empty(), "the first connect was taken");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live, on a Wayland desktop that is not Hyprland (owed where it
