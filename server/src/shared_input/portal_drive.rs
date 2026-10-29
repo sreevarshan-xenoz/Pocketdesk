@@ -537,7 +537,9 @@ fn drive<B: Backend>(
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
-        nudge.follow(driver.away_on().filter(|_| quick_on));
+        // Let go after ten seconds without input here (BK10 review M3).
+        let quick = quick_on && last_input.elapsed() < super::receive::QUICK_FOR;
+        nudge.follow(driver.away_on().filter(|_| quick));
         glue.follow_sound(&mut driver);
         // Looked at only at home: away, the desktop gives every key and
         // click to Pocketdesk, so nothing here comes to the front, and the

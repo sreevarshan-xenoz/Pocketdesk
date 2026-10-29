@@ -14,8 +14,10 @@
 //! finer timer makes the whole computer wake more often, which costs a
 //! laptop some battery. So it is held while this computer's keyboard and
 //! mouse are on another computer or a phone, while another computer's
-//! cursor is on this one, and while `share-test` runs. Elsewhere holding
-//! does nothing: Linux's timers are fine-grained already.
+//! cursor is on this one (in both, only while input comes: ten seconds
+//! without any lets go until the next, [`super::receive::QUICK_FOR`]), and
+//! while `share-test` runs. Elsewhere holding does nothing: Linux's timers
+//! are fine-grained already.
 //!
 //! The same while, on any system, a [`Nudge`] keeps this computer's Wi-Fi
 //! awake. A Wi-Fi card saving power dozes after about 100 ms without

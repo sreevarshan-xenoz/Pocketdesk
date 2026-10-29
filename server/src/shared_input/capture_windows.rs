@@ -1830,7 +1830,12 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
-        let quick = glue.quick.is_held();
+        // The quick link while away and someone types or moves here, let
+        // go after ten seconds without (BK10 review M3).
+        let quick = glue.quick_on
+            && glue.awake.is_held()
+            && last_input.elapsed() < super::receive::QUICK_FOR;
+        glue.quick.set(quick);
         glue.nudge.follow(driver.away_on().filter(|_| quick));
         // The sound of the computer driven follows the cursor (BK6).
         glue.follow_sound(&mut driver);
@@ -1902,8 +1907,6 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             driver.set_clipboard(config.shared_input_clipboard);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
-            let quick = glue.quick_on && glue.awake.is_held();
-            glue.quick.set(quick);
             if config.shared_input_files != glue.files_on {
                 glue.files_setting(config.shared_input_files);
             }
