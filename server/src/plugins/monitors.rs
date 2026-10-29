@@ -25,17 +25,33 @@ impl Plugin for MonitorsPlugin {
 
     async fn handle_packet(&self, packet: &NetworkPacket, sender: &dyn DeviceSender) -> Result<()> {
         if packet.packet_type == "kdeconnect.pocketdesk.monitors" {
-            let monitors = enumerate_monitors();
-            let response =
-                NetworkPacket::new("kdeconnect.pocketdesk.monitors").with_body(serde_json::json!({
-                    "count": monitors.len(),
-                    "monitors": monitors
-                }));
+            // A computer paired both ways answering this one's question on
+            // the link it keeps (PC1): kept for the window that shows its
+            // screen, never answered back.
+            if crate::peer_computers::is_screens_answer(&packet.body) {
+                if crate::plugins::pair::is_computer_device(sender.device_id()) {
+                    crate::peer_computers::keep_screens(sender.device_id(), &packet.body);
+                }
+                return Ok(());
+            }
+            let response = answer();
             sender.send_packet(&response).await?;
-            tracing::info!("Monitors queried: {} found", monitors.len());
+            tracing::info!(
+                "Monitors queried: {} found",
+                response.body["count"].as_u64().unwrap_or(0)
+            );
         }
         Ok(())
     }
+}
+
+/// This computer's monitors, as the answer to a monitors question.
+pub(crate) fn answer() -> NetworkPacket {
+    let monitors = enumerate_monitors();
+    NetworkPacket::new("kdeconnect.pocketdesk.monitors").with_body(serde_json::json!({
+        "count": monitors.len(),
+        "monitors": monitors
+    }))
 }
 
 /// Each listed monitor's origin, in index order: what the capture matches a

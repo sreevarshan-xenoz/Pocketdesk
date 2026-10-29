@@ -170,6 +170,41 @@ fn pair_asks_whose_phone_it_is_and_someone_elses_code_says_so() {
     assert!(said, "someone else's code was never written");
 }
 
+/// PC1: the Pair page's box for another of the owner's computers is off
+/// until ticked; ticked, it makes a code that says so in the PIN file.
+#[test]
+fn pair_ticks_another_of_my_computers_into_a_new_code() {
+    use pocketdesk_core::local::pin;
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    go_to(&app, Tab::Pair);
+    let shown = (0..50).any(|_| {
+        app.run_steps(2);
+        let found = app.query_by_label(crate::pair_view::MINE_BOX).is_some();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        found
+    });
+    assert!(shown, "the Pair page never showed the box");
+    let plain = pin::read(&folders().state, pin::now_unix()).expect("a code on file");
+    assert!(!plain.mine, "off until ticked");
+    app.get_by_label(crate::pair_view::MINE_BOX).click();
+    let said = (0..50).any(|_| {
+        app.run_steps(2);
+        let file = pin::read(&folders().state, pin::now_unix());
+        let said = file.is_some_and(|f| f.mine && !f.someone_else);
+        if !said {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        said
+    });
+    assert!(
+        said,
+        "the code for another of my computers was never written"
+    );
+}
+
 /// With no phone paired, Devices says how to pair one, and its button goes
 /// there.
 #[test]
@@ -264,6 +299,7 @@ fn unpairing_a_computer_waits_for_the_server() {
                 link: String::new(),
                 link_unix: 0,
                 lets_drive: false,
+                mine: false,
             });
     })
     .expect("a computers file");
@@ -278,6 +314,57 @@ fn unpairing_a_computer_waits_for_the_server() {
         app.get_by_label("Unpair…").accesskit_node().is_disabled(),
         "no server here, so no Unpair"
     );
+}
+
+/// PC1: Other computers says which computer is paired both ways, seeing
+/// and controlling this one without asking, and only that one.
+#[test]
+fn other_computers_say_which_is_mine() {
+    let fixture = Fixture::new();
+    let computer =
+        |id: &str, name: &str, mine: bool| pocketdesk_core::local::computers::PeerComputer {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: Vec::new(),
+            control_port: 1716,
+            stream_port: 4716,
+            fingerprint: String::new(),
+            endpoint: None,
+            paired_unix: 0,
+            link: "linked".to_string(),
+            link_unix: 0,
+            lets_drive: false,
+            mine,
+        };
+    pocketdesk_core::local::computers::update(fixture.state(), |file| {
+        file.computers.push(computer(
+            "00000000-0000-4000-8000-0000000000e1",
+            "Test Tower",
+            true,
+        ));
+    })
+    .expect("a computers file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("Other computers");
+    app.run_steps(3);
+    assert!(app.query_by_label("Test Tower").is_some());
+    assert_eq!(
+        app.query_all_by_label(crate::computers_view::MINE).count(),
+        1,
+        "said for the computer paired both ways"
+    );
+    // One paired one way says nothing of the kind.
+    pocketdesk_core::local::computers::update(fixture.state(), |file| {
+        file.computers[0].mine = false;
+    })
+    .expect("a computers file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("Other computers");
+    app.run_steps(3);
+    assert!(app.query_by_label("Test Tower").is_some());
+    assert!(app.query_by_label(crate::computers_view::MINE).is_none());
 }
 
 /// Test computers for the Keyboard and mouse page: this one ("Test Desk")
@@ -302,6 +389,7 @@ fn keyboard_mouse_computers(state: &Path) {
                 link: "linked".to_string(),
                 link_unix: 0,
                 lets_drive: false,
+                mine: false,
             });
     })
     .expect("a computers file");

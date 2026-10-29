@@ -744,6 +744,7 @@ impl Plugin for PairPlugin {
             "kdeconnect.pocketdesk.pair",
             "kdeconnect.identity",
             WAN_KEY,
+            crate::peer_computers::BOTH_WAYS,
         ]
     }
 
@@ -780,6 +781,17 @@ impl Plugin for PairPlugin {
                 handle_pair(&conn, packet, sender).await;
             }
             WAN_KEY => register_wan_key(&conn, packet, sender),
+            // Only from one of the owner's computers (third review).
+            crate::peer_computers::BOTH_WAYS if is_computer_device(&conn) => {
+                let (key, connection) = (sender.peer_key(), sender.connection_id().to_string());
+                let heard = tokio::task::spawn_blocking(move || {
+                    crate::peer_computers::both_ways_heard(&conn, key.as_ref(), &connection)
+                })
+                .await;
+                if let Err(e) = heard {
+                    tracing::debug!("A computer's word that it paired both ways was lost: {e}");
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1013,6 +1025,18 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         let grant_secs = cli_grant.flatten();
+        let asked_computer = packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        // Before any key is bound (PC1 re-review I-1): an id that is a
+        // computer listed here, with another certificate, is refused, as a
+        // computer or a phone, and that computer keeps its keys.
+        if let Ok(dir) = state::state_dir()
+            && let Some(why) =
+                reused_id_in(&dir, &phone_id, sender.peer_key().as_ref(), asked_computer)
+        {
+            tracing::warn!("Pairing refused: {why}");
+            respond_pair(sender, false, "").await;
+            return;
+        }
         // A guest grant, and someone else's phone (M2 review), binds the key
         // that paired before anything is trusted, and never claims an id
         // another phone has proved: only the owner's own code may.
@@ -1038,7 +1062,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         if grant_secs.is_none() && !someone_else {
             let bound = state::state_dir()
                 .map_err(|e| std::io::Error::other(e.to_string()))
-                .and_then(|dir| owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref()));
+                .and_then(|dir| {
+                    pairing_keys_in(&dir, &phone_id, sender.peer_key().as_ref(), asked_computer)
+                        .map_err(std::io::Error::other)
+                });
             if let Err(e) = bound {
                 tracing::error!("Pairing refused: could not bind the keys of {phone_id}: {e}");
                 respond_pair(sender, false, "").await;
@@ -1048,8 +1075,29 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // Another of the owner's computers (2f) asks to be one: the PIN
         // allowed the pairing, this chooses its narrow permissions. Never a
         // guest's.
-        let computer = grant_secs.is_none()
-            && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        let computer = grant_secs.is_none() && asked_computer;
+        // PC1: one of the owner's own, paired both ways, when it asked and
+        // this computer's own code was minted for that; listed here in turn
+        // from what it said of itself.
+        let both_ways = pairs_both_ways(
+            computer,
+            packet.body.get("mine").and_then(|v| v.as_bool()) == Some(true),
+            cli.as_ref(),
+            someone_else,
+            sender.peer_key().as_ref(),
+        )
+        .then(|| listed_back(&phone_id, &packet.body, sender.peer_key().as_ref()))
+        .flatten()
+        // Only while the server can list it: else a one-way pairing.
+        .filter(|_| crate::peer_computers::takes_paired_back());
+        // Paired again one way: no grant both ways waits for it any more,
+        // before it is trusted narrowly again (PC1 third review m-A).
+        if computer
+            && both_ways.is_none()
+            && let Ok(dir) = state::state_dir()
+        {
+            crate::peer_computers::stop_waiting(&dir, &phone_id);
+        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             let was_trusted = store.is_trusted(&phone_id);
             // The permissions before the trust (M2 review): a write that fails
@@ -1068,12 +1116,56 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
+                // PC1: both ways, but as one way until the link between
+                // the two shows the other computer recorded it too (review
+                // M1): `peer_computers::grant_on_link` gives the rest then.
                 None if computer => store.trust_computer(phone_id.clone()),
                 None => store.trust_device(phone_id.clone()),
             }
         });
         match outcome {
             Ok(()) => {
+                if let Some(listed) = both_ways {
+                    // The endpoint it is listed at is the key it is admitted
+                    // by from now (PC1 review M3); its WAN key names the same.
+                    if let (Some(target), Ok(dir)) = (
+                        listed
+                            .endpoint
+                            .as_ref()
+                            .and_then(crate::peer_computers::WanTarget::parse),
+                        state::state_dir(),
+                    ) && let Err(e) = pocketdesk_core::local::device_keys::register(
+                        &dir,
+                        &phone_id,
+                        pocketdesk_core::local::device_keys::Slot::Iroh,
+                        &target.endpoint_id,
+                    ) {
+                        tracing::warn!("Could not bind {phone_id}'s internet key: {e}");
+                    }
+                    tracing::info!(
+                        "Paired computer {phone_id} both ways on connection {conn}: it sees and controls this one without asking"
+                    );
+                    // Listed here in turn (PC1), not forgotten as one paired
+                    // the other way (BD1): the two keep one link between them.
+                    // Its connection up now is not the link that shows it
+                    // recorded the pairing: the newest per device (third
+                    // review m-B), in practice this pairing connection. An
+                    // older link is no proof either way: the grant needs the
+                    // computer's both-ways word, sent only once recorded.
+                    let before: Vec<String> = state::clone_answer_targets()
+                        .await
+                        .iter()
+                        .filter(|c| c.device_id() == phone_id)
+                        .map(|c| c.connection_id().to_string())
+                        .collect();
+                    if !crate::peer_computers::paired_back(listed, before) {
+                        tracing::warn!(
+                            "Paired computer {phone_id} both ways, but the server could not list it here"
+                        );
+                    }
+                    respond_pair_as(sender, true, &desktop_id_field(), true).await;
+                    return;
+                }
                 match grant_secs {
                     Some(secs) => tracing::info!(
                         "Paired phone {phone_id} on connection {conn} (scoped grant: {secs}s)"
@@ -1116,6 +1208,90 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         }
         respond_pair(sender, false, "").await;
     }
+}
+
+/// Bind the keys of the owner's pairing of `phone_id` on a connection that
+/// proved `key`, as a computer or a phone (`computer`).
+fn pairing_keys_in(
+    dir: &std::path::Path,
+    phone_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    computer: bool,
+) -> std::result::Result<(), String> {
+    if let Some(why) = reused_id_in(dir, phone_id, key, computer) {
+        return Err(why);
+    }
+    owner_paired_in(dir, phone_id, key).map_err(|e| e.to_string())
+}
+
+/// Why a pairing under `device_id` on a connection that proved `key` is
+/// refused before anything is bound (PC1 re-review I-1): the id is a
+/// computer listed here with another certificate, or none proved, which
+/// would take that computer's place and lock it out. Asked as a computer
+/// or as a phone (`computer`) alike: no phone takes a listed computer's id.
+fn reused_id_in(
+    dir: &std::path::Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    computer: bool,
+) -> Option<String> {
+    let file = pocketdesk_core::local::computers::read(dir);
+    if !file.computers.iter().any(|c| c.device_id == device_id) {
+        return None;
+    }
+    let other = match key {
+        Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
+            file.listed_with_other_certificate(device_id, &hex(hash))
+        }
+        _ => true,
+    };
+    other.then(|| {
+        format!(
+            "{device_id} is a computer listed here with another certificate (asked as a {})",
+            if computer { "computer" } else { "phone" }
+        )
+    })
+}
+
+/// PC1: whether a computer's pairing makes it one of the owner's own,
+/// paired both ways, seeing and controlling this one without asking. It
+/// asked (its link said so: a request only, as anyone holding a link can
+/// change it), and this computer's own code it paired with (`cli`, the PIN
+/// file's) was minted for one: the file decides, never the link. Only the
+/// owner's code (no guest's, nor someone else's), and only on a connection
+/// that proved a certificate, by which it is listed here in turn.
+fn pairs_both_ways(
+    computer: bool,
+    asked: bool,
+    cli: Option<&local_pin::FilePin>,
+    someone_else: bool,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> bool {
+    computer
+        && asked
+        && !someone_else
+        && cli.is_some_and(|cli| cli.mine && cli.grant_secs.is_none() && !cli.someone_else)
+        && matches!(key, Some(pocketdesk_core::streaming::PeerKey::Tls(_)))
+}
+
+/// The computer that paired both ways, as this one lists it in turn: what
+/// it said of itself in its ask (`facts`), by the id and the certificate
+/// its connection proved. None when it said nothing that reads.
+fn listed_back(
+    device_id: &str,
+    body: &serde_json::Value,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> Option<pocketdesk_core::local::computers::PeerComputer> {
+    let Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) = key else {
+        return None;
+    };
+    let facts = serde_json::from_value(body.get("facts")?.clone()).ok()?;
+    Some(crate::peer_computers::listed_from(
+        device_id,
+        facts,
+        &hex(hash),
+        local_pin::now_unix(),
+    ))
 }
 
 /// The owner's PIN paired `phone_id` on a connection that proved `key`: that
@@ -1179,10 +1355,20 @@ fn guest_may_pair_in(
 }
 
 async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) {
-    let response = NetworkPacket::new("kdeconnect.pair").with_body(json!({
+    respond_pair_as(sender, paired, server_id, false).await;
+}
+
+/// [`respond_pair`], saying `mine` when the computer that paired is now
+/// paired both ways (PC1), so it trusts this one in turn.
+async fn respond_pair_as(sender: &dyn DeviceSender, paired: bool, server_id: &str, mine: bool) {
+    let mut body = json!({
         "pair": paired,
         "serverId": server_id,
-    }));
+    });
+    if mine {
+        body["mine"] = true.into();
+    }
+    let response = NetworkPacket::new("kdeconnect.pair").with_body(body);
     if let Err(e) = sender.send_packet(&response).await {
         tracing::debug!("Failed to deliver pair response: {e}");
     }
@@ -1206,6 +1392,49 @@ fn show_pin_notification(pin: &str) {
 #[cfg(test)]
 mod tests {
 
+    /// PC1 re-review I-1: a pairing under the id of a computer listed here
+    /// with another certificate is refused before any key is touched,
+    /// whether it says it is a computer or a phone: the listed computer
+    /// keeps its keys, its iroh key too, and nobody else takes them.
+    #[test]
+    fn a_listed_computers_id_with_another_key_touches_no_key() {
+        use pocketdesk_core::local::computers::{self, ComputerFacts};
+        use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = std::env::temp_dir().join(format!("pd-pc1-reused-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (own, iroh) = ("ab".repeat(32), "e".repeat(64));
+        computers::update(&dir, |file| {
+            let facts = ComputerFacts {
+                name: "Desk".to_string(),
+                addresses: vec!["192.0.2.80".to_string()],
+                control_port: 1716,
+                stream_port: 4716,
+                endpoint: None,
+            };
+            file.computers.push(facts.into_peer("desk", &own, 1));
+        })
+        .unwrap();
+        device_keys::replace(&dir, "desk", &own).unwrap();
+        device_keys::register(&dir, "desk", Slot::Iroh, &iroh).unwrap();
+        let impostor = PeerKey::Tls([0xcd; 32]);
+        let mut refusals = Vec::new();
+        for computer in [true, false] {
+            refusals.push(pairing_keys_in(&dir, "desk", Some(&impostor), computer).is_err());
+            refusals.push(pairing_keys_in(&dir, "desk", None, computer).is_err());
+        }
+        let tls = device_keys::check(&dir, "desk", Slot::Tls, Some(&own));
+        let kept_iroh = device_keys::check(&dir, "desk", Slot::Iroh, Some(&iroh));
+        // Its own certificate pairs again, as before.
+        let again = pairing_keys_in(&dir, "desk", Some(&PeerKey::Tls([0xab; 32])), true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(refusals, [true; 4], "refused, as a computer and as a phone");
+        assert_eq!(tls, Verdict::Matches, "its certificate stands");
+        assert_eq!(kept_iroh, Verdict::Matches, "its iroh key stands");
+        assert!(again.is_ok());
+    }
+
     #[test]
     fn a_pin_shown_for_the_phone_follows_the_pair_pages_choice() {
         let file = |someone_else, grant_secs| local_pin::FilePin {
@@ -1214,6 +1443,7 @@ mod tests {
             minted_unix: 0,
             grant_secs,
             someone_else,
+            mine: false,
         };
         // The code itself says it.
         assert!(someone_else_for(Some(&file(true, None)), false, None));
@@ -1223,6 +1453,116 @@ mod tests {
         assert!(someone_else_for(None, true, Some(&file(false, Some(900)))));
         assert!(!someone_else_for(None, true, Some(&file(false, None))));
         assert!(!someone_else_for(None, true, None));
+    }
+
+    /// PC1: a computer pairs both ways only when it asked and this
+    /// computer's own code was minted for one of the owner's computers, on
+    /// a connection that proved a certificate. Adding `mine=1` to a link
+    /// whose code was not minted so, or taking it off one that was, pairs
+    /// one way.
+    #[test]
+    fn a_computer_pairs_both_ways_only_when_both_sides_said_so() {
+        use pocketdesk_core::streaming::PeerKey;
+        let code = |mine, grant_secs, someone_else| local_pin::FilePin {
+            profile: None,
+            pin: "123456".to_string(),
+            minted_unix: 0,
+            grant_secs,
+            someone_else,
+            mine,
+        };
+        let key = Some(PeerKey::Tls([7; 32]));
+        let mine = code(true, None, false);
+        assert!(pairs_both_ways(
+            true,
+            true,
+            Some(&mine),
+            false,
+            key.as_ref()
+        ));
+        // The link's flag alone: this computer's code was not minted so.
+        let plain = code(false, None, false);
+        assert!(!pairs_both_ways(
+            true,
+            true,
+            Some(&plain),
+            false,
+            key.as_ref()
+        ));
+        // The code alone: the link that was pasted did not ask (an old
+        // link, or one with the flag taken off).
+        assert!(!pairs_both_ways(
+            true,
+            false,
+            Some(&mine),
+            false,
+            key.as_ref()
+        ));
+        // A phone, a code shown for a phone (not the file's), a guest's or
+        // someone else's code, and a connection with no certificate.
+        assert!(!pairs_both_ways(
+            false,
+            true,
+            Some(&mine),
+            false,
+            key.as_ref()
+        ));
+        assert!(!pairs_both_ways(true, true, None, false, key.as_ref()));
+        let guest = code(true, Some(900), false);
+        assert!(!pairs_both_ways(
+            true,
+            true,
+            Some(&guest),
+            false,
+            key.as_ref()
+        ));
+        let theirs = code(true, None, true);
+        assert!(!pairs_both_ways(
+            true,
+            true,
+            Some(&theirs),
+            false,
+            key.as_ref()
+        ));
+        assert!(!pairs_both_ways(
+            true,
+            true,
+            Some(&mine),
+            true,
+            key.as_ref()
+        ));
+        assert!(!pairs_both_ways(true, true, Some(&mine), false, None));
+    }
+
+    /// PC1: the computer that paired both ways is listed by the id and the
+    /// certificate its connection proved, with what it said of itself; an
+    /// ask that says nothing that reads lists nothing.
+    #[test]
+    fn a_computer_paired_both_ways_is_listed_by_what_its_connection_proved() {
+        use pocketdesk_core::streaming::PeerKey;
+        let body = serde_json::json!({
+            "pin": "123456",
+            "computer": true,
+            "mine": true,
+            "facts": {
+                "name": "Lap\u{202E}top",
+                "addresses": ["192.0.2.41"],
+                "controlPort": 1716,
+                "streamPort": 4716,
+                "endpoint": {"endpointId": "not an iroh key"},
+            },
+        });
+        let key = PeerKey::Tls([0xab; 32]);
+        let listed = listed_back("lap", &body, Some(&key)).unwrap();
+        assert_eq!(listed.device_id, "lap");
+        assert_eq!(listed.fingerprint, "ab".repeat(32));
+        assert_eq!(listed.name, "Laptop", "cleaned as a link's name is");
+        assert_eq!(listed.addresses, ["192.0.2.41"]);
+        assert_eq!(listed.endpoint, None, "not a real iroh key");
+        assert!(listed.mine);
+        assert!(listed_back("lap", &body, None).is_none(), "no certificate");
+        let said_nothing = serde_json::json!({"pin": "123456", "mine": true});
+        assert!(listed_back("lap", &said_nothing, Some(&key)).is_none());
     }
 
     #[test]
@@ -1857,6 +2197,10 @@ forged log line"
             // A computer's iroh key (2f): it holds itself to a paired
             // device's bound TLS key, on the home road.
             "kdeconnect.pocketdesk.wan_key",
+            // PC1: a computer paired both ways says it recorded the
+            // pairing; it gives only what this computer's owner granted, on
+            // its link, held to its iroh key.
+            "kdeconnect.pocketdesk.both_ways",
             // The deck (F1): the listing tells only labels and kinds, and a
             // press is held to the phone's permission for its action.
             "kdeconnect.pocketdesk.deck",

@@ -1586,9 +1586,13 @@ where
             Road::Internet => {
                 // Nothing is kept for pairing on this road: a connection
                 // that is not the paired phone with its iroh key ends here.
-                if let Err(refusal) =
+                // Being recorded here as paired both ways (PC1): not yet.
+                let standing = if crate::peer_computers::being_recorded(&device_id) {
+                    Err(pocketdesk_core::local::device_keys::Refusal::NotRegistered)
+                } else {
                     crate::plugins::pair::internet_standing(&device_id, peer_key.as_ref())
-                {
+                };
+                if let Err(refusal) = standing {
                     tracing::warn!(
                         "Refused {device_id}'s control connection over the internet: {}",
                         refusal.reason()

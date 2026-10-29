@@ -367,6 +367,21 @@ impl DevicePermissions {
         permissions
     }
 
+    /// What another of the owner's computers may do when it pairs from a
+    /// link made for one of them (PC1, "This is another of my computers"):
+    /// [`Self::computer`]'s, and control (the mouse and keyboard in a
+    /// session) and the shared keyboard and mouse, with no session asked
+    /// first. The PIN on that link proved the owner was at both computers,
+    /// so the consent is given once, at pairing; each switch can be turned
+    /// back on its Devices page.
+    pub fn computer_mine() -> Self {
+        let mut permissions = Self::computer();
+        permissions.set(Capability::Input, true);
+        permissions.set(Capability::SharedInput, true);
+        permissions.ask_first = false;
+        permissions
+    }
+
     /// What a phone that is not the owner's may do when it pairs (M2b),
     /// as the Pair page's "Someone else's" and every guest: send files and
     /// links, nothing else (not browse this computer's files), and every
@@ -418,6 +433,29 @@ mod tests {
             );
         }
         assert!(computer.ask_first, "its screen sessions wait for the owner");
+    }
+
+    /// PC1: one of the owner's own computers, paired from a link made for
+    /// one, sees and controls this one without asking, and shares its
+    /// keyboard and mouse; nothing more than a computer's otherwise.
+    #[test]
+    fn another_of_my_computers_sees_and_controls_without_asking() {
+        let mine = DevicePermissions::computer_mine();
+        for capability in Capability::ALL {
+            assert_eq!(
+                mine.allows(capability),
+                matches!(
+                    capability,
+                    Capability::Clipboard
+                        | Capability::Files
+                        | Capability::Links
+                        | Capability::Input
+                        | Capability::SharedInput
+                ),
+                "{capability:?}"
+            );
+        }
+        assert!(!mine.ask_first, "no session waits for the owner");
     }
 
     #[test]

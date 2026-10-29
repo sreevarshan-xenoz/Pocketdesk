@@ -55,10 +55,79 @@ pub struct PeerComputer {
     /// paired, again too.
     #[serde(default)]
     pub lets_drive: bool,
+    /// Paired both ways from a link made for another of the owner's
+    /// computers (PC1, "This is another of my computers"): each computer
+    /// lists the other here and trusts it, seeing and controlling it
+    /// without asking. Only one of the two keeps the link between them
+    /// ([`keeps_link`]). Off in files written before.
+    #[serde(default)]
+    pub mine: bool,
 }
 
 fn default_stream_port() -> u16 {
     crate::streaming::client::DEFAULT_STREAMING_PORT
+}
+
+/// Whether this computer (`own_id`) dials and keeps the link to `computer`
+/// (PC1). It always does to one it paired with one way: it pasted that
+/// one's link, and that one does not list it. Of two paired both ways, each
+/// listing the other, only the one whose id sorts first dials; the other
+/// takes that link as the computer it pasted would, and keeps none of its
+/// own. Both work it out alike, from their two ids alone, so they agree
+/// whichever pasted the other's link and in whatever order they start: one
+/// link between them, never two.
+pub fn keeps_link(own_id: &str, computer: &PeerComputer) -> bool {
+    !computer.mine || own_id < computer.device_id.as_str()
+}
+
+/// What a computer pasting a link made for one of the owner's computers
+/// tells the computer it pairs with about itself, inside its pairing ask
+/// (PC1): what that computer needs to list it in turn and reach it. Its
+/// certificate is not among them: the computer it pairs with takes that
+/// from the connection itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComputerFacts {
+    pub name: String,
+    /// Its addresses, best first.
+    pub addresses: Vec<String>,
+    pub control_port: u16,
+    pub stream_port: u16,
+    /// Its iroh endpoint (`endpointId`, `relayUrls`, `directAddrs`), when
+    /// it has the internet road.
+    #[serde(default)]
+    pub endpoint: Option<serde_json::Value>,
+}
+
+/// The most addresses a computer's facts are taken with.
+const MOST_ADDRESSES: usize = 16;
+
+impl ComputerFacts {
+    /// The computer these facts describe, as the computer it paired with
+    /// lists it: `device_id` from the connection, `fingerprint` (hex) the
+    /// certificate it proved there. Its addresses are put in order (no
+    /// loopback, link-local or IPv6), at most 16; a port of 0 is the
+    /// default one. Its name and endpoint are taken as they are: the
+    /// server cleans the one and checks the other.
+    pub fn into_peer(self, device_id: &str, fingerprint: &str, now_unix: u64) -> PeerComputer {
+        let mut addresses = super::pair_link::order_addresses(self.addresses);
+        addresses.truncate(MOST_ADDRESSES);
+        let or = |port: u16, default: u16| if port == 0 { default } else { port };
+        PeerComputer {
+            device_id: device_id.to_string(),
+            name: self.name,
+            addresses,
+            control_port: or(self.control_port, crate::DEFAULT_CONTROL_PORT),
+            stream_port: or(self.stream_port, default_stream_port()),
+            fingerprint: fingerprint.to_ascii_lowercase(),
+            endpoint: self.endpoint,
+            paired_unix: now_unix,
+            link: "connecting".to_string(),
+            link_unix: now_unix,
+            lets_drive: false,
+            mine: true,
+        }
+    }
 }
 
 /// How the last pairing went, for the app to show.
@@ -96,9 +165,58 @@ pub struct ComputersFile {
     pub computers: Vec<PeerComputer>,
     #[serde(default)]
     pub last_pairing: Option<PairingOutcome>,
+    /// The computers that paired here both ways (PC1) whose grant waits for
+    /// the link between the two: until it comes up, which shows the other
+    /// computer recorded the pairing too, each is trusted as a computer
+    /// paired one way (PC1 review M1). Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
+    /// The computers whose grant both ways waited for the link longer than
+    /// [`PENDING_FOR`] and lapsed (PC1 re-review): each stays paired one
+    /// way here until it pairs again. Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lapsed: Vec<String>,
 }
 
+/// How long a grant both ways waits for the link before it lapses (PC1).
+pub const PENDING_FOR: u64 = 10 * 60;
+
 impl ComputersFile {
+    /// Let each grant both ways that has waited for the link longer than
+    /// [`PENDING_FOR`] since its computer paired (`paired_unix`) lapse at
+    /// `now_unix`, or one whose computer is gone; the lapsed ones.
+    pub fn lapse_pending(&mut self, now_unix: u64) -> Vec<String> {
+        let paired = |id: &str| {
+            self.computers
+                .iter()
+                .find(|c| c.device_id == id)
+                .map(|c| c.paired_unix)
+        };
+        let lapsed: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|id| paired(id).is_none_or(|at| now_unix.saturating_sub(at) >= PENDING_FOR))
+            .cloned()
+            .collect();
+        self.pending.retain(|id| !lapsed.contains(id));
+        for id in &lapsed {
+            if paired(id).is_some() && !self.lapsed.contains(id) {
+                self.lapsed.push(id.clone());
+            }
+        }
+        lapsed
+    }
+
+    /// Whether `device_id` is listed here with a certificate other than
+    /// `fingerprint` (hex, either case): a link or a pairing that reuses a
+    /// listed computer's id with another certificate is someone else's
+    /// (PC1 review C1, M2), and is refused until that computer is unpaired.
+    pub fn listed_with_other_certificate(&self, device_id: &str, fingerprint: &str) -> bool {
+        self.computers
+            .iter()
+            .any(|c| c.device_id == device_id && !c.fingerprint.eq_ignore_ascii_case(fingerprint))
+    }
+
     /// Take the computer `device_id` out, and its pairing's line with it
     /// (BD3: the line, and any address a failure named, outlived Unpair).
     pub fn remove(&mut self, device_id: &str) -> Option<PeerComputer> {
@@ -107,6 +225,8 @@ impl ComputersFile {
             .iter()
             .position(|c| c.device_id == device_id)?;
         let computer = self.computers.remove(at);
+        self.pending.retain(|id| id != device_id);
+        self.lapsed.retain(|id| id != device_id);
         if self
             .last_pairing
             .as_ref()
@@ -123,10 +243,22 @@ impl ComputersFile {
 #[serde(tag = "ask", rename_all = "snake_case")]
 pub enum ComputerAsk {
     /// Pair with the computer whose pairing link (`pocketdesk://pair?...`)
-    /// this is.
-    Pair { link: String },
+    /// this is. `mine`: the owner confirmed here, for a link that asks to
+    /// pair both ways (PC1), that the computer it names may see and control
+    /// this one at any time without asking. Without it such a link pairs one
+    /// way, and this computer trusts nothing of the link's maker.
+    Pair {
+        link: String,
+        #[serde(default)]
+        mine: bool,
+    },
     /// Forget a paired computer.
     Forget { device_id: String },
+    /// Forget the computer `device_id` only as it was listed when this was
+    /// asked (its `paired_unix`): the server's own ask when that computer
+    /// paired here the other way (BD1), which a pairing since must outlive
+    /// (PC1 review M5).
+    ForgetPaired { device_id: String, paired_unix: u64 },
     /// Let a computer this one paired with drive this one's keyboard and
     /// mouse, or not ([`PeerComputer::lets_drive`]).
     LetDrive { device_id: String, allow: bool },
@@ -307,7 +439,81 @@ mod tests {
             link: String::new(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
+    }
+
+    /// PC1: of two computers paired both ways, exactly one keeps the link,
+    /// the same one whichever pasted the other's link and in whatever
+    /// order they look; to one paired one way, the one that pasted always
+    /// does.
+    #[test]
+    fn one_link_is_kept_between_two_computers_in_every_order() {
+        let ids = ["0a-desk", "7f-laptop", "c3-tower"];
+        for a in ids {
+            for b in ids.iter().copied().filter(|b| *b != a) {
+                let (b_on_a, a_on_b) = (
+                    PeerComputer {
+                        mine: true,
+                        ..computer(b)
+                    },
+                    PeerComputer {
+                        mine: true,
+                        ..computer(a)
+                    },
+                );
+                let dialers = [keeps_link(a, &b_on_a), keeps_link(b, &a_on_b)];
+                assert_eq!(
+                    dialers.iter().filter(|d| **d).count(),
+                    1,
+                    "{a} and {b}: {dialers:?}"
+                );
+                assert_eq!(keeps_link(a, &b_on_a), a < b, "the first id dials");
+                // One way: only the computer that pasted lists the other,
+                // and it dials, whichever id sorts first.
+                assert!(keeps_link(a, &computer(b)));
+            }
+        }
+        // A file from before PC1 reads as one way.
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        let old: PeerComputer = serde_json::from_str(&raw.replace(",\"mine\":false", "")).unwrap();
+        assert!(!old.mine);
+    }
+
+    /// PC1: what a computer says of itself as it pairs both ways becomes
+    /// its entry on the other: its addresses in order (no loopback), a
+    /// port of 0 the default, the certificate the connection proved, and
+    /// the entry marked as paired both ways.
+    #[test]
+    fn a_computers_facts_become_its_entry_on_the_other() {
+        let facts: ComputerFacts = serde_json::from_value(serde_json::json!({
+            "name": "Laptop",
+            "addresses": ["127.0.0.1", "100.80.1.2", "192.0.2.40", "fe80::1"],
+            "controlPort": 1716,
+            "streamPort": 0,
+        }))
+        .unwrap();
+        assert_eq!(facts.endpoint, None, "no internet road");
+        let peer = facts.into_peer("lap", &"AB".repeat(32), 50);
+        assert_eq!(peer.device_id, "lap");
+        assert_eq!(peer.name, "Laptop");
+        assert_eq!(peer.addresses, ["192.0.2.40", "100.80.1.2"]);
+        assert_eq!(peer.control_port, 1716);
+        assert_eq!(
+            peer.stream_port,
+            crate::streaming::client::DEFAULT_STREAMING_PORT
+        );
+        assert_eq!(peer.fingerprint, "ab".repeat(32));
+        assert!(peer.mine && !peer.lets_drive);
+        assert_eq!(peer.link, "connecting");
+        let many = ComputerFacts {
+            name: "Many".to_string(),
+            addresses: (1..=40).map(|n| format!("192.0.2.{n}")).collect(),
+            control_port: 1,
+            stream_port: 2,
+            endpoint: None,
+        };
+        assert_eq!(many.into_peer("m", "", 1).addresses.len(), 16);
     }
 
     #[test]
@@ -335,6 +541,7 @@ mod tests {
             &dir,
             ComputerAsk::Pair {
                 link: "pocketdesk://pair?v=1".to_string(),
+                mine: false,
             },
             100,
         )
@@ -471,6 +678,33 @@ mod tests {
         assert_eq!(old.ask, ComputerAsk::StopView { session_id: None });
     }
 
+    /// PC1 review C1: a pairing ask says whether the owner here let the
+    /// link's maker see and control this computer; one from before says not.
+    #[test]
+    fn a_pairing_ask_carries_the_owners_consent_here() {
+        let old: ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"pair","link":"pocketdesk://pair?v=1&mine=1","created_unix":1}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old.ask,
+            ComputerAsk::Pair {
+                link: "pocketdesk://pair?v=1&mine=1".to_string(),
+                mine: false,
+            },
+            "a link's own mine=1 is not this owner's consent"
+        );
+        let wire = serde_json::to_value(ComputerAsk::Pair {
+            link: "l".to_string(),
+            mine: true,
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"ask": "pair", "link": "l", "mine": true})
+        );
+    }
+
     #[test]
     fn a_request_names_what_it_asks_on_disk() {
         let wire = serde_json::to_value(ComputerRequest {
@@ -512,6 +746,44 @@ mod tests {
         assert_eq!(old.device_id, "");
     }
 
+    /// PC1 review C1, M2: a listed computer's id with another certificate
+    /// is someone else's; the same certificate, in either case, or an id
+    /// not listed, is not.
+    #[test]
+    fn a_listed_id_with_another_certificate_is_someone_elses() {
+        let file = ComputersFile {
+            computers: vec![computer("desk")],
+            ..ComputersFile::default()
+        };
+        assert!(file.listed_with_other_certificate("desk", &"cd".repeat(32)));
+        assert!(!file.listed_with_other_certificate("desk", &"AB".repeat(32)));
+        assert!(!file.listed_with_other_certificate("lap", &"cd".repeat(32)));
+    }
+
+    /// PC1 re-review: a grant both ways that waited for the link longer
+    /// than ten minutes lapses (its computer then stays paired one way, and
+    /// is said to have lapsed); a younger one waits on, and one whose
+    /// computer is gone lapses too.
+    #[test]
+    fn a_grant_waiting_for_the_link_lapses_after_ten_minutes() {
+        let paired_at = |id: &str, at: u64| PeerComputer {
+            paired_unix: at,
+            ..computer(id)
+        };
+        let mut file = ComputersFile {
+            computers: vec![paired_at("old", 1_000), paired_at("young", 1_500)],
+            pending: vec!["old".to_string(), "young".to_string(), "gone".to_string()],
+            ..ComputersFile::default()
+        };
+        let lapsed = file.lapse_pending(1_000 + PENDING_FOR);
+        assert_eq!(lapsed, ["old", "gone"]);
+        assert_eq!(file.pending, ["young"]);
+        assert_eq!(file.lapsed, ["old"], "said for a computer still listed");
+        assert!(file.lapse_pending(1_000 + PENDING_FOR).is_empty(), "once");
+        file.remove("old");
+        assert!(file.lapsed.is_empty(), "gone with its computer");
+    }
+
     /// BD3: a computer taken out takes its pairing's line, not another's.
     #[test]
     fn a_computer_removed_takes_its_pairing_line() {
@@ -525,6 +797,7 @@ mod tests {
         let mut file = ComputersFile {
             computers: vec![computer("desk"), computer("lap")],
             last_pairing: Some(line("lap")),
+            ..ComputersFile::default()
         };
         assert_eq!(
             file.remove("desk").map(|c| c.device_id),

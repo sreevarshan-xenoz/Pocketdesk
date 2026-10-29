@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-962 open items.
+966 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 55 |
+| A second computer | 59 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -870,7 +870,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Quality: Economy, Balanced, Best and Auto from the bar visibly change the picture within a few seconds (and the bitrate in Linux's session record); the Settings choice is what a new window starts at; View only in Settings starts it sending nothing. (where: second computer)
 - Linux's session list (its desktop app's Sessions, and `pocketdesk sessions`) shows the Windows laptop's session by its name; End there ends it and the window says why; privacy mode, the away lock and one driver at a time behave there as for a phone. (where: second computer)
 - Sound: with "Hear and change this computer's sound" on for the Windows laptop on Linux, Linux's sound plays on Windows while the window is open, and stops with it. (where: second computer)
-- Linux views Windows (pairing is one way: unpair on both, then paste Windows' pairing link on Linux): the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
+- Linux views Windows (paired both ways, §223; or, paired one way, unpair on both, then paste Windows' pairing link on Linux): the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
 - Screenshot and Record from the window save a PNG and an MKV of Linux's screen; Full screen fills Windows' screen and Exit full screen comes back. (where: second computer)
 
 **220. Linux drives too (BK8)**
@@ -892,6 +892,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
 - Mixed versions: a computer on 0.8.2 (or earlier) and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
 - A computer's answers follow its new link: with the throwaway pair of the runs above, restart the Windows server and run `share-test <laptop> --keys 20` as soon as the link is direct again: the timings come back on the first run, not after about 50 s; and restart the laptop's server while Windows' cursor is home: the next crossing from Windows reaches it (its screens answered at once). (where: second computer)
+
+**223. Both are mine (PC1)**
+
+- Pair once: the box ticked on the Windows laptop's Pair page, its link pasted in the Linux laptop's Settings, Other computers, which names the Windows laptop and its addresses (the Windows laptop's own) and says it would see and control the Linux laptop at any time without asking; ticking that it is the owner's own turns the button to "Pair both ways". Within a few seconds each lists the other, Windows saying "Mine once linked" until the link is up and then, like Linux, "Mine: sees and controls without asking", and both say linked. Pasted again unticked, the button says "Pair one way". (where: second computer)
+- Each views and drives the other with no prompt: "Show its screen" on Windows shows Linux's screen with control, and on Linux shows Windows' with control, with nobody at the far computer to click Allow or turn Control on; the window's bar says the other takes this computer's clicks and keys. (where: second computer)
+- The shared keyboard and mouse both ways with sharing on at both: Windows drives Linux and Linux drives Windows (BK8) over the one link, never "Waiting for <computer> to answer". (where: second computer)
+- Turned back and unpaired: on Linux's Devices page, "Ask before each session" on and Control off for the Windows laptop; the next "Show its screen" from Windows waits for Allow once there and is view-only. Unpair under Other computers on Linux: the Windows laptop leaves both Linux pages, and Windows says refused or waiting for it. (where: second computer)
 
 **224. The window says how it's doing, and comes back by itself (PC2)**
 

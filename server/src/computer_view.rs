@@ -239,6 +239,17 @@ async fn dial(
                 .to_string(),
         );
     }
+    // The internet road only at the key the computer is held to (PC1
+    // review M3): a computer paired both ways is dialled at its bound key.
+    let internet = computer
+        .endpoint
+        .as_ref()
+        .and_then(crate::peer_computers::WanTarget::parse)
+        .map(|target| {
+            let bound = crate::state::state_dir()
+                .is_ok_and(|dir| crate::peer_computers::endpoint_bound(&dir, computer, &target));
+            (target, bound)
+        });
     let dials: Vec<(bool, RoadDial<SharedConnection>)> = routes
         .iter()
         .map(|route| match route {
@@ -248,7 +259,7 @@ async fn dial(
             ),
             Route::Internet => (
                 false,
-                Box::pin(dial_internet(wan.cloned(), computer.endpoint.clone()))
+                Box::pin(dial_internet(wan.cloned(), internet.clone()))
                     as RoadDial<SharedConnection>,
             ),
         })
@@ -288,19 +299,18 @@ async fn dial_home(addr: SocketAddr, certs: Arc<CertManager>) -> Result<SharedCo
     }
 }
 
-/// The internet road, from this computer's WAN endpoint to the other's.
+/// The internet road, from this computer's WAN endpoint to the other's
+/// `target`, when it is the key that computer is held to (`bound`).
 async fn dial_internet(
     wan: Option<iroh::Endpoint>,
-    endpoint: Option<serde_json::Value>,
+    target: Option<(crate::peer_computers::WanTarget, bool)>,
 ) -> Result<SharedConnection, String> {
-    let (Some(wan), Some(target)) = (
-        wan,
-        endpoint
-            .as_ref()
-            .and_then(crate::peer_computers::WanTarget::parse),
-    ) else {
+    let (Some(wan), Some((target, bound))) = (wan, target) else {
         return Err("internet: no endpoint".to_string());
     };
+    if !bound {
+        return Err("internet: its endpoint is not the key it paired with".to_string());
+    }
     pocketdesk_core::streaming::iroh_connection::dial_stream_from(
         &wan,
         &target.endpoint_id,
@@ -1489,6 +1499,7 @@ mod tests {
             link: String::new(),
             link_unix: 0,
             lets_drive: false,
+            mine: false,
         }
     }
 
