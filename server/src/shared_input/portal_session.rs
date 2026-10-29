@@ -139,19 +139,13 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
 ) -> Result<(), String> {
     let ended = std::panic::AssertUnwindSafe(async {
         let mut zone_set = zones(calls, events).await?;
-        // The barriers last asked for, set again for each new zone set.
-        let mut armed: Option<Vec<Barrier>> = None;
         loop {
             tokio::select! {
                 ask = asked.recv() => match ask {
                     // The glue is gone: the session ends with it.
                     None => return Ok(()),
-                    Some(Ask::Arm(barriers)) => {
-                        arm(calls, &barriers, zone_set).await;
-                        armed = Some(barriers);
-                    }
+                    Some(Ask::Arm(barriers)) => arm(calls, &barriers, zone_set).await,
                     Some(Ask::Disarm) => {
-                        armed = None;
                         if let Err(e) = calls.disable().await {
                             tracing::debug!("Shared input: input capture not disabled: {e}");
                         }
@@ -171,19 +165,11 @@ pub async fn serve<C: Calls, S: Stream<Item = Signal> + Unpin>(
                     Some(Signal::Deactivated { activation }) => {
                         say(events, Portal::Deactivated { activation })?;
                     }
-                    Some(Signal::Disabled) => {
-                        armed = None;
-                        say(events, Portal::Disabled)?;
-                    }
-                    Some(Signal::ZonesChanged) => {
-                        zone_set = zones(calls, events).await?;
-                        // The barriers belong to a zone set: set again for
-                        // this one (the glue sets new ones once the layout
-                        // follows).
-                        if let Some(barriers) = &armed {
-                            arm(calls, barriers, zone_set).await;
-                        }
-                    }
+                    Some(Signal::Disabled) => say(events, Portal::Disabled)?,
+                    // Said to the glue, which sets the new zone set's
+                    // barriers once nothing is captured (setting them here
+                    // would end a capture behind its back).
+                    Some(Signal::ZonesChanged) => zone_set = zones(calls, events).await?,
                     Some(Signal::Input(input)) => {
                         for event in input {
                             say(events, event)?;
@@ -417,5 +403,46 @@ pub(crate) mod tests {
             "{ended:?}"
         );
         assert_eq!(*calls.log.borrow(), ["zones -> 1", "disable", "close"]);
+    }
+
+    /// BK8 review I2: new zones never set the old barriers again behind
+    /// the glue (that would disable a capture going on): the zones are
+    /// read and said, and the glue arms the new ones once nothing is
+    /// captured.
+    #[tokio::test]
+    async fn new_zones_are_said_and_never_set_the_old_barriers_again() {
+        let calls = FakeCalls::default();
+        let (ended, said) = run(
+            &calls,
+            vec![
+                Ok(Ask::Arm(vec![barrier(1)])),
+                Err(Signal::ZonesChanged),
+                Ok(Ask::Arm(vec![barrier(2)])),
+            ],
+            None,
+        )
+        .await;
+        assert_eq!(ended, Ok(()));
+        assert_eq!(
+            *calls.log.borrow(),
+            [
+                "zones -> 1",
+                "disable",
+                "set [1] for 1",
+                "enable",
+                "zones -> 2",
+                "disable",
+                "set [2] for 2",
+                "enable",
+                "disable",
+                "close",
+            ]
+        );
+        assert_eq!(
+            said.iter()
+                .filter(|p| matches!(p, Portal::Zones(_)))
+                .count(),
+            2
+        );
     }
 }

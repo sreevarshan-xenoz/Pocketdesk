@@ -150,6 +150,9 @@ pub struct PortalGlue<B: Backend> {
     reachable: HashSet<String>,
     /// The barriers set now, if the capture is enabled.
     armed: Option<Vec<Barrier>>,
+    /// The zones changed since they were set: they belong to the last zone
+    /// set, and are set again at the next arming.
+    stale: bool,
     /// The desktop disabled the capture: enabled again only when asked
     /// ([`PortalGlue::rearm`]), not at once.
     disabled: bool,
@@ -187,6 +190,7 @@ impl<B: Backend> PortalGlue<B> {
             layout: Layout::default(),
             reachable: HashSet::new(),
             armed: None,
+            stale: false,
             disabled: false,
             mode: Mode::Off,
             captured: None,
@@ -264,6 +268,9 @@ impl<B: Backend> PortalGlue<B> {
                 Vec::new()
             }
             Portal::Zones(zones) => {
+                // The barriers set belong to the last zone set: the new
+                // ones are set at the next arming, never mid-capture.
+                self.stale = true;
                 if self.zones.as_ref() != Some(&zones) {
                     // New screens: every edge is tried again.
                     self.breaker.clear();
@@ -525,7 +532,8 @@ impl<B: Backend> PortalGlue<B> {
         );
         if wanted.is_empty() {
             self.disarm();
-        } else if self.armed.as_ref() != Some(&wanted) {
+        } else if self.stale || self.armed.as_ref() != Some(&wanted) {
+            self.stale = false;
             self.backend.arm(&wanted);
             self.armed = Some(wanted);
         }
@@ -1127,5 +1135,46 @@ mod tests {
         rig.now = t0 + Duration::from_millis(400);
         rig.say(Portal::Motion { dx: -1.0, dy: 0.0 });
         assert_eq!(rig.calls(), vec![Call::Release(None, (1595, 500))]);
+    }
+
+    /// BK8 review I2: new zones mid-capture set nothing (setting barriers
+    /// would end the capture behind the driver's back); the new barriers
+    /// are set once the keyboard and mouse are home, even when their lines
+    /// are as before (they belong to the new zone set).
+    #[test]
+    fn new_zones_set_the_barriers_again_only_once_home() {
+        let mut rig = Rig::new(&["W"]);
+        rig.calls();
+        rig.hit(7, 1, (1600.0, 500.0));
+        rig.say(Portal::Zones(vec![screen(0, 0, 1600, 1000)]));
+        rig.glue.set_targets(&desk(), &["W".to_string()]);
+        rig.glue.rearm();
+        assert_eq!(rig.calls(), vec![], "nothing set mid-capture");
+        // Home: let go, then the new zone set's barriers.
+        rig.say(Portal::Motion { dx: -30.0, dy: 0.0 });
+        assert_eq!(
+            rig.calls(),
+            vec![
+                Call::Release(Some(7), (1595, 500)),
+                Call::Arm(vec![(RIGHT, "W".to_string())])
+            ]
+        );
+        // At home, new zones set them again at the next layout pass.
+        rig.say(Portal::Zones(vec![screen(0, 0, 1600, 1000)]));
+        rig.glue.set_targets(&desk(), &["W".to_string()]);
+        assert_eq!(rig.calls(), vec![Call::Arm(vec![(RIGHT, "W".to_string())])]);
+        // New zones and then a game before the next pass: the capture is
+        // still disabled (the barriers set are not forgotten).
+        rig.say(Portal::Zones(vec![screen(0, 0, 1600, 1000)]));
+        let fg = crate::shared_input::game_lock::Foreground {
+            fullscreen: true,
+            ..Default::default()
+        };
+        let actions = rig.driver.on(Captured::Foreground {
+            fg,
+            kernel_anti_cheat: false,
+        });
+        rig.glue.act(actions);
+        assert_eq!(rig.calls(), vec![Call::Disarm]);
     }
 }
