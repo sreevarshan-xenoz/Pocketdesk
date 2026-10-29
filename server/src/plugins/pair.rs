@@ -1092,9 +1092,9 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 Some(secs) => {
                     store.trust_device_with_ttl(phone_id.clone(), Duration::from_secs(secs))
                 }
-                None if both_ways.is_some() => {
-                    store.trust_computer_as(phone_id.clone(), DevicePermissions::computer_mine())
-                }
+                // PC1: both ways, but as one way until the link between
+                // the two shows the other computer recorded it too (review
+                // M1): `peer_computers::grant_on_link` gives the rest then.
                 None if computer => store.trust_computer(phone_id.clone()),
                 None => store.trust_device(phone_id.clone()),
             }

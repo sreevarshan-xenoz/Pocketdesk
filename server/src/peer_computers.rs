@@ -251,6 +251,11 @@ fn list_back(
             was = Some(file.computers.remove(at));
         }
         file.computers.push(computer.clone());
+        // Given what was granted once the link shows the other recorded it
+        // too (PC1 review M1).
+        if !file.pending.contains(&computer.device_id) {
+            file.pending.push(computer.device_id.clone());
+        }
     });
     if let Err(e) = saved {
         tracing::warn!("Could not list a computer paired both ways: {e}");
@@ -1779,6 +1784,9 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
 
 /// Record how the link to `device_id` is doing, when it changed.
 fn set_link(dir: &Path, device_id: &str, link: &str) {
+    if link == "linked" {
+        grant_on_link(dir, device_id);
+    }
     let now = pocketdesk_core::local::pin::now_unix();
     let saved = computers::update(dir, |file| {
         if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id)
@@ -1790,6 +1798,48 @@ fn set_link(dir: &Path, device_id: &str, link: &str) {
     });
     if let Err(e) = saved {
         tracing::debug!("Could not record the link's state: {e}");
+    }
+}
+
+/// The link to `device_id` is up: a grant both ways that waited for it
+/// (PC1 review M1) is given now. The link shows the other computer recorded
+/// the pairing: it dials only one it lists, and admits only one it trusts.
+fn grant_on_link(dir: &Path, device_id: &str) {
+    if let Ok(trust) = crate::state::trust_store_path() {
+        grant_on_link_in(dir, &trust, device_id);
+    }
+}
+
+fn grant_on_link_in(dir: &Path, trust: &Path, device_id: &str) {
+    if !computers::read(dir)
+        .pending
+        .iter()
+        .any(|id| id == device_id)
+    {
+        return;
+    }
+    let granted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
+        // Unpaired on Devices meanwhile: nothing is given back.
+        if !(store.is_trusted(device_id) && store.is_computer(device_id)) {
+            return Ok(false);
+        }
+        store.trust_computer_as(
+            device_id,
+            pocketdesk_core::protocol::permissions::DevicePermissions::computer_mine(),
+        )?;
+        Ok(true)
+    });
+    match granted {
+        Ok(given) => {
+            if given {
+                tracing::info!(device_id, "The link is up: paired both ways now");
+            }
+            let saved = computers::update(dir, |file| file.pending.retain(|id| id != device_id));
+            if let Err(e) = saved {
+                tracing::warn!("Could not record the grant to {device_id}: {e}");
+            }
+        }
+        Err(e) => tracing::warn!("Could not give {device_id} what was granted: {e}"),
     }
 }
 
@@ -2008,6 +2058,49 @@ mod tests {
         assert!(!asks_both_ways(&no_road, true), "no endpoint to bind");
     }
 
+    /// PC1 review M1: a computer that paired here both ways is trusted as
+    /// one paired one way until the link between the two comes up; then it
+    /// is given what was granted, once. One no longer trusted here as a
+    /// computer, or not waiting, is given nothing.
+    #[test]
+    fn a_grant_both_ways_waits_for_the_link() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("grant-on-link");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| {
+            store.trust_computer("waits")?;
+            store.trust_computer("one-way")
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(facts().into_peer("waits", "", 1));
+            file.computers.push(facts().into_peer("gone", "", 1));
+            file.pending = vec!["waits".to_string(), "gone".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "one-way");
+        grant_on_link_in(&dir, &trust, "gone");
+        grant_on_link_in(&dir, &trust, "waits");
+        let store = TrustStore::read(&trust).unwrap();
+        let pending = computers::read(&dir).pending;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            store.permissions("waits"),
+            DevicePermissions::computer_mine()
+        );
+        assert_eq!(
+            store.permissions("one-way"),
+            DevicePermissions::computer(),
+            "not waiting"
+        );
+        assert!(
+            !store.is_trusted("gone"),
+            "untrusted meanwhile: nothing given"
+        );
+        assert!(pending.is_empty(), "{pending:?}");
+    }
+
     /// PC1: the computer that pasted the link trusts the other in turn,
     /// with a computer's permissions and control, unasked, and the keys it
     /// was pinned and paired by bound; unpaired, all of it goes.
@@ -2062,7 +2155,7 @@ mod tests {
                 entry("unpaired", true),
                 entry("one-way", false),
             ],
-            last_pairing: None,
+            ..computers::ComputersFile::default()
         };
         assert_eq!(untrusted_mine(&file, |id| id == "kept"), ["unpaired"]);
     }

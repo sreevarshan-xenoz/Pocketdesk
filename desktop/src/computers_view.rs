@@ -194,8 +194,12 @@ impl ComputersView {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&computer.name).strong());
                 ui.label(RichText::new(link_words(computer)).weak());
-                // PC1: paired both ways, with consent given at pairing.
-                if computer.mine {
+                // PC1: paired both ways, with consent given at pairing; the
+                // grant here waits for the link (review M1).
+                if computer.mine && self.file.pending.contains(&computer.device_id) {
+                    ui.label(RichText::new(MINE_PENDING).color(crate::theme::warn(ui)))
+                        .on_hover_text(MINE_HOVER);
+                } else if computer.mine {
                     ui.label(RichText::new(MINE).color(crate::theme::good(ui)))
                         .on_hover_text(MINE_HOVER);
                 }
@@ -273,6 +277,9 @@ const STOPPED: &str = "Start the server first: it does the unpairing";
 
 /// What a computer paired both ways is (PC1), and how to have it ask again.
 pub const MINE: &str = "Mine: sees and controls without asking";
+/// Paired both ways, but its grant here waits for the link (PC1 review M1).
+pub const MINE_PENDING: &str =
+    "Mine once linked: until the link comes up, it asks first and does not control this computer";
 const MINE_HOVER: &str = "Paired both ways from a link made for another of your computers: each lists the other, and either shows and controls the other with no prompt. To have it ask first again, turn on its Ask before each session (and off its Control switches) on Devices. Unpair takes both ways away.";
 
 #[cfg(test)]

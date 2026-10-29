@@ -165,6 +165,12 @@ pub struct ComputersFile {
     pub computers: Vec<PeerComputer>,
     #[serde(default)]
     pub last_pairing: Option<PairingOutcome>,
+    /// The computers that paired here both ways (PC1) whose grant waits for
+    /// the link between the two: until it comes up, which shows the other
+    /// computer recorded the pairing too, each is trusted as a computer
+    /// paired one way (PC1 review M1). Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<String>,
 }
 
 impl ComputersFile {
@@ -186,6 +192,7 @@ impl ComputersFile {
             .iter()
             .position(|c| c.device_id == device_id)?;
         let computer = self.computers.remove(at);
+        self.pending.retain(|id| id != device_id);
         if self
             .last_pairing
             .as_ref()
@@ -707,7 +714,7 @@ mod tests {
     fn a_listed_id_with_another_certificate_is_someone_elses() {
         let file = ComputersFile {
             computers: vec![computer("desk")],
-            last_pairing: None,
+            ..ComputersFile::default()
         };
         assert!(file.listed_with_other_certificate("desk", &"cd".repeat(32)));
         assert!(!file.listed_with_other_certificate("desk", &"AB".repeat(32)));
@@ -727,6 +734,7 @@ mod tests {
         let mut file = ComputersFile {
             computers: vec![computer("desk"), computer("lap")],
             last_pairing: Some(line("lap")),
+            ..ComputersFile::default()
         };
         assert_eq!(
             file.remove("desk").map(|c| c.device_id),
