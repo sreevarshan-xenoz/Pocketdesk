@@ -153,6 +153,9 @@ pub struct PortalGlue<B: Backend> {
     /// The zones changed since they were set: they belong to the last zone
     /// set, and are set again at the next arming.
     stale: bool,
+    /// The last barrier id given: ids keep rising across armings, so an
+    /// activation from an earlier one never names an edge of this one.
+    last_id: u32,
     /// The desktop disabled the capture: enabled again only when asked
     /// ([`PortalGlue::rearm`]), not at once.
     disabled: bool,
@@ -191,6 +194,7 @@ impl<B: Backend> PortalGlue<B> {
             reachable: HashSet::new(),
             armed: None,
             stale: false,
+            last_id: 0,
             disabled: false,
             mode: Mode::Off,
             captured: None,
@@ -526,7 +530,7 @@ impl<B: Backend> PortalGlue<B> {
         {
             return;
         }
-        let wanted = barriers::barriers(
+        let mut wanted = barriers::barriers(
             &self.layout,
             &self.this,
             |to| self.reachable.contains(to),
@@ -534,8 +538,17 @@ impl<B: Backend> PortalGlue<B> {
         );
         if wanted.is_empty() {
             self.disarm();
-        } else if self.stale || self.armed.as_ref() != Some(&wanted) {
+        } else if self.stale
+            || !self
+                .armed
+                .as_ref()
+                .is_some_and(|armed| same_edges(armed, &wanted))
+        {
             self.stale = false;
+            for barrier in &mut wanted {
+                self.last_id = self.last_id.checked_add(1).unwrap_or(1);
+                barrier.id = self.last_id;
+            }
             self.backend.arm(&wanted);
             self.armed = Some(wanted);
         }
@@ -575,6 +588,14 @@ impl<B: Backend> PortalGlue<B> {
         }
         rest
     }
+}
+
+/// Whether two armings set the same edges, whatever their ids.
+fn same_edges(a: &[Barrier], b: &[Barrier]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(a, b)| (a.line, a.way, &a.to, a.from) == (b.line, b.way, &b.to, b.from))
 }
 
 /// Whole units of `rest + d`, keeping what is left over in `rest`.
@@ -633,10 +654,13 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         calls: Vec<Call>,
+        /// The ids of each arming.
+        ids: Vec<Vec<u32>>,
     }
 
     impl Backend for Fake {
         fn arm(&mut self, barriers: &[Barrier]) {
+            self.ids.push(barriers.iter().map(|b| b.id).collect());
             self.calls.push(Call::Arm(
                 barriers.iter().map(|b| (b.line, b.to.clone())).collect(),
             ));
@@ -1178,5 +1202,28 @@ mod tests {
         });
         rig.glue.act(actions);
         assert_eq!(rig.calls(), vec![Call::Disarm]);
+    }
+
+    /// BK8 review M2: barrier ids keep rising across armings, so an
+    /// activation already on its way from the last arming never lands on
+    /// another edge of this one.
+    #[test]
+    fn barrier_ids_are_never_reused_across_armings() {
+        let mut rig = Rig::new(&["W", "P"]);
+        assert_eq!(rig.glue.backend.ids, vec![vec![1, 2]]);
+        rig.glue.set_targets(&desk(), &["P".to_string()]);
+        assert_eq!(rig.glue.backend.ids[1], vec![3], "P's edge, a new id");
+        rig.calls();
+        // An activation of W's edge from the last arming: no such barrier
+        // now, let go of at once, onto no computer.
+        let hit = rig.hit(5, 1, (1600.0, 500.0));
+        assert_eq!(sends(&hit), vec![]);
+        assert_eq!(rig.driver.away_on(), None);
+        assert_eq!(rig.calls(), vec![Call::Release(Some(5), (1600, 500))]);
+        // The same barriers again set nothing, whatever their ids.
+        rig.glue.set_targets(&desk(), &["P".to_string()]);
+        assert_eq!(rig.calls(), vec![]);
+        rig.hit(6, 3, (600.0, 1000.0));
+        assert_eq!(rig.driver.away_on(), Some("P"));
     }
 }

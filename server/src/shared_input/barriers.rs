@@ -96,7 +96,8 @@ impl Barrier {
 /// The barriers of this computer (`this`) in `layout`, whose screens there
 /// are the portal's zones: one for each run of edge pixels that leads onto
 /// the same other computer that `may_go` allows (reachable now), none on an
-/// edge in `walls`. Their ids count from 1.
+/// edge in `walls`. Their ids count from 1 (the glue numbers them anew,
+/// rising across armings).
 pub fn barriers(
     layout: &Layout,
     this: &str,
