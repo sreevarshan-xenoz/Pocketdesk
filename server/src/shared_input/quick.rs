@@ -320,15 +320,10 @@ impl Drop for Nudge {
 }
 
 /// Send a byte to where `aimed` says every [`NUDGE_EVERY`] until it says
-/// nowhere. `first` picks the socket's family.
+/// nowhere, on a socket of the family of where it is aimed.
 fn send_nudges(aimed: &Mutex<Aim>, first: SocketAddr) {
-    let any = if first.is_ipv4() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-    } else {
-        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
-    };
     let lock = || aimed.lock().unwrap_or_else(PoisonError::into_inner);
-    let socket = match UdpSocket::bind(SocketAddr::new(any, 0)) {
+    let mut socket = match socket_for(first) {
         Ok(socket) => socket,
         Err(e) => {
             tracing::debug!("Shared input: no socket to keep the Wi-Fi awake: {e}");
@@ -346,6 +341,17 @@ fn send_nudges(aimed: &Mutex<Aim>, first: SocketAddr) {
             };
             to
         };
+        // The link moved between IPv4 and IPv6 (review M1): a socket of
+        // the other family, kept should one not be made.
+        if to.is_ipv4() != socket.local_addr().is_ok_and(|a| a.is_ipv4()) {
+            match socket_for(to) {
+                Ok(other) => socket = other,
+                Err(e) if !std::mem::replace(&mut told, true) => {
+                    tracing::debug!("Shared input: no socket to keep the Wi-Fi awake: {e}");
+                }
+                Err(_) => {}
+            }
+        }
         if let Err(e) = socket.send_to(&[0], to)
             && !std::mem::replace(&mut told, true)
         {
@@ -353,6 +359,16 @@ fn send_nudges(aimed: &Mutex<Aim>, first: SocketAddr) {
         }
         std::thread::sleep(NUDGE_EVERY);
     }
+}
+
+/// A socket of `to`'s family, on any address and port.
+fn socket_for(to: SocketAddr) -> std::io::Result<UdpSocket> {
+    let any = if to.is_ipv4() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+    };
+    UdpSocket::bind(SocketAddr::new(any, 0))
 }
 
 #[cfg(test)]
@@ -427,6 +443,36 @@ mod tests {
         std::thread::sleep(NUDGE_EVERY * 2);
         while catcher.recv(&mut [0u8; 8]).is_ok() {}
         assert_eq!(caught(1), 0, "stopped when dropped");
+    }
+
+    /// BK10 review M1: a link that moves from IPv4 to IPv6 is followed
+    /// there, the socket made again for the new family.
+    #[test]
+    fn a_nudge_follows_a_link_from_ipv4_to_ipv6() {
+        let Ok(six) = UdpSocket::bind("[::1]:0") else {
+            return; // No IPv6 loopback here: nothing to check.
+        };
+        let four = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for socket in [&four, &six] {
+            socket
+                .set_read_timeout(Some(Duration::from_millis(500)))
+                .unwrap();
+        }
+        static AT: Mutex<Option<SocketAddr>> = Mutex::new(None);
+        *AT.lock().unwrap() = Some(four.local_addr().unwrap());
+        let mut nudge = Nudge {
+            aim: Arc::default(),
+            following: None,
+            look_up: |_| *AT.lock().unwrap(),
+            networks: Vec::new,
+        };
+        nudge.follow(Some("pc"));
+        assert!(four.recv(&mut [0u8; 8]).is_ok(), "over IPv4");
+        *AT.lock().unwrap() = Some(six.local_addr().unwrap());
+        // Looked up again a second on.
+        std::thread::sleep(LOOK_AGAIN);
+        nudge.follow(Some("pc"));
+        assert!(six.recv(&mut [0u8; 8]).is_ok(), "then over IPv6");
     }
 
     /// BK10 review I1: a byte goes only to a computer on this one's own
