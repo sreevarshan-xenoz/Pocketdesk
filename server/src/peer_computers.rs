@@ -516,9 +516,9 @@ const AWAITING: &str = "away: waiting for it to link to this one";
 
 /// Say how the link to `device_id`, a computer paired both ways that keeps
 /// the link itself (PC1), is doing while it is listed: "linked" while it is
-/// connected here as one of this computer's devices (that link is the
-/// one between them; files, the clipboard and shared input ride it as they
-/// ride a link this one dials), else waiting for it.
+/// connected here by that link ([`is_the_link`]: files, the clipboard and
+/// shared input ride it as they ride a link this one dials), else waiting
+/// for it.
 async fn await_link(dir: PathBuf, device_id: String) {
     loop {
         let listed = computers::read(&dir)
@@ -528,12 +528,30 @@ async fn await_link(dir: PathBuf, device_id: String) {
         if !listed {
             return;
         }
-        let linked = crate::state::clone_clients()
-            .await
-            .iter()
-            .any(|c| c.device_id() == device_id);
+        let linked = crate::state::clone_clients().await.iter().any(|c| {
+            c.device_id() == device_id && is_the_link(&dir, &device_id, c.peer_key().as_ref())
+        });
         set_link(&dir, &device_id, if linked { "linked" } else { AWAITING });
         tokio::time::sleep(AWAIT_LOOK).await;
+    }
+}
+
+/// Whether a connection of the computer `device_id`, which proved `key`,
+/// is the link between the two (PC1 re-review I-2): one over the internet
+/// road that proved the iroh key the computer is held to here, as the link
+/// it dials does. Its pairing connection, still open a moment after its
+/// answer, proved only a certificate, and is not.
+fn is_the_link(
+    dir: &Path,
+    device_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+) -> bool {
+    use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    match key {
+        Some(pocketdesk_core::streaming::PeerKey::Iroh(id)) => {
+            device_keys::check(dir, device_id, Slot::Iroh, Some(id)) == Verdict::Matches
+        }
+        _ => false,
     }
 }
 
@@ -2276,6 +2294,31 @@ mod tests {
             "its link stopped"
         );
         assert!(!still, "Other computers' Unpair untrusts it too");
+    }
+
+    /// PC1 re-review I-2: only a connection that proved the iroh key the
+    /// computer is held to is the link between the two; its pairing
+    /// connection (a certificate), another key, or none, is not.
+    #[test]
+    fn only_the_link_proves_the_other_recorded_the_pairing() {
+        use pocketdesk_core::local::device_keys::{self, Slot};
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = temp("is-the-link");
+        let (own, other) = (
+            iroh::SecretKey::generate().public().to_string(),
+            iroh::SecretKey::generate().public().to_string(),
+        );
+        device_keys::replace(&dir, "lap", &"ab".repeat(32)).unwrap();
+        device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
+        let verdicts = [
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own.clone()))),
+            is_the_link(&dir, "lap", Some(&PeerKey::Tls([0xab; 32]))),
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(other))),
+            is_the_link(&dir, "lap", None),
+            is_the_link(&dir, "desk", Some(&PeerKey::Iroh(own))),
+        ];
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(verdicts, [true, false, false, false, false]);
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
