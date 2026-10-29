@@ -71,6 +71,38 @@ pub fn foreground_of(window: Option<&HyprWindow>) -> Foreground {
     })
 }
 
+/// Whether one of Hyprland's screens is scaled by a fraction (1.25, 1.5):
+/// xdg-desktop-portal-hyprland bug 435 makes an edge there flip.
+pub fn fractional(monitors: &[crate::hyprland::HyprMonitor]) -> bool {
+    monitors
+        .iter()
+        .any(|m| m.scale.is_finite() && (m.scale - m.scale.round()).abs() > 1e-3)
+}
+
+/// How the portal stands as the owner is told: one that captures on
+/// Hyprland with a fractionally scaled screen is warned about it before
+/// an edge has flipped.
+pub fn shown(standing: Standing, fractional_screen: bool) -> Standing {
+    match standing {
+        Standing::Ready if fractional_screen => Standing::FractionalScale,
+        other => other,
+    }
+}
+
+/// Whether Hyprland has a fractionally scaled screen now (false off
+/// Hyprland, or when it does not say in time).
+fn fractional_now(runtime: &tokio::runtime::Handle) -> bool {
+    runtime.block_on(async {
+        let Ok(ipc) = crate::hyprland::HyprlandIpc::from_env() else {
+            return false;
+        };
+        matches!(
+            tokio::time::timeout(PROBE_WAIT, ipc.monitors()).await,
+            Ok(Ok(monitors)) if fractional(&monitors)
+        )
+    })
+}
+
 /// What is in front now, for the driver: nothing probed with the gaming
 /// lock off, or off Hyprland.
 fn foreground_now(runtime: &tokio::runtime::Handle, game_lock: bool) -> Captured {
@@ -430,6 +462,7 @@ fn drive<B: Backend>(
     // The first layout pass at once, with the computers' screens.
     let mut layout_at: Option<Instant> = None;
     let mut greeted_at: Option<Instant> = None;
+    let mut fractional_screen = false;
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
         match events.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
@@ -507,6 +540,7 @@ fn drive<B: Backend>(
             glue.apply(&mut driver, actions);
         }
         status::set_keyboard_on(driver.away_on());
+        status::set_input_capture(Some(shown(glue.input.standing(), fractional_screen)));
         // Away, a link that turned relayed or closed brings it home.
         if let Some(to) = driver.away_on().map(str::to_string)
             && link_at.elapsed() >= LINK_EVERY
@@ -538,6 +572,7 @@ fn drive<B: Backend>(
             glue.sound_on = config.shared_input_sound;
             let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
             glue.apply(&mut driver, actions);
+            fractional_screen = fractional_now(&runtime);
             // The portal's zones are this computer's screens once it said
             // them; until then, what the desktop says.
             let own = match glue.input.zones() {
@@ -619,8 +654,11 @@ fn drive<B: Backend>(
         channel.finish_within(deadline.saturating_duration_since(Instant::now()));
     }
     tracing::info!("Shared input: this computer's keyboard and mouse stay here");
+    // How it ended stays said (a refusal, no portal) until sharing is off.
+    let standing = glue.input.standing();
+    status::set_input_capture(Some(standing));
     // Dropping the glue drops the backend: the portal's session ends.
-    glue.input.standing()
+    standing
 }
 
 /// The driver for the server's life: running while shared input and
@@ -647,6 +685,9 @@ pub async fn supervise<B: Backend + 'static>(start: Start<B>) {
         .unwrap_or(false);
         if !want {
             refused = false;
+            if running.is_none() {
+                status::set_input_capture(None);
+            }
         }
         if running.as_ref().is_some_and(|(_, t)| t.is_finished()) {
             let mut wait = RESTART_AFTER;
@@ -697,6 +738,25 @@ mod tests {
             "address": "0x1", "class": class, "fullscreen": fullscreen,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_fractionally_scaled_hyprland_screen_is_warned_of() {
+        let monitor = |scale: f64| -> crate::hyprland::HyprMonitor {
+            serde_json::from_value(serde_json::json!({ "name": "eDP-1", "scale": scale })).unwrap()
+        };
+        assert!(!fractional(&[]));
+        assert!(!fractional(&[monitor(1.0), monitor(2.0)]));
+        assert!(fractional(&[monitor(1.0), monitor(1.25)]));
+        assert!(fractional(&[monitor(1.5)]));
+        assert_eq!(shown(Standing::Ready, true), Standing::FractionalScale);
+        assert_eq!(shown(Standing::Ready, false), Standing::Ready);
+        // What it cannot do yet comes first.
+        assert_eq!(
+            shown(Standing::NeedsPermission, true),
+            Standing::NeedsPermission
+        );
+        assert_eq!(shown(Standing::Unsupported, true), Standing::Unsupported);
     }
 
     #[test]

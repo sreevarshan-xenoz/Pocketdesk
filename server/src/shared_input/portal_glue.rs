@@ -91,6 +91,20 @@ pub enum Standing {
     FractionalScale,
 }
 
+impl Standing {
+    /// How it is said in the status file (empty: nothing to say yet).
+    pub fn word(self) -> &'static str {
+        use pocketdesk_core::local::shared_input as words;
+        match self {
+            Standing::Starting => "",
+            Standing::NeedsPermission => words::CAPTURE_NEEDS_PERMISSION,
+            Standing::Unsupported => words::CAPTURE_UNSUPPORTED,
+            Standing::Ready => words::CAPTURE_READY,
+            Standing::FractionalScale => words::CAPTURE_FRACTIONAL_SCALE,
+        }
+    }
+}
+
 /// What is asked of the portal.
 pub trait Backend {
     /// Watch these barriers (set, and the capture enabled again); none
