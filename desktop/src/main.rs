@@ -14,6 +14,7 @@ mod computer_view;
 mod computers_view;
 mod diagnostics_view;
 mod fonts;
+mod input_options;
 mod kdeconnect_view;
 mod keys;
 mod logs_view;

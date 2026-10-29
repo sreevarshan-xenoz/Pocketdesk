@@ -397,6 +397,8 @@ pub struct PocketdeskApp {
     /// Pair → Computer's paste box and Settings → Other computers' list
     /// (2f, UX 2).
     computers: crate::computers_view::ComputersView,
+    /// The Keyboard and mouse page's options (UX 2).
+    input_options: crate::input_options::InputOptions,
     /// The Keyboard and mouse page (shared input).
     arrange: crate::arrange_view::ArrangeView,
     /// Settings → KDE Connect devices (3a).
@@ -480,6 +482,7 @@ impl PocketdeskApp {
             clipboard: Default::default(),
             notes: Default::default(),
             computers: Default::default(),
+            input_options: Default::default(),
             arrange: Default::default(),
             kdeconnect: Default::default(),
             phone_files: Default::default(),
@@ -572,11 +575,6 @@ impl PocketdeskApp {
                 self.diagnostics.run_now();
                 self.switch_to(Tab::Diagnostics);
                 self.chosen = Tab::Diagnostics;
-            }
-            Ask::Settings(words) => {
-                self.switch_to(Tab::Settings);
-                self.chosen = Tab::Settings;
-                self.settings_query = words.to_string();
             }
         }
     }
@@ -2504,29 +2502,54 @@ impl PocketdeskApp {
             }
             None => {}
         }
+        // UX 2: its options, here rather than in Settings.
+        if let Some(config) = self.config.as_ref() {
+            let mut edited = config.clone();
+            let changed = self.input_options.show(ui, &mut edited, sharing_on);
+            if !changed.is_empty() {
+                self.save_input_keys(&edited, &changed, None);
+            }
+        }
     }
 
-    /// Turn the shared keyboard and mouse on or off (`shared_input`),
-    /// written as Settings writes it: that key alone, the rest of the file
-    /// as it is. The server reads it within a second.
+    /// Turn the shared keyboard and mouse on or off (`shared_input`).
     fn set_sharing(&mut self, on: bool) {
+        let config = Config {
+            shared_input: on,
+            ..self.config.clone().unwrap_or_default()
+        };
+        let said = if on {
+            "Sharing the keyboard and mouse with your computers."
+        } else {
+            "The keyboard and mouse stay on each computer."
+        };
+        self.save_input_keys(&config, &["shared_input"], Some(said));
+    }
+
+    /// Save the shared keyboard and mouse's `keys` as `edited` has them,
+    /// written as Settings writes them: those keys alone, the rest of the
+    /// file as it is. The server reads them within a second (the hotkey at
+    /// its next start).
+    fn save_input_keys(&mut self, edited: &Config, keys: &[&str], said: Option<&str>) {
         let saved = Config::path().map_err(|e| e.to_string()).and_then(|path| {
             let mut config = Config::load_from(&path).map_err(|e| e.to_string())?;
-            config.shared_input = on;
+            for key in keys {
+                crate::input_options::copy_key(edited, &mut config, key);
+            }
             config
-                .save_keys_to(&path, &["shared_input"])
+                .save_keys_to(&path, keys)
                 .map_err(|e| e.to_string())
+                .map(|()| config)
         });
         match saved {
-            Ok(()) => {
+            Ok(config) => {
                 if let Some(Ok(form)) = self.settings.as_mut() {
-                    form.saved_elsewhere_shared_input(on);
+                    form.saved_elsewhere_input(&config, keys);
                 }
-                self.notice = crate::notice::Notice::done(if on {
-                    "Sharing the keyboard and mouse with your computers."
-                } else {
-                    "The keyboard and mouse stay on each computer."
-                });
+                self.notice = crate::notice::Notice::done(said.map_or_else(
+                    || format!("Saved: {}.", crate::settings_view::name(keys[0])),
+                    str::to_string,
+                ));
             }
             Err(e) => self.notice = crate::notice::Notice::error(format!("Not saved: {e}")),
         }

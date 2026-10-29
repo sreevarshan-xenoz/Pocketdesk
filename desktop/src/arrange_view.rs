@@ -39,8 +39,108 @@ fn shown_name(name: &str) -> String {
     shared_input::display_name(name, NAME_CHARS)
 }
 
+/// The page's sharing switch (UX 2: its one home).
+pub const SHARE_SWITCH: &str = "Share my keyboard and mouse";
+
 /// The canvas's height, in points.
 const CANVAS_HEIGHT: f32 = 220.0;
+
+/// What the setup checklist knows (UX 2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Facts {
+    pub server_running: bool,
+    /// The computers paired, either way.
+    pub paired: usize,
+    pub sharing_on: bool,
+    /// The paired computers linked directly.
+    pub linked: usize,
+    /// The computers that take this one's keyboard and mouse.
+    pub drives: usize,
+    /// An arrangement was saved.
+    pub arranged: bool,
+}
+
+/// A step's fix, by what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fix {
+    StartServer,
+    PairComputer,
+    SharingOn,
+    RunDiagnostics,
+}
+
+impl Fix {
+    pub fn label(self) -> &'static str {
+        match self {
+            Fix::StartServer => crate::widgets::START,
+            Fix::PairComputer => crate::app::PAIR_A_COMPUTER,
+            Fix::SharingOn => "Turn on",
+            Fix::RunDiagnostics => "Run diagnostics",
+        }
+    }
+}
+
+/// One step of setting the keyboard and mouse up (UX 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    pub done: bool,
+    /// What it is, at most six words.
+    pub label: &'static str,
+    /// What to do, while it is not done: one line.
+    pub todo: &'static str,
+    pub fix: Option<Fix>,
+}
+
+/// The steps, in order: each later one waits on those before.
+pub fn checklist(facts: Facts) -> Vec<Step> {
+    let step = |done, label, todo, fix| Step {
+        done,
+        label,
+        todo,
+        fix,
+    };
+    vec![
+        step(
+            facts.server_running,
+            "Pocketdesk is running",
+            "It carries the keyboard and mouse.",
+            Some(Fix::StartServer),
+        ),
+        step(
+            facts.paired > 0,
+            "Another computer is paired",
+            "Pair one from the Pair page.",
+            Some(Fix::PairComputer),
+        ),
+        step(
+            facts.sharing_on,
+            "Sharing is on here",
+            "Turn it on here and on the other.",
+            Some(Fix::SharingOn),
+        ),
+        step(
+            facts.linked > 0,
+            "Linked directly",
+            "Same network, with no relay between.",
+            Some(Fix::RunDiagnostics),
+        ),
+        step(
+            facts.drives > 0,
+            "This one may drive another",
+            "Allow it on the other computer's page.",
+            None,
+        ),
+        step(
+            facts.arranged,
+            "Arranged on the desk",
+            "Optional: drag the computers below.",
+            None,
+        ),
+    ]
+}
+
+/// The checklist's heading.
+pub const SETUP: &str = "Setup";
 
 /// What the page asks the window to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -499,12 +599,54 @@ impl ArrangeView {
         self.refresh(state_dir);
         let mut action = None;
         let muted = crate::theme::muted(ui);
+        // UX 2: each step, done or not, with its fix.
+        let paired_now = self.paired(devices);
+        let facts = Facts {
+            server_running,
+            paired: paired_now.len(),
+            sharing_on,
+            linked: paired_now
+                .iter()
+                .filter(|id| self.status.link.get(*id).is_some_and(|l| l == LINK_DIRECT))
+                .count(),
+            drives: self.status.answered.len(),
+            arranged: self.saved.is_some(),
+        };
+        ui.label(RichText::new(SETUP).strong());
+        for step in checklist(facts) {
+            ui.horizontal_wrapped(|ui| {
+                if step.done {
+                    ui.label(RichText::new("✓").color(crate::theme::good(ui)).strong());
+                    ui.label(step.label);
+                } else {
+                    ui.label(RichText::new("•").color(crate::theme::warn(ui)).strong());
+                    ui.label(step.label);
+                    ui.label(RichText::new(step.todo).color(muted));
+                    if let Some(fix) = step.fix
+                        && ui.small_button(fix.label()).clicked()
+                    {
+                        match fix {
+                            Fix::StartServer => {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::StartServer)
+                            }
+                            Fix::PairComputer => {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::PairComputer)
+                            }
+                            Fix::RunDiagnostics => {
+                                crate::widgets::ask(ui.ctx(), crate::widgets::Ask::RunDiagnostics)
+                            }
+                            Fix::SharingOn => action = Some(Action::Sharing(true)),
+                        }
+                    }
+                }
+            });
+        }
+        ui.add_space(8.0);
         let mut on = sharing_on;
         if ui
-            .checkbox(&mut on, "Share my keyboard and mouse with my computers")
+            .checkbox(&mut on, SHARE_SWITCH)
             .on_hover_text(
-                "One keyboard and mouse across your own paired computers, on Windows and Linux. \
-                 The same switch is in Settings, Keyboard and mouse.",
+                "One keyboard and mouse across your own paired computers, on Windows and Linux.",
             )
             .changed()
         {
@@ -558,11 +700,7 @@ impl ArrangeView {
             );
             if shown.len() == 1 {
                 ui.label(
-                    RichText::new(
-                        "No other computer has said its screens yet: pair one (Settings, Other \
-                         computers), turn sharing on there too, and it shows up here.",
-                    )
-                    .color(muted),
+                    RichText::new("Others show here once paired, with sharing on.").color(muted),
                 );
             }
         }
@@ -619,8 +757,8 @@ impl ArrangeView {
                 crate::widgets::why_off_ask(
                     ui,
                     "Identify needs another computer paired with this one.",
-                    "Pair a computer",
-                    crate::widgets::Ask::Settings("Other computers"),
+                    crate::app::PAIR_A_COMPUTER,
+                    crate::widgets::Ask::PairComputer,
                 );
             } else {
                 crate::widgets::why_off(
@@ -634,13 +772,7 @@ impl ArrangeView {
         ui.heading("Your computers");
         let paired = self.paired(devices);
         if paired.is_empty() {
-            ui.label(
-                RichText::new(
-                    "No other computer is paired with this one. Pair one in Settings, Other \
-                     computers, with its pairing link.",
-                )
-                .color(muted),
-            );
+            ui.label(RichText::new("No other computer is paired yet.").color(muted));
             if let Some(phones) = self.phones_section(ui, devices, &this_name) {
                 action = Some(phones);
             }
@@ -921,6 +1053,45 @@ mod tests {
     /// A computer's name as another computer gave it is shown tamed: on
     /// one line, with no character that turns or hides the text around it,
     /// and clipped; this computer's own name too.
+    /// UX 2: each step is done by its own fact, and only those not done
+    /// say what to do; a label is at most six words.
+    #[test]
+    fn the_setup_steps_follow_the_facts() {
+        let none = checklist(Facts::default());
+        assert!(none.iter().all(|s| !s.done));
+        let fixes: Vec<Option<Fix>> = none.iter().map(|s| s.fix).collect();
+        assert_eq!(
+            fixes,
+            [
+                Some(Fix::StartServer),
+                Some(Fix::PairComputer),
+                Some(Fix::SharingOn),
+                Some(Fix::RunDiagnostics),
+                None,
+                None
+            ]
+        );
+        let all = checklist(Facts {
+            server_running: true,
+            paired: 1,
+            sharing_on: true,
+            linked: 1,
+            drives: 1,
+            arranged: true,
+        });
+        assert!(all.iter().all(|s| s.done));
+        let some = checklist(Facts {
+            server_running: true,
+            paired: 2,
+            ..Facts::default()
+        });
+        let done: Vec<bool> = some.iter().map(|s| s.done).collect();
+        assert_eq!(done, [true, true, false, false, false, false]);
+        for step in none {
+            assert!(step.label.split_whitespace().count() <= 6, "{}", step.label);
+        }
+    }
+
     #[test]
     fn computers_names_are_shown_tamed() {
         let screens = |id: &str, name: &str, this: bool| shared_input::ComputerScreens {

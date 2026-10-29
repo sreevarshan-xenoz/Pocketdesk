@@ -460,7 +460,8 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
     let mut app = fixture.open(Some(Tab::KeyboardMouse));
     app.run_steps(3);
     assert!(app.query_by_label("Test Laptop").is_some());
-    assert!(app.query_by_label("Linked directly").is_some());
+    // Its own line, and Setup's step.
+    assert_eq!(app.query_all_by_label("Linked directly").count(), 2);
     assert!(
         app.query_by_label("Test Desk may drive Test Laptop")
             .is_some(),
@@ -480,7 +481,10 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
             .is_disabled(),
         "no server here, so no switch"
     );
-    app.get_by_label("Identify").click();
+    // Below Setup: by the keyboard, which scrolls to it.
+    app.get_by_label("Identify").focus();
+    app.run_steps(2);
+    app.key_press(egui::Key::Enter);
     app.run_steps(3);
     // Read after the click: a request made in the next second would be
     // "from the future" to a clock read before it.
@@ -488,16 +492,12 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
     let identify = pocketdesk_core::local::shared_input::take_all(fixture.state(), now);
     assert_eq!(identify.len(), 1, "one Identify asked");
 
-    app.get_by_label("Share my keyboard and mouse with my computers")
-        .click();
+    app.get_by_label(crate::arrange_view::SHARE_SWITCH).click();
     app.run_steps(3);
-    let config = pocketdesk_core::local::config::Config::load_from(
-        &fixture
-            .config()
-            .join(pocketdesk_core::local::paths::CONFIG_FILE),
-    )
-    .expect("the config");
-    assert!(config.shared_input, "the page's switch is the setting");
+    assert!(
+        load_config(&fixture).shared_input,
+        "the page's switch is the setting"
+    );
 }
 
 /// BK5: a phone that said its screen is on the Keyboard and mouse page,
@@ -918,40 +918,39 @@ fn settings_search_shows_what_it_finds() {
     assert!(app.query_by_label("Control port (TCP)").is_some());
 }
 
-/// The shared keyboard and mouse's section starts closed, and its title
-/// opens it with its rows (Windows and Linux; files dragged across the
-/// edge on Windows only).
+/// UX 2: Settings' Keyboard and mouse section is a pointer to the page,
+/// found by its title or one of its options, whose button opens the page.
 #[test]
-fn the_keyboard_and_mouse_section_opens_by_its_title() {
-    const ROWS: [&str; 6] = [
-        "Share my keyboard and mouse with my computers",
-        "This computer's keyboard and mouse can move to the others",
-        "Switch computer with a key",
-        "Stay on this computer while a game runs",
-        "Always stay while these programs are in front",
-        "Clipboard follows the mouse",
-    ];
+fn the_keyboard_and_mouse_section_points_to_its_page() {
     let fixture = Fixture::new();
     let mut app = fixture.open(Some(Tab::Settings));
     assert!(
-        app.query_by_label(ROWS[0]).is_none(),
+        app.query_by_label(crate::settings_view::INPUT_ELSEWHERE)
+            .is_none(),
         "closed until looked for"
     );
+    for words in ["keyboard and mouse", "game runs"] {
+        let mut app = fixture.open(Some(Tab::Settings));
+        find(&app).focus();
+        find(&app).type_text(words);
+        app.run_steps(3);
+        assert!(
+            app.query_by_label(crate::settings_view::INPUT_ELSEWHERE)
+                .is_some(),
+            "{words}"
+        );
+    }
     find(&app).focus();
     find(&app).type_text("keyboard and mouse");
     app.run_steps(3);
-    for row in ROWS {
-        assert_eq!(
-            app.query_by_label(row).is_some(),
-            cfg!(any(windows, target_os = "linux")),
-            "{row}"
-        );
-    }
-    assert_eq!(
-        app.query_by_label("Drag files across the edge").is_some(),
-        cfg!(windows)
-    );
     assert!(app.query_by_label("Control port (TCP)").is_none());
+    app.get_by_label(crate::settings_view::OPEN_KEYBOARD_MOUSE)
+        .click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::KeyboardMouse.purpose()).is_some(),
+        "the page opened"
+    );
 }
 
 /// J2 review: a section held open by a problem stays, whole, under a
@@ -1550,32 +1549,69 @@ fn the_clipboard_page_lists_what_crossed() {
     assert!(app.query_by_label("from here").is_none(), "cleared");
 }
 
-/// UX 1: the Keyboard and mouse rows that are off while sharing is off say
-/// so beside them, and "Turn sharing on" turns them on.
+/// UX 2: the Keyboard and mouse page has its options, off while sharing
+/// is with the reason beside them; on, one changed is saved at once.
 #[test]
-fn the_keyboard_and_mouse_rows_say_why_they_are_off() {
+fn the_keyboard_and_mouse_options_are_on_its_page() {
     use egui_kittest::kittest::NodeT;
-    if !cfg!(any(windows, target_os = "linux")) {
-        return;
-    }
-    const DRIVE: &str = "this computer's pointer and keys may be carried onto the others";
     let fixture = Fixture::new();
-    let mut app = fixture.open(Some(Tab::Settings));
-    find(&app).focus();
-    find(&app).type_text("keyboard and mouse");
+    let mut app = fixture.open(Some(Tab::KeyboardMouse));
     app.run_steps(3);
-    assert!(app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    let clipboard = crate::settings_view::name("shared_input_clipboard");
+    assert!(app.get_by_label(clipboard).accesskit_node().is_disabled());
     assert!(
-        app.query_by_label(crate::settings_view::SHARING_OFF)
+        app.query_by_label(crate::input_options::SHARING_OFF)
             .is_some()
     );
-    app.get_by_label("Turn sharing on").click();
+    app.get_by_label(crate::arrange_view::SHARE_SWITCH).click();
     app.run_steps(3);
-    assert!(!app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    assert!(!app.get_by_label(clipboard).accesskit_node().is_disabled());
     assert!(
-        app.query_by_label(crate::settings_view::SHARING_OFF)
+        app.query_by_label(crate::input_options::SHARING_OFF)
             .is_none()
     );
+    let was = load_config(&fixture).shared_input_clipboard;
+    // Below the fold: by the keyboard, which scrolls to it.
+    app.get_by_label(clipboard).focus();
+    app.run_steps(2);
+    app.key_press(egui::Key::Space);
+    app.run_steps(3);
+    assert_eq!(
+        load_config(&fixture).shared_input_clipboard,
+        !was,
+        "saved as it changed"
+    );
+}
+
+/// The config the fixture's app saves.
+fn load_config(fixture: &Fixture) -> pocketdesk_core::local::config::Config {
+    pocketdesk_core::local::config::Config::load_from(
+        &fixture
+            .config()
+            .join(pocketdesk_core::local::paths::CONFIG_FILE),
+    )
+    .expect("the config")
+}
+
+/// UX 2: the Keyboard and mouse page starts with its setup, each step
+/// done or not with its fix; Pair a computer opens Pair on Computer.
+#[test]
+fn the_keyboard_and_mouse_page_lists_its_setup() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::KeyboardMouse));
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::arrange_view::SETUP).is_some());
+    for step in crate::arrange_view::checklist(Default::default()) {
+        assert!(app.query_by_label(step.label).is_some(), "{}", step.label);
+    }
+    app.get_by_label(crate::app::PAIR_A_COMPUTER).click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::pair_view::COPY_LINK).is_some()
+            || app.query_by_label_contains("pairing code").is_some(),
+        "Pair opened on Computer"
+    );
+    assert!(app.query_by_label("From the other computer").is_some());
 }
 
 /// UX 1: Identify, off, says why beside it: sharing first, with its fix.
