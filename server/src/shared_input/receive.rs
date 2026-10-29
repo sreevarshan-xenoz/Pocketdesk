@@ -636,15 +636,53 @@ impl OwnScreens {
 }
 
 /// What other computers said of their screens and is not written yet, by
-/// computer: the name it gave (when it gave one) and its screens, clipped.
-type Heard = HashMap<String, (Option<String>, Vec<Screen>)>;
+/// computer: the name it gave (when it gave one) and its screens (when it
+/// gave them), clipped.
+type Heard = HashMap<String, (Option<String>, Option<Vec<Screen>>)>;
 
 fn note_heard(heard: &mut Heard, from: &str, name: Option<&str>, screens: &[Screen]) {
     let entry = heard.entry(from.to_string()).or_default();
     if let Some(name) = name {
         entry.0 = Some(shared_input::clean_name(name));
     }
-    entry.1 = shared_input::clean_screens(screens);
+    entry.1 = Some(shared_input::clean_screens(screens));
+}
+
+/// A computer said its name alone ([`Msg::Name`]: one that only takes
+/// input says it after its screens, as it never says hello).
+fn note_name(heard: &mut Heard, from: &str, name: &str) {
+    let entry = heard.entry(from.to_string()).or_default();
+    entry.0 = Some(shared_input::clean_name(name));
+}
+
+/// Keep `heard` in `file`: a computer's screens with its name, when it
+/// gave one; a name said alone names the computer already kept (its
+/// screens as they were), and makes none without screens.
+fn keep_heard(file: &mut shared_input::ScreensFile, heard: &Heard, now: u64) {
+    for (id, (name, screens)) in heard {
+        match (name, screens) {
+            (name, Some(screens)) => file.heard(id, name.as_deref(), screens, now),
+            (Some(name), None) => {
+                if let Some(screens) = file.get(id).map(|kept| kept.screens.clone()) {
+                    file.heard(id, Some(name), &screens, now);
+                }
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+/// Answer `to`'s hello: this computer's `screens`, then its `name` (which a
+/// computer that only takes input says nowhere else).
+fn answer_hello(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Screen], name: &str) {
+    tell_screens(channels, to, screens);
+    send_to(
+        channels,
+        to,
+        &Msg::Name {
+            name: name.to_string(),
+        },
+    );
 }
 
 /// Write `heard` to `shared_screens.json`, and with `own` this computer's
@@ -666,9 +704,7 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
             if let (Some(me), Some(own)) = (&me, &own) {
                 file.set_own(&me.device_id, &me.device_name, own, now);
             }
-            for (id, (name, screens)) in &heard {
-                file.heard(id, name.as_deref(), screens, now);
-            }
+            keep_heard(file, &heard, now);
         })
     })
     .await;
@@ -896,11 +932,15 @@ pub async fn run() {
                                 write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec()))
                                     .await;
                             }
-                            tell_screens(&mut channels, &from, own.get());
+                            let name = crate::kde::host_device_name();
+                            answer_hello(&mut channels, &from, own.get(), &name);
                         }
                     }
                     Msg::Screens(screens) if standing.computer => {
                         note_heard(&mut heard, &from, None, screens);
+                    }
+                    Msg::Name { name } if standing.computer => {
+                        note_name(&mut heard, &from, name);
                     }
                     Msg::Identify { name } if standing.allowed => {
                         // Shown on screen by the receiver, below.
@@ -1746,5 +1786,46 @@ mod tests {
                 .all(|call| matches!(call, Call::Move(0, 0))),
             "only the arrivals moved"
         );
+    }
+
+    /// BK8 live: a computer that only takes input never says hello, so its
+    /// name comes in its own message, after its screens: it names the
+    /// computer already kept, its screens left as they were; screens heard
+    /// alone keep the name.
+    #[test]
+    fn a_name_heard_alone_names_the_computer_and_keeps_its_screens() {
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let mut file = shared_input::ScreensFile::default();
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "laptop", None, &[screen]);
+        keep_heard(&mut file, &heard, 1);
+        assert_eq!(file.get("laptop").map(|c| c.name.as_str()), Some(""));
+        let mut heard = Heard::new();
+        note_name(&mut heard, "laptop", "Arch laptop");
+        keep_heard(&mut file, &heard, 2);
+        let kept = file.get("laptop").unwrap();
+        assert_eq!(kept.name, "Arch laptop");
+        assert_eq!(kept.screens, vec![screen]);
+        // Its screens again, alone: the name stays.
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "laptop", None, &[screen]);
+        keep_heard(&mut file, &heard, 3);
+        assert_eq!(file.get("laptop").unwrap().name, "Arch laptop");
+        // A name from a computer not kept yet makes no entry without screens.
+        let mut heard = Heard::new();
+        note_name(&mut heard, "stranger", "Desk");
+        keep_heard(&mut file, &heard, 4);
+        assert!(file.get("stranger").is_none());
+        // Both in one batch: kept together.
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "desk", None, &[screen]);
+        note_name(&mut heard, "desk", "Desk");
+        keep_heard(&mut file, &heard, 5);
+        assert_eq!(file.get("desk").unwrap().name, "Desk");
     }
 }
