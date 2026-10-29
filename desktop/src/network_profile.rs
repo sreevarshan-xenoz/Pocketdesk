@@ -11,6 +11,7 @@
 //! Elsewhere nothing is asked and nothing is said, so off Windows the
 //! words are built only by the tests (PR #552 review C1: dead code there).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -87,39 +88,69 @@ fn shown_name(raw: &str) -> String {
 pub struct PublicNetwork {
     said: Arc<Mutex<Option<String>>>,
     asked: Option<Instant>,
+    /// An ask is under way: no second one starts beside it, should
+    /// Windows' Network List Manager hang (PR #552 review M2).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    busy: Arc<AtomicBool>,
 }
 
 impl PublicNetwork {
-    /// What to say now (as last asked), asking again when due.
-    pub fn notice(&mut self) -> Option<String> {
+    /// What to say now (as last asked), asking again when due; the page
+    /// is drawn again when the answer changes it (`ctx`).
+    pub fn notice(&mut self, ctx: &eframe::egui::Context) -> Option<String> {
         if self.asked.is_none_or(|at| at.elapsed() >= EVERY) {
             self.asked = Some(Instant::now());
-            self.ask();
+            self.ask(ctx);
         }
         self.said.lock().ok().and_then(|said| said.clone())
     }
 
+    /// Start an ask, unless one is under way.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn begin(&self) -> bool {
+        !self.busy.swap(true, Ordering::SeqCst)
+    }
+
+    /// The ask answered `now`: kept, and whether it changed what is said.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn answered(said: &Mutex<Option<String>>, busy: &AtomicBool, now: Option<String>) -> bool {
+        let changed = match said.lock() {
+            Ok(mut said) if *said != now => {
+                *said = now;
+                true
+            }
+            _ => false,
+        };
+        busy.store(false, Ordering::SeqCst);
+        changed
+    }
+
     #[cfg(windows)]
-    fn ask(&self) {
-        let said = Arc::clone(&self.said);
-        // Networks that cannot be read say nothing: the page only loses a
-        // hint, and the next ask tries again.
-        let _ = std::thread::Builder::new()
+    fn ask(&self, ctx: &eframe::egui::Context) {
+        if !self.begin() {
+            return;
+        }
+        let (said, busy, ctx) = (Arc::clone(&self.said), Arc::clone(&self.busy), ctx.clone());
+        let started = std::thread::Builder::new()
             .name("network-profile".into())
             .spawn(move || {
                 let now = connected().ok().and_then(|networks| notice(&networks));
-                if let Ok(mut said) = said.lock() {
-                    *said = now;
+                if Self::answered(&said, &busy, now) {
+                    ctx.request_repaint();
                 }
             });
+        // Not started: the next ask may try.
+        if started.is_err() {
+            self.busy.store(false, Ordering::SeqCst);
+        }
     }
 
     #[cfg(not(windows))]
-    fn ask(&self) {}
+    fn ask(&self, _ctx: &eframe::egui::Context) {}
 
     /// Show the notice, if any, as a warning line under `ui`'s cursor.
     pub fn show(&mut self, ui: &mut eframe::egui::Ui) {
-        if let Some(words) = self.notice() {
+        if let Some(words) = self.notice(&ui.ctx().clone()) {
             ui.label(eframe::egui::RichText::new(words).color(crate::theme::warn(ui)));
         }
     }
@@ -165,7 +196,12 @@ fn connected() -> windows::core::Result<Vec<Network>> {
                 .GetName()
                 .map(|name| name.to_string())
                 .unwrap_or_default();
-            let public = network.GetCategory()? == NLM_NETWORK_CATEGORY_PUBLIC;
+            // One network that cannot say its category is passed over, not
+            // the whole list (PR #552 review M1).
+            let Ok(category) = network.GetCategory() else {
+                continue;
+            };
+            let public = category == NLM_NETWORK_CATEGORY_PUBLIC;
             out.push(Network { name, public });
         }
         Ok(out)
@@ -181,6 +217,24 @@ mod tests {
             name: name.to_string(),
             public,
         }
+    }
+
+    /// PR #552 review M2: one ask at a time, and the page drawn again only
+    /// when the answer changes what it says.
+    #[test]
+    fn one_ask_at_a_time_and_a_change_redraws() {
+        let public = PublicNetwork::default();
+        assert!(public.begin());
+        assert!(!public.begin(), "under way");
+        let words = Some("Public".to_string());
+        assert!(PublicNetwork::answered(
+            &public.said,
+            &public.busy,
+            words.clone()
+        ));
+        assert!(public.begin(), "answered: the next may start");
+        assert!(!PublicNetwork::answered(&public.said, &public.busy, words));
+        assert!(PublicNetwork::answered(&public.said, &public.busy, None));
     }
 
     #[test]
