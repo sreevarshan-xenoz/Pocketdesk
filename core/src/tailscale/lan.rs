@@ -523,6 +523,25 @@ pub struct Browse {
     started: std::time::Instant,
 }
 
+/// The most computers a look keeps: a flood of announcements grows
+/// neither its memory nor the Nearby list past it.
+#[cfg(feature = "local")]
+pub const BROWSE_MOST: usize = 64;
+
+/// Keep `computer`, found under the record `fullname`: in place of what
+/// that record said before, or as a new one while fewer than
+/// [`BROWSE_MOST`] are kept.
+#[cfg(feature = "local")]
+fn keep_found(
+    found: &mut HashMap<String, crate::local::nearby::Found>,
+    fullname: &str,
+    computer: crate::local::nearby::Found,
+) {
+    if found.contains_key(fullname) || found.len() < BROWSE_MOST {
+        found.insert(fullname.to_string(), computer);
+    }
+}
+
 #[cfg(feature = "local")]
 impl Browse {
     /// Start looking. `changed` is called after each change (to redraw).
@@ -543,7 +562,7 @@ impl Browse {
                     match event {
                         ServiceEvent::ServiceResolved(info) => match found_from(&info) {
                             Some(computer) => {
-                                found.insert(info.get_fullname().to_string(), computer);
+                                keep_found(&mut found, info.get_fullname(), computer);
                             }
                             None => {
                                 found.remove(info.get_fullname());
@@ -939,6 +958,28 @@ mod tests {
         )
         .expect("a record");
         assert_eq!(found_from(&no_id), None);
+    }
+
+    /// A look keeps at most [`BROWSE_MOST`] computers; one already kept is
+    /// still updated.
+    #[cfg(feature = "local")]
+    #[test]
+    fn a_look_keeps_at_most_64_computers() {
+        let computer = |n: usize| crate::local::nearby::Found {
+            device_id: format!("d-{n}"),
+            name: format!("Desk {n}"),
+            addresses: vec!["169.254.10.5".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+        };
+        let mut found = HashMap::new();
+        for n in 0..BROWSE_MOST + 10 {
+            keep_found(&mut found, &format!("desk-{n}"), computer(n));
+        }
+        assert_eq!(found.len(), BROWSE_MOST);
+        keep_found(&mut found, "desk-0", computer(999));
+        assert_eq!(found["desk-0"].device_id, "d-999", "updated");
+        assert_eq!(found.len(), BROWSE_MOST);
     }
 
     /// Only this network's addresses count: private and link-local IPv4,

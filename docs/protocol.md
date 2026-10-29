@@ -350,7 +350,7 @@ Made when `lan_discovery = true`, which is the default (`core/src/local/config.r
 | TXT `id` | The desktop's device id | same |
 | TXT `stream` | The stream port (4716) | same |
 
-The server also browses for other Pocketdesk servers every 30 s (`service.rs`, `lan_discovery.run`). The desktop app's Pair → Computer browses for them while it is open, to list them under Nearby (`lan.rs`, `Browse`, `found_from`): it reads the same records and announces nothing.
+The server also browses for other Pocketdesk servers every 30 s (`service.rs`, `lan_discovery.run`). The desktop app's Pair → Computer browses for them while it is open, to list them under Nearby (`lan.rs`, `Browse`, `found_from`): it reads the same records and announces nothing, keeps at most 64 of them, and lists only a record's addresses on this network (private or link-local IPv4, unique-local or link-local IPv6; never loopback, a tailnet's or a public one, `on_this_network`).
 
 ### 4.2 Mainline DHT
 
