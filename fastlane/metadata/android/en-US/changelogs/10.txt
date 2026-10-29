@@ -1,0 +1,2 @@
+* Nothing new on the phone in this release; the app is rebuilt as 0.8.2 and updates 0.8.1 in place, keeping your saved computers and pairings.
+* On the computer: a Linux computer can now share its keyboard and mouse with your other computers too, with no lag while sharing, and Linux fixes (the desktop app's picture with FFmpeg 9, the Pair page's link).
