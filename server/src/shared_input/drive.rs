@@ -72,6 +72,16 @@ pub enum Captured {
         extended: bool,
         down: bool,
     },
+    /// The pointer at (x, y) (logical) was pushed (dx, dy) past this
+    /// computer's edge, as Linux's input-capture portal says when it hits a
+    /// barrier: no move is watched there, so it crosses as such a push from
+    /// that edge would, with no position before it.
+    Edge {
+        x: i32,
+        y: i32,
+        dx: i32,
+        dy: i32,
+    },
     /// A key as its evdev code (Linux's libei gives these): sent as it is.
     EvKey {
         code: u16,
@@ -369,6 +379,16 @@ impl Driver {
                 None => self.watch((x, y), &mut out),
                 Some(_) => self.carry((x, y), &mut out),
             },
+            Captured::Edge { x, y, dx, dy } => {
+                if self.away.is_none() {
+                    // Where it is now: the next move watched measures from
+                    // here, and none is marked first.
+                    self.home = Some((x, y));
+                    self.reseed = false;
+                    let at = self.layout.clamp(&self.this, (x, y));
+                    self.cross(at, dx, dy, &mut out);
+                }
+            }
             Captured::Key {
                 scan,
                 extended,
@@ -683,6 +703,12 @@ impl Driver {
         let (dx, dy) = (pos.0.saturating_sub(prev.0), pos.1.saturating_sub(prev.1));
         // A pointer pushed past the edge is on its last pixel.
         let at = self.layout.clamp(&self.this, pos);
+        self.cross(at, dx, dy, out);
+    }
+
+    /// At home, the cursor at `at` (on a screen here) moved by (dx, dy): off
+    /// an edge onto another computer it may go to, it goes there.
+    fn cross(&mut self, at: (i32, i32), dx: i32, dy: i32, out: &mut Vec<Action>) {
         // A game in front: the edges lead nowhere (the hooks are out, but a
         // move already on its way may still come).
         if !self.game_held
@@ -2430,5 +2456,51 @@ mod tests {
             sends(&back),
             vec![sent("L", evdev(29, false)), sent("L", Msg::Leave)]
         );
+    }
+
+    /// BK8: Linux's input-capture portal says only that the pointer hit a
+    /// barrier, where and which way: no move is watched before it, yet it
+    /// crosses as a push off that edge does, with the same walls.
+    #[test]
+    fn a_push_at_a_barrier_crosses_with_no_move_before_it() {
+        let layout = desk(false);
+        let edge = |x: i32, y: i32, dx: i32, dy: i32| Captured::Edge { x, y, dx, dy };
+        let mut d = driver(layout.clone(), &["L"]);
+        assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
+        // The laptop's last column, pushed right: onto L at the same height,
+        // though the first position watched would only mark where it is.
+        let crossed = d.on(edge(3455, 480, 1, 0));
+        let (x, y) = layout.normalized("L", (0, 480));
+        assert_eq!(sends(&crossed), vec![sent("L", Msg::Enter { x, y })]);
+        assert!(crossed.contains(&Action::ParkCursor(PARK.0, PARK.1)));
+        assert_eq!(d.away_on(), Some("L"));
+        // Away, a barrier's word is stale: nothing.
+        assert_eq!(d.on(edge(3455, 480, 1, 0)), vec![]);
+        // Back the usual way, by the mouse.
+        d.on(moved(PARK.0 - 20, PARK.1));
+        assert_eq!(d.away_on(), None);
+
+        // A point a little past the edge is held on it.
+        let mut d = driver(layout.clone(), &["L"]);
+        d.start();
+        d.on(edge(3460, 480, 1, 0));
+        assert_eq!(d.away_on(), Some("L"));
+        // An edge with nothing past it, or onto a computer that is not
+        // reachable, leads nowhere.
+        let mut d = driver(layout.clone(), &["L"]);
+        d.start();
+        assert_eq!(d.on(edge(0, 480, -1, 0)), vec![]);
+        let mut d = driver(layout, &[]);
+        d.start();
+        assert_eq!(d.on(edge(3455, 480, 1, 0)), vec![]);
+        // Nor while a game is in front, or locked.
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(in_front(true, false));
+        assert_eq!(sends(&d.on(edge(3455, 480, 1, 0))), vec![]);
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(Captured::Locked);
+        assert_eq!(sends(&d.on(edge(3455, 480, 1, 0))), vec![]);
     }
 }
