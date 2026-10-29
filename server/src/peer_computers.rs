@@ -140,6 +140,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
             }
         }
         forget_untrusted_mine(&dir, &cert_manager, &mut links);
+        lapse_pending(&dir);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
         }
@@ -266,6 +267,7 @@ fn list_back(
         if !file.pending.contains(&computer.device_id) {
             file.pending.push(computer.device_id.clone());
         }
+        file.lapsed.retain(|id| *id != computer.device_id);
     });
     if let Err(e) = saved {
         tracing::warn!("Could not list a computer paired both ways: {e}");
@@ -533,6 +535,28 @@ async fn await_link(dir: PathBuf, device_id: String) {
         });
         set_link(&dir, &device_id, if linked { "linked" } else { AWAITING });
         tokio::time::sleep(AWAIT_LOOK).await;
+    }
+}
+
+/// Let each grant both ways that waited too long for the link lapse
+/// ([`computers::ComputersFile::lapse_pending`]): that computer stays paired
+/// one way here, its trust as narrow as it was, and Other computers says so.
+fn lapse_pending(dir: &Path) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    if !computers::read(dir).pending.is_empty() {
+        let mut lapsed = Vec::new();
+        let saved = computers::update(dir, |file| lapsed = file.lapse_pending(now));
+        match saved {
+            Ok(()) => {
+                for device_id in lapsed {
+                    tracing::warn!(
+                        device_id,
+                        "No link came from a computer paired both ways within ten minutes: it stays paired one way here; pair again for both ways"
+                    );
+                }
+            }
+            Err(e) => tracing::debug!("Could not let a waiting grant lapse: {e}"),
+        }
     }
 }
 

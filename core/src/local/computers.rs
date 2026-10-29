@@ -171,9 +171,42 @@ pub struct ComputersFile {
     /// paired one way (PC1 review M1). Absent in files written before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending: Vec<String>,
+    /// The computers whose grant both ways waited for the link longer than
+    /// [`PENDING_FOR`] and lapsed (PC1 re-review): each stays paired one
+    /// way here until it pairs again. Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lapsed: Vec<String>,
 }
 
+/// How long a grant both ways waits for the link before it lapses (PC1).
+pub const PENDING_FOR: u64 = 10 * 60;
+
 impl ComputersFile {
+    /// Let each grant both ways that has waited for the link longer than
+    /// [`PENDING_FOR`] since its computer paired (`paired_unix`) lapse at
+    /// `now_unix`, or one whose computer is gone; the lapsed ones.
+    pub fn lapse_pending(&mut self, now_unix: u64) -> Vec<String> {
+        let paired = |id: &str| {
+            self.computers
+                .iter()
+                .find(|c| c.device_id == id)
+                .map(|c| c.paired_unix)
+        };
+        let lapsed: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|id| paired(id).is_none_or(|at| now_unix.saturating_sub(at) >= PENDING_FOR))
+            .cloned()
+            .collect();
+        self.pending.retain(|id| !lapsed.contains(id));
+        for id in &lapsed {
+            if paired(id).is_some() && !self.lapsed.contains(id) {
+                self.lapsed.push(id.clone());
+            }
+        }
+        lapsed
+    }
+
     /// Whether `device_id` is listed here with a certificate other than
     /// `fingerprint` (hex, either case): a link or a pairing that reuses a
     /// listed computer's id with another certificate is someone else's
@@ -193,6 +226,7 @@ impl ComputersFile {
             .position(|c| c.device_id == device_id)?;
         let computer = self.computers.remove(at);
         self.pending.retain(|id| id != device_id);
+        self.lapsed.retain(|id| id != device_id);
         if self
             .last_pairing
             .as_ref()
@@ -724,6 +758,30 @@ mod tests {
         assert!(file.listed_with_other_certificate("desk", &"cd".repeat(32)));
         assert!(!file.listed_with_other_certificate("desk", &"AB".repeat(32)));
         assert!(!file.listed_with_other_certificate("lap", &"cd".repeat(32)));
+    }
+
+    /// PC1 re-review: a grant both ways that waited for the link longer
+    /// than ten minutes lapses (its computer then stays paired one way, and
+    /// is said to have lapsed); a younger one waits on, and one whose
+    /// computer is gone lapses too.
+    #[test]
+    fn a_grant_waiting_for_the_link_lapses_after_ten_minutes() {
+        let paired_at = |id: &str, at: u64| PeerComputer {
+            paired_unix: at,
+            ..computer(id)
+        };
+        let mut file = ComputersFile {
+            computers: vec![paired_at("old", 1_000), paired_at("young", 1_500)],
+            pending: vec!["old".to_string(), "young".to_string(), "gone".to_string()],
+            ..ComputersFile::default()
+        };
+        let lapsed = file.lapse_pending(1_000 + PENDING_FOR);
+        assert_eq!(lapsed, ["old", "gone"]);
+        assert_eq!(file.pending, ["young"]);
+        assert_eq!(file.lapsed, ["old"], "said for a computer still listed");
+        assert!(file.lapse_pending(1_000 + PENDING_FOR).is_empty(), "once");
+        file.remove("old");
+        assert!(file.lapsed.is_empty(), "gone with its computer");
     }
 
     /// BD3: a computer taken out takes its pairing's line, not another's.

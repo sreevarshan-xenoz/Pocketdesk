@@ -196,7 +196,10 @@ impl ComputersView {
                 ui.label(RichText::new(link_words(computer)).weak());
                 // PC1: paired both ways, with consent given at pairing; the
                 // grant here waits for the link (review M1).
-                if computer.mine && self.file.pending.contains(&computer.device_id) {
+                if computer.mine && self.file.lapsed.contains(&computer.device_id) {
+                    ui.label(RichText::new(MINE_LAPSED).color(crate::theme::warn(ui)))
+                        .on_hover_text(MINE_HOVER);
+                } else if computer.mine && self.file.pending.contains(&computer.device_id) {
                     ui.label(RichText::new(MINE_PENDING).color(crate::theme::warn(ui)))
                         .on_hover_text(MINE_HOVER);
                 } else if computer.mine {
@@ -277,6 +280,10 @@ const STOPPED: &str = "Start the server first: it does the unpairing";
 
 /// What a computer paired both ways is (PC1), and how to have it ask again.
 pub const MINE: &str = "Mine: sees and controls without asking";
+/// Paired both ways, but no link came within ten minutes: one way here
+/// until it pairs again (PC1 re-review).
+pub const MINE_LAPSED: &str =
+    "Paired one way here: no link came from it within ten minutes; pair again for both ways";
 /// Paired both ways, but its grant here waits for the link (PC1 review M1).
 pub const MINE_PENDING: &str =
     "Mine once linked: until the link comes up, it asks first and does not control this computer";
