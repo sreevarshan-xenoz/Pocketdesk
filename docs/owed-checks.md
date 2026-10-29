@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-985 open items.
+989 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 77 |
+| A second computer | 81 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -926,7 +926,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Start server in the bar at the top of a page starts the stopped server on the Linux laptop, and the bar goes once it runs. (where: second computer)
 - A real failed pairing: with Pocketdesk stopped on the other computer, Pair shows its progress, then "The other computer didn't answer…" with Details and Run diagnostics, which opens Diagnostics and runs its checks. (where: second computer)
 
-**227. Pair a computer nearby, and one place per task (Desktop UX 2)**
+**227. The clipboard and files follow the window (PC3)**
+
+- Copy a line on Windows, click into the laptop's screen window: within a second the laptop's clipboard holds it (paste it there with Ctrl+V through the window); copy something on the laptop through the window, click back on a Windows app: Windows' clipboard holds the laptop's copy. A quick Alt+Tab through the window and back moves nothing. (where: second computer)
+- Copy an image on Windows (a screenshot with Win+Shift+S), focus the window: the laptop's clipboard holds the image; with "Files over the internet" off on either, it does not go. A KeePassXC password copied on the laptop does not come back to Windows as the window loses the focus. (where: second computer)
+- With View only on in the window's bar, or Control off for Windows on the laptop's Devices page, focusing the window moves nothing; with "Clipboard follows a computer's screen window" off on either computer, nothing moves; with "Clipboard with my computers" on on both, copies cross as that sync sends them and the window adds no second copy. (where: second computer)
+- Drop three files and a folder from Explorer onto the window: the note says "Sending 3 files and 1 folder to <laptop>…", then "Sent 3 files and 1 folder to <laptop>'s Downloads.", and they are there; with Files off for Windows on the laptop's Devices page, the note says Files is off for this computer there; with the laptop's Wi-Fi off, it says the link is down. (where: second computer)
+
+**228. Pair a computer nearby, and one place per task (Desktop UX 2)**
 
 - Pair the two laptops from the nearby list: on Windows, Pair → Computer lists the Arch laptop under Nearby within about 10 s, with its address; Pair on it shows a six-digit code with "Same code on both?" and Confirm; the Arch laptop shows "<Windows' name> wants to pair" with the same code, as a notification too; Confirm on Windows (it says "Confirmed. Waiting for … to accept") and Accept on the laptop, and Windows says "Paired with …" with Set up keyboard and mouse, and each lists the other (Windows under Settings → Other computers, the laptop on its Devices page). (where: second computer)
 - The same the other way (the Arch laptop asks Windows), with "Both are mine" ticked on both sides: each lists the other as Mine. (where: second computer)

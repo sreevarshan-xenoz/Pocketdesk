@@ -13,5 +13,10 @@ pub const CLIPBOARD_IMAGE: &str = "kdeconnect.pocketdesk.clipboard_image";
 /// image its last clipboard reply named, while the clipboard still holds it.
 pub const CLIPBOARD_IMAGE_FETCH: &str = "kdeconnect.pocketdesk.clipboard_image_fetch";
 
+/// Computer → computer (PC3): `{}`. The window showing the receiver's
+/// screen lost the focus while it controlled it; the receiver answers with
+/// its clipboard, as a push marked `{follows: true, view: true}`.
+pub const CLIPBOARD_VIEW: &str = "kdeconnect.pocketdesk.clipboard_view";
+
 /// The largest image either side moves, as PNG bytes.
 pub const MAX_CLIPBOARD_IMAGE: u64 = 32 * 1024 * 1024;

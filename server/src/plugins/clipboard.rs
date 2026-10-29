@@ -121,6 +121,7 @@ impl Plugin for ClipboardPlugin {
             "kdeconnect.clipboard.connect",
             CLIPBOARD_IMAGE,
             CLIPBOARD_IMAGE_FETCH,
+            pocketdesk_core::protocol::clipboard::CLIPBOARD_VIEW,
         ]
     }
 
@@ -200,6 +201,16 @@ impl Plugin for ClipboardPlugin {
             }
             CLIPBOARD_IMAGE => receive_image(packet, sender).await,
             CLIPBOARD_IMAGE_FETCH => send_image(packet, sender).await,
+            // Its window lost the focus (PC3): this clipboard goes back to
+            // the computer that controls this one through it, never to a
+            // phone, nor by the always-on sharing's word alone.
+            pocketdesk_core::protocol::clipboard::CLIPBOARD_VIEW
+                if crate::plugins::pair::is_computer_device(sender.device_id())
+                    && crate::clipboard_push::takes_window_ask(sender.device_id()) =>
+            {
+                let to = sender.device_id().to_string();
+                tokio::spawn(async move { crate::clipboard_push::answer_window_ask(&to).await });
+            }
             _ => {}
         }
         Ok(())
@@ -212,6 +223,10 @@ impl Plugin for ClipboardPlugin {
 /// the fetch of the image this one told it of at the last switch.
 fn follows_the_mouse(packet: &NetworkPacket, device_id: &str) -> bool {
     match packet.packet_type.as_str() {
+        // The window showing this screen asks for the clipboard back (PC3).
+        pocketdesk_core::protocol::clipboard::CLIPBOARD_VIEW => {
+            crate::clipboard_push::takes_window_ask(device_id)
+        }
         "kdeconnect.clipboard" | CLIPBOARD_IMAGE => {
             crate::clipboard_push::takes_follow(device_id, &packet.body)
         }
