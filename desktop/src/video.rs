@@ -17,6 +17,21 @@ use eframe::egui;
 /// one begins, and this begins one at once.
 pub const AUD: [u8; 6] = [0, 0, 0, 1, 0x09, 0xF0];
 
+/// The largest picture decoded: 8K, 8192 by 4352 (H.264's largest level),
+/// either way round.
+const MAX_SIDE: usize = 8192;
+const MAX_SIDE_SHORT: usize = 4352;
+
+/// What a window says when its decoder would not start, showing `what`
+/// ("a phone's screen"): a picture it refuses, or no ffmpeg.
+pub fn decoder_words(e: &io::Error, what: &str) -> String {
+    if e.kind() == io::ErrorKind::InvalidData {
+        format!("Cannot show {what}: {e}.")
+    } else {
+        format!("Showing {what} needs ffmpeg on this computer ({e}).")
+    }
+}
+
 /// One decoded picture.
 pub struct Picture {
     pub width: usize,
@@ -240,6 +255,14 @@ impl Decoder {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "an empty screen",
+            ));
+        }
+        // BK7 review I1: each picture is w x h x 4 bytes, asked for before
+        // ffmpeg says a word; a size no H.264 level allows is refused.
+        if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_SIDE * MAX_SIDE_SHORT {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("a picture too large to show ({w}x{h})"),
             ));
         }
         let mut command = Command::new("ffmpeg");
@@ -538,6 +561,33 @@ mod tests {
             "a keyframe after a gap is fed"
         );
         assert_eq!(gate.admit(false, 10), Admit::Feed);
+    }
+
+    /// BK7 review I1: a size past H.264's largest is refused before ffmpeg
+    /// starts or a picture's memory is asked for, and says why.
+    #[test]
+    fn a_decoder_refuses_a_picture_too_large() {
+        for (w, h) in [(8193, 100), (100, 8193), (8192, 8192), (u16::MAX, u16::MAX)] {
+            let refused = Decoder::start(w, h, Box::new(|_| {}))
+                .err()
+                .expect("refused");
+            assert_eq!(refused.kind(), io::ErrorKind::InvalidData);
+            assert!(refused.to_string().contains("too large"), "{refused}");
+        }
+    }
+
+    #[test]
+    fn a_refused_picture_is_not_said_to_need_ffmpeg() {
+        let large = io::Error::new(
+            io::ErrorKind::InvalidData,
+            "a picture too large to show (9000x9000)",
+        );
+        assert_eq!(
+            decoder_words(&large, "a phone's screen"),
+            "Cannot show a phone's screen: a picture too large to show (9000x9000)."
+        );
+        let missing = io::Error::new(io::ErrorKind::NotFound, "program not found");
+        assert!(decoder_words(&missing, "a phone's screen").contains("needs ffmpeg"));
     }
 
     /// The sidecar turns an H.264 stream into pictures of the size read.

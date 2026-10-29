@@ -712,9 +712,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                         state.note = None;
                     }
                     Err(e) => {
-                        state.note = Some(format!(
-                            "Showing another computer's screen needs ffmpeg on this computer ({e})."
-                        ));
+                        state.note =
+                            Some(crate::video::decoder_words(&e, "another computer's screen"));
                     }
                 }
                 ctx.request_repaint_of(viewport_id());
