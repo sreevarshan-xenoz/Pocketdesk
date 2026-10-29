@@ -42,15 +42,6 @@ use super::wire::{Msg, REFUSE_RELAYED, REFUSE_SHARING_OFF, Screen};
 /// How often, away, the computer driven is pinged ([`Driver::tick`]).
 pub const PING_EVERY: Duration = Duration::from_millis(200);
 
-/// How often instead with the link kept quick (`shared_input_low_latency`,
-/// BK10): a Wi-Fi card saving power dozes after about 100 ms without
-/// sending, and what comes for it meanwhile waits at the access point for
-/// its next wake, up to a beacon's 102 ms. Pinged this often, the computer
-/// driven answers before its card dozes, and this one asks before its own
-/// does, so neither holds up the next key. The drivers look every 50 ms,
-/// so a ping goes with each look.
-pub const QUICK_PING_EVERY: Duration = Duration::from_millis(40);
-
 /// The computer driven not answering this long has stopped answering: the
 /// keyboard and mouse come home (as the computer driven lets go after a
 /// second without a word, `receive::SILENCE_RELEASE`).
@@ -218,9 +209,6 @@ pub struct Driver {
     reseed: bool,
     /// The clipboard follows the mouse (`shared_input_clipboard`).
     clipboard: bool,
-    /// The link is kept quick (`shared_input_low_latency`): away, the
-    /// computer driven is pinged every [`QUICK_PING_EVERY`].
-    quick: bool,
     /// Away: when the computer driven last answered a ping (or the first
     /// tick of the visit), and when it was last pinged.
     heard: Option<Instant>,
@@ -253,7 +241,6 @@ impl Driver {
             foreground_pending: false,
             reseed: false,
             clipboard: false,
-            quick: false,
             heard: None,
             pinged: None,
             silent: HashSet::new(),
@@ -265,13 +252,6 @@ impl Driver {
     /// pushed to each computer the cursor goes to, as it goes.
     pub fn set_clipboard(&mut self, on: bool) {
         self.clipboard = on;
-    }
-
-    /// Whether the link is kept quick (`shared_input_low_latency`): away,
-    /// the computer driven is pinged every [`QUICK_PING_EVERY`] rather
-    /// than [`PING_EVERY`], so neither side's Wi-Fi dozes between keys.
-    pub fn set_quick(&mut self, on: bool) {
-        self.quick = on;
     }
 
     /// The gaming lock's settings before the driver starts: nothing is
@@ -474,8 +454,7 @@ impl Driver {
     }
 
     /// The time is `now` (called several times a second): away, the
-    /// computer driven is pinged every [`PING_EVERY`] ([`QUICK_PING_EVERY`]
-    /// with the link kept quick), and one that has not
+    /// computer driven is pinged every [`PING_EVERY`], and one that has not
     /// answered for [`ANSWER_WITHIN`] since the crossing or its last answer
     /// has stopped answering: home, letting go of what was sent down (it
     /// lets go by itself too, hearing nothing). Its edge is a wall until it
@@ -495,12 +474,7 @@ impl Driver {
                 );
                 return out;
             }
-            let every = if self.quick {
-                QUICK_PING_EVERY
-            } else {
-                PING_EVERY
-            };
-            if self.ping_due(now, every) {
+            if self.ping_due(now) {
                 out.push(Action::Ping(away.to));
             }
             return out;
@@ -511,18 +485,17 @@ impl Driver {
             .filter(|id| self.reachable.contains(*id))
             .cloned()
             .collect();
-        if !silent.is_empty() && self.ping_due(now, PING_EVERY) {
+        if !silent.is_empty() && self.ping_due(now) {
             out.extend(silent.into_iter().map(Action::Ping));
         }
         out
     }
 
-    /// Whether a ping is due at `now`, one going `every` so long, noting
-    /// that one goes.
-    fn ping_due(&mut self, now: Instant, every: Duration) -> bool {
+    /// Whether a ping is due at `now`, noting that one goes.
+    fn ping_due(&mut self, now: Instant) -> bool {
         let due = self
             .pinged
-            .is_none_or(|at| now.saturating_duration_since(at) >= every);
+            .is_none_or(|at| now.saturating_duration_since(at) >= PING_EVERY);
         if due {
             self.pinged = Some(now);
         }
@@ -1881,41 +1854,6 @@ mod tests {
                 _ => None,
             })
             .collect()
-    }
-
-    /// BK10: with the link kept quick, the computer driven is pinged at
-    /// each of the drivers' 50 ms looks while away (its Wi-Fi never dozes
-    /// between keys), and still five times a second from home while it is
-    /// silent; the second's grace is the same.
-    #[test]
-    fn a_quick_link_pings_at_each_look_while_away() {
-        let t0 = Instant::now();
-        let ms = |n: u64| t0 + Duration::from_millis(n);
-        let mut d = away_on_linux(false);
-        d.set_quick(true);
-        let mut pinged = Vec::new();
-        for at in (0..=500).step_by(50) {
-            if !pings(&d.tick(ms(at))).is_empty() {
-                pinged.push(at);
-            }
-            d.answered("L", ms(at));
-        }
-        assert_eq!(pinged, [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500]);
-        // Turned off, five times a second again.
-        d.set_quick(false);
-        assert!(pings(&d.tick(ms(550))).is_empty());
-        assert_eq!(pings(&d.tick(ms(700))), ["L"]);
-        // Back on: silent for a second brings them home as before.
-        d.set_quick(true);
-        assert_eq!(d.away_on(), Some("L"));
-        let gone = d.tick(ms(1500));
-        assert!(gone.contains(&Action::HideCursor(false)), "{gone:?}");
-        assert_eq!(d.away_on(), None);
-        // From home, the silent one is pinged at the usual pace.
-        assert_eq!(pings(&d.tick(ms(1600))), ["L"]);
-        assert!(pings(&d.tick(ms(1650))).is_empty());
-        assert!(pings(&d.tick(ms(1750))).is_empty());
-        assert_eq!(pings(&d.tick(ms(1800))), ["L"]);
     }
 
     /// Away, the computer driven is pinged five times a second; with no

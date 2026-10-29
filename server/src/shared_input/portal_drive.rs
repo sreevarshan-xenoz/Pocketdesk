@@ -31,6 +31,7 @@ use super::game_lock::Foreground;
 use super::link::{self, Channel};
 use super::phone::{self, PhoneChannel};
 use super::portal_glue::{Backend, Portal, PortalGlue, Standing};
+use super::quick::Nudge;
 use super::screens;
 use super::sound;
 use super::status;
@@ -459,10 +460,13 @@ fn drive<B: Backend>(
         layout
     };
     let mut game_lock_on = config.shared_input_game_lock;
+    // This computer's Wi-Fi kept awake toward the computer driven while the
+    // link is kept quick (BK10).
+    let mut quick_on = config.shared_input_low_latency;
+    let mut nudge = Nudge::default();
     let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
         .with_game_lock(game_lock_on, config.shared_input_lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
-    driver.set_quick(config.shared_input_low_latency);
     let actions = driver.on(foreground_now(&runtime, game_lock_on));
     glue.apply(&mut driver, actions);
     let started = driver.start();
@@ -533,6 +537,7 @@ fn drive<B: Backend>(
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
+        nudge.follow(driver.away_on().filter(|_| quick_on));
         glue.follow_sound(&mut driver);
         // Looked at only at home: away, the desktop gives every key and
         // click to Pocketdesk, so nothing here comes to the front, and the
@@ -584,8 +589,8 @@ fn drive<B: Backend>(
             layout_at = Some(Instant::now());
             let config = crate::events::current_config();
             game_lock_on = config.shared_input_game_lock;
+            quick_on = config.shared_input_low_latency;
             driver.set_clipboard(config.shared_input_clipboard);
-            driver.set_quick(config.shared_input_low_latency);
             glue.sound_on = config.shared_input_sound;
             let actions = driver.set_game_lock(game_lock_on, config.shared_input_lock_programs);
             glue.apply(&mut driver, actions);

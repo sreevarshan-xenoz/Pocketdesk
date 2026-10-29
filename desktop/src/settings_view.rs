@@ -2132,7 +2132,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "While the pointer is on another computer, or this one is driven: Windows' timer runs finer for Pocketdesk, and the computers stay in touch often enough that Wi-Fi does not doze between keys. A little more battery while it lasts.",
+                        "While the pointer is on another computer, or this one is driven: Windows' timer runs finer for Pocketdesk, and this computer sends the other a byte every 50 ms so its Wi-Fi does not doze between keys. A little more battery while it lasts.",
                     );
                 });
             }

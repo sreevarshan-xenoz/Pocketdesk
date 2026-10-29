@@ -363,8 +363,9 @@ pub struct Config {
     pub shared_input_sound: bool,
     /// With `shared_input`, the link is kept quick while the keyboard and
     /// mouse are on another computer or this one is driven (BK10): on
-    /// Windows a 1 ms timer for this process, and the computer driven
-    /// pinged often enough that neither side's Wi-Fi dozes between keys.
+    /// Windows a 1 ms timer for this process, and on any system a byte to
+    /// the other computer every 50 ms so this one's Wi-Fi does not doze
+    /// between keys.
     #[serde(default = "default_true")]
     pub shared_input_low_latency: bool,
     /// Another computer's screen in a window here (BK7): the quality its

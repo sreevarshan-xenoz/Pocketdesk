@@ -27,7 +27,7 @@ use super::awake::KeepAwake;
 use super::badge;
 use super::held::HeldInput;
 use super::link::{self, Channel};
-use super::quick::KeepQuick;
+use super::quick::{KeepQuick, Nudge};
 use super::screens;
 use super::sound;
 use super::status;
@@ -933,6 +933,7 @@ pub async fn run() {
     let mut awake = KeepAwake::default();
     // Held while another computer's cursor is on this one (BK10).
     let mut quick = KeepQuick::default();
+    let mut nudge = Nudge::default();
     let mut gate = Gate::default();
     // This computer's screens as last looked at (none while shared input
     // is off), and the computers told them.
@@ -1114,8 +1115,9 @@ pub async fn run() {
                 } else {
                     awake.release();
                 }
-                let driven = receiver.driver().is_some();
-                quick.set(driven && gate.low_latency().await);
+                let low_latency = gate.low_latency().await;
+                quick.set(receiver.driver().is_some() && low_latency);
+                nudge.follow(receiver.driver().filter(|_| low_latency));
                 if !heard.is_empty() {
                     write_screens(state_dir.as_ref(), std::mem::take(&mut heard), None).await;
                 }

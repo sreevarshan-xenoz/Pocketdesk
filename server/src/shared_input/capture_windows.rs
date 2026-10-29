@@ -80,7 +80,7 @@ use super::drop_windows::{self, Caught, DropCatcher};
 use super::game_lock;
 use super::link::{self, Channel};
 use super::phone::{self, PhoneChannel};
-use super::quick::KeepQuick;
+use super::quick::{KeepQuick, Nudge};
 use super::screens::{Desktop, Motion};
 use super::sound;
 use super::status;
@@ -1086,6 +1086,9 @@ struct Glue {
     /// is on.
     quick: KeepQuick,
     quick_on: bool,
+    /// Keeps this computer's Wi-Fi awake toward the computer driven while
+    /// the link is kept quick (BK10).
+    nudge: Nudge,
     /// Files dragged across the edge (BK4): the setting, the catcher's
     /// state, its window's thread (running while the setting is on), and
     /// where its drops come in.
@@ -1677,6 +1680,7 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         awake: KeepAwake::default(),
         quick: KeepQuick::default(),
         quick_on: config.shared_input_low_latency,
+        nudge: Nudge::default(),
         files_on: false,
         catcher: Catcher::default(),
         drop_catcher: None,
@@ -1740,7 +1744,6 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
     let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))
         .with_game_lock(game_lock_on, lock_programs.clone());
     driver.set_clipboard(config.shared_input_clipboard);
-    driver.set_quick(config.shared_input_low_latency);
     let actions = driver.on(foreground_now(game_lock_on, &lock_programs, &glue.desktop));
     glue.apply(&mut driver, actions);
     let start = driver.start();
@@ -1827,6 +1830,8 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
         }
         let actions = driver.tick(now);
         glue.apply(&mut driver, actions);
+        let quick = glue.quick.is_held();
+        glue.nudge.follow(driver.away_on().filter(|_| quick));
         // The sound of the computer driven follows the cursor (BK6).
         glue.follow_sound(&mut driver);
         // A game in front keeps the keyboard and mouse here with no hooks;
@@ -1895,7 +1900,6 @@ fn drive(stop: Arc<AtomicBool>, runtime: tokio::runtime::Handle) {
             game_lock_on = config.shared_input_game_lock;
             lock_programs = config.shared_input_lock_programs;
             driver.set_clipboard(config.shared_input_clipboard);
-            driver.set_quick(config.shared_input_low_latency);
             glue.sound_on = config.shared_input_sound;
             glue.quick_on = config.shared_input_low_latency;
             let quick = glue.quick_on && glue.awake.is_held();

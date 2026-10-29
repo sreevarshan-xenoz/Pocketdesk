@@ -204,6 +204,19 @@ pub fn is_direct(conn: &Connection) -> bool {
         .is_some_and(|path| !path.is_relay())
 }
 
+/// The address the link to `device_id` reaches it at now, while it is up
+/// and direct: where the packets to it go, so through the network device
+/// that carries the link.
+pub fn peer_ip(device_id: &str) -> Option<std::net::IpAddr> {
+    let conn = connection(device_id)?;
+    let paths = conn.paths();
+    let path = pocketdesk_core::streaming::iroh_connection::selected_path(&paths)?;
+    match path.remote_addr() {
+        iroh::TransportAddr::Ip(addr) => Some(addr.ip()),
+        _ => None,
+    }
+}
+
 /// A connection registered while this is held, and unregistered however
 /// its holder ends (a link's task aborted too), unless a newer connection
 /// to that computer took its place meanwhile.

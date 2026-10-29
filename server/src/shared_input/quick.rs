@@ -15,11 +15,22 @@
 //! laptop some battery. So it is held while this computer's keyboard and
 //! mouse are on another computer or a phone, while another computer's
 //! cursor is on this one, and while `share-test` runs. Elsewhere holding
-//! does nothing: Linux's timers are fine-grained already. (The Wi-Fi on
-//! either side is kept from dozing by the pings, every
-//! [`super::drive::QUICK_PING_EVERY`] with the same setting.)
+//! does nothing: Linux's timers are fine-grained already.
+//!
+//! The same while, on any system, a [`Nudge`] keeps this computer's Wi-Fi
+//! awake. A Wi-Fi card saving power dozes after about 100 ms without
+//! sending, and what comes for it meanwhile waits at the access point for
+//! its next wake, up to a beacon's 102 ms: the first key after a pause
+//! was held up by as much. A byte sent to the other computer's discard
+//! port every 50 ms keeps the card awake, through whichever card carries
+//! the link, without changing any setting of the system's (Wi-Fi's own
+//! power saving is left on, so nothing needs putting back, even after a
+//! crash). It goes outside the link on purpose: on the link it would spend
+//! the link's pacing, which on a quiet link held the next key back.
 
-use std::sync::{Mutex, PoisonError};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 /// The holds made in this process, and what is done as the first is made
 /// and the last let go.
@@ -149,6 +160,136 @@ fn system(on: bool) {
 #[cfg(not(windows))]
 fn system(_on: bool) {}
 
+/// How often a nudge goes: well inside the 100 ms a Wi-Fi card waits
+/// before it dozes, a Windows timer's coarse tick (62 ms) included.
+pub const NUDGE_EVERY: Duration = Duration::from_millis(50);
+
+/// The discard service's port: nothing answers there, and a firewall in
+/// front of it drops the byte.
+const DISCARD_PORT: u16 = 9;
+
+/// How long the address a computer is nudged at is trusted before it is
+/// looked up again (its link may move to another path).
+const LOOK_AGAIN: Duration = Duration::from_secs(1);
+
+/// A byte now and then to the computer the keyboard and mouse are shared
+/// with, keeping this computer's Wi-Fi awake (see the module's words).
+/// Nothing goes while it follows no computer; dropped, it stops.
+pub struct Nudge {
+    aim: Arc<Mutex<Aim>>,
+    /// The computer followed, and when its address was looked up.
+    following: Option<(String, Instant)>,
+    /// Where a computer's link reaches it ([`super::link::peer_ip`]), and
+    /// the port: a test's stand-ins.
+    look_up: fn(&str) -> Option<IpAddr>,
+    port: u16,
+}
+
+/// Where the bytes go now (none ends the sending thread), and whether a
+/// thread sends them: both under one lock, so a thread about to end is
+/// never counted on to send to a new address.
+#[derive(Default)]
+struct Aim {
+    to: Option<SocketAddr>,
+    sending: bool,
+}
+
+impl Default for Nudge {
+    fn default() -> Self {
+        Nudge {
+            aim: Arc::default(),
+            following: None,
+            look_up: super::link::peer_ip,
+            port: DISCARD_PORT,
+        }
+    }
+}
+
+impl Nudge {
+    /// Nudge toward `computer` (its link's address, looked up again every
+    /// [`LOOK_AGAIN`]), or stop with none. Cheap to call as often as a
+    /// loop goes round.
+    pub fn follow(&mut self, computer: Option<&str>) {
+        let Some(computer) = computer else {
+            if self.following.take().is_some() {
+                self.aim(None);
+            }
+            return;
+        };
+        let fresh = self
+            .following
+            .as_ref()
+            .is_some_and(|(id, at)| id == computer && at.elapsed() < LOOK_AGAIN);
+        if fresh {
+            return;
+        }
+        self.following = Some((computer.to_string(), Instant::now()));
+        let to = (self.look_up)(computer).map(|ip| SocketAddr::new(ip, self.port));
+        self.aim(to);
+    }
+
+    fn aim(&mut self, to: Option<SocketAddr>) {
+        let mut aim = self.aim.lock().unwrap_or_else(PoisonError::into_inner);
+        aim.to = to;
+        let Some(first) = to else {
+            return;
+        };
+        if aim.sending {
+            return;
+        }
+        let aimed = Arc::clone(&self.aim);
+        let spawned = std::thread::Builder::new()
+            .name("pd-wifi-nudge".into())
+            .spawn(move || send_nudges(&aimed, first));
+        match spawned {
+            Ok(_) => aim.sending = true,
+            Err(e) => tracing::debug!("Shared input: no thread to keep the Wi-Fi awake: {e}"),
+        }
+    }
+}
+
+impl Drop for Nudge {
+    fn drop(&mut self) {
+        self.aim(None);
+    }
+}
+
+/// Send a byte to where `aimed` says every [`NUDGE_EVERY`] until it says
+/// nowhere. `first` picks the socket's family.
+fn send_nudges(aimed: &Mutex<Aim>, first: SocketAddr) {
+    let any = if first.is_ipv4() {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+    } else {
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+    };
+    let lock = || aimed.lock().unwrap_or_else(PoisonError::into_inner);
+    let socket = match UdpSocket::bind(SocketAddr::new(any, 0)) {
+        Ok(socket) => socket,
+        Err(e) => {
+            tracing::debug!("Shared input: no socket to keep the Wi-Fi awake: {e}");
+            lock().sending = false;
+            return;
+        }
+    };
+    let mut told = false;
+    loop {
+        let to = {
+            let mut aim = lock();
+            let Some(to) = aim.to else {
+                aim.sending = false;
+                return;
+            };
+            to
+        };
+        if let Err(e) = socket.send_to(&[0], to)
+            && !std::mem::replace(&mut told, true)
+        {
+            tracing::debug!("Shared input: a byte to keep the Wi-Fi awake did not go: {e}");
+        }
+        std::thread::sleep(NUDGE_EVERY);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +306,49 @@ mod tests {
         } else {
             LET_GO.fetch_add(1, Ordering::SeqCst);
         }
+    }
+
+    /// A nudge follows a computer to its link's address, a byte every
+    /// 50 ms, and stops when it follows none or is dropped; a computer with
+    /// no direct link gets nothing.
+    #[test]
+    fn a_nudge_sends_while_it_follows_and_stops_after() {
+        let catcher = UdpSocket::bind("127.0.0.1:0").unwrap();
+        catcher
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut nudge = Nudge {
+            aim: Arc::default(),
+            following: None,
+            look_up: |id| (id == "pc").then_some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            port: catcher.local_addr().unwrap().port(),
+        };
+        let caught = |n: usize| {
+            let mut got = 0;
+            let mut byte = [0u8; 8];
+            while got < n && catcher.recv(&mut byte).is_ok() {
+                got += 1;
+            }
+            got
+        };
+        nudge.follow(Some("pc"));
+        let started = Instant::now();
+        assert_eq!(caught(3), 3);
+        assert!(started.elapsed() >= NUDGE_EVERY, "spaced, not a burst");
+        // Following it again changes nothing; nothing goes to no link.
+        nudge.follow(Some("pc"));
+        nudge.follow(Some("relayed"));
+        nudge.follow(None);
+        std::thread::sleep(NUDGE_EVERY * 2);
+        while catcher.recv(&mut [0u8; 8]).is_ok() {}
+        assert_eq!(caught(1), 0, "stopped");
+        // Again, then dropped.
+        nudge.follow(Some("pc"));
+        assert_eq!(caught(1), 1);
+        drop(nudge);
+        std::thread::sleep(NUDGE_EVERY * 2);
+        while catcher.recv(&mut [0u8; 8]).is_ok() {}
+        assert_eq!(caught(1), 0, "stopped when dropped");
     }
 
     /// Never the real timer: a test must not change the owner's computer.

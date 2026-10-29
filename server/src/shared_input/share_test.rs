@@ -22,7 +22,7 @@ use pocketdesk_core::local::pin::now_unix;
 use serde::{Deserialize, Serialize};
 
 use super::link::{self, Channel, Pong};
-use super::quick::KeepQuick;
+use super::quick::{KeepQuick, Nudge};
 use super::wire::{self, Msg, Timing};
 use crate::local_api::exit;
 
@@ -189,12 +189,10 @@ struct Request {
 }
 
 /// How often pings go between the events of a script paused `pause_ms`
-/// between them, the link kept `quick` or not: as a computer driving
-/// another pings it while away. None for a script without a pause, whose
-/// pings go with its events.
-fn pinging_every(pause_ms: u32, quick: bool) -> Option<Duration> {
-    use super::drive::{PING_EVERY, QUICK_PING_EVERY};
-    (pause_ms > 0).then_some(if quick { QUICK_PING_EVERY } else { PING_EVERY })
+/// between them: as a computer driving another pings it while away. None
+/// for a script without a pause, whose pings go with its events.
+fn pinging_every(pause_ms: u32) -> Option<Duration> {
+    (pause_ms > 0).then_some(super::drive::PING_EVERY)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,6 +479,10 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
             .await
             .unwrap_or(false);
     quick.set(outcome.quick);
+    let mut nudge = Nudge::default();
+    if outcome.quick {
+        nudge.follow(Some(device_id.as_str()));
+    }
     tracing::info!(device_id, "share-test: sending a script of shared input");
     let me = crate::kde::host_identity();
     let hello = Msg::Hello {
@@ -503,7 +505,7 @@ async fn run_one(dir: &Path, request: &Request) -> Outcome {
         0 => GAP,
         ms => Duration::from_millis(u64::from(ms.min(PAUSE_MOST_MS))),
     };
-    let pinging = pinging_every(request.pause_ms, outcome.quick);
+    let pinging = pinging_every(request.pause_ms);
     let sending = async {
         channel.send(&hello)?;
         outcome.sent += 1;
@@ -774,14 +776,13 @@ mod tests {
     }
 
     /// BK10: a paused script pings between its events as a driver pings
-    /// while away, often with the link kept quick; one without a pause
-    /// pings with its events. A request from before the pause has none.
+    /// while away; one without a pause pings with its events. A request
+    /// from before the pause has none.
     #[test]
     fn a_paused_script_pings_as_a_driver_away() {
-        use super::super::drive::{PING_EVERY as AWAY, QUICK_PING_EVERY};
-        assert_eq!(pinging_every(0, true), None);
-        assert_eq!(pinging_every(1_000, true), Some(QUICK_PING_EVERY));
-        assert_eq!(pinging_every(1_000, false), Some(AWAY));
+        use super::super::drive::PING_EVERY as AWAY;
+        assert_eq!(pinging_every(0), None);
+        assert_eq!(pinging_every(1_000), Some(AWAY));
         let old: Request = serde_json::from_str(
             r#"{"id":"a","computer":"L","keys":1,"moves":0,"created_unix":5}"#,
         )
