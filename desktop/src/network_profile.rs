@@ -8,7 +8,8 @@
 //!
 //! The words are chosen here ([`notice`], pure); Windows' Network List
 //! Manager is asked off the UI thread every [`EVERY`] ([`PublicNetwork`]).
-//! Elsewhere nothing is asked and nothing is said.
+//! Elsewhere nothing is asked and nothing is said, so off Windows the
+//! words are built only by the tests (PR #552 review C1: dead code there).
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,10 +18,12 @@ use std::time::{Duration, Instant};
 pub const EVERY: Duration = Duration::from_secs(10);
 
 /// The most of a network's name shown.
+#[cfg_attr(not(windows), allow(dead_code))]
 const NAME_CHARS: usize = 40;
 
 /// A network this computer is connected to, as Windows names it, and
 /// whether Windows treats it as Public.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Network {
     pub name: String,
@@ -29,6 +32,7 @@ pub struct Network {
 
 /// What to tell the owner of `networks`: nothing while none is Public
 /// (Private and Domain networks are what the firewall rules open).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn notice(networks: &[Network]) -> Option<String> {
     let public: Vec<String> = networks
         .iter()
@@ -62,6 +66,7 @@ pub fn notice(networks: &[Network]) -> Option<String> {
 
 /// A network's name fit to show: no control or format characters (a
 /// right-to-left override), trimmed and cut short.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn shown_name(raw: &str) -> String {
     let clean: String = raw
         .chars()
