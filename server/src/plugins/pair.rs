@@ -1127,7 +1127,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                     );
                     // Listed here in turn (PC1), not forgotten as one paired
                     // the other way (BD1): the two keep one link between them.
-                    if !crate::peer_computers::paired_back(listed) {
+                    // Its connections up now (this one, an earlier link)
+                    // are not the link that shows it recorded the pairing.
+                    let before: Vec<String> = state::clone_answer_targets()
+                        .await
+                        .iter()
+                        .filter(|c| c.device_id() == phone_id)
+                        .map(|c| c.connection_id().to_string())
+                        .collect();
+                    if !crate::peer_computers::paired_back(listed, before) {
                         tracing::warn!(
                             "Paired computer {phone_id} both ways, but the server could not list it here"
                         );

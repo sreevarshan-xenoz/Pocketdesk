@@ -169,9 +169,31 @@ pub(crate) fn takes_paired_back() -> bool {
         .is_some_and(|tx| !tx.is_closed())
 }
 
+/// The connections of each computer that paired here both ways that were
+/// up as it paired (its pairing connection, an earlier one-way link not yet
+/// gone): never the link that shows it recorded the pairing (PC1
+/// re-review I-2).
+static BEFORE_PAIRING: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
+    LazyLock::new(Default::default);
+
+/// Whether the connection `connection_id` of `device_id` was up as it
+/// paired here both ways.
+fn opened_before_pairing(device_id: &str, connection_id: &str) -> bool {
+    BEFORE_PAIRING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .is_some_and(|before| before.iter().any(|c| c == connection_id))
+}
+
 /// List `computer`, which just paired here both ways (PC1), as one this
-/// computer paired with too. Whether the run loop took it.
-pub(crate) fn paired_back(computer: PeerComputer) -> bool {
+/// computer paired with too; `before`, the ids of its connections up as it
+/// paired, are never taken for its link. Whether the run loop took it.
+pub(crate) fn paired_back(computer: PeerComputer, before: Vec<String>) -> bool {
+    BEFORE_PAIRING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(computer.device_id.clone(), before);
     PAIRED_BACK
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -531,7 +553,13 @@ async fn await_link(dir: PathBuf, device_id: String) {
             return;
         }
         let linked = crate::state::clone_clients().await.iter().any(|c| {
-            c.device_id() == device_id && is_the_link(&dir, &device_id, c.peer_key().as_ref())
+            c.device_id() == device_id
+                && is_the_link(
+                    &dir,
+                    &device_id,
+                    c.peer_key().as_ref(),
+                    opened_before_pairing(&device_id, c.connection_id()),
+                )
         });
         set_link(&dir, &device_id, if linked { "linked" } else { AWAITING });
         tokio::time::sleep(AWAIT_LOOK).await;
@@ -569,8 +597,12 @@ fn is_the_link(
     dir: &Path,
     device_id: &str,
     key: Option<&pocketdesk_core::streaming::PeerKey>,
+    opened_before: bool,
 ) -> bool {
     use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+    if opened_before {
+        return false;
+    }
     match key {
         Some(pocketdesk_core::streaming::PeerKey::Iroh(id)) => {
             device_keys::check(dir, device_id, Slot::Iroh, Some(id)) == Verdict::Matches
@@ -2344,14 +2376,17 @@ mod tests {
         device_keys::replace(&dir, "lap", &"ab".repeat(32)).unwrap();
         device_keys::register(&dir, "lap", Slot::Iroh, &own).unwrap();
         let verdicts = [
-            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own.clone()))),
-            is_the_link(&dir, "lap", Some(&PeerKey::Tls([0xab; 32]))),
-            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(other))),
-            is_the_link(&dir, "lap", None),
-            is_the_link(&dir, "desk", Some(&PeerKey::Iroh(own))),
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own.clone())), false),
+            is_the_link(&dir, "lap", Some(&PeerKey::Tls([0xab; 32])), false),
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(other)), false),
+            is_the_link(&dir, "lap", None, false),
+            is_the_link(&dir, "desk", Some(&PeerKey::Iroh(own.clone())), false),
+            // A link up when it paired (an earlier one-way link, not yet
+            // gone) proves nothing of this pairing.
+            is_the_link(&dir, "lap", Some(&PeerKey::Iroh(own)), true),
         ];
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(verdicts, [true, false, false, false, false]);
+        assert_eq!(verdicts, [true, false, false, false, false, false]);
     }
 
     /// PC1 re-review m-4: a computer this one pairs with again by its link
