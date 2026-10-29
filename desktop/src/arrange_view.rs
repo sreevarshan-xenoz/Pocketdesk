@@ -791,7 +791,7 @@ impl ArrangeView {
             }
         }
         ui.add_space(8.0);
-        ui.heading("Your computers");
+        crate::theme::section(ui, "Your computers");
         let paired = self.paired(devices);
         if paired.is_empty() {
             ui.label(RichText::new("No other computer is paired yet.").color(muted));
@@ -919,7 +919,7 @@ impl ArrangeView {
         let muted = crate::theme::muted(ui);
         let mut action = None;
         ui.add_space(8.0);
-        ui.heading("Your phones");
+        crate::theme::section(ui, "Your phones");
         egui::Grid::new("keyboard_mouse_phones")
             .num_columns(2)
             .min_col_width(180.0)

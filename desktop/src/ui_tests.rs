@@ -712,7 +712,8 @@ fn the_overview_shows_a_phone_with_its_battery_and_actions() {
     .collect();
     pocketdesk_core::local::phone_status::write(fixture.state(), &batteries).expect("battery");
     let app = fixture.open(None);
-    assert!(app.query_by_label("Your phones").is_some());
+    // UX 3: phones and computers under one heading.
+    assert!(app.query_by_label(crate::app::YOUR_DEVICES).is_some());
     assert!(app.query_by_label("Test Phone").is_some());
     assert!(app.query_by_label("Away").is_some(), "no session or link");
     // The battery's words beside its bar (I3), the rest on their own line.
@@ -1813,4 +1814,226 @@ fn diagnostics_say_nothing_of_fonts_still_looked_for() {
         app.query_by_label_contains("Fonts for other scripts")
             .is_none()
     );
+}
+
+/// A computer this one paired with, as the computers file keeps it.
+fn add_computer(state: &Path, name: &str) {
+    pocketdesk_core::local::computers::update(state, |file| {
+        file.computers
+            .push(pocketdesk_core::local::computers::PeerComputer {
+                device_id: "00000000-0000-4000-8000-0000000000ba".to_string(),
+                name: name.to_string(),
+                addresses: Vec::new(),
+                control_port: 1716,
+                stream_port: 4716,
+                fingerprint: String::new(),
+                endpoint: None,
+                paired_unix: 0,
+                link: String::new(),
+                link_unix: 0,
+                lets_drive: false,
+                mine: false,
+            });
+    })
+    .expect("a computers file");
+}
+
+/// UX 3: the Overview's Start is in its status card, between the words
+/// that the server is stopped and the pause, and the bar at the top is not
+/// drawn there (one Start, not two); other pages keep the bar. Restart
+/// takes its place with the server running, which no test here starts.
+#[test]
+fn the_overviews_start_is_in_its_status_card() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    let words = app.get_by_label(crate::app::STOPPED_BAR).rect();
+    // One Start on the page: get_by_label fails on two.
+    let start = app.get_by_label(crate::app::START_SERVER).rect();
+    let pause = app.get_by_label(crate::tray_menu::PAUSE_LABEL).rect();
+    assert!(words.bottom() <= start.top(), "{words:?} above {start:?}");
+    assert!(start.bottom() <= pause.top(), "{start:?} above {pause:?}");
+    go_to(&app, Tab::Devices);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::app::START_SERVER).is_some(),
+        "the bar"
+    );
+}
+
+/// UX 3: the ports and the pairing rule are in a Details fold, closed
+/// until opened.
+#[test]
+fn the_overviews_details_start_closed() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    assert!(app.query_by_label("Control port").is_none(), "closed");
+    assert!(app.query_by_label("Pairing required").is_none(), "closed");
+    app.get_by_label(crate::app::DETAILS).click();
+    app.run_steps(3);
+    assert!(app.query_by_label("Control port").is_some());
+    assert!(app.query_by_label("Streaming port").is_some());
+    assert!(app.query_by_label("Pairing required").is_some());
+}
+
+/// UX 3: the first-run steps follow the facts: none done at first (no
+/// server here, nothing paired); a computer paired ticks its step and
+/// lists the computer; a phone paired ends the steps.
+#[test]
+fn the_first_run_steps_follow_the_facts() {
+    let label = |i: usize, done: bool| {
+        let (words, _) = crate::app::first_steps(false, 0, 0)[i];
+        crate::app::step_label(i, words, done)
+    };
+    let fixture = Fixture::new();
+    let app = fixture.open(None);
+    for i in 0..3 {
+        assert!(app.query_by_label(&label(i, false)).is_some(), "step {i}");
+        assert!(app.query_by_label(&label(i, true)).is_none(), "step {i}");
+    }
+    assert!(app.query_by_label("Pair a phone").is_some());
+    assert!(app.query_by_label(crate::app::PAIR_A_COMPUTER).is_some());
+    drop(app);
+
+    add_computer(fixture.state(), "Test Desk");
+    let app = fixture.open(None);
+    assert!(app.query_by_label(&label(0, false)).is_some());
+    assert!(app.query_by_label(&label(1, false)).is_some());
+    assert!(app.query_by_label(&label(2, true)).is_some(), "ticked");
+    assert!(app.query_by_label(crate::app::YOUR_DEVICES).is_some());
+    assert!(app.query_by_label("Test Desk").is_some(), "its card");
+    assert!(app.query_by_label("Show its screen").is_some());
+    drop(app);
+
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(None);
+    for i in 0..3 {
+        assert!(app.query_by_label(&label(i, false)).is_none(), "step {i}");
+        assert!(app.query_by_label(&label(i, true)).is_none(), "step {i}");
+    }
+    assert!(app.query_by_label("Test Phone").is_some());
+}
+
+/// UX 3: Hide these steps hides them, and the page then says nothing is
+/// paired, with its button.
+#[test]
+fn the_first_run_steps_hide() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    app.get_by_label(crate::app::HIDE_STEPS).click();
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::app::HIDE_STEPS).is_none());
+    assert!(
+        app.query_by_label_contains("Nothing is paired yet")
+            .is_some()
+    );
+    assert!(app.query_by_label("Pair a phone").is_some());
+}
+
+/// UX 3: each group's switch on Devices saves its own switches and no
+/// others: the groups spelled out here, not taken from the app's helpers.
+/// Every other switch and "Ask before each session" stay as they were, a
+/// part-on group shows as mixed, and Automation never turns Run commands
+/// on but does turn it off (PR #558 review).
+#[test]
+fn each_permission_group_switch_saves_its_permissions() {
+    use egui_kittest::kittest::NodeT;
+    use pocketdesk_core::protocol::permissions::{Capability as C, DevicePermissions};
+    // AwayLock can be set on Windows and Linux, where these tests run.
+    let groups: [(&str, Vec<C>); 5] = [
+        ("Control", vec![C::Input, C::SharedInput, C::Power, C::Peek]),
+        (
+            "Screen, sound and media",
+            vec![C::Cast, C::Audio, C::Mic, C::Media, C::PhoneSound],
+        ),
+        (
+            "Files and clipboard",
+            vec![C::Clipboard, C::Files, C::Browse, C::Links, C::Notes],
+        ),
+        (
+            "Phone on this computer",
+            vec![
+                C::Notifications,
+                C::Texts,
+                C::Dial,
+                C::PhoneActions,
+                C::Ring,
+                C::Mute,
+            ],
+        ),
+        (
+            "Automation",
+            vec![C::Command, C::Ask, C::Tasks, C::AwayLock],
+        ),
+    ];
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    // Not the defaults: Run commands on, one switch off in each group, and
+    // each session asked for.
+    let mut start = DevicePermissions::default();
+    start.set(C::Exec, true);
+    for c in [C::Input, C::Audio, C::Clipboard, C::Texts, C::Tasks] {
+        start.set(c, false);
+    }
+    // And one on in each, so each shows part-on.
+    for c in [C::Power, C::Cast, C::Files, C::Notifications, C::Command] {
+        start.set(c, true);
+    }
+    start.ask_first = true;
+    TrustStore::update(fixture.state().join(TRUST_FILE), |store| {
+        store.set_permissions(PHONE, start.clone())
+    })
+    .expect("set");
+    let read = |state: &Path| {
+        TrustStore::read(state.join(TRUST_FILE))
+            .expect("the trust store")
+            .permissions(PHONE)
+    };
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.get_by_label("What Test Phone may do").click();
+    app.run_steps(3);
+    let click = |app: &mut Harness<'static, PocketdeskApp>, label: &str| {
+        app.get_by_label(label).scroll_to_me();
+        app.run_steps(3);
+        app.get_by_label(label).click();
+        app.run_steps(3);
+    };
+    // Every switch outside `members` (and ask_first) as `before` had it.
+    let others_kept = |before: &DevicePermissions, members: &[C], what: &str| {
+        let now = read(fixture.state());
+        assert_eq!(now.ask_first, before.ask_first, "{what}: ask_first");
+        for c in C::ALL {
+            if !members.contains(&c) {
+                assert_eq!(now.allows(c), before.allows(c), "{what}: {c:?} kept");
+            }
+        }
+    };
+    for (group, members) in &groups {
+        // Part-on at first: one of each group was turned off above.
+        assert_eq!(
+            app.get_by_label(group).accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::Mixed),
+            "{group} shows part-on"
+        );
+        let before = read(fixture.state());
+        click(&mut app, group);
+        for c in members {
+            assert!(read(fixture.state()).allows(*c), "{group}: {c:?} on");
+        }
+        // Run commands is kept as it was: on.
+        let mut kept = members.clone();
+        others_kept(&before, &kept, group);
+        assert!(read(fixture.state()).allows(C::Exec), "{group}: Exec kept");
+
+        let before = read(fixture.state());
+        click(&mut app, group);
+        if *group == "Automation" {
+            // Off takes Run commands with the rest.
+            kept.push(C::Exec);
+            assert!(!read(fixture.state()).allows(C::Exec), "Exec off");
+        }
+        for c in members {
+            assert!(!read(fixture.state()).allows(*c), "{group}: {c:?} off");
+        }
+        others_kept(&before, &kept, group);
+    }
 }

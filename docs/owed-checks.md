@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1000 open items.
+1005 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 154 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 156 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 91 |
+| A second computer | 93 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -123,6 +123,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The phone away: the line is gone.
 
+**230. Look and feel (Desktop UX 3)**
+
+- On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
+
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
@@ -157,7 +161,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **49. Protocol audit (what Pocketdesk sends, and to whom)**
 
 - Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
-- The desktop app's Devices tab reads "Lock, sleep, privacy mode and waking others".
+- The desktop app's Devices tab reads "Lock, sleep, privacy and wake others".
 - Windows: after `pocketdesk install`, the firewall has TCP 1716-1725, UDP 4716 and TCP 1739-1764 rules only, and a phone on a fresh machine still lists the computer by mDNS (no UDP 5353 rule is made).
 
 **89. The phone's navigation and feedback (U2)**
@@ -512,7 +516,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
 
-**230. Keys that reach the other computer (PC4)**
+**230. Look and feel (Desktop UX 3)**
+
+- On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
+- Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
+
+**231. Keys that reach the other computer (PC4)**
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
@@ -955,7 +964,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The Keyboard and mouse page's Setup on both laptops ticks each step as it becomes true (running, paired, sharing on, linked directly, may drive, arranged), and each fix button does what it says. (where: second computer)
 - An option changed on the Keyboard and mouse page (Clipboard follows the mouse off) is saved at once and the next crossing follows it; Settings' search for "game" finds the pointer, whose button opens the page. (where: second computer)
 
-**230. Keys that reach the other computer (PC4)**
+**230. Look and feel (Desktop UX 3)**
+
+- With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
+- A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)
+
+**231. Keys that reach the other computer (PC4)**
 
 - Windows viewing the Linux laptop, windowed: Send keys lists Windows key (Super), Alt+Tab, Alt+F4 and Print Screen, and not Ctrl+Alt+Del, Task Manager or Lock; each reaches the laptop (record with `wev` on the headless sway stand-in: key names and counts only), Super opening Hyprland's launcher and Alt+F4 closing the focused window there; with Alt held through the window, Print Screen arrives as Alt up, Print Screen, Alt down (`wev`), never Alt+SysRq. (where: second computer)
 - The Linux laptop viewing Windows: Send keys lists Ctrl+Shift+Esc (Task Manager) and Lock (Windows+L) as well; Task Manager opens on Windows, and note whether Lock locks it (Windows may ignore an injected Windows+L; if it does, Lock needs a server action instead). (where: second computer)
