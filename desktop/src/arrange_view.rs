@@ -605,6 +605,38 @@ impl ArrangeView {
                 }
             }
         });
+        // UX 1: why Identify is off, beside it, with the fix.
+        if self.status.answered.is_empty() {
+            if !sharing_on {
+                if crate::widgets::why_off(
+                    ui,
+                    "Identify needs sharing on: turn it on above.",
+                    Some("Turn sharing on"),
+                ) {
+                    action = Some(Action::Sharing(true));
+                }
+            } else if !server_running {
+                crate::widgets::why_off_ask(
+                    ui,
+                    "Identify needs the server running.",
+                    crate::widgets::START,
+                    crate::widgets::Ask::StartServer,
+                );
+            } else if self.paired(devices).is_empty() {
+                crate::widgets::why_off_ask(
+                    ui,
+                    "Identify needs another computer paired with this one.",
+                    "Pair a computer",
+                    crate::widgets::Ask::Settings("Other computers"),
+                );
+            } else {
+                crate::widgets::why_off(
+                    ui,
+                    "No computer takes this one's keyboard and mouse yet: turn sharing on there, and let this one drive it.",
+                    None,
+                );
+            }
+        }
         ui.add_space(8.0);
         ui.heading("Your computers");
         let paired = self.paired(devices);

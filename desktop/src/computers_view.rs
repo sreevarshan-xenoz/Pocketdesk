@@ -196,6 +196,7 @@ impl ComputersView {
             LinkCheck::Valid(link) => Some(link.as_ref().clone()),
             _ => None,
         };
+        let empty = check == LinkCheck::Empty;
         match check {
             LinkCheck::Empty | LinkCheck::Valid(_) => {}
             LinkCheck::Own => {
@@ -280,6 +281,18 @@ impl ComputersView {
                 "Asked the other computer to pair.",
             );
         }
+        // UX 1: why Pair is off, beside it (a link that is not one, or is
+        // this computer's own, is said under the box).
+        if !server_running {
+            crate::widgets::why_off_ask(
+                ui,
+                PAIR_NEEDS_SERVER,
+                crate::widgets::START,
+                crate::widgets::Ask::StartServer,
+            );
+        } else if empty {
+            crate::widgets::why_off(ui, PASTE_FIRST, None);
+        }
         if let Some(last) = &self.file.last_pairing {
             let failed = last.outcome.starts_with("failed");
             let text = format!("Last pairing, with {}: {}", last.name, last.outcome);
@@ -321,6 +334,14 @@ impl ComputersView {
                 {
                     self.view = Some((computer.device_id.clone(), computer.name.clone()));
                 }
+                // UX 1: why, beside it; a stopped server is said once,
+                // under the list.
+                if server_running && reach.is_err() {
+                    ui.label(
+                        RichText::new(unreachable(&computer.name))
+                            .color(crate::theme::muted(ui)),
+                    );
+                }
                 // U5: "Unpair" for a pairing everywhere, asked by name.
                 if self.forgetting.as_deref() == Some(computer.device_id.as_str()) {
                     ui.label(format!(
@@ -348,6 +369,14 @@ impl ComputersView {
                     self.forgetting = Some(computer.device_id.clone());
                 }
             });
+        }
+        if !server_running && !self.file.computers.is_empty() {
+            crate::widgets::why_off_ask(
+                ui,
+                LIST_NEEDS_SERVER,
+                crate::widgets::START,
+                crate::widgets::Ask::StartServer,
+            );
         }
         if let Some((device_id, name)) = forget {
             self.forgetting = None;
@@ -385,6 +414,19 @@ fn names_endpoint(link: &pocketdesk_core::local::pair_link::PairLink) -> bool {
 fn link_name(name: &str) -> String {
     pocketdesk_core::protocol::kdeconnect::clean_device_name(name)
         .unwrap_or_else(|| "A computer".to_string())
+}
+
+/// Why Pair is off with the server stopped (UX 1).
+pub const PAIR_NEEDS_SERVER: &str = "Pair needs the server running: it does the pairing.";
+/// Why Pair is off with nothing pasted (UX 1).
+pub const PASTE_FIRST: &str = "Paste the link copied on the other computer first.";
+/// Why each computer's Show its screen and Unpair are off with the server
+/// stopped (UX 1).
+pub const LIST_NEEDS_SERVER: &str = "Show its screen and Unpair need the server running.";
+
+/// Why `name`'s Show its screen is off with the server running (UX 1).
+fn unreachable(name: &str) -> String {
+    format!("{name} can't be reached now: its link is down and no address of it is known.")
 }
 
 /// Why Unpair waits (BA3).
@@ -719,6 +761,45 @@ mod tests {
         harness.get_by_label("Clear").click();
         harness.run_steps(2);
         assert!(harness.query_by_label_contains("A pairing link").is_none());
+    }
+
+    /// UX 1: Pair, off, says why beside it, with Start when the server is
+    /// the reason; the fix asks the app.
+    #[test]
+    fn pair_says_why_it_is_off() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("why");
+        let harness = page(&dir, true, "");
+        assert!(harness.query_by_label(PASTE_FIRST).is_some());
+        let mut harness = page(&dir, false, &mine_link());
+        assert!(harness.query_by_label(PAIR_NEEDS_SERVER).is_some());
+        harness.get_by_label(crate::widgets::START).click();
+        harness.run_steps(2);
+        assert_eq!(
+            crate::widgets::take_ask(&harness.ctx),
+            Some(crate::widgets::Ask::StartServer)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// UX 1: a computer that cannot be reached says so beside its greyed
+    /// Show its screen.
+    #[test]
+    fn show_its_screen_says_why_it_is_off() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("reach");
+        computers::update(&dir, |file| {
+            file.computers.push(computer("away: the link closed"));
+        })
+        .unwrap();
+        let harness = page(&dir, true, "");
+        let said = harness
+            .query_by_label_contains("Desk can't be reached now")
+            .is_some();
+        let harness = page(&dir, false, "");
+        let stopped = harness.query_by_label(LIST_NEEDS_SERVER).is_some();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(said && stopped);
     }
 
     #[test]

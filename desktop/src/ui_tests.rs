@@ -1526,3 +1526,58 @@ fn the_clipboard_page_lists_what_crossed() {
     app.run_steps(3);
     assert!(app.query_by_label("from here").is_none(), "cleared");
 }
+
+/// UX 1: the Keyboard and mouse rows that are off while sharing is off say
+/// so beside them, and "Turn sharing on" turns them on.
+#[test]
+fn the_keyboard_and_mouse_rows_say_why_they_are_off() {
+    use egui_kittest::kittest::NodeT;
+    if !cfg!(any(windows, target_os = "linux")) {
+        return;
+    }
+    const DRIVE: &str = "this computer's pointer and keys may be carried onto the others";
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("keyboard and mouse");
+    app.run_steps(3);
+    assert!(app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::settings_view::SHARING_OFF)
+            .is_some()
+    );
+    app.get_by_label("Turn sharing on").click();
+    app.run_steps(3);
+    assert!(!app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::settings_view::SHARING_OFF)
+            .is_none()
+    );
+}
+
+/// UX 1: Identify, off, says why beside it: sharing first, with its fix.
+#[test]
+fn identify_says_why_it_is_off() {
+    use egui_kittest::kittest::NodeT;
+    let fixture = Fixture::new();
+    let app = fixture.open(Some(Tab::KeyboardMouse));
+    assert!(app.get_by_label("Identify").accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label_contains("Identify needs sharing on")
+            .is_some()
+    );
+    assert!(app.query_by_label("Turn sharing on").is_some());
+}
+
+/// UX 1: an away phone's greyed actions say why, by its name, in a line
+/// and not only on hover.
+#[test]
+fn an_away_phones_actions_say_why_they_are_off() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(None);
+    assert!(
+        app.query_by_label("Test Phone is away: these come back when it connects.")
+            .is_some()
+    );
+}

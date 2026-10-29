@@ -36,6 +36,7 @@ mod type_view;
 mod ui_tests;
 mod video;
 mod view_input;
+mod widgets;
 
 use eframe::egui;
 // What the window shares with the tray program (E2).

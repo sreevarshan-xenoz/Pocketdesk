@@ -496,6 +496,19 @@ impl PocketdeskApp {
     }
 
     /// Run a start or restart off the UI thread; one at a time.
+    /// What a page asked for (UX 1).
+    fn do_ask(&mut self, ask: crate::widgets::Ask) {
+        use crate::widgets::Ask;
+        match ask {
+            Ask::StartServer => self.run_job("Starting the server", crate::restart::start),
+            Ask::Settings(words) => {
+                self.switch_to(Tab::Settings);
+                self.chosen = Tab::Settings;
+                self.settings_query = words.to_string();
+            }
+        }
+    }
+
     fn run_job(
         &mut self,
         what: &'static str,
@@ -1851,6 +1864,18 @@ impl PocketdeskApp {
                         ));
                     }
                 });
+                // UX 1: an away phone's actions are all off; why, in a
+                // line and not only on hover.
+                if row.place == model::Place::Away {
+                    crate::widgets::why_off(
+                        ui,
+                        &format!(
+                            "{} is away: these come back when it connects.",
+                            model::device_label(&self.snapshot.devices, &device.id)
+                        ),
+                        None,
+                    );
+                }
                 // Q2 review: the phone's own switch, as it last said it.
                 if model::phone_action_reach(
                     device.linked,
@@ -3964,6 +3989,10 @@ impl eframe::App for PocketdeskApp {
         // An empty page's button asked for another page (E5).
         if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
             self.switch_to(tab);
+        }
+        // A page's fix for a control it shows off (UX 1).
+        if let Some(ask) = crate::widgets::take_ask(ui.ctx()) {
+            self.do_ask(ask);
         }
         self.approval_prompt(ui);
         self.task_prompt(ui);
