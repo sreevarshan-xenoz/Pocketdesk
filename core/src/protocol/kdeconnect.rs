@@ -770,10 +770,20 @@ impl TrustStore {
     /// Trust `device_id` as one of the owner's other computers (2f), with
     /// [`DevicePermissions::computer`]'s narrow permissions.
     pub fn trust_computer(&mut self, device_id: impl Into<String>) -> Result<()> {
+        self.trust_computer_as(device_id, DevicePermissions::computer())
+    }
+
+    /// Trust `device_id` as one of the owner's other computers with
+    /// `permissions`: [`DevicePermissions::computer_mine`]'s for one paired
+    /// both ways from a link made for it (PC1).
+    pub fn trust_computer_as(
+        &mut self,
+        device_id: impl Into<String>,
+        permissions: DevicePermissions,
+    ) -> Result<()> {
         let id = device_id.into();
         self.grants.remove(&id);
         self.trusted_device_ids.insert(id.clone());
-        let permissions = DevicePermissions::computer();
         self.permissions.insert(id.clone(), permissions);
         self.computers.insert(id);
         self.persist()
@@ -1139,6 +1149,29 @@ mod tests {
         store.untrust_device("desk").unwrap();
         let reloaded = TrustStore::load_or_create(&path).unwrap();
         assert!(!reloaded.is_computer("desk"), "forgotten with its pairing");
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// PC1: a computer paired both ways is kept with the permissions it
+    /// paired with, and pairing it again one way puts them back to a
+    /// computer's.
+    #[test]
+    fn a_computer_paired_both_ways_keeps_its_permissions() {
+        let path = temp_store_path("computer-mine");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        store
+            .trust_computer_as("desk", DevicePermissions::computer_mine())
+            .unwrap();
+        let reloaded = TrustStore::load_or_create(&path).unwrap();
+        assert!(reloaded.is_trusted("desk") && reloaded.is_computer("desk"));
+        assert_eq!(
+            reloaded.permissions("desk"),
+            DevicePermissions::computer_mine()
+        );
+        let mut store = reloaded;
+        store.trust_computer("desk").unwrap();
+        let reloaded = TrustStore::load_or_create(&path).unwrap();
+        assert_eq!(reloaded.permissions("desk"), DevicePermissions::computer());
         let _ = std::fs::remove_file(path);
     }
 
