@@ -642,14 +642,12 @@ pub async fn run(
                             let _ = v.tx.try_send(Message::End { why: why.clone() });
                         }
                         current.ended = Some((why, Instant::now()));
-                        if let Err(e) = wire::remove(&state_dir, session_id) {
-                            tracing::warn!(error = %e, "Could not forget the view");
-                        }
-                        // Said to the window watching; a later one learns of
-                        // the end from no file.
+                        // Said to the window watching, the view is over; one
+                        // that has not come yet finds it still named, and
+                        // hears why as it joins (or it goes in a minute).
                         if watching.is_some() {
-                            view = None;
                             viewer = None;
+                            end(&mut view, &mut None, &state_dir, None);
                         }
                     }
                 }

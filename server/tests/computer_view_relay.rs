@@ -308,7 +308,13 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
         }
     };
     assert_eq!(why, "Lost the connection to Desk.");
-    assert_eq!(wire::read(&dir), None);
+    for _ in 0..100 {
+        if wire::read(&dir).is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(wire::read(&dir), None, "view.json forgets the view");
 
     drop(commands);
     relay.await.unwrap();
@@ -359,6 +365,53 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert_eq!(wire::read(&dir), None);
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A view that ends before its window comes (the computer could not be
+/// reached at once) keeps its file, so the window still hears why.
+#[tokio::test]
+async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
+    let dir = temp_dir("late");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    // Nothing listens at port 9: the dial fails at once.
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr: "127.0.0.1:9".parse().unwrap(),
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    // Long enough for the dial to fail.
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(wire::read(&dir), Some(file.clone()), "kept for the window");
+    let mut window = join(&file).await;
+    let why = loop {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::End { why } => break why,
+            _ => continue,
+        }
+    };
+    assert!(why.starts_with("Could not reach Desk:"), "{why}");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
