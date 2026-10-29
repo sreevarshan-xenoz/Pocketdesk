@@ -324,7 +324,7 @@ Made when `lan_discovery = true`, which is the default (`core/src/local/config.r
 | Instance name | The desktop's name | `register_service` |
 | Host name | `<name>.local.` | same |
 | Port | The control port (1716) | same |
-| Addresses (A/AAAA) | The non-loopback, non-link-local adapter addresses (from `if-addrs`, or `hostname -I` on Linux), less the tailnet's (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) | `lan.rs` (`get_local_ips`, `announceable`) |
+| Addresses (A/AAAA) | The non-loopback, non-link-local adapter addresses (read from the interfaces with `if-addrs` on every system), less the tailnet's (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) | `lan.rs` (`get_local_ips`, `announceable`) |
 | TXT `name` | The desktop's name | `lan.rs` (`announcement_properties`) |
 | TXT `version` | `1` | same |
 | TXT `id` | The desktop's device id | same |

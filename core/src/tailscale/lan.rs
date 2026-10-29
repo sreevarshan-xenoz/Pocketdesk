@@ -11,7 +11,6 @@ use anyhow::{Context, Result};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
@@ -481,41 +480,74 @@ pub async fn scan_lan_once() -> Vec<PeerInfo> {
     }
 }
 
-/// Get all local IP addresses of the current machine.
-///
-/// Uses `hostname -I` on Linux to get all IPv4 and IPv6 addresses. Elsewhere
-/// (Windows has no `hostname -I`) the adapters are enumerated directly, with
-/// the same exclusions: no loopback, no link-local.
+/// Get all local IP addresses of the current machine: [`interface_ips`].
 pub async fn get_local_ips() -> Vec<String> {
-    #[cfg(not(target_os = "linux"))]
-    {
-        return match if_addrs::get_if_addrs() {
-            Ok(interfaces) => interfaces
-                .iter()
-                .filter(|iface| !iface.is_loopback() && !iface.is_link_local())
-                .map(|iface| iface.ip().to_string())
-                .collect(),
-            Err(e) => {
-                debug!("Enumerating network adapters failed: {e}");
-                Vec::new()
-            }
+    interface_ips()
+}
+
+/// This machine's adapter addresses, read from its network interfaces, less
+/// the ones no other device can reach ([`shareable_ips`]). Read directly on
+/// every system: `hostname -I` is not on a stock Arch install (it comes from
+/// `inetutils`), and without it the pairing link had no address.
+pub fn interface_ips() -> Vec<String> {
+    match if_addrs::get_if_addrs() {
+        Ok(interfaces) => shareable_ips(interfaces.iter().map(if_addrs::Interface::ip)),
+        Err(e) => {
+            debug!("Enumerating network adapters failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// The addresses of `ips` worth offering another device: no loopback and no
+/// link-local (`169.254.0.0/16`, `fe80::/10`), each once, in the order
+/// given. A tailnet's addresses stay; the LAN announcement leaves them out
+/// itself ([`announced_addresses`]).
+pub fn shareable_ips(ips: impl IntoIterator<Item = std::net::IpAddr>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for ip in ips {
+        let reachable = match ip {
+            std::net::IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => !v6.is_loopback() && v6.segments()[0] & 0xffc0 != 0xfe80,
         };
+        let ip = ip.to_string();
+        if reachable && !out.contains(&ip) {
+            out.push(ip);
+        }
     }
-    #[cfg_attr(not(target_os = "linux"), allow(unreachable_code))]
-    let output = Command::new("hostname").arg("-I").output().await;
-    if let Ok(output) = output {
-        String::from_utf8_lossy(&output.stdout)
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect()
-    } else {
-        Vec::new()
-    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_addresses_another_device_can_reach_are_shared() {
+        let ips = [
+            "127.0.0.1",
+            "192.0.2.10",
+            "169.254.7.1",
+            "::1",
+            "fe80::1",
+            "febf::1",
+            "2001:db8::10",
+            "100.64.0.9",
+            "fd7a:115c:a1e0::9",
+            "192.0.2.10",
+        ]
+        .map(|ip| ip.parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(
+            shareable_ips(ips),
+            [
+                "192.0.2.10",
+                "2001:db8::10",
+                "100.64.0.9",
+                "fd7a:115c:a1e0::9"
+            ]
+        );
+        assert!(shareable_ips([]).is_empty());
+    }
 
     #[tokio::test]
     async fn local_ips_are_routable_addresses() {
