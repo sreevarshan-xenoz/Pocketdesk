@@ -1,0 +1,738 @@
+//! Another computer's screen in a window (BK7): what the window's pointer
+//! and keys become for that computer, as the input packets a phone sends.
+//!
+//! The pointer goes as absolute moves over the picture (0..=65535 each
+//! way), at most one each [`MOVE_EVERY`], with the buttons and the wheel.
+//! Typing goes as text; the keys that type nothing (Enter, the arrows, F1
+//! and the rest) and every key pressed with Ctrl, Alt or the Windows key go
+//! as Linux evdev key codes, the modifiers held as keys. Shift is held on the
+//! other computer only while such a key, a button or the wheel needs it, so
+//! text typed with Shift arrives as its capitals and not shifted twice.
+//! egui turns Ctrl+C, Ctrl+X and Ctrl+V into copy, cut and paste: they go
+//! back to being those keys. Whatever is held is let go when the window
+//! loses focus, closes or stops controlling.
+
+use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
+
+use eframe::egui;
+use pocketdesk_core::streaming::InputPacket;
+
+use crate::video::fraction;
+
+/// Moves go at most this often: a 1000 Hz mouse sends one a pass, not one a
+/// millisecond.
+pub const MOVE_EVERY: Duration = Duration::from_millis(8);
+
+/// Linux evdev codes for the modifiers.
+pub const LEFT_CTRL: u16 = 29;
+pub const LEFT_SHIFT: u16 = 42;
+pub const RIGHT_SHIFT: u16 = 54;
+pub const LEFT_ALT: u16 = 56;
+pub const RIGHT_CTRL: u16 = 97;
+pub const RIGHT_ALT: u16 = 100;
+pub const LEFT_META: u16 = 125;
+pub const RIGHT_META: u16 = 126;
+
+const KEY_C: u16 = 46;
+const KEY_V: u16 = 47;
+const KEY_X: u16 = 45;
+
+/// The Linux evdev code of `key` (where it sits on a US keyboard), or
+/// `None` for one with none here.
+pub fn evdev(key: egui::Key) -> Option<u16> {
+    use egui::Key::*;
+    Some(match key {
+        Escape => 1,
+        Num1 => 2,
+        Num2 => 3,
+        Num3 => 4,
+        Num4 => 5,
+        Num5 => 6,
+        Num6 => 7,
+        Num7 => 8,
+        Num8 => 9,
+        Num9 => 10,
+        Num0 => 11,
+        Minus => 12,
+        Equals | Plus => 13,
+        Backspace => 14,
+        Tab => 15,
+        Q => 16,
+        W => 17,
+        E => 18,
+        R => 19,
+        T => 20,
+        Y => 21,
+        U => 22,
+        I => 23,
+        O => 24,
+        P => 25,
+        OpenBracket | OpenCurlyBracket => 26,
+        CloseBracket | CloseCurlyBracket => 27,
+        Enter => 28,
+        ControlLeft => LEFT_CTRL,
+        A => 30,
+        S => 31,
+        D => 32,
+        F => 33,
+        G => 34,
+        H => 35,
+        J => 36,
+        K => 37,
+        L => 38,
+        Semicolon | Colon => 39,
+        Quote => 40,
+        Backtick => 41,
+        ShiftLeft => LEFT_SHIFT,
+        Backslash | Pipe => 43,
+        Z => 44,
+        X => KEY_X,
+        C => KEY_C,
+        V => KEY_V,
+        B => 48,
+        N => 49,
+        M => 50,
+        Comma => 51,
+        Period => 52,
+        Slash | Questionmark => 53,
+        ShiftRight => RIGHT_SHIFT,
+        AltLeft => LEFT_ALT,
+        Space => 57,
+        F1 => 59,
+        F2 => 60,
+        F3 => 61,
+        F4 => 62,
+        F5 => 63,
+        F6 => 64,
+        F7 => 65,
+        F8 => 66,
+        F9 => 67,
+        F10 => 68,
+        IntlBackslash => 86,
+        F11 => 87,
+        F12 => 88,
+        ControlRight => RIGHT_CTRL,
+        AltRight => RIGHT_ALT,
+        Home => 102,
+        ArrowUp => 103,
+        PageUp => 104,
+        ArrowLeft => 105,
+        ArrowRight => 106,
+        End => 107,
+        ArrowDown => 108,
+        PageDown => 109,
+        Insert => 110,
+        Delete => 111,
+        SuperLeft => LEFT_META,
+        SuperRight => RIGHT_META,
+        F13 => 183,
+        F14 => 184,
+        F15 => 185,
+        F16 => 186,
+        F17 => 187,
+        F18 => 188,
+        F19 => 189,
+        F20 => 190,
+        F21 => 191,
+        F22 => 192,
+        F23 => 193,
+        F24 => 194,
+        BrowserBack => 158,
+        _ => return None,
+    })
+}
+
+/// Whether pressing `key` alone types something (it arrives as text then).
+pub fn types(key: egui::Key) -> bool {
+    use egui::Key::*;
+    matches!(
+        key,
+        A | B
+            | C
+            | D
+            | E
+            | F
+            | G
+            | H
+            | I
+            | J
+            | K
+            | L
+            | M
+            | N
+            | O
+            | P
+            | Q
+            | R
+            | S
+            | T
+            | U
+            | V
+            | W
+            | X
+            | Y
+            | Z
+            | Num0
+            | Num1
+            | Num2
+            | Num3
+            | Num4
+            | Num5
+            | Num6
+            | Num7
+            | Num8
+            | Num9
+            | Space
+            | Minus
+            | Plus
+            | Equals
+            | OpenBracket
+            | CloseBracket
+            | OpenCurlyBracket
+            | CloseCurlyBracket
+            | Semicolon
+            | Colon
+            | Quote
+            | Backtick
+            | Backslash
+            | Pipe
+            | Comma
+            | Period
+            | Slash
+            | Questionmark
+            | Exclamationmark
+            | IntlBackslash
+    )
+}
+
+fn is_shift(code: u16) -> bool {
+    matches!(code, LEFT_SHIFT | RIGHT_SHIFT)
+}
+
+/// Ctrl, Alt or the Windows key: pressed with one of them, a key is a
+/// shortcut, not typing.
+fn is_chord_modifier(code: u16) -> bool {
+    matches!(
+        code,
+        LEFT_CTRL | RIGHT_CTRL | LEFT_ALT | RIGHT_ALT | LEFT_META | RIGHT_META
+    )
+}
+
+/// The wire's button for egui's: 0 left, 1 middle, 2 right, 3 back, 4 forward.
+pub fn button(button: egui::PointerButton) -> u8 {
+    match button {
+        egui::PointerButton::Primary => 0,
+        egui::PointerButton::Middle => 1,
+        egui::PointerButton::Secondary => 2,
+        egui::PointerButton::Extra1 => 3,
+        egui::PointerButton::Extra2 => 4,
+    }
+}
+
+/// The window's input on its way to the other computer: what it holds
+/// there, and the move waiting for its turn.
+#[derive(Debug, Default)]
+pub struct WindowInput {
+    /// Keys held here, modifiers among them, by evdev code.
+    down_here: BTreeSet<u16>,
+    /// Keys held on the other computer.
+    down_there: BTreeSet<u16>,
+    /// Buttons held on the other computer.
+    buttons: BTreeSet<u8>,
+    /// The last move sent, and when.
+    moved_at: Option<Instant>,
+    /// A move that waits for its turn.
+    pending: Option<(u16, u16)>,
+    /// What the wheel turned that is not yet a whole step, each way.
+    wheel: egui::Vec2,
+}
+
+impl WindowInput {
+    /// Whether anything is held on the other computer.
+    pub fn holds(&self) -> bool {
+        !self.down_there.is_empty() || !self.buttons.is_empty()
+    }
+
+    /// Whether a move waits for its turn (the window should look again in
+    /// [`MOVE_EVERY`]).
+    pub fn waiting(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// This pass's `events` over the picture at `picture`, at `now`, as
+    /// packets for the other computer.
+    pub fn take(
+        &mut self,
+        events: &[egui::Event],
+        picture: egui::Rect,
+        now: Instant,
+    ) -> Vec<InputPacket> {
+        let mut out = Vec::new();
+        for event in events {
+            match event {
+                egui::Event::PointerMoved(pos) => {
+                    let clamp = !self.buttons.is_empty();
+                    if let Some(at) = fraction(picture, *pos, clamp) {
+                        self.pending = Some(at);
+                    }
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: which,
+                    pressed,
+                    ..
+                } => {
+                    let code = button(*which);
+                    if *pressed {
+                        let Some(at) = fraction(picture, *pos, false) else {
+                            continue;
+                        };
+                        self.hold_shift(&mut out);
+                        self.move_to(at, now, &mut out);
+                        self.buttons.insert(code);
+                        out.push(InputPacket::MouseClick {
+                            button: code,
+                            pressed: true,
+                        });
+                    } else if self.buttons.remove(&code) {
+                        if let Some(at) = fraction(picture, *pos, true) {
+                            self.move_to(at, now, &mut out);
+                        }
+                        out.push(InputPacket::MouseClick {
+                            button: code,
+                            pressed: false,
+                        });
+                    }
+                }
+                egui::Event::MouseWheel { unit, delta, .. } => {
+                    let scale = match unit {
+                        egui::MouseWheelUnit::Line => 1.0,
+                        egui::MouseWheelUnit::Page => 3.0,
+                        egui::MouseWheelUnit::Point => 1.0 / 50.0,
+                    };
+                    self.wheel += *delta * scale;
+                    let (dx, dy) = (self.wheel.x.trunc(), self.wheel.y.trunc());
+                    if dx == 0.0 && dy == 0.0 {
+                        continue;
+                    }
+                    self.wheel -= egui::vec2(dx, dy);
+                    self.flush(now, &mut out, true);
+                    self.hold_shift(&mut out);
+                    // Content that moves down is the wheel turned up (the
+                    // wire's positive); content that moves right is the
+                    // wheel turned left.
+                    out.push(InputPacket::MouseScroll {
+                        dx: (-dx).clamp(-10.0, 10.0) as i16,
+                        dy: dy.clamp(-10.0, 10.0) as i16,
+                    });
+                }
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    ..
+                } => {
+                    let key = physical_key.unwrap_or(*key);
+                    let Some(code) = evdev(key) else { continue };
+                    self.key(key, code, *pressed, &mut out);
+                }
+                egui::Event::Text(text) if !text.is_empty() => {
+                    // With Ctrl or Alt held it is a shortcut, sent as keys.
+                    if self.down_here.iter().any(|c| is_chord_modifier(*c)) {
+                        continue;
+                    }
+                    for shift in [LEFT_SHIFT, RIGHT_SHIFT] {
+                        if self.down_there.remove(&shift) {
+                            out.push(InputPacket::KeyEvent {
+                                key: shift,
+                                pressed: false,
+                            });
+                        }
+                    }
+                    out.push(InputPacket::Text(text.clone()));
+                }
+                egui::Event::Copy => self.tap(KEY_C, &mut out),
+                egui::Event::Cut => self.tap(KEY_X, &mut out),
+                // The other computer pastes its own clipboard.
+                egui::Event::Paste(_) => self.tap(KEY_V, &mut out),
+                _ => {}
+            }
+        }
+        self.flush(now, &mut out, false);
+        out
+    }
+
+    /// The move waiting, if its turn has come (or `now`, with `force`).
+    pub fn flush(&mut self, now: Instant, out: &mut Vec<InputPacket>, force: bool) {
+        let due = force
+            || self
+                .moved_at
+                .is_none_or(|at| now.saturating_duration_since(at) >= MOVE_EVERY);
+        if due && let Some(at) = self.pending {
+            self.move_to(at, now, out);
+        }
+    }
+
+    fn move_to(&mut self, (x, y): (u16, u16), now: Instant, out: &mut Vec<InputPacket>) {
+        self.pending = None;
+        self.moved_at = Some(now);
+        out.push(InputPacket::MouseMoveAbs {
+            x_norm: x,
+            y_norm: y,
+        });
+    }
+
+    /// Shift held here goes down there before what needs it.
+    fn hold_shift(&mut self, out: &mut Vec<InputPacket>) {
+        for shift in [LEFT_SHIFT, RIGHT_SHIFT] {
+            if self.down_here.contains(&shift) && self.down_there.insert(shift) {
+                out.push(InputPacket::KeyEvent {
+                    key: shift,
+                    pressed: true,
+                });
+            }
+        }
+    }
+
+    fn key(&mut self, key: egui::Key, code: u16, pressed: bool, out: &mut Vec<InputPacket>) {
+        if !pressed {
+            self.down_here.remove(&code);
+            if self.down_there.remove(&code) {
+                out.push(InputPacket::KeyEvent {
+                    key: code,
+                    pressed: false,
+                });
+            }
+            return;
+        }
+        self.down_here.insert(code);
+        if is_shift(code) {
+            // Held there once something needs it.
+            return;
+        }
+        let chord = self.down_here.iter().any(|c| is_chord_modifier(*c));
+        if types(key) && !chord {
+            // It arrives as text.
+            return;
+        }
+        if !is_chord_modifier(code) {
+            self.hold_shift(out);
+        }
+        // A key held repeats: each repeat is pressed again.
+        self.down_there.insert(code);
+        out.push(InputPacket::KeyEvent {
+            key: code,
+            pressed: true,
+        });
+    }
+
+    /// `code` pressed and let go, with what is held.
+    fn tap(&mut self, code: u16, out: &mut Vec<InputPacket>) {
+        self.hold_shift(out);
+        for pressed in [true, false] {
+            out.push(InputPacket::KeyEvent { key: code, pressed });
+        }
+    }
+
+    /// Let go of everything held on the other computer, and forget what is
+    /// held here (the window lost focus, closed or stopped controlling).
+    pub fn release_all(&mut self) -> Vec<InputPacket> {
+        let mut out: Vec<InputPacket> = std::mem::take(&mut self.buttons)
+            .into_iter()
+            .map(|button| InputPacket::MouseClick {
+                button,
+                pressed: false,
+            })
+            .collect();
+        // Other keys first, the modifiers last, as fingers would.
+        let mut keys: Vec<u16> = std::mem::take(&mut self.down_there).into_iter().collect();
+        keys.sort_by_key(|code| is_shift(*code) || is_chord_modifier(*code));
+        out.extend(keys.into_iter().map(|key| InputPacket::KeyEvent {
+            key,
+            pressed: false,
+        }));
+        self.down_here.clear();
+        self.pending = None;
+        self.wheel = egui::Vec2::ZERO;
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn picture() -> egui::Rect {
+        // A 200x100 picture at (100, 50), letterboxed in a wider window.
+        egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(200.0, 100.0))
+    }
+
+    fn key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn click(pos: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn words(packets: &[InputPacket]) -> Vec<String> {
+        packets.iter().map(|p| format!("{p:?}")).collect()
+    }
+
+    #[test]
+    fn the_keys_that_type_nothing_have_their_linux_codes() {
+        for (k, code) in [
+            (egui::Key::Enter, 28),
+            (egui::Key::Tab, 15),
+            (egui::Key::Backspace, 14),
+            (egui::Key::Escape, 1),
+            (egui::Key::ArrowUp, 103),
+            (egui::Key::ArrowDown, 108),
+            (egui::Key::ArrowLeft, 105),
+            (egui::Key::ArrowRight, 106),
+            (egui::Key::Home, 102),
+            (egui::Key::End, 107),
+            (egui::Key::PageUp, 104),
+            (egui::Key::PageDown, 109),
+            (egui::Key::Delete, 111),
+            (egui::Key::Insert, 110),
+            (egui::Key::F1, 59),
+            (egui::Key::F10, 68),
+            (egui::Key::F11, 87),
+            (egui::Key::F12, 88),
+            (egui::Key::ControlLeft, 29),
+            (egui::Key::ShiftLeft, 42),
+            (egui::Key::AltLeft, 56),
+            (egui::Key::SuperLeft, 125),
+            (egui::Key::A, 30),
+            (egui::Key::Z, 44),
+            (egui::Key::Num0, 11),
+        ] {
+            assert_eq!(evdev(k), Some(code), "{k:?}");
+        }
+        assert_eq!(evdev(egui::Key::F35), None);
+        assert!(types(egui::Key::A) && types(egui::Key::Space));
+        assert!(!types(egui::Key::Enter) && !types(egui::Key::F5));
+    }
+
+    /// The picture is letterboxed: a point is a fraction of the picture,
+    /// not the window, and the bars beside it take no click.
+    #[test]
+    fn a_point_is_a_fraction_of_the_picture_with_its_bars() {
+        let mut input = WindowInput::default();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                click(egui::pos2(50.0, 100.0), true),
+                click(egui::pos2(200.0, 100.0), true),
+                click(egui::pos2(400.0, 100.0), false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "MouseMoveAbs { x_norm: 32768, y_norm: 32768 }",
+                "MouseClick { button: 0, pressed: true }",
+                "MouseMoveAbs { x_norm: 65535, y_norm: 32768 }",
+                "MouseClick { button: 0, pressed: false }",
+            ],
+            "the press on the bar is nothing; a release past the edge keeps to it"
+        );
+        assert!(!input.holds());
+    }
+
+    /// Moves go at most one each 8 ms, the newest; one held back goes
+    /// once its turn comes, or at once before a click.
+    #[test]
+    fn moves_are_coalesced_to_one_each_turn() {
+        let mut input = WindowInput::default();
+        let t0 = Instant::now();
+        let at = |x| egui::Event::PointerMoved(egui::pos2(x, 100.0));
+        let out = input.take(&[at(100.0), at(150.0), at(200.0)], picture(), t0);
+        assert_eq!(
+            words(&out),
+            ["MouseMoveAbs { x_norm: 32768, y_norm: 32768 }"]
+        );
+        let out = input.take(&[at(300.0)], picture(), t0 + Duration::from_millis(3));
+        assert!(out.is_empty(), "too soon");
+        assert!(input.waiting());
+        let mut later = Vec::new();
+        input.flush(t0 + MOVE_EVERY, &mut later, false);
+        assert_eq!(
+            words(&later),
+            ["MouseMoveAbs { x_norm: 65535, y_norm: 32768 }"]
+        );
+        // Outside the picture, with nothing held, a move is nothing.
+        let out = input.take(&[at(20.0)], picture(), t0 + Duration::from_secs(1));
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_wheel_turns_in_whole_steps_both_ways() {
+        let mut input = WindowInput::default();
+        let wheel = |unit, x, y| egui::Event::MouseWheel {
+            unit,
+            delta: egui::vec2(x, y),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let now = Instant::now();
+        let out = input.take(
+            &[wheel(egui::MouseWheelUnit::Line, 0.0, 1.0)],
+            picture(),
+            now,
+        );
+        assert_eq!(words(&out), ["MouseScroll { dx: 0, dy: 1 }"], "up");
+        let out = input.take(
+            &[wheel(egui::MouseWheelUnit::Line, 2.0, -1.0)],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            ["MouseScroll { dx: -2, dy: -1 }"],
+            "left, down"
+        );
+        // A touchpad's small turns add up to a step.
+        let small = wheel(egui::MouseWheelUnit::Point, 0.0, 30.0);
+        assert!(
+            input
+                .take(std::slice::from_ref(&small), picture(), now)
+                .is_empty()
+        );
+        assert_eq!(
+            words(&input.take(&[small], picture(), now)),
+            ["MouseScroll { dx: 0, dy: 1 }"]
+        );
+    }
+
+    /// Typing goes as text; Enter and the arrows as keys; Ctrl and a letter
+    /// as the keys; Shift held only for what needs it.
+    #[test]
+    fn typing_goes_as_text_and_shortcuts_as_keys() {
+        let mut input = WindowInput::default();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::A, true),
+                egui::Event::Text("A".into()),
+                key(egui::Key::A, false),
+                key(egui::Key::ArrowLeft, true),
+                key(egui::Key::ArrowLeft, false),
+                egui::Event::Text("B".into()),
+                key(egui::Key::ShiftLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "Text(\"A\")",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 105, pressed: true }",
+                "KeyEvent { key: 105, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+                "Text(\"B\")",
+            ],
+            "Shift+Left selects; the capitals are typed, not shifted twice"
+        );
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::S, true),
+                key(egui::Key::S, false),
+                egui::Event::Copy,
+                egui::Event::Paste("here".into()),
+                key(egui::Key::ControlLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 31, pressed: true }",
+                "KeyEvent { key: 31, pressed: false }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "Ctrl+S, Ctrl+C and Ctrl+V reach the other computer as keys"
+        );
+        assert!(!input.holds());
+    }
+
+    #[test]
+    fn text_with_alt_held_is_a_shortcut_not_typing() {
+        let mut input = WindowInput::default();
+        let out = input.take(
+            &[
+                key(egui::Key::AltLeft, true),
+                key(egui::Key::F, true),
+                egui::Event::Text("f".into()),
+            ],
+            picture(),
+            Instant::now(),
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 56, pressed: true }",
+                "KeyEvent { key: 33, pressed: true }",
+            ]
+        );
+    }
+
+    /// Focus lost mid-press: the button, the keys and the modifiers are let
+    /// go there, the keys before the modifiers.
+    #[test]
+    fn everything_held_is_let_go() {
+        let mut input = WindowInput::default();
+        input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::ArrowDown, true),
+                click(egui::pos2(150.0, 60.0), true),
+            ],
+            picture(),
+            Instant::now(),
+        );
+        assert!(input.holds());
+        assert_eq!(
+            words(&input.release_all()),
+            [
+                "MouseClick { button: 0, pressed: false }",
+                "KeyEvent { key: 108, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+        assert!(!input.holds());
+        assert!(input.release_all().is_empty(), "once");
+        // A release of a key let go already goes nowhere.
+        let out = input.take(
+            &[key(egui::Key::ArrowDown, false)],
+            picture(),
+            Instant::now(),
+        );
+        assert!(out.is_empty());
+    }
+}
