@@ -11,6 +11,7 @@ This is the contract between a phone (or any client) and a computer running Pock
 - **Pocketdesk's own packets** (`kdeconnect.pocketdesk.*`) carry `llVersion: 1` at the top level. A receiver must ignore fields it does not know, at the top level and in a body. A change that an older peer would misread gets a new packet type or a new `llVersion`; packets are never redefined in place.
 - **The ALPNs** carry their own versions:
   - `pocketdesk-control/1`, the control channel, on both roads: a TLS client on TCP that offers ALPN must offer this one (offering none also passes); the HELLO line carries the version as well;
+  - `pocketdesk-computer/1`, the same control channel between two computers over iroh, on a congestion controller that does not pace a quiet link (BK11). The dialing computer offers `pocketdesk-control/1` beside it, for a computer that does not know it; it grants nothing the control channel's ALPN does not;
   - `pocketdesk-stream`, the v1 stream;
   - `pocketdesk-v2`, the multiplexer;
   - `pocketdesk-transfer/2`, a file transfer.

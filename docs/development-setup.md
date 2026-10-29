@@ -47,11 +47,13 @@ Optional config file location:
 - `~/.config/pocketdesk/config.toml` (see `config.toml.example`)
 
 Streaming QUIC congestion control can be A/B tested via the `POCKETDESK_CC`
-environment variable (`bbr`, `cubic`, or `new_reno`; default `new_reno`).
-It applies to both the server and client endpoints.
+environment variable (`bbr`, `cubic`, or `new_reno`; default `bbr`, since
+BG4). It applies to both the server and client endpoints, the home road's
+QUIC and every iroh endpoint, except the link between two computers, which
+always sends on Cubic (BK11).
 
 ```bash
-POCKETDESK_CC=bbr cargo run --bin pocketdesk -- start
+POCKETDESK_CC=cubic cargo run --bin pocketdesk -- start
 ```
 
 `POCKETDESK_STATE_DIR` moves the state folder (pairings, device keys,

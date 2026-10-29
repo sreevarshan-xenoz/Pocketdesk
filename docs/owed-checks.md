@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-955 open items.
+960 open items.
 
 | Where | Items |
 |---|---|
@@ -11,8 +11,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 152 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
-| Away from home: another network, or through a router | 37 |
-| A second computer | 50 |
+| Away from home: another network, or through a router | 39 |
+| A second computer | 53 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -782,6 +782,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real move: the computer onto another Wi-Fi, or a VPN brought up, found at the new address within a minute. (where: away)
 
+**222. No pacing stall on the computer link (BK11)**
+
+- The phone on the internet road (mobile data) after this build: its control channel and its screen session connect and play as before. (where: away)
+- Files between computers on Cubic: a large file (1 GB or more) sent from one computer to the other with 0.8.2 on both, then with this build on both, over a lossy or internet path (another network, or Wi-Fi far from the router), timed both ways; this build is not much slower. If it is, the transfers could ride a connection of their own on BBR. (where: away)
+
 ## A second computer
 
 **29. Computers on this network**
@@ -865,7 +870,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Quality: Economy, Balanced, Best and Auto from the bar visibly change the picture within a few seconds (and the bitrate in Linux's session record); the Settings choice is what a new window starts at; View only in Settings starts it sending nothing. (where: second computer)
 - Linux's session list (its desktop app's Sessions, and `pocketdesk sessions`) shows the Windows laptop's session by its name; End there ends it and the window says why; privacy mode, the away lock and one driver at a time behave there as for a phone. (where: second computer)
 - Sound: with "Hear and change this computer's sound" on for the Windows laptop on Linux, Linux's sound plays on Windows while the window is open, and stops with it. (where: second computer)
-- Linux views Windows (paired both ways, §222; or, paired one way, unpair on both, then paste Windows' pairing link on Linux): the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
+- Linux views Windows (paired both ways, §223; or, paired one way, unpair on both, then paste Windows' pairing link on Linux): the same from the Linux laptop's desktop app, the Windows host's capture and encoder (and its session list) behaving as for a phone. (where: second computer)
 - Screenshot and Record from the window save a PNG and an MKV of Linux's screen; Full screen fills Windows' screen and Exit full screen comes back. (where: second computer)
 
 **220. Linux drives too (BK8)**
@@ -881,7 +886,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Linux laptop driving Windows (BK8) with the setting on: `share-test <windows>` from the laptop, the network's one way p50 under 5 ms, and a byte every 50 ms from the laptop to Windows while the pointer is there (a capture on Windows' side, counts only). (where: second computer)
 
-**222. Both are mine (PC1)**
+**222. No pacing stall on the computer link (BK11)**
+
+- At the desk, Windows driving the Linux laptop on Wi-Fi: after a few seconds' pause the next key comes at once (no tenth-of-a-second catch), and fast typing and a fast mouse keep up. (where: second computer)
+- The Linux laptop driving Windows (BK8): `share-test <windows>` from the laptop with a 1 s pause, the network's one way p95 under 5 ms. (where: second computer)
+- Mixed versions: a computer on 0.8.2 (or earlier) and one on this build link both ways (each dialing the other), and the keyboard and mouse cross between them. (where: second computer)
+
+**223. Both are mine (PC1)**
 
 - Pair once: the box ticked on the Windows laptop's Pair page, its link pasted in the Linux laptop's Settings, Other computers, which names the Windows laptop and says it would see and control the Linux laptop at any time without asking; ticking that it is the owner's own turns the button to "Pair both ways". Within a few seconds each lists the other, Windows saying "Mine once linked" until the link is up and then, like Linux, "Mine: sees and controls without asking", and both say linked. Pasted again unticked, the button says "Pair one way". (where: second computer)
 - Each views and drives the other with no prompt: "Show its screen" on Windows shows Linux's screen with control, and on Linux shows Windows' with control, with nobody at the far computer to click Allow or turn Control on; the window's bar says the other takes this computer's clicks and keys. (where: second computer)
