@@ -121,6 +121,10 @@ pub enum Captured {
     /// The hooks [`Mode::Away`] needs could not be installed: this
     /// computer's keyboard and mouse would act here and there at once.
     HookFailed,
+    /// Linux's desktop ended the capture by itself (its portal said so, or
+    /// its libei stream closed): this computer has its keyboard and mouse
+    /// again.
+    CaptureLost,
 }
 
 /// What the driver wants done.
@@ -371,6 +375,16 @@ impl Driver {
                         away.park,
                         true,
                         Some("The keyboard and mouse could not be taken from this computer"),
+                    );
+                }
+            }
+            Captured::CaptureLost => {
+                if let Some(away) = self.away.clone() {
+                    self.go_home(
+                        &mut out,
+                        away.park,
+                        true,
+                        Some("The desktop took the keyboard and mouse back"),
                     );
                 }
             }
@@ -2502,5 +2516,29 @@ mod tests {
         d.start();
         d.on(Captured::Locked);
         assert_eq!(sends(&d.on(edge(3455, 480, 1, 0))), vec![]);
+    }
+
+    /// BK8: Linux's desktop can end the capture by itself (its portal says
+    /// so, or its libei stream closes): home, letting go of what was sent.
+    #[test]
+    fn a_capture_the_desktop_ended_brings_them_home_with_releases() {
+        let mut d = away_on_linux(false);
+        d.on(Captured::EvKey {
+            code: 42,
+            down: true,
+        });
+        let back = d.on(Captured::CaptureLost);
+        assert_eq!(
+            sends(&back),
+            vec![sent("L", evdev(42, false)), sent("L", Msg::Leave)]
+        );
+        assert!(back.contains(&Action::WarpHome(PARK.0, PARK.1)), "{back:?}");
+        assert!(back.contains(&home_badge(Some(
+            "The desktop took the keyboard and mouse back"
+        ))));
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Watch);
+        // At home it is nothing.
+        assert_eq!(d.on(Captured::CaptureLost), vec![]);
     }
 }
