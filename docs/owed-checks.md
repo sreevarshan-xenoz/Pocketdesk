@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-991 open items.
+999 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 35 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 153 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 154 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 83 |
+| A second computer | 90 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -512,6 +512,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
 
+**230. Keys that reach the other computer (PC4)**
+
+- On a Windows test machine (never the owner's box), run `cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored`: the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -950,6 +954,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows set to a Public network: the Arch laptop's Nearby list never shows Windows, and after about 10 s says why (the reasons, with how to make it Private on Windows' own list) and offers Run diagnostics. (where: second computer)
 - The Keyboard and mouse page's Setup on both laptops ticks each step as it becomes true (running, paired, sharing on, linked directly, may drive, arranged), and each fix button does what it says. (where: second computer)
 - An option changed on the Keyboard and mouse page (Clipboard follows the mouse off) is saved at once and the next crossing follows it; Settings' search for "game" finds the pointer, whose button opens the page. (where: second computer)
+
+**230. Keys that reach the other computer (PC4)**
+
+- Windows viewing the Linux laptop, windowed: Send keys lists Windows key (Super), Alt+Tab, Alt+F4, Print Screen and Ctrl+Alt+Del, and not Task Manager or Lock; each reaches the laptop (record with `wev` on the headless sway stand-in: key names and counts only), Super opening Hyprland's launcher and Alt+F4 closing the focused window there. (where: second computer)
+- The Linux laptop viewing Windows: Send keys lists Ctrl+Shift+Esc (Task Manager) and Lock (Windows+L) in place of Ctrl+Alt+Del; Task Manager opens on Windows, and note whether Lock locks it (Windows may ignore an injected Windows+L; if it does, Lock needs a server action instead). (where: second computer)
+- With View only on, or Control off for this computer there, the bar shows no Send keys and no "Send Win and Alt+Tab there". (where: second computer)
+- Windows viewing the laptop in full screen with the grab on: Win alone, Win+1 to Win+4 (Hyprland's workspaces), Win+Enter, Alt+Tab, Alt+Esc and Ctrl+Esc act on the laptop, and Windows' Start menu and task switcher never open; windowed, or with the setting off, they are Windows' again. (where: second computer)
+- In full screen with the grab on, press and let go of Ctrl+Alt+Shift: Win and Alt+Tab are Windows' again; leave full screen and come back, and they go to the laptop again. Ctrl+Alt+Shift+S still switches the stats without giving the keys back. (where: second computer)
+- In full screen with Win held through the window, Alt+Tab away by a mouse click elsewhere (a second monitor) or a toast: nothing stays held on the laptop, and Windows' own Win key works at once. (where: second computer)
+- With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
