@@ -1,0 +1,3 @@
+* The phone as another screen: with "Let my computer's keyboard and mouse use this phone" on, a Windows computer's mouse crosses onto the phone, where a click taps, a drag swipes, the wheel scrolls and keys type.
+* The computer it works with can now share one keyboard and mouse with your other computers, and show another computer's screen in a window.
+* Pairing works right after a computer starts, with no wait.
