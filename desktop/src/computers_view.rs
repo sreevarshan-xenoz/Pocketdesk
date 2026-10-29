@@ -376,7 +376,7 @@ impl ComputersView {
             if asks_both {
                 ui.label(
                     RichText::new(format!(
-                        "{name} asks for full control here. Tick only if it's yours and you copied its link."
+                        "{name} would see and control this computer at any time, without asking. Tick only if it's yours and you copied its link."
                     ))
                     .color(crate::theme::warn(ui)),
                 );
@@ -694,8 +694,8 @@ fn show_outcome(ui: &mut egui::Ui, last: &computers::PairingOutcome) {
 }
 
 /// The box the owner ticks for a link that asks to pair both ways (PC1).
-pub fn consent_label(name: &str) -> String {
-    format!("Both are mine: {name} has full control")
+pub fn consent_label(_name: &str) -> String {
+    crate::pair_view::MINE_BOX.to_string()
 }
 
 /// Whether `link` names an internet endpoint (an `endpointId` in its `ep`),
@@ -841,7 +841,9 @@ mod tests {
         // wearing one of the owner's computers' names is told by them.
         assert!(
             harness
-                .query_by_label_contains("Test Tower asks for full control here")
+                .query_by_label_contains(
+                    "Test Tower would see and control this computer at any time, without asking"
+                )
                 .is_some()
         );
         assert!(

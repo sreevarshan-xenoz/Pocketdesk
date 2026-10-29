@@ -320,8 +320,10 @@ pub fn profile_allows(
 
 /// The box that makes the link for another computer one of the owner's own
 /// (PC1), and its line.
-pub const MINE_BOX: &str = "Both are mine (full control, no prompts)";
-const MINE_LINE: &str = "Each then controls the other without asking. Off for others' computers.";
+/// The same words as the paste side's (PR #555 review I2), at most six.
+pub const MINE_BOX: &str = "Both are mine: no prompts";
+const MINE_LINE: &str =
+    "Each then sees and controls the other at any time, without asking. Off for others' computers.";
 /// What the box does, on hover.
 const MINE_HOVER: &str = "A new link is made for it. Each computer lists the other and trusts it with control and the shared keyboard and mouse; neither asks first. Turn either back on its Devices page.";
 /// Said while the server has not made its certificate yet.
@@ -792,6 +794,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// PR #555 review I2: both sides tick the same words, at most six,
+    /// and the lines beside them keep "without asking".
+    #[test]
+    fn both_sides_ask_for_both_ways_in_the_same_short_words() {
+        assert!(MINE_BOX.split_whitespace().count() <= 6, "{MINE_BOX}");
+        assert_eq!(crate::computers_view::consent_label("Test Tower"), MINE_BOX);
+        assert!(MINE_LINE.contains("without asking"));
     }
 
     #[test]
