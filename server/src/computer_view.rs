@@ -424,11 +424,30 @@ pub fn fits(len: usize) -> bool {
     len.saturating_add(16) <= pocketdesk_core::local::cast::MAX_MESSAGE
 }
 
+/// The words a computer closes a session with when it ends or refuses it on
+/// purpose: its End (a kick), a refusal or its owner's no, an unpairing, a
+/// permission it does not give.
+const ENDED_ON_PURPOSE: [&str; 4] = ["kicked", "refused", "not paired", "not allowed"];
+
+/// Whether a view the other computer closed with `reason` is dialled again
+/// by itself (PC2): not when that computer ended it on purpose. A server
+/// stopping or restarting, a link gone, the encoder rebuilt or permissions
+/// changed are worth another dial.
+pub fn may_reconnect(reason: Option<&str>) -> bool {
+    let reason = reason.unwrap_or("").to_ascii_lowercase();
+    !ENDED_ON_PURPOSE.iter().any(|word| reason.contains(word))
+}
+
 /// The words for a session that ended: before the other computer let this
-/// one in (it refused, or its owner said no), or after.
+/// one in (it refused, or its owner said no), or after (that computer ended
+/// it, or the link went).
 fn ended_words(name: &str, admitted: bool, reason: Option<&str>) -> String {
     if admitted {
-        return format!("Lost the connection to {name}.");
+        if may_reconnect(reason) {
+            return format!("Lost the connection to {name}.");
+        }
+        let reason = reason.unwrap_or_default();
+        return format!("{name} ended the view ({reason}).");
     }
     let reason = reason.filter(|r| !r.is_empty()).unwrap_or("it closed");
     format!(
@@ -436,47 +455,291 @@ fn ended_words(name: &str, admitted: bool, reason: Option<&str>) -> String {
     )
 }
 
-/// One view's session with the other computer, until it ends.
+/// The words once the tries after a drop gave up.
+fn gave_up_words(name: &str) -> String {
+    format!("Lost the connection to {name}, and it did not come back within two minutes.")
+}
+
+/// A dropped view is dialled again for about this long (PC2).
+const RECONNECT_FOR: Duration = Duration::from_secs(120);
+/// The longest wait between two tries.
+const RECONNECT_MAX_WAIT: Duration = Duration::from_secs(15);
+/// A view shown again for this long starts a later drop's tries afresh;
+/// one that drops sooner goes on with the tries it was on, so a computer
+/// that lets the view in and drops it each time is not dialled for ever.
+const STABLE: Duration = Duration::from_secs(30);
+
+/// The wait before try `n` after a drop, from 1: 1, 2, 4 and 8 s, then
+/// 15 s each.
+pub fn backoff(n: u32) -> Duration {
+    let secs = 1u64.checked_shl(n.saturating_sub(1)).unwrap_or(u64::MAX);
+    Duration::from_secs(secs).min(RECONNECT_MAX_WAIT)
+}
+
+/// The tries after a view dropped (PC2).
+#[derive(Debug, Default)]
+pub struct Reconnect {
+    /// When the drop these tries are for came.
+    since: Option<Instant>,
+    /// The tries made since.
+    tries: u32,
+    /// When the view was last shown again.
+    shown: Option<Instant>,
+}
+
+impl Reconnect {
+    /// The view dropped at `now`: the try to make and the wait before it,
+    /// or `None` once the time is up.
+    pub fn dropped(&mut self, now: Instant) -> Option<(u32, Duration)> {
+        let afresh = self.since.is_none()
+            || self
+                .shown
+                .is_some_and(|at| now.saturating_duration_since(at) >= STABLE);
+        if afresh {
+            self.since = Some(now);
+            self.tries = 0;
+        }
+        self.shown = None;
+        self.next(now)
+    }
+
+    /// A try failed at `now`: the next and the wait before it, or `None`
+    /// once the time is up (or when nothing dropped).
+    pub fn failed(&mut self, now: Instant) -> Option<(u32, Duration)> {
+        self.since?;
+        self.next(now)
+    }
+
+    /// The view was shown again at `now`.
+    pub fn shown(&mut self, now: Instant) {
+        self.shown = Some(now);
+    }
+
+    fn next(&mut self, now: Instant) -> Option<(u32, Duration)> {
+        let since = self.since?;
+        let n = self.tries.saturating_add(1);
+        let wait = backoff(n);
+        if now.saturating_duration_since(since) + wait > RECONNECT_FOR {
+            return None;
+        }
+        self.tries = n;
+        Some((n, wait))
+    }
+}
+
+/// The window's choices a new session there must hear again after a
+/// reconnect (PC2): the last quality and view-only it sent.
+#[derive(Debug, Default)]
+pub struct Sticky {
+    quality: Option<u8>,
+    view_only: Option<bool>,
+}
+
+impl Sticky {
+    /// The window sent `packet`.
+    pub fn note(&mut self, packet: &InputPacket) {
+        match packet {
+            InputPacket::QualityPreset { preset } => self.quality = Some(*preset),
+            InputPacket::ViewOnly { enabled } => self.view_only = Some(*enabled),
+            _ => {}
+        }
+    }
+
+    /// What a new session hears again.
+    pub fn replay(&self) -> Vec<InputPacket> {
+        let mut packets = Vec::new();
+        if let Some(preset) = self.quality {
+            packets.push(InputPacket::QualityPreset { preset });
+        }
+        if let Some(enabled) = self.view_only {
+            packets.push(InputPacket::ViewOnly { enabled });
+        }
+        packets
+    }
+}
+
+fn lock_sticky(sticky: &std::sync::Mutex<Sticky>) -> std::sync::MutexGuard<'_, Sticky> {
+    sticky
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Aborts its task when dropped: the view's input goes when the view does.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Says a view's events to the relay.
+struct Say {
+    session_id: u64,
+    events: mpsc::Sender<(u64, Event)>,
+}
+
+impl Say {
+    async fn say(&self, event: Event) {
+        let _ = self.events.send((self.session_id, event)).await;
+    }
+}
+
+/// How one session with the other computer ended.
+enum Outcome {
+    /// It never let this one in: its close reason.
+    NotLetIn(Option<String>),
+    /// Shown, then gone: its close reason.
+    Lost(Option<String>),
+}
+
+/// One view, until it ends: dialled, shown, and after a drop dialled again
+/// by itself with [`backoff`] for about two minutes (PC2). A Stop or a
+/// window closed aborts it, so it never dials again after one.
 async fn session(
     session_id: u64,
     computer: PeerComputer,
     monitor: u32,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
-    mut input: mpsc::Receiver<InputPacket>,
+    input: mpsc::Receiver<InputPacket>,
 ) {
-    let say = |event| {
-        let events = events.clone();
-        async move {
-            let _ = events.send((session_id, event)).await;
-        }
-    };
+    let say = Say { session_id, events };
     let name = computer.name.clone();
     let mut status = ViewStatus {
         monitor,
         ..ViewStatus::default()
     };
     crate::peer_computers::ask_screens(&computer.device_id);
-    say(Event::Status(status.clone())).await;
-    let dial_started = Instant::now();
-    let dialed = match dialer.dial(&computer, monitor).await {
-        Ok(dialed) => dialed,
-        Err(why) => {
-            // Its addresses stay out of the log at info (BK7 review M8):
-            // the window says them to the owner.
-            tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached");
-            tracing::debug!(device_id = %computer.device_id, "Another computer's screen not reached: {why}");
-            say(Event::Ended(format!("Could not reach {name}: {why}"))).await;
+    say.say(Event::Status(status.clone())).await;
+    // The window's input goes to the session of the moment, for the
+    // view's whole life.
+    let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+    let sticky = Arc::new(std::sync::Mutex::new(Sticky::default()));
+    let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx, sticky.clone())));
+    let mut reconnect = Reconnect::default();
+    let mut shown_once = false;
+    loop {
+        let dial_started = Instant::now();
+        let next = match dialer.dial(&computer, monitor).await {
+            Err(why) if !shown_once => {
+                // Its addresses stay out of the log at info (BK7 review M8):
+                // the window says them to the owner.
+                tracing::info!(device_id = %computer.device_id, "Another computer's screen not reached");
+                tracing::debug!(device_id = %computer.device_id, "Another computer's screen not reached: {why}");
+                say.say(Event::Ended(format!("Could not reach {name}: {why}")))
+                    .await;
+                return;
+            }
+            Err(why) => {
+                tracing::debug!(device_id = %computer.device_id, attempt = status.reconnecting, "Another computer's screen not reached again: {why}");
+                reconnect.failed(Instant::now())
+            }
+            Ok(dialed) => {
+                let dial_ms = millis(dial_started.elapsed());
+                let outcome = attempt(
+                    &computer,
+                    dialed,
+                    dial_ms,
+                    &mut status,
+                    &say,
+                    &conn_now,
+                    &sticky,
+                    &mut reconnect,
+                )
+                .await;
+                match outcome {
+                    Outcome::Lost(reason) => {
+                        shown_once = true;
+                        if !may_reconnect(reason.as_deref()) {
+                            tracing::info!(device_id = %computer.device_id, "Another computer ended the view of its screen");
+                            say.say(Event::Ended(ended_words(&name, true, reason.as_deref())))
+                                .await;
+                            return;
+                        }
+                        tracing::info!(device_id = %computer.device_id, "Another computer's screen dropped; dialling it again");
+                        reconnect.dropped(Instant::now())
+                    }
+                    // Its server still starting, during the tries: another try.
+                    Outcome::NotLetIn(reason) if shown_once && may_reconnect(reason.as_deref()) => {
+                        reconnect.failed(Instant::now())
+                    }
+                    // A refusal, or its owner's no, is honoured.
+                    Outcome::NotLetIn(reason) => {
+                        tracing::info!(device_id = %computer.device_id, "Another computer did not let this one see its screen");
+                        say.say(Event::Ended(ended_words(&name, false, reason.as_deref())))
+                            .await;
+                        return;
+                    }
+                }
+            }
+        };
+        let Some((attempt_no, wait)) = next else {
+            tracing::info!(device_id = %computer.device_id, "Another computer's screen did not come back");
+            say.say(Event::Ended(gave_up_words(&name))).await;
             return;
+        };
+        status = ViewStatus {
+            phase: Phase::Connecting,
+            monitor: status.monitor,
+            monitors: std::mem::take(&mut status.monitors),
+            reconnecting: attempt_no,
+            ..ViewStatus::default()
+        };
+        say.say(Event::Status(status.clone())).await;
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// The window's input, in order, one stream each as a phone sends it, to
+/// the session of the moment; between two (a reconnect) it goes nowhere.
+async fn forward_input(
+    mut input: mpsc::Receiver<InputPacket>,
+    conn: tokio::sync::watch::Receiver<Option<SharedConnection>>,
+    sticky: Arc<std::sync::Mutex<Sticky>>,
+) {
+    while let Some(packet) = input.recv().await {
+        lock_sticky(&sticky).note(&packet);
+        let current = conn.borrow().clone();
+        let Some(conn) = current else {
+            continue;
+        };
+        // A release is tried again on a stalled link (BK7 review M7): left
+        // undone, the key stays held there.
+        let tries = if is_release(&packet) {
+            RELEASE_TRIES
+        } else {
+            1
+        };
+        for _ in 0..tries {
+            let sent = tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
+            if matches!(sent, Ok(Ok(()))) {
+                break;
+            }
+            tracing::debug!("An input packet did not reach the other computer");
         }
-    };
+    }
+}
+
+/// One session with the other computer, dialled, until it ends.
+#[allow(clippy::too_many_arguments)]
+async fn attempt(
+    computer: &PeerComputer,
+    dialed: Dialed,
+    dial_ms: u32,
+    status: &mut ViewStatus,
+    say: &Say,
+    conn_now: &tokio::sync::watch::Sender<Option<SharedConnection>>,
+    sticky: &std::sync::Mutex<Sticky>,
+    reconnect: &mut Reconnect,
+) -> Outcome {
+    let name = &computer.name;
     let Dialed {
         mut client,
         mut frames,
         audio,
         route,
     } = dialed;
-    let dial_ms = millis(dial_started.elapsed());
     tracing::info!(device_id = %computer.device_id, route, dial_ms, "Showing another computer's screen");
     let conn = client.connection().cloned();
     let remote = client.remote();
@@ -486,33 +749,14 @@ async fn session(
     };
     tokio::spawn(async move { client.start().await });
     tokio::spawn(play_sound(audio));
-    // Input in order, one stream each, as a phone sends it.
-    if let Some(conn) = conn.clone() {
-        tokio::spawn(async move {
-            while let Some(packet) = input.recv().await {
-                // A release is tried again on a stalled link (BK7 review M7):
-                // left undone, the key stays held there.
-                let tries = if is_release(&packet) {
-                    RELEASE_TRIES
-                } else {
-                    1
-                };
-                for _ in 0..tries {
-                    let sent = tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
-                    if matches!(sent, Ok(Ok(()))) {
-                        break;
-                    }
-                    tracing::debug!("An input packet did not reach the other computer");
-                }
-            }
-        });
-    }
+    conn_now.send_replace(conn.clone());
     status.phase = Phase::Waiting;
     status.route = route.to_string();
-    say(Event::Status(status.clone())).await;
+    say.say(Event::Status(status.clone())).await;
     let mut size: Option<(u16, u16)> = None;
     let mut last_seq: Option<u64> = None;
     let mut admitted = false;
+    let mut shown = false;
     let mut look = tokio::time::interval(LOOK);
     let mut said_too_large = false;
     let mut too_large_ask: Option<Instant> = None;
@@ -537,7 +781,7 @@ async fn session(
                     && size != Some(read)
                 {
                     size = Some(read);
-                    say(Event::Config(read.0, read.1)).await;
+                    say.say(Event::Config(read.0, read.1)).await;
                 }
                 if size.is_none() {
                     continue;
@@ -551,7 +795,7 @@ async fn session(
                         status.note = Some(format!(
                             "{name}'s screen comes in frames too large to show here. A lower Quality, or a smaller screen there, may help."
                         ));
-                        say(Event::Status(status.clone())).await;
+                        say.say(Event::Status(status.clone())).await;
                     }
                     if !said_too_large {
                         said_too_large = true;
@@ -576,9 +820,9 @@ async fn session(
                     continue;
                 }
                 if status.note.take().is_some() {
-                    say(Event::Status(status.clone())).await;
+                    say.say(Event::Status(status.clone())).await;
                 }
-                say(Event::Frame {
+                say.say(Event::Frame {
                     keyframe: packet.is_keyframe,
                     seq: packet.sequence,
                     data: packet.data,
@@ -601,7 +845,7 @@ async fn session(
                     dropped: counts.dropped,
                     codec: CODEC.to_string(),
                 });
-                say(Event::Status(status.clone())).await;
+                say.say(Event::Status(status.clone())).await;
             }
         }
         // What the other computer said: let in, with or without control,
@@ -616,24 +860,40 @@ async fn session(
         }
         if admitted {
             next.phase = Phase::Showing;
+            if !shown {
+                // Let in (again, after a drop): the tries are over, and
+                // the window's quality and view-only go to this session.
+                shown = true;
+                next.reconnecting = 0;
+                reconnect.shown(Instant::now());
+                let replay = lock_sticky(sticky).replay();
+                if let Some(conn) = conn.clone().filter(|_| !replay.is_empty()) {
+                    tokio::spawn(async move {
+                        for packet in replay {
+                            let _ =
+                                tokio::time::timeout(INPUT_SEND, send_input(&conn, &packet)).await;
+                        }
+                    });
+                }
+            }
         }
         next.monitors = crate::peer_computers::screens(&computer.device_id);
-        if next != status {
-            status = next;
-            say(Event::Status(status.clone())).await;
+        if next != *status {
+            *status = next;
+            say.say(Event::Status(status.clone())).await;
         }
     }
+    conn_now.send_replace(None);
     let reason = conn.as_ref().and_then(|c| c.close_reason());
     tracing::info!(device_id = %computer.device_id, "Another computer's screen ended");
-    say(Event::Ended(ended_words(
-        &name,
-        admitted,
-        reason.as_deref(),
-    )))
-    .await;
+    if admitted {
+        Outcome::Lost(reason)
+    } else {
+        Outcome::NotLetIn(reason)
+    }
 }
 
-/// One input packet on its own stream.
+// One input packet on its own stream.
 async fn send_input(conn: &SharedConnection, packet: &InputPacket) -> Result<(), String> {
     let mut stream = conn.open_uni().await.map_err(|e| e.to_string())?;
     stream
@@ -1146,6 +1406,106 @@ mod tests {
         assert!(
             in_order(true, 0, Some(9)),
             "a rebuilt encoder counts from 0"
+        );
+    }
+
+    /// PC2: after a drop the tries wait 1, 2, 4 and 8 s, then 15 s each.
+    #[test]
+    fn the_tries_after_a_drop_back_off_to_fifteen_seconds() {
+        let waits: Vec<u64> = (1..=8).map(|n| backoff(n).as_secs()).collect();
+        assert_eq!(waits, [1, 2, 4, 8, 15, 15, 15, 15]);
+        assert_eq!(backoff(0), Duration::from_secs(1));
+        assert_eq!(backoff(u32::MAX), Duration::from_secs(15));
+    }
+
+    /// PC2: the tries go on for about two minutes from the drop, then stop;
+    /// a view shown again for a while starts a later drop's tries afresh,
+    /// one that drops at once goes on with the tries it was on.
+    #[test]
+    fn the_tries_stop_after_two_minutes_and_start_afresh_once_shown() {
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let mut tries = Reconnect::default();
+        assert_eq!(
+            tries.failed(at(0)),
+            None,
+            "a failure with no drop is not a try"
+        );
+        assert_eq!(tries.dropped(at(0)), Some((1, Duration::from_secs(1))));
+        assert_eq!(tries.failed(at(1)), Some((2, Duration::from_secs(2))));
+        assert_eq!(tries.failed(at(3)), Some((3, Duration::from_secs(4))));
+        assert_eq!(tries.failed(at(7)), Some((4, Duration::from_secs(8))));
+        assert_eq!(tries.failed(at(15)), Some((5, Duration::from_secs(15))));
+        assert_eq!(tries.failed(at(104)), Some((6, Duration::from_secs(15))));
+        assert_eq!(tries.failed(at(106)), None, "past two minutes");
+
+        // Shown again, then dropped at once: the same tries go on.
+        let mut tries = Reconnect::default();
+        tries.dropped(at(0));
+        tries.failed(at(1));
+        tries.shown(at(3));
+        assert_eq!(tries.dropped(at(5)), Some((3, Duration::from_secs(4))));
+        // Shown for long enough: a later drop starts afresh.
+        tries.shown(at(10));
+        assert_eq!(tries.dropped(at(200)), Some((1, Duration::from_secs(1))));
+    }
+
+    /// PC2: a view the other computer ended on purpose (its End, a refusal,
+    /// an unpairing, a permission it does not give) is not dialled again;
+    /// a link gone, a server stopping or restarting, the encoder rebuilt or
+    /// permissions changed are.
+    #[test]
+    fn only_a_view_ended_on_purpose_is_left_ended() {
+        for kept in [
+            Some("kicked by user"),
+            Some("session refused"),
+            Some("not paired"),
+            Some("input not allowed"),
+            Some("Kicked by user"),
+        ] {
+            assert!(!may_reconnect(kept), "{kept:?}");
+        }
+        for again in [
+            None,
+            Some(""),
+            Some("session ended"),
+            Some("encoder failed"),
+            Some("permissions changed"),
+            Some("timed out"),
+            Some("done"),
+        ] {
+            assert!(may_reconnect(again), "{again:?}");
+        }
+        assert_eq!(
+            ended_words("Desk", true, Some("kicked by user")),
+            "Desk ended the view (kicked by user)."
+        );
+    }
+
+    /// PC2: a new session after a reconnect hears the window's quality and
+    /// view-only again, the last of each.
+    #[test]
+    fn the_windows_choices_are_said_again_to_a_new_session() {
+        let mut sticky = Sticky::default();
+        assert!(sticky.replay().is_empty());
+        for packet in [
+            InputPacket::QualityPreset { preset: 1 },
+            InputPacket::KeyEvent {
+                key: 30,
+                pressed: true,
+            },
+            InputPacket::ViewOnly { enabled: true },
+            InputPacket::QualityPreset { preset: 3 },
+        ] {
+            sticky.note(&packet);
+        }
+        assert_eq!(
+            sticky
+                .replay()
+                .iter()
+                .map(|p| format!("{p:?}"))
+                .collect::<Vec<_>>(),
+            ["QualityPreset { preset: 3 }", "ViewOnly { enabled: true }"]
         );
     }
 

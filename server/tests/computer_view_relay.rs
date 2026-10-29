@@ -11,6 +11,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pocketdesk_core::local::computers::{self, PeerComputer};
@@ -65,13 +66,18 @@ fn paired(dir: &Path) {
     .unwrap();
 }
 
+/// Why the stand-in closes a session (PC2): its End, which is not dialled
+/// again, or its server stopping, which is.
+const KICKED: &[u8] = b"kicked by user";
+const STOPPING: &[u8] = b"session ended";
+
 /// The stand-in for the other computer: one session, admitted with input
 /// taken, a keyframe every 50 ms; the input packets it gets go to `input`.
-/// It closes the session when `hang_up` fires.
+/// It closes the session, with the reason given, when `hang_up` fires.
 async fn other_computer(
     cert: Arc<CertManager>,
     input: mpsc::UnboundedSender<InputPacket>,
-    hang_up: tokio::sync::oneshot::Receiver<()>,
+    hang_up: tokio::sync::oneshot::Receiver<&'static [u8]>,
 ) -> SocketAddr {
     other_computer_sending(cert, input, hang_up, keyframe()).await
 }
@@ -80,7 +86,7 @@ async fn other_computer(
 async fn other_computer_sending(
     cert: Arc<CertManager>,
     input: mpsc::UnboundedSender<InputPacket>,
-    hang_up: tokio::sync::oneshot::Receiver<()>,
+    hang_up: tokio::sync::oneshot::Receiver<&'static [u8]>,
     frame: Vec<u8>,
 ) -> SocketAddr {
     let listen = StreamTransportConfig {
@@ -98,66 +104,122 @@ async fn other_computer_sending(
             .expect("accepted")
             .await
             .expect("handshake");
-        // What the client sends: its config streams, then input.
-        let reading = conn.clone();
-        tokio::spawn(async move {
-            while let Ok(mut stream) = reading.accept_uni().await {
-                let Ok(bytes) = stream.read_to_end(64 * 1024).await else {
-                    continue;
-                };
-                if bytes.first().is_some_and(|b| *b >= 0xF0) {
-                    continue;
-                }
-                if let Ok(packet) = InputPacket::decode(&bytes)
-                    && !matches!(
-                        packet,
-                        InputPacket::LinkFeedback { .. } | InputPacket::ClientSamples { .. }
-                    )
-                {
-                    let _ = input.send(packet);
-                }
-            }
-        });
-        let send = |kind: u8, seq: u64, keyframe: bool, payload: Vec<u8>| {
-            let conn = conn.clone();
-            async move {
-                let mut stream = conn.open_uni().await?;
-                let header = PacketHeader {
-                    sequence: seq,
-                    stream_kind: kind,
-                    is_keyframe: keyframe,
-                    timestamp_us: 0,
-                };
-                stream.write_all(&header.as_bytes()).await?;
-                stream.write_all(&payload).await?;
-                stream.finish()?;
-                Ok::<_, anyhow::Error>(())
-            }
-        };
-        send(
-            STREAM_KIND_READY,
-            0,
-            false,
-            vec![SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT],
-        )
-        .await
-        .expect("ready");
-        let mut hang_up = hang_up;
-        let mut seq = 0;
-        loop {
-            tokio::select! {
-                _ = &mut hang_up => break,
-                _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    if send(STREAM_KIND_VIDEO, seq, true, frame.clone()).await.is_err() {
-                        break;
-                    }
-                    seq += 1;
-                }
-            }
-        }
-        conn.close(0u32.into(), b"done");
+        serve(conn, input, frame, hang_up).await;
     });
     addr
+}
+
+/// One session of the stand-in, until `hang_up` says why it closes (or the
+/// viewer goes).
+async fn serve(
+    conn: quinn::Connection,
+    input: mpsc::UnboundedSender<InputPacket>,
+    frame: Vec<u8>,
+    hang_up: tokio::sync::oneshot::Receiver<&'static [u8]>,
+) {
+    // What the client sends: its config streams, then input.
+    let reading = conn.clone();
+    tokio::spawn(async move {
+        while let Ok(mut stream) = reading.accept_uni().await {
+            let Ok(bytes) = stream.read_to_end(64 * 1024).await else {
+                continue;
+            };
+            if bytes.first().is_some_and(|b| *b >= 0xF0) {
+                continue;
+            }
+            if let Ok(packet) = InputPacket::decode(&bytes)
+                && !matches!(
+                    packet,
+                    InputPacket::LinkFeedback { .. } | InputPacket::ClientSamples { .. }
+                )
+            {
+                let _ = input.send(packet);
+            }
+        }
+    });
+    let send = |kind: u8, seq: u64, keyframe: bool, payload: Vec<u8>| {
+        let conn = conn.clone();
+        async move {
+            let mut stream = conn.open_uni().await?;
+            let header = PacketHeader {
+                sequence: seq,
+                stream_kind: kind,
+                is_keyframe: keyframe,
+                timestamp_us: 0,
+            };
+            stream.write_all(&header.as_bytes()).await?;
+            stream.write_all(&payload).await?;
+            stream.finish()?;
+            Ok::<_, anyhow::Error>(())
+        }
+    };
+    send(
+        STREAM_KIND_READY,
+        0,
+        false,
+        vec![SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT],
+    )
+    .await
+    .expect("ready");
+    let mut hang_up = hang_up;
+    let mut seq = 0;
+    let reason = loop {
+        tokio::select! {
+            reason = &mut hang_up => break reason.unwrap_or(b"done"),
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                if send(STREAM_KIND_VIDEO, seq, true, frame.clone()).await.is_err() {
+                    break b"done";
+                }
+                seq += 1;
+            }
+        }
+    };
+    conn.close(0u32.into(), reason);
+}
+
+/// A stand-in that takes one session after another, as a computer whose
+/// server restarts does (PC2): each closes as `hang_ups` says; the count
+/// of sessions it took goes up as each comes.
+async fn other_computer_again_and_again(
+    cert: Arc<CertManager>,
+) -> (
+    SocketAddr,
+    Arc<AtomicUsize>,
+    mpsc::UnboundedSender<&'static [u8]>,
+) {
+    let listen = StreamTransportConfig {
+        address: "127.0.0.1:0".parse().unwrap(),
+        ..StreamTransportConfig::default()
+    };
+    let server = StreamServer::new(listen, &cert).await.expect("bind");
+    let addr = server.local_addr().unwrap();
+    let sessions = Arc::new(AtomicUsize::new(0));
+    let (hang_ups, mut hang_up_rx) = mpsc::unbounded_channel::<&'static [u8]>();
+    let counted = sessions.clone();
+    tokio::spawn(async move {
+        loop {
+            let Some(incoming) = server.accept_connection().await else {
+                return;
+            };
+            let Ok(connecting) = incoming.accept() else {
+                continue;
+            };
+            let Ok(conn) = connecting.await else { continue };
+            counted.fetch_add(1, Ordering::SeqCst);
+            let (this_tx, this_rx) = tokio::sync::oneshot::channel();
+            let (input, _ignored) = mpsc::unbounded_channel();
+            let session = tokio::spawn(serve(conn, input, keyframe(), this_rx));
+            // The next hang-up closes this session.
+            match hang_up_rx.recv().await {
+                Some(reason) => {
+                    let _ = this_tx.send(reason);
+                    let _ = session.await;
+                }
+                None => return,
+            }
+        }
+    });
+    (addr, sessions, hang_ups)
 }
 
 async fn read_message(stream: &mut TcpStream) -> Message {
@@ -325,9 +387,9 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
         "the mic packet went nowhere"
     );
 
-    // The computer hangs up: the window hears it lost the connection, and
-    // view.json forgets the view.
-    let _ = hang_up_tx.send(());
+    // The computer ends the session (its End): the window hears so, it is
+    // not dialled again, and view.json forgets the view.
+    let _ = hang_up_tx.send(KICKED);
     let why = loop {
         match tokio::time::timeout(Duration::from_secs(60), read_message(&mut window))
             .await
@@ -337,7 +399,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
             _ => continue,
         }
     };
-    assert_eq!(why, "Lost the connection to Desk.");
+    assert_eq!(why, "Desk ended the view (kicked by user).");
     for _ in 0..100 {
         if wire::read(&dir).is_none() {
             break;
@@ -346,6 +408,117 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
     }
     assert_eq!(wire::read(&dir), None, "view.json forgets the view");
 
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PC2: the other computer's session drops as its server stops: the view
+/// says it is reconnecting and dials again by itself, and the picture comes
+/// back in the same view, with no new window and no click. A Stop while it
+/// tries ends it, and nothing dials again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dropped_view_reconnects_by_itself_until_stopped() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("again");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, sessions, hang_ups) = other_computer_again_and_again(cert.clone()).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let mut window = join(&file).await;
+    let mut seen = 0;
+    while seen < 3 {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("frames within 10 s")
+        {
+            Message::Frame { .. } => seen += 1,
+            Message::End { why } => panic!("ended: {why}"),
+            _ => {}
+        }
+    }
+    assert_eq!(sessions.load(Ordering::SeqCst), 1);
+
+    // Its server stops: reconnecting is said, then the size and the
+    // picture come again in the same view.
+    hang_ups.send(STOPPING).unwrap();
+    let (mut tries, mut config_again, mut after) = (Vec::new(), false, 0);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while after < 3 {
+        assert!(tokio::time::Instant::now() < deadline, "back within 20 s");
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::Status(status) if status.reconnecting > 0 => {
+                // Dialling, or reached and not let in yet: not shown.
+                assert_ne!(status.phase, Phase::Showing, "{status:?}");
+                if status.phase == Phase::Connecting {
+                    assert_eq!(status.stats, None, "no stats while it dials");
+                }
+                tries.push(status.reconnecting);
+            }
+            Message::Status(status) if !tries.is_empty() && status.phase == Phase::Showing => {
+                assert_eq!(status.reconnecting, 0, "shown again");
+            }
+            Message::Config { .. } if !tries.is_empty() => config_again = true,
+            Message::Frame { .. } if config_again => after += 1,
+            Message::End { why } => panic!("ended: {why}"),
+            _ => {}
+        }
+    }
+    assert_eq!(tries.first(), Some(&1), "{tries:?}");
+    assert_eq!(sessions.load(Ordering::SeqCst), 2, "dialled once more");
+    assert_eq!(
+        wire::read(&dir).map(|f| f.session_id),
+        Some(file.session_id),
+        "the same view"
+    );
+
+    // It drops again, and the window stops it while it waits to dial.
+    hang_ups.send(STOPPING).unwrap();
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+            .await
+            .expect("a message")
+        {
+            Message::Status(status) if status.reconnecting > 0 => break,
+            Message::End { why } => panic!("ended: {why}"),
+            _ => {}
+        }
+    }
+    commands
+        .send(Command::Stop {
+            session_id: Some(file.session_id),
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(
+        sessions.load(Ordering::SeqCst),
+        2,
+        "never dialled again once stopped"
+    );
+    assert_eq!(wire::read(&dir), None, "view.json forgets the view");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
