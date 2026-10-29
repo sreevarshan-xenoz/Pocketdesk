@@ -358,6 +358,11 @@ pub enum Commands {
         /// Pointer moves to send
         #[arg(long, default_value_t = 100)]
         moves: u32,
+        /// Milliseconds between events, pinging meanwhile as a computer
+        /// driving another does (to time the first key after a pause); 0
+        /// sends one a millisecond
+        #[arg(long, default_value_t = 0)]
+        pause: u32,
     },
     /// Send the owner's phone a script of what a keyboard and mouse would
     /// do on it as a screen (BK5), and print how many pings it answered.
