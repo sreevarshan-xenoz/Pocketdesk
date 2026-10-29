@@ -161,10 +161,14 @@ async fn run(
         .map_err(|e| format!("no session bus for input capture: {e}"))?;
     let portal = match InputCapture::with_connection(connection).await {
         Ok(portal) => portal,
-        Err(e) => {
+        // Only the portal's own word that it has no such interface is "not
+        // offered" (a 10-minute wait); anything else, a portal not up yet
+        // at login, is tried again in 30 s.
+        Err(e @ ashpd::Error::PortalNotFound(_)) => {
             say(events, Portal::Standing(Standing::Unsupported))?;
             return Err(format!("this desktop has no input-capture portal ({e})"));
         }
+        Err(e) => return Err(format!("the input-capture portal did not answer: {e}")),
     };
     let session = match portal
         .create_session2(CreateSession2Options::default())
