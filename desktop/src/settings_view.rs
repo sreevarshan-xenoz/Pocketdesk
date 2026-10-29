@@ -2069,7 +2069,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "Only while the window controls that computer, and with this on on both. Never a password manager's copy, nor one Never send keeps here. Files dropped on the window go to its Downloads either way.",
+                        "Only while the window controls that computer, and with this on on both. Never a password manager's copy, nor one Never send keeps here. With Clipboard with my computers on here, the window leaves copies to that sync: turn it on on the other computer too, or nothing crosses. Files dropped on the window go to its Downloads either way.",
                     );
                 });
             }
