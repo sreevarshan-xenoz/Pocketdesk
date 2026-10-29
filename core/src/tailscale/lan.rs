@@ -444,6 +444,170 @@ fn service_info_to_peer(info: &ServiceInfo) -> Option<PeerInfo> {
     })
 }
 
+/// The Pocketdesk computer an announcement describes, as the Nearby list
+/// shows it ([`crate::local::nearby::Found`]): its id, name, addresses
+/// (IPv4 first), control port and stream port, from the record this
+/// server's [`announcement_properties`] makes. None without an id or an
+/// address on this network ([`on_this_network`]). Nothing is read that the
+/// announcement did not say before.
+#[cfg(feature = "local")]
+pub fn found_from(info: &ServiceInfo) -> Option<crate::local::nearby::Found> {
+    let text = |key: &str| {
+        info.get_property(key)
+            .and_then(|prop| prop.val())
+            .and_then(|v| String::from_utf8(v.to_vec()).ok())
+    };
+    let device_id = text("id").filter(|id| !id.is_empty())?;
+    let name = text("name").unwrap_or_else(|| {
+        info.get_hostname()
+            .trim_end_matches('.')
+            .split('.')
+            .next()
+            .unwrap_or("A computer")
+            .to_string()
+    });
+    // Only addresses on this network: an announcement is anyone's word,
+    // and a Pair here dials its first address.
+    let mut addresses: Vec<std::net::IpAddr> = info
+        .get_addresses()
+        .iter()
+        .copied()
+        .filter(|a| on_this_network(*a))
+        .collect();
+    // IPv4 first: link-local IPv6 needs a scope a dial cannot name here.
+    addresses.sort_by_key(|a| (a.is_ipv6(), *a));
+    let addresses: Vec<String> = addresses.iter().map(|a| a.to_string()).collect();
+    if addresses.is_empty() {
+        return None;
+    }
+    Some(crate::local::nearby::Found {
+        device_id,
+        name,
+        addresses,
+        control_port: info.get_port(),
+        stream_port: text("stream")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(crate::streaming::client::DEFAULT_STREAMING_PORT),
+    })
+}
+
+/// Whether `ip` is on this computer's own network, as the LAN's other
+/// rules judge it: a private or link-local IPv4 address, or a unique-local
+/// or link-local IPv6 one. A tailnet's (100.64/10, `fd7a:115c:a1e0::/48`)
+/// reaches from anywhere, and loopback is this computer: neither counts,
+/// nor does any public address.
+#[cfg(feature = "local")]
+pub fn on_this_network(ip: std::net::IpAddr) -> bool {
+    match ip.to_canonical() {
+        std::net::IpAddr::V4(v4) => {
+            let tailnet = v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64;
+            !tailnet && (v4.is_private() || v4.is_link_local())
+        }
+        std::net::IpAddr::V6(v6) => {
+            let s = v6.segments();
+            let tailnet = s[0] == 0xfd7a && s[1] == 0x115c && s[2] == 0xa1e0;
+            let unique_local = (s[0] & 0xfe00) == 0xfc00;
+            let link_local = (s[0] & 0xffc0) == 0xfe80;
+            !tailnet && (unique_local || link_local)
+        }
+    }
+}
+
+/// A live look for Pocketdesk computers on this network (the Pair page's
+/// Nearby list): what was found, kept up to date as announcements come and
+/// go, until dropped. Only listens: nothing is announced by it.
+#[cfg(feature = "local")]
+pub struct Browse {
+    daemon: ServiceDaemon,
+    found: std::sync::Arc<std::sync::Mutex<HashMap<String, crate::local::nearby::Found>>>,
+    started: std::time::Instant,
+}
+
+/// The most computers a look keeps: a flood of announcements grows
+/// neither its memory nor the Nearby list past it.
+#[cfg(feature = "local")]
+pub const BROWSE_MOST: usize = 64;
+
+/// Keep `computer`, found under the record `fullname`: in place of what
+/// that record said before, or as a new one while fewer than
+/// [`BROWSE_MOST`] are kept.
+#[cfg(feature = "local")]
+fn keep_found(
+    found: &mut HashMap<String, crate::local::nearby::Found>,
+    fullname: &str,
+    computer: crate::local::nearby::Found,
+) {
+    if found.contains_key(fullname) || found.len() < BROWSE_MOST {
+        found.insert(fullname.to_string(), computer);
+    }
+}
+
+#[cfg(feature = "local")]
+impl Browse {
+    /// Start looking. `changed` is called after each change (to redraw).
+    pub fn start(changed: impl Fn() + Send + 'static) -> Result<Self> {
+        let daemon = ServiceDaemon::new().context("Failed to create mDNS daemon")?;
+        let events = daemon
+            .browse(SERVICE_TYPE)
+            .map_err(|e| anyhow::anyhow!("mDNS browse failed: {e}"))?;
+        let found: std::sync::Arc<std::sync::Mutex<HashMap<String, crate::local::nearby::Found>>> =
+            Default::default();
+        let kept = found.clone();
+        std::thread::Builder::new()
+            .name("nearby-browse".into())
+            .spawn(move || {
+                // Ends as the daemon shuts down and the channel closes.
+                while let Ok(event) = events.recv() {
+                    let mut found = kept.lock().unwrap_or_else(|e| e.into_inner());
+                    match event {
+                        ServiceEvent::ServiceResolved(info) => match found_from(&info) {
+                            Some(computer) => {
+                                keep_found(&mut found, info.get_fullname(), computer);
+                            }
+                            None => {
+                                found.remove(info.get_fullname());
+                            }
+                        },
+                        ServiceEvent::ServiceRemoved(_, fullname) => {
+                            found.remove(&fullname);
+                        }
+                        _ => continue,
+                    }
+                    drop(found);
+                    changed();
+                }
+            })
+            .context("Failed to start the mDNS browse")?;
+        Ok(Self {
+            daemon,
+            found,
+            started: std::time::Instant::now(),
+        })
+    }
+
+    /// What was found so far.
+    pub fn found(&self) -> Vec<crate::local::nearby::Found> {
+        self.found
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// How long it has looked.
+    pub fn looked_for(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+}
+
+#[cfg(feature = "local")]
+impl Drop for Browse {
+    fn drop(&mut self) {
+        let _ = self.daemon.shutdown();
+    }
+}
+
 /// Quick check whether mDNS is available on this system.
 ///
 /// Returns `true` if an mDNS daemon can be created and a browse query
@@ -747,6 +911,98 @@ mod tests {
         // Falls back to hostname without domain suffix
         assert_eq!(peer.name, "my-machine");
         assert!(peer.ips.contains(&"10.0.0.5".to_string()));
+    }
+
+    /// A computer's announcement reads back as the Nearby list's row: its
+    /// id, name, ports and its addresses on this network, IPv4 first; one
+    /// with no id, or no address on this network, is not a computer to
+    /// pair with.
+    #[cfg(feature = "local")]
+    #[test]
+    fn an_announcement_reads_as_a_nearby_computer() {
+        let info = service_info(
+            "Test Tower",
+            "00000000-0000-4000-8000-0000000000e1",
+            1716,
+            4716,
+            &[
+                "fd00:db8::5".to_string(),
+                "2001:db8::5".to_string(),
+                "192.0.2.5".to_string(),
+                "169.254.10.5".to_string(),
+            ],
+        )
+        .expect("a record");
+        let found = found_from(&info).expect("a computer");
+        assert_eq!(found.device_id, "00000000-0000-4000-8000-0000000000e1");
+        assert_eq!(found.name, "Test Tower");
+        assert_eq!(found.control_port, 1716);
+        assert_eq!(found.stream_port, 4716);
+        assert_eq!(found.addresses, ["169.254.10.5", "fd00:db8::5"]);
+        let elsewhere = service_info(
+            "Far Tower",
+            "00000000-0000-4000-8000-0000000000e2",
+            1716,
+            4716,
+            &["192.0.2.6".to_string(), "2001:db8::6".to_string()],
+        )
+        .expect("a record");
+        assert_eq!(found_from(&elsewhere), None, "no address on this network");
+        let no_id = ServiceInfo::new(
+            SERVICE_TYPE,
+            "phone",
+            "phone.local.",
+            "192.0.2.6",
+            1716,
+            None,
+        )
+        .expect("a record");
+        assert_eq!(found_from(&no_id), None);
+    }
+
+    /// A look keeps at most [`BROWSE_MOST`] computers; one already kept is
+    /// still updated.
+    #[cfg(feature = "local")]
+    #[test]
+    fn a_look_keeps_at_most_64_computers() {
+        let computer = |n: usize| crate::local::nearby::Found {
+            device_id: format!("d-{n}"),
+            name: format!("Desk {n}"),
+            addresses: vec!["169.254.10.5".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+        };
+        let mut found = HashMap::new();
+        for n in 0..BROWSE_MOST + 10 {
+            keep_found(&mut found, &format!("desk-{n}"), computer(n));
+        }
+        assert_eq!(found.len(), BROWSE_MOST);
+        keep_found(&mut found, "desk-0", computer(999));
+        assert_eq!(found["desk-0"].device_id, "d-999", "updated");
+        assert_eq!(found.len(), BROWSE_MOST);
+    }
+
+    /// Only this network's addresses count: private and link-local IPv4,
+    /// unique-local and link-local IPv6; never loopback, a tailnet's or a
+    /// public one.
+    #[cfg(feature = "local")]
+    #[test]
+    fn only_this_networks_addresses_are_nearby() {
+        let on = |a: &str| on_this_network(a.parse().unwrap());
+        for here in ["169.254.10.5", "fe80::5", "fd00:db8::5"] {
+            assert!(on(here), "{here}");
+        }
+        for away in [
+            "127.0.0.1",
+            "::1",
+            "192.0.2.5",
+            "2001:db8::5",
+            "100.64.0.5",
+            "fd7a:115c:a1e0::5",
+            "::ffff:192.0.2.5",
+        ] {
+            assert!(!on(away), "{away}");
+        }
     }
 
     #[test]

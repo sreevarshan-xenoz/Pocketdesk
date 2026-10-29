@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-986 open items.
+996 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 75 |
+| A second computer | 85 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -123,7 +123,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The phone away: the line is gone.
 
-**229. Look and feel (Desktop UX 3)**
+**230. Look and feel (Desktop UX 3)**
 
 - On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
 
@@ -516,7 +516,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
 
-**229. Look and feel (Desktop UX 3)**
+**230. Look and feel (Desktop UX 3)**
 
 - On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
 - Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
@@ -947,7 +947,20 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
 - With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
 
-**229. Look and feel (Desktop UX 3)**
+**229. Pair a computer nearby, and one place per task (Desktop UX 2)**
+
+- Pair the two laptops from the nearby list: on Windows, Pair → Computer lists the Arch laptop under Nearby within about 10 s, with its address; Pair on it shows a six-digit code with "Same code on both?" and Confirm; the Arch laptop shows "<Windows' name> wants to pair" with the same code, as a notification too; Confirm on Windows (it says "Confirmed. Waiting for … to accept") and Accept on the laptop, and Windows says "Paired with …" with Set up keyboard and mouse, and each lists the other (Windows under Settings → Other computers, the laptop on its Devices page). (where: second computer)
+- The same the other way (the Arch laptop asks Windows), with "Both are mine" ticked on both sides: each lists the other as Mine. (where: second computer)
+- Both owners must say yes (PR #556 security review): Accept on the asked computer while the asking one still shows "Same code on both?" pairs nothing until Confirm there; Accept first then Confirm, and Confirm first then Accept, each pair. Cancel on the asking computer takes the other's prompt down at once, and a new ask can be made right away. (where: second computer)
+- The Arch laptop asks Windows, and its Wi-Fi is turned off while Windows shows the prompt: the prompt goes at once, and the other takes a new ask. (where: second computer)
+- Decline on the asked computer, and Escape on its prompt: the asking one says it declined; nothing is paired. A minute without an answer declines too. (where: second computer)
+- The asked computer's window hidden to the tray: the notification shows the code, and the window comes forward with the prompt. (where: second computer)
+- "Let computers nearby ask to pair" off on the asked computer: the asking one says it isn't taking asks now, and no prompt shows there. (where: second computer)
+- Windows set to a Public network: the Arch laptop's Nearby list never shows Windows, and after about 10 s says why (the reasons, with how to make it Private on Windows' own list) and offers Run diagnostics. (where: second computer)
+- The Keyboard and mouse page's Setup on both laptops ticks each step as it becomes true (running, paired, sharing on, linked directly, may drive, arranged), and each fix button does what it says. (where: second computer)
+- An option changed on the Keyboard and mouse page (Clipboard follows the mouse off) is saved at once and the next crossing follows it; Settings' search for "game" finds the pointer, whose button opens the page. (where: second computer)
+
+**230. Look and feel (Desktop UX 3)**
 
 - With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
 - A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)

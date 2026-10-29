@@ -354,6 +354,51 @@ fn other_computers_point_to_pairing_on_the_pair_page() {
     );
 }
 
+/// Pair a computer nearby: Pair → Computer starts with the Nearby list
+/// (looking, until something answers), the link below it.
+#[test]
+fn pair_computer_starts_with_the_nearby_list() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    go_to(&app, Tab::Pair);
+    app.run_steps(2);
+    app.get_by_label(crate::pair_view::FOR_COMPUTER).click();
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::nearby_view::NEARBY).is_some());
+    assert!(app.query_by_label(crate::nearby_view::NOT_LISTED).is_some());
+}
+
+/// Pair a computer nearby: another computer's ask shows over any page,
+/// with its code; Decline answers it.
+#[test]
+fn a_nearby_computers_ask_shows_over_any_page() {
+    let fixture = Fixture::new();
+    pocketdesk_core::local::computers::update(fixture.state(), |file| {
+        file.nearby_in = Some(pocketdesk_core::local::nearby::NearbyRequest {
+            id: "0a1b2c3d4e5f6071".to_string(),
+            device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
+            name: "Test Tower".to_string(),
+            address: "192.0.2.60".to_string(),
+            code: "482913".to_string(),
+            unix: pocketdesk_core::local::pin::now_unix(),
+        });
+    })
+    .expect("a computers file");
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(&crate::nearby_view::prompt_title("Test Tower"))
+            .is_some()
+    );
+    assert!(app.query_by_label("482 913").is_some());
+    app.get_by_label("Decline").click();
+    app.run_steps(3);
+    assert!(app.query_by_label("482 913").is_none());
+    let now = pocketdesk_core::local::pin::now_unix();
+    let asks = pocketdesk_core::local::computers::take_all(fixture.state(), now);
+    assert_eq!(asks.len(), 1, "one answer");
+}
+
 /// PC1: Other computers says which computer is paired both ways, seeing
 /// and controlling this one without asking, and only that one.
 #[test]

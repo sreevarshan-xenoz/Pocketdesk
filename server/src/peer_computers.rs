@@ -71,6 +71,12 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
     *PAIRED_BACK.lock().unwrap_or_else(|e| e.into_inner()) = Some(back_tx);
     // Another computer's screen in a window here (BK7), from the first ask.
     let mut views: Option<mpsc::Sender<crate::computer_view::Command>> = None;
+    // This computer asking a nearby one to pair (pair a computer nearby):
+    // the ask under way (its request) and its owner's word on it, to
+    // confirm or cancel, and the links the asks both owners said yes to
+    // make.
+    let mut nearby_ask: Option<(String, tokio::sync::watch::Sender<crate::nearby::Owner>)> = None;
+    let (nearby_tx, mut nearby_accepted) = mpsc::unbounded_channel::<(String, bool, String)>();
     // What an earlier run said of its links is not this run's.
     let restarted = computers::update(&dir, |file| {
         for computer in &mut file.computers {
@@ -84,22 +90,61 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
         for request in computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()) {
             match request.ask {
                 ComputerAsk::Pair { link, mine } => {
-                    // Paired again: the link starts over now, not after the
-                    // back-off a refused or broken one was sleeping out.
                     let asked = Asked {
                         uri: &link,
                         mine,
                         request: &request.id,
                     };
-                    if let Some(paired) = pair(&dir, &cert_manager, wan.as_ref(), asked).await {
-                        if let Some(stale) = links.remove(&paired) {
-                            stale.task.abort();
-                        }
-                        // No link is kept without the road (BD5).
-                        if wan.is_none() {
-                            set_link(&dir, &paired, first_link(false));
-                        }
+                    pair_and_relink(&dir, &cert_manager, wan.as_ref(), asked, &mut links).await;
+                }
+                ComputerAsk::PairNearby {
+                    device_id,
+                    name,
+                    address,
+                    port,
+                    mine,
+                } => {
+                    // A newer ask replaces one under way.
+                    if let Some((_, owner)) = nearby_ask.take() {
+                        let _ = owner.send(crate::nearby::Owner::Cancelled);
                     }
+                    let (owner, said) =
+                        tokio::sync::watch::channel(crate::nearby::Owner::Undecided);
+                    nearby_ask = Some((request.id.clone(), owner));
+                    let asked = crate::nearby::Asked {
+                        request: request.id.clone(),
+                        device_id,
+                        name,
+                        address,
+                        port,
+                        mine,
+                    };
+                    let (dir, certs, accepted) =
+                        (dir.clone(), cert_manager.clone(), nearby_tx.clone());
+                    tokio::spawn(async move {
+                        let (request, mine) = (asked.request.clone(), asked.mine);
+                        if let Some(link) = crate::nearby::ask(dir, certs, asked, said).await {
+                            let _ = accepted.send((link, mine, request));
+                        }
+                    });
+                }
+                ComputerAsk::CancelNearby => {
+                    if let Some((_, owner)) = nearby_ask.take() {
+                        let _ = owner.send(crate::nearby::Owner::Cancelled);
+                    }
+                }
+                ComputerAsk::ConfirmNearby { nearby } => {
+                    // Only the ask under way, as its code was shown.
+                    if let Some((_, owner)) = nearby_ask.as_ref().filter(|(r, _)| *r == nearby) {
+                        let _ = owner.send(crate::nearby::Owner::Confirmed);
+                    }
+                }
+                ComputerAsk::AnswerNearby {
+                    nearby,
+                    accept,
+                    mine,
+                } => {
+                    crate::nearby::answer(&dir, &nearby, accept, mine).await;
                 }
                 ComputerAsk::Forget { device_id } => {
                     if let Some(link) = links.remove(&device_id) {
@@ -153,6 +198,15 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
             _ = crate::inbox::wait(COMPUTERS_DIR, POLL) => {}
             Some(computer) = paired_back.recv() => {
                 list_back(&dir, &cert_manager, wan.is_some(), computer, &mut links);
+            }
+            // A nearby computer accepted: paired as from its link.
+            Some((link, mine, request)) = nearby_accepted.recv() => {
+                let asked = Asked {
+                    uri: &link,
+                    mine,
+                    request: &request,
+                };
+                pair_and_relink(&dir, &cert_manager, wan.as_ref(), asked, &mut links).await;
             }
         }
     }
@@ -662,6 +716,26 @@ fn forget_untrusted_mine_in(
     }
 }
 
+/// Pair as [`pair`] does; once paired, the link starts over now, not after
+/// the back-off a refused or broken one was sleeping out.
+async fn pair_and_relink(
+    dir: &Path,
+    certs: &CertManager,
+    wan: Option<&iroh::Endpoint>,
+    asked: Asked<'_>,
+    links: &mut HashMap<String, Link>,
+) {
+    if let Some(paired) = pair(dir, certs, wan, asked).await {
+        if let Some(stale) = links.remove(&paired) {
+            stale.task.abort();
+        }
+        // No link is kept without the road (BD5).
+        if wan.is_none() {
+            set_link(dir, &paired, first_link(false));
+        }
+    }
+}
+
 /// What the app asked to pair with: the link, whether the owner here let
 /// its maker see and control this computer (PC1), and the request's id.
 struct Asked<'a> {
@@ -716,7 +790,7 @@ async fn pair_with(
     uri: &str,
     consent: bool,
 ) -> Result<PeerComputer, String> {
-    let link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
+    let mut link = PairLink::from_uri(uri).map_err(|e| format!("not a pairing link: {e}"))?;
     let fingerprint = link
         .fingerprint
         .as_deref()
@@ -748,6 +822,17 @@ async fn pair_with(
         );
     }
     let name = shown_name(&link.name);
+    // Never another listed computer's pin (PR #556 review I2): an address
+    // it is listed at keeps its certificate; this pairing neither pins nor
+    // dials it.
+    let named = !link.addresses.is_empty();
+    link.addresses = free_addresses(&computers::read(dir), &link.device_id, &link.addresses);
+    if named && link.addresses.is_empty() {
+        return Err(
+            "every address it names is another paired computer's: unpair that one first"
+                .to_string(),
+        );
+    }
     let labels: Vec<String> = link
         .addresses
         .iter()
@@ -850,6 +935,28 @@ async fn pair_with(
     Ok(computer)
 }
 
+/// The addresses of `addresses` that no computer listed in `file` other
+/// than `device_id` is listed at (by the pin label each address takes):
+/// pinning one of those would put this pairing's certificate in that
+/// computer's place there.
+fn free_addresses(
+    file: &computers::ComputersFile,
+    device_id: &str,
+    addresses: &[String],
+) -> Vec<String> {
+    let held: std::collections::HashSet<String> = file
+        .computers
+        .iter()
+        .filter(|c| c.device_id != device_id)
+        .flat_map(|c| c.addresses.iter().filter_map(|a| peer_label_for_address(a)))
+        .collect();
+    addresses
+        .iter()
+        .filter(|a| peer_label_for_address(a).is_none_or(|label| !held.contains(&label)))
+        .cloned()
+        .collect()
+}
+
 /// Whether this computer asks `link`'s maker to pair both ways (PC1): the
 /// link asks for it, and the owner here confirmed it (`consent`). The link
 /// alone is never enough: anyone can make one, or edit one on its way.
@@ -931,7 +1038,7 @@ fn listed_mine(dir: &Path, device_id: &str) -> bool {
 /// What this computer tells one it pairs with both ways about itself
 /// (PC1), for that one to list it in turn: its name, its addresses as its
 /// Pair page names them, its ports and its iroh endpoint.
-async fn own_facts(dir: &Path) -> ComputerFacts {
+pub(crate) async fn own_facts(dir: &Path) -> ComputerFacts {
     let config = crate::events::current_config();
     // External commands (the Tailscale address), off the runtime.
     let addresses = tokio::task::spawn_blocking(|| {
@@ -1127,7 +1234,7 @@ where
 
 /// A computer's name as the link gives it, fit to show: no control or
 /// invisible characters, at most 64 of them, else "Computer".
-fn shown_name(name: &str) -> String {
+pub(crate) fn shown_name(name: &str) -> String {
     let shown: String = name
         .chars()
         .filter(|c| {
@@ -2149,7 +2256,10 @@ pub(crate) fn parse_fingerprint(hex: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-async fn send<W: AsyncWrite + Unpin>(writer: &mut W, packet: &NetworkPacket) -> Result<(), String> {
+pub(crate) async fn send<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    packet: &NetworkPacket,
+) -> Result<(), String> {
     let wire = packet.to_wire().map_err(|e| e.to_string())?;
     writer.write_all(&wire).await.map_err(|e| e.to_string())?;
     writer.flush().await.map_err(|e| e.to_string())
@@ -2157,7 +2267,9 @@ async fn send<W: AsyncWrite + Unpin>(writer: &mut W, packet: &NetworkPacket) -> 
 
 /// The next packet, `None` at the end; a line too long or a packet that
 /// does not read is an error.
-async fn read_packet<R>(reader: &mut BufReader<R>) -> Result<Option<NetworkPacket>, String>
+pub(crate) async fn read_packet<R>(
+    reader: &mut BufReader<R>,
+) -> Result<Option<NetworkPacket>, String>
 where
     R: AsyncRead + Unpin,
 {
@@ -2262,6 +2374,37 @@ mod tests {
             stream_port: 4716,
             endpoint: None,
         }
+    }
+
+    /// PR #556 review I2: a pairing never takes another listed computer's
+    /// address (and so its pin there); its own listed addresses, and new
+    /// ones, stay.
+    #[test]
+    fn a_pairing_takes_no_other_computers_address() {
+        let mut file = computers::ComputersFile::default();
+        file.computers.push(facts().into_peer("lap", "", 1));
+        let desk = ComputerFacts {
+            addresses: vec!["192.0.2.42".to_string(), "192.0.2.44".to_string()],
+            ..facts()
+        };
+        file.computers.push(desk.into_peer("desk", "", 1));
+        let asked = [
+            "192.0.2.41".to_string(),
+            "192.0.2.42".to_string(),
+            "192.0.2.44".to_string(),
+            "192.0.2.43".to_string(),
+        ];
+        assert_eq!(
+            free_addresses(&file, "newcomer", &asked),
+            ["192.0.2.43"],
+            "another computer's addresses are left out"
+        );
+        assert_eq!(
+            free_addresses(&file, "desk", &asked),
+            ["192.0.2.42", "192.0.2.44", "192.0.2.43"],
+            "its own stay"
+        );
+        assert!(free_addresses(&file, "newcomer", &asked[..1]).is_empty());
     }
 
     /// The other computer's side of a pairing: read the ask, answer it with
