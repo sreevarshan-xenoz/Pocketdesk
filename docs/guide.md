@@ -372,6 +372,18 @@ Uninstall it from Settings → Apps: it stops Pocketdesk, removes the logon task
 the firewall rules and the shortcuts, and asks before deleting your pairings
 and settings. `packaging/windows/pocketdesk.iss` is its script.
 
+**A Public network:** the firewall rules (Pocketdesk control, TCP 1716-1725;
+media, UDP 4716; KDE Connect files) cover Windows' Private and Domain networks
+only, on purpose. When Windows treats the network as Public (it may, for a home
+Ethernet or Wi-Fi it has not been told about), phones and other computers
+cannot reach Pocketdesk: a pairing from another computer ends with "it did not
+answer … timeout after 8000ms during connect", and a phone finds nothing. The
+desktop app's Pair page and Settings → Other computers then say "Windows treats
+the network "<name>" as Public, so other devices can't reach Pocketdesk". Set it
+to Private in Settings → Network & internet → Ethernet or Wi-Fi → the network →
+Network profile type. The other computer cannot tell why it got no answer, so
+when a pairing times out, look here on the Windows one.
+
 **Or by hand:** unzip `pocketdesk-<version>-windows-x86_64.zip` from the releases page
 (the server `pocketdesk.exe` and the desktop app `pocketdesk-app.exe`), install FFmpeg (`winget install Gyan.FFmpeg`, which
 puts `ffmpeg.exe` on `PATH`), then:

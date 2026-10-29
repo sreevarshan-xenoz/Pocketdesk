@@ -28,6 +28,9 @@ pub struct ComputersView {
     /// PC1: the owner ticked that the pasted link's computer, which asks to
     /// pair both ways, is their own; and the link it was ticked for.
     consent: Option<String>,
+    /// Whether Windows treats this computer's network as Public, where
+    /// the other computer cannot reach it.
+    public: crate::network_profile::PublicNetwork,
 }
 
 /// A link's state in words.
@@ -115,6 +118,8 @@ impl ComputersView {
             )
             .weak(),
         );
+        // A pairing from the other side times out with no word why here.
+        self.public.show(ui);
         // Masked, as it holds the other computer's PIN (PC1 re-review m-1);
         // what it asks for is read below it, before Pair.
         ui.add(
