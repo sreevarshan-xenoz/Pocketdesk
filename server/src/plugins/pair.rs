@@ -227,7 +227,7 @@ pub fn allows(
 pub fn kept_link_clipboard(device_id: &str) -> bool {
     let store = state::trust_store_path()
         .ok()
-        .and_then(|path| TrustStore::load_or_create(path).ok());
+        .and_then(|path| TrustStore::read(path).ok());
     kept_link_clipboard_in(store.as_ref(), device_id)
 }
 
