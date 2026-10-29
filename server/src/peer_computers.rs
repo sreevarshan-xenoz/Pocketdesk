@@ -795,6 +795,9 @@ async fn pair_with(
         .and_then(WanTarget::parse)
         .map(|t| t.endpoint_id);
     let mut mine = answer.mine && facts.is_some();
+    // Its links are refused until it is trusted and recorded here (third
+    // review m-E): one let in between could be granted there first.
+    let _recording = Recording::begin(&link.device_id);
     if mine {
         let trusted = match &iroh {
             Some(iroh) => trust_back(dir, &link.device_id, fingerprint, Some(iroh)),
@@ -871,6 +874,43 @@ fn record_pasted(
     file.pending.retain(|id| *id != computer.device_id);
     file.lapsed.retain(|id| *id != computer.device_id);
     was
+}
+
+/// The computers this one is trusting, then recording, as paired both
+/// ways (PC1 third review m-E): until both are written, a link from one is
+/// refused, so it cannot be granted there before this one has listed it.
+static RECORDING: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// A computer being recorded, while held.
+struct Recording(String);
+
+impl Recording {
+    fn begin(device_id: &str) -> Self {
+        RECORDING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(device_id.to_string());
+        Self(device_id.to_string())
+    }
+}
+
+impl Drop for Recording {
+    fn drop(&mut self) {
+        RECORDING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Whether this computer is trusting and recording `device_id` now: its
+/// links are refused meanwhile.
+pub(crate) fn being_recorded(device_id: &str) -> bool {
+    RECORDING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(device_id)
 }
 
 /// Whether this computer lists `device_id` as one paired both ways (PC1).
@@ -2592,6 +2632,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(given, DevicePermissions::computer(), "lapsed, not given");
         assert!(file.pending.is_empty() && file.lapsed == ["lap"]);
+    }
+
+    /// PC1 third review m-E: while this computer trusts and records a
+    /// computer it paired with both ways, that computer's links are refused;
+    /// once done, or given up, they are not.
+    #[test]
+    fn a_computer_being_recorded_is_not_let_in_meanwhile() {
+        assert!(!being_recorded("rec-lap"));
+        let held = Recording::begin("rec-lap");
+        assert!(being_recorded("rec-lap"));
+        assert!(!being_recorded("rec-desk"), "another computer");
+        drop(held);
+        assert!(!being_recorded("rec-lap"));
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
