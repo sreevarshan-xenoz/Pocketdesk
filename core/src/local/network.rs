@@ -3,39 +3,10 @@
 
 use std::time::{Duration, Instant};
 
-/// Every adapter address except loopback and link-local.
+/// Every adapter address except loopback and link-local, read from the
+/// network interfaces ([`crate::tailscale::lan::interface_ips`]).
 pub fn local_ips() -> Vec<String> {
-    #[cfg(not(target_os = "linux"))]
-    {
-        if_addrs::get_if_addrs()
-            .map(|interfaces| {
-                interfaces
-                    .iter()
-                    .filter(|i| !i.is_loopback() && !i.is_link_local())
-                    .map(|i| i.ip().to_string())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-    #[cfg(target_os = "linux")]
-    {
-        output_within("hostname", &["-I"], COMMAND_LIMIT)
-            .map(|out| {
-                String::from_utf8_lossy(&out)
-                    .split_whitespace()
-                    .filter(|ip| {
-                        ip.parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
-                            std::net::IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_link_local(),
-                            std::net::IpAddr::V6(v6) => {
-                                !v6.is_loopback() && v6.segments()[0] & 0xffc0 != 0xfe80
-                            }
-                        })
-                    })
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
+    crate::tailscale::lan::interface_ips()
 }
 
 /// This machine's Tailscale IPv4 (`tailscale ip -4`), when Tailscale runs.

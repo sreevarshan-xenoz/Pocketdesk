@@ -92,7 +92,7 @@ pub async fn run(control_port: u16, announce_changes: bool) {
 
 /// This computer's IPv4 addresses, to notice a network change: the
 /// broadcast is IPv4, and IPv6 privacy addresses change by themselves. Read
-/// off the runtime (on Linux it can wait on `hostname -I`).
+/// off the runtime, as it asks the system for its interfaces.
 async fn local_addresses() -> Vec<std::net::Ipv4Addr> {
     tokio::task::spawn_blocking(|| {
         let mut found: Vec<std::net::Ipv4Addr> = pocketdesk_core::local::network::local_ips()

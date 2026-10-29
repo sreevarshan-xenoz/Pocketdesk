@@ -3055,6 +3055,7 @@ mod tests {
     /// again.
     #[tokio::test]
     async fn a_download_the_owner_cancelled_is_refused_with_why_once() {
+        crate::state::use_test_dirs();
         crate::transfers::cancelled_for_test("offer:c1-cancelled-offer");
         let asked = || {
             fetch(serde_json::json!({
@@ -3076,6 +3077,7 @@ mod tests {
     /// connection that will never come and can say why.
     #[tokio::test]
     async fn a_refused_share_is_answered_with_its_key() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let loopback = Phone::at("127.0.0.1:51000");
         plugin.handle_packet(&share(10), &loopback).await.unwrap();
@@ -3098,6 +3100,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_share_whose_path_climbs_out_is_refused() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let phone = Phone::at("192.0.2.7:51000");
         let packet = NetworkPacket::new("kdeconnect.share.request")
@@ -3117,6 +3120,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_refused_folder_share_makes_no_folder() {
+        crate::state::use_test_dirs();
         let downloads =
             std::env::temp_dir().join(format!("ll-share-refused-folder-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&downloads);
@@ -3182,6 +3186,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_folder_outside_home_is_refused_with_its_path() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         assert!(
             plugin.incoming_capabilities().contains(&FOLDER_FETCH),
@@ -3201,6 +3206,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_download_outside_home_is_refused_with_its_key() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let phone = Phone::at("192.0.2.7:51000");
         let packet =
@@ -3213,6 +3219,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_offer_made_to_another_phone_is_refused() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let phone = Phone::at("192.0.2.7:51000");
         let file = temp_dir("offer").join("a.txt");
@@ -3227,6 +3234,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_phone_can_decline_an_offer_it_will_not_fetch() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let phone = Phone::at("192.0.2.7:51000");
         crate::offers::offer_at(
@@ -3257,6 +3265,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_download_is_never_dialled_back_to_this_machine() {
+        crate::state::use_test_dirs();
         let plugin = SharePlugin::new();
         let phone = Phone::at("127.0.0.1:51000");
         let home = dirs::home_dir().unwrap();

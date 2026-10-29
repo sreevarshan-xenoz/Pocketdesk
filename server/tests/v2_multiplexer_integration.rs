@@ -13,6 +13,7 @@ use pocketdesk_server::v2_multiplexer::handle_v2_session;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_reconnect_storm_pushes_to_one_connection() -> anyhow::Result<()> {
+    pocketdesk_core::local::paths::use_test_dirs("server-it");
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert_manager = Arc::new(CertManager::new()?);
     let registry = Arc::new(PluginRegistry::new());
