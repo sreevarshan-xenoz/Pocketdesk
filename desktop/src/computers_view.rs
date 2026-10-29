@@ -28,6 +28,11 @@ pub struct ComputersView {
     /// PC1: the owner ticked that the pasted link's computer, which asks to
     /// pair both ways, is their own; and the link it was ticked for.
     consent: Option<String>,
+    /// Paste was pressed: the clipboard's text, which comes as a paste
+    /// event, goes in the box (UX 1).
+    pasting: bool,
+    /// This computer's own id, read with the file, to tell its own link.
+    own_id: Option<String>,
 }
 
 /// A link's state in words.
@@ -63,6 +68,41 @@ pub fn looks_like_link(text: &str) -> bool {
     text.trim().starts_with("pocketdesk://pair?")
 }
 
+/// What a pasted text is, as the line under the box says it (UX 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkCheck {
+    /// Nothing pasted.
+    Empty,
+    /// A pairing link from another computer.
+    Valid(Box<pocketdesk_core::local::pair_link::PairLink>),
+    /// This computer's own pairing link (`own_id` is its id).
+    Own,
+    /// Not a pairing link, or not a whole one.
+    NotALink,
+}
+
+/// Check `text`, pasted on the computer whose id is `own_id`.
+pub fn check_link(text: &str, own_id: Option<&str>) -> LinkCheck {
+    let text = text.trim();
+    if text.is_empty() {
+        return LinkCheck::Empty;
+    }
+    if !looks_like_link(text) {
+        return LinkCheck::NotALink;
+    }
+    match pocketdesk_core::local::pair_link::PairLink::from_uri(text) {
+        Ok(link) if own_id == Some(link.device_id.as_str()) => LinkCheck::Own,
+        Ok(link) => LinkCheck::Valid(Box::new(link)),
+        Err(_) => LinkCheck::NotALink,
+    }
+}
+
+/// What the line under the box says of a text that is not a link.
+pub const NOT_A_LINK: &str = "This isn't a Pocketdesk computer link. Copy it on the other computer's Pair page (\"Copy the link for another computer\").";
+/// What it says of this computer's own link.
+pub const OWN_LINK: &str =
+    "That's this computer's own link: paste the one copied on the other computer.";
+
 impl ComputersView {
     /// What this page said happened since the last call, for the app's one
     /// notice (E5).
@@ -80,6 +120,7 @@ impl ComputersView {
             return;
         }
         self.file = computers::read(state_dir);
+        self.own_id = pocketdesk_core::local::identity::device_id(state_dir);
         self.read_at = Some(Instant::now());
     }
 
@@ -111,16 +152,59 @@ impl ComputersView {
             )
             .weak(),
         );
-        // Masked, as it holds the other computer's PIN (PC1 re-review m-1);
-        // what it asks for is read below it, before Pair.
-        ui.add(
-            egui::TextEdit::singleline(&mut self.link)
-                .hint_text("pocketdesk://pair?...")
-                .password(true)
-                .desired_width(420.0),
-        );
+        // UX 1: shown as pasted, not masked (PC1 re-review m-1 had masked
+        // it, as it holds the PIN): a link that cannot be read back cannot
+        // be checked. The PIN is short-lived, and the other computer shows
+        // it anyway; the box is cleared once Pair is pressed.
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.link)
+                    .hint_text("pocketdesk://pair?...")
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(420.0),
+            );
+            if ui
+                .button("Paste")
+                .on_hover_text("Put the copied link in the box")
+                .clicked()
+            {
+                self.pasting = true;
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+            }
+            if !self.link.is_empty() && ui.button("Clear").clicked() {
+                self.link.clear();
+            }
+        });
+        // The clipboard's text comes as a paste event a frame later, and
+        // takes the box's place.
+        if self.pasting {
+            let pasted = ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Paste(text) => Some(text.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(text) = pasted {
+                self.link = text;
+                self.pasting = false;
+            }
+        }
         let pasted = self.link.trim().to_string();
-        let parsed = pocketdesk_core::local::pair_link::PairLink::from_uri(&pasted).ok();
+        let check = check_link(&pasted, self.own_id.as_deref());
+        let parsed = match &check {
+            LinkCheck::Valid(link) => Some(link.as_ref().clone()),
+            _ => None,
+        };
+        match check {
+            LinkCheck::Empty | LinkCheck::Valid(_) => {}
+            LinkCheck::Own => {
+                ui.label(RichText::new(OWN_LINK).color(crate::theme::warn(ui)));
+            }
+            LinkCheck::NotALink => {
+                ui.label(RichText::new(NOT_A_LINK).color(crate::theme::bad(ui)));
+            }
+        }
         // A yes is for the link it was given for, never a later one.
         if self.consent.as_deref().is_some_and(|l| l != pasted) {
             self.consent = None;
@@ -132,10 +216,13 @@ impl ComputersView {
             let name = link_name(&link.name);
             // Its name is the link's own word; its addresses show whose it
             // is (PC1 re-review m-1, m-2).
-            ui.label(format!(
-                "A pairing link from {name}, at {}.",
-                link.addresses.join(", ")
-            ));
+            ui.label(
+                RichText::new(format!(
+                    "A pairing link from {name}, at {}.",
+                    link.addresses.join(", ")
+                ))
+                .color(crate::theme::good(ui)),
+            );
             if asks && !asks_both {
                 ui.label(
                     RichText::new(format!(
@@ -166,7 +253,7 @@ impl ComputersView {
             }
         }
         let both = asks_both && self.consent.is_some();
-        let ready = looks_like_link(&self.link) && server_running;
+        let ready = parsed.is_some() && server_running;
         let pair = match (asks, both) {
             (_, true) => "Pair both ways",
             (true, false) => "Pair one way",
@@ -494,6 +581,144 @@ mod tests {
             asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
             [ComputerAsk::Pair { link, mine: false }]
         );
+    }
+
+    /// UX 1: what is pasted is checked as it is pasted, by this
+    /// computer's own id too.
+    #[test]
+    fn a_pasted_link_is_checked_as_it_is_pasted() {
+        assert_eq!(check_link("  ", Some("me")), LinkCheck::Empty);
+        assert_eq!(
+            check_link("https://example.org/", Some("me")),
+            LinkCheck::NotALink
+        );
+        assert_eq!(
+            check_link("pocketdesk://pair?v=1", Some("me")),
+            LinkCheck::NotALink,
+            "begun, but not a whole link"
+        );
+        let link = mine_link();
+        assert!(matches!(
+            check_link(&link, Some("me")),
+            LinkCheck::Valid(l) if l.name == "Test Tower"
+        ));
+        assert_eq!(
+            check_link(&link, Some("00000000-0000-4000-8000-0000000000f1")),
+            LinkCheck::Own
+        );
+    }
+
+    /// The page over `dir`, the server `running`, with `link` in the box.
+    fn page(
+        dir: &std::path::Path,
+        running: bool,
+        link: &str,
+    ) -> egui_kittest::Harness<'static, ComputersView> {
+        let now = pocketdesk_core::local::pin::now_unix();
+        let state = dir.to_path_buf();
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            move |ui, view: &mut ComputersView| view.show(ui, &state, running, now),
+            ComputersView {
+                link: link.to_string(),
+                ..ComputersView::default()
+            },
+        );
+        harness.run_steps(2);
+        harness
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computers-view-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// UX 1: the box shows what was pasted (it was a password box, all
+    /// dots), and the line under it says what it is.
+    #[test]
+    fn the_pasted_link_shows_and_says_what_it_is() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("shows");
+        let link = mine_link();
+        let harness = page(&dir, true, &link);
+        assert!(
+            harness
+                .query_all_by_role(egui::accesskit::Role::PasswordInput)
+                .next()
+                .is_none(),
+            "not masked"
+        );
+        let shown = harness
+            .get_all_by_role(egui::accesskit::Role::TextInput)
+            .next()
+            .expect("the link box");
+        assert_eq!(
+            shown.accesskit_node().value().as_deref(),
+            Some(link.as_str())
+        );
+        assert!(
+            harness
+                .query_by_label_contains("A pairing link from Test Tower")
+                .is_some()
+        );
+        let harness = page(&dir, true, "https://example.org/");
+        assert!(harness.query_by_label(NOT_A_LINK).is_some());
+        assert!(
+            harness.get_by_label("Pair").accesskit_node().is_disabled(),
+            "not a link, no Pair"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// UX 1: this computer's own link is said, and cannot be paired with.
+    #[test]
+    fn this_computers_own_link_is_said() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(pocketdesk_core::local::paths::DEVICE_ID_FILE),
+            "00000000-0000-4000-8000-0000000000f1",
+        )
+        .unwrap();
+        let harness = page(&dir, true, &mine_link());
+        let own = harness.query_by_label(OWN_LINK).is_some();
+        let off = harness.get_by_label("Pair").accesskit_node().is_disabled();
+        let consent = harness
+            .query_by_label(&consent_label("Test Tower"))
+            .is_some();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(own && off && !consent);
+    }
+
+    /// UX 1: Paste puts the clipboard's text in the box, in place of what
+    /// was there.
+    #[test]
+    fn paste_fills_the_box() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("paste");
+        let mut harness = page(&dir, true, "old");
+        harness.get_by_label("Paste").click();
+        harness.run_steps(2);
+        harness.event(egui::Event::Paste(format!("{}  ", mine_link())));
+        harness.run_steps(2);
+        let shown = harness
+            .get_all_by_role(egui::accesskit::Role::TextInput)
+            .next()
+            .expect("the link box");
+        assert_eq!(
+            shown.accesskit_node().value().as_deref(),
+            Some(format!("{}  ", mine_link()).as_str())
+        );
+        assert!(
+            harness
+                .query_by_label_contains("A pairing link from Test Tower")
+                .is_some()
+        );
+        harness.get_by_label("Clear").click();
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("A pairing link").is_none());
     }
 
     #[test]
