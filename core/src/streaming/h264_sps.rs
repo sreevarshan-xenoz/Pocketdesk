@@ -178,7 +178,9 @@ fn sps_size(rbsp: &[u8]) -> Option<(u16, u16)> {
     };
     // No level allows more (BK7 review I1): a host's bogus size must not
     // make the window ask for gigabytes.
-    if width_mbs * height_units * fields > MAX_FRAME_MBS {
+    // Checked (BK7 re-review N2): both counts reach 2^32.
+    let frame_mbs = width_mbs.checked_mul(height_units)?.checked_mul(fields)?;
+    if frame_mbs > MAX_FRAME_MBS {
         return None;
     }
     let width = (width_mbs * 16).checked_sub(crop_x * (left + right))?;
@@ -299,11 +301,21 @@ mod tests {
                 self.bits.push(false);
             }
             let mut out = vec![0, 0, 0, 1, 0x67];
-            out.extend(
-                self.bits
-                    .chunks(8)
-                    .map(|byte| byte.iter().fold(0u8, |acc, b| (acc << 1) | u8::from(*b))),
-            );
+            // With emulation prevention, as an encoder writes it: a run of
+            // zero bits would otherwise read as the next start code.
+            let mut zeros = 0;
+            for byte in self
+                .bits
+                .chunks(8)
+                .map(|byte| byte.iter().fold(0u8, |acc, b| (acc << 1) | u8::from(*b)))
+            {
+                if zeros >= 2 && byte <= 3 {
+                    out.push(3);
+                    zeros = 0;
+                }
+                zeros = if byte == 0 { zeros + 1 } else { 0 };
+                out.push(byte);
+            }
             out
         }
     }
@@ -346,6 +358,29 @@ mod tests {
             None,
             "within each side, past the level's frame size"
         );
+    }
+
+    /// BK7 re-review N2: macroblock counts whose product passes u64 are no
+    /// size, never an overflow.
+    #[test]
+    fn macroblock_counts_past_u64_are_no_size() {
+        let sps = Writer::default()
+            .bits(66, 8)
+            .bits(0, 8)
+            .bits(62, 8)
+            .ue(0) // seq_parameter_set_id
+            .ue(0) // log2_max_frame_num_minus4
+            .ue(2) // pic_order_cnt_type
+            .ue(1) // max_num_ref_frames
+            .bits(0, 1) // gaps
+            .ue(u32::MAX - 1) // width: 2^32 - 1 macroblocks
+            .ue(u32::MAX - 1) // height: 2^32 - 1 map units
+            .bits(0, 1) // fields: frame_mbs_only off
+            .bits(0, 1) // mb_adaptive_frame_field
+            .bits(1, 1) // direct_8x8_inference
+            .bits(0, 1) // no cropping
+            .unit();
+        assert_eq!(picture_size(&sps), None);
     }
 
     /// BK7 review M2: a scaling list's step past what the standard allows
