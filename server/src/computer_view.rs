@@ -1167,6 +1167,8 @@ struct View {
     asks: CastChain,
     /// Frames the window was too slow to take, for its stats (PC2).
     window_dropped: u64,
+    /// The window's focus last passed on, and when (PC3).
+    focus_said: Option<(bool, Instant)>,
 }
 
 impl Drop for View {
@@ -1287,6 +1289,7 @@ pub async fn run(
                     unwatched_since: Some(Instant::now()),
                     asks: CastChain::default(),
                     window_dropped: 0,
+                    focus_said: None,
                 });
             }
             Some((session_id, event)) = events.recv() => {
@@ -1379,7 +1382,7 @@ pub async fn run(
             Some((session_id, focused)) = focus_rx.recv() => {
                 // The window watching the view now, of a view still going.
                 let Some(v) = view
-                    .as_ref()
+                    .as_mut()
                     .filter(|v| v.session_id == session_id && v.ended.is_none())
                 else {
                     continue;
@@ -1387,6 +1390,13 @@ pub async fn run(
                 if viewer.as_ref().is_none_or(|w| w.session_id != session_id) {
                     continue;
                 }
+                // The app settles the focus first; a client that does not
+                // is held to it here too (PR #554 review M2).
+                let now = Instant::now();
+                if !focus_passes(v.focus_said, focused, now) {
+                    continue;
+                }
+                v.focus_said = Some((focused, now));
                 window_focus(v.device_id.clone(), focused, v.status.control);
             }
             _ = heartbeat.tick() => {
@@ -1414,6 +1424,17 @@ pub async fn run(
         }
     }
     end(&mut view, &mut viewer, &state_dir, None);
+}
+
+/// A focus passed on at most this often (PR #554 review M2): the app
+/// says one only after it held for 300 ms.
+pub const FOCUS_GAP: Duration = Duration::from_millis(250);
+
+/// Whether the window's focus `focused` at `now` is passed on, after `last`
+/// (what was passed on, and when): only a change, and not within
+/// [`FOCUS_GAP`] of the last.
+pub fn focus_passes(last: Option<(bool, Instant)>, focused: bool, now: Instant) -> bool {
+    last.is_none_or(|(said, at)| said != focused && now.saturating_duration_since(at) >= FOCUS_GAP)
 }
 
 /// The window showing the computer `device_id` gained or lost the focus
@@ -1702,6 +1723,24 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// PR #554 review M2: the relay passes a focus on only when it changed,
+    /// and not sooner than FOCUS_GAP after the last it passed on.
+    #[test]
+    fn a_focus_goes_on_only_as_it_changes_and_not_too_often() {
+        let t = Instant::now();
+        assert!(focus_passes(None, true, t), "the first");
+        assert!(
+            !focus_passes(Some((true, t)), true, t + FOCUS_GAP * 4),
+            "the same again"
+        );
+        assert!(
+            !focus_passes(Some((true, t)), false, t + FOCUS_GAP / 2),
+            "too soon"
+        );
+        assert!(focus_passes(Some((true, t)), false, t + FOCUS_GAP));
+        assert!(focus_passes(Some((false, t)), true, t + FOCUS_GAP));
     }
 
     #[test]
