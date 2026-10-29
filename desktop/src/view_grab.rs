@@ -163,6 +163,23 @@ impl HookKeys {
         self.taken.remove(&vk);
     }
 
+    /// `stroke` went to Windows while the grab took nothing (the beat
+    /// stale, another window in front): the modifiers held and the keys
+    /// taken stay in step, so a taken key let go meanwhile is not taken
+    /// for ever after (review M4).
+    pub fn pass(&mut self, stroke: Stroke) {
+        let vk = stroke.vk;
+        self.chord = false;
+        if stroke.down {
+            if is_ctrl(vk) || is_alt(vk) || is_shift(vk) {
+                self.held.insert(vk);
+            }
+        } else {
+            self.held.remove(&vk);
+            self.taken.remove(&vk);
+        }
+    }
+
     /// What to do with `stroke`.
     pub fn key(&mut self, stroke: Stroke) -> Verdict {
         let code = evdev_from_scan(stroke.scan, stroke.extended).or(match stroke.vk {
@@ -347,10 +364,11 @@ fn decide(
     let Some(state) = slot.as_mut().filter(|s| s.thread_id == here) else {
         return false;
     };
-    if state.gone || foreground != state.window {
-        return false;
-    }
-    if stalled(state.beat.load(Ordering::Acquire), now_ms) {
+    if state.gone
+        || foreground != state.window
+        || stalled(state.beat.load(Ordering::Acquire), now_ms)
+    {
+        state.keys.pass(stroke);
         return false;
     }
     // A key is taken only when it was said there: one nobody hears stays
@@ -944,6 +962,27 @@ mod tests {
         let tab = stroke(TAB.0, TAB.1, TAB.2, true);
         assert!(!decide(&mut slot, 7, 1_100, WINDOW, tab));
         assert!(slot.as_ref().is_some_and(|s| s.gone));
+    }
+
+    /// Review M4: a taken Windows key let go while the beat was stale is
+    /// not taken for ever: once the beat is fresh, E is typed again, and
+    /// Alt held meanwhile still makes Alt+Tab.
+    #[test]
+    fn keys_pressed_while_passing_keep_the_grab_in_step() {
+        let (mut slot, heard) = hook_state(7, 1_000);
+        assert!(decide(&mut slot, 7, 1_100, WINDOW, win(true)));
+        assert!(!decide(&mut slot, 7, 2_500, WINDOW, win(false)), "stale");
+        let alt = stroke(ALT.0, ALT.1, ALT.2, true);
+        assert!(!decide(&mut slot, 7, 2_500, 0x9999, alt), "elsewhere");
+        if let Some(state) = slot.as_mut() {
+            state.beat.store(3_000, Ordering::Release);
+        }
+        let e = stroke(KEY_E.0, KEY_E.1, KEY_E.2, true);
+        assert!(!decide(&mut slot, 7, 3_000, WINDOW, e), "E is typed here");
+        let tab = stroke(TAB.0, TAB.1, TAB.2, true);
+        assert!(decide(&mut slot, 7, 3_000, WINDOW, tab), "Alt+Tab");
+        let said: Vec<Heard> = heard.try_iter().collect();
+        assert_eq!(said, [Heard::Key(125, true), Heard::Key(15, true)]);
     }
 
     /// A stale beat: every key is Windows', nothing said.
