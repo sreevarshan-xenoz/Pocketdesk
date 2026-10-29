@@ -18,7 +18,7 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.8.0 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux, and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. It updates 0.7.0 in place (same signing key), keeping your saved computers and pairings.
+Pocketdesk 0.8.1 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux, and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. It updates 0.7.0 in place (same signing key), keeping your saved computers and pairings.
 
 The shared keyboard and mouse is new and largely unchecked at a desk. It is unit-tested throughout, and its receiving end ran on a real Linux laptop from a script, but nobody has yet pushed a real Windows mouse onto a Linux screen with it. Everything it does is off until you turn it on. Please try it and tell us how it went.
 
