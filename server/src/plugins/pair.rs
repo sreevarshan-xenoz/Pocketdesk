@@ -1089,6 +1089,14 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         .flatten()
         // Only while the server can list it: else a one-way pairing.
         .filter(|_| crate::peer_computers::takes_paired_back());
+        // Paired again one way: no grant both ways waits for it any more,
+        // before it is trusted narrowly again (PC1 third review m-A).
+        if computer
+            && both_ways.is_none()
+            && let Ok(dir) = state::state_dir()
+        {
+            crate::peer_computers::stop_waiting(&dir, &phone_id);
+        }
         let outcome = TrustStore::update(state::trust_store_path().expect("state dir"), |store| {
             let was_trusted = store.is_trusted(&phone_id);
             // The permissions before the trust (M2 review): a write that fails

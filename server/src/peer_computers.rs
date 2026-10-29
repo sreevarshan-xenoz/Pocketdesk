@@ -2004,12 +2004,35 @@ fn both_ways_heard_in(
     }
 }
 
-fn grant_on_link_in(dir: &Path, trust: &Path, device_id: &str) {
-    if !computers::read(dir)
+/// Stop `device_id` waiting for a grant both ways (or saying it lapsed):
+/// it is about to be trusted again one way (PC1 third review m-A).
+pub(crate) fn stop_waiting(dir: &Path, device_id: &str) {
+    let waits = computers::read(dir)
         .pending
         .iter()
-        .any(|id| id == device_id)
-    {
+        .chain(computers::read(dir).lapsed.iter())
+        .any(|id| id == device_id);
+    if !waits {
+        return;
+    }
+    let saved = computers::update(dir, |file| {
+        file.pending.retain(|id| id != device_id);
+        file.lapsed.retain(|id| id != device_id);
+    });
+    if let Err(e) = saved {
+        tracing::warn!("Could not stop {device_id} waiting for a grant: {e}");
+    }
+}
+
+fn grant_on_link_in(dir: &Path, trust: &Path, device_id: &str) {
+    let file = computers::read(dir);
+    // Waiting, and still listed as paired both ways (third review m-A).
+    let waits = file.pending.iter().any(|id| id == device_id)
+        && file
+            .computers
+            .iter()
+            .any(|c| c.device_id == device_id && c.mine);
+    if !waits {
         return;
     }
     let granted = pocketdesk_core::protocol::kdeconnect::TrustStore::update(trust, |store| {
@@ -2480,6 +2503,45 @@ mod tests {
         assert_eq!(on_pairing_connection, DevicePermissions::computer());
         assert_eq!(on_an_earlier_link, DevicePermissions::computer());
         assert_eq!(on_its_link, DevicePermissions::computer_mine());
+    }
+
+    /// PC1 third review m-A: a computer paired again one way is no longer
+    /// waiting for anything: its waiting grant is cleared before it is
+    /// trusted narrowly again, and a grant is given only to a computer still
+    /// listed as paired both ways.
+    #[test]
+    fn a_computer_paired_again_one_way_is_given_nothing() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        use pocketdesk_core::protocol::permissions::DevicePermissions;
+        let dir = temp("one-way-again");
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |store| {
+            store.trust_computer("lap")?;
+            store.trust_computer("desk")
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..facts().into_peer("lap", "", 1)
+            });
+            file.computers.push(facts().into_peer("desk", "", 1));
+            file.pending = vec!["lap".to_string(), "desk".to_string()];
+            file.lapsed = vec!["desk".to_string()];
+        })
+        .unwrap();
+        grant_on_link_in(&dir, &trust, "lap");
+        let lap = TrustStore::read(&trust).unwrap().permissions("lap");
+        stop_waiting(&dir, "desk");
+        let file = computers::read(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            lap,
+            DevicePermissions::computer(),
+            "listed one way: nothing"
+        );
+        assert!(!file.pending.contains(&"desk".to_string()));
+        assert!(!file.lapsed.contains(&"desk".to_string()));
     }
 
     /// PC1: the computer that pasted the link trusts the other in turn,
