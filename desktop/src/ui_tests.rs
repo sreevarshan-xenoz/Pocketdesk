@@ -445,10 +445,11 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
             .is_disabled(),
         "no server here, so no switch"
     );
-    let now = pocketdesk_core::local::pin::now_unix();
-
     app.get_by_label("Identify").click();
     app.run_steps(3);
+    // Read after the click: a request made in the next second would be
+    // "from the future" to a clock read before it.
+    let now = pocketdesk_core::local::pin::now_unix();
     let identify = pocketdesk_core::local::shared_input::take_all(fixture.state(), now);
     assert_eq!(identify.len(), 1, "one Identify asked");
 
