@@ -2068,7 +2068,24 @@ impl SettingsForm {
                     );
                 });
                 let on = e.shared_input;
+                // UX 1: why the rows below are off, beside them: once,
+                // under the switch, or in each row when a search hides it.
+                let query: String = ui
+                    .ctx()
+                    .data(|d| d.get_temp(search_id()))
+                    .unwrap_or_default();
+                let switch_shown = drawn_here("shared_input") && row_shown(&query, "shared_input");
+                let mut turn_on = false;
+                if !on && switch_shown {
+                    turn_on |= crate::widgets::why_off(ui, SHARING_OFF, Some(TURN_SHARING_ON));
+                }
+                let mut off = |ui: &mut egui::Ui| {
+                    if !on && !switch_shown {
+                        turn_on |= crate::widgets::why_off(ui, SHARING_OFF, Some(TURN_SHARING_ON));
+                    }
+                };
                 row(ui, "shared_input_drive", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2082,6 +2099,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_hotkey", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::TextEdit::singleline(&mut e.shared_input_hotkey)
@@ -2098,6 +2116,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_game_lock", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2112,6 +2131,7 @@ impl SettingsForm {
                 });
                 let lock_programs = &mut self.lock_programs_text;
                 row(ui, "shared_input_lock_programs", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::TextEdit::multiline(lock_programs)
@@ -2124,6 +2144,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_clipboard", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2133,6 +2154,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_files", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2146,6 +2168,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_sound", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2159,6 +2182,7 @@ impl SettingsForm {
                     );
                 });
                 row(ui, "shared_input_low_latency", |ui| {
+                    off(ui);
                     ui.add_enabled(
                         on,
                         egui::Checkbox::new(
@@ -2168,6 +2192,9 @@ impl SettingsForm {
                     );
                     note(ui, quick_note());
                 });
+                if turn_on {
+                    e.shared_input = true;
+                }
             }
             Section::KdeConnect => {
                 row(ui, "kdeconnect_compat", |ui| {
@@ -2494,6 +2521,11 @@ fn quiet_problem(config: &Config) -> Option<&'static str> {
     }
     (days_mask(&config.quiet_days) == 0).then_some("No day is chosen, so nothing is held.")
 }
+
+/// Why the Keyboard and mouse rows are off (UX 1).
+pub const SHARING_OFF: &str = "Off while sharing is off: turn it on to change these.";
+/// Its fix.
+pub const TURN_SHARING_ON: &str = "Turn sharing on";
 
 /// A row's note, small and quiet.
 fn note(ui: &mut egui::Ui, text: impl Into<String>) {

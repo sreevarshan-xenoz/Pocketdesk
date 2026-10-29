@@ -3108,6 +3108,13 @@ Built 2026-10-29, from the owner's first live test of 0.8.2 on the Windows lapto
 - [ ] A pairing link copied with a byte-order mark or a trailing line break (from a text editor) pastes into Settings → Other computers with Pair enabled, and pairs. (where: second computer)
 - [ ] With Windows' network set to Public: the Pair page and Settings → Other computers say "Windows treats the network "<name>" as Public…" within about 10 s; set back to Private, the line goes within about 10 s. (where: owner)
 
+## 226. Pairing and disabled controls say why (Desktop UX 1)
+
+Built 2026-10-29. Kittest drove every piece headless (the link box, the reasons and fixes, the bar, the progress and its outcome words), but not the real clipboard, a real server start or a real failed pairing.
+- [ ] Paste on Settings → Other computers fills the box from the real clipboard, on Windows and on the Linux laptop, and the line under it names the other computer and its addresses. (where: second computer)
+- [ ] Start server in the bar at the top of a page starts the stopped server on the Linux laptop, and the bar goes once it runs. (where: second computer)
+- [ ] A real failed pairing: with Pocketdesk stopped on the other computer, Pair shows its progress, then "The other computer didn't answer…" with Details and Run diagnostics, which opens Diagnostics and runs its checks. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

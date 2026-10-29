@@ -24,9 +24,17 @@ pub struct DiagnosticsView {
     /// The shared keyboard and mouse's last measured latency
     /// (`pocketdesk share-test`), read with each run.
     latency: Option<LatencyReport>,
+    /// Another page asked for the checks (UX 1: a failed pairing's "Run
+    /// diagnostics").
+    asked: bool,
 }
 
 impl DiagnosticsView {
+    /// Run the checks as the page next shows (UX 1).
+    pub fn run_now(&mut self) {
+        self.asked = true;
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, state_dir: &Path, config: Option<&Config>) {
         if self.running.as_ref().is_some_and(|job| job.is_finished())
             && let Some(job) = self.running.take()
@@ -44,9 +52,11 @@ impl DiagnosticsView {
         }
         // The checks run as the page first opens (I3): it is opened to see
         // them. Not under tests, where they would start the firewall probe.
-        let open_run =
-            !self.started && self.report.is_none() && self.running.is_none() && !cfg!(test);
+        let open_run = (self.asked || (!self.started && self.report.is_none()))
+            && self.running.is_none()
+            && !cfg!(test);
         self.started = true;
+        self.asked = false;
         ui.horizontal(|ui| {
             let busy = self.running.is_some();
             if open_run
@@ -80,10 +90,9 @@ impl DiagnosticsView {
         });
         // Said with or without a report: it is about this app, not the
         // checks (U1 review: it showed only after a run).
-        ui.label(
-            egui::RichText::new(crate::fonts::summary(crate::fonts::loaded()))
-                .color(crate::theme::muted(ui)),
-        );
+        if let Some(fonts) = crate::fonts::summary(crate::fonts::loaded()) {
+            ui.label(egui::RichText::new(fonts).color(crate::theme::muted(ui)));
+        }
         let Some(report) = &self.report else {
             return;
         };
