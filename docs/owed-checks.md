@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-971 open items.
+972 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 63 |
+| A second computer | 64 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -915,6 +915,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **225. Both computers driving at once, and two pairing papercuts (from the owner's first live test)**
 
 - Windows drives the laptop while the laptop also drives: Windows' cursor arrives on the laptop's left edge and stays there; the laptop's log says it is driven ("driven by another computer (true)") and no "Keyboard and mouse: <Windows>" follows; moving around the laptop's screens, the pointer never bounces home, and pushing back off the left edge comes home to Windows as before. (where: second computer)
+- Windows' cursor left resting on the laptop: after about 2.5 s without a key, click or move from Windows, the laptop's own touchpad crosses its edge onto Windows; Windows' cursor comes home there (its badge says the laptop's keyboard and mouse came here), and the laptop's touchpad drives Windows. (where: second computer)
 - Then the laptop drives Windows from its own touchpad: once Windows' cursor left, the laptop's edge facing Windows crosses again within a second or two; Windows' cursor arriving on Windows' right edge stays there too. (where: second computer)
 - Windows' watchdog: the laptop's Wi-Fi off while Windows drives it: Windows' keyboard and mouse come home within about a second, and once the Wi-Fi is back the laptop's edges lead to Windows again. (where: second computer)
 - A pairing link copied with a byte-order mark or a trailing line break (from a text editor) pastes into Settings → Other computers with Pair enabled, and pairs. (where: second computer)

@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::shared_input;
@@ -126,6 +126,10 @@ const AWAKE_FOR: Duration = Duration::from_secs(10);
 /// Someone idle this long at the driving computer does not.
 const IDLE_MS_AWAKE: u32 = 60_000;
 
+/// How long after the driving computer's last input (or its arrival) this
+/// computer's own edges stay unwatched ([`Receiver::driven_by`]).
+pub const DRIVEN_FOR: Duration = Duration::from_millis(2500);
+
 /// The driving computer silent this long is taken to have gone.
 pub const SILENCE_RELEASE: Duration = Duration::from_secs(1);
 
@@ -223,6 +227,17 @@ impl Receiver {
     /// The computer driving this one now.
     pub fn driver(&self) -> Option<&str> {
         self.driver.as_deref()
+    }
+
+    /// The computer driving this one at `now` while it sends input: it
+    /// arrived, or sent a key, a click, the wheel or a move, within
+    /// [`DRIVEN_FOR`]. Pings and activity notes do not count: a cursor left
+    /// resting here lets this computer's own edges lead on again.
+    pub fn driven_by(&self, now: Instant) -> Option<&str> {
+        self.driver.as_deref().filter(|_| {
+            self.input_at
+                .is_some_and(|at| now.saturating_duration_since(at) < DRIVEN_FOR)
+        })
     }
 
     /// The computer that wants this one's sound now: the one driving it,
@@ -1028,27 +1043,49 @@ fn status_due(on: bool, was_on: Option<bool>, since: Option<Duration>) -> bool {
     on || was_on != Some(false) || since.is_none_or(|since| since >= STATUS_IDLE_EVERY)
 }
 
-/// Set while another computer drives this one (its cursor is here): this
-/// computer's own driver watches no edge meanwhile ([`driven_here`]).
-static DRIVEN: AtomicBool = AtomicBool::new(false);
+/// The computer driving this one now, while its input is recent
+/// ([`Receiver::driven_by`]): this computer's own driver watches no edge
+/// meanwhile ([`driven_by`]).
+static DRIVEN_BY: Mutex<Option<String>> = Mutex::new(None);
 
-/// Whether another computer drives this one now. This computer's own
-/// driver (Windows' hooks, Linux's input-capture portal) watches no edge
-/// while it does: the pointer here is that computer's, and put on the edge
-/// facing it, an edge watched would carry this computer's keyboard and
-/// mouse straight back (the owner's first live test, Windows driving the
-/// Linux laptop). Watched again once it leaves, goes home or falls silent.
-pub fn driven_here() -> bool {
-    DRIVEN.load(Ordering::SeqCst)
+/// The computer driving this one now, while it sends input. This
+/// computer's own driver (Windows' hooks, Linux's input-capture portal)
+/// watches no edge meanwhile: the pointer here is that computer's, and put
+/// on the edge facing it, an edge watched would carry this computer's
+/// keyboard and mouse straight back (the owner's first live test, Windows
+/// driving the Linux laptop). Watched again once it leaves, goes home,
+/// falls silent, or sends no input for [`DRIVEN_FOR`], so its cursor left
+/// idle here never keeps this computer's own mouse from its edges (PR #552
+/// review I1: Linux has no switch key at home).
+pub fn driven_by() -> Option<String> {
+    DRIVEN_BY.lock().map(|by| by.clone()).unwrap_or_default()
 }
 
-fn set_driven(on: bool) {
-    if DRIVEN.swap(on, Ordering::SeqCst) != on {
+fn set_driven_by(by: Option<&str>) {
+    let Ok(mut now) = DRIVEN_BY.lock() else {
+        return;
+    };
+    if now.as_deref() != by {
         tracing::debug!(
-            on,
-            "Shared input: driven by another computer (this one's edges are not watched meanwhile)"
+            by,
+            "Shared input: driven by another computer now, or no longer (no edge watched meanwhile)"
         );
+        *now = by.map(str::to_string);
     }
+}
+
+/// Whether `msg` from `from` makes it drive this one now, said before it is
+/// acted on so no edge its pointer lands on is watched: its arrival, or
+/// input from the computer whose cursor is here (`driver`).
+fn drives_now(msg: &Msg, from: &str, allowed: bool, driver: Option<&str>) -> bool {
+    allowed
+        && match msg {
+            Msg::Enter { .. } => true,
+            Msg::Move { .. } | Msg::Key { .. } | Msg::Button { .. } | Msg::Wheel { .. } => {
+                driver == Some(from)
+            }
+            _ => false,
+        }
 }
 
 /// The receiving side, for the server's life: take what other computers
@@ -1095,7 +1132,7 @@ pub async fn run() {
         // a permission or a link gone), the sound follows it.
         follow_sound(&mut sound, &receiver, &mut channels);
         // And whether this computer's own driver may watch its edges.
-        set_driven(receiver.driver().is_some());
+        set_driven_by(receiver.driven_by(Instant::now()));
         tokio::select! {
             arrival = arriving.recv() => {
                 let Some((from, msg, arrived_us, link_id)) = arrival else { break };
@@ -1176,9 +1213,11 @@ pub async fn run() {
                 if standing.allowed && matches!(msg, Msg::Enter { .. }) {
                     tracing::info!(from, "Shared input: another computer drives this one");
                     driver_link = Some(link_id);
-                    // Said before its pointer is put here, so no edge it
-                    // lands on is watched.
-                    set_driven(true);
+                }
+                // Said before its pointer is put here or moved, so no edge
+                // it lands on is watched.
+                if drives_now(&msg, &from, standing.allowed, receiver.driver()) {
+                    set_driven_by(Some(&from));
                 }
                 if standing.allowed && matches!(msg, Msg::AskTimings) {
                     let timings = receiver.timings_for(&from).unwrap_or_default().to_vec();
@@ -1343,7 +1382,7 @@ pub async fn run() {
             }
         }
     }
-    set_driven(false);
+    set_driven_by(None);
 }
 
 #[cfg(test)]
@@ -1537,6 +1576,50 @@ mod tests {
             fake.take(),
             vec![Call::Move(inside, 32768), Call::Move(0, 32768)]
         );
+    }
+
+    /// PR #552 review I1: a cursor left resting here (its computer still
+    /// pinging and saying it is active) stops counting as driving after
+    /// [`DRIVEN_FOR`], so this computer's own edges lead on again; its next
+    /// input counts again.
+    #[test]
+    fn driven_counts_only_while_the_driving_computer_sends_input() {
+        let (mut r, _fake) = receiver();
+        let t0 = Instant::now();
+        assert_eq!(r.driven_by(t0), None);
+        r.handle_at("pc", Msg::Enter { x: 0, y: 0 }, true, t0);
+        assert_eq!(r.driven_by(t0), Some("pc"));
+        let resting = t0 + DRIVEN_FOR - Duration::from_millis(100);
+        r.handle_at("pc", Msg::Ping { t_us: 1 }, true, resting);
+        r.handle_at("pc", Msg::Active { idle_ms: 0 }, true, resting);
+        assert_eq!(r.driven_by(resting), Some("pc"));
+        let later = t0 + DRIVEN_FOR;
+        assert_eq!(
+            r.driven_by(later),
+            None,
+            "pings and activity notes do not count"
+        );
+        assert_eq!(r.driver(), Some("pc"), "its cursor is still here");
+        r.handle_at("pc", Msg::Move { seq: 1, x: 9, y: 9 }, true, later);
+        assert_eq!(r.driven_by(later), Some("pc"));
+        r.handle_at("pc", Msg::Leave, true, later);
+        assert_eq!(r.driven_by(later), None);
+    }
+
+    /// What says, before it is acted on, that a computer drives this one.
+    #[test]
+    fn its_arrival_and_its_input_say_it_drives_before_they_are_acted_on() {
+        let key = Msg::Key {
+            code: 30,
+            pressed: true,
+        };
+        assert!(drives_now(&Msg::Enter { x: 0, y: 0 }, "pc", true, None));
+        assert!(!drives_now(&Msg::Enter { x: 0, y: 0 }, "pc", false, None));
+        assert!(drives_now(&key, "pc", true, Some("pc")));
+        assert!(!drives_now(&key, "pc", true, Some("other")));
+        assert!(!drives_now(&key, "pc", true, None));
+        assert!(!drives_now(&Msg::Ping { t_us: 1 }, "pc", true, Some("pc")));
+        assert!(!drives_now(&Msg::Leave, "pc", true, Some("pc")));
     }
 
     #[test]

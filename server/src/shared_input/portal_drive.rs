@@ -303,16 +303,19 @@ impl<B: Backend> Glue<B> {
     /// Whether another computer drives this one, as the receiver says:
     /// while it does, no barrier is set, so the pointer it puts on the edge
     /// facing it never carries this computer's keyboard and mouse back.
-    fn follow_driven(&mut self, driver: &mut Driver) {
-        let driven = super::receive::driven_here();
-        if driven == driver.driven() {
-            return;
+    ///
+    /// `active_here`: this computer's own input came within
+    /// `receive::DRIVEN_FOR` (a visit of its own resting on the computer
+    /// driving this one ends then: [`Driver::set_driven`]).
+    fn follow_driven(&mut self, driver: &mut Driver, active_here: bool) {
+        let by = super::receive::driven_by();
+        if by.is_some() != driver.driven() {
+            tracing::info!(
+                by,
+                "Shared input: driven by another computer now, or no longer (no edge watched meanwhile)"
+            );
         }
-        tracing::info!(
-            driven,
-            "Shared input: driven by another computer (true) or no longer; no edge is watched meanwhile"
-        );
-        let actions = driver.set_driven(driven);
+        let actions = driver.set_driven(by.as_deref(), active_here);
         self.apply(driver, actions);
     }
 
@@ -508,12 +511,18 @@ fn drive<B: Backend>(
     let mut greeted_at: Option<Instant> = None;
     let mut fractional_screen = false;
     while !stop.load(Ordering::SeqCst) && !STOPPING.load(Ordering::SeqCst) {
-        glue.follow_driven(&mut driver);
+        glue.follow_driven(
+            &mut driver,
+            last_input.elapsed() < super::receive::DRIVEN_FOR,
+        );
         match events.recv_timeout(Duration::from_millis(50)) {
             Ok(event) => {
                 // Looked at again as the event comes: a barrier hit by the
                 // pointer of a computer that just arrived is let go of.
-                glue.follow_driven(&mut driver);
+                glue.follow_driven(
+                    &mut driver,
+                    last_input.elapsed() < super::receive::DRIVEN_FOR,
+                );
                 if matches!(
                     event,
                     Portal::Motion { .. }

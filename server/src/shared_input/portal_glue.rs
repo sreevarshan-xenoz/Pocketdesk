@@ -1057,7 +1057,7 @@ mod tests {
     fn while_driven_no_barrier_is_set_and_a_late_hit_is_let_go_of() {
         let mut rig = Rig::new(&["W"]);
         rig.calls();
-        let actions = rig.driver.set_driven(true);
+        let actions = rig.driver.set_driven(Some("W"), true);
         assert_eq!(rig.glue.act(actions), vec![]);
         assert_eq!(rig.calls(), vec![Call::Disarm]);
         // The rearm every few seconds sets none meanwhile.
@@ -1072,7 +1072,7 @@ mod tests {
         assert!(!rig.glue.captured());
         assert_eq!(rig.driver.away_on(), None);
         // It left: the barriers are set again.
-        let actions = rig.driver.set_driven(false);
+        let actions = rig.driver.set_driven(None, true);
         assert_eq!(rig.glue.act(actions), vec![]);
         assert_eq!(rig.calls(), vec![Call::Arm(vec![(RIGHT, "W".to_string())])]);
         // And a hit crosses again.
@@ -1087,7 +1087,7 @@ mod tests {
         let mut rig = Rig::new(&["W"]);
         rig.calls();
         // Driven, the glue not told yet: its barriers are still set.
-        let _late = rig.driver.set_driven(true);
+        let _late = rig.driver.set_driven(Some("W"), true);
         let hit = rig.hit(6, 1, (1600.0, 300.0));
         assert_eq!(sends(&hit), vec![]);
         assert_eq!(rig.calls(), vec![Call::Release(Some(6), (1600, 300))]);
