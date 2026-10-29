@@ -151,6 +151,11 @@ impl ComputersView {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(&computer.name).strong());
                 ui.label(RichText::new(link_words(computer)).weak());
+                // PC1: paired both ways, with consent given at pairing.
+                if computer.mine {
+                    ui.label(RichText::new(MINE).color(crate::theme::good(ui)))
+                        .on_hover_text(MINE_HOVER);
+                }
                 // BK7: its screen in a window here.
                 let reach = view_reach(computer, server_running);
                 if ui
@@ -208,6 +213,10 @@ impl ComputersView {
 
 /// Why Unpair waits (BA3).
 const STOPPED: &str = "Start the server first: it does the unpairing";
+
+/// What a computer paired both ways is (PC1), and how to have it ask again.
+pub const MINE: &str = "Mine: sees and controls without asking";
+const MINE_HOVER: &str = "Paired both ways from a link made for another of your computers: each lists the other, and either shows and controls the other with no prompt. To have it ask first again, turn on its Ask before each session (and off its Control switches) on Devices. Unpair takes both ways away.";
 
 #[cfg(test)]
 mod tests {

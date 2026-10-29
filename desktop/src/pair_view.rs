@@ -22,6 +22,10 @@ pub struct Whose {
     pub someone_else: bool,
     /// P9: pairs with this saved profile's permissions, as someone else's.
     pub profile: Option<String>,
+    /// PC1: the link for another computer is for one of the owner's own,
+    /// which pairs both ways from it and sees and controls this one
+    /// without asking. Only with the owner's code.
+    pub mine: bool,
 }
 
 impl Whose {
@@ -29,11 +33,13 @@ impl Whose {
         grant_secs: None,
         someone_else: false,
         profile: None,
+        mine: false,
     };
     pub const SOMEONE_ELSE: Self = Self {
         grant_secs: None,
         someone_else: true,
         profile: None,
+        mine: false,
     };
 
     pub const fn guest(secs: u64) -> Self {
@@ -41,6 +47,7 @@ impl Whose {
             grant_secs: Some(secs),
             someone_else: true,
             profile: None,
+            mine: false,
         }
     }
 
@@ -50,7 +57,15 @@ impl Whose {
             grant_secs: None,
             someone_else: true,
             profile: Some(name.to_string()),
+            mine: false,
         }
+    }
+
+    /// Whether it is the owner's own code (not a guest's, someone else's or
+    /// a profile's): the only one that can be for another of the owner's
+    /// computers (PC1).
+    pub fn is_owners(&self) -> bool {
+        self.grant_secs.is_none() && !self.someone_else && self.profile.is_none()
     }
 
     fn of(file: &pin::FilePin) -> Self {
@@ -60,6 +75,7 @@ impl Whose {
             // pairs as someone else's all the same (M2 review).
             someone_else: file.someone_else || file.grant_secs.is_some(),
             profile: file.profile.clone(),
+            mine: file.mine,
         }
     }
 }
@@ -85,14 +101,18 @@ pub fn link_for(
         Some(file) => file.pin,
         None => {
             let pin = pin::mint_value();
-            pin::write_preset(
-                state_dir,
-                &pin,
-                now_unix,
-                whose.grant_secs,
-                whose.someone_else,
-                whose.profile.as_deref(),
-            )?;
+            if whose.mine && whose.is_owners() {
+                pin::write_mine(state_dir, &pin, now_unix)?;
+            } else {
+                pin::write_preset(
+                    state_dir,
+                    &pin,
+                    now_unix,
+                    whose.grant_secs,
+                    whose.someone_else,
+                    whose.profile.as_deref(),
+                )?;
+            }
             pin
         }
     };
@@ -111,7 +131,7 @@ pub fn link_for(
             .ok()
             .map(identity::fingerprint_hex),
         endpoint: identity::read_endpoint(state_dir).map(|e| e.to_string()),
-        mine: false,
+        mine: whose.mine && whose.is_owners(),
     })
 }
 
@@ -275,6 +295,12 @@ pub fn profile_allows(
     }
     words
 }
+
+/// The box that makes the link for another computer one of the owner's own
+/// (PC1), and its line.
+pub const MINE_BOX: &str =
+    "This is another of my computers (let it see and control this one without asking)";
+const MINE_LINE: &str = "Ticked, the two computers pair both ways: each lists the other, and either shows and controls the other with no prompt. Leave it off for a computer that is not yours.";
 
 /// The choices of whose phone a code pairs (M2b), a guest's for a while (I3).
 const WHOSE: [(Whose, &str); 5] = [
@@ -505,9 +531,10 @@ impl PairView {
                         .small(),
                     );
                 }
-                if chosen != self.whose {
-                    grant_changed = Some(chosen);
-                }
+                // PC1: a phone's choice keeps the box for another of the
+                // owner's computers only while the code is the owner's own.
+                let owners = chosen.is_owners();
+                chosen.mine = owners && self.whose.mine;
                 ui.add_space(6.0);
                 ui.label("Or enter this PIN:");
                 let spaced: String = link
@@ -534,7 +561,17 @@ impl PairView {
                     RichText::new(format!("Reachable at {}", link.addresses.join(", "))).weak(),
                 );
                 // Another of the owner's computers pairs from the link
-                // itself (2f), pasted in its Settings → Computers.
+                // itself (2f), pasted in its Settings → Computers; both
+                // ways, with consent given here, when it is ticked (PC1).
+                ui.add_enabled(owners, egui::Checkbox::new(&mut chosen.mine, MINE_BOX))
+                    .on_hover_text(
+                        "A new code is made for it. The other computer pairs both ways from the link: each lists the other under Other computers and trusts it with control and the shared keyboard and mouse, and neither asks before the other's sessions. Turn either back on its Devices page.",
+                    )
+                    .on_disabled_hover_text("Only with your own code: choose Mine above.");
+                ui.label(RichText::new(MINE_LINE).small());
+                if chosen != self.whose {
+                    grant_changed = Some(chosen.clone());
+                }
                 if ui
                     .button("Copy the link for another computer")
                     .on_hover_text(
@@ -582,7 +619,15 @@ impl PairView {
         );
         self.whose_chosen = false;
         match link_for(state_dir, &config, now_unix, addresses, self.whose.clone()) {
-            Ok(link) => match qr_modules(&link.to_uri()) {
+            // The phone's code never says a link is for a computer (PC1):
+            // the phone has no use for it.
+            Ok(link) => match qr_modules(
+                &PairLink {
+                    mine: false,
+                    ..link.clone()
+                }
+                .to_uri(),
+            ) {
                 Ok(modules) => {
                     self.texture = Some(ui.ctx().load_texture(
                         "pair-qr",
@@ -673,6 +718,40 @@ mod tests {
         let fingerprint = identity::fingerprint_hex(identity::cert_fingerprint(&dir).unwrap());
         assert_eq!(link.fingerprint.as_deref(), Some(fingerprint.as_str()));
         assert!(link.endpoint.as_deref().is_some_and(|e| e.contains("e1")));
+        assert!(!link.mine, "a plain code's link");
+    }
+
+    /// PC1: the code for another of the owner's computers says so in the
+    /// PIN file and its link; ticking or unticking the box makes a new
+    /// code, and only the owner's own code can be one.
+    #[test]
+    fn a_code_for_another_of_my_computers_says_so_on_file_and_in_its_link() {
+        let dir = temp_dir("mine");
+        let addresses = || vec!["192.0.2.4".to_string()];
+        let config = Config::default();
+        let mine = Whose {
+            mine: true,
+            ..Whose::MINE
+        };
+        let link = link_for(&dir, &config, 1_000, addresses(), mine.clone()).unwrap();
+        assert!(link.mine);
+        assert!(link.to_uri().ends_with("&mine=1"));
+        let file = pin::read(&dir, 1_000).unwrap();
+        assert!(file.mine && file.pin == link.pin);
+        assert_eq!(Whose::of(&file), mine);
+        let again = link_for(&dir, &config, 1_010, addresses(), mine).unwrap();
+        assert_eq!(again.pin, link.pin, "kept while the box stays ticked");
+        let plain = link_for(&dir, &config, 1_020, addresses(), Whose::MINE).unwrap();
+        // Unticked, a new code, written plain.
+        assert!(!plain.mine && !pin::read(&dir, 1_020).unwrap().mine);
+        // Someone else's code is never one, whatever the view says.
+        let theirs = Whose {
+            mine: true,
+            ..Whose::SOMEONE_ELSE
+        };
+        assert!(!theirs.is_owners());
+        let link = link_for(&dir, &config, 1_030, addresses(), theirs).unwrap();
+        assert!(!link.mine && !pin::read(&dir, 1_030).unwrap().mine);
     }
 
     #[test]
