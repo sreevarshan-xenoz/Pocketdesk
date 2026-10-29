@@ -3129,6 +3129,20 @@ Built 2026-10-30. A unit test covers the decision; the link itself was not run.
 - [ ] With the two laptops paired both ways and "Clipboard with my computers" on both, turn Clipboard off for the Linux laptop on the Windows Devices page: a copy on the laptop no longer lands on Windows; turn it back on and it does. A pairing one way only keeps syncing as before. (where: second computer)
 - [ ] With Clipboard off for the laptop on Windows' Devices page but Shared input on, cross from the laptop to Windows with something copied: Windows' clipboard does not take it; with Clipboard on, it does. (where: second computer)
 
+## 229. Pair a computer nearby, and one place per task (Desktop UX 2)
+
+Built 2026-10-30, from the owner's first live test of pairing two computers (the link had to be carried across, and Windows' Public network blocked it). Pair → Computer lists the computers on this network and pairs one with a matching code on both screens; Pair has a Phone | Computer switch, and the Keyboard and mouse page has a setup checklist and its options. Unit-tested: the code (both sides alike, another certificate or nonce another code), the host's ask, accept, decline and run-out, the pace per address, the Nearby list's rows, reading an announcement, the link an accepted answer makes. A live test paired two throwaway servers on the Windows box from an ask (decline, then accept both ways). Not run: real mDNS between two machines, a real prompt and notification, Linux.
+- [ ] Pair the two laptops from the nearby list: on Windows, Pair → Computer lists the Arch laptop under Nearby within about 10 s, with its address; Pair on it shows a six-digit code with "Same code on both?" and Confirm; the Arch laptop shows "<Windows' name> wants to pair" with the same code, as a notification too; Confirm on Windows (it says "Confirmed. Waiting for … to accept") and Accept on the laptop, and Windows says "Paired with …" with Set up keyboard and mouse, and each lists the other (Windows under Settings → Other computers, the laptop on its Devices page). (where: second computer)
+- [ ] The same the other way (the Arch laptop asks Windows), with "Both are mine" ticked on both sides: each lists the other as Mine. (where: second computer)
+- [ ] Both owners must say yes (PR #556 security review): Accept on the asked computer while the asking one still shows "Same code on both?" pairs nothing until Confirm there; Accept first then Confirm, and Confirm first then Accept, each pair. Cancel on the asking computer takes the other's prompt down at once, and a new ask can be made right away. (where: second computer)
+- [ ] The Arch laptop asks Windows, and its Wi-Fi is turned off while Windows shows the prompt: the prompt goes at once, and the other takes a new ask. (where: second computer)
+- [ ] Decline on the asked computer, and Escape on its prompt: the asking one says it declined; nothing is paired. A minute without an answer declines too. (where: second computer)
+- [ ] The asked computer's window hidden to the tray: the notification shows the code, and the window comes forward with the prompt. (where: second computer)
+- [ ] "Let computers nearby ask to pair" off on the asked computer: the asking one says it isn't taking asks now, and no prompt shows there. (where: second computer)
+- [ ] Windows set to a Public network: the Arch laptop's Nearby list never shows Windows, and after about 10 s says why (the reasons, with how to make it Private on Windows' own list) and offers Run diagnostics. (where: second computer)
+- [ ] The Keyboard and mouse page's Setup on both laptops ticks each step as it becomes true (running, paired, sharing on, linked directly, may drive, arranged), and each fix button does what it says. (where: second computer)
+- [ ] An option changed on the Keyboard and mouse page (Clipboard follows the mouse off) is saved at once and the next crossing follows it; Settings' search for "game" finds the pointer, whose button opens the page. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

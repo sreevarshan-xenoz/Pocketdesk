@@ -399,6 +399,12 @@ pub struct PocketdeskApp {
     computers: crate::computers_view::ComputersView,
     /// The Keyboard and mouse page's options (UX 2).
     input_options: crate::input_options::InputOptions,
+    /// Pair → Computer's Nearby list (pair a computer nearby).
+    nearby: crate::nearby_view::NearbyView,
+    /// A nearby computer's ask on this one's screen, and whether it is new
+    /// (the window then comes forward).
+    nearby_prompt: crate::nearby_view::Prompt,
+    nearby_new: bool,
     /// The Keyboard and mouse page (shared input).
     arrange: crate::arrange_view::ArrangeView,
     /// Settings → KDE Connect devices (3a).
@@ -483,6 +489,9 @@ impl PocketdeskApp {
             notes: Default::default(),
             computers: Default::default(),
             input_options: Default::default(),
+            nearby: Default::default(),
+            nearby_prompt: Default::default(),
+            nearby_new: false,
             arrange: Default::default(),
             kdeconnect: Default::default(),
             phone_files: Default::default(),
@@ -712,6 +721,7 @@ impl PocketdeskApp {
         }
         if self.tab == Tab::Pair && tab != Tab::Pair {
             self.pair.reset(&self.state_dir);
+            self.nearby.stop();
         }
         if tab == Tab::Activity && self.tab != Tab::Activity {
             self.activity.reopen();
@@ -748,6 +758,8 @@ impl PocketdeskApp {
             .filter(|r| !self.answered_tasks.contains(&r.id))
             .collect();
         self.config = Config::load().ok();
+        let asked = pocketdesk_core::local::computers::read(&self.state_dir).nearby_in;
+        self.nearby_new |= self.nearby_prompt.update(asked);
         if self.tab == Tab::Status {
             // Read again only when the log changed, not every second.
             let stamp = model::session_log_stamp(&self.state_dir);
@@ -1243,13 +1255,22 @@ impl PocketdeskApp {
                 }
             }
             Tab::Pair => {
+                let (nearby, state_dir) = (&mut self.nearby, self.state_dir.clone());
+                let (devices, running) = (&self.snapshot.devices, self.snapshot.running);
+                let mut list = |ui: &mut egui::Ui| {
+                    nearby.show(ui, &state_dir, devices, running, now_unix());
+                };
                 self.pair.show(
                     ui,
                     &self.state_dir,
                     self.config.as_ref(),
                     &self.snapshot.devices,
                     now_unix(),
+                    &mut list,
                 );
+                if self.pair.mode != crate::pair_view::PairFor::Computer {
+                    self.nearby.stop();
+                }
                 // UX 2: the other computer's link is pasted here too.
                 if self.pair.mode == crate::pair_view::PairFor::Computer {
                     self.computers.show_pairing(
@@ -4113,6 +4134,15 @@ impl eframe::App for PocketdeskApp {
         }
         self.approval_prompt(ui);
         self.task_prompt(ui);
+        // Pair a computer nearby: another computer's ask, over any page;
+        // the window comes forward for a new one, as for a phone's.
+        if std::mem::take(&mut self.nearby_new) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        self.nearby_prompt
+            .show(ui.ctx(), &self.state_dir, now_unix());
     }
 }
 
