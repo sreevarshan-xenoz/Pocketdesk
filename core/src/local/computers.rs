@@ -382,17 +382,19 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
                 .ok()
                 .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
                 .is_some_and(|at| now_unix.saturating_sub(at.as_secs()) > REQUEST_TTL_SECS);
-            if stale && path.extension().is_some_and(|e| e == "tmp") {
+            // A claimed one left by a crash holds a Pair request's PIN too.
+            if stale && path.extension().is_some_and(|e| e == "tmp" || e == "taken") {
                 let _ = std::fs::remove_file(&path);
             }
             continue;
         };
-        let raw = std::fs::read_to_string(&path);
-        let _ = std::fs::remove_file(&path);
-        let Some(request) = raw
-            .ok()
-            .and_then(|raw| serde_json::from_str::<ComputerRequest>(&raw).ok())
-        else {
+        // Claimed before it is read (PR #553 review I1): a request the
+        // app withdrew meanwhile is not there to claim, and one claimed is
+        // not there to withdraw.
+        let Some(claimed) = claim(&path) else {
+            continue;
+        };
+        let Some(request) = read_claimed(&claimed) else {
             continue;
         };
         let fresh =
@@ -405,9 +407,25 @@ pub fn take_all(state_dir: &Path, now_unix: u64) -> Vec<ComputerRequest> {
     taken
 }
 
+/// Claim the request at `path` for the server, atomically: renamed out of
+/// the app's reach, so [`withdraw`] and the server never both win. Where
+/// it went, or none when it was withdrawn (or claimed) first.
+fn claim(path: &Path) -> Option<PathBuf> {
+    let claimed = path.with_extension("taken");
+    std::fs::rename(path, &claimed).ok().map(|()| claimed)
+}
+
+/// Read a claimed request, which goes once read.
+fn read_claimed(claimed: &Path) -> Option<ComputerRequest> {
+    let raw = std::fs::read_to_string(claimed);
+    let _ = std::fs::remove_file(claimed);
+    raw.ok()
+        .and_then(|raw| serde_json::from_str::<ComputerRequest>(&raw).ok())
+}
+
 /// Take back the request `id` before the server takes it (the app's
-/// Cancel): true when it was still waiting, false when the server had
-/// taken it already (or it is gone).
+/// Cancel): true when it was still waiting, so the server never sees it;
+/// false when the server had claimed it already (or it is gone).
 pub fn withdraw(state_dir: &Path, id: &str) -> io::Result<bool> {
     match std::fs::remove_file(request_path(state_dir, id)?) {
         Ok(()) => Ok(true),
@@ -446,6 +464,29 @@ mod tests {
         assert_eq!(take_all(&dir, now).len(), 1);
         assert!(!withdraw(&dir, &second.id).unwrap(), "taken already");
         assert!(withdraw(&dir, "../x").is_err(), "not a request id");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #553 review I1: the server claims a request before it reads
+    /// it, so Cancel and the server never both win. Claimed first, Cancel
+    /// is too late; withdrawn first, there is nothing to claim.
+    #[test]
+    fn a_request_is_claimed_or_withdrawn_never_both() {
+        let dir = temp_dir("claim");
+        let now = crate::local::pin::now_unix();
+        let ask = ComputerAsk::Forget {
+            device_id: "b".to_string(),
+        };
+        let first = request(&dir, ask.clone(), now).unwrap();
+        let path = request_path(&dir, &first.id).unwrap();
+        let claimed = claim(&path).expect("claimed");
+        assert!(!withdraw(&dir, &first.id).unwrap(), "too late: it is taken");
+        assert_eq!(read_claimed(&claimed).map(|r| r.id), Some(first.id));
+        assert!(!claimed.exists(), "read once, then gone");
+        let second = request(&dir, ask, now).unwrap();
+        let path = request_path(&dir, &second.id).unwrap();
+        assert!(withdraw(&dir, &second.id).unwrap());
+        assert!(claim(&path).is_none(), "withdrawn: nothing to claim");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

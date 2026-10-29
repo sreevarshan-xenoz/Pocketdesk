@@ -26,6 +26,8 @@ struct Pairing {
     /// The link's computer, as shown.
     name: String,
     since: Instant,
+    /// Cancel came after the server took it (PR #553 review I1).
+    too_late: bool,
 }
 
 #[derive(Default)]
@@ -182,22 +184,36 @@ impl ComputersView {
         }
         let mut cancel = false;
         ui.horizontal_wrapped(|ui| {
+            // Clear of the frame's edge, so it is drawn whole.
+            ui.add_space(4.0);
             ui.spinner();
             ui.label(format!("Pairing with {}…", pairing.name));
-            cancel = ui.button("Cancel").clicked();
+            if pairing.too_late {
+                ui.label(RichText::new(TOO_LATE).color(crate::theme::muted(ui)));
+            } else {
+                cancel = ui.button("Cancel").clicked();
+            }
         });
         ui.ctx().request_repaint_after(PAIRING_REFRESH);
         if cancel {
-            let name = pairing.name.clone();
-            self.notice = match computers::withdraw(state_dir, &pairing.request) {
-                Ok(true) => crate::notice::Notice::done(format!("Pairing with {name} cancelled.")),
+            // The server claims a request before it reads it, so this
+            // either takes it back whole or finds it taken (review I1).
+            match computers::withdraw(state_dir, &pairing.request) {
+                Ok(true) => {
+                    self.notice = crate::notice::Notice::done(format!(
+                        "Pairing with {} cancelled.",
+                        pairing.name
+                    ));
+                    self.pairing = None;
+                }
                 // Taken already: it goes on, and its outcome shows here.
-                Ok(false) => crate::notice::Notice::done(format!(
-                    "Stopped waiting: the server had begun pairing with {name}, and says how it went here."
-                )),
-                Err(e) => crate::notice::Notice::error(format!("Not cancelled: {e}")),
-            };
-            self.pairing = None;
+                Ok(false) => {
+                    if let Some(pairing) = self.pairing.as_mut() {
+                        pairing.too_late = true;
+                    }
+                }
+                Err(e) => self.notice = crate::notice::Notice::error(format!("Not cancelled: {e}")),
+            }
         }
     }
 
@@ -355,6 +371,7 @@ impl ComputersView {
                         request: request.id,
                         name,
                         since: Instant::now(),
+                        too_late: false,
                     });
                     self.read_at = None;
                 }
@@ -480,6 +497,9 @@ pub struct Outcome {
     pub said: String,
     pub diagnostics: bool,
 }
+
+/// What a Cancel after the server took the request says (review I1).
+pub const TOO_LATE: &str = "Too late to cancel: the server is already pairing.";
 
 /// What the timeout of a pairing says: the commonest failure.
 pub const NO_ANSWER: &str = "The other computer didn't answer. Check both are on the same network and Pocketdesk is running there.";
@@ -1091,6 +1111,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(gone);
         assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// PR #553 review I1: Cancel after the server took the request says
+    /// it is too late, and the page keeps waiting for that outcome.
+    #[test]
+    fn cancel_too_late_keeps_waiting_for_the_outcome() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("too-late");
+        let mut harness = page(&dir, true, &mine_link());
+        harness.get_by_label("Pair one way").click();
+        harness.run_steps(2);
+        let now = pocketdesk_core::local::pin::now_unix();
+        let taken = computers::take_all(&dir, now);
+        harness.get_by_label("Cancel").click();
+        harness.run_steps(2);
+        let late = harness.query_by_label_contains(TOO_LATE).is_some();
+        let waiting = harness
+            .query_by_label_contains("Pairing with Test Tower")
+            .is_some();
+        let no_cancel = harness.query_by_label("Cancel").is_none();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(taken.len(), 1);
+        assert!(late && waiting && no_cancel);
     }
 
     /// UX 1: a pairing that worked says so, with the next step.
