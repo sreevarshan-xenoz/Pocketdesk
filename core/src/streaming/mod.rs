@@ -97,8 +97,9 @@ pub use client::StreamingClient;
 pub use client::report_samples;
 pub use client::{
     REMOTE_FEATURE_LASER, REMOTE_FEATURES_SAID, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_PEN,
-    SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO, SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features,
-    screen_features, screen_takes_input, sound_grant,
+    SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS, SCREEN_FEATURES_SAID, SOUND_GRANT_AUDIO,
+    SOUND_GRANT_MIC, SOUND_GRANT_SAID, remote_features, screen_features, screen_runs_windows,
+    screen_takes_input, sound_grant,
 };
 pub use connection::{
     Connection, ConnectionError, ConnectionStats, InStream, OutStream, PeerKey, QuinnConnection,

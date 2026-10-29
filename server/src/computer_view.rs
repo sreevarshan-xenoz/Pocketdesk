@@ -1091,6 +1091,10 @@ async fn attempt(
             admitted = true;
             next.control = Some(control);
         }
+        // Which system it runs, for the window's Send keys menu (PC4).
+        if let Some(windows) = pocketdesk_core::streaming::screen_runs_windows(features) {
+            next.windows = Some(windows);
+        }
         if admitted {
             next.phase = Phase::Showing;
             if !shown {
