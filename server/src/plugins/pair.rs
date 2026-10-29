@@ -1013,6 +1013,18 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
             }
         }
         let grant_secs = cli_grant.flatten();
+        let asked_computer = packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
+        // Before any key is bound (PC1 re-review I-1): an id that is a
+        // computer listed here, with another certificate, is refused, as a
+        // computer or a phone, and that computer keeps its keys.
+        if let Ok(dir) = state::state_dir()
+            && let Some(why) =
+                reused_id_in(&dir, &phone_id, sender.peer_key().as_ref(), asked_computer)
+        {
+            tracing::warn!("Pairing refused: {why}");
+            respond_pair(sender, false, "").await;
+            return;
+        }
         // A guest grant, and someone else's phone (M2 review), binds the key
         // that paired before anything is trusted, and never claims an id
         // another phone has proved: only the owner's own code may.
@@ -1038,7 +1050,10 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         if grant_secs.is_none() && !someone_else {
             let bound = state::state_dir()
                 .map_err(|e| std::io::Error::other(e.to_string()))
-                .and_then(|dir| owner_paired_in(&dir, &phone_id, sender.peer_key().as_ref()));
+                .and_then(|dir| {
+                    pairing_keys_in(&dir, &phone_id, sender.peer_key().as_ref(), asked_computer)
+                        .map_err(std::io::Error::other)
+                });
             if let Err(e) = bound {
                 tracing::error!("Pairing refused: could not bind the keys of {phone_id}: {e}");
                 respond_pair(sender, false, "").await;
@@ -1048,18 +1063,7 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         // Another of the owner's computers (2f) asks to be one: the PIN
         // allowed the pairing, this chooses its narrow permissions. Never a
         // guest's.
-        let computer = grant_secs.is_none()
-            && packet.body.get("computer").and_then(|v| v.as_bool()) == Some(true);
-        // A computer pairing under the id of one listed here with another
-        // certificate would take that one's place (PC1 review M2): refused,
-        // until that one is unpaired here.
-        if computer && listed_with_other_key(&phone_id, sender.peer_key().as_ref()) {
-            tracing::warn!(
-                "Pairing refused: {phone_id} is a computer listed here with another certificate"
-            );
-            respond_pair(sender, false, "").await;
-            return;
-        }
+        let computer = grant_secs.is_none() && asked_computer;
         // PC1: one of the owner's own, paired both ways, when it asked and
         // this computer's own code was minted for that; listed here in turn
         // from what it said of itself.
@@ -1175,25 +1179,47 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     }
 }
 
-/// Whether `device_id` is a computer this one lists with a certificate
-/// other than the one its connection proved (`key`), or proved none.
-fn listed_with_other_key(
+/// Bind the keys of the owner's pairing of `phone_id` on a connection that
+/// proved `key`, as a computer or a phone (`computer`).
+fn pairing_keys_in(
+    dir: &std::path::Path,
+    phone_id: &str,
+    key: Option<&pocketdesk_core::streaming::PeerKey>,
+    computer: bool,
+) -> std::result::Result<(), String> {
+    if let Some(why) = reused_id_in(dir, phone_id, key, computer) {
+        return Err(why);
+    }
+    owner_paired_in(dir, phone_id, key).map_err(|e| e.to_string())
+}
+
+/// Why a pairing under `device_id` on a connection that proved `key` is
+/// refused before anything is bound (PC1 re-review I-1): the id is a
+/// computer listed here with another certificate, or none proved, which
+/// would take that computer's place and lock it out. Asked as a computer
+/// or as a phone (`computer`) alike: no phone takes a listed computer's id.
+fn reused_id_in(
+    dir: &std::path::Path,
     device_id: &str,
     key: Option<&pocketdesk_core::streaming::PeerKey>,
-) -> bool {
-    let Ok(dir) = state::state_dir() else {
-        return false;
-    };
-    let file = pocketdesk_core::local::computers::read(&dir);
+    computer: bool,
+) -> Option<String> {
+    let file = pocketdesk_core::local::computers::read(dir);
     if !file.computers.iter().any(|c| c.device_id == device_id) {
-        return false;
+        return None;
     }
-    match key {
+    let other = match key {
         Some(pocketdesk_core::streaming::PeerKey::Tls(hash)) => {
             file.listed_with_other_certificate(device_id, &hex(hash))
         }
         _ => true,
-    }
+    };
+    other.then(|| {
+        format!(
+            "{device_id} is a computer listed here with another certificate (asked as a {})",
+            if computer { "computer" } else { "phone" }
+        )
+    })
 }
 
 /// PC1: whether a computer's pairing makes it one of the owner's own,
@@ -1334,6 +1360,49 @@ fn show_pin_notification(pin: &str) {
 
 #[cfg(test)]
 mod tests {
+
+    /// PC1 re-review I-1: a pairing under the id of a computer listed here
+    /// with another certificate is refused before any key is touched,
+    /// whether it says it is a computer or a phone: the listed computer
+    /// keeps its keys, its iroh key too, and nobody else takes them.
+    #[test]
+    fn a_listed_computers_id_with_another_key_touches_no_key() {
+        use pocketdesk_core::local::computers::{self, ComputerFacts};
+        use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
+        use pocketdesk_core::streaming::PeerKey;
+        let dir = std::env::temp_dir().join(format!("pd-pc1-reused-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (own, iroh) = ("ab".repeat(32), "e".repeat(64));
+        computers::update(&dir, |file| {
+            let facts = ComputerFacts {
+                name: "Desk".to_string(),
+                addresses: vec!["192.0.2.80".to_string()],
+                control_port: 1716,
+                stream_port: 4716,
+                endpoint: None,
+            };
+            file.computers.push(facts.into_peer("desk", &own, 1));
+        })
+        .unwrap();
+        device_keys::replace(&dir, "desk", &own).unwrap();
+        device_keys::register(&dir, "desk", Slot::Iroh, &iroh).unwrap();
+        let impostor = PeerKey::Tls([0xcd; 32]);
+        let mut refusals = Vec::new();
+        for computer in [true, false] {
+            refusals.push(pairing_keys_in(&dir, "desk", Some(&impostor), computer).is_err());
+            refusals.push(pairing_keys_in(&dir, "desk", None, computer).is_err());
+        }
+        let tls = device_keys::check(&dir, "desk", Slot::Tls, Some(&own));
+        let kept_iroh = device_keys::check(&dir, "desk", Slot::Iroh, Some(&iroh));
+        // Its own certificate pairs again, as before.
+        let again = pairing_keys_in(&dir, "desk", Some(&PeerKey::Tls([0xab; 32])), true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(refusals, [true; 4], "refused, as a computer and as a phone");
+        assert_eq!(tls, Verdict::Matches, "its certificate stands");
+        assert_eq!(kept_iroh, Verdict::Matches, "its iroh key stands");
+        assert!(again.is_ok());
+    }
 
     #[test]
     fn a_pin_shown_for_the_phone_follows_the_pair_pages_choice() {
