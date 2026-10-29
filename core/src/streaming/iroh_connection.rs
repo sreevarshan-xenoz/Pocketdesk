@@ -447,15 +447,30 @@ pub fn accept_incoming(
     incoming: iroh::endpoint::Incoming,
     computer_link: Option<&Arc<iroh::endpoint::ServerConfig>>,
 ) -> std::result::Result<iroh::endpoint::Accepting, NoqError> {
-    let wants_computer_link = || {
-        incoming
-            .decrypt()
-            .and_then(|initial| initial.alpns())
-            .is_some_and(|alpns| offers_computer_link(alpns.map_while(|alpn| alpn.ok())))
+    let Some(config) = computer_link else {
+        return incoming.accept();
     };
-    match computer_link {
-        Some(config) if wants_computer_link() => incoming.accept_with(Arc::clone(config)),
-        _ => incoming.accept(),
+    let offered = incoming
+        .decrypt()
+        .and_then(|initial| initial.alpns())
+        .map(|alpns| offers_computer_link(alpns.map_while(|alpn| alpn.ok())));
+    match offered {
+        Some(true) => {
+            tracing::debug!("Accepted another computer's link on its own controller (Cubic)");
+            incoming.accept_with(Arc::clone(config))
+        }
+        Some(false) => {
+            tracing::debug!(
+                "Accepted a connection on the endpoint's own controller: no computer link offered"
+            );
+            incoming.accept()
+        }
+        None => {
+            tracing::debug!(
+                "Accepted a connection on the endpoint's own controller: its offered ALPNs could not be read"
+            );
+            incoming.accept()
+        }
     }
 }
 
