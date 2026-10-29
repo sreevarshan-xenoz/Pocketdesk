@@ -249,8 +249,17 @@ impl<B: Backend> PortalGlue<B> {
     pub fn rearm(&mut self, now: Instant) {
         // A wall up long enough lifts: its edge is set again.
         self.breaker.expire(now);
+        self.walls_lifted();
         self.disabled = false;
         self.arm();
+    }
+
+    /// With no wall left, fractional scaling no longer stops a crossing:
+    /// the page says ready again.
+    fn walls_lifted(&mut self) {
+        if self.standing == Standing::FractionalScale && self.breaker.walls().is_empty() {
+            self.standing = Standing::Ready;
+        }
     }
 
     /// What the portal said: the driver told, and what it wants done here
@@ -280,6 +289,7 @@ impl<B: Backend> PortalGlue<B> {
                 if self.zones.as_ref() != Some(&zones) {
                     // New screens: every edge is tried again.
                     self.breaker.clear();
+                    self.walls_lifted();
                     self.zones = Some(zones);
                 }
                 if self.standing == Standing::Starting || self.standing == Standing::NeedsPermission
@@ -1254,5 +1264,53 @@ mod tests {
         });
         assert_eq!(rig.driver.away_on(), None, "the switch key came home");
         assert_eq!(rig.calls(), vec![Call::Release(Some(8), PARK)]);
+    }
+
+    /// BK8 re-review N1: once every wall has lifted, the page stops saying
+    /// fractional scaling stops crossing; the edge is set again.
+    #[test]
+    fn the_fractional_scale_word_goes_once_every_wall_lifts() {
+        let mut rig = Rig::new(&["W", "P"]);
+        let t0 = rig.now;
+        for (n, ms) in [(1u32, 0u64), (2, 300)] {
+            rig.now = t0 + Duration::from_millis(ms);
+            rig.hit(n, 1, (1600.0, 500.0));
+            rig.say(Portal::Deactivated {
+                activation: Some(n),
+            });
+        }
+        rig.now = t0 + Duration::from_millis(600);
+        rig.hit(3, 1, (1600.0, 500.0));
+        assert_eq!(rig.glue.standing(), Standing::FractionalScale);
+        rig.calls();
+        // Not yet lifted: still said.
+        rig.glue
+            .rearm(rig.now + crate::shared_input::barriers::WALL_FOR / 2);
+        assert_eq!(rig.glue.standing(), Standing::FractionalScale);
+        assert_eq!(rig.calls(), vec![]);
+        // Lifted: ready again, the edge set again.
+        rig.glue
+            .rearm(rig.now + crate::shared_input::barriers::WALL_FOR);
+        assert_eq!(rig.glue.standing(), Standing::Ready);
+        assert_eq!(
+            rig.calls(),
+            vec![Call::Arm(vec![
+                (RIGHT, "W".to_string()),
+                (BOTTOM, "P".to_string())
+            ])]
+        );
+        // New zones lift every wall too.
+        let mut rig = Rig::new(&["W"]);
+        let t0 = rig.now;
+        for (n, ms) in [(1u32, 0u64), (2, 300), (3, 600)] {
+            rig.now = t0 + Duration::from_millis(ms);
+            rig.hit(n, 1, (1600.0, 500.0));
+            rig.say(Portal::Deactivated {
+                activation: Some(n),
+            });
+        }
+        assert_eq!(rig.glue.standing(), Standing::FractionalScale);
+        rig.say(Portal::Zones(vec![screen(0, 0, 1280, 800)]));
+        assert_eq!(rig.glue.standing(), Standing::Ready);
     }
 }
