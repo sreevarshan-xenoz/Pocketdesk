@@ -893,7 +893,7 @@ async fn attempt(
     }
 }
 
-// One input packet on its own stream.
+/// One input packet on its own stream.
 async fn send_input(conn: &SharedConnection, packet: &InputPacket) -> Result<(), String> {
     let mut stream = conn.open_uni().await.map_err(|e| e.to_string())?;
     stream
