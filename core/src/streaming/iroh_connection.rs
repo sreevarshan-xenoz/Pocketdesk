@@ -453,6 +453,10 @@ pub fn accept_incoming(
     let Some(config) = computer_link else {
         return incoming.accept();
     };
+    // The read needs the dialer's ClientHello in its first packet, as it is
+    // with iroh's ring TLS (no post-quantum key share); with aws-lc-rs and
+    // X25519MLKEM768 it could span two, every read would fail and the link
+    // fall back to BBR (`a_new_computer_links_to_a_new_one_on_cubic` fails).
     let offered = incoming
         .decrypt()
         .and_then(|initial| initial.alpns())
