@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-966 open items.
+969 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 59 |
+| A second computer | 62 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -907,6 +907,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The laptop's Pocketdesk server restarted mid-view (`systemctl --user restart pocketdesk`, or Stop and Start in its desktop app): the window dims the last picture and says "Reconnecting to … (1)", then the picture comes back by itself within a few seconds at the same Quality, with no click; the laptop's session list shows one session for the Windows laptop afterwards, not two. (where: second computer)
 - The laptop's Wi-Fi off for 30 s mid-view: "Reconnecting… (n)" counting up, then the picture back by itself once the Wi-Fi returns; off for three minutes: the tries stop after about two minutes and the window says it did not come back, with Reconnect, which works once the Wi-Fi is back. (where: second computer)
 - Cancel while it reconnects: the window says it stopped, with Reconnect, and the laptop gets no further sessions from it; End on the laptop's session list mid-view: the window says the laptop ended the view and does not reconnect; with "Ask before each session" on there, a reconnect waits for Allow once again, and a no ends it. (where: second computer)
+
+**225. Pairing and disabled controls say why (Desktop UX 1)**
+
+- Paste on Settings → Other computers fills the box from the real clipboard, on Windows and on the Linux laptop, and the line under it names the other computer and its addresses. (where: second computer)
+- Start server in the bar at the top of a page starts the stopped server on the Linux laptop, and the bar goes once it runs. (where: second computer)
+- A real failed pairing: with Pocketdesk stopped on the other computer, Pair shows its progress, then "The other computer didn't answer…" with Details and Run diagnostics, which opens Diagnostics and runs its checks. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

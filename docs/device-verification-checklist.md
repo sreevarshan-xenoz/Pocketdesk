@@ -3098,6 +3098,13 @@ Built 2026-10-29 (a computer's screen window: a stats overlay, a view that recon
 - [ ] The laptop's Wi-Fi off for 30 s mid-view: "Reconnecting… (n)" counting up, then the picture back by itself once the Wi-Fi returns; off for three minutes: the tries stop after about two minutes and the window says it did not come back, with Reconnect, which works once the Wi-Fi is back. (where: second computer)
 - [ ] Cancel while it reconnects: the window says it stopped, with Reconnect, and the laptop gets no further sessions from it; End on the laptop's session list mid-view: the window says the laptop ended the view and does not reconnect; with "Ask before each session" on there, a reconnect waits for Allow once again, and a no ends it. (where: second computer)
 
+## 225. Pairing and disabled controls say why (Desktop UX 1)
+
+Built 2026-10-29. Kittest drove every piece headless (the link box, the reasons and fixes, the bar, the progress and its outcome words), but not the real clipboard, a real server start or a real failed pairing.
+- [ ] Paste on Settings → Other computers fills the box from the real clipboard, on Windows and on the Linux laptop, and the line under it names the other computer and its addresses. (where: second computer)
+- [ ] Start server in the bar at the top of a page starts the stopped server on the Linux laptop, and the bar goes once it runs. (where: second computer)
+- [ ] A real failed pairing: with Pocketdesk stopped on the other computer, Pair shows its progress, then "The other computer didn't answer…" with Details and Run diagnostics, which opens Diagnostics and runs its checks. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
