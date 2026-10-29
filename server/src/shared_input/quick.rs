@@ -26,7 +26,9 @@
 //! the link, without changing any setting of the system's (Wi-Fi's own
 //! power saving is left on, so nothing needs putting back, even after a
 //! crash). It goes outside the link on purpose: on the link it would spend
-//! the link's pacing, which on a quiet link held the next key back.
+//! the link's pacing, which on a quiet link held the next key back. It
+//! goes only to a computer on this one's own network ([`may_nudge`]),
+//! never out to the internet.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -172,6 +174,63 @@ const DISCARD_PORT: u16 = 9;
 /// looked up again (its link may move to another path).
 const LOOK_AGAIN: Duration = Duration::from_secs(1);
 
+/// Whether a byte may go to `peer`: only on this computer's own network,
+/// never out to the internet. It is on one of `networks` (an interface's
+/// address and prefix length), or in a range that never leaves a site:
+/// the private ones, link-local, loopback and IPv6 unique-local. A direct
+/// link between two networks is hole-punched to the far side's public
+/// address, which is its router's, not the computer's: none goes there.
+/// The shared space carriers use (100.64.0.0/10) is not a site's own, so
+/// it counts only when on one of `networks`.
+pub(crate) fn may_nudge(peer: IpAddr, networks: &[(IpAddr, u8)]) -> bool {
+    let peer = peer.to_canonical();
+    let site_local = match peer {
+        IpAddr::V4(v4) => v4.is_private() || v4.is_link_local() || v4.is_loopback(),
+        IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            v6.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80
+        }
+    };
+    site_local
+        || networks
+            .iter()
+            .any(|&(address, prefix)| same_network(peer, address.to_canonical(), prefix))
+}
+
+/// Whether `a` and `b` share their first `prefix` bits (a prefix of 0 is
+/// no network: everything would share it).
+fn same_network(a: IpAddr, b: IpAddr, prefix: u8) -> bool {
+    let (a, b, bits) = match (a, b) {
+        (IpAddr::V4(a), IpAddr::V4(b)) => (
+            u128::from(u32::from(a)) << 96,
+            u128::from(u32::from(b)) << 96,
+            prefix.min(32),
+        ),
+        (IpAddr::V6(a), IpAddr::V6(b)) => (u128::from(a), u128::from(b), prefix.min(128)),
+        _ => return false,
+    };
+    if bits == 0 {
+        return false;
+    }
+    let mask = u128::MAX << (128 - u32::from(bits));
+    a & mask == b & mask
+}
+
+/// This computer's networks: each interface's address and prefix length.
+fn local_networks() -> Vec<(IpAddr, u8)> {
+    if_addrs::get_if_addrs()
+        .map(|interfaces| {
+            interfaces
+                .iter()
+                .map(|interface| match &interface.addr {
+                    if_addrs::IfAddr::V4(v4) => (IpAddr::V4(v4.ip), v4.prefixlen),
+                    if_addrs::IfAddr::V6(v6) => (IpAddr::V6(v6.ip), v6.prefixlen),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A byte now and then to the computer the keyboard and mouse are shared
 /// with, keeping this computer's Wi-Fi awake (see the module's words).
 /// Nothing goes while it follows no computer; dropped, it stops.
@@ -179,9 +238,11 @@ pub struct Nudge {
     aim: Arc<Mutex<Aim>>,
     /// The computer followed, and when its address was looked up.
     following: Option<(String, Instant)>,
-    /// Where a computer's link reaches it ([`super::link::peer_ip`]), and
-    /// the port: a test's stand-ins.
+    /// Where a computer's link reaches it ([`super::link::peer_ip`]), this
+    /// computer's networks ([`local_networks`]), and the port: a test's
+    /// stand-ins.
     look_up: fn(&str) -> Option<IpAddr>,
+    networks: fn() -> Vec<(IpAddr, u8)>,
     port: u16,
 }
 
@@ -200,6 +261,7 @@ impl Default for Nudge {
             aim: Arc::default(),
             following: None,
             look_up: super::link::peer_ip,
+            networks: local_networks,
             port: DISCARD_PORT,
         }
     }
@@ -224,7 +286,10 @@ impl Nudge {
             return;
         }
         self.following = Some((computer.to_string(), Instant::now()));
-        let to = (self.look_up)(computer).map(|ip| SocketAddr::new(ip, self.port));
+        // Only on this computer's own network (BK10 review I1).
+        let to = (self.look_up)(computer)
+            .filter(|&ip| may_nudge(ip, &(self.networks)()))
+            .map(|ip| SocketAddr::new(ip, self.port));
         self.aim(to);
     }
 
@@ -321,6 +386,7 @@ mod tests {
             aim: Arc::default(),
             following: None,
             look_up: |id| (id == "pc").then_some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            networks: Vec::new,
             port: catcher.local_addr().unwrap().port(),
         };
         let caught = |n: usize| {
@@ -335,7 +401,18 @@ mod tests {
         let started = Instant::now();
         assert_eq!(caught(3), 3);
         assert!(started.elapsed() >= NUDGE_EVERY, "spaced, not a burst");
-        // Following it again changes nothing; nothing goes to no link.
+        // A public address is not followed (I1), and nothing goes to no
+        // link.
+        let mut public = Nudge {
+            aim: Arc::default(),
+            following: None,
+            look_up: |_| Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9))),
+            networks: Vec::new,
+            port: 9,
+        };
+        public.follow(Some("far"));
+        assert!(!public.aim.lock().unwrap().sending);
+        // Following it again changes nothing.
         nudge.follow(Some("pc"));
         nudge.follow(Some("relayed"));
         nudge.follow(None);
@@ -349,6 +426,47 @@ mod tests {
         std::thread::sleep(NUDGE_EVERY * 2);
         while catcher.recv(&mut [0u8; 8]).is_ok() {}
         assert_eq!(caught(1), 0, "stopped when dropped");
+    }
+
+    /// BK10 review I1: a byte goes only to a computer on this one's own
+    /// network or in a range that stays on a site, never to a public
+    /// address (a link hole-punched across the internet).
+    #[test]
+    fn a_byte_goes_only_to_this_network() {
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let networks = [
+            (ip("192.0.2.10"), 24),
+            (ip("2001:db8:1::10"), 64),
+            (ip("100.100.1.1"), 32),
+        ];
+        // On one of this computer's networks, public prefix or not.
+        assert!(may_nudge(ip("192.0.2.77"), &networks));
+        assert!(may_nudge(ip("2001:db8:1::99"), &networks));
+        // Off them, with a public address: never.
+        assert!(!may_nudge(ip("198.51.100.7"), &networks));
+        assert!(!may_nudge(ip("192.0.3.1"), &networks));
+        assert!(!may_nudge(ip("2001:db8:2::1"), &networks));
+        assert!(!may_nudge(ip("203.0.113.9"), &[]));
+        // A site's own ranges, on its networks or not.
+        for local in [
+            "10.1.2.3",
+            "172.16.0.9",
+            "192.168.50.2",
+            "169.254.3.4",
+            "127.0.0.1",
+            "fe80::1",
+            "fd12:3456::1",
+            "::1",
+            "::ffff:192.168.1.5",
+        ] {
+            assert!(may_nudge(ip(local), &[]), "{local}");
+        }
+        // Carriers' shared space only when on a network here.
+        assert!(!may_nudge(ip("100.64.0.5"), &[]));
+        assert!(may_nudge(ip("100.100.1.1"), &networks));
+        assert!(!may_nudge(ip("100.100.1.2"), &networks), "a /32 is itself");
+        // A prefix of 0 is no network.
+        assert!(!may_nudge(ip("198.51.100.7"), &[(ip("192.0.2.1"), 0)]));
     }
 
     /// Never the real timer: a test must not change the owner's computer.
