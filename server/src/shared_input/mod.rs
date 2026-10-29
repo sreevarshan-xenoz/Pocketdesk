@@ -59,13 +59,30 @@ pub mod wire;
 
 /// What a test logs, caught as text (no times, no colours), from debug up,
 /// on this thread while the guard lives.
+///
+/// Through one process-wide subscriber that writes each thread's lines to
+/// the buffer that thread set, never a scoped one: tracing caches whether
+/// a log line is wanted when its callsite is first met, and a scoped
+/// subscriber missed lines another test's thread met first (seen on
+/// Windows, where tests run in parallel).
 #[cfg(test)]
 pub(crate) mod caught_log {
+    use std::collections::HashMap;
     use std::io;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, LazyLock, Mutex, Once};
+    use std::thread::ThreadId;
 
-    #[derive(Clone, Default)]
-    pub struct Caught(Arc<Mutex<Vec<u8>>>);
+    type Buffer = Arc<Mutex<Vec<u8>>>;
+
+    /// The buffer each catching thread set.
+    static CATCHING: LazyLock<Mutex<HashMap<ThreadId, Buffer>>> = LazyLock::new(Default::default);
+
+    fn this_thread() -> ThreadId {
+        std::thread::current().id()
+    }
+
+    /// The lines caught so far.
+    pub struct Caught(Buffer);
 
     impl Caught {
         pub fn text(&self) -> String {
@@ -73,9 +90,24 @@ pub(crate) mod caught_log {
         }
     }
 
-    impl io::Write for Caught {
+    /// Catching stops on this thread when it drops.
+    pub struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            CATCHING.lock().unwrap().remove(&this_thread());
+        }
+    }
+
+    /// Writes to the buffer of the thread logging, if it catches.
+    struct ThisThread;
+
+    impl io::Write for ThisThread {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
+            let buffer = CATCHING.lock().unwrap().get(&this_thread()).cloned();
+            if let Some(buffer) = buffer {
+                buffer.lock().unwrap().extend_from_slice(bytes);
+            }
             Ok(bytes.len())
         }
 
@@ -85,15 +117,23 @@ pub(crate) mod caught_log {
     }
 
     /// Catch this thread's logs until the guard drops.
-    pub fn catch() -> (Caught, tracing::subscriber::DefaultGuard) {
-        let caught = Caught::default();
-        let writer = caught.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .without_time()
-            .with_ansi(false)
-            .with_writer(move || writer.clone())
-            .finish();
-        (caught, tracing::subscriber::set_default(subscriber))
+    pub fn catch() -> (Caught, Guard) {
+        static GLOBAL: Once = Once::new();
+        GLOBAL.call_once(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::DEBUG)
+                .without_time()
+                .with_ansi(false)
+                .with_writer(|| ThisThread)
+                .finish();
+            // Another test's global subscriber would do as well.
+            let _ = tracing::subscriber::set_global_default(subscriber);
+        });
+        let buffer = Buffer::default();
+        CATCHING
+            .lock()
+            .unwrap()
+            .insert(this_thread(), buffer.clone());
+        (Caught(buffer), Guard)
     }
 }
