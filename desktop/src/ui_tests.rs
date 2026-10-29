@@ -445,10 +445,11 @@ fn the_keyboard_and_mouse_page_lets_either_side_drive() {
             .is_disabled(),
         "no server here, so no switch"
     );
-    let now = pocketdesk_core::local::pin::now_unix();
-
     app.get_by_label("Identify").click();
     app.run_steps(3);
+    // Read after the click: a request made in the next second would be
+    // "from the future" to a clock read before it.
+    let now = pocketdesk_core::local::pin::now_unix();
     let identify = pocketdesk_core::local::shared_input::take_all(fixture.state(), now);
     assert_eq!(identify.len(), 1, "one Identify asked");
 
@@ -680,22 +681,12 @@ fn the_save_bar_comes_with_a_change_and_goes_with_undo_or_save() {
 #[test]
 fn empty_sessions_and_files_say_what_to_do_next() {
     let fixture = Fixture::new();
-    // No server runs here, so Sessions sends the owner to start it.
+    // No server runs here: the bar at the top says so (UX 1), not the page.
     let mut app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
     assert!(
-        app.query_by_label(
-            "The server is not running, so no phone is connected. Start it from Overview."
-        )
-        .is_some()
-    );
-    app.get_all_by_label("Overview")
-        .last()
-        .expect("the page's own Overview button")
-        .click();
-    app.run_steps(3);
-    assert!(
-        app.query_by_label(Tab::Status.purpose()).is_some(),
-        "Overview opened"
+        app.query_by_label_contains("Start it from Overview")
+            .is_none()
     );
 
     go_to(&app, Tab::Files);
@@ -985,10 +976,7 @@ fn the_sessions_page_lists_the_recent_sessions() {
     .expect("log");
     let mut app = fixture.open(Some(Tab::Sessions));
     app.run_steps(3);
-    assert!(
-        app.query_by_label_contains("The server is not running")
-            .is_some()
-    );
+    assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
     assert!(app.query_by_label("Recent sessions").is_some());
     assert!(
         app.query_by_label("2 h ago · for 2m 5s · on this network · 38 ms capture to arrival")
@@ -1525,4 +1513,95 @@ fn the_clipboard_page_lists_what_crossed() {
     app.get_by_label("Clear").click();
     app.run_steps(3);
     assert!(app.query_by_label("from here").is_none(), "cleared");
+}
+
+/// UX 1: the Keyboard and mouse rows that are off while sharing is off say
+/// so beside them, and "Turn sharing on" turns them on.
+#[test]
+fn the_keyboard_and_mouse_rows_say_why_they_are_off() {
+    use egui_kittest::kittest::NodeT;
+    if !cfg!(any(windows, target_os = "linux")) {
+        return;
+    }
+    const DRIVE: &str = "this computer's pointer and keys may be carried onto the others";
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("keyboard and mouse");
+    app.run_steps(3);
+    assert!(app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::settings_view::SHARING_OFF)
+            .is_some()
+    );
+    app.get_by_label("Turn sharing on").click();
+    app.run_steps(3);
+    assert!(!app.get_by_label(DRIVE).accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::settings_view::SHARING_OFF)
+            .is_none()
+    );
+}
+
+/// UX 1: Identify, off, says why beside it: sharing first, with its fix.
+#[test]
+fn identify_says_why_it_is_off() {
+    use egui_kittest::kittest::NodeT;
+    let fixture = Fixture::new();
+    let app = fixture.open(Some(Tab::KeyboardMouse));
+    assert!(app.get_by_label("Identify").accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label_contains("Identify needs sharing on")
+            .is_some()
+    );
+    assert!(app.query_by_label("Turn sharing on").is_some());
+}
+
+/// UX 1: an away phone's greyed actions say why, by its name, in a line
+/// and not only on hover.
+#[test]
+fn an_away_phones_actions_say_why_they_are_off() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(None);
+    assert!(
+        app.query_by_label(&crate::app::away_words("Test Phone", false))
+            .is_some()
+    );
+}
+
+/// UX 1: a stopped server is said once, in a bar at the top of every page,
+/// with its Start; not by each page in its own words.
+#[test]
+fn a_stopped_server_is_said_at_the_top_of_every_page() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(None);
+    for page in Tab::ALL {
+        go_to(&app, page);
+        app.run_steps(3);
+        assert!(
+            app.query_by_label(crate::app::STOPPED_BAR).is_some(),
+            "{page:?}"
+        );
+        // The bar's Start; never pressed here, as it would start a server.
+        assert!(app.query_by_label("Start server").is_some(), "{page:?}");
+    }
+    go_to(&app, Tab::KeyboardMouse);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label_contains("start it on the Overview")
+            .is_none()
+    );
+}
+
+/// UX 1: Diagnostics says nothing of the fonts while they are still looked
+/// for (a stray line before any check ran).
+#[test]
+fn diagnostics_say_nothing_of_fonts_still_looked_for() {
+    let fixture = Fixture::new();
+    let app = fixture.open(Some(Tab::Diagnostics));
+    assert!(
+        app.query_by_label_contains("Fonts for other scripts")
+            .is_none()
+    );
 }

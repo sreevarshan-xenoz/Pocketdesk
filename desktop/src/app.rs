@@ -340,6 +340,8 @@ pub struct PocketdeskApp {
     settings_query: String,
     /// A start or restart running off the UI thread.
     job: Option<(&'static str, std::thread::JoinHandle<Result<(), String>>)>,
+    /// When the bar's Start last started the server (PR #553 review I2).
+    started_at: Option<std::time::Instant>,
     /// A setting that runs a program (the file manager's menu, the
     /// browser's host), off the UI thread: what it says once done.
     setting_job: Option<std::thread::JoinHandle<Result<String, String>>>,
@@ -448,6 +450,7 @@ impl PocketdeskApp {
             settings: None,
             settings_query: String::new(),
             job: None,
+            started_at: None,
             setting_job: None,
             confirm_restart: false,
             raised_approvals: Vec::new(),
@@ -493,6 +496,77 @@ impl PocketdeskApp {
             app.chosen = page;
         }
         app
+    }
+
+    /// The bar at the top of every page while the server is stopped
+    /// (UX 1), with Start: off, with "Starting…", from a start until the
+    /// server says it runs (PR #553 review I2).
+    fn stopped_bar(&mut self, ui: &mut egui::Ui) {
+        let busy = self.job.is_some()
+            || starting(
+                self.started_at,
+                self.snapshot.running,
+                std::time::Instant::now(),
+            );
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(STOPPED_BAR)
+                    .color(crate::theme::warn(ui))
+                    .strong(),
+            );
+            if busy {
+                ui.spinner();
+                ui.label("Starting\u{2026}");
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(500));
+            } else if ui
+                .button("Start server")
+                .on_hover_text("Once installed, it starts by itself when you sign in.")
+                .clicked()
+            {
+                self.start_server();
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    /// Start the server off the UI thread, once (PR #553 review I2).
+    fn start_server(&mut self) {
+        if self.job.is_some()
+            || starting(
+                self.started_at,
+                self.snapshot.running,
+                std::time::Instant::now(),
+            )
+        {
+            return;
+        }
+        self.started_at = Some(std::time::Instant::now());
+        let dir = self.state_dir.clone();
+        self.run_job("Starting the server", move || crate::restart::start(&dir));
+    }
+
+    /// What a page asked for (UX 1).
+    fn do_ask(&mut self, ask: crate::widgets::Ask) {
+        use crate::widgets::Ask;
+        match ask {
+            Ask::StartServer => self.start_server(),
+            Ask::Go(tab) => {
+                self.switch_to(tab);
+                self.chosen = tab;
+            }
+            Ask::RunDiagnostics => {
+                self.diagnostics.run_now();
+                self.switch_to(Tab::Diagnostics);
+                self.chosen = Tab::Diagnostics;
+            }
+            Ask::Settings(words) => {
+                self.switch_to(Tab::Settings);
+                self.chosen = Tab::Settings;
+                self.settings_query = words.to_string();
+            }
+        }
     }
 
     /// Run a start or restart off the UI thread; one at a time.
@@ -558,6 +632,10 @@ impl PocketdeskApp {
             && let Some(Ok(form)) = &mut self.settings
         {
             form.restarted();
+        }
+        // A start that failed leaves Start to be pressed again at once.
+        if outcome.is_err() {
+            self.started_at = None;
         }
         self.notice = crate::notice::Notice::outcome(outcome);
         self.refreshed = None;
@@ -1225,16 +1303,8 @@ impl PocketdeskApp {
             status_line(ui, crate::theme::GOOD, "The server is running");
             self.restart_button(ui);
         } else {
-            status_line(ui, crate::theme::MUTED, "The server is not running");
-            ui.label(
-                "Phones cannot connect until it starts. Once installed, it starts when you sign in.",
-            );
-            if ui
-                .add_enabled(self.job.is_none(), egui::Button::new("Start server"))
-                .clicked()
-            {
-                self.run_job("Starting the server", crate::restart::start);
-            }
+            // Its Start is in the bar at the top of every page (UX 1).
+            status_line(ui, crate::theme::MUTED, "The server isn't running");
         }
         ui.add_space(8.0);
         egui::Grid::new("status")
@@ -1851,6 +1921,18 @@ impl PocketdeskApp {
                         ));
                     }
                 });
+                // UX 1: an away phone's remote actions are off; why, in
+                // a line and not only on hover.
+                if row.place == model::Place::Away {
+                    crate::widgets::why_off(
+                        ui,
+                        &away_words(
+                            &model::device_label(&self.snapshot.devices, &device.id),
+                            self.snapshot.running,
+                        ),
+                        None,
+                    );
+                }
                 // Q2 review: the phone's own switch, as it last said it.
                 if model::phone_action_reach(
                     device.linked,
@@ -2429,14 +2511,8 @@ impl PocketdeskApp {
     }
 
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
-        if !self.snapshot.running {
-            ui.label(
-                "The server is not running, so no phone is connected. Start it from Overview.",
-            );
-            if ui.button("Overview").clicked() {
-                self.switch_to(Tab::Status);
-            }
-        } else if self.snapshot.sessions.is_empty() {
+        // A stopped server is said by the bar at the top (UX 1).
+        if self.snapshot.sessions.is_empty() {
             ui.label(
                 "No phone is viewing this computer right now. On the phone, tap Connect on this \
                  computer's card.",
@@ -3933,6 +4009,11 @@ impl eframe::App for PocketdeskApp {
         } else {
             self.notice = None;
         }
+        // UX 1: a stopped server said once, at the top of every page, with
+        // its Start, in place of each page's own words.
+        if !self.snapshot.running {
+            egui::Panel::top("stopped").show(ui, |ui| self.stopped_bar(ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(self.tab.name());
             ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
@@ -3965,10 +4046,42 @@ impl eframe::App for PocketdeskApp {
         if let Some(tab) = self.notes.take_go_to().or(self.phone_files.take_go_to()) {
             self.switch_to(tab);
         }
+        // A page's fix for a control it shows off (UX 1).
+        if let Some(ask) = crate::widgets::take_ask(ui.ctx()) {
+            self.do_ask(ask);
+        }
         self.approval_prompt(ui);
         self.task_prompt(ui);
     }
 }
+
+/// How long Start stays off after a start, waiting for the server to say
+/// it runs (PR #553 review I2).
+const START_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Whether a start at `started_at` still waits at `now`: the server not
+/// `running` yet, within [`START_WAIT`].
+fn starting(
+    started_at: Option<std::time::Instant>,
+    running: bool,
+    now: std::time::Instant,
+) -> bool {
+    !running && started_at.is_some_and(|at| now.saturating_duration_since(at) < START_WAIT)
+}
+
+/// Why an away phone's remote actions are off (UX 1): `running` says
+/// whether the server runs, else that is the cause (PR #553 review M6).
+pub fn away_words(name: &str, running: bool) -> String {
+    if running {
+        format!("{name} is away: its remote actions come back when it connects.")
+    } else {
+        format!("{name}'s remote actions come back once the server runs and it connects.")
+    }
+}
+
+/// What the bar at the top of every page says while the server is
+/// stopped (UX 1).
+pub const STOPPED_BAR: &str = "The server isn't running: phones and computers can't connect.";
 
 /// A coloured dot and a bold line. The dot is painted: the bundled fonts
 /// have no "●" glyph.
@@ -3989,6 +4102,44 @@ pub fn kept_page(chosen: Tab) -> Tab {
         Tab::Status
     } else {
         chosen
+    }
+}
+
+#[cfg(test)]
+mod start_tests {
+    use super::*;
+
+    /// PR #553 review M6: an away phone's line names its remote actions,
+    /// and a stopped server as the cause when it is one.
+    #[test]
+    fn an_away_phone_says_why_by_the_cause() {
+        assert_eq!(
+            away_words("Test Phone", true),
+            "Test Phone is away: its remote actions come back when it connects."
+        );
+        assert_eq!(
+            away_words("Test Phone", false),
+            "Test Phone's remote actions come back once the server runs and it connects."
+        );
+    }
+
+    /// PR #553 review I2: Start stays off a while after a start, until the
+    /// server says it runs, and no longer than that.
+    #[test]
+    fn start_waits_for_the_server_to_say_it_runs() {
+        let at = std::time::Instant::now();
+        assert!(!starting(None, false, at));
+        assert!(starting(
+            Some(at),
+            false,
+            at + std::time::Duration::from_secs(5)
+        ));
+        assert!(!starting(Some(at), true, at), "it runs");
+        assert!(!starting(
+            Some(at),
+            false,
+            at + START_WAIT + std::time::Duration::from_secs(1)
+        ));
     }
 }
 

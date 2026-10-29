@@ -18,15 +18,15 @@ pub fn loaded() -> Option<&'static [String]> {
     LOADED.get().map(Vec::as_slice)
 }
 
-/// Diagnostics' line about the fonts for other scripts.
-pub fn summary(loaded: Option<&[String]>) -> String {
-    match loaded {
-        None => "Fonts for other scripts: still looking.".to_string(),
-        Some([]) => {
+/// Diagnostics' line about the fonts for other scripts; none while they
+/// are still looked for (UX 1: a stray line before any check ran).
+pub fn summary(loaded: Option<&[String]>) -> Option<String> {
+    match loaded? {
+        [] => Some(
             "Fonts for other scripts: none found, so some names and texts may show as boxes."
-                .to_string()
-        }
-        Some(names) => format!("Fonts for other scripts: {}.", names.join(", ")),
+                .to_string(),
+        ),
+        names => Some(format!("Fonts for other scripts: {}.", names.join(", "))),
     }
 }
 
@@ -196,14 +196,15 @@ mod tests {
 
     #[test]
     fn the_summary_tells_looking_from_none() {
-        assert!(summary(None).contains("still looking"));
-        assert!(summary(Some(&[])).contains("none found"));
+        assert_eq!(summary(None), None, "nothing to say while looking");
+        assert!(summary(Some(&[])).is_some_and(|s| s.contains("none found")));
         assert_eq!(
             summary(Some(&[
                 "Nirmala UI".to_string(),
                 "Leelawadee UI".to_string()
-            ])),
-            "Fonts for other scripts: Nirmala UI, Leelawadee UI."
+            ]))
+            .as_deref(),
+            Some("Fonts for other scripts: Nirmala UI, Leelawadee UI.")
         );
     }
 
