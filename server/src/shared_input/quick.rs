@@ -111,6 +111,7 @@ const TIMER_MS: u32 = 1;
 
 #[cfg(windows)]
 fn system(on: bool) {
+    use std::sync::atomic::Ordering;
     use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
     use windows::Win32::System::Threading::{
         GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
@@ -151,18 +152,26 @@ fn system(on: bool) {
         set_throttling();
         // SAFETY: a plain call; matched by the `timeEndPeriod` below.
         let asked = unsafe { timeBeginPeriod(TIMER_MS) };
+        // Only a request Windows took is ended (review M7).
+        BEGUN.store(asked == 0, Ordering::SeqCst);
         if asked == 0 {
             tracing::debug!("Shared input: the timer at 1 ms while sharing");
         } else {
             tracing::debug!("Shared input: Windows would not take a 1 ms timer ({asked})");
         }
     } else {
-        // SAFETY: as above; one end for the one begin.
-        unsafe { timeEndPeriod(TIMER_MS) };
+        if BEGUN.swap(false, Ordering::SeqCst) {
+            // SAFETY: as above; one end for the one begin it took.
+            unsafe { timeEndPeriod(TIMER_MS) };
+        }
         set_throttling();
         tracing::debug!("Shared input: the timer given back");
     }
 }
+
+/// Whether Windows took the timer request now held, so it is ended once.
+#[cfg(windows)]
+static BEGUN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(not(windows))]
 fn system(_on: bool) {}
