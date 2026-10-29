@@ -1,6 +1,6 @@
-Pocketdesk is a remote desktop for your own computers: an Android app that streams and controls a Linux or Windows desktop, with files both ways, the clipboard, notifications and sound.
+Pocketdesk is a remote desktop for your own computers: an Android app that streams and controls a Linux or Windows desktop, with files both ways, the clipboard, notifications and sound, and now one keyboard and mouse across your computers.
 
-**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
+**This is a beta.** Most features are verified on two Android phones against a Windows host, and many on-device checks are still open. The shared keyboard and mouse, new in this release, has not yet been tried at a desk with a real Windows computer driving a Linux one (see the end of these notes). See [`docs/device-verification-checklist.md`](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md). Please read [SECURITY.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/SECURITY.md) before using it on a network you do not control.
 
 ## Install
 
@@ -9,8 +9,8 @@ Pocketdesk is a remote desktop for your own computers: an Android app that strea
 | Windows | `pocketdesk-…-windows-x86_64-setup.exe` | Run it: it installs Pocketdesk, starts it at sign-in with its firewall ports open, puts `pocketdesk` on `PATH` and offers FFmpeg through winget. Uninstall it from Settings → Apps. |
 | Windows, portable | `pocketdesk-…-windows-x86_64.zip` | Unzip, then run `pocketdesk.exe install` to start the server at logon and open its firewall ports. `pocketdesk-app.exe` is the desktop app. FFmpeg must be on `PATH` for the encoder. |
 | Debian, Ubuntu | `pocketdesk-…-linux-amd64.deb` | `sudo apt install ./pocketdesk-…-linux-amd64.deb` installs the server, the desktop app and the tray, with the libraries they need, and starts the server at every sign-in. `sudo apt remove pocketdesk` takes it out. |
-| Linux | `pocketdesk-…-linux-x86_64.tar.gz` | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the server, the desktop app and the systemd user service. It needs PipeWire and FFmpeg (libav*). |
-| Android | `pocketdesk-…-android-arm64*.apk` | Install it on the phone, then pair with the QR code from the desktop app (Pair tab). |
+| Linux | `pocketdesk-…-linux-x86_64.tar.gz` | `curl -fsSL https://raw.githubusercontent.com/sreevarshan-xenoz/Pocketdesk/main/scripts/install.sh \| bash` installs the server, the desktop app, the tray and the systemd user service. It needs PipeWire and FFmpeg (libav*). On Arch, `yay -S pocketdesk` installs it from the AUR. |
+| Android | `pocketdesk-…-android-arm64*.apk` | Install it on the phone, then pair with the QR code from the desktop app's Pair page. |
 
 `SHA256SUMS` lists every file's checksum (`sha256sum -c SHA256SUMS`).
 
@@ -18,58 +18,45 @@ An APK named `…-debug-signed.apk` is the debug build. It works, but Android wi
 
 ## What's changed
 
-Pocketdesk 0.7.0 brings Linux up to Windows, works beside KDE Connect, and moves more of your phone's photos and files to the computer by themselves. It also carries fixes from a long run of checks on a real phone, with sessions, transfers and the clipboard driven by script. It updates 0.6.0 in place (same signing key), keeping your saved computers and pairings.
+Pocketdesk 0.8.0 brings your computers together. One keyboard and mouse moves between them, Windows driving Linux, and the clipboard, images, files and sound follow the pointer; your phone can be another screen beside them; and one computer can show another's screen in a window. It updates 0.7.0 in place (same signing key), keeping your saved computers and pairings.
 
-**Beside KDE Connect**
-- **Starts next to it:** with KDE Connect or GSConnect holding port 1716, the server takes the next free port and says so, instead of stopping.
-- **Files to KDE Connect devices:** a paired KDE Connect device is a target on the Files page and for `pocketdesk send`.
+The shared keyboard and mouse is new and largely unchecked at a desk. It is unit-tested throughout, and its receiving end ran on a real Linux laptop from a script, but nobody has yet pushed a real Windows mouse onto a Linux screen with it. Everything it does is off until you turn it on. Please try it and tell us how it went.
 
-**Photos and folders**
-- **New camera photos** go to the computer by themselves, when you turn on "Send new camera photos" on the phone.
-- **The whole gallery:** the Phone page's "More photos" goes back through every photo, not only the newest 24.
-- **Folders between computers** go both ways.
+**One keyboard and mouse across your computers (new)**
+- **Windows drives Linux:** pair two computers, turn on "Share my keyboard and mouse with my computers" on both (desktop app, Keyboard and mouse), and allow "Keyboard and mouse" for the Windows computer on the Linux computer's Devices page. Then push the pointer off the edge that faces the other computer, or press Ctrl+Alt+Right, and your keys and mouse go there; push back to come home. Linux is driven but does not drive the others yet. It works only while the link between the two is direct (at home), never through a relay.
+- **Arrange them:** the Keyboard and mouse page places your computers by dragging, shows each link and both permissions, and Identify flashes each computer's name on its screen. Each switch flashes the name of the computer that has the keyboard and mouse, and the tray says where they are.
+- **Nothing left stuck:** if the other computer stops answering for a second (a Wi-Fi drop, a crash), the keyboard and mouse come home by themselves and every key held there is let go. Win+L while away comes home and then locks this computer, Ctrl+Alt+Del stays with Windows, and stopping or uninstalling the server brings them home first.
+- **Games:** "Stay on this computer while a game runs" (on) keeps them on Windows while a full-screen game or a program you list is in front, with no hook installed at all. The switch key can still take them off a game, except while a kernel anti-cheat runs (Vanguard, FACEIT, Easy Anti-Cheat, BattlEye) or the program in front runs as administrator while the server does not.
+- **The clipboard follows the mouse:** what you copied goes with the pointer to the other computer and comes back as it returns, text or, with no text, an image (a PNG of up to 32 MB; images need "Files over the internet" on on both). Never a password manager's private copy. "Clipboard with my computers" also shares images now.
+- **Files dragged across the edge:** drag files or folders in Explorer onto the other computer and let go there; they are copied to it as the Files page sends them (at most 100 at once).
+- **Hear the computer you're driving:** with "Hear the computer you're driving here" on (off by default), the other computer's sound plays on Windows while the pointer is there, and stops as it comes home. Update both computers before turning it on.
+- **Your phone as another screen:** with the phone's "Let my computer's keyboard and mouse use this phone" on (it uses the "Pocketdesk control" Accessibility service) and "Keyboard and mouse" allowed for the phone on the computer's Devices page, the Windows mouse crosses onto the phone like onto a computer: a click taps, a drag swipes, the wheel scrolls, the right button is Back and the middle Home, and keys type into the field in front (on a US layout; never into a password field or on a locked phone). It needs only the phone's own link, at home or away.
+- **How quick it is:** `pocketdesk share-test <computer>` measures how long keys and moves take, and the desktop app's Diagnostics page shows the result.
 
-**Linux**
-- **The clipboard on X11** (Mint and other X11 sessions), both ways, with images, without polling.
-- **The phone as a game controller:** its gamepad drives a real controller on Linux, so games see one.
-- **Lock when the phone leaves** on Sway and Hyprland, from the compositor's own idle time; its minutes are now in Settings on Linux too.
+**Another computer's screen in a window (new)**
+- In Settings → Other computers, "Show its screen" beside a paired computer opens a window with that computer's screen, as the phone shows it, on the home network or over the internet. Windows and Linux alike, either way round.
+- It is view-only unless the other computer's Devices page turns on "Control the mouse and keyboard" for this one; by default the other computer asks before each session. Its bar has the screen, Quality, View only, Screenshot, Record and Full screen, and its sound plays here when that computer allows "Hear and change this computer's sound" for this one.
+- Pairing between computers is one way: show the screen from the computer that pasted the other's pairing link.
 
-**Sessions and the link**
-- **Sessions from away start sooner:** a phone linked by the internet road no longer waits out a home dial first (about 3 s from the tap, down from 11).
-- **A phone that vanishes** with data waiting counts as gone within a minute on a Linux computer, not after a quarter of an hour.
-- **The away lock** counts only a phone on this computer's network: one that walked off on mobile data, still linked over the internet, now counts as gone.
-- **The session's numbers** start fresh: a new session no longer shows the last one's round-trip figures while it connects.
-- **A crop to one window** no longer ends the session when the window is still (its first frame was lost), and costs one encoder rebuild, not two.
-- **A window you crop to and then resize** reaches the phone at its new size even if it then stays still; it used to keep its old size until something on it moved.
-- **A file sent while the phone shares a big one** now waits for it: the phone moves one file at a time, and the computer's offer no longer runs out behind a share longer than 10 minutes.
-- **A ringer turned during a session** shows on the computer within seconds; it could take up to 17.
-- **A computer added on the phone** keeps to its own address: with the phone linked to another computer, it could take that one's name and reach it over the internet instead.
-- **A phone that moves between computers** no longer carries the first one's links, file offers or pairing answer to the second.
-- **Pairing from a code** works on the computer's network even when the phone's link to it came over the internet; it used to say the phone needed the same network.
-- **A wake-on-LAN MAC typed when adding a computer** is kept, and its card offers Wake; it was dropped unless "Connect to it when the app opens" was on.
-- **A phone you unpair** keeps nothing on the computer: a task you allowed afterwards no longer runs or reports to it, its notifications, live cards and texts leave the computer's pages, and only its own sessions end (a phone with a look-alike id could end others'). A guest's time-boxed pairing ending counts as an unpair for the event log and hooks, and a session claiming a phone's id is checked against that phone's key on every message, not only as it opens.
-- **Your other computers** stay straight on the Computers page: one that paired back the other way no longer has its files sent by a road that is down, Unpair takes its last pairing line with it, a computer that is away is named on the Files page, "connecting…" no longer shows for good when the internet road is off here, and a file offered when the server stopped says it was not sent, with Send again.
-- **Unpairing a phone or another computer on this one** stops what it had going: a file under way stops, and its connection closes, so another computer stops sending its clipboard and stops showing this one as linked. Unpairing another computer waits for the server and says when it asked.
-- **A computer that unpairs your phone** now tells it. The phone stops sending it notifications, texts, the clipboard and photos, keeping them instead of counting them delivered, and its card on Home says "No longer paired with this phone" until the computer lets it in again. New camera photos and screenshots that fail to send are tried again, and away from home a computer that refuses the phone is dialed less and less often.
-- **A shortcut or the deck widget made for a computer** goes to that computer alone: one saved later at its old address no longer takes them over (its buttons pressing the new one), and one that moves keeps its pinned shortcuts working. A computer saved at a removed one's address no longer takes the removed one's name.
-- **A computer removed on the phone** is let go: its link closes, so it can no longer ring the phone, and the next computer links; its pick for the phone's notifications goes too, and so does its place as the computer that sends other computers' wakes, also when the connection checker's "Scan code again" removes it. A computer that moves takes along the wakes sent through it.
-- **A computer you tried but never paired** no longer blocks pairing with another computer at its address, and texts kept while your computer was away go to that computer alone, not the next one; turning "Show texts" off drops them.
+**Installing, starting and stopping**
+- **Reachable from the internet** (desktop Settings, on by default) can be turned off: the computer then contacts no relay and no DHT and maps no router port, and phones reach it on the same network or through Tailscale only.
+- **A privacy policy** ([docs/privacy.md](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/privacy.md)) says what goes where and how to turn each off; the Windows installer shows it before it installs.
+- **A phone can pair as soon as the server starts:** on a computer without Tailscale, its probe kept the server's door shut for about 24 s after every start.
+- **`pocketdesk stop` returns once the server has gone** (0.4 s, where it could take 27), and the Windows uninstaller and an upgrade stop a server that outlives its stop, so no file is left in use.
+- **On Arch Linux** Pocketdesk is in the AUR (`yay -S pocketdesk`).
 
 **Smaller fixes**
-- Home shows one card when Android pauses Pocketdesk, with its Allow button.
-- The Overview names which Android setting stops a screenshot or a lock.
-- A send to another computer says what became of it in a computer's words; a video without a date has no stray dot.
-- The desktop app's hints and section names are larger (11 points, from 9); the Messages page's text no longer spreads its words, and Logs and Diagnostics show commands without Markdown backticks.
-- The phone's Wake settings say what a blank field means under it, not inside its label.
-- The desktop app's Files page says what can take a file in a whole sentence, and the phone's Tamil uses one word for the phone.
-- The desktop app's pause reads "Pause notifications", on the Overview and in the tray, and says all it holds.
+- The computer's sound from Linux: Pocketdesk now tells PipeWire the sound format it reads, where it named none, which the phone's sound in a session from a Linux computer needed too. Not yet checked by ear.
+- A pointer sent to the screen's last pixel lands on it, not one past it (on Linux, a phone's touches land at most a pixel further up and left).
 
 ### Not yet checked on a device
 
-These work in tests, and many were checked on an OPPO phone against Windows and a Linux VM, but not yet:
-- **Linux desktops:** the game controller in real games, the away lock on a real Sway or Hyprland, and the clipboard on a real X11 desktop (they were seen on a VM).
-- **KDE Connect:** files to a real KDE Connect device.
-- **By hand:** the camera photos and gallery pages, and the Settings rows that are new.
-- **Updating:** from 0.6.0 to this release on a phone, and a clean Linux install.
+These work in tests, and some ran on real hardware from a script, but not yet:
+- **The shared keyboard and mouse at the desk** (checklist §214 and §215): Windows driving Linux with its real mouse and keyboard, at the edge and by the switch key; typing; Win+L; a pulled network and a server stopped while away; mixed display scales; the gaming lock with real games and anti-cheats; the badges, Identify and the tray; the clipboard and images following both ways; Linux kept awake while driven; the arrangement's crossings; and the latency over real Wi-Fi. What did run: a script typing into a headless Sway on the Linux laptop (102 keys in order, none left down; a killed sender's key let go about a second later; a lock screen typed into).
+- **Files dragged across the edge** (§216): whether Windows' drag finds Pocketdesk's drop target under the parked cursor at all, and drops of several files, folders, and files from a zip or from a phone shown in Explorer.
+- **The phone as a screen with a real mouse** (§217): it was checked on an OPPO phone from a script (taps, swipes, scrolls, Back, Home, typing, a held drag), not yet with a Windows mouse crossing onto it, nor its lag from away.
+- **Sound following the mouse** (§218): not yet heard between two real computers; only a test tone crossed a link on one machine.
+- **Another computer's screen in a window** (§219): it ran between two throwaway servers on one Windows computer, view-only, by both roads, but not yet between two real computers: control, keys, a second monitor, reconnecting, quality, the session list, sound, Linux showing Windows, screenshots and recordings.
+- **Updating:** from 0.7.0 to this release on a phone, and a clean install.
 
-The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§207 on are this release's).
+The full list is in [the checklist](https://github.com/sreevarshan-xenoz/Pocketdesk/blob/main/docs/device-verification-checklist.md) (§214 on are this release's).

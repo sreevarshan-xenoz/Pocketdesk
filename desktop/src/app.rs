@@ -249,7 +249,7 @@ fn hint_for(capability: Capability, computer: bool, hint: &'static str) -> &'sta
 
 /// What a paired computer's Control switch does (BK7): it can show this
 /// screen in a window there, and with this on, control this computer from it.
-pub(crate) const COMPUTER_CONTROL: &str = "That computer can show this screen in a window (Show its screen, on its Computers page). On, it can also control this one from that window; off, it can only watch.";
+pub(crate) const COMPUTER_CONTROL: &str = "That computer can show this screen in a window (Show its screen, in its Settings under Other computers). On, it can also control this one from that window; off, it can only watch.";
 
 /// Whether a device is shown `capability`'s switch (E5): a paired computer
 /// is not a phone to ring, mute, cast or lock this computer by.

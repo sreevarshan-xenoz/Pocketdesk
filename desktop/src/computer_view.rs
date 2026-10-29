@@ -1,6 +1,6 @@
 //! Another of the owner's computers' screens in a window (BK7).
 //!
-//! "Show its screen" on the Computers page asks the server to dial that
+//! "Show its screen" in Settings under Other computers asks the server to dial that
 //! computer's screen (`computers_out/`, `ComputerAsk::View`); the server
 //! relays the picture over loopback and names it in `view.json`
 //! (`core::local::view`). A worker thread here connects with the file's
