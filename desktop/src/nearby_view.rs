@@ -21,6 +21,8 @@ const REFRESH: Duration = Duration::from_millis(500);
 /// How long the list says it is looking before it says why it may be
 /// empty.
 const LOOKING: Duration = Duration::from_secs(10);
+/// How long an ask waits for the server to take it.
+const TAKEN_WITHIN: Duration = Duration::from_secs(15);
 
 /// The list's heading.
 pub const NEARBY: &str = "Nearby";
@@ -79,8 +81,13 @@ pub struct NearbyView {
     file: ComputersFile,
     own_id: Option<String>,
     read_at: Option<Instant>,
-    /// The request of the ask made from here, while it is shown.
-    asking: Option<String>,
+    /// The request of the ask made from here, while it is shown, and when
+    /// it was made.
+    asking: Option<(String, Instant)>,
+    /// What the tests list in place of a look on the network (no test
+    /// opens mDNS sockets on the machine it runs on).
+    #[cfg(test)]
+    pub found_for_tests: Vec<nearby::Found>,
     /// Both are mine, for the next ask (PC1).
     mine: bool,
     /// The Public network's fix is shown.
@@ -113,7 +120,7 @@ impl NearbyView {
         now_unix: u64,
     ) {
         self.refresh(state_dir);
-        if self.browse.is_none() && self.browse_error.is_none() {
+        if self.browse.is_none() && self.browse_error.is_none() && !cfg!(test) {
             let ctx = ui.ctx().clone();
             match Browse::start(move || ctx.request_repaint()) {
                 Ok(browse) => self.browse = Some(browse),
@@ -130,7 +137,10 @@ impl NearbyView {
             .map(|c| c.device_id.clone())
             .chain(devices.iter().filter(|d| d.computer).map(|d| d.id.clone()))
             .collect();
+        #[cfg(not(test))]
         let found = self.browse.as_ref().map(Browse::found).unwrap_or_default();
+        #[cfg(test)]
+        let found = self.found_for_tests.clone();
         let rows = nearby::nearby_list(&found, self.own_id.as_deref().unwrap_or(""), &paired);
         if let Some(e) = &self.browse_error {
             ui.label(
@@ -201,7 +211,7 @@ impl NearbyView {
             );
             match asked {
                 Ok(request) => {
-                    self.asking = Some(request.id);
+                    self.asking = Some((request.id, Instant::now()));
                     self.read_at = None;
                 }
                 Err(e) => {
@@ -237,7 +247,7 @@ impl NearbyView {
     /// This computer's ask, while it goes and as it ended; whether one is
     /// under way.
     fn ask_progress(&mut self, ui: &mut egui::Ui, state_dir: &Path, now_unix: u64) -> bool {
-        let Some(request) = self.asking.clone() else {
+        let Some((request, asked_at)) = self.asking.clone() else {
             return false;
         };
         let Some(out) = self
@@ -246,7 +256,18 @@ impl NearbyView {
             .clone()
             .filter(|o| o.request == request)
         else {
-            // Not taken by the server yet.
+            // Not taken by the server yet: it may have stopped.
+            if asked_at.elapsed() > TAKEN_WITHIN {
+                let done = crate::widgets::why_off(
+                    ui,
+                    "The server didn't take the ask. Is it running?",
+                    Some("Done"),
+                );
+                if done {
+                    self.asking = None;
+                }
+                return false;
+            }
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("Asking…");
@@ -418,7 +439,10 @@ impl Prompt {
                 now_unix,
             );
             self.answered.push(asked.id);
-            self.answered.truncate(16);
+            // The newest few: an id is never asked again.
+            if self.answered.len() > 16 {
+                self.answered.remove(0);
+            }
             self.shown = None;
         }
     }
@@ -511,6 +535,110 @@ mod tests {
                 accept: false,
                 mine: false,
             }]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn found(id: &str, name: &str, address: &str) -> nearby::Found {
+        nearby::Found {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: vec![address.to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+        }
+    }
+
+    /// The list shows each computer found, a paired one as "Paired"; Pair
+    /// asks the server for that computer as found, with both-are-mine
+    /// when ticked; then its code shows large, with whom it waits for.
+    #[test]
+    fn pair_on_a_nearby_computer_asks_and_shows_the_code() {
+        let dir = temp("list");
+        computers::update(&dir, |file| {
+            file.computers.push(computers::PeerComputer {
+                device_id: "00000000-0000-4000-8000-0000000000e2".to_string(),
+                name: "Old Desk".to_string(),
+                addresses: Vec::new(),
+                control_port: 1716,
+                stream_port: 4716,
+                fingerprint: String::new(),
+                endpoint: None,
+                paired_unix: 0,
+                link: String::new(),
+                link_unix: 0,
+                lets_drive: false,
+                mine: false,
+            });
+        })
+        .unwrap();
+        let mut view = NearbyView {
+            found_for_tests: vec![
+                found(
+                    "00000000-0000-4000-8000-0000000000e1",
+                    "Test Tower",
+                    "192.0.2.80",
+                ),
+                found(
+                    "00000000-0000-4000-8000-0000000000e2",
+                    "Old Desk",
+                    "192.0.2.81",
+                ),
+            ],
+            ..NearbyView::default()
+        };
+        let state = dir.clone();
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+            view.show(
+                ui,
+                &state,
+                &[],
+                true,
+                pocketdesk_core::local::pin::now_unix(),
+            );
+        });
+        harness.run_steps(2);
+        assert!(harness.query_by_label("Test Tower").is_some());
+        assert!(
+            harness.query_by_label(PAIRED).is_some(),
+            "Old Desk is paired"
+        );
+        harness.get_by_label(MINE_BOX).click();
+        harness.run_steps(2);
+        harness.get_by_label("Pair").click();
+        harness.run_steps(2);
+        let now = pocketdesk_core::local::pin::now_unix();
+        let taken = computers::take_all(&dir, now);
+        assert_eq!(taken.len(), 1);
+        assert_eq!(
+            taken[0].ask,
+            ComputerAsk::PairNearby {
+                device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
+                name: "Test Tower".to_string(),
+                address: "192.0.2.80".to_string(),
+                port: 1716,
+                mine: true,
+            }
+        );
+        // The server says it waits, with the code.
+        computers::update(&dir, |file| {
+            file.nearby_out = Some(nearby::NearbyAsk {
+                request: taken[0].id.clone(),
+                device_id: "00000000-0000-4000-8000-0000000000e1".to_string(),
+                name: "Test Tower".to_string(),
+                code: Some("482913".to_string()),
+                state: AskState::Waiting,
+                unix: now,
+            });
+        })
+        .unwrap();
+        std::thread::sleep(REFRESH);
+        harness.run_steps(2);
+        assert!(harness.query_by_label("482 913").is_some());
+        assert!(
+            harness
+                .query_by_label("Waiting for Test Tower to accept.")
+                .is_some()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
