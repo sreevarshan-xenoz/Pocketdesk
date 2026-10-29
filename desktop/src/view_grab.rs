@@ -329,7 +329,11 @@ unsafe extern "system" fn keyboard_hook(
                 let Ok(mut slot) = HOOK_STATE.try_lock() else {
                     return false;
                 };
-                let Some(state) = slot.as_mut() else {
+                // Only this thread's own (a hook left from an earlier
+                // window, on its way out, takes nothing).
+                // SAFETY: this thread's id.
+                let here = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+                let Some(state) = slot.as_mut().filter(|s| s.thread_id == here) else {
                     return false;
                 };
                 // A window that stopped answering gets nothing: the key is
