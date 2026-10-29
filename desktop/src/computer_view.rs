@@ -606,6 +606,22 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         let ended = view(&file, shared, ctx);
         end_recording(shared, Some("the screen stopped"));
         let mut state = lock(shared);
+        // The relay dropped this window but the view goes on (its queue
+        // was full at a new size, BK7 review M3): it is joined again, with
+        // what is held let go meanwhile.
+        let rejoin = ended.is_err()
+            && state.session_id == Some(file.session_id)
+            && state.wanted.as_ref() == Some(&wanted)
+            && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
+        if rejoin {
+            let release = state.input.release_all();
+            send(&mut state, release);
+            state.stream = None;
+            state.writer = None;
+            state.session_id = None;
+            state.input = WindowInput::default();
+            continue;
+        }
         state.newer_than = state.newer_than.max(file.session_id);
         // Still the one this window wants (not closed, nor another screen
         // asked for meanwhile): it says why it ended.
@@ -850,6 +866,80 @@ mod tests {
         assert_eq!(file_safe("Desk"), "Desk");
         assert_eq!(file_safe("a/b:c"), "a b c");
         assert_eq!(file_safe("..."), "Computer");
+    }
+
+    /// BK7 review M3: a relay that drops the window (its queue was full at a
+    /// new size) while `view.json` still names the view is joined again,
+    /// not taken for the view's end.
+    #[test]
+    fn a_window_dropped_by_the_relay_joins_the_view_again() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-rejoin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        struct Remove(PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _remove = Remove(dir.clone());
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let token = [4u8; pocketdesk_core::local::cast::TOKEN_LEN];
+        wire::write(
+            &dir,
+            &ViewFile {
+                session_id: 20,
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                port: listener.local_addr().unwrap().port(),
+                token: pocketdesk_core::local::cast::token_hex(&token),
+            },
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone());
+        view.open("desk", "Desk", 0, 0, false).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let join = || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut relay = loop {
+                match listener.accept() {
+                    Ok((relay, _)) => break relay,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "joined within 10 s");
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            };
+            relay.set_nonblocking(false).unwrap();
+            relay
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut given = [0u8; 32];
+            std::io::Read::read_exact(&mut relay, &mut given).unwrap();
+            assert_eq!(given, token);
+            relay
+        };
+        let first = join();
+        drop(first);
+        // Joined again, and nothing said ended meanwhile.
+        let mut second = join();
+        assert_eq!(lock(&view.shared).ended, None);
+        Message::End {
+            why: "Lost the connection to Desk.".into(),
+        }
+        .write(&mut second)
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lock(&view.shared).ended.is_none() {
+            assert!(Instant::now() < deadline, "the end within 10 s");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            lock(&view.shared).ended.as_deref(),
+            Some("Lost the connection to Desk.")
+        );
     }
 
     /// The worker against a stand-in relay: it finds the view the window
