@@ -1120,6 +1120,17 @@ fn drag_held() -> bool {
 impl Glue {
     /// The channel to `to`, opened (and greeted) if there is none.
     fn channel(&mut self, to: &str) -> Option<&mut Channel> {
+        // A channel on a link since replaced (that computer restarted and
+        // linked again) is opened anew on the new one, and greets it. Mid-
+        // visit it is not reopened here: its next send fails and the
+        // keyboard and mouse come home.
+        if self
+            .channels
+            .get(to)
+            .is_some_and(|channel| !channel.is_current())
+        {
+            self.channels.remove(to);
+        }
         if !self.channels.contains_key(to) {
             let opened = Instant::now();
             match Channel::open(to) {

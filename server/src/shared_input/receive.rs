@@ -845,6 +845,14 @@ fn tell_screens(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Sc
 /// Send `msg` to the computer `to` on the channel kept for it (opened the
 /// first time; dropped when a send fails, so the next opens it again).
 fn send_to(channels: &mut HashMap<String, Channel>, to: &str, msg: &Msg) {
+    // A channel on a link since replaced (the other computer restarted and
+    // linked again) would carry this nowhere: it goes on the new link.
+    if channels
+        .get(to)
+        .is_some_and(|channel| !channel.is_current())
+    {
+        channels.remove(to);
+    }
     if !channels.contains_key(to) {
         match Channel::open(to) {
             Ok(channel) => {
@@ -2052,5 +2060,59 @@ mod tests {
         note_name(&mut heard, "desk", "Desk");
         keep_heard(&mut file, &heard, 5);
         assert_eq!(file.get("desk").unwrap().name, "Desk");
+    }
+
+    /// Both ends of two links on this machine, each direct (an answer goes
+    /// only on a direct link).
+    async fn two_direct_links() -> (
+        Vec<iroh::Endpoint>,
+        [iroh::endpoint::Connection; 2],
+        iroh::endpoint::Connection,
+    ) {
+        let (a, b, first, _first_back) = link::tests::linked_pair().await;
+        let (c, d, second, second_back) = link::tests::linked_pair().await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !(link::is_direct(&first) && link::is_direct(&second)) {
+            assert!(tokio::time::Instant::now() < deadline, "direct in time");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        (vec![a, b, c, d], [first, second], second_back)
+    }
+
+    /// When another computer restarts and links again, its new link
+    /// replaces the old one, which lives on here until it times out (about
+    /// 45 s, the other end gone without a word). This computer's answers to
+    /// it (screens, refusals, timings) go on the new link at once, not on
+    /// the old one into nothing.
+    #[tokio::test]
+    async fn an_answer_goes_on_the_link_that_replaced_the_old_one() {
+        let id = "test-answer-relinked";
+        let (ends, [first, second], second_back) = two_direct_links().await;
+        link::register(id, first);
+        let mut channels = HashMap::new();
+        send_to(&mut channels, id, &Msg::Leave);
+        assert!(
+            channels.contains_key(id),
+            "a channel kept for the next answer"
+        );
+        link::register(id, second);
+        send_to(&mut channels, id, &Msg::Leave);
+        let mut stream = tokio::time::timeout(Duration::from_secs(5), second_back.accept_uni())
+            .await
+            .expect("the answer on the new link at once")
+            .unwrap();
+        let mut head = [0u8; 7];
+        stream.read_exact(&mut head).await.unwrap();
+        assert_eq!(head[..4], wire::STREAM_MAGIC);
+        assert_eq!(head[4], wire::VERSION);
+        let len = usize::from(u16::from_be_bytes([head[5], head[6]]));
+        let mut body = vec![0u8; len];
+        stream.read_exact(&mut body).await.unwrap();
+        assert_eq!(wire::decode(&body).unwrap(), Msg::Leave);
+        link::unregister(id);
+        drop(channels);
+        for end in ends {
+            end.close().await;
+        }
     }
 }

@@ -563,13 +563,29 @@ impl Channel {
         })
     }
 
+    /// Whether this channel's connection is still the link registered for
+    /// its computer: not once a newer link replaced it (the other computer
+    /// restarted and linked again; the old connection lives on here until
+    /// it times out, about 45 s, carrying what is sent on it nowhere) or the
+    /// link went. A channel that is not current is opened anew.
+    pub fn is_current(&self) -> bool {
+        let stable_id = self.conn.stable_id();
+        lock(&LINKS)
+            .get(&self.device_id)
+            .is_some_and(|registered| registered.conn.stable_id() == stable_id)
+    }
+
     /// Send `msg`: a move, an activity note, a ping or a pong as one
     /// datagram, the rest in order on this channel's stream (opened with the
-    /// first). Never waits; an error means the link closed, the stream
-    /// broke, or the other computer is not taking what was sent.
+    /// first). Never waits; an error means the link closed, was replaced or
+    /// went, the stream broke, or the other computer is not taking what was
+    /// sent.
     pub fn send(&mut self, msg: &Msg) -> Result<(), String> {
         if let Some(why) = self.conn.close_reason() {
             return Err(format!("the link closed: {why}"));
+        }
+        if !self.is_current() {
+            return Err("the link to that computer was replaced or went".to_string());
         }
         if let Some(why) = lock(&self.broken).clone() {
             return Err(why);
@@ -1038,5 +1054,29 @@ pub(crate) mod tests {
         assert!(!rides_datagram(&Msg::SoundUnavailable {
             why: String::new()
         }));
+    }
+
+    /// A channel opened on a link that has since been replaced (the other
+    /// computer restarted and linked again) is no longer current: it sends
+    /// nothing more on the old connection, which would carry it nowhere
+    /// until it timed out.
+    #[tokio::test]
+    async fn a_channel_on_a_replaced_link_is_not_current() {
+        let (a, b, first, _first_back) = linked_pair().await;
+        let (c, d, second, _second_back) = linked_pair().await;
+        register("test-replaced", first);
+        let mut channel = Channel::open_with("test-replaced", |_| true).unwrap();
+        assert!(channel.is_current());
+        channel.send(&Msg::Leave).unwrap();
+        register("test-replaced", second);
+        assert!(!channel.is_current(), "its link replaced");
+        let err = channel.send(&Msg::Leave).unwrap_err();
+        assert!(err.contains("replaced"), "{err}");
+        unregister("test-replaced");
+        assert!(!channel.is_current(), "no link at all");
+        drop(channel);
+        for end in [a, b, c, d] {
+            end.close().await;
+        }
     }
 }
