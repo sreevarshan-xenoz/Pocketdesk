@@ -572,6 +572,12 @@ pub(crate) async fn push_for_window(device_id: &str) {
 /// back (PC3, [`ask_back`]), as [`push_now`] sends it, marked as
 /// following the window.
 pub(crate) async fn answer_window_ask(device_id: &str) {
+    // Asked again here, as the ask was judged (PR #554 review I1): the
+    // answer goes on whichever road reaches that computer.
+    if !takes_window_ask(device_id) {
+        tracing::debug!("Not answered {device_id}'s ask for the clipboard back");
+        return;
+    }
     push_following(device_id, Follow::Window).await
 }
 
@@ -771,6 +777,7 @@ pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
             config.computer_view_clipboard,
             || is_paired_computer(device_id),
             || controls_here(device_id),
+            || clipboard_allowed(device_id),
             || answer_awaited(device_id, std::time::Instant::now()),
         );
     }
@@ -790,27 +797,52 @@ pub(crate) fn takes_follow(device_id: &str, body: &serde_json::Value) -> bool {
 /// Whether a push that follows the window (PC3) is taken: with
 /// `computer_view_clipboard` on here (`on`), from one of the owner's paired
 /// computers (`is_computer`) that controls this one through its window now
-/// (`controls`: its screen session here takes its input), or whose answer
-/// this one awaits (`awaited`: this computer's window lost the focus and
-/// asked it back; used once). Each later word is asked only when those
-/// before it hold.
+/// (`controls`: its screen session here takes its input) and has the
+/// Clipboard permission here (`permitted`, PR #554 review I1: on the link
+/// this computer keeps no other gate asks), or whose answer this one awaits
+/// (`awaited`: this computer's window lost the focus and asked it back;
+/// used once). Each later word is asked only when those before it hold.
 fn window_taken(
     on: bool,
     is_computer: impl FnOnce() -> bool,
     controls: impl FnOnce() -> bool,
+    permitted: impl FnOnce() -> bool,
     awaited: impl FnOnce() -> bool,
 ) -> bool {
-    on && is_computer() && (controls() || awaited())
+    on && is_computer() && ((controls() && permitted()) || awaited())
+}
+
+/// Whether an ask for this computer's clipboard back is answered (PC3):
+/// with `computer_view_clipboard` on here (`on`), from a paired computer
+/// (`is_computer`) that controls this one through its window now
+/// (`controls`) and has the Clipboard permission here (`permitted`).
+fn window_ask_taken(
+    on: bool,
+    is_computer: impl FnOnce() -> bool,
+    controls: impl FnOnce() -> bool,
+    permitted: impl FnOnce() -> bool,
+) -> bool {
+    on && is_computer() && controls() && permitted()
 }
 
 /// Whether the computer `device_id` may ask for this computer's clipboard
-/// back as its window loses the focus (PC3): with `computer_view_clipboard`
-/// on here, a paired computer that controls this one through its window
-/// now.
+/// back as its window loses the focus: [`window_ask_taken`], whichever road
+/// the ask came by.
 pub(crate) fn takes_window_ask(device_id: &str) -> bool {
-    crate::events::current_config().computer_view_clipboard
-        && is_paired_computer(device_id)
-        && controls_here(device_id)
+    window_ask_taken(
+        crate::events::current_config().computer_view_clipboard,
+        || is_paired_computer(device_id),
+        || controls_here(device_id),
+        || clipboard_allowed(device_id),
+    )
+}
+
+/// Whether the computer `device_id` has the Clipboard permission here.
+fn clipboard_allowed(device_id: &str) -> bool {
+    crate::plugins::pair::allows(
+        device_id,
+        pocketdesk_core::protocol::permissions::Capability::Clipboard,
+    )
 }
 
 /// One of the owner's paired computers, either way.
@@ -1913,19 +1945,49 @@ mod tests {
     fn a_window_push_is_taken_from_the_computer_that_controls_or_was_asked() {
         let yes = || true;
         let no = || false;
-        assert!(window_taken(true, yes, yes, no), "it controls this one");
-        assert!(window_taken(true, yes, no, yes), "this one asked it back");
-        assert!(!window_taken(true, yes, no, no), "neither");
-        assert!(!window_taken(false, yes, yes, yes), "the setting off here");
-        assert!(!window_taken(true, no, yes, yes), "not a computer");
+        assert!(
+            window_taken(true, yes, yes, yes, no),
+            "it controls this one"
+        );
+        assert!(
+            window_taken(true, yes, no, no, yes),
+            "this one asked it back"
+        );
+        assert!(!window_taken(true, yes, no, yes, no), "neither");
+        assert!(
+            !window_taken(false, yes, yes, yes, yes),
+            "the setting off here"
+        );
+        assert!(!window_taken(true, no, yes, yes, yes), "not a computer");
         // The ask is used up only when the rest holds.
         let unread = || -> bool { panic!("not asked") };
-        assert!(!window_taken(false, unread, unread, unread));
-        assert!(!window_taken(true, no, unread, unread));
+        assert!(!window_taken(false, unread, unread, unread, unread));
+        assert!(!window_taken(true, no, unread, unread, unread));
         assert!(
-            window_taken(true, yes, yes, unread),
+            window_taken(true, yes, yes, yes, unread),
             "controls: no ask used"
         );
+    }
+
+    /// PR #554 review I1: with Clipboard off here for the computer that
+    /// controls this one, its window neither sets this clipboard nor reads
+    /// it, whichever road the packet came by.
+    #[test]
+    fn clipboard_off_here_takes_no_window_push_and_answers_no_ask() {
+        let yes = || true;
+        let no = || false;
+        assert!(
+            !window_taken(true, yes, yes, no, no),
+            "it controls, but Clipboard is off for it"
+        );
+        assert!(window_ask_taken(true, yes, yes, yes));
+        assert!(!window_ask_taken(true, yes, yes, no), "Clipboard off");
+        assert!(!window_ask_taken(true, yes, no, yes), "not controlling");
+        assert!(!window_ask_taken(true, no, yes, yes), "not a computer");
+        assert!(!window_ask_taken(false, yes, yes, yes), "the setting off");
+        let unread = || -> bool { panic!("not asked") };
+        assert!(!window_ask_taken(false, unread, unread, unread));
+        assert!(!window_ask_taken(true, yes, no, unread));
     }
 
     /// PC3: an answer is awaited from the computer asked, within the wait,
