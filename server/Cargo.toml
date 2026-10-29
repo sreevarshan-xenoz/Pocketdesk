@@ -87,6 +87,10 @@ x11rb = { version = "0.13", features = ["xfixes"] }
 # with ab_glyph (pure Rust, Apache-2.0) in a memfd buffer.
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", default-features = false, features = ["client"] }
+# This computer's screens from xdg-output where neither Hyprland's IPC nor
+# X can say them (BK8 live: sway without Xwayland); the version core's
+# laser dot uses.
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 ab_glyph = "0.2"
 libc.workspace = true
 # Driving from Linux (BK8): the input-capture portal (ashpd, MIT) and its

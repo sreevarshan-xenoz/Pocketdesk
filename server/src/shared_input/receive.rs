@@ -96,7 +96,15 @@ impl Inject for InputInjector {
 
 fn inject(injector: &mut InputInjector, packet: InputPacket) {
     if let Err(e) = injector.handle_input_packet(&packet) {
-        tracing::debug!("Shared input: {packet:?} was not injected: {e:#}");
+        // What it was, never which key: no keystroke goes in a log.
+        let what = match packet {
+            InputPacket::KeyEvent { .. } => "a key",
+            InputPacket::MouseClick { .. } => "a button",
+            InputPacket::MouseScroll { .. } => "a wheel turn",
+            InputPacket::MouseMoveAbs { .. } => "a move",
+            _ => "an input",
+        };
+        tracing::debug!("Shared input: {what} was not injected: {e:#}");
     }
 }
 
@@ -268,6 +276,12 @@ impl Receiver {
             self.inputs = 0;
             // An ask is for one visit: it asks again after it arrives.
             self.sound_wanted = false;
+            tracing::debug!(
+                from,
+                x,
+                y,
+                "Shared input: another computer's cursor arrived here at this position (0..=65535)"
+            );
             self.inject.move_abs(x, y);
             // Where the cursor arrives, the owner sees whose keyboard and
             // mouse they are now: this computer's.
@@ -286,7 +300,10 @@ impl Receiver {
         }
         let n = self.inputs;
         match msg {
-            Msg::Leave => self.stop(),
+            Msg::Leave => {
+                tracing::debug!(from, "Shared input: the driving computer's cursor left");
+                self.stop();
+            }
             Msg::Move { seq, x, y } => {
                 // Newer by the count, which may wrap.
                 let newer = self
@@ -312,7 +329,13 @@ impl Receiver {
                 self.inject.wheel(dx, dy);
                 self.time(false, n, arrived_us);
             }
-            Msg::ReleaseAll => self.release_held(),
+            Msg::ReleaseAll => {
+                tracing::debug!(
+                    from,
+                    "Shared input: the driving computer let go of everything held"
+                );
+                self.release_held();
+            }
             Msg::SoundWanted { on } => self.sound_wanted = on,
             _ => {}
         }
@@ -604,6 +627,47 @@ impl Gate {
     }
 }
 
+/// This computer's screens, read on a task of their own (review M3): a
+/// compositor slow to answer (up to the Wayland read's deadline) never
+/// holds up the loop that injects another computer's input. The loop asks
+/// for a look ([`ScreensLook::ask`]) and takes what was seen when it comes
+/// ([`ScreensLook::seen`]); an ask made while a look is on its way is
+/// dropped, so no queue builds behind a slow one.
+struct ScreensLook {
+    ask: tokio::sync::mpsc::Sender<()>,
+    seen: tokio::sync::mpsc::Receiver<Vec<Screen>>,
+}
+
+impl ScreensLook {
+    /// Looking with [`screens::current`].
+    fn start() -> Self {
+        Self::start_with(screens::current)
+    }
+
+    /// Looking with `look`; its task ends with this.
+    fn start_with<F, Fut>(look: F) -> Self
+    where
+        F: Fn() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Vec<Screen>> + Send + 'static,
+    {
+        let (ask, mut asked) = tokio::sync::mpsc::channel::<()>(1);
+        let (tell, seen) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            while asked.recv().await.is_some() {
+                if tell.send(look().await).await.is_err() {
+                    break;
+                }
+            }
+        });
+        ScreensLook { ask, seen }
+    }
+
+    /// Ask for a look, unless one is already on its way. Never waits.
+    fn ask(&self) {
+        let _ = self.ask.try_send(());
+    }
+}
+
 /// This computer's own screens as last read, so they are written to
 /// `shared_screens.json` (and told) when they are first read, whichever
 /// way that is, and again only when they change.
@@ -636,15 +700,59 @@ impl OwnScreens {
 }
 
 /// What other computers said of their screens and is not written yet, by
-/// computer: the name it gave (when it gave one) and its screens, clipped.
-type Heard = HashMap<String, (Option<String>, Vec<Screen>)>;
+/// computer: the name it gave (when it gave one) and its screens (when it
+/// gave them), clipped.
+type Heard = HashMap<String, (Option<String>, Option<Vec<Screen>>)>;
 
 fn note_heard(heard: &mut Heard, from: &str, name: Option<&str>, screens: &[Screen]) {
     let entry = heard.entry(from.to_string()).or_default();
     if let Some(name) = name {
         entry.0 = Some(shared_input::clean_name(name));
     }
-    entry.1 = shared_input::clean_screens(screens);
+    entry.1 = Some(shared_input::clean_screens(screens));
+}
+
+/// A computer said its name alone ([`Msg::Name`]: one that only takes
+/// input says it after its screens, as it never says hello).
+fn note_name(heard: &mut Heard, from: &str, name: &str) {
+    let entry = heard.entry(from.to_string()).or_default();
+    entry.0 = Some(shared_input::clean_name(name));
+}
+
+/// Keep `heard` in `file`: a computer's screens with its name, when it
+/// gave one; a name said alone names the computer already kept (its
+/// screens as they were), and makes none without screens.
+fn keep_heard(file: &mut shared_input::ScreensFile, heard: &Heard, now: u64) {
+    for (id, (name, screens)) in heard {
+        match (name, screens) {
+            (name, Some(screens)) => file.heard(id, name.as_deref(), screens, now),
+            (Some(name), None) => {
+                if let Some(screens) = file.get(id).map(|kept| kept.screens.clone()) {
+                    file.heard(id, Some(name), &screens, now);
+                }
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+/// Answer `to`'s hello ([`hello_answer`]), on the channel kept for it.
+fn answer_hello(channels: &mut HashMap<String, Channel>, to: &str, screens: &[Screen], name: &str) {
+    for msg in hello_answer(screens, name) {
+        send_to(channels, to, &msg);
+    }
+}
+
+/// The answer to a hello, in order: this computer's `screens` (the answer
+/// the driving side waits for), then its `name` (which a computer that
+/// only takes input says nowhere else).
+fn hello_answer(screens: &[Screen], name: &str) -> [Msg; 2] {
+    [
+        Msg::Screens(screens.to_vec()),
+        Msg::Name {
+            name: name.to_string(),
+        },
+    ]
 }
 
 /// Write `heard` to `shared_screens.json`, and with `own` this computer's
@@ -666,9 +774,7 @@ async fn write_screens(state_dir: Option<&PathBuf>, heard: Heard, own: Option<Ve
             if let (Some(me), Some(own)) = (&me, &own) {
                 file.set_own(&me.device_id, &me.device_name, own, now);
             }
-            for (id, (name, screens)) in &heard {
-                file.heard(id, name.as_deref(), screens, now);
-            }
+            keep_heard(file, &heard, now);
         })
     })
     .await;
@@ -824,6 +930,8 @@ pub async fn run() {
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut look = tokio::time::interval(SCREENS_EVERY);
     look.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Read off this loop: a slow compositor never delays an injection.
+    let mut looks = ScreensLook::start();
     let mut status_every = tokio::time::interval(STATUS_EVERY);
     status_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_status: Option<shared_input::StatusFile> = None;
@@ -892,15 +1000,22 @@ pub async fn run() {
                     Msg::Hello { version, name, screens } if standing.computer => {
                         note_heard(&mut heard, &from, Some(name), screens);
                         if standing.allowed && *version == wire::VERSION {
-                            if own.is_unread() && own.note(screens::current().await) {
-                                write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec()))
-                                    .await;
+                            // Not looked at since sharing came on: a look
+                            // is asked for, and its screens go to every
+                            // computer told when it comes. This answer
+                            // says what is known now.
+                            if own.is_unread() {
+                                looks.ask();
                             }
-                            tell_screens(&mut channels, &from, own.get());
+                            let name = crate::kde::host_device_name();
+                            answer_hello(&mut channels, &from, own.get(), &name);
                         }
                     }
                     Msg::Screens(screens) if standing.computer => {
                         note_heard(&mut heard, &from, None, screens);
+                    }
+                    Msg::Name { name } if standing.computer => {
+                        note_name(&mut heard, &from, name);
                     }
                     Msg::Identify { name } if standing.allowed => {
                         // Shown on screen by the receiver, below.
@@ -1010,7 +1125,14 @@ pub async fn run() {
                 receiver.prepare();
                 // The name its badge shows, kept to a rename.
                 receiver.set_name(&crate::kde::host_device_name());
-                if own.note(screens::current().await) {
+                looks.ask();
+            }
+            Some(seen) = looks.seen.recv() => {
+                // Looked at while sharing was on; off since, it is no news.
+                if !gate.on().await {
+                    continue;
+                }
+                if own.note(seen) {
                     write_screens(state_dir.as_ref(), Heard::new(), Some(own.get().to_vec())).await;
                     let told: Vec<String> = channels.keys().cloned().collect();
                     for to in told {
@@ -1746,5 +1868,122 @@ mod tests {
                 .all(|call| matches!(call, Call::Move(0, 0))),
             "only the arrivals moved"
         );
+    }
+
+    /// Review M8: a hello is answered with the screens first (the answer
+    /// the driving side waits for) and then the name, in that order.
+    #[test]
+    fn a_hello_is_answered_with_the_screens_then_the_name() {
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            hello_answer(&[screen], "Arch laptop"),
+            [
+                Msg::Screens(vec![screen]),
+                Msg::Name {
+                    name: "Arch laptop".to_string()
+                }
+            ]
+        );
+    }
+
+    /// Review M3: this computer's screens are read on a task of their own,
+    /// so asking never waits on the compositor, and asks made while a look
+    /// is on its way make no queue behind it.
+    #[tokio::test]
+    async fn a_look_at_the_screens_never_holds_up_the_asker() {
+        let looked = Arc::new(Mutex::new(0u32));
+        let counted = looked.clone();
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let mut looks = ScreensLook::start_with(move || {
+            let counted = counted.clone();
+            async move {
+                *counted.lock().unwrap() += 1;
+                // A compositor slow to answer.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                vec![screen]
+            }
+        });
+        let asked = Instant::now();
+        for _ in 0..5 {
+            looks.ask();
+        }
+        assert!(asked.elapsed() < Duration::from_millis(50), "asking waited");
+        let seen = tokio::time::timeout(Duration::from_secs(2), looks.seen.recv())
+            .await
+            .unwrap();
+        assert_eq!(seen, Some(vec![screen]));
+        // The asks made while it looked were one at most, not five.
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        assert!(*looked.lock().unwrap() <= 2, "{}", *looked.lock().unwrap());
+    }
+
+    /// BK8 live: where another computer's cursor arrived, its leave and its
+    /// letting go are logged at debug, so "it came home where it crossed"
+    /// can be checked from the log; a key never is (its code or anything).
+    #[test]
+    fn arrivals_leaves_and_letting_go_are_logged_and_keys_never() {
+        let (mut r, _fake) = receiver();
+        let (caught, guard) = super::super::caught_log::catch();
+        r.handle("pc", Msg::Enter { x: 1234, y: 4321 }, true);
+        r.handle("pc", key(47, true), true);
+        r.handle("pc", Msg::ReleaseAll, true);
+        r.handle("pc", Msg::Leave, true);
+        drop(guard);
+        let log = caught.text();
+        assert!(log.contains("x=1234") && log.contains("y=4321"), "{log}");
+        assert!(log.contains("let go of everything"), "{log}");
+        assert!(log.contains("cursor left"), "{log}");
+        assert!(!log.contains("47") && !log.contains("code"), "{log}");
+    }
+
+    /// BK8 live: a computer that only takes input never says hello, so its
+    /// name comes in its own message, after its screens: it names the
+    /// computer already kept, its screens left as they were; screens heard
+    /// alone keep the name.
+    #[test]
+    fn a_name_heard_alone_names_the_computer_and_keeps_its_screens() {
+        let screen = Screen {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let mut file = shared_input::ScreensFile::default();
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "laptop", None, &[screen]);
+        keep_heard(&mut file, &heard, 1);
+        assert_eq!(file.get("laptop").map(|c| c.name.as_str()), Some(""));
+        let mut heard = Heard::new();
+        note_name(&mut heard, "laptop", "Arch laptop");
+        keep_heard(&mut file, &heard, 2);
+        let kept = file.get("laptop").unwrap();
+        assert_eq!(kept.name, "Arch laptop");
+        assert_eq!(kept.screens, vec![screen]);
+        // Its screens again, alone: the name stays.
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "laptop", None, &[screen]);
+        keep_heard(&mut file, &heard, 3);
+        assert_eq!(file.get("laptop").unwrap().name, "Arch laptop");
+        // A name from a computer not kept yet makes no entry without screens.
+        let mut heard = Heard::new();
+        note_name(&mut heard, "stranger", "Desk");
+        keep_heard(&mut file, &heard, 4);
+        assert!(file.get("stranger").is_none());
+        // Both in one batch: kept together.
+        let mut heard = Heard::new();
+        note_heard(&mut heard, "desk", None, &[screen]);
+        note_name(&mut heard, "desk", "Desk");
+        keep_heard(&mut file, &heard, 5);
+        assert_eq!(file.get("desk").unwrap().name, "Desk");
     }
 }

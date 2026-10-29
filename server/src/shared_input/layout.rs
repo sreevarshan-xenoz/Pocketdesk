@@ -7,6 +7,8 @@
 //! edge to edge. A [`Crossing`] is in the receiving computer's own space, the
 //! one it will move its cursor in.
 
+use std::collections::HashMap;
+
 use super::wire::Screen;
 
 /// One computer in the layout.
@@ -162,6 +164,35 @@ impl Layout {
             })
             .min_by_key(|(distance, _)| *distance)
             .map_or(at, |(_, near)| (near.0 as i32, near.1 as i32))
+    }
+}
+
+impl Layout {
+    /// Name each computer as the owner paired it (`paired`: its pairing
+    /// link's name, or the trust store's rename, else what it called itself
+    /// there), whatever it calls itself now (review M1: a computer's own
+    /// name, said in its hello or `Name`, could be anything, "this
+    /// computer" too). One not paired by a name keeps its own, unless that
+    /// is no name once cleaned for showing (zero-width only, review M2) or
+    /// claims to be this computer: it is then unnamed, and the badge says
+    /// "another computer" (BK8 live: one that only takes input never said
+    /// its name at all).
+    pub fn name_as_paired(&mut self, paired: &HashMap<String, String>) {
+        let shown = |name: &str| super::badge::clip(name, super::badge::NAME_CHARS);
+        for computer in &mut self.computers {
+            match paired
+                .get(&computer.device_id)
+                .filter(|name| !shown(name).is_empty())
+            {
+                Some(name) => computer.name = name.clone(),
+                None => {
+                    let own = shown(&computer.name);
+                    if own.is_empty() || own.eq_ignore_ascii_case("this computer") {
+                        computer.name = String::new();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -613,6 +644,55 @@ mod tests {
         assert_eq!(
             Layout::default_for(windows(), vec![linux()]).crossing("W", (3455, 480), 5, 0),
             crossing("L", (0, 480))
+        );
+    }
+
+    /// BK8 live, and review M1/M2: each computer is named as the owner
+    /// paired it, whatever it calls itself (one that only takes input never
+    /// says hello, and one could call itself "this computer"); a name blank
+    /// once cleaned for showing (zero-width only) is no name.
+    #[test]
+    fn a_computer_is_named_as_the_owner_paired_it() {
+        let named = |id: &str, y: i32, name: &str| {
+            let mut c = placed(id, (0, y), vec![screen(0, 0, 800, 600)]);
+            c.name = name.to_string();
+            c
+        };
+        let mut layout = Layout {
+            computers: vec![
+                windows(),
+                named("L", 1000, " "),
+                named("N", 2000, "this computer"),
+                named("Z", 3000, "\u{200B}"),
+                named("S", 4000, "Said"),
+                named("B", 5000, "Its own"),
+                named("T", 6000, "This Computer"),
+                named("U", 7000, "\u{200B}\u{2066}"),
+            ],
+        };
+        let paired = HashMap::from([
+            ("L".to_string(), "Arch laptop".to_string()),
+            ("N".to_string(), "Desk".to_string()),
+            ("Z".to_string(), "Spare".to_string()),
+            // A paired name blank once cleaned names nothing.
+            ("B".to_string(), "\u{200B}".to_string()),
+        ]);
+        layout.name_as_paired(&paired);
+        let names: Vec<&str> = layout.computers.iter().map(|c| c.name.as_str()).collect();
+        // Not paired: its own name stays, unless that is no name or claims
+        // to be this computer (the badge then says "another computer").
+        assert_eq!(
+            names,
+            [
+                "W",
+                "Arch laptop",
+                "Desk",
+                "Spare",
+                "Said",
+                "Its own",
+                "",
+                ""
+            ]
         );
     }
 }

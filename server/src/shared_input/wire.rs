@@ -47,6 +47,7 @@ const TAG_TIMINGS: u8 = 15;
 const TAG_SOUND_WANTED: u8 = 16;
 const TAG_SOUND_UNAVAILABLE: u8 = 17;
 const TAG_SOUND: u8 = 18;
+const TAG_NAME: u8 = 19;
 
 /// The longest Opus packet a [`Msg::Sound`] carries, in bytes (a longer
 /// one is cut short when encoded; the sender never makes one): with its
@@ -181,6 +182,13 @@ pub enum Msg {
         seq: u32,
         opus: Vec<u8>,
     },
+    /// The sender's name (BK8 live): a computer answering a hello says it
+    /// right after its screens, so a computer that only takes input (which
+    /// never says hello) is named on the computer driving it. A build that
+    /// does not know it skips it.
+    Name {
+        name: String,
+    },
 }
 
 /// Why bytes are not a message.
@@ -307,6 +315,10 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
             out.extend_from_slice(&(opus.len() as u16).to_be_bytes());
             out.extend_from_slice(opus);
         }
+        Msg::Name { name } => {
+            out.push(TAG_NAME);
+            put_str(&mut out, name);
+        }
     }
     out
 }
@@ -360,6 +372,7 @@ pub fn decode(bytes: &[u8]) -> Result<Msg, WireError> {
             seq: r.u32()?,
             opus: r.bytes()?,
         },
+        TAG_NAME => Msg::Name { name: r.string()? },
         tag => return Err(WireError::UnknownTag(tag)),
     };
     if r.rest.is_empty() {
@@ -639,7 +652,26 @@ mod tests {
                 seq: 0,
                 opus: Vec::new(),
             },
+            Msg::Name {
+                name: "Arch laptop \u{e9}".to_string(),
+            },
+            Msg::Name {
+                name: String::new(),
+            },
         ]
+    }
+
+    /// BK8 live: a computer that only takes input says its name with its
+    /// screens: its tag and a name as a hello's.
+    #[test]
+    fn a_name_is_its_tag_and_a_string() {
+        assert_eq!(
+            encode(&Msg::Name {
+                name: "ab".to_string()
+            }),
+            [19, 0, 2, b'a', b'b']
+        );
+        assert_eq!(decode(&[19, 0, 3, b'a']), Err(WireError::Truncated));
     }
 
     /// BK6: the sound messages' bytes, as protocol.md gives them: a sound

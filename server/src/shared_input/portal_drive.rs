@@ -438,14 +438,25 @@ fn drive<B: Backend>(
                 .filter(|id| phone::is_linked(id))
                 .cloned(),
         );
-        layout_for(
+        let mut layout = layout_for(
             &me.device_id,
             &me.device_name,
             glue.own.clone(),
             &file,
             &linked,
             state_dir.as_deref().and_then(|dir| saved.get(dir)),
-        )
+        );
+        // Each named as the owner paired it, whatever it calls itself
+        // (one that only takes input never said its name): the badge
+        // never says "this computer" of another.
+        if layout.computers.len() > 1 {
+            let paired = state_dir
+                .as_deref()
+                .map(status::paired_names)
+                .unwrap_or_default();
+            layout.name_as_paired(&paired);
+        }
+        layout
     };
     let mut game_lock_on = config.shared_input_game_lock;
     let mut driver = Driver::new(&me.device_id, read_layout(&mut glue))

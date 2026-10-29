@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-946 open items.
+947 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 37 |
-| A second computer | 46 |
-| A Linux desktop (the Azure VM serves for some) | 175 |
+| A second computer | 45 |
+| A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 370 |
 
@@ -866,7 +866,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **220. Linux drives too (BK8)**
 
 - Before anything: `pacman -Q xdg-desktop-portal-hyprland xdg-desktop-portal hyprland` names xdph 1.4.0 or later, and `hyprctl monitors` names each screen's scale; the Keyboard and mouse page on the Linux laptop says "Ready" (or "Fractional scaling stops crossing" with a scale like 1.25), never "doesn't offer input capture". (where: second computer)
-- The permission dialog: with no `input_capture.token` in the state folder, turning sharing on shows the desktop's dialog once; allowed, the page says "Ready"; after a server restart it does not ask again (the token replaced, owner-only); said no, the page says "Needs permission" and it does not ask again until sharing is turned off and on. (where: second computer)
 - Cross to Windows and back: the pointer pushed off the Linux laptop's edge that faces Windows on the Keyboard and mouse page appears on Windows at the same height, Linux's own cursor hidden and still; moves, clicks, drags, the wheel and a touchpad's two-finger scroll work there; pushed back off Windows' facing edge, the pointer comes home where it crossed, and the other edges are walls. (where: second computer)
 - Keys and modifiers: typing, Shift for capitals, Ctrl+C and Ctrl+V in a Windows text field, Alt+Tab there, the arrows, F-keys; Shift or Ctrl held while crossing in either direction is never left held on either computer (xdph bug 436); the switch key (ctrl+alt+right) while on Windows comes home, and pressed at home on Linux does nothing (no keys at home). (where: second computer)
 - The safety nets: Wi-Fi turned off on Windows while driving it brings the keyboard and mouse home within about a second; locking the Linux laptop (its lock screen taking them back) brings them home with nothing held on Windows; plugging in or unplugging a monitor on Linux sets the edges again within a few seconds, and doing it while the pointer is on Windows keeps it there until it comes home (then the new edges are set). (where: second computer)
@@ -1342,12 +1341,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **215. The shared keyboard and mouse: the computer driven, the arrangement, the clipboard and the latency (shared input)**
 
-- `pocketdesk share-test <laptop> --keys 2000 --moves 2000` over the home Wi-Fi: Pocketdesk's share under 5 ms at the 95th percentile; the result on the desktop app's Diagnostics page. (where: linux)
+- The share-test's result on the desktop app's Diagnostics page. (where: linux)
 - Linux kept awake while driven: its screensaver and idle lock do not start while typing goes on from Windows for longer than the idle time. (where: linux)
 
 **220. Linux drives too (BK8)**
 
+- The permission dialog, on GNOME and KDE: with no `input_capture.token` in the state folder, turning sharing on shows the desktop's dialog once; allowed, the page says "Ready"; after a server restart it does not ask again (the token replaced, owner-only); said no, the page says "Needs permission" and it does not ask again until sharing is turned off and on. Hyprland asks nothing: xdph 1.4.1 has no input-capture dialog and gives no restore token, so sharing goes straight to "Ready" (about 18 s after driving was turned on, 2026-10-29) and no token is written. (where: linux)
 - The phone's screen sharing still works after driving: with shared input on, turn sharing off and on twice on the Linux laptop, then show its screen on the phone (GNOME or KDE, through the screen-sharing portal; on Hyprland too): it starts within a few seconds, never waiting on a portal call. (where: linux)
+- GNOME at scale 2 in its default physical-layout mode: the computer's own screens in `shared_screens.json` (read from xdg-output where Hyprland's IPC is not there) are its logical size, 1920x1080 for a 4K screen at 200%, not 3840x2160 (mutter's xdg-output may report physical-layout boxes); if not, the screens come from somewhere else on GNOME. (where: linux)
 - GNOME 45 or later and KDE Plasma 6.1 or later (a VM serves): the dialog, a crossing to a second computer and back, keys, and a lock bringing them home; on GNOME 46 a monitor change may need sharing turned off and on (its portal cannot re-enable a disabled session). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android

@@ -161,6 +161,39 @@ pub fn paired_at(state_dir: &Path, trust: Option<&Path>) -> Option<BTreeSet<Stri
     Some(paired)
 }
 
+/// The names this computer paired its other computers as, for one that
+/// has not said its own (BK8 live: one that only takes input never says
+/// hello): `computers.json`'s, then the trust store's computers (the
+/// owner's rename, else what it calls itself). What does not read names
+/// none. Blocking file work.
+pub fn paired_names(state_dir: &Path) -> HashMap<String, String> {
+    let trust = crate::state::trust_store_path().ok();
+    paired_names_at(state_dir, trust.as_deref())
+}
+
+/// [`paired_names`] with the trust store at `trust`.
+pub fn paired_names_at(state_dir: &Path, trust: Option<&Path>) -> HashMap<String, String> {
+    let mut names: HashMap<String, String> = pocketdesk_core::local::computers::try_read(state_dir)
+        .map(|file| {
+            file.computers
+                .into_iter()
+                .filter(|c| !c.name.trim().is_empty())
+                .map(|c| (c.device_id, c.name))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(store) = trust.and_then(|trust| TrustStore::read(trust).ok()) {
+        for id in store.paired_devices() {
+            if store.is_computer(&id)
+                && let Some(name) = store.name(&id)
+            {
+                names.entry(id).or_insert_with(|| name.to_string());
+            }
+        }
+    }
+    names
+}
+
 /// The owner's phones paired now (BK5): the trust store's devices that
 /// are not computers. `None` when it could not be read.
 pub fn paired_phones_at(trust: Option<&Path>) -> Option<BTreeSet<String>> {
@@ -378,6 +411,53 @@ mod tests {
             phones,
             BTreeMap::from([("oppo".to_string(), PHONE_READY.to_string())])
         );
+    }
+
+    /// The names this computer paired its computers as: computers.json's
+    /// first, then the trust store's computers (the owner's rename, else
+    /// what it calls itself); its phones are not computers.
+    #[test]
+    fn paired_computers_are_named_from_both_files() {
+        let dir = temp("names");
+        let trust = dir.join("trusted_devices.json");
+        assert!(paired_names_at(&dir, Some(&trust)).is_empty(), "no files");
+        let computer = |id: &str, name: &str| pocketdesk_core::local::computers::PeerComputer {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: vec!["192.0.2.10".to_string()],
+            control_port: 1716,
+            stream_port: 4716,
+            fingerprint: String::new(),
+            endpoint: None,
+            paired_unix: 0,
+            link: "linked".to_string(),
+            link_unix: 0,
+            lets_drive: false,
+        };
+        pocketdesk_core::local::computers::update(&dir, |file| {
+            file.computers.push(computer("dialed", "Arch laptop"));
+            file.computers.push(computer("both", "Linked as"));
+        })
+        .unwrap();
+        let mut store = TrustStore::load_or_create(&trust).unwrap();
+        store.trust_computer("dialer").unwrap();
+        store.note_claimed_name("dialer", "Desk").unwrap();
+        store.trust_computer("both").unwrap();
+        store.note_claimed_name("both", "Trusted as").unwrap();
+        store.trust_device("phone").unwrap();
+        store.note_claimed_name("phone", "Phone").unwrap();
+        let names = paired_names_at(&dir, Some(&trust));
+        assert_eq!(
+            names,
+            HashMap::from([
+                ("dialed".to_string(), "Arch laptop".to_string()),
+                ("both".to_string(), "Linked as".to_string()),
+                ("dialer".to_string(), "Desk".to_string()),
+            ])
+        );
+        // No trust store to read: computers.json's still name them.
+        assert_eq!(paired_names_at(&dir, None).len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp(name: &str) -> std::path::PathBuf {

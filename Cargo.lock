@@ -5752,6 +5752,7 @@ dependencies = [
  "url",
  "uuid",
  "wayland-client",
+ "wayland-protocols",
  "wayland-protocols-wlr",
  "windows 0.62.2",
  "windows-core 0.62.2",
