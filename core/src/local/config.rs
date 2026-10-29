@@ -361,6 +361,40 @@ pub struct Config {
     /// chosen.
     #[serde(default)]
     pub shared_input_sound: bool,
+    /// Another computer's screen in a window here (BK7): the quality its
+    /// window starts at, `auto`, `quality`, `balanced` or `economy` (the
+    /// phone's presets). The window's own choice then holds for its view.
+    #[serde(default = "default_computer_view_quality")]
+    pub computer_view_quality: String,
+    /// The window that shows another computer's screen starts view-only:
+    /// it sends that computer nothing until switched.
+    #[serde(default)]
+    pub computer_view_only: bool,
+}
+
+fn default_computer_view_quality() -> String {
+    "auto".to_string()
+}
+
+/// The quality presets a computer's window offers, as the config names
+/// them, with the preset id each sends (BK7).
+pub const COMPUTER_VIEW_QUALITIES: [(&str, u8); 4] = [
+    ("auto", crate::streaming::input_packet::PRESET_AUTO),
+    ("quality", crate::streaming::input_packet::PRESET_QUALITY),
+    ("balanced", crate::streaming::input_packet::PRESET_BALANCED),
+    ("economy", crate::streaming::input_packet::PRESET_ECONOMY),
+];
+
+impl Config {
+    /// The preset id a computer's window starts at: `auto` for a name it
+    /// does not know.
+    pub fn computer_view_preset(&self) -> u8 {
+        let named = self.computer_view_quality.trim().to_ascii_lowercase();
+        COMPUTER_VIEW_QUALITIES
+            .iter()
+            .find(|(name, _)| *name == named)
+            .map_or(crate::streaming::input_packet::PRESET_AUTO, |(_, id)| *id)
+    }
 }
 
 fn default_shared_input_hotkey() -> String {
@@ -549,6 +583,8 @@ impl Default for Config {
             shared_input_clipboard: true,
             shared_input_files: true,
             shared_input_sound: false,
+            computer_view_quality: default_computer_view_quality(),
+            computer_view_only: false,
         }
     }
 }
@@ -801,6 +837,8 @@ impl Config {
         "shared_input_clipboard",
         "shared_input_files",
         "shared_input_sound",
+        "computer_view_quality",
+        "computer_view_only",
     ];
 }
 
@@ -1174,6 +1212,50 @@ phone_battery = \"x\"
             assert!(config.shared_input_files, "BK4: on by default");
             assert!(!config.shared_input_sound, "BK6: off until chosen");
         }
+    }
+
+    /// BK7: a computer's window starts at Auto, controlling, unless chosen;
+    /// the choice saves and reads back, and a name not known is Auto.
+    #[test]
+    fn a_computers_window_starts_as_chosen() {
+        let path = temp("computer-view");
+        std::fs::write(&path, "").unwrap();
+        let config = Config::load_from(&path).unwrap();
+        assert_eq!(config.computer_view_quality, "auto");
+        assert!(!config.computer_view_only);
+        assert_eq!(Config::default().computer_view_quality, "auto");
+        assert!(!Config::default().computer_view_only);
+        let mut chosen = config.clone();
+        chosen.computer_view_quality = "economy".to_string();
+        chosen.computer_view_only = true;
+        chosen.save_to(&path).unwrap();
+        let back = Config::load_from(&path).unwrap();
+        assert_eq!(back.computer_view_quality, "economy");
+        assert!(back.computer_view_only);
+        assert_eq!(
+            back.computer_view_preset(),
+            crate::streaming::input_packet::PRESET_ECONOMY
+        );
+        assert_eq!(
+            Config::default().changed_keys(&back),
+            ["computer_view_quality", "computer_view_only"]
+        );
+        let odd = Config {
+            computer_view_quality: "Sharp".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(
+            odd.computer_view_preset(),
+            crate::streaming::input_packet::PRESET_AUTO
+        );
+        let upper = Config {
+            computer_view_quality: " Balanced ".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(
+            upper.computer_view_preset(),
+            crate::streaming::input_packet::PRESET_BALANCED
+        );
     }
 
     #[test]
