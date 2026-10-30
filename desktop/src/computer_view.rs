@@ -65,6 +65,10 @@ const DROP_LOOK: Duration = Duration::from_millis(500);
 /// A way of decoding on the graphics card that gives no picture this long
 /// after its first access unit is given up for the next (PC5).
 const NO_PICTURE: Duration = Duration::from_secs(2);
+/// The last way, the processor, gets longer (PR #562 re-review N2): a cold
+/// ffmpeg or a large first picture is not taken for a decoder that cannot,
+/// which would drop an HEVC view to H.264.
+const LAST_NO_PICTURE: Duration = Duration::from_secs(6);
 /// How often the keyboard grab reads where the shared keyboard is (PC4).
 #[cfg(windows)]
 const ACROSS_LOOK: Duration = Duration::from_millis(500);
@@ -375,10 +379,16 @@ fn decode_words(shown: Shown, decoding: &str) -> String {
 
 /// Whether a decoder that gave `pictures`, has `ended` or not, and was
 /// first fed at `first_fed`, is given up for the next way at `now` (PC5):
-/// one that never gave a picture, and ended or has had [`NO_PICTURE`].
-pub fn give_up(pictures: u64, ended: bool, first_fed: Option<Instant>, now: Instant) -> bool {
+/// one that never gave a picture, and ended or has had `limit`.
+pub fn give_up(
+    pictures: u64,
+    ended: bool,
+    first_fed: Option<Instant>,
+    now: Instant,
+    limit: Duration,
+) -> bool {
     pictures == 0
-        && (ended || first_fed.is_some_and(|at| now.saturating_duration_since(at) >= NO_PICTURE))
+        && (ended || first_fed.is_some_and(|at| now.saturating_duration_since(at) >= limit))
 }
 
 /// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
@@ -1993,7 +2003,9 @@ impl Ladder {
             self.settled = true;
             return Step::Settled;
         }
-        if give_up(pictures, ended, self.first_fed, now) {
+        let last = self.at + 1 >= self.ways.len();
+        let limit = if last { LAST_NO_PICTURE } else { NO_PICTURE };
+        if give_up(pictures, ended, self.first_fed, now, limit) {
             return self.next();
         }
         Step::Stay
@@ -2468,12 +2480,16 @@ mod tests {
     fn a_way_that_gives_no_picture_is_given_up() {
         let t = Instant::now();
         let at = |ms: u64| t + Duration::from_millis(ms);
-        assert!(!give_up(0, false, None, at(9_000)), "not fed yet");
-        assert!(!give_up(0, false, Some(t), at(1_999)));
-        assert!(give_up(0, false, Some(t), at(2_000)));
-        assert!(give_up(0, true, None, t), "ffmpeg ended at once");
-        assert!(!give_up(1, true, Some(t), at(9_000)), "it gave a picture");
-        assert!(!give_up(5, false, Some(t), at(9_000)));
+        let two = NO_PICTURE;
+        assert!(!give_up(0, false, None, at(9_000), two), "not fed yet");
+        assert!(!give_up(0, false, Some(t), at(1_999), two));
+        assert!(give_up(0, false, Some(t), at(2_000), two));
+        assert!(give_up(0, true, None, t, two), "ffmpeg ended at once");
+        assert!(
+            !give_up(1, true, Some(t), at(9_000), two),
+            "it gave a picture"
+        );
+        assert!(!give_up(5, false, Some(t), at(9_000), two));
         assert_eq!(way_words(&Accel::D3d11va, None), "d3d11va");
         assert_eq!(way_words(&Accel::Software, None), "software");
         assert_eq!(
@@ -2504,7 +2520,9 @@ mod tests {
         assert_eq!(ladder.check(0, true, at(5_000)), Step::Next, "ended");
         assert_eq!(ladder.way(), &Accel::Software);
         ladder.fed(at(6_000));
-        assert_eq!(ladder.check(1, false, at(6_010)), Step::Settled);
+        // The processor, last, is given 6 s, not 2 (re-review N2).
+        assert_eq!(ladder.check(0, false, at(8_000)), Step::Stay);
+        assert_eq!(ladder.check(1, false, at(8_010)), Step::Settled);
         assert_eq!(ladder.check(0, true, at(99_000)), Step::Stay, "settled");
         // A feed error leaves the last way: said once.
         assert_eq!(ladder.failed(), Step::Exhausted);
