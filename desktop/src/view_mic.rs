@@ -562,7 +562,7 @@ mod wasapi {
     use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
     use windows::Win32::System::Com::{
         CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-        STGM_READ,
+        CoUninitialize, STGM_READ,
     };
 
     use super::MicSource;
@@ -574,6 +574,21 @@ mod wasapi {
     pub struct Wasapi {
         client: IAudioClient,
         capture: IAudioCaptureClient,
+        /// Last, so COM ends on this thread after its objects go (PR #569
+        /// review M8).
+        _com: Com,
+    }
+
+    /// COM on the capture's thread, ended as it goes when it was begun
+    /// here (an apartment of another kind is left as it was).
+    struct Com(bool);
+
+    impl Drop for Com {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { CoUninitialize() };
+            }
+        }
     }
 
     fn words(e: &windows::core::Error) -> String {
@@ -624,7 +639,7 @@ mod wasapi {
     }
 
     pub fn open(wanted: Option<&str>) -> io::Result<Box<dyn MicSource>> {
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        let com = Com(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok());
         let enumerator: IMMDeviceEnumerator =
             unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.map_err(failed)?;
         let device = device(&enumerator, wanted)?;
@@ -654,7 +669,11 @@ mod wasapi {
         .map_err(failed)?;
         let capture: IAudioCaptureClient = unsafe { client.GetService() }.map_err(failed)?;
         unsafe { client.Start() }.map_err(failed)?;
-        Ok(Box::new(Wasapi { client, capture }))
+        Ok(Box::new(Wasapi {
+            client,
+            capture,
+            _com: com,
+        }))
     }
 
     impl MicSource for Wasapi {
