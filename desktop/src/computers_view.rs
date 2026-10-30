@@ -67,6 +67,10 @@ pub struct ComputersView {
     offer: Option<String>,
     /// PC6: a computer woken to show its screen, until its link comes.
     waking: Option<Waking>,
+    /// Remote revoke: the computer whose "Devices there…" is open.
+    there_open: Option<String>,
+    /// Remote revoke: the device there whose Remove waits for its answer.
+    confirm_remove: Option<String>,
 }
 
 /// How long "Wake it and show" waits for the computer's link (PC6): a
@@ -402,7 +406,12 @@ impl ComputersView {
     }
 
     fn refresh(&mut self, state_dir: &Path) {
-        let every = if self.pairing.is_some() || self.waking.is_some() {
+        let waiting_there = self
+            .file
+            .there
+            .as_ref()
+            .is_some_and(|t| !t.request.is_empty());
+        let every = if self.pairing.is_some() || self.waking.is_some() || waiting_there {
             PAIRING_REFRESH
         } else {
             REFRESH
@@ -413,6 +422,143 @@ impl ComputersView {
         self.file = computers::read(state_dir);
         self.own_id = pocketdesk_core::local::identity::device_id(state_dir);
         self.read_at = Some(Instant::now());
+    }
+
+    /// Whether `device_id` is a computer paired both ways, its grant not
+    /// waiting or lapsed: one whose devices this computer may manage.
+    fn manages(&self, device_id: &str) -> bool {
+        self.file.both_ways(device_id) && !self.file.pending.iter().any(|id| id == device_id)
+    }
+
+    /// Open or close `computer`'s "Devices there…"; opened, its devices
+    /// are asked for (with the server running; else the last list shows).
+    fn toggle_there(
+        &mut self,
+        state_dir: &Path,
+        computer: &PeerComputer,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        self.confirm_remove = None;
+        if self.there_open.as_deref() == Some(&computer.device_id) {
+            self.there_open = None;
+            return;
+        }
+        self.there_open = Some(computer.device_id.clone());
+        if server_running {
+            self.ask_there(state_dir, &computer.device_id, now_unix);
+        }
+    }
+
+    /// Ask the server for the devices on `device_id`.
+    fn ask_there(&mut self, state_dir: &Path, device_id: &str, now_unix: u64) {
+        let ask = ComputerAsk::DevicesThere {
+            device_id: device_id.to_string(),
+        };
+        if let Err(e) = computers::request(state_dir, ask, now_unix) {
+            self.notice = crate::notice::Notice::error(format!("Not asked: {e}"));
+        }
+        self.read_at = None;
+    }
+
+    /// Remote revoke: the devices paired with `computer`, each with
+    /// Remove…, asked by name; what the last ask came to.
+    fn devices_there(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        computer: &PeerComputer,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        let name = computer.name.clone();
+        let there = self
+            .file
+            .there
+            .clone()
+            .filter(|t| t.device_id == computer.device_id);
+        ui.separator();
+        ui.label(RichText::new(format!("Devices paired with {name}")).strong());
+        let step = there_step(there.as_ref(), now_unix);
+        match &step {
+            ThereStep::Asking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Asking {name}…"));
+                });
+                ui.ctx().request_repaint_after(Duration::from_millis(500));
+            }
+            ThereStep::Said(code) => {
+                ui.label(RichText::new(there_words(code, &name)).color(crate::theme::bad(ui)));
+            }
+            ThereStep::Listed | ThereStep::NotAsked => {}
+        }
+        let mut remove = None;
+        if let Some(there) = &there {
+            if there.devices.is_empty() && there.listed_unix > 0 {
+                ui.label(RichText::new("No devices are paired there.").weak());
+            }
+            for device in &there.devices {
+                let shown = device_name(device);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&shown);
+                    ui.label(RichText::new(device_kind(device)).color(crate::theme::muted(ui)));
+                    if device.you {
+                        return;
+                    }
+                    let busy = there.removing.is_some() || !server_running;
+                    if self.confirm_remove.as_deref() == Some(device.id.as_str()) {
+                        ui.label(remove_question(&shown, &name));
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("Remove"))
+                            .on_disabled_hover_text(REMOVE_WAITS)
+                            .clicked()
+                        {
+                            remove = Some(device.id.clone());
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.confirm_remove = None;
+                        }
+                    } else if ui
+                        .add_enabled(!busy, egui::Button::new("Remove…"))
+                        .on_disabled_hover_text(REMOVE_WAITS)
+                        .clicked()
+                    {
+                        self.confirm_remove = Some(device.id.clone());
+                    }
+                });
+            }
+            if let Some(outcome) = &there.outcome {
+                let (ok, words) = outcome_of_removal(outcome, &name);
+                let color = if ok {
+                    crate::theme::good(ui)
+                } else {
+                    crate::theme::bad(ui)
+                };
+                ui.label(RichText::new(words).color(color));
+            }
+        }
+        if ui
+            .add_enabled(
+                server_running && step != ThereStep::Asking,
+                egui::Button::new("Refresh"),
+            )
+            .on_disabled_hover_text(REMOVE_WAITS)
+            .clicked()
+        {
+            self.ask_there(state_dir, &computer.device_id, now_unix);
+        }
+        if let Some(target) = remove {
+            self.confirm_remove = None;
+            let ask = ComputerAsk::RemoveThere {
+                device_id: computer.device_id.clone(),
+                remove: target,
+            };
+            if let Err(e) = computers::request(state_dir, ask, now_unix) {
+                self.notice = crate::notice::Notice::error(format!("Not asked: {e}"));
+            }
+            self.read_at = None;
+        }
     }
 
     fn ask(&mut self, state_dir: &Path, ask: ComputerAsk, now_unix: u64, done: &str) {
@@ -781,8 +927,23 @@ impl ComputersView {
                     {
                         self.forgetting = Some(computer.device_id.clone());
                     }
+                    // Remote revoke: only a computer paired both ways
+                    // answers this one about its devices.
+                    if self.manages(&computer.device_id) {
+                        let open = self.there_open.as_deref() == Some(&computer.device_id);
+                        if ui
+                            .selectable_label(open, DEVICES_THERE)
+                            .on_hover_text(DEVICES_THERE_HOVER)
+                            .clicked()
+                        {
+                            self.toggle_there(state_dir, computer, server_running, now_unix);
+                        }
+                    }
                 });
                 self.wake_row(ui, state_dir, computer, server_running, now_unix);
+                if self.there_open.as_deref() == Some(&computer.device_id) {
+                    self.devices_there(ui, state_dir, computer, server_running, now_unix);
+                }
             });
         }
         if !server_running && !self.file.computers.is_empty() {
@@ -1001,6 +1162,105 @@ fn unreachable(name: &str) -> String {
 
 /// Why Unpair waits (BA3).
 const STOPPED: &str = "Start the server first: it does the unpairing";
+
+/// Remote revoke: the button that lists another computer's devices.
+pub const DEVICES_THERE: &str = "Devices there…";
+
+/// What "Devices there…" does.
+const DEVICES_THERE_HOVER: &str = "The phones and computers paired with that computer, each with Remove: for a lost or stolen device. That computer says who removed what.";
+
+/// Why Remove and Refresh wait.
+const REMOVE_WAITS: &str = "Needs the server running, and no ask under way";
+
+/// How long the app waits for the other computer's answer.
+const ANSWER_WAIT_SECS: u64 = 20;
+
+/// Where an ask of another computer's devices stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThereStep {
+    /// Nothing asked of this computer yet.
+    NotAsked,
+    /// Asked, its answer awaited.
+    Asking,
+    /// Answered with its devices.
+    Listed,
+    /// The server's word for why there is no list: a refusal's code,
+    /// `not_linked`, or `no_answer`.
+    Said(String),
+}
+
+/// Where `there` stands at `now_unix`.
+pub fn there_step(there: Option<&computers::DevicesThere>, now_unix: u64) -> ThereStep {
+    let Some(there) = there else {
+        return ThereStep::NotAsked;
+    };
+    if !there.request.is_empty() {
+        return if now_unix.saturating_sub(there.asked_unix) > ANSWER_WAIT_SECS {
+            ThereStep::Said("no_answer".to_string())
+        } else {
+            ThereStep::Asking
+        };
+    }
+    match &there.refused {
+        Some(code) => ThereStep::Said(code.clone()),
+        None if there.listed_unix > 0 => ThereStep::Listed,
+        None => ThereStep::NotAsked,
+    }
+}
+
+/// What the owner reads for the server's word `code` about `computer`.
+pub fn there_words(code: &str, computer: &str) -> String {
+    use pocketdesk_core::protocol::remote_devices::Refusal;
+    match code {
+        "no_answer" => format!("{computer} didn't answer. Is its link up?"),
+        "not_linked" => format!(
+            "{computer} isn't linked to this one now: it is asked over the link between the two."
+        ),
+        code => Refusal::from_code(code).words().to_string(),
+    }
+}
+
+/// A device there by its name, else the start of its id.
+fn device_name(device: &pocketdesk_core::protocol::remote_devices::ThereDevice) -> String {
+    pocketdesk_core::protocol::kdeconnect::clean_device_name(&device.name)
+        .unwrap_or_else(|| device.id.chars().take(8).collect())
+}
+
+/// What kind of device it is there, in a few words.
+pub fn device_kind(device: &pocketdesk_core::protocol::remote_devices::ThereDevice) -> String {
+    let mut words = vec![if device.computer { "computer" } else { "phone" }];
+    if device.you {
+        words.push("this computer");
+    } else if device.owner {
+        words.push("yours");
+    }
+    if device.guest {
+        words.push("guest");
+    }
+    if device.connected {
+        words.push("connected");
+    }
+    words.join(", ")
+}
+
+/// The question before a removal.
+pub fn remove_question(device: &str, computer: &str) -> String {
+    format!(
+        "Remove {device} from {computer}? It loses all access there at once and must pair again. There is no undo."
+    )
+}
+
+/// The last removal's outcome (`removed: <name>` or `refused: <code>`)
+/// in words, and whether it went.
+pub fn outcome_of_removal(outcome: &str, computer: &str) -> (bool, String) {
+    if let Some(name) = outcome.strip_prefix("removed: ") {
+        let name = pocketdesk_core::protocol::kdeconnect::clean_device_name(name)
+            .unwrap_or_else(|| "The device".to_string());
+        return (true, format!("Removed {name} from {computer}."));
+    }
+    let code = outcome.strip_prefix("refused: ").unwrap_or(outcome);
+    (false, there_words(code, computer))
+}
 
 /// What a computer paired both ways is (PC1), and how to have it ask again.
 pub const MINE: &str = "Mine: sees and controls without asking";
@@ -1509,6 +1769,162 @@ mod tests {
         );
         harness.run_steps(2);
         harness
+    }
+
+    /// Remote revoke: Settings' list with `show_list`, the server running
+    /// or not.
+    fn list_page(
+        dir: &std::path::Path,
+        running: bool,
+    ) -> egui_kittest::Harness<'static, ComputersView> {
+        let now = pocketdesk_core::local::pin::now_unix();
+        let state = dir.to_path_buf();
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            move |ui, view: &mut ComputersView| view.show_list(ui, &state, running, now),
+            ComputersView::default(),
+        );
+        harness.run_steps(2);
+        harness
+    }
+
+    fn there_device(
+        id: &str,
+        name: &str,
+    ) -> pocketdesk_core::protocol::remote_devices::ThereDevice {
+        pocketdesk_core::protocol::remote_devices::ThereDevice {
+            id: id.to_string(),
+            name: name.to_string(),
+            computer: false,
+            owner: false,
+            guest: false,
+            connected: false,
+            you: false,
+        }
+    }
+
+    /// Remote revoke: "Devices there…" shows only for a computer paired
+    /// both ways, lists what it last answered, and asks before a removal;
+    /// with the server stopped, Remove waits for it.
+    #[test]
+    fn devices_there_list_a_computer_paired_both_ways_and_ask_before_removing() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let dir = temp("there");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "mine-pc".to_string(),
+                name: "Tower".to_string(),
+                mine: true,
+                ..computer("linked")
+            });
+            file.computers.push(PeerComputer {
+                device_id: "one-way".to_string(),
+                name: "Laptop".to_string(),
+                ..computer("linked")
+            });
+            file.there = Some(computers::DevicesThere {
+                device_id: "mine-pc".to_string(),
+                listed_unix: 1,
+                devices: vec![
+                    there_device("lost", "Lost phone"),
+                    pocketdesk_core::protocol::remote_devices::ThereDevice {
+                        you: true,
+                        computer: true,
+                        ..there_device("me", "This desk")
+                    },
+                ],
+                ..Default::default()
+            });
+        })
+        .unwrap();
+        // With the server stopped, the last list shows, and Remove waits.
+        let mut stopped = list_page(&dir, false);
+        stopped.get_by_label(DEVICES_THERE).click();
+        stopped.run_steps(2);
+        let waits = stopped
+            .get_by_label("Remove…")
+            .accesskit_node()
+            .is_disabled();
+        drop(stopped);
+        let mut harness = list_page(&dir, true);
+        let buttons = harness.query_all_by_label(DEVICES_THERE).count();
+        harness.get_by_label(DEVICES_THERE).click();
+        harness.run_steps(2);
+        let listed = harness.query_by_label("Lost phone").is_some();
+        let removes = harness.query_all_by_label("Remove…").count();
+        harness.get_by_label("Remove…").click();
+        harness.run_steps(2);
+        let asked = harness
+            .query_by_label(&remove_question("Lost phone", "Tower"))
+            .is_some();
+        harness.get_by_label("Remove").click();
+        harness.run_steps(2);
+        let now = pocketdesk_core::local::pin::now_unix();
+        let requests: Vec<ComputerAsk> = computers::take_all(&dir, now)
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(waits, "no server here, so no removal");
+        assert_eq!(buttons, 1, "only the computer paired both ways");
+        assert!(listed);
+        assert_eq!(removes, 1, "never this computer itself");
+        assert!(asked, "asked by name first");
+        assert!(
+            requests.contains(&ComputerAsk::DevicesThere {
+                device_id: "mine-pc".to_string()
+            }),
+            "opened, its devices are asked for"
+        );
+        assert!(
+            requests.contains(&ComputerAsk::RemoveThere {
+                device_id: "mine-pc".to_string(),
+                remove: "lost".to_string()
+            }),
+            "only the answer removes"
+        );
+    }
+
+    #[test]
+    fn an_ask_of_devices_there_says_how_it_stands() {
+        let mut there = computers::DevicesThere {
+            device_id: "pc".to_string(),
+            request: "r".to_string(),
+            asked_unix: 100,
+            ..Default::default()
+        };
+        assert_eq!(there_step(None, 100), ThereStep::NotAsked);
+        assert_eq!(there_step(Some(&there), 110), ThereStep::Asking);
+        assert_eq!(
+            there_step(Some(&there), 100 + ANSWER_WAIT_SECS + 1),
+            ThereStep::Said("no_answer".to_string())
+        );
+        there.request.clear();
+        there.refused = Some("not_owner".to_string());
+        assert_eq!(
+            there_step(Some(&there), 110),
+            ThereStep::Said("not_owner".to_string())
+        );
+        there.refused = None;
+        there.listed_unix = 105;
+        assert_eq!(there_step(Some(&there), 110), ThereStep::Listed);
+        assert!(there_words("not_linked", "Tower").starts_with("Tower isn't linked"));
+        assert!(there_words("not_owner", "Tower").contains("device of yours"));
+        assert_eq!(
+            outcome_of_removal("removed: Lost phone", "Tower"),
+            (true, "Removed Lost phone from Tower.".to_string())
+        );
+        let (ok, words) = outcome_of_removal("refused: last_owner", "Tower");
+        assert!(!ok && words.contains("last device of yours"));
+        let (ok, words) = outcome_of_removal("refused: too_many", "Tower");
+        assert!(!ok && words.contains("Too many removals"));
+        assert_eq!(
+            device_kind(&pocketdesk_core::protocol::remote_devices::ThereDevice {
+                owner: true,
+                connected: true,
+                ..there_device("p", "")
+            }),
+            "phone, yours, connected"
+        );
     }
 
     fn temp(name: &str) -> std::path::PathBuf {
