@@ -227,40 +227,21 @@ pub(crate) async fn respond(
     let want_lock = body.get("lock").and_then(|v| v.as_bool()).unwrap_or(false);
     let renew = body.get("renew").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    let holder = owner();
-    let refused = !may_act(action, holder.as_deref(), device);
-    let mut response = match action {
-        _ if refused => {
-            tracing::warn!(
-                device_id = %device,
-                holder = holder.as_deref().unwrap_or(""),
-                "Privacy {action} refused: another device holds the grab"
-            );
-            json!({ "ok": false, "error": HELD_ELSEWHERE })
-        }
-        "grab" if renewal_refused(renew, holder.as_deref(), device) => {
-            json!({ "ok": false, "error": "privacy mode ended there" })
-        }
-        "grab" => match privacy::grab_input(ttl) {
-            Ok(count) => {
-                *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Holder {
-                    device: device.to_string(),
-                    connection: connection.map(str::to_string),
-                });
-                json!({ "ok": true, "grabbed": count })
-            }
-            Err(e) => json!({ "ok": false, "error": e }),
-        },
-        "release" => {
-            let count = privacy::release_input();
-            *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            json!({ "ok": true, "released": count })
-        }
-        _ => {
-            let (count, ttl_left) = privacy::privacy_status();
-            json!({ "ok": true, "grabbed": count, "ttlLeft": ttl_left })
-        }
-    };
+    let (device_owned, connection_owned) = (device.to_string(), connection.map(str::to_string));
+    let action_owned = action.to_string();
+    // Checked and done under one lock (PR #561 re-review N4), off the
+    // runtime: grabbing and releasing block.
+    let (mut response, refused) = tokio::task::spawn_blocking(move || {
+        act(
+            &action_owned,
+            renew,
+            &device_owned,
+            connection_owned.as_deref(),
+            ttl,
+        )
+    })
+    .await
+    .unwrap_or_else(|e| (json!({ "ok": false, "error": e.to_string() }), true));
 
     // A refused request does nothing, the lock included.
     if want_lock && !refused {
@@ -273,6 +254,72 @@ pub(crate) async fn respond(
         }
     }
     answering(body, response)
+}
+
+/// Why `device` may not do `action` (with `renew`) while `holder` holds the
+/// grab, as the answer says it, and whether a lock asked with it is refused
+/// too; `None` when it may.
+fn refusal(action: &str, renew: bool, holder: Option<&str>, device: &str) -> Option<(Value, bool)> {
+    if !may_act(action, holder, device) {
+        return Some((json!({ "ok": false, "error": HELD_ELSEWHERE }), true));
+    }
+    if action == "grab" && renewal_refused(renew, holder, device) {
+        return Some((
+            json!({ "ok": false, "error": "privacy mode ended there" }),
+            false,
+        ));
+    }
+    None
+}
+
+/// Do `action` for `device`, the holder checked and the grab taken or let
+/// go under one lock, so no other request or closing connection comes
+/// between (PR #561 re-review N4). Returns the answer and whether the
+/// request was refused (a lock with it is then not done).
+fn act(
+    action: &str,
+    renew: bool,
+    device: &str,
+    connection: Option<&str>,
+    ttl: Duration,
+) -> (Value, bool) {
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    if owner.is_some() && privacy::privacy_status().0 == 0 {
+        *owner = None;
+    }
+    let holder = owner.as_ref().map(|h| h.device.clone());
+    if let Some((answer, refused)) = refusal(action, renew, holder.as_deref(), device) {
+        if refused {
+            tracing::warn!(
+                device_id = %device,
+                holder = holder.as_deref().unwrap_or(""),
+                "Privacy {action} refused: another device holds the grab"
+            );
+        }
+        return (answer, refused);
+    }
+    let answer = match action {
+        "grab" => match privacy::grab_input(ttl) {
+            Ok(count) => {
+                *owner = Some(Holder {
+                    device: device.to_string(),
+                    connection: connection.map(str::to_string),
+                });
+                json!({ "ok": true, "grabbed": count })
+            }
+            Err(e) => json!({ "ok": false, "error": e }),
+        },
+        "release" => {
+            let count = privacy::release_input();
+            *owner = None;
+            json!({ "ok": true, "released": count })
+        }
+        _ => {
+            let (count, ttl_left) = privacy::privacy_status();
+            json!({ "ok": true, "grabbed": count, "ttlLeft": ttl_left })
+        }
+    };
+    (answer, false)
 }
 
 #[async_trait::async_trait]
@@ -390,7 +437,20 @@ mod tests {
     /// kinds of holder.
     #[test]
     fn a_grab_held_elsewhere_is_said_for_a_phone_or_a_computer() {
-        assert!(HELD_ELSEWHERE.contains("phone or computer"));
+        let (said, refused) = refusal("grab", false, Some("phone-a"), "desk").unwrap();
+        assert!(refused, "a lock with it is not done");
+        assert_eq!(
+            said["error"], "another phone or computer holds privacy mode",
+            "{said}"
+        );
+        let (said, refused) = refusal("release", false, Some("desk"), "phone-a").unwrap();
+        assert!(refused);
+        assert_eq!(said["error"], HELD_ELSEWHERE);
+        let (said, refused) = refusal("grab", true, None, "desk").unwrap();
+        assert!(!refused, "a renewal refused does not refuse a lock");
+        assert_eq!(said["error"], "privacy mode ended there");
+        assert_eq!(refusal("status", false, Some("phone-a"), "desk"), None);
+        assert_eq!(refusal("grab", false, None, "desk"), None);
     }
 
     /// PR #561 review M10: a closing connection takes out only the holder
