@@ -1656,9 +1656,10 @@ fn follow_pointer(
     ctx.set_cursor_icon(egui::CursorIcon::None);
     // Said again in time for the relay's lease, mouse moving or not.
     ctx.request_repaint_after(POINTER_RENEW);
-    if mode == view_pointer::GrabMode::Confined
-        && let Some(back) = view_pointer::recentre(ctx.input(|i| i.pointer.latest_pos()), over)
-    {
+    // Re-centred whatever the mode: should Locked have failed (winit only
+    // logs it), the confined pointer is kept in the picture still; a
+    // locked one takes this only as where it shows on unlock.
+    if let Some(back) = view_pointer::recentre(ctx.input(|i| i.pointer.latest_pos()), over) {
         ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(back));
     }
     if state.pointer.hint(now) {

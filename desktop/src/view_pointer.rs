@@ -200,11 +200,28 @@ pub fn grab_mode(windows: bool, wayland: bool) -> GrabMode {
     }
 }
 
+/// Whether winit runs on Wayland, by its own rule (winit 0.30's Linux
+/// event loop, which eframe never forces): `WAYLAND_DISPLAY`, else
+/// `WAYLAND_SOCKET`, set and not empty; else X11. (No variable picks X11
+/// over a Wayland session any more: winit 0.29 dropped
+/// `WINIT_UNIX_BACKEND`.) PR #563 review M4.
+pub fn winit_on_wayland(
+    wayland_display: Option<&std::ffi::OsStr>,
+    wayland_socket: Option<&std::ffi::OsStr>,
+) -> bool {
+    wayland_display
+        .filter(|v| !v.is_empty())
+        .or(wayland_socket)
+        .is_some_and(|v| !v.is_empty())
+}
+
 /// The grab on this computer.
 pub fn grab_here() -> GrabMode {
+    let display = std::env::var_os("WAYLAND_DISPLAY");
+    let socket = std::env::var_os("WAYLAND_SOCKET");
     grab_mode(
         cfg!(windows),
-        std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()),
+        winit_on_wayland(display.as_deref(), socket.as_deref()),
     )
 }
 
@@ -225,17 +242,25 @@ pub fn recentre(pointer: Option<egui::Pos2>, picture: egui::Rect) -> Option<egui
 pub fn commands(change: Change, mode: GrabMode, picture: egui::Rect) -> Vec<egui::ViewportCommand> {
     use egui::viewport::CursorGrab;
     match change {
-        Change::Lock => vec![
-            egui::ViewportCommand::CursorGrab(match mode {
-                GrabMode::Locked => CursorGrab::Locked,
-                GrabMode::Confined => CursorGrab::Confined,
-            }),
-            // Into the picture where the system moves it (Windows, X11).
-            // Wayland takes this only as where the pointer shows again on
-            // unlock: a locked pointer stays where it was, so the window
-            // turns its bar off while locked.
-            egui::ViewportCommand::CursorPosition(picture.center()),
-        ],
+        Change::Lock => {
+            // Confined first: where Locked fails (winit only logs it), the
+            // pointer stays confined, and the window re-centres it anyway
+            // (PR #563 review M4); where it works, Locked replaces it.
+            let mut grabs = vec![egui::ViewportCommand::CursorGrab(CursorGrab::Confined)];
+            if mode == GrabMode::Locked {
+                grabs.push(egui::ViewportCommand::CursorGrab(CursorGrab::Locked));
+            }
+            grabs
+                .into_iter()
+                .chain([
+                    // Into the picture where the system moves it (Windows, X11).
+                    // Wayland takes this only as where the pointer shows again on
+                    // unlock: a locked pointer stays where it was, so the window
+                    // turns its bar off while locked.
+                    egui::ViewportCommand::CursorPosition(picture.center()),
+                ])
+                .collect()
+        }
         Change::Free => vec![egui::ViewportCommand::CursorGrab(CursorGrab::None)],
     }
 }
@@ -392,6 +417,19 @@ mod tests {
     }
 
     #[test]
+    fn winit_is_on_wayland_by_its_own_rule() {
+        use std::ffi::OsStr;
+        let set = Some(OsStr::new("wayland-1"));
+        let empty = Some(OsStr::new(""));
+        assert!(winit_on_wayland(set, None));
+        assert!(winit_on_wayland(None, Some(OsStr::new("5"))), "a socket");
+        assert!(winit_on_wayland(empty, Some(OsStr::new("5"))));
+        assert!(!winit_on_wayland(empty, None), "empty is not set");
+        assert!(!winit_on_wayland(None, empty));
+        assert!(!winit_on_wayland(None, None), "X11");
+    }
+
+    #[test]
     fn wayland_locks_and_the_rest_confine() {
         assert_eq!(grab_mode(false, true), GrabMode::Locked);
         assert_eq!(grab_mode(false, false), GrabMode::Confined, "X11");
@@ -427,13 +465,18 @@ mod tests {
         assert_eq!(
             commands(Change::Lock, GrabMode::Locked, picture),
             vec![
+                egui::ViewportCommand::CursorGrab(CursorGrab::Confined),
                 egui::ViewportCommand::CursorGrab(CursorGrab::Locked),
                 egui::ViewportCommand::CursorPosition(egui::pos2(400.0, 240.0)),
-            ]
+            ],
+            "confined first, should the lock fail"
         );
         assert_eq!(
-            commands(Change::Lock, GrabMode::Confined, picture)[0],
-            egui::ViewportCommand::CursorGrab(CursorGrab::Confined)
+            commands(Change::Lock, GrabMode::Confined, picture),
+            vec![
+                egui::ViewportCommand::CursorGrab(CursorGrab::Confined),
+                egui::ViewportCommand::CursorPosition(egui::pos2(400.0, 240.0)),
+            ]
         );
         assert_eq!(
             commands(Change::Free, GrabMode::Confined, picture),
