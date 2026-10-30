@@ -153,6 +153,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     if let Some(link) = links.remove(&device_id) {
                         link.task.abort();
                     }
+                    drop_nudge(&device_id);
                     forget(&dir, &cert_manager, &device_id);
                     // Its view, if shown, ends with it (PR #551 review I1).
                     if let Some(views) = &views {
@@ -1475,6 +1476,14 @@ fn nudge(device_id: &str) {
     nudge_of(device_id).notify_one();
 }
 
+/// Forget the nudge of the link to `device_id`, as it is unpaired.
+fn drop_nudge(device_id: &str) {
+    NUDGES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
+}
+
 /// Wait `wait`, or less when nudged; whether it was nudged.
 async fn back_off(wait: Duration, nudged: &tokio::sync::Notify) -> bool {
     tokio::select! {
@@ -2513,6 +2522,19 @@ mod tests {
             !back_off(Duration::from_millis(10), &nudged).await,
             "a wait not nudged runs out"
         );
+    }
+
+    /// PC6 re-review: an unpaired computer's nudge is forgotten.
+    #[test]
+    fn an_unpaired_computers_nudge_goes() {
+        let kept = nudge_of("pc-gone");
+        assert!(Arc::ptr_eq(&kept, &nudge_of("pc-gone")), "one per computer");
+        drop_nudge("pc-gone");
+        let listed = NUDGES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key("pc-gone");
+        assert!(!listed);
     }
 
     /// PC6 review M-9: the run loop's Wake nudges that computer's link
