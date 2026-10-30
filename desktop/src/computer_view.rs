@@ -243,8 +243,9 @@ struct State {
     /// window's at a time, so this one's is refused.
     mic_elsewhere: bool,
     /// The mic was on as this window switched screens (PC11): it starts
-    /// again once the new screen's view controls that computer.
-    mic_resume: bool,
+    /// again once the new screen's view controls that computer, only for
+    /// that switch (PR #570 re-review N1).
+    mic_resume: Option<MicResume>,
     /// How the microphone is opened: [`view_mic::open`] unless a test
     /// gives a fake (no test opens a real microphone).
     mic_open: Option<MicOpener>,
@@ -1170,7 +1171,7 @@ impl ComputerView {
             .zip(&devices)
             .map(|(w, device)| {
                 let state = lock(w);
-                (state.mic.on() || state.mic_resume)
+                (state.mic.on() || state.mic_resume.is_some())
                     .then(|| device.clone())
                     .flatten()
             })
@@ -1394,6 +1395,8 @@ fn ask_with(
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
+    // A mic waiting after a switch is that switch's alone (re-review N1).
+    state.mic_resume = None;
     // The old view's decoder may still give pictures (frames in flight, or
     // read already): they are dropped, never taken for the next screen's
     // (PR #570 review I1).
@@ -1488,20 +1491,30 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
     state.pointer.free();
     // The mic goes on with the window (PC11): stopped here, its relay told,
     // and started again on the new screen's view once that controls.
-    if state.mic.on() || state.mic.wanted() {
+    let resume = state.mic.on() || state.mic.wanted();
+    if resume {
         let sending = state.mic.on();
         state.mic.stopped();
         if sending {
             stop_mic(state);
         }
-        state.mic_resume = true;
     }
     let privacy = state.status.privacy.clone();
     let going = state.ended.is_none();
     // Carried only from a view going: one already ended has no recording
     // to end, and a later end would wrongly start one (PR #570 review M2).
     state.record_carry = state.record_want && going;
+    let device_id = wanted.device_id.clone();
     ask(state_dir, state, Wanted { monitor, ..wanted })?;
+    // Set after the ask, which forgets any (re-review N1): only this
+    // switch carries it.
+    if resume {
+        state.mic_resume = Some(MicResume {
+            device_id,
+            asked: state.asked,
+            until: Instant::now() + MIC_RESUME_FOR,
+        });
+    }
     if going {
         state.status.privacy = privacy;
     }
@@ -1620,6 +1633,9 @@ fn say_privacy(state: &mut State, ask: u8) {
 /// review I2).
 fn say_closing(state: &mut State) -> bool {
     let mut owed = false;
+    // A mic waiting to start again after a switch never outlives the
+    // window (PR #570 re-review N1).
+    state.mic_resume = None;
     // Another window still shows that computer (PC11): it is not locked
     // under it.
     let lock_it = state.lock_on_close && !state.same_computer_open;
@@ -1717,25 +1733,57 @@ fn mic_stop_words(state: &State) -> Option<&'static str> {
     }
 }
 
+/// A mic to start again after a switch (PC11): only for the computer it
+/// was on for, only for that switch's ask (the window's `asked` just
+/// after it), and only until a while has passed (PR #570 re-review N1): a
+/// window closed, asked for anything else, or reused, never inherits it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicResume {
+    pub device_id: String,
+    pub asked: u64,
+    pub until: Instant,
+}
+
+/// How long a mic waits after a switch for the new screen's view to
+/// control that computer before it is given up, said.
+pub const MIC_RESUME_FOR: Duration = Duration::from_secs(30);
+
 /// What a window's mic does after it switched screens with the mic on
 /// (PC11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resume {
     /// Not switching with it on.
     Nothing,
+    /// The resume is not this view's (another ask since, another
+    /// computer): forgotten, the mic off, nothing said.
+    Forget,
     /// The new screen's view is not shown yet: nothing yet.
     Wait,
     /// It controls that computer: the mic starts again.
     Start,
-    /// It ended, or shows without taking input: the mic stays off, said.
+    /// It ended, shows without taking input, or took too long: the mic
+    /// stays off, said.
     GiveUp,
 }
 
-/// [`Resume`] for a window `resume`-ing its mic, `controlling` that
-/// computer or not, its view `ended` or not and standing at `phase`.
-pub fn mic_resumes(resume: bool, controlling: bool, ended: bool, phase: Phase) -> Resume {
+/// [`Resume`] for a window's `resume` while it shows `device` after its
+/// ask number `asked`, at `now`, `controlling` that computer or not, its
+/// view `ended` or not and standing at `phase`.
+pub fn mic_resumes(
+    resume: Option<&MicResume>,
+    device: Option<&str>,
+    asked: u64,
+    now: Instant,
+    controlling: bool,
+    ended: bool,
+    phase: Phase,
+) -> Resume {
+    let Some(resume) = resume else {
+        return Resume::Nothing;
+    };
     match () {
-        _ if !resume => Resume::Nothing,
+        _ if device != Some(resume.device_id.as_str()) || asked != resume.asked => Resume::Forget,
+        _ if now >= resume.until => Resume::GiveUp,
         _ if controlling => Resume::Start,
         _ if ended || phase == Phase::Showing => Resume::GiveUp,
         _ => Resume::Wait,
@@ -1766,23 +1814,31 @@ fn follow_mic(
     // On, but this connection's relay never heard so (a rejoin, another
     // computer asked, a write lost): nothing of it is heard there, so it
     // stops and says why (PR #569 review I1).
+    let device = state.wanted.as_ref().map(|w| w.device_id.clone());
     match mic_resumes(
-        state.mic_resume,
+        state.mic_resume.as_ref(),
+        device.as_deref(),
+        state.asked,
+        Instant::now(),
         controlling,
         state.ended.is_some(),
         state.status.phase,
     ) {
-        Resume::Wait => return,
+        Resume::Wait => {
+            ctx.request_repaint_after(Duration::from_secs(1));
+            return;
+        }
         Resume::Start => {
-            state.mic_resume = false;
+            state.mic_resume = None;
             if !state.mic.wanted() {
                 state.mic.toggle();
             }
         }
         Resume::GiveUp => {
-            state.mic_resume = false;
+            state.mic_resume = None;
             state.mic_note = Some(MIC_SWITCH_WORDS.to_string());
         }
+        Resume::Forget => state.mic_resume = None,
         Resume::Nothing => {}
     }
     // One window's mic a computer (PC11): asked in a second window, it is
@@ -6064,28 +6120,72 @@ mod tests {
     /// ends or shows without taking input.
     #[test]
     fn the_mic_goes_on_across_a_switch_or_says_why_not() {
+        let now = Instant::now();
+        let resume = MicResume {
+            device_id: "desk".into(),
+            asked: 7,
+            until: now + MIC_RESUME_FOR,
+        };
+        let at = |controlling, ended, phase| {
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                7,
+                now,
+                controlling,
+                ended,
+                phase,
+            )
+        };
         assert_eq!(
-            mic_resumes(false, true, false, Phase::Showing),
+            mic_resumes(None, Some("desk"), 7, now, true, false, Phase::Showing),
             Resume::Nothing
         );
+        assert_eq!(at(false, false, Phase::Connecting), Resume::Wait);
+        assert_eq!(at(false, false, Phase::Waiting), Resume::Wait);
+        assert_eq!(at(true, false, Phase::Showing), Resume::Start);
+        assert_eq!(at(false, false, Phase::Showing), Resume::GiveUp);
+        assert_eq!(at(false, true, Phase::Connecting), Resume::GiveUp);
+        // Re-review N1: never for another computer, another ask, or late.
         assert_eq!(
-            mic_resumes(true, false, false, Phase::Connecting),
-            Resume::Wait
+            mic_resumes(
+                Some(&resume),
+                Some("lap"),
+                7,
+                now,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Forget
         );
         assert_eq!(
-            mic_resumes(true, false, false, Phase::Waiting),
-            Resume::Wait
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                8,
+                now,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Forget
         );
         assert_eq!(
-            mic_resumes(true, true, false, Phase::Showing),
-            Resume::Start
+            mic_resumes(Some(&resume), None, 7, now, true, false, Phase::Showing),
+            Resume::Forget
         );
+        let late = now + MIC_RESUME_FOR;
         assert_eq!(
-            mic_resumes(true, false, false, Phase::Showing),
-            Resume::GiveUp
-        );
-        assert_eq!(
-            mic_resumes(true, false, true, Phase::Connecting),
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                7,
+                late,
+                true,
+                false,
+                Phase::Showing
+            ),
             Resume::GiveUp
         );
         // The switch stops it here, to start again on the new view.
@@ -6102,17 +6202,74 @@ mod tests {
         };
         state.mic.toggle();
         switch_screen(&dir, &mut state, 1).unwrap();
-        assert!(state.mic_resume && !state.mic.wanted());
+        assert!(state.mic_resume.is_some() && !state.mic.wanted());
         let shared = Arc::new(Mutex::new(State::default()));
         let ctx = egui::Context::default();
         // Waiting for the new view: nothing yet.
         follow_mic(&shared, &mut state, None, &ctx, false);
-        assert!(state.mic_resume && state.mic_note.is_none());
+        assert!(state.mic_resume.is_some() && state.mic_note.is_none());
         // Shown, but without control there: given up, said.
         state.status.phase = Phase::Showing;
         follow_mic(&shared, &mut state, None, &ctx, false);
-        assert!(!state.mic_resume && !state.mic.wanted());
+        assert!(state.mic_resume.is_none() && !state.mic.wanted());
         assert_eq!(state.mic_note.as_deref(), Some(MIC_SWITCH_WORDS));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #570 re-review N1: a mic waiting after a switch never starts by
+    /// itself elsewhere: the window closed and its place reused, or the
+    /// same window asked for another computer, and it stays off, the
+    /// relay told nothing, even with control there.
+    #[test]
+    fn a_mic_waiting_after_a_switch_never_starts_elsewhere() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-mic-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        let desk = || Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        let controlled = |state: &mut State| {
+            state.status = ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                ..ViewStatus::default()
+            };
+        };
+        for how in ["closed and reused", "another computer"] {
+            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let mut state = State {
+                wanted: Some(desk()),
+                ..State::default()
+            };
+            state.mic.toggle();
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(state.mic_resume.is_some(), "{how}");
+            match how {
+                "closed and reused" => {
+                    quit_view(&dir, &mut state);
+                    ask_with(&dir, &mut state, desk(), Some(false)).unwrap();
+                }
+                _ => {
+                    let lap = Wanted {
+                        device_id: "lap".into(),
+                        name: "Lap".into(),
+                        monitor: 0,
+                    };
+                    ask_with(&dir, &mut state, lap, Some(false)).unwrap();
+                }
+            }
+            assert!(state.mic_resume.is_none(), "{how}");
+            // The new view controls there: nothing starts.
+            state.writer = Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+            controlled(&mut state);
+            follow_mic(&shared, &mut state, None, &ctx, true);
+            assert!(!state.mic.wanted() && !state.mic.on(), "{how}");
+            assert_eq!(state.mic_said, None, "{how}: the relay told nothing");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6143,7 +6300,14 @@ mod tests {
         let view = ComputerView::new(&ctx, dir.clone(), None);
         view.open("desk", "Desk", 0, 0, false, false).unwrap();
         view.open_new_window(&ctx, &view.shared, 1);
-        lock(&view.shared).mic_resume = true;
+        {
+            let mut first = lock(&view.shared);
+            first.mic_resume = Some(MicResume {
+                device_id: "desk".into(),
+                asked: first.asked,
+                until: Instant::now() + MIC_RESUME_FOR,
+            });
+        }
         let windows = view.windows();
         let marked = |view: &ComputerView| {
             view.windows()
