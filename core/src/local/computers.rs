@@ -72,6 +72,12 @@ pub struct PeerComputer {
     /// recently first.
     #[serde(default)]
     pub viewed_unix: u64,
+    /// Whether the window that shows its screen here sends keys by their
+    /// position (scancode mode, for games) rather than typing text: the
+    /// window's "Keys by position", as last chosen for this computer.
+    /// `None` until chosen, when Settings' `computer_view_scancodes` says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys_by_position: Option<bool>,
 }
 
 /// `computers` with the one viewed most recently first (PC6), those never
@@ -162,6 +168,7 @@ impl ComputerFacts {
             mine: true,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         }
     }
 }
@@ -409,6 +416,10 @@ pub enum ComputerAsk {
     /// Send the magic packet that wakes the computer `device_id` (PC6),
     /// as it told this one ([`PeerComputer::wake`]).
     Wake { device_id: String },
+    /// Remember for the computer `device_id` whether its screen window
+    /// sends keys by position ([`PeerComputer::keys_by_position`]), as the
+    /// window's bar was switched.
+    KeysByPosition { device_id: String, on: bool },
     /// Stop this computer's ask of a nearby one.
     CancelNearby,
     /// The owner here confirmed that both screens show the code of this
@@ -722,6 +733,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         }
     }
 
@@ -981,6 +993,41 @@ mod tests {
         let back: PeerComputer =
             serde_json::from_str(&serde_json::to_string(&told).unwrap()).unwrap();
         assert_eq!(back, told);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Keys by position: the window's choice for a computer is asked by its
+    /// id and kept on its entry; a file from before, or a computer never
+    /// switched, has no choice of its own.
+    #[test]
+    fn keys_by_position_is_asked_and_kept_for_a_computer() {
+        let dir = temp_dir("keys-by-position");
+        let ask = ComputerAsk::KeysByPosition {
+            device_id: "desk".to_string(),
+            on: true,
+        };
+        let asked = request(&dir, ask.clone(), 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        assert_eq!(
+            serde_json::to_value(&ask).unwrap(),
+            serde_json::json!({"ask": "keys_by_position", "device_id": "desk", "on": true})
+        );
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        assert!(
+            !raw.contains("keys_by_position"),
+            "no choice is not written"
+        );
+        let old: PeerComputer = serde_json::from_str(&raw).unwrap();
+        assert_eq!(old.keys_by_position, None);
+        for chosen in [Some(true), Some(false)] {
+            let kept = PeerComputer {
+                keys_by_position: chosen,
+                ..computer("desk")
+            };
+            let back: PeerComputer =
+                serde_json::from_str(&serde_json::to_string(&kept).unwrap()).unwrap();
+            assert_eq!(back, kept);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

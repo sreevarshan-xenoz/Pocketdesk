@@ -2746,6 +2746,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         };
         let computers = [
             computer("a1b2c3d4e5", "Desk"),

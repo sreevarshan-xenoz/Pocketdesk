@@ -868,6 +868,25 @@ impl InputInjector {
             debug!("held back a key that would have made the kernel's SysRq");
             return Ok(());
         }
+        // A key by its position (X11): pressed as its own X keycode, never
+        // as the character a US keyboard prints there, which enigo would
+        // look for in this desktop's layout and so press elsewhere on any
+        // other layout (the window's Keys by position, a phone's keys).
+        #[cfg(target_os = "linux")]
+        if let InputBackend::Enigo(enigo) = &mut self.backend
+            && let Some(keycode) = x11_position_keycode(code)
+        {
+            let direction = if pressed {
+                enigo::Direction::Press
+            } else {
+                enigo::Direction::Release
+            };
+            return enigo
+                .get_mut()
+                .unwrap()
+                .raw(keycode, direction)
+                .context("enigo raw key failed");
+        }
         match &mut self.backend {
             #[cfg(windows)]
             InputBackend::SendInput(backend) => backend.key(code, pressed),
@@ -1735,6 +1754,21 @@ fn keycode_to_enigo(code: u16) -> Option<Key> {
         .map(|&(_, key)| key)
 }
 
+/// The X keycode an X11 desktop presses for the evdev `code`, where the
+/// table above would have enigo type a character (letters, digits and
+/// punctuation) or knows no key at all (the ISO key beside Shift, the
+/// keypad): X numbers a key as its evdev code and 8, so the key goes by its
+/// position, as uinput and Windows' scancodes press it, and the desktop's
+/// own layout says what it types. `None` for the named keys (Enter, the
+/// arrows, the modifiers...), which go as before.
+#[cfg(any(target_os = "linux", test))]
+fn x11_position_keycode(code: u16) -> Option<u16> {
+    match keycode_to_enigo(code) {
+        Some(Key::Unicode(_)) | None if (1..=247).contains(&code) => Some(code + 8),
+        _ => None,
+    }
+}
+
 /// Map an enigo Key to an evdev KeyCode for uinput backend.
 /// Uses KEYCODE_MAP as the single source of truth (reverse lookup).
 #[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
@@ -1892,6 +1926,45 @@ mod sysrq_tests {
         assert!(guard.passes(altgr, false));
         assert!(!guard.passes(sysrq, false), "a held-back press's release");
         assert!(guard.passes(sysrq, true) && guard.passes(sysrq, false));
+    }
+}
+
+/// Keys by position on an X11 desktop: the keys enigo would type as a
+/// US keyboard's characters, and those it has no name for, go as their own
+/// X keycodes; the named keys stay enigo's.
+#[cfg(test)]
+mod x11_position_tests {
+    use super::*;
+
+    #[test]
+    fn printing_keys_go_as_their_x_keycode_and_named_keys_as_before() {
+        for (code, x) in [
+            (KeyCode::KEY_Q.0, 24),
+            (KeyCode::KEY_A.0, 38),
+            (KeyCode::KEY_1.0, 10),
+            (KeyCode::KEY_SEMICOLON.0, 47),
+            (KeyCode::KEY_SLASH.0, 61),
+            // The ISO key beside Shift, and the keypad's 1: no enigo name.
+            (86, 94),
+            (79, 87),
+        ] {
+            assert_eq!(x11_position_keycode(code), Some(x), "evdev {code}");
+        }
+        for code in [
+            KeyCode::KEY_ESC.0,
+            KeyCode::KEY_ENTER.0,
+            KeyCode::KEY_LEFTSHIFT.0,
+            KeyCode::KEY_LEFTCTRL.0,
+            KeyCode::KEY_UP.0,
+            KeyCode::KEY_F1.0,
+            KeyCode::KEY_KPPLUS.0,
+        ] {
+            assert_eq!(x11_position_keycode(code), None, "evdev {code}");
+        }
+        // Nothing that is no key, nor past X's 255.
+        assert_eq!(x11_position_keycode(0), None);
+        assert_eq!(x11_position_keycode(248), None);
+        assert_eq!(x11_position_keycode(0x110), None);
     }
 }
 

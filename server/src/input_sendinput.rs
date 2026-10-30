@@ -53,6 +53,16 @@ pub(crate) fn stroke_for(code: u16) -> Option<Stroke> {
         // Pause and Windows tells them apart by a prefix SendInput cannot set.
         KeyCode::KEY_NUMLOCK => Some(Stroke::Vk(VK_NUMLOCK)),
         KeyCode(c @ 1..=88) => Some(Stroke::Scan(c, false)),
+        // The keypad's Enter and slash are the main block's with the
+        // prefix, as `windows_scan` reads them back.
+        KeyCode(96) => ext(0x1C), // KEY_KPENTER
+        KeyCode(98) => ext(0x35), // KEY_KPSLASH
+        // The Japanese and Brazilian keys past the main block.
+        KeyCode(89) => Some(Stroke::Scan(0x73, false)), // KEY_RO
+        KeyCode(92) => Some(Stroke::Scan(0x79, false)), // KEY_HENKAN
+        KeyCode(93) => Some(Stroke::Scan(0x70, false)), // KEY_KATAKANAHIRAGANA
+        KeyCode(94) => Some(Stroke::Scan(0x7B, false)), // KEY_MUHENKAN
+        KeyCode(124) => Some(Stroke::Scan(0x7D, false)), // KEY_YEN
         KeyCode::KEY_RIGHTCTRL => ext(0x1D),
         KeyCode::KEY_SYSRQ => ext(0x37), // Print Screen
         KeyCode::KEY_RIGHTALT => ext(0x38),
@@ -327,6 +337,57 @@ mod tests {
     fn every_key_the_phone_can_send_has_a_windows_stroke() {
         for code in phone_emittable_codes() {
             assert!(stroke_for(code).is_some(), "evdev {code} has no stroke");
+        }
+    }
+
+    /// Keys by position (the window's scancode mode): every key a Windows
+    /// keyboard names by its scancode, as `windows_scan` reads it, is
+    /// pressed here again, and a key pressed by its scancode is that same
+    /// scancode, never one the layout picks.
+    #[test]
+    fn every_scancode_read_back_is_pressed_as_itself() {
+        use pocketdesk_core::input::windows_scan::evdev_from_scan;
+        let mut seen = 0;
+        for extended in [false, true] {
+            for scan in 0..=0x7Fu16 {
+                let Some(code) = evdev_from_scan(scan, extended) else {
+                    continue;
+                };
+                seen += 1;
+                match stroke_for(code) {
+                    Some(Stroke::Scan(s, e)) => assert_eq!(
+                        evdev_from_scan(s, e),
+                        Some(code),
+                        "evdev {code} goes as another key"
+                    ),
+                    Some(Stroke::Vk(_)) => {}
+                    None => panic!("evdev {code} (scan {scan:#x}, ext {extended}) has no stroke"),
+                }
+            }
+        }
+        assert!(seen > 100, "{seen}");
+        assert_eq!(stroke_for(96), Some(Stroke::Scan(0x1C, true)));
+        assert_eq!(stroke_for(98), Some(Stroke::Scan(0x35, true)));
+        assert_eq!(stroke_for(86), Some(Stroke::Scan(0x56, false)));
+    }
+
+    /// PR #573 review N6: the keys added, held to the set-1 scancodes
+    /// Microsoft's keyboard scan code specification gives them, written
+    /// here apart from `windows_scan` (the round trip above only says the
+    /// two tables agree). Whether a layout without these keys does
+    /// anything with them is a device check (§240).
+    #[test]
+    fn the_keys_added_are_their_documented_set1_scancodes() {
+        for (code, stroke) in [
+            (96, Stroke::Scan(0x1C, true)),   // KEY_KPENTER: E0 1C
+            (98, Stroke::Scan(0x35, true)),   // KEY_KPSLASH: E0 35
+            (89, Stroke::Scan(0x73, false)),  // KEY_RO (ABNT slash, JIS ro)
+            (92, Stroke::Scan(0x79, false)),  // KEY_HENKAN (Convert)
+            (93, Stroke::Scan(0x70, false)),  // KEY_KATAKANAHIRAGANA
+            (94, Stroke::Scan(0x7B, false)),  // KEY_MUHENKAN (No convert)
+            (124, Stroke::Scan(0x7D, false)), // KEY_YEN
+        ] {
+            assert_eq!(stroke_for(code), Some(stroke), "evdev {code}");
         }
     }
 

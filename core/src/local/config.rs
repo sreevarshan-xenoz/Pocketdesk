@@ -424,6 +424,13 @@ pub struct Config {
     /// chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_lock_on_close: bool,
+    /// A computer's screen window starts with "Keys by position" (scancode
+    /// mode): every key goes to that computer as the key at its place on
+    /// the keyboard, for games, instead of typing text. Each computer's own
+    /// choice on the window's bar, kept in `computers.json`, comes first.
+    /// Read as each window opens. Off by default.
+    #[serde(default)]
+    pub computer_view_scancodes: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -668,6 +675,7 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
+            computer_view_scancodes: false,
             computer_view_mic_device: None,
             computer_wake_facts: true,
         }
@@ -933,6 +941,7 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_lock_on_close",
+        "computer_view_scancodes",
         "computer_view_mic_device",
         "computer_wake_facts",
     ];
@@ -1512,6 +1521,28 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_lock_on_close"]
+        );
+    }
+
+    /// Keys by position: a computer's screen window types text unless
+    /// chosen, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_sends_keys_by_position_only_once_chosen() {
+        let path = temp("computer-view-scancodes");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_scancodes);
+        assert!(!Config::default().computer_view_scancodes);
+        let chosen = Config {
+            computer_view_scancodes: true,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_scancodes"])
+            .unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_scancodes);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_scancodes"]
         );
     }
 

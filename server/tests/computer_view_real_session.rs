@@ -74,6 +74,7 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         })
     })
     .unwrap();

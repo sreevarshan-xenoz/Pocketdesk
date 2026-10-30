@@ -200,6 +200,10 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 }
                 // PC6: the magic packet, as the computer told this one.
                 ComputerAsk::Wake { device_id } => asked_wake(&dir, device_id),
+                // The window's Keys by position, kept for that computer.
+                ComputerAsk::KeysByPosition { device_id, on } => {
+                    keys_by_position(&dir, &device_id, on);
+                }
                 ComputerAsk::View {
                     device_id,
                     monitor,
@@ -1083,6 +1087,7 @@ async fn pair_with(
         mine,
         wake: None,
         viewed_unix: 0,
+        keys_by_position: None,
     };
     let mut was = None;
     let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
@@ -2517,6 +2522,19 @@ fn viewed(dir: &Path, device_id: &str) {
     }
 }
 
+/// Keep the window's "Keys by position" for `device_id`, as its bar was
+/// switched; a computer not listed keeps nothing.
+fn keys_by_position(dir: &Path, device_id: &str, on: bool) {
+    let saved = computers::update(dir, |file| {
+        if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+            c.keys_by_position = Some(on);
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not keep a computer's Keys by position: {e}");
+    }
+}
+
 /// Record how the link to `device_id` is doing, when it changed.
 fn set_link(dir: &Path, device_id: &str, link: &str) {
     let now = pocketdesk_core::local::pin::now_unix();
@@ -2833,6 +2851,7 @@ mod tests {
                 mine: true,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             })
         })
         .unwrap();
@@ -2939,6 +2958,33 @@ mod tests {
         let before = pocketdesk_core::local::pin::now_unix();
         viewed(&dir, "pc-b");
         assert!(computers::read(&dir).computers[0].viewed_unix >= before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The window's Keys by position is kept on the computer's entry, on
+    /// and off again; a computer not listed keeps nothing.
+    #[test]
+    fn keys_by_position_is_kept_for_its_computer() {
+        let dir = temp("keys-by-position");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "pc-b".to_string(),
+                ..ComputerFacts::into_peer(facts(), "pc-b", "", 1)
+            })
+        })
+        .unwrap();
+        keys_by_position(&dir, "pc-x", true);
+        assert_eq!(computers::read(&dir).computers[0].keys_by_position, None);
+        keys_by_position(&dir, "pc-b", true);
+        assert_eq!(
+            computers::read(&dir).computers[0].keys_by_position,
+            Some(true)
+        );
+        keys_by_position(&dir, "pc-b", false);
+        assert_eq!(
+            computers::read(&dir).computers[0].keys_by_position,
+            Some(false)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3631,6 +3677,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();
