@@ -1376,6 +1376,7 @@ async fn forget_paired(
     if let Some(link) = links.remove(&device_id) {
         link.task.abort();
     }
+    drop_nudge(&device_id);
     if let Some(views) = views {
         let forgotten = crate::computer_view::Command::Forgotten { device_id };
         let _ = views.send(forgotten).await;
