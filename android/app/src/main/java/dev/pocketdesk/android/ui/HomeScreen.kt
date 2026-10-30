@@ -86,6 +86,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.lifecycle.repeatOnLifecycle
 
 /** How a move of a saved computer to a found address went (O3). */
 private enum class MoveOutcome { MOVED, REFUSED, UNREACHED }
@@ -325,12 +340,15 @@ fun HomeScreen(
     }
     // UX1: the cards' "Used 2 min ago", read once per list and resume
     // (review N3: not from the preferences at every recomposition), and the
-    // clock it is told against, a tick a minute while Home shows.
+    // clock it is told against, a tick a minute while Home shows: only while
+    // resumed, so a paused app is not woken each minute (UX2, review N9).
     val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
-    val minuteNow by produceState(System.currentTimeMillis(), resumes) {
-        while (true) {
-            value = System.currentTimeMillis()
-            delay(60_000L - value % 60_000L)
+    val minuteNow by produceState(System.currentTimeMillis(), lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(60_000L - value % 60_000L)
+            }
         }
     }
     // The Health card's Choose opens the picker itself (E6).
@@ -972,6 +990,7 @@ private fun HostCard(
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
     var menu by remember { mutableStateOf(false) }
+    var manageOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1001,63 +1020,96 @@ private fun HostCard(
                     IconButton(onClick = { menu = true }) {
                         LlIcon(LlIcons.MoreVert, stringResource(R.string.card_more, title))
                     }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        // What it does first, then its upkeep, then Remove (E6).
-                        val uses = buildList {
-                            // BF2: a glance at its screen, first: the quickest.
-                            if (Prefs.peek(context)) add(R.string.card_peek to onPeek)
-                            // The phone as the computer's speaker and mic (N5).
-                            add(R.string.sound_button to onSound)
-                            // F1: the buttons its owner set up there.
-                            add(R.string.card_deck to onDeck)
-                            // F2: its CPU, memory, disks, battery, uptime.
-                            add(R.string.card_state to onState)
-                            // F6: the back camera, shown in the computer's window.
-                            add(R.string.card_show_camera to onCamera)
-                            // M7: the phone's sound there, with no picture (Android 10+).
-                            if (dev.pocketdesk.android.cast.CastSoundRule.offeredAlone(android.os.Build.VERSION.SDK_INT)) {
-                                add(R.string.card_phone_sound to onPhoneSound)
+                    DropdownMenu(
+                        expanded = menu,
+                        onDismissRequest = {
+                            menu = false
+                            manageOpen = false
+                        },
+                    ) {
+                        // UX2: headed sections, its upkeep folded under
+                        // Manage (it was 13 items in one flat list).
+                        val sections = CardMenu.sections(
+                            peek = Prefs.peek(context),
+                            phoneSound = dev.pocketdesk.android.cast.CastSoundRule.offeredAlone(android.os.Build.VERSION.SDK_INT),
+                            hasWake = hasWake,
+                        )
+                        fun run(action: CardMenu.Action) {
+                            menu = false
+                            manageOpen = false
+                            when (action) {
+                                CardMenu.Action.WAKE -> onWake()
+                                CardMenu.Action.PEEK -> onPeek()
+                                CardMenu.Action.SOUND -> onSound()
+                                CardMenu.Action.DECK -> onDeck()
+                                CardMenu.Action.STATE -> onState()
+                                CardMenu.Action.CAMERA -> onCamera()
+                                CardMenu.Action.PHONE_SOUND -> onPhoneSound()
+                                CardMenu.Action.EARLIER_COPY -> onHistory()
+                                CardMenu.Action.CHECK -> onCheck()
+                                CardMenu.Action.WAKE_SETTINGS -> onWakeSettings()
+                                CardMenu.Action.ALLOWED -> onAllowed()
+                                CardMenu.Action.DEVICES -> onDevices()
+                                CardMenu.Action.RENAME -> onRename()
+                                CardMenu.Action.REMOVE -> onRemove()
                             }
-                            // D3: an earlier copy, sent to this computer again.
-                            add(R.string.card_send_earlier_copy to onHistory)
-                            if (hasWake) add(R.string.wake to onWake)
                         }
-                        val upkeep = listOf(
-                            R.string.wake_settings to onWakeSettings,
-                            R.string.doctor_title to onCheck,
-                            // M2a: both sides of each feature.
-                            R.string.card_allowed to onAllowed,
-                            // Remote revoke: a lost device removed from here.
-                            R.string.card_devices_there to onDevices,
-                            R.string.card_rename to onRename,
-                        )
-                        uses.forEach { (label, action) ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(label)) },
-                                onClick = {
-                                    menu = false
-                                    action()
-                                },
-                            )
+                        sections.forEachIndexed { i, section ->
+                            if (i > 0) HorizontalDivider()
+                            if (section.folded) {
+                                val manageLabel = stringResource(R.string.card_menu_manage)
+                                DropdownMenuItem(
+                                    text = { Text(manageLabel) },
+                                    trailingIcon = {
+                                        LlIcon(
+                                            LlIcons.ChevronRight,
+                                            null,
+                                            modifier = Modifier.rotate(if (manageOpen) 270f else 90f),
+                                        )
+                                    },
+                                    onClick = { manageOpen = !manageOpen },
+                                    modifier = Modifier.semantics {
+                                        // A button TalkBack calls expanded or
+                                        // collapsed in its own words (PR #580
+                                        // review N4).
+                                        role = Role.Button
+                                        if (manageOpen) {
+                                            collapse {
+                                                manageOpen = false
+                                                true
+                                            }
+                                        } else {
+                                            expand {
+                                                manageOpen = true
+                                                true
+                                            }
+                                        }
+                                    },
+                                )
+                                if (!manageOpen) return@forEachIndexed
+                            } else {
+                                CardMenuHeading(stringResource(cardMenuHeading(section.kind)))
+                            }
+                            section.actions.forEach { action ->
+                                val remove = action == CardMenu.Action.REMOVE
+                                // Kept apart from Rename above it (PR #580 review N3).
+                                if (remove) HorizontalDivider(modifier = Modifier.padding(start = 24.dp))
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(cardMenuLabel(action)),
+                                            color = if (remove) MaterialTheme.colorScheme.error else Color.Unspecified,
+                                        )
+                                    },
+                                    onClick = { run(action) },
+                                    contentPadding = if (section.folded) {
+                                        PaddingValues(start = 24.dp, end = 12.dp)
+                                    } else {
+                                        MenuDefaults.DropdownMenuItemContentPadding
+                                    },
+                                )
+                            }
                         }
-                        HorizontalDivider()
-                        upkeep.forEach { (label, action) ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(label)) },
-                                onClick = {
-                                    menu = false
-                                    action()
-                                },
-                            )
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.remove_host), color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                menu = false
-                                onRemove()
-                            },
-                        )
                     }
                 }
             }
@@ -1108,6 +1160,42 @@ private fun HostCard(
             }
         }
     }
+}
+
+/** A card menu section's heading (UX2): small, in the accent colour, read as a heading. */
+@Composable
+private fun CardMenuHeading(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp)
+            .semantics { heading() },
+    )
+}
+
+private fun cardMenuHeading(kind: CardMenu.Kind): Int = when (kind) {
+    CardMenu.Kind.COMPUTER -> R.string.card_menu_on_computer
+    CardMenu.Kind.PHONE -> R.string.card_menu_from_phone
+    CardMenu.Kind.MANAGE -> R.string.card_menu_manage
+}
+
+private fun cardMenuLabel(action: CardMenu.Action): Int = when (action) {
+    CardMenu.Action.WAKE -> R.string.wake
+    CardMenu.Action.PEEK -> R.string.card_peek
+    CardMenu.Action.SOUND -> R.string.sound_button
+    CardMenu.Action.DECK -> R.string.card_deck
+    CardMenu.Action.STATE -> R.string.card_state
+    CardMenu.Action.CAMERA -> R.string.card_show_camera
+    CardMenu.Action.PHONE_SOUND -> R.string.card_phone_sound
+    CardMenu.Action.EARLIER_COPY -> R.string.card_send_earlier_copy
+    CardMenu.Action.CHECK -> R.string.doctor_title
+    CardMenu.Action.WAKE_SETTINGS -> R.string.wake_settings
+    CardMenu.Action.ALLOWED -> R.string.card_allowed
+    CardMenu.Action.DEVICES -> R.string.card_devices_there
+    CardMenu.Action.RENAME -> R.string.card_rename
+    CardMenu.Action.REMOVE -> R.string.remove_host
 }
 
 /** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
@@ -1259,25 +1347,37 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
                 ),
                 style = MaterialTheme.typography.titleSmall,
             )
+            // UX2: the phone maker's own setting is a link at the end of the
+            // sentence, and the card's two answers have the row under it (a
+            // link button on a row of its own left a tall empty band beside
+            // it; AJ2: on the answers' row, three buttons wrapped).
+            val why = stringResource(R.string.bg_why)
+            val guideLabel = stringResource(R.string.bg_maker_guide)
+            val linkStyle = TextLinkStyles(
+                SpanStyle(
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    textDecoration = TextDecoration.Underline,
+                ),
+            )
             Text(
-                stringResource(R.string.bg_why),
+                buildAnnotatedString {
+                    append(why)
+                    if (guide != null) {
+                        append(" ")
+                        val open = LinkAnnotation.Clickable("maker-guide", linkStyle) {
+                            if (!BackgroundRunning.openGuide(context, guide)) {
+                                android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        withLink(open) { append(guideLabel) }
+                    }
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
             )
-            // The phone maker's own setting reads as a link under the text,
-            // the card's two answers on their row (AJ2: three buttons wrapped
-            // into a lone button above the other two).
-            if (guide != null) {
-                TextButton(
-                    onClick = {
-                        if (!BackgroundRunning.openGuide(context, guide)) {
-                            android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 0.dp),
-                ) { Text(stringResource(R.string.bg_maker_guide)) }
-            }
-            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            FlowRow(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.bg_dont_remind)) }
                 TextButton(onClick = onAllow) { Text(stringResource(R.string.bg_allow)) }
             }

@@ -3301,6 +3301,18 @@ Built 2026-10-31. Each identity says the release its sender runs (`pocketdeskVer
 - [ ] A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
 - [ ] Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
 
+## 243. The card menu, window chips and font scale (Android UX 2)
+
+Built 2026-10-31. The computer card's menu is headed sections with its upkeep under Manage; a session's window chips cut long titles in the middle and show the whole title on a long-press; the background card's maker link ends its sentence; a debuggable build takes a font scale from `files/debug_font_scale`; a computer's last use is stamped as a session ends and for cast, camera and phone-sound sessions.
+
+- [x] The card menu folded and with Manage open, every action reachable, Remove last; the background card with its link inline, and the link opens the maker's guide; Home and the menu at font scale 0.85 and 1.3 (through the debug file). Checked 2026-10-31 on the OPPO against a throwaway server, by screenshot.
+- [x] A window chip with a long title is cut in its middle, and a long-press shows the whole title. Checked 2026-10-31 on the OPPO.
+- [ ] A screen session of a few minutes, then Exit: back on Home, the card says "Used just now", not the time it started. (where: OPPO + throwaway)
+- [ ] Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway)
+- [ ] The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
+- [ ] TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
+- [ ] The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

@@ -74,7 +74,8 @@ object HostStore {
     /**
      * UX1: a session with the saved computer at [address] came up (its
      * stream, or a remote or sound session admitted), for its card's "Used
-     * 2 hours ago". Not on pairing, a shortcut or a tap that never connects
+     * 2 hours ago"; again as it ends, and for a cast, camera or phone-sound
+     * session too (UX2, review N10). Not on pairing, a shortcut or a tap that never connects
      * (PR #575 review N2). Nothing for an address that is not saved.
      */
     fun markUsed(ctx: Context, address: String, now: Long = System.currentTimeMillis()) {

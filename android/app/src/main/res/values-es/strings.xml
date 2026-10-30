@@ -739,6 +739,10 @@
     <string name="shortcut_failed">%1$s no llegó al equipo: %2$s</string>
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">¿Bloquear %1$s?</string>
+    <string name="card_menu_on_computer">En el equipo</string>
+    <string name="card_menu_from_phone">Desde este teléfono</string>
+    <string name="card_menu_manage">Administrar</string>
+    <string name="window_chip_full_title">Mostrar el título completo</string>
     <string name="card_rename">Renombrar</string>
     <string name="card_more">Más opciones para %1$s</string>
     <string name="status_paired">Emparejado</string>
@@ -748,14 +752,17 @@
     <string name="status_used_just_now">Usado hace un momento</string>
     <plurals name="status_used_minutes">
         <item quantity="one">Usado hace %1$d min</item>
+        <item quantity="many">Usado hace %1$d min</item>
         <item quantity="other">Usado hace %1$d min</item>
     </plurals>
     <plurals name="status_used_hours">
         <item quantity="one">Usado hace %1$d hora</item>
+        <item quantity="many">Usado hace %1$d horas</item>
         <item quantity="other">Usado hace %1$d horas</item>
     </plurals>
     <plurals name="status_used_days">
         <item quantity="one">Usado hace %1$d día</item>
+        <item quantity="many">Usado hace %1$d días</item>
         <item quantity="other">Usado hace %1$d días</item>
     </plurals>
     <string name="status_used_long_ago">Usado hace tiempo</string>

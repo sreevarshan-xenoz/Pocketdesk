@@ -733,6 +733,10 @@
     <string name="shortcut_failed">%1$s கணினியை அடையவில்லை: %2$s</string>
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">%1$s-ஐப் பூட்டவா?</string>
+    <string name="card_menu_on_computer">கணினியில்</string>
+    <string name="card_menu_from_phone">இந்தத் தொலைபேசியிலிருந்து</string>
+    <string name="card_menu_manage">நிர்வகி</string>
+    <string name="window_chip_full_title">முழுத் தலைப்பைக் காட்டு</string>
     <string name="card_rename">மறுபெயரிடு</string>
     <string name="card_more">%1$s க்கான மேலும்</string>
     <string name="status_paired">இணைக்கப்பட்டது</string>

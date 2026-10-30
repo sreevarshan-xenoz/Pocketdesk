@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1071 open items.
+1076 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 44 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 46 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 143 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -143,6 +143,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here)
 - A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
+
+**243. The card menu, window chips and font scale (Android UX 2)**
+
+- A screen session of a few minutes, then Exit: back on Home, the card says "Used just now", not the time it started. (where: OPPO + throwaway)
+- The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2628,3 +2633,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)
+
+**243. The card menu, window chips and font scale (Android UX 2)**
+
+- Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway)
+- The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
+- TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)

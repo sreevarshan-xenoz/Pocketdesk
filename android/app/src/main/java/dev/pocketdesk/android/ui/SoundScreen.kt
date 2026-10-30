@@ -84,6 +84,9 @@ fun SoundScreen(
 
     // Ecosystem 1f: other apps hear it start and end, as a session's.
     val tell = remember(address) { SessionTell("sound") }
+    // UX2 (review N10): a session that came up is stamped again as it
+    // ends, so a long one reads "Used just now" back on Home.
+    val wasUp = remember(address) { java.util.concurrent.atomic.AtomicBoolean(false) }
     LaunchedEffect(state) {
         val told = when (state) {
             State.Ready -> {
@@ -93,15 +96,24 @@ fun SoundScreen(
                 shownName = HostStore.shownName(context, address)
                 // UX1: its card's "Used just now".
                 HostStore.markUsed(context, address)
+                wasUp.set(true)
                 tell.up(Prefs.tellOtherApps(context))
             }
-            State.Down, State.TooOld -> tell.lost()
+            State.Down, State.TooOld -> {
+                // UX2 (PR #580 review N1): stamped as it drops, not when the
+                // screen is left later from the Retry card.
+                if (wasUp.getAndSet(false)) HostStore.markUsed(context, address)
+                tell.lost()
+            }
             else -> null
         }
         told?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) }
     }
     DisposableEffect(tell) {
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
+    }
+    DisposableEffect(address) {
+        onDispose { if (wasUp.get()) HostStore.markUsed(context, address) }
     }
 
     // The session's foreground service, so the sound goes on with the

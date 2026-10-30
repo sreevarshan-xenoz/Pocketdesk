@@ -742,6 +742,12 @@
     <string name="shortcut_failed">%1$s did not reach the computer: %2$s</string>
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">Lock %1$s?</string>
+    <!-- UX2: the card menu's section headings. -->
+    <string name="card_menu_on_computer">On the computer</string>
+    <string name="card_menu_from_phone">From this phone</string>
+    <string name="card_menu_manage">Manage</string>
+    <!-- UX2: a session's window chip, long-pressed (TalkBack's action name). -->
+    <string name="window_chip_full_title">Show the full title</string>
     <string name="card_rename">Rename</string>
     <string name="card_more">More for %1$s</string>
     <string name="status_paired">Paired</string>

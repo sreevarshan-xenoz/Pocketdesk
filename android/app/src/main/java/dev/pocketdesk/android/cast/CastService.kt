@@ -120,6 +120,9 @@ class CastService : Service() {
     @Volatile
     private var finished = false
 
+    /** UX2 (review N10): it reached the computer, so its card is stamped "Used" as it ends too. */
+    @Volatile private var reached = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -280,7 +283,13 @@ class CastService : Service() {
                     }
                     return finish()
                 }
-                State.Ready ->
+                State.Ready -> {
+                    // UX2 (review N10): a cast, camera or phone-sound session
+                    // stamps its card "Used just now" too.
+                    if (!reached) {
+                        reached = true
+                        HostStore.markUsed(this, address)
+                    }
                     if (!showing && soundAlone) {
                         showing = true
                         // M7: its sound only: no picture, no control.
@@ -301,6 +310,7 @@ class CastService : Service() {
                             }
                         }.also { it.start() }
                     }
+                }
                 else -> {}
             }
             Thread.sleep(POLL_MS)
@@ -417,6 +427,7 @@ class CastService : Service() {
         if (finished) return
         finished = true
         castingTo = null
+        if (reached) HostStore.markUsed(this, address)
         // Its sound first, off the main thread (its stop waits for its
         // worker): it captures under the projection given back below.
         val capture = sound
