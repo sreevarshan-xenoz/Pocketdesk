@@ -121,8 +121,15 @@ pub enum Refusal {
     Yourself,
     /// The device named is not paired there.
     NotPaired,
-    /// Removing it would leave the computer with no owner device.
+    /// Removing it would leave the computer with no owner device. The
+    /// asker is an owner device that stays, so a computer never says it
+    /// today; kept as a guard and on the wire.
     LastOwner,
+    /// The computer's owner turned removal from afar off
+    /// ("Let my devices remove others from afar", `remote_revoke`).
+    Off,
+    /// Too many lists asked in a minute.
+    Busy,
     /// The computer could not write its trust store.
     Failed,
 }
@@ -136,6 +143,8 @@ impl Refusal {
             Refusal::Yourself => "yourself",
             Refusal::NotPaired => "not_paired",
             Refusal::LastOwner => "last_owner",
+            Refusal::Off => "off",
+            Refusal::Busy => "busy",
             Refusal::Failed => "failed",
         }
     }
@@ -148,6 +157,8 @@ impl Refusal {
             "yourself" => Refusal::Yourself,
             "not_paired" => Refusal::NotPaired,
             "last_owner" => Refusal::LastOwner,
+            "off" => Refusal::Off,
+            "busy" => Refusal::Busy,
             _ => Refusal::Failed,
         }
     }
@@ -164,7 +175,11 @@ impl Refusal {
             Refusal::LastOwner => {
                 "That is the last device of yours there: removing it would leave none to manage it."
             }
-            Refusal::Failed => "That computer could not remove it: try again.",
+            Refusal::Off => {
+                "That computer's owner turned off removing devices from afar: remove it at that computer (Devices → Unpair)."
+            }
+            Refusal::Busy => "Too many asks in a minute: wait a minute and try again.",
+            Refusal::Failed => "That computer could not do it: try again.",
         }
     }
 }
@@ -187,13 +202,16 @@ pub fn remove_answer(request: &str, device_id: &str, outcome: Result<(), Refusal
     }
 }
 
-/// The answer to any ask from a device that may not ask.
-pub fn refused_answer(request: &str, ask: &Ask) -> Value {
+/// The answer to any ask the computer does not take at all: from a device
+/// that may not ask (`NotOwner`), with removal from afar turned off
+/// (`Off`), too many at once (`Busy`), or a store it could not read
+/// (`Failed`).
+pub fn refused_answer(request: &str, ask: &Ask, refusal: Refusal) -> Value {
     let word = match ask {
         Ask::List => "list",
         Ask::Remove { .. } => "remove",
     };
-    json!({ "request": request, "ask": word, "refused": Refusal::NotOwner.code() })
+    json!({ "request": request, "ask": word, "refused": refusal.code() })
 }
 
 /// What an answer says, read on the asking side.
@@ -301,6 +319,8 @@ mod tests {
             Refusal::Yourself,
             Refusal::NotPaired,
             Refusal::LastOwner,
+            Refusal::Off,
+            Refusal::Busy,
             Refusal::Failed,
         ] {
             assert_eq!(Refusal::from_code(refusal.code()), refusal);
@@ -316,8 +336,12 @@ mod tests {
             );
         }
         assert_eq!(
-            read_answer(&refused_answer("r", &Ask::List)),
+            read_answer(&refused_answer("r", &Ask::List, Refusal::NotOwner)),
             Some(("r".to_string(), Answer::Refused(Refusal::NotOwner)))
+        );
+        assert_eq!(
+            read_answer(&refused_answer("r", &Ask::List, Refusal::Off)),
+            Some(("r".to_string(), Answer::Refused(Refusal::Off)))
         );
     }
 }

@@ -406,11 +406,10 @@ impl ComputersView {
     }
 
     fn refresh(&mut self, state_dir: &Path) {
-        let waiting_there = self
-            .file
-            .there
-            .as_ref()
-            .is_some_and(|t| !t.request.is_empty());
+        // Read often only while an answer can still come (PR #574 review
+        // N7): one past its wait is said as none.
+        let now_unix = pocketdesk_core::local::pin::now_unix();
+        let waiting_there = there_step(self.file.there.as_ref(), now_unix) == ThereStep::Asking;
         let every = if self.pairing.is_some() || self.waking.is_some() || waiting_there {
             PAIRING_REFRESH
         } else {
@@ -442,6 +441,15 @@ impl ComputersView {
         self.confirm_remove = None;
         if self.there_open.as_deref() == Some(&computer.device_id) {
             self.there_open = None;
+            // Its devices' names are not kept once the list is closed (PR
+            // #574 review N12); the server holds the file.
+            if server_running {
+                let ask = ComputerAsk::CloseThere {
+                    device_id: computer.device_id.clone(),
+                };
+                let _ = computers::request(state_dir, ask, now_unix);
+                self.read_at = None;
+            }
             return;
         }
         self.there_open = Some(computer.device_id.clone());
@@ -506,7 +514,10 @@ impl ComputersView {
                     if device.you {
                         return;
                     }
-                    let busy = there.removing.is_some() || !server_running;
+                    // A removal under way holds the buttons, until its
+                    // answer or its wait runs out (PR #574 review N7).
+                    let busy =
+                        (there.removing.is_some() && step == ThereStep::Asking) || !server_running;
                     if self.confirm_remove.as_deref() == Some(device.id.as_str()) {
                         ui.label(remove_question(&shown, &name));
                         if ui

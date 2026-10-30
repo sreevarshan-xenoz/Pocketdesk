@@ -431,6 +431,10 @@ pub enum ComputerAsk {
     /// Remove the device `remove` from the computer `device_id` (remote
     /// revoke), as its own Devices page's Unpair would.
     RemoveThere { device_id: String, remove: String },
+    /// Forget what the computer `device_id` listed (remote revoke): its
+    /// "Devices there…" was closed, and the names of its devices are not
+    /// kept here past that.
+    CloseThere { device_id: String },
     /// Stop showing the computer's screen (its window closed): the view
     /// `session_id` (`view.json`'s) when the window knew it, else the one
     /// shown now. A Stop for a view since replaced stops nothing (BK7

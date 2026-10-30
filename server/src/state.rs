@@ -185,11 +185,18 @@ pub fn close_device(device_id: &str) {
 }
 
 /// Wait until [`close_device`] names `device_id` on `closing`; never, once
-/// nothing can name it.
-pub async fn closed(device_id: &str, closing: &mut tokio::sync::broadcast::Receiver<String>) {
+/// nothing can name it. A receiver that fell behind (too many at once)
+/// may have missed its name: it ends then if `gone` says the device is
+/// no longer let in (PR #574 review N9).
+pub async fn closed(
+    device_id: &str,
+    closing: &mut tokio::sync::broadcast::Receiver<String>,
+    gone: impl Fn() -> bool,
+) {
     loop {
         match closing.recv().await {
             Ok(id) if id == device_id => return,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) if gone() => return,
             Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                 std::future::pending::<()>().await

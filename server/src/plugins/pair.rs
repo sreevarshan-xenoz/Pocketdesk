@@ -2618,3 +2618,127 @@ forged log line"
         assert!(!preset.allows(Capability::SharedInput));
     }
 }
+
+#[cfg(test)]
+mod owner_mark_tests {
+    use super::*;
+
+    /// A sender that keeps what it is sent, with the key its TLS proved.
+    struct Phone {
+        id: String,
+        key: [u8; 32],
+        sent: std::sync::Mutex<Vec<NetworkPacket>>,
+    }
+
+    #[async_trait::async_trait]
+    impl DeviceSender for Phone {
+        fn device_id(&self) -> &str {
+            &self.id
+        }
+        fn connection_id(&self) -> &str {
+            "owner-mark-test"
+        }
+        fn peer_key(&self) -> Option<pocketdesk_core::streaming::PeerKey> {
+            Some(pocketdesk_core::streaming::PeerKey::Tls(self.key))
+        }
+        async fn send_packet(&self, packet: &NetworkPacket) -> Result<()> {
+            self.sent.lock().unwrap().push(packet.clone());
+            Ok(())
+        }
+    }
+
+    /// Pair `id` with the PIN `pin`, as its pairing packet asks; whether it
+    /// paired, and whether it is an owner phone now.
+    async fn pair_with(id: &str, key: u8, pin: &str) -> (bool, bool) {
+        let phone = Phone {
+            id: id.to_string(),
+            key: [key; 32],
+            sent: Default::default(),
+        };
+        let packet = NetworkPacket::new("kdeconnect.pair").with_body(json!({ "pin": pin }));
+        handle_pair(id, &packet, &phone).await;
+        let paired = phone
+            .sent
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p.body["pair"] == true);
+        let store = TrustStore::read(state::trust_store_path().unwrap()).unwrap();
+        (paired, store.is_owner_phone(id))
+    }
+
+    /// Remote revoke (PR #574 review I3): pairing marks a phone as the
+    /// owner's only with this computer's own code; a guest grant, someone
+    /// else's code, a profile's code (one whose profile is gone too) and a
+    /// PIN shown for the phone while the Pair page's code is someone else's
+    /// never do.
+    #[tokio::test]
+    async fn only_the_computers_own_code_makes_an_owner_phone() {
+        let dir = state::use_test_dirs().to_path_buf();
+        let now = local_pin::now_unix();
+        let id = |n: u8| format!("0d7c3a52-91e4-4b6f-8a2e-0000000000{n:02x}");
+
+        local_pin::write(&dir, "411001", now, None).unwrap();
+        assert_eq!(
+            pair_with(&id(1), 1, "411001").await,
+            (true, true),
+            "own code"
+        );
+
+        local_pin::write(&dir, "411002", now, Some(900)).unwrap();
+        assert_eq!(pair_with(&id(2), 2, "411002").await, (true, false), "guest");
+
+        local_pin::write_preset(&dir, "411003", now, None, true, None).unwrap();
+        assert_eq!(
+            pair_with(&id(3), 3, "411003").await,
+            (true, false),
+            "someone else's"
+        );
+
+        local_pin::write_preset(&dir, "411004", now, None, false, Some("gone")).unwrap();
+        assert_eq!(
+            pair_with(&id(4), 4, "411004").await,
+            (true, false),
+            "a profile's, the profile gone"
+        );
+
+        // "Show PIN on desktop" while the page's live code is someone else's.
+        local_pin::write_preset(&dir, "411005", now, None, true, None).unwrap();
+        pins().lock().unwrap().insert(
+            id(5),
+            PinEntry {
+                pin: "722005".to_string(),
+                created: Instant::now(),
+            },
+        );
+        assert_eq!(
+            pair_with(&id(5), 5, "722005").await,
+            (true, false),
+            "a PIN shown while the code is someone else's"
+        );
+
+        // The owner phone paired again with someone else's code loses it.
+        local_pin::write_preset(&dir, "411006", now, None, true, None).unwrap();
+        assert_eq!(pair_with(&id(1), 1, "411006").await, (true, false));
+
+        let _ = local_pin::remove_if(&dir, "411005");
+        TrustStore::update(state::trust_store_path().unwrap(), |s| {
+            for n in 1..=5 {
+                s.untrust_device(&id(n))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        for n in 1..=5 {
+            let _ = pocketdesk_core::local::device_keys::clear(&dir, &id(n));
+        }
+    }
+
+    #[test]
+    fn only_a_plain_code_is_the_owners() {
+        assert!(is_owner_code(false, false));
+        assert!(!is_owner_code(true, false));
+        assert!(!is_owner_code(false, true));
+        assert!(!is_owner_code(true, true));
+    }
+}

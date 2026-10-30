@@ -189,6 +189,13 @@ pub struct Config {
     /// default; off, every ask is turned away unseen.
     #[serde(default = "default_nearby_pairing")]
     pub nearby_pairing: bool,
+    /// Let my devices remove others from afar (remote revoke): an owner
+    /// device (a phone paired with this computer's own code, or a computer
+    /// paired both ways) may list this computer's paired devices and
+    /// remove one. On by default; off, both are refused (`off`), and a
+    /// device is removed only here (Devices → Unpair, `pocketdesk unpair`).
+    #[serde(default = "default_remote_revoke")]
+    pub remote_revoke: bool,
     /// Keep the last this many texts that crossed between this computer and
     /// its phones, either way (D3); 0 keeps none. Off by default: the texts
     /// stay on disk, owner-only.
@@ -543,6 +550,10 @@ fn default_nearby_pairing() -> bool {
     true
 }
 
+fn default_remote_revoke() -> bool {
+    true
+}
+
 fn default_pairing_required() -> bool {
     true
 }
@@ -602,6 +613,7 @@ impl Default for Config {
             received_images_clipboard: false,
             computer_clipboard: false,
             nearby_pairing: true,
+            remote_revoke: true,
             clipboard_history: 0,
             clipboard_never_from: Vec::new(),
             clipboard_never_like: Vec::new(),
@@ -867,6 +879,7 @@ impl Config {
         "phone_media_controls",
         "computer_clipboard",
         "nearby_pairing",
+        "remote_revoke",
         "clipboard_history",
         "clipboard_never_from",
         "clipboard_never_like",

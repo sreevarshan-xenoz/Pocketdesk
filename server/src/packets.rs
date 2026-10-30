@@ -65,9 +65,13 @@ fn permission(packet_type: &str) -> String {
     if packet_type == crate::computer_wake::COMPUTER_WAKE {
         return "none (a listed computer only)".to_string();
     }
-    // Remote revoke: answered only for an owner device, by the plugin.
+    // Remote revoke: answered only for an owner device, by the plugin; an
+    // answer is taken only from the computer asked, for the ask waiting.
     if packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES {
         return "none (an owner device only)".to_string();
+    }
+    if packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER {
+        return "none (only the computer asked, for the ask waiting)".to_string();
     }
     match capability_for(packet_type) {
         Some(capability) => format!("{capability:?}"),

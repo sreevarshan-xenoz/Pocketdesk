@@ -188,6 +188,13 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     };
                     crate::remote_devices::ask(&dir, &device_id, ask).await;
                 }
+                ComputerAsk::CloseThere { device_id } => {
+                    let dir = dir.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::remote_devices::close_there(&dir, &device_id)
+                    })
+                    .await;
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }

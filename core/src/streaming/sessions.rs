@@ -331,6 +331,27 @@ mod tests {
         );
     }
 
+    /// Remote revoke: a removed device's sessions end, each connection
+    /// closed, and another device's go on.
+    #[test]
+    fn kick_device_closes_that_device_s_sessions_alone() {
+        let _guard = test_lock();
+        let (gone, gone_closed) = dummy(true, 205);
+        let (kept, kept_closed) = dummy(true, 206);
+        let _gone = register(Some("removed-dev".into()), &gone, Streamed::default());
+        let _kept = register(Some("removed-dev-2".into()), &kept, Streamed::default());
+        let kicked = kick_device("removed-dev");
+        assert_eq!(kicked.len(), 1);
+        assert!(gone_closed.load(Ordering::Relaxed));
+        assert!(!kept_closed.load(Ordering::Relaxed));
+        assert!(
+            list()
+                .iter()
+                .any(|s| s.device_id.as_deref() == Some("removed-dev-2"))
+        );
+        kick_device("removed-dev-2");
+    }
+
     #[test]
     fn matches_rules() {
         let info = LiveSession {

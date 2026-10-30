@@ -12,10 +12,13 @@
 //! computer's connection here, and the link this computer keeps to a
 //! computer ([`crate::peer_computers`]'s `take`).
 //!
-//! **Its limits:** at most [`REMOVALS_PER_MINUTE`] removals a minute per
-//! asker; never the asker itself; never the last owner device here. The
-//! asker must still be an owner device as the store is written, under its
-//! lock, so two owner devices removing each other at once leave one.
+//! **Its limits:** the computer's owner can turn it off ("Let my devices
+//! remove others from afar", `remote_revoke`, on by default); at most
+//! [`REMOVALS_PER_MINUTE`] removals and [`LISTS_PER_MINUTE`] lists a
+//! minute per asker (kept in memory: a restart starts the count again);
+//! never the asker itself. The asker must still be an owner device as the
+//! store is written, under its lock, so it is always left, and two owner
+//! devices removing each other at once leave one.
 //!
 //! This computer asks another the same way ([`ask`]), for the desktop
 //! app's "Devices there…", and keeps the answer in `computers.json`
@@ -45,6 +48,32 @@ pub(crate) fn is_owner_device(store: &TrustStore, file: &ComputersFile, device_i
         file.both_ways(device_id) && !file.pending.iter().any(|id| id == device_id)
     } else {
         store.is_owner_phone(device_id) && store.grant_remaining(device_id).is_none()
+    }
+}
+
+/// Who asked, as this computer knows it, never the name the device gives
+/// itself (a stolen phone could call itself anything): the owner's rename
+/// here, else a listed computer's name, with its kind and the start of
+/// its id, as the Activity page names it.
+fn asker_name(store: &TrustStore, file: &ComputersFile, device_id: &str) -> String {
+    let kind = if store.is_computer(device_id) {
+        "computer"
+    } else {
+        "phone"
+    };
+    let short: String = device_id.chars().take(8).collect();
+    let known = store
+        .chosen_name(device_id)
+        .map(str::to_string)
+        .or_else(|| {
+            file.computers
+                .iter()
+                .find(|c| c.device_id == device_id)
+                .and_then(|c| pocketdesk_core::protocol::kdeconnect::clean_device_name(&c.name))
+        });
+    match known {
+        Some(name) => format!("{name} ({kind} {short})"),
+        None => format!("A {kind} ({short})"),
     }
 }
 
@@ -93,7 +122,9 @@ pub(crate) fn listing(
         .collect()
 }
 
-/// Why `asker` may not remove `target` here, or `None` when it may.
+/// Why `asker` may not remove `target` here, or `None` when it may. The
+/// last-owner check cannot refuse today: past the first two checks the
+/// asker is an owner device that stays. It is kept as a guard.
 pub(crate) fn refusal(
     store: &TrustStore,
     file: &ComputersFile,
@@ -132,13 +163,18 @@ struct Pace {
 impl Pace {
     /// Whether `asker` may ask one more removal at `now`; counted if so.
     fn take(&mut self, asker: &str, now: Instant) -> bool {
+        self.take_up_to(asker, now, REMOVALS_PER_MINUTE)
+    }
+
+    /// Whether `asker` may ask one more of `most` a minute at `now`.
+    fn take_up_to(&mut self, asker: &str, now: Instant, most: usize) -> bool {
         self.asks
             .retain(|_, at| at.back().is_some_and(|t| now.duration_since(*t) < MINUTE));
         let at = self.asks.entry(asker.to_string()).or_default();
         while at.front().is_some_and(|t| now.duration_since(*t) >= MINUTE) {
             at.pop_front();
         }
-        if at.len() >= REMOVALS_PER_MINUTE {
+        if at.len() >= most {
             return false;
         }
         at.push_back(now);
@@ -148,7 +184,13 @@ impl Pace {
 
 const MINUTE: Duration = Duration::from_secs(60);
 
+/// At most this many lists a minute are taken from one asker.
+pub(crate) const LISTS_PER_MINUTE: usize = 30;
+
 static PACE: LazyLock<Mutex<Pace>> = LazyLock::new(Default::default);
+
+/// The lists each asker made in the last minute.
+static LIST_PACE: LazyLock<Mutex<Pace>> = LazyLock::new(Default::default);
 
 /// What a removal took away, for its words.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,42 +209,61 @@ pub(crate) fn removal_words(removed: &Removed) -> String {
     )
 }
 
-/// Remove `target` for `asker`, deciding again under the trust store's
-/// lock with `computers.json` read then: its trust and name go, then its
-/// keys and contacts, as the Devices page's Unpair takes them.
+/// Remove `target` for `asker`, deciding again with `computers.json` held
+/// under its own lock and then the trust store's (the order the link's
+/// grant takes them), so neither a lapse nor a grant slips between: its
+/// trust and name go, and its keys and contacts with them, as the Devices
+/// page's Unpair takes them, before a pairing again could bind new keys.
 pub(crate) fn remove_in(
     dir: &Path,
     trust: &Path,
     asker: &str,
     target: &str,
 ) -> Result<Removed, Refusal> {
-    let written = TrustStore::update(trust, |store| {
-        let file = computers::read(dir);
-        if let Some(refusal) = refusal(store, &file, asker, target) {
-            return Ok(Err(refusal));
+    let decide = |file: &ComputersFile| {
+        TrustStore::update(trust, |store| {
+            if let Some(refusal) = refusal(store, file, asker, target) {
+                return Ok(Err(refusal));
+            }
+            let removed = Removed {
+                asker: asker_name(store, file, asker),
+                device: shown_name(store, file, target),
+            };
+            store.untrust_device(target)?;
+            // Its keys go too, so it pairs again only with a new code.
+            if let Err(e) = pocketdesk_core::local::device_keys::clear(dir, target) {
+                tracing::warn!("Could not clear a removed device's keys: {e}");
+            }
+            // A phone's contacts go with it (P10); its notifications, cards
+            // and texts go as the watcher sees it unpaired (AY5).
+            let _ = pocketdesk_core::local::phone_contacts::forget(dir, target);
+            Ok(Ok(removed))
+        })
+    };
+    // With no computers file there is nothing to hold, and none is made.
+    let written = if dir
+        .join(pocketdesk_core::local::paths::COMPUTERS_FILE)
+        .exists()
+    {
+        let mut written = None;
+        let held = computers::update(dir, |file| written = Some(decide(file)));
+        match (held, written) {
+            (Ok(()), Some(written)) => written,
+            _ => {
+                tracing::warn!("A removal from afar could not read computers.json");
+                return Err(Refusal::Failed);
+            }
         }
-        let removed = Removed {
-            asker: shown_name(store, &file, asker),
-            device: shown_name(store, &file, target),
-        };
-        store.untrust_device(target)?;
-        Ok(Ok(removed))
-    });
-    let removed = match written {
-        Ok(outcome) => outcome?,
+    } else {
+        decide(&ComputersFile::default())
+    };
+    match written {
+        Ok(outcome) => outcome,
         Err(e) => {
             tracing::warn!("A removal from afar could not write the trust store: {e}");
-            return Err(Refusal::Failed);
+            Err(Refusal::Failed)
         }
-    };
-    // Its keys go too, so it pairs again only with a new code.
-    if let Err(e) = pocketdesk_core::local::device_keys::clear(dir, target) {
-        tracing::warn!("Could not clear a removed device's keys: {e}");
     }
-    // A phone's contacts go with it (P10); its notifications, cards and
-    // texts go as the watcher sees it unpaired (AY5).
-    let _ = pocketdesk_core::local::phone_contacts::forget(dir, target);
-    Ok(removed)
 }
 
 /// End what the removed `target` has going here now: its sessions, and its
@@ -210,18 +271,40 @@ pub(crate) fn remove_in(
 /// paired both ways is forgotten by the links' loop, which sees it is no
 /// longer trusted: told to forget, its nudge dropped, its view ended.
 async fn end_what_it_has(target: &str) {
-    for session in pocketdesk_core::streaming::sessions::kick_device(target) {
+    end_what_it_has_with(target, pocketdesk_core::streaming::sessions::kick_device);
+}
+
+/// [`end_what_it_has`] with the sessions ended by `kick`; how many were.
+fn end_what_it_has_with(
+    target: &str,
+    kick: impl Fn(&str) -> Vec<pocketdesk_core::streaming::sessions::LiveSession>,
+) -> usize {
+    let ended = kick(target);
+    for session in &ended {
         tracing::info!(session = session.id, "Ended a removed device's session");
     }
     crate::state::close_device(target);
+    ended.len()
 }
 
 /// Answer the ask in `body` from `asker`, the device on the connection or
 /// link it came by; `None` for a body that does not read.
 pub(crate) async fn answer(asker: &str, body: &Value) -> Option<Value> {
+    answer_with(asker, body, crate::events::current_config().remote_revoke).await
+}
+
+/// [`answer`], with the owner's switch (`remote_revoke`) as `enabled`.
+async fn answer_with(asker: &str, body: &Value, enabled: bool) -> Option<Value> {
     let request = Request::parse(body)?;
+    let refused = |refusal| {
+        Some(wire::refused_answer(
+            &request.request,
+            &request.ask,
+            refusal,
+        ))
+    };
     let (Ok(dir), Ok(trust)) = (crate::state::state_dir(), crate::state::trust_store_path()) else {
-        return Some(wire::refused_answer(&request.request, &request.ask));
+        return refused(Refusal::Failed);
     };
     let read = {
         let (dir, trust) = (dir.clone(), trust.clone());
@@ -234,20 +317,36 @@ pub(crate) async fn answer(asker: &str, body: &Value) -> Option<Value> {
         .ok()
         .flatten()
     };
-    let owner = read
-        .as_ref()
-        .is_some_and(|(store, file)| is_owner_device(store, file, asker));
-    let Some((store, file)) = read.filter(|_| owner) else {
+    // A store that does not read (one caught mid-replace) is a failure to
+    // try again, never "not yours" (PR #574 review N10).
+    let Some((store, file)) = read else {
+        return refused(Refusal::Failed);
+    };
+    if !is_owner_device(&store, &file, asker) {
         tracing::warn!(
             asker,
             "Refused a device list or removal from a device not the owner's"
         );
-        return Some(wire::refused_answer(&request.request, &request.ask));
-    };
+        return refused(Refusal::NotOwner);
+    }
+    // The owner's switch, read at each ask (PR #574 review I1).
+    if !enabled {
+        tracing::info!(asker, "Refused a device list or removal: turned off here");
+        return refused(Refusal::Off);
+    }
     match request.ask {
         Ask::List => {
+            let paced = LIST_PACE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take_up_to(asker, Instant::now(), LISTS_PER_MINUTE);
+            if !paced {
+                return refused(Refusal::Busy);
+            }
             let connected = connected_now().await;
-            let devices = listing(&store, &file, asker, |id| connected.iter().any(|c| c == id));
+            let devices = listing(&store, &file, asker, |id| {
+                connected.iter().any(|c| c == id) || crate::peer_computers::is_linked(id)
+            });
             Some(wire::list_answer(&request.request, &devices))
         }
         Ask::Remove { device_id } => {
@@ -304,8 +403,8 @@ async fn remove(dir: &Path, trust: &Path, asker: &str, target: &str) -> Result<(
     Ok(())
 }
 
-/// The devices connected here now: a control connection, a session or a
-/// link this computer keeps.
+/// The devices connected here now by a control connection or a session
+/// (a link this computer keeps is asked of the links, in [`answer`]).
 async fn connected_now() -> Vec<String> {
     let mut ids: Vec<String> = crate::state::clone_clients()
         .await
@@ -411,6 +510,19 @@ fn record_ask(file: &mut ComputersFile, computer: &str, request: &Request, now: 
     file.there = Some(there);
 }
 
+/// Forget what `computer` listed, its "Devices there…" closed (PR #574
+/// review N12): the names of its devices are not kept past that.
+pub(crate) fn close_there(dir: &Path, computer: &str) {
+    let saved = computers::update(dir, |file| {
+        if file.there.as_ref().is_some_and(|t| t.device_id == computer) {
+            file.there = None;
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not forget another computer's devices: {e}");
+    }
+}
+
 /// The ask `request` of `computer` could not be sent: no link is up.
 fn not_sent(file: &mut ComputersFile, computer: &str, request: &str) {
     if let Some(there) = file
@@ -466,6 +578,17 @@ fn take_answer(file: &mut ComputersFile, from: &str, request: &str, answer: Answ
         tracing::debug!("An answer about devices that no ask here waits for; dropped");
         return;
     };
+    // The answer must be to the kind of ask waiting, and a removal's to
+    // the device asked (PR #574 review N7).
+    let fits = match (&answer, there.removing.as_deref()) {
+        (Answer::Refused(_), _) | (Answer::Listed(_), None) => true,
+        (Answer::Removed { device_id, .. }, Some(asked)) => device_id == asked,
+        _ => false,
+    };
+    if !fits {
+        tracing::debug!("An answer about devices that does not fit the ask waiting; dropped");
+        return;
+    }
     there.request.clear();
     match answer {
         Answer::Listed(devices) => {
@@ -668,7 +791,7 @@ mod tests {
         let removed = remove_in(&d.dir, &d.trust(), "mine-pc", "someone-else").unwrap();
         assert_eq!(
             removal_words(&removed),
-            "Computer mine-pc removed someone- from this computer"
+            "Computer mine-pc (computer mine-pc) removed someone- from this computer"
         );
         let store = d.store();
         assert!(!store.is_trusted("someone-else"));
@@ -684,8 +807,12 @@ mod tests {
         assert!(!d.store().is_trusted("mine-pc"));
     }
 
+    /// What this test checks (PR #574 review N1): two owner devices removing
+    /// each other leave one, because the second asker is no longer an owner
+    /// device; and the last-owner count itself, called directly, says when
+    /// none would be left. `refusal` never reaches it with a live asker.
     #[test]
-    fn the_last_owner_device_is_never_removed() {
+    fn mutual_removal_leaves_one_owner_and_the_count_sees_the_last() {
         let d = Dirs::new("last");
         TrustStore::update(d.trust(), |s| {
             s.trust_phone("phone", true)?;
@@ -703,14 +830,134 @@ mod tests {
             remove_in(&d.dir, &d.trust(), "pc", "phone"),
             Err(Refusal::NotOwner)
         );
-        // The phone is now the only owner device: removing it would leave
-        // none, so the rule refuses it, whoever asks.
+        // The phone is now the only owner device: the count says removing
+        // it would leave none.
         let (store, file) = (d.store(), computers::read(&d.dir));
         assert!(leaves_no_owner(&store, &file, "phone"));
-        assert!(
-            d.store().is_owner_phone("phone"),
-            "one owner device is left"
+        assert!(store.is_owner_phone("phone"), "one owner device is left");
+        assert!(!store.is_trusted("pc"));
+    }
+
+    /// N3: the asker is named by what this computer knows of it, never the
+    /// name it gives itself, with its kind and the start of its id.
+    #[test]
+    fn the_asker_is_named_by_this_computer_not_by_itself() {
+        let d = Dirs::new("asker-name");
+        TrustStore::update(d.trust(), |s| {
+            s.trust_phone("a1b2c3d4e5", true)?;
+            s.note_claimed_name("a1b2c3d4e5", "Desk laptop")?;
+            Ok(())
+        })
+        .unwrap();
+        let file = computers::read(&d.dir);
+        assert_eq!(
+            asker_name(&d.store(), &file, "a1b2c3d4e5"),
+            "A phone (a1b2c3d4)",
+            "its own name is not taken"
         );
+        TrustStore::update(d.trust(), |s| s.rename("a1b2c3d4e5", Some("Pixel 8"))).unwrap();
+        assert_eq!(
+            asker_name(&d.store(), &file, "a1b2c3d4e5"),
+            "Pixel 8 (phone a1b2c3d4)"
+        );
+    }
+
+    /// I1: with "Let my devices remove others from afar" off, an owner
+    /// device's list and removal are both refused as off, and nothing goes.
+    #[tokio::test]
+    async fn turned_off_an_owner_device_lists_and_removes_nothing() {
+        let dir = crate::state::use_test_dirs();
+        let trust = dir.join("trusted_devices.json");
+        TrustStore::update(&trust, |s| {
+            s.trust_phone("off-owner", true)?;
+            s.trust_phone("off-other", true)
+        })
+        .unwrap();
+        for ask in [
+            Ask::List,
+            Ask::Remove {
+                device_id: "off-other".to_string(),
+            },
+        ] {
+            let request = Request {
+                request: "off".to_string(),
+                ask,
+            };
+            let answered = answer_with("off-owner", &request.body(), false)
+                .await
+                .unwrap();
+            assert_eq!(answered["refused"], "off", "{answered}");
+            assert!(answered.get("devices").is_none());
+        }
+        assert!(TrustStore::read(&trust).unwrap().is_trusted("off-other"));
+        TrustStore::update(&trust, |s| {
+            s.untrust_device("off-owner")?;
+            s.untrust_device("off-other")
+        })
+        .unwrap();
+    }
+
+    /// N6: lists are paced too, more loosely than removals.
+    #[test]
+    fn lists_are_paced_per_asker() {
+        let mut pace = Pace::default();
+        let start = Instant::now();
+        for _ in 0..LISTS_PER_MINUTE {
+            assert!(pace.take_up_to("a", start, LISTS_PER_MINUTE));
+        }
+        assert!(!pace.take_up_to("a", start, LISTS_PER_MINUTE));
+        assert!(pace.take_up_to("b", start, LISTS_PER_MINUTE));
+    }
+
+    /// N7: an answer of another kind, or about another device, is not
+    /// taken for the ask waiting.
+    #[test]
+    fn an_answer_that_does_not_fit_the_ask_waiting_is_dropped() {
+        let mut file = ComputersFile::default();
+        let remove = Request {
+            request: "w".to_string(),
+            ask: Ask::Remove {
+                device_id: "p".to_string(),
+            },
+        };
+        record_ask(&mut file, "pc", &remove, 1);
+        take_answer(&mut file, "pc", "w", Answer::Listed(vec![]), 2);
+        take_answer(
+            &mut file,
+            "pc",
+            "w",
+            Answer::Removed {
+                device_id: "q".to_string(),
+                outcome: Ok(()),
+            },
+            2,
+        );
+        let there = file.there.clone().unwrap();
+        assert_eq!(there.request, "w", "still waiting");
+        assert_eq!(there.removing.as_deref(), Some("p"));
+        let list = Request {
+            request: "l".to_string(),
+            ask: Ask::List,
+        };
+        record_ask(&mut file, "pc", &list, 3);
+        take_answer(
+            &mut file,
+            "pc",
+            "l",
+            Answer::Removed {
+                device_id: "p".to_string(),
+                outcome: Ok(()),
+            },
+            4,
+        );
+        assert_eq!(file.there.as_ref().unwrap().request, "l");
+        // Closed, its list goes (N12).
+        let d = Dirs::new("close");
+        computers::update(&d.dir, |f| *f = file.clone()).unwrap();
+        close_there(&d.dir, "other");
+        assert!(computers::read(&d.dir).there.is_some(), "another's stays");
+        close_there(&d.dir, "pc");
+        assert!(computers::read(&d.dir).there.is_none());
     }
 
     #[test]
@@ -833,12 +1080,12 @@ mod tests {
         assert!(!TrustStore::read(&trust).unwrap().is_trusted("ends-lost"));
         tokio::time::timeout(
             Duration::from_secs(2),
-            crate::state::closed("ends-lost", &mut closing),
+            crate::state::closed("ends-lost", &mut closing, || false),
         )
         .await
         .expect("its connections are told to close");
-        // Its sessions are judged unpaired by the watcher's own rule.
-        let store = TrustStore::read(&trust).unwrap();
+        // Its sessions: the removal kicks the removed device's own, by its
+        // exact id (core's `kick_device` closes each one's connection).
         let session = pocketdesk_core::streaming::sessions::LiveSession {
             streamed: Default::default(),
             id: 9,
@@ -847,10 +1094,13 @@ mod tests {
             lan: true,
             started_unix: 1,
         };
-        assert_eq!(
-            crate::live_sessions::untrusted_sessions(&[session], true, |id| store.is_trusted(id)),
-            vec![9]
-        );
+        let asked = std::sync::Mutex::new(Vec::new());
+        let ended = end_what_it_has_with("ends-lost", |id| {
+            asked.lock().unwrap().push(id.to_string());
+            vec![session.clone()]
+        });
+        assert_eq!(ended, 1);
+        assert_eq!(*asked.lock().unwrap(), vec!["ends-lost".to_string()]);
         TrustStore::update(&trust, |s| s.untrust_device("ends-owner")).unwrap();
     }
 
