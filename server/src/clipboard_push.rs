@@ -366,6 +366,11 @@ pub(crate) fn note_image_sent(device_id: &str, id: &str) {
 }
 
 fn note_sent(device_id: &str, id: &str, told_until: Option<std::time::Instant>) {
+    // An image there now: the window's last text no longer is.
+    WINDOW_SENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
     IMAGE_SENT.lock().unwrap_or_else(|e| e.into_inner()).insert(
         device_id.to_string(),
         Sent {
@@ -410,12 +415,30 @@ pub(crate) fn forget_image_sent_if(device_id: &str, id: &str) {
 }
 
 /// The computer `device_id`'s clipboard holds no image of this one's now:
-/// text went to it, or it sent this one something of its own.
+/// text went to it, or it sent this one something of its own. Nor is the
+/// window's last text known to be there (range review I2).
 fn forget_image_sent(device_id: &str) {
     IMAGE_SENT
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(device_id);
+    WINDOW_SENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
+}
+
+/// The text a window push sent each computer last (a hash), while nothing
+/// else went there or came from it since (range review I2).
+static WINDOW_SENT: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
+
+/// [`WINDOW_SENT`]'s entry for `device_id`.
+fn window_sent_last(device_id: &str) -> Option<u64> {
+    WINDOW_SENT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .copied()
 }
 
 /// The image last sent to the computer `device_id`, while nothing has
@@ -572,10 +595,203 @@ pub(crate) async fn push_now(device_id: &str) {
 /// while it controls that computer (PC3): this computer's clipboard goes
 /// there, as [`push_now`] sends it, marked as following the window. An
 /// answer still awaited from that computer is no longer taken: this
-/// clipboard is the newer.
+/// clipboard is the newer. An answer awaited from another computer, whose
+/// window just lost the focus to this one's, is waited for first, up to
+/// [`HANDOVER_WAIT`] (range review I2): its copy is the newest, and goes
+/// on to this computer.
 pub(crate) async fn push_for_window(device_id: &str) {
-    ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner()).take();
+    ASKED_BACK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
+    wait_for_other_answers(device_id).await;
     push_following(device_id, Follow::Window).await
+}
+
+/// How close one window's focus loss and another's gain are, to be one
+/// hand-over between windows (range review I2).
+const HANDOVER: Duration = Duration::from_millis(300);
+
+/// The longest a window's push waits for another computer's answer.
+const HANDOVER_WAIT: Duration = Duration::from_millis(1500);
+
+/// After another computer's answer was taken, time for it to land on this
+/// computer's clipboard before a push reads it.
+const ANSWER_SETTLE: Duration = Duration::from_millis(250);
+
+/// Wait, up to [`HANDOVER_WAIT`], while a window of another computer than
+/// `device_id` is losing the focus or its answer is awaited.
+async fn wait_for_other_answers(device_id: &str) {
+    let start = std::time::Instant::now();
+    let mut waited = false;
+    loop {
+        let now = std::time::Instant::now();
+        // The focus first: an ask is noted before its loss is let go.
+        let losing = FOCUS_MOVES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .other_losing(device_id, now);
+        let pending = losing
+            || asked_elsewhere(
+                &ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner()),
+                device_id,
+                now,
+            );
+        if !pending {
+            break;
+        }
+        if now.saturating_duration_since(start) >= HANDOVER_WAIT {
+            tracing::debug!(
+                "The clipboard follows the window to {device_id} without the answer it waited for"
+            );
+            break;
+        }
+        waited = true;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let answered = ANSWERED_AT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|at| at >= start);
+    if waited && answered {
+        tokio::time::sleep(ANSWER_SETTLE).await;
+    }
+}
+
+/// Whether an answer from a computer other than `device_id` is awaited at
+/// `now` from an ask made within [`HANDOVER_WAIT`]: its window lost the
+/// focus just now. An older ask (its window lost the focus to another
+/// program) holds no push up.
+fn asked_elsewhere(
+    asked: &HashMap<String, std::time::Instant>,
+    device_id: &str,
+    now: std::time::Instant,
+) -> bool {
+    asked
+        .iter()
+        .any(|(from, at)| from != device_id && now.saturating_duration_since(*at) < HANDOVER_WAIT)
+}
+
+/// The windows' focus, per computer they show (range review I2): a loss
+/// waits [`HANDOVER`] before its ask, so a window of the same computer
+/// taking the focus then is a hand-over that asks and pushes nothing.
+#[derive(Debug, Default)]
+struct FocusMoves {
+    by_device: HashMap<String, FocusMove>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct FocusMove {
+    /// Moves on with each loss or gain, so a loss's ask knows it still stands.
+    turn: u64,
+    /// A window of it lost the focus then, its ask not sent yet.
+    lost: Option<std::time::Instant>,
+    /// A window of it gained the focus then.
+    gained: Option<std::time::Instant>,
+}
+
+impl FocusMoves {
+    /// A window of `device_id` lost the focus at `now`: the turn to check
+    /// after [`HANDOVER`], or `None` when a window of the same computer
+    /// gained it just before (a hand-over between its windows).
+    fn lost(&mut self, device_id: &str, now: std::time::Instant) -> Option<u64> {
+        let m = self.by_device.entry(device_id.to_string()).or_default();
+        m.turn += 1;
+        let handed = m
+            .gained
+            .take()
+            .is_some_and(|at| now.saturating_duration_since(at) < HANDOVER);
+        m.lost = (!handed).then_some(now);
+        (!handed).then_some(m.turn)
+    }
+
+    /// A window of `device_id` gained the focus at `now`: whether its push
+    /// goes (not when a window of the same computer lost it just before).
+    fn gained(&mut self, device_id: &str, now: std::time::Instant) -> bool {
+        let m = self.by_device.entry(device_id.to_string()).or_default();
+        m.turn += 1;
+        let handed = m
+            .lost
+            .take()
+            .is_some_and(|at| now.saturating_duration_since(at) < HANDOVER);
+        m.gained = Some(now);
+        !handed
+    }
+
+    /// Whether the loss of `device_id`'s window at `turn` still stands:
+    /// none of that computer's windows moved since.
+    fn still_lost(&self, device_id: &str, turn: u64) -> bool {
+        self.by_device
+            .get(device_id)
+            .is_some_and(|m| m.turn == turn)
+    }
+
+    /// The loss at `turn` was asked for: no longer losing.
+    fn asked(&mut self, device_id: &str, turn: u64) {
+        if let Some(m) = self.by_device.get_mut(device_id).filter(|m| m.turn == turn) {
+            m.lost = None;
+        }
+    }
+
+    /// Whether a window of a computer other than `device_id` lost the focus
+    /// and its ask is not sent yet (bounded, twice [`HANDOVER`]).
+    fn other_losing(&self, device_id: &str, now: std::time::Instant) -> bool {
+        self.by_device.iter().any(|(id, m)| {
+            id != device_id
+                && m.lost
+                    .is_some_and(|at| now.saturating_duration_since(at) < HANDOVER * 2)
+        })
+    }
+}
+
+static FOCUS_MOVES: LazyLock<Mutex<FocusMoves>> = LazyLock::new(Default::default);
+
+/// When an answer to an ask was last taken.
+static ANSWERED_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// The window showing `device_id`'s screen gained the focus while it
+/// controls that computer (PC3): [`push_for_window`], unless a window of
+/// the same computer lost the focus just before (range review I2: two
+/// windows on one computer's screens share its clipboard already).
+pub(crate) async fn window_gained_focus(device_id: &str) {
+    let goes = FOCUS_MOVES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .gained(device_id, std::time::Instant::now());
+    if !goes {
+        tracing::debug!("The focus moved between windows of {device_id}: nothing pushed");
+        return;
+    }
+    push_for_window(device_id).await
+}
+
+/// The window showing `device_id`'s screen lost the focus while it
+/// controlled that computer (PC3): [`ask_back`] after [`HANDOVER`], unless
+/// a window of the same computer took the focus meanwhile (range review
+/// I2).
+pub(crate) async fn window_lost_focus(device_id: &str) {
+    let turn = FOCUS_MOVES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .lost(device_id, std::time::Instant::now());
+    let Some(turn) = turn else {
+        tracing::debug!("The focus moved between windows of {device_id}: nothing asked");
+        return;
+    };
+    tokio::time::sleep(HANDOVER).await;
+    let stands = FOCUS_MOVES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .still_lost(device_id, turn);
+    if !stands {
+        tracing::debug!("The focus moved between windows of {device_id}: nothing asked");
+        return;
+    }
+    ask_back(device_id).await;
+    FOCUS_MOVES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .asked(device_id, turn);
 }
 
 /// Answer the computer `device_id`'s ask for this computer's clipboard
@@ -701,6 +917,19 @@ async fn push_held(device_id: &str, follow: Follow, answering: bool) {
             return;
         }
     }
+    // The same text the window sent that computer last is there already,
+    // unless something else went there or came from it since (range
+    // review I2).
+    if follow == Follow::Window
+        && !answering
+        && let Held::Text(text) = &follows
+        && window_sent_last(device_id) == Some(hash(text))
+    {
+        tracing::debug!(
+            "The clipboard did not follow the window to {device_id}: sent there already"
+        );
+        return;
+    }
     match follows {
         Held::Text(text) => push_text_now(device_id, &text, follow).await,
         Held::Image(id) => push_image_now(device_id, &id, at, follow).await,
@@ -748,6 +977,12 @@ async fn push_text_now(device_id: &str, text: &str, follow: Follow) {
         // Who and how long, never the text (Z1).
         Ok(()) => {
             forget_image_sent(device_id);
+            if follow == Follow::Window {
+                WINDOW_SENT
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(device_id.to_string(), hash(text));
+            }
             crate::clip_history::note(text, None);
             tracing::info!(
                 "Clipboard followed {} to {device_id} ({} chars)",
@@ -976,27 +1211,25 @@ pub(crate) const ASK_BACK: &str = pocketdesk_core::protocol::clipboard::CLIPBOAR
 /// How long an answer to [`ask_back`] is awaited.
 const ANSWER_WAIT: Duration = Duration::from_secs(15);
 
-/// The computer this one asked for its clipboard back, and when.
-static ASKED_BACK: Mutex<Option<(String, std::time::Instant)>> = Mutex::new(None);
+/// The computers this one asked for their clipboard back, and when: one
+/// each (range review I2: a push to one computer does not undo an ask to
+/// another).
+static ASKED_BACK: LazyLock<Mutex<HashMap<String, std::time::Instant>>> =
+    LazyLock::new(Default::default);
 
-/// Whether an answer from `device_id` is awaited at `now`, given the ask
-/// `asked`: from that computer, within [`ANSWER_WAIT`].
-fn awaits(
-    asked: Option<&(String, std::time::Instant)>,
-    device_id: &str,
-    now: std::time::Instant,
-) -> bool {
-    asked.is_some_and(|(from, at)| {
-        from == device_id && now.saturating_duration_since(*at) < ANSWER_WAIT
-    })
+/// Whether an answer is awaited at `now` from a computer asked at `asked`:
+/// within [`ANSWER_WAIT`].
+fn awaits(asked: Option<&std::time::Instant>, now: std::time::Instant) -> bool {
+    asked.is_some_and(|at| now.saturating_duration_since(*at) < ANSWER_WAIT)
 }
 
 /// Whether an answer from `device_id` is awaited now; the ask is used up.
 fn answer_awaited(device_id: &str, now: std::time::Instant) -> bool {
     let mut asked = ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner());
-    let awaited = awaits(asked.as_ref(), device_id, now);
+    let awaited = awaits(asked.get(device_id), now);
     if awaited {
-        *asked = None;
+        asked.remove(device_id);
+        *ANSWERED_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
     }
     awaited
 }
@@ -1005,8 +1238,10 @@ fn answer_awaited(device_id: &str, now: std::time::Instant) -> bool {
 /// while it controlled that computer (PC3): ask that computer for its
 /// clipboard, which comes back as a push that follows the window.
 pub(crate) async fn ask_back(device_id: &str) {
-    *ASKED_BACK.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some((device_id.to_string(), std::time::Instant::now()));
+    ASKED_BACK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(device_id.to_string(), std::time::Instant::now());
     // An image of this computer's still on its way there goes no further.
     switch();
     let ask = NetworkPacket::new(ASK_BACK).with_body(serde_json::json!({}));
@@ -2133,23 +2368,101 @@ mod tests {
     #[test]
     fn an_answer_is_awaited_from_the_computer_asked_for_a_while() {
         let at = std::time::Instant::now();
-        let asked = ("pc3-desk".to_string(), at);
-        assert!(awaits(Some(&asked), "pc3-desk", at));
+        assert!(awaits(Some(&at), at));
         assert!(awaits(
-            Some(&asked),
-            "pc3-desk",
+            Some(&at),
             at + ANSWER_WAIT - Duration::from_millis(1)
         ));
-        assert!(
-            !awaits(Some(&asked), "pc3-desk", at + ANSWER_WAIT),
-            "too late"
-        );
-        assert!(!awaits(Some(&asked), "pc3-other", at), "another computer");
-        assert!(!awaits(None, "pc3-desk", at), "never asked");
+        assert!(!awaits(Some(&at), at + ANSWER_WAIT), "too late");
+        assert!(!awaits(None, at), "never asked");
 
-        *ASKED_BACK.lock().unwrap() = Some(("pc3-desk-once".to_string(), at));
+        ASKED_BACK
+            .lock()
+            .unwrap()
+            .insert("pc3-desk-once".to_string(), at);
+        assert!(!answer_awaited("pc3-other-once", at), "another computer");
         assert!(answer_awaited("pc3-desk-once", at));
         assert!(!answer_awaited("pc3-desk-once", at), "used up");
+    }
+
+    /// Range review I2: an ask to one computer stands while another is
+    /// asked, and a push to one does not undo another's.
+    #[test]
+    fn each_computer_is_asked_back_on_its_own() {
+        let at = std::time::Instant::now();
+        {
+            let mut asked = ASKED_BACK.lock().unwrap();
+            asked.insert("i2-desk-b".to_string(), at);
+            asked.insert("i2-desk-c".to_string(), at);
+        }
+        ASKED_BACK.lock().unwrap().remove("i2-desk-c");
+        assert!(answer_awaited("i2-desk-b", at), "C's push left B's ask");
+    }
+
+    /// Range review I2: a push to C waits only for a recent ask to another
+    /// computer.
+    #[test]
+    fn a_push_waits_only_for_another_computers_recent_ask() {
+        let at = std::time::Instant::now();
+        let mut asked = HashMap::new();
+        asked.insert("b".to_string(), at);
+        assert!(asked_elsewhere(&asked, "c", at));
+        assert!(!asked_elsewhere(&asked, "b", at), "its own");
+        assert!(
+            !asked_elsewhere(&asked, "c", at + HANDOVER_WAIT),
+            "an old ask holds nothing up"
+        );
+    }
+
+    /// Range review I2: the focus moving between two windows of the same
+    /// computer asks and pushes nothing, either order; between windows of
+    /// different computers both go, the push after the other's loss.
+    #[test]
+    fn the_focus_between_windows_of_one_computer_does_nothing() {
+        let t = std::time::Instant::now();
+        let ms = Duration::from_millis;
+        let mut moves = FocusMoves::default();
+        let turn = moves.lost("b", t).expect("a loss alone waits to ask");
+        assert!(!moves.gained("b", t + ms(5)), "a window of B took it");
+        assert!(!moves.still_lost("b", turn), "so B is not asked");
+
+        // The gain first, then the loss.
+        assert!(moves.gained("b", t + ms(1000)));
+        assert_eq!(moves.lost("b", t + ms(1005)), None);
+
+        // B to C.
+        let turn = moves.lost("b", t + ms(2000)).unwrap();
+        assert!(moves.other_losing("c", t + ms(2005)), "C waits for B");
+        assert!(moves.gained("c", t + ms(2005)), "C's push goes");
+        assert!(moves.still_lost("b", turn), "and B is asked");
+        moves.asked("b", turn);
+        assert!(!moves.other_losing("c", t + ms(2310)));
+
+        // A loss long before is no hand-over.
+        let turn = moves.lost("b", t + ms(3000)).unwrap();
+        assert!(moves.still_lost("b", turn));
+        assert!(moves.gained("b", t + ms(3000) + HANDOVER));
+    }
+
+    /// Range review I2: the text a window sent a computer last is not sent
+    /// again, until something else goes there or comes from it.
+    #[test]
+    fn the_same_text_is_not_sent_to_a_computer_twice() {
+        let id = "i2-same-text";
+        WINDOW_SENT
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), hash("hello"));
+        assert_eq!(window_sent_last(id), Some(hash("hello")));
+        forget_image_sent(id);
+        assert_eq!(window_sent_last(id), None, "something else went there");
+        WINDOW_SENT
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), hash("hello"));
+        note_image_sent(id, "ab12");
+        assert_eq!(window_sent_last(id), None, "an image went there");
+        forget_image_sent(id);
     }
 
     /// PC3: a computer controls this one through its window when a live

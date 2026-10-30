@@ -2491,8 +2491,10 @@ fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
         let sync = crate::clipboard_push::with_computers();
         use crate::clipboard_push::WindowFocus;
         match crate::clipboard_push::window_focus_does(focused, on, sync, control) {
-            Some(WindowFocus::Push) => crate::clipboard_push::push_for_window(&device_id).await,
-            Some(WindowFocus::AskBack) => crate::clipboard_push::ask_back(&device_id).await,
+            Some(WindowFocus::Push) => crate::clipboard_push::window_gained_focus(&device_id).await,
+            Some(WindowFocus::AskBack) => {
+                crate::clipboard_push::window_lost_focus(&device_id).await
+            }
             None => {}
         }
     });
