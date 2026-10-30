@@ -326,6 +326,12 @@ const MINE_LINE: &str =
     "Each then sees and controls the other at any time, without asking. Off for others' computers.";
 /// What the box does, on hover.
 const MINE_HOVER: &str = "A new link is made for it. Each computer lists the other and trusts it with control and the shared keyboard and mouse; neither asks first. Turn either back on its Devices page.";
+/// The phone's code at its largest and smallest, and the width its words
+/// beside it need (UX 4).
+const CODE_SIZE: f32 = 260.0;
+const CODE_MIN: f32 = 180.0;
+const WORDS_WIDTH: f32 = 240.0;
+
 /// Said while the server has not made its certificate yet.
 const NO_CERTIFICATE: &str = "Start the server once first: it makes its certificate.";
 
@@ -538,7 +544,7 @@ impl PairView {
         }
 
         if self.stopped {
-            ui.label(RichText::new("This code no longer works").heading());
+            crate::theme::section(ui, "This code no longer works");
             ui.label(
                 "It was used, or the server discarded it after 5 wrong PIN guesses. \
                  If nobody here was pairing a phone, someone on your network may have been \
@@ -576,15 +582,19 @@ impl PairView {
             return;
         }
         let mut grant_changed = None;
+        // UX 4: the code shrinks, down to a floor, to leave its words the
+        // width they need (at the smallest window they were cut off on the
+        // right, the PIN among them).
+        let size = (ui.available_width() - 16.0 - WORDS_WIDTH).clamp(CODE_MIN, CODE_SIZE);
         ui.horizontal_top(|ui| {
             ui.add(
                 egui::Image::new(texture)
-                    .fit_to_exact_size(egui::vec2(260.0, 260.0))
+                    .fit_to_exact_size(egui::vec2(size, size))
                     .alt_text("Pairing code to scan with the phone"),
             );
             ui.add_space(16.0);
             ui.vertical(|ui| {
-                ui.label(RichText::new("Pair a phone").heading());
+                crate::theme::section(ui, "Pair a phone");
                 ui.label("In the app, tap \"Scan pairing code\".");
                 ui.add_space(10.0);
                 // M2b: someone else's phone, or a guest's for a while (I3,
@@ -686,7 +696,7 @@ impl PairView {
             return;
         };
         let (uri, no_certificate) = (link.to_uri(), link.fingerprint.is_none());
-        ui.label(RichText::new("On this computer").heading());
+        crate::theme::section(ui, "On this computer");
         ui.label("Copy this link, then paste it on the other computer.");
         let mut chosen = self.whose.clone();
         // A computer pairs with the owner's own code (open_for).

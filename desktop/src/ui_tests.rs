@@ -2221,3 +2221,31 @@ fn a_computers_greyed_drive_box_says_why() {
             .is_some()
     );
 }
+
+/// UX 4: at the smallest window (640×440) the phone's code shrinks so its
+/// words beside it fit: "Whose phone is it?" and its box stay inside.
+#[test]
+fn pair_fits_the_smallest_window() {
+    let fixture = Fixture::new();
+    let smallest = egui::vec2(640.0, 440.0);
+    let state = fixture.state().to_path_buf();
+    let mut app = Harness::builder()
+        .with_size(smallest)
+        .build_eframe(move |cc| {
+            crate::theme::install(&cc.egui_ctx);
+            PocketdeskApp::new(state, None, Some(Tab::Pair))
+        });
+    let asked = (0..50).any(|_| {
+        app.run_steps(2);
+        let found = app.query_by_label("Whose phone is it?").is_some();
+        if !found {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        found
+    });
+    assert!(asked, "the Pair page never showed its code");
+    let whose = app.get_by_role(egui::accesskit::Role::ComboBox).rect();
+    assert!(whose.right() <= smallest.x, "{whose:?} inside {smallest:?}");
+    let pin = app.get_by_label("Or enter this PIN:").rect();
+    assert!(pin.right() <= smallest.x, "{pin:?}");
+}
