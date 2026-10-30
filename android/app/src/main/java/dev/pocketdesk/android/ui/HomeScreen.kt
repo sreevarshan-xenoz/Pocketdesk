@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -400,12 +401,16 @@ fun HomeScreen(
         ) {
             Column {
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    stringResource(R.string.home_subtitle),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Not over a Home with nothing saved yet (UX1: it said "Your
+                // saved computers" above only a computer found on the network).
+                if (hosts.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.home_subtitle),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             IconButton(onClick = onOpenSettings) {
                 LlIcon(LlIcons.Settings, stringResource(R.string.settings_title))
@@ -428,16 +433,7 @@ fun HomeScreen(
                     tint = MaterialTheme.colorScheme.primaryContainer,
                 )
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    stringResource(R.string.no_computers),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.home_explainer),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FirstRunExplainer(centered = true)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = onScan) {
                     Text(stringResource(R.string.scan_pairing_code))
@@ -447,13 +443,7 @@ fun HomeScreen(
                     Text(stringResource(R.string.add_computer))
                 }
                 Spacer(Modifier.height(8.dp))
-                // A first-time user may have only the phone app: say where the
-                // computer's half comes from.
-                TextButton(onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, DESKTOP_APP_URL.toUri())) }
-                }) {
-                    Text(stringResource(R.string.home_get_desktop_app))
-                }
+                GetDesktopAppButton()
             }
         } else {
             LazyColumn(
@@ -469,7 +459,7 @@ fun HomeScreen(
                 item(key = "#top") {}
                 // Only here, not on the empty Home: the background features
                 // need a paired computer to send to.
-                if (showHealth) {
+                if (showHealth && hosts.isNotEmpty()) {
                     item(key = "#health") {
                         HealthCard(
                             problems = healthProblems.orEmpty(),
@@ -491,13 +481,23 @@ fun HomeScreen(
                         )
                     }
                 }
-                if (remindBackground) {
+                if (remindBackground && hosts.isNotEmpty()) {
                     item(key = "#background") {
                         BackgroundCard(
                             limit = backgroundLimit,
                             onAllow = { BackgroundRunning.openSettings(context, backgroundLimit) },
                             onDismiss = { Prefs.setBackgroundReminder(context, false) },
                         )
+                    }
+                }
+                // UX1: a computer found on the network had hidden the first-run
+                // explainer, and with it where the computer's half comes from.
+                if (hosts.isEmpty()) {
+                    item(key = "#first-run") {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            FirstRunExplainer(centered = false)
+                            GetDesktopAppButton()
+                        }
                     }
                 }
                 if (network.unsaved.isNotEmpty()) {
@@ -858,6 +858,37 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/** What Home says before any computer is saved. */
+@Composable
+private fun FirstRunExplainer(centered: Boolean) {
+    val align = if (centered) TextAlign.Center else TextAlign.Start
+    Text(
+        stringResource(R.string.no_computers),
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = align,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        stringResource(R.string.home_explainer),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = align,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** A first-time user may have only the phone app: where the computer's half comes from. */
+@Composable
+private fun GetDesktopAppButton() {
+    val context = LocalContext.current
+    TextButton(onClick = {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, DESKTOP_APP_URL.toUri())) }
+    }) {
+        Text(stringResource(R.string.home_get_desktop_app))
     }
 }
 
