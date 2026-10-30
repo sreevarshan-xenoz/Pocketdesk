@@ -196,6 +196,17 @@ pub const PRIVACY_RENEW: Duration = Duration::from_secs(10);
 /// Why privacy ended when no window watched the view any more (PR #561
 /// review I2).
 const WINDOW_GONE: &str = "Privacy ended: the window closed.";
+/// A privacy mode held there outlives its window's connection this long
+/// (PR #563 re-review N2): a window whose write stalled ends its connection
+/// and joins the same view again within a second or so, and keeps it; one
+/// that does not come back (closed, crashed) has it let go.
+pub const WINDOW_GRACE: Duration = Duration::from_secs(4);
+
+/// Whether privacy held for a view nobody has watched since `unwatched_since`
+/// is let go at `now`: once no window has come back for [`WINDOW_GRACE`].
+pub fn window_gone(unwatched_since: Option<Instant>, now: Instant) -> bool {
+    unwatched_since.is_some_and(|t| now.saturating_duration_since(t) >= WINDOW_GRACE)
+}
 
 /// What the Computers page asks of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2076,23 +2087,35 @@ pub async fn run_with(
                 }) {
                     viewer = None;
                 }
+                let now = Instant::now();
+                if let Some(v) = view.as_mut() {
+                    let watched = viewer.as_ref().is_some_and(|w| w.session_id == v.session_id);
+                    if watched {
+                        v.unwatched_since = None;
+                    } else if v.unwatched_since.is_none() {
+                        v.unwatched_since = Some(now);
+                    }
+                }
                 // A privacy mode held there is renewed only while a window
-                // watches (PR #561 review I2): with none, it is let go at
-                // once; else given up when that computer stopped answering
-                // (PC8).
+                // watches (PR #561 review I2): with none for
+                // [`WINDOW_GRACE`], it is let go; else given up when that
+                // computer stopped answering (PC8). Within the grace (PR #563
+                // re-review N2) nothing is renewed or given up: the window
+                // joining again finds it as it was.
                 if let Some(v) = view.as_mut()
                     && v.privacy.is_some()
                 {
                     let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
-                    let now = Instant::now();
                     let due = v
                         .privacy
                         .as_ref()
                         .map(|hold| privacy_due(hold.on, hold.waiting, hold.sent, now));
                     if watching.is_none() {
-                        v.privacy = None;
-                        tracing::info!(device_id = %v.device_id, "Privacy there let go: no window watches it");
-                        say_privacy(v, None, ViewPrivacy::Refused(WINDOW_GONE.to_string()));
+                        if window_gone(v.unwatched_since, now) {
+                            v.privacy = None;
+                            tracing::info!(device_id = %v.device_id, "Privacy there let go: no window watches it");
+                            say_privacy(v, None, ViewPrivacy::Refused(WINDOW_GONE.to_string()));
+                        }
                     } else {
                         match due {
                             Some(PrivacyDue::Renew) => {
@@ -2109,14 +2132,7 @@ pub async fn run_with(
                         }
                     }
                 }
-                let now = Instant::now();
                 if let Some(v) = view.as_mut() {
-                    let watched = viewer.as_ref().is_some_and(|w| w.session_id == v.session_id);
-                    if watched {
-                        v.unwatched_since = None;
-                    } else if v.unwatched_since.is_none() {
-                        v.unwatched_since = Some(now);
-                    }
                     let unwatched = v.unwatched_since.is_some_and(|t| now.duration_since(t) >= UNWATCHED);
                     let stale = v.ended.as_ref().is_some_and(|(_, at)| now.duration_since(*at) >= ENDED_KEPT);
                     if stale || (unwatched && v.ended.is_none()) {
@@ -3371,6 +3387,28 @@ mod tests {
             PrivacyDue::Renew
         );
         assert!(PRIVACY_RENEW < crate::privacy::GRAB_TTL);
+    }
+
+    /// PR #563 re-review N2: privacy outlives its window's connection for
+    /// the grace only, long enough for a window whose write stalled to join
+    /// again, and well inside the host's own lapse.
+    #[test]
+    fn privacy_waits_out_the_grace_for_its_window() {
+        let at = Instant::now();
+        assert!(!window_gone(None, at), "watched");
+        assert!(!window_gone(Some(at), at));
+        assert!(!window_gone(
+            Some(at),
+            at + WINDOW_GRACE - Duration::from_millis(1)
+        ));
+        assert!(window_gone(Some(at), at + WINDOW_GRACE));
+        assert!(
+            !window_gone(Some(at + WINDOW_GRACE), at),
+            "a clock set back"
+        );
+        assert!(WINDOW_GRACE >= HEARTBEAT, "past one heartbeat");
+        assert!(WINDOW_GRACE < UNWATCHED);
+        assert!(WINDOW_GRACE < crate::plugins::privacy::COMPUTER_GRAB_TTL);
     }
 
     /// PC8: privacy ends as the view drops or control goes, never left on
