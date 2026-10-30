@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1066 open items.
+1059 open items.
 
 | Where | Items |
 |---|---|
@@ -13,7 +13,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
 | A second computer | 139 |
-| A Linux desktop (the Azure VM serves for some) | 178 |
+| A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
 
@@ -1085,18 +1085,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **2. Session shell + video (Tier 1 #5, R2#2, R2#5)**
 
-- R4 B1 screencopy backend (desktop-observable): starting a stream on (where: linux) Hyprland must NOT raise the portal screen-share grant dialog; server log shows "Capture started via backend Screencopy". If instead it shows "Capture backend Screencopy unavailable (…); trying next" followed by "Capture started via backend Portal", the reason is in the line — that's the fallback working, but note it as a finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
-- R4 B3 capture_backend config override: set `capture_backend = "portal"` in (where: linux) config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error.
-- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (where: linux) (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling).
+- R4 B3 capture_backend config override: set `capture_backend = "portal"` in (where: linux) config.toml, restart, start a stream → log shows "Capture started via backend Portal" and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"` on a NON-wlroots/portal-only Wayland, the server must fail the session with a "Capture backend Screencopy unavailable" error rather than silently falling back to the portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server refuse to start with a TOML parse error. (The unknown value seen 2026-10-30 on the Linux laptop with a throwaway server: `capture_backend = "v4l2"` stopped it at start, exit 1, "TOML parse error at line 7, column 19 ... unknown variant `v4l2`, expected one of `auto`, `screencopy`, `portal`, `x11`, `wgc`, `dxgi`". The portal pin and the non-wlroots case not run: the pin raises the share dialog at the laptop's desk.)
+- R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (where: linux) (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing or upside-down frames (YInvert handling). (The static half seen 2026-10-30 on the Linux laptop, no phone: with its screen still, the screencopy backend logged "screen static, repeating the last frame each second" and the client received 1.7 to 2.0 fps in every 10 s window of four 40 s sessions. Moving a window, and the picture itself, not checked.)
 - R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (where: linux) (x,y)" shows that monitor's wl_output origin and frames are its size.
-- R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken (e.g. force `hardware_encoder = "nvenc"` here — this box's NVIDIA driver predates FFmpeg 9 NVENC, so the sidecar dies), start a session → server log shows "Hardware encoder unavailable (…); falling back to software (C2)" and video still appears within ~2 s on x264.
 - R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session, `pkill -f 'ffmpeg .*vaapi'` (or kill the encoder child seen in `pstree` of the server) → log shows "Rebuilt encoder on software rung (C2)", video resuming within ~2 s and the phone toasts "Desktop switched encoder — now H.264" (MediaCodec swap re-sniffed from the first software IDR).
-- R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued. (where: linux)
+- R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued. (where: linux) (Not runnable on the Linux laptop as of 2026-10-30: its NVIDIA card is on nouveau, so there is no NVENC and no `nvidia-smi`.)
 
 **2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed**
 
-- R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` →  (where: linux) `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
-- R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the (where: linux) VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129` starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129" and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2), never hangs.
 - R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma (where: linux) shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
 
 **2d. Rate and link basis (roadmap 2056)**
@@ -1179,7 +1175,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **24. Desktop app and QR pairing**
 
-- Linux: the app builds and opens on X11 and on Wayland (Hyprland), closing it quits (no tray on Linux yet), and the single-instance socket works.
+- Linux: the app builds and opens on X11 and on Wayland (Hyprland), closing it quits (no tray on Linux yet), and the single-instance socket works. (Partly seen 2026-10-30 on the Linux laptop with throwaway folders: the release build opened a "Pocketdesk" window on Hyprland, and a second launch exited at once (exit 0) with the first still running and one app process. X11 and closing the window not run.)
 - Linux tray: build one on a GTK thread (or tray-icon's ksni backend) and verify it with a StatusNotifier host, e.g. waybar's tray.
 
 **26. In-session keyboard**
@@ -1244,10 +1240,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **47. Check connection (T1)**
 
 - The Linux host (a stopped server there should be "nothing is listening").
-
-**49. Protocol audit (what Pocketdesk sends, and to whom)**
-
-- Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
 
 **50. Resumable transfers (T6a)**
 
@@ -1384,13 +1376,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A real lock, on a computer where locking is allowed (not this box), Windows; on Linux under GNOME, KDE and X11 (R3), and that it never locks on Sway or Hyprland.
 
-**119. Memory at rest (D7)**
-
-- Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
-
 **121. The tray on its own (E2)**
 
-- Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
+- Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close). (FAILED 2026-10-30 on the Linux laptop, waybar's tray running, release build of the server and the app together: `pocketdesk-tray` panicked in ksni's service thread, zbus "there is no reactor running, must be called from the context of a Tokio 1.x runtime" (`ksni::blocking::spawn_with_options` → zbus `Transport::connect` → `Handle::current`), then said "no tray icon (the tray host did not answer within 3 s); running without one".)
 
 **122. The phone as a pen (E3)**
 
@@ -1477,7 +1465,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **192. Diagnostics' firewall row on Linux (O9)**
 
-- No ufw: "no firewall found". (where: linux)
 - ufw on with the default deny: the row is red, naming 1716/tcp and 4716/udp with `sudo ufw allow …`; after allowing them, green. (where: linux)
 - The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
 - firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
