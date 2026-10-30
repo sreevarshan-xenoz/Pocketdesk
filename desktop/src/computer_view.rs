@@ -3587,7 +3587,7 @@ mod tests {
                 "{i}"
             );
         }
-        assert!(STALL_REJOINS > REJOINS * 3);
+        const { assert!(STALL_REJOINS > REJOINS * 3) };
         assert!(STALL_REJOIN_WINDOW > REJOIN_WINDOW);
         // A link that never comes back still ends the view in the end.
         let at = t + Duration::from_secs(11);
