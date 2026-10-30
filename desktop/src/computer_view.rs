@@ -2719,11 +2719,9 @@ mod tests {
             pointer_said: Some(true),
             ..State::default()
         };
-        hold_writes_short(&state);
-        assert_eq!(
-            state.writer.as_ref().unwrap().write_timeout().unwrap(),
-            Some(QUIT_WRITE)
-        );
+        relay
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         quit_view(&dir, &mut state);
         assert_eq!(
             Message::read(&mut relay).unwrap(),
@@ -2744,6 +2742,67 @@ mod tests {
         // Nothing open: nothing said, nothing asked.
         quit_view(&dir, &mut state);
         assert!(computers::take_all(&dir, now_unix()).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A writer to a relay whose reader is held up: its peer never reads and
+    /// its send buffer is full, so the next write waits out its timeout, set
+    /// here long (as the window's own 200 ms would be, made plain). The peer
+    /// is kept open alongside.
+    fn stalled_writer() -> (TcpStream, TcpStream) {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (peer, _) = listener.accept().unwrap();
+        writer.set_nonblocking(true).unwrap();
+        let chunk = vec![0u8; 64 * 1024];
+        let mut full = false;
+        for _ in 0..16_384 {
+            match (&writer).write(&chunk) {
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    full = true;
+                    break;
+                }
+                Err(e) => panic!("filling the buffer: {e}"),
+            }
+        }
+        assert!(full, "the send buffer filled");
+        writer.set_nonblocking(false).unwrap();
+        writer
+            .set_write_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        (writer, peer)
+    }
+
+    /// PR #568 review I1: quitting while the relay's reader is held up
+    /// returns within about a second: quit holds each write short itself.
+    #[test]
+    fn quitting_while_the_relay_stalls_is_quick() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-quit-stall-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (writer, _peer) = stalled_writer();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            session_id: Some(9),
+            writer: Some(writer),
+            lock_on_close: true,
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            pointer_said: Some(true),
+            ..State::default()
+        };
+        let started = Instant::now();
+        quit_view(&dir, &mut state);
+        let took = started.elapsed();
+        assert!(took < Duration::from_secs(1), "quit took {took:?}");
+        assert!(state.wanted.is_none() && state.writer.is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
