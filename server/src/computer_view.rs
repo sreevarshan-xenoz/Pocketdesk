@@ -2626,6 +2626,12 @@ fn start_viewer(
                     if read.read_exact(&mut on).await.is_err() || on[0] > 1 {
                         break;
                     }
+                    // Off then on again quickly behind a backlog of keys: the
+                    // stop waits in the input queue while the new frames take
+                    // their own way, so the other computer may hear a new
+                    // frame, then the old stop, then the next frame start it
+                    // again. A gap of one frame, never a mic left on (PR #569
+                    // re-review N3).
                     if on[0] == 1 {
                         mic.on = true;
                     } else if mic.on {
