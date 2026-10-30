@@ -850,7 +850,7 @@ fn empty_pages_with_no_phone_offer_pairing() {
     }
 }
 
-/// The Overview, Devices, Settings and Keyboard and mouse at 720×480 in both themes, compared
+/// The Overview, Devices, Settings, Sessions and Keyboard and mouse at 720×480 in both themes, compared
 /// with the pictures under `desktop/tests/snapshots/` (C4). They need a GPU
 /// renderer, so only with the `snapshots` feature; CI draws them with
 /// Mesa's software Vulkan, where they were made. `UPDATE_SNAPSHOTS=1`
@@ -887,6 +887,25 @@ mod snapshots {
                 if let Err(e) = app.try_snapshot_options(format!("{name}_{shade}"), &options) {
                     failed.push(e.to_string());
                 }
+            }
+        }
+        // UX 4: Sessions with none live (its empty card) and two recent
+        // ones, finished and refused, as cards with their dots.
+        recent_sessions(fixture.state());
+        for (theme, shade) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+            let state = fixture.state().to_path_buf();
+            let mut app = Harness::builder()
+                .with_size(SIZE)
+                .with_theme(theme)
+                .wgpu()
+                .build_eframe(move |cc| {
+                    crate::theme::install(&cc.egui_ctx);
+                    PocketdeskApp::new(state, None, Some(Tab::Sessions))
+                });
+            app.run_steps(3);
+            let name = format!("sessions_{shade}");
+            if let Err(e) = app.try_snapshot_options(name, &options) {
+                failed.push(e.to_string());
             }
         }
         // The Keyboard and mouse page with a computer beside this one,
@@ -1074,12 +1093,9 @@ fn find<'a>(app: &'a Harness<'static, PocketdeskApp>) -> egui_kittest::Node<'a> 
         .expect("the search box")
 }
 
-/// J3: the Sessions page lists the recent sessions from the log, by the
-/// phone's name, a refused one as refused, with the server not running.
-#[test]
-fn the_sessions_page_lists_the_recent_sessions() {
-    let fixture = Fixture::new();
-    pair_phone(fixture.state(), PHONE, "Test Phone");
+/// Two recent sessions in the session log (J3): one two hours ago on this
+/// network, one refused two minutes ago.
+fn recent_sessions(state: &Path) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
@@ -1091,12 +1107,19 @@ fn the_sessions_page_lists_the_recent_sessions() {
         now - 120,
     );
     std::fs::write(
-        fixture
-            .state()
-            .join(pocketdesk_core::local::paths::SESSIONS_FILE),
+        state.join(pocketdesk_core::local::paths::SESSIONS_FILE),
         log,
     )
     .expect("log");
+}
+
+/// J3: the Sessions page lists the recent sessions from the log, by the
+/// phone's name, a refused one as refused, with the server not running.
+#[test]
+fn the_sessions_page_lists_the_recent_sessions() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    recent_sessions(fixture.state());
     let mut app = fixture.open(Some(Tab::Sessions));
     app.run_steps(3);
     assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
