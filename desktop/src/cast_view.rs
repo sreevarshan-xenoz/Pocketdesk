@@ -437,7 +437,7 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
     if let Some(picture) = state.picture.take() {
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [picture.width, picture.height],
-            &picture.rgba,
+            &picture.data,
         );
         match &mut state.texture {
             Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
@@ -727,7 +727,7 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     let Some((width, height, rgba)) = lock(shared)
         .shown
         .as_ref()
-        .map(|p| (p.width, p.height, p.rgba.clone()))
+        .map(|p| (p.width, p.height, p.data.clone()))
     else {
         return;
     };

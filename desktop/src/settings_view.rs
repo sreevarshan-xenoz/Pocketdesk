@@ -340,6 +340,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_hw_decode",
+        "Decode a computer's screen on the graphics card",
+        Section::Computers,
+    ),
+    (
         "computer_wake_facts",
         "Let my computers wake this one",
         Section::Computers,
@@ -605,6 +610,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_clipboard"
             // PC4: read by an open window at once.
             | "computer_view_grab_keys"
+            // PC5: read as each view starts.
+            | "computer_view_hw_decode"
             | "events"
             | "events_detail"
             | "hooks"
@@ -2144,6 +2151,17 @@ impl SettingsForm {
                         );
                     });
                 }
+                // PC5: how the window decodes.
+                row(ui, "computer_view_hw_decode", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_hw_decode,
+                        "decode a computer's screen on the graphics card when it can",
+                    );
+                    note(
+                        ui,
+                        "Direct3D 11 on Windows, VA-API on Linux, else what ffmpeg finds; a card that gives no picture in 2 s is left for the processor. The window's Stats say which. Applies from the next view.",
+                    );
+                });
                 // PC6: what Wake on the other computers needs from this one.
                 row(ui, "computer_wake_facts", |ui| {
                     ui.checkbox(
@@ -2921,6 +2939,7 @@ mod tests {
             "computer_view_stats",
             "computer_view_clipboard",
             "computer_view_grab_keys",
+            "computer_view_hw_decode",
         ] {
             assert!(
                 SETTINGS

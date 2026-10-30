@@ -984,6 +984,12 @@ impl PocketdeskApp {
                 Config::path().ok(),
             )
         });
+        // PC5: the next view decodes on the card, or not, as Settings say.
+        view.set_hw_decode(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.computer_view_hw_decode),
+        );
         // PC4: the keyboard grab follows Settings in every window.
         #[cfg(windows)]
         view.set_grab_keys(

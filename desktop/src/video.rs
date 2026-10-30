@@ -1,6 +1,8 @@
 //! What the windows that show another device's screen share: a phone's
 //! cast (T10k) and another computer's screen (BK7). An `ffmpeg` sidecar
-//! decodes H.264 to RGBA pictures of a size fixed when it starts; a gate
+//! decodes H.264 to RGBA pictures of a size fixed when it starts (for a
+//! computer's screen, PC5: on the graphics card where it can, and to NV12
+//! for a shader to draw, [`crate::nv12`]); a gate
 //! feeds it from a keyframe on; a picture is letterboxed in the window, and
 //! a point on it is a fraction of it; a recording copies the stream into an
 //! MKV, and a screenshot is a PNG.
@@ -8,7 +10,8 @@
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
@@ -31,13 +34,6 @@ pub fn decoder_words(e: &io::Error, what: &str) -> String {
     } else {
         format!("Showing {what} needs ffmpeg on this computer ({e}).")
     }
-}
-
-/// One decoded picture.
-pub struct Picture {
-    pub width: usize,
-    pub height: usize,
-    pub rgba: Vec<u8>,
 }
 
 /// `unix` as a name's date and time, UTC: "2026-10-21 01-02-03" (L5).
@@ -239,75 +235,376 @@ impl KeyGate {
     }
 }
 
+/// The codec a stream comes in (PC5: HEVC beside H.264).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Codec {
+    H264,
+}
+
+impl Codec {
+    /// ffmpeg's demuxer for the raw stream.
+    fn demuxer(self) -> &'static str {
+        match self {
+            Codec::H264 => "h264",
+        }
+    }
+
+    /// An access unit delimiter of this codec: ffmpeg's parser emits a
+    /// frame once the next one begins, and this begins one at once.
+    fn delimiter(self) -> &'static [u8] {
+        match self {
+            Codec::H264 => &AUD,
+        }
+    }
+}
+
+/// How the sidecar decodes (PC5): on the graphics card through Direct3D
+/// 11 or VA-API (at a render node), whichever ffmpeg finds, or on the
+/// processor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Accel {
+    D3d11va,
+    Vaapi(String),
+    Auto,
+    Software,
+}
+
+impl Accel {
+    /// The overlay's word for it ("d3d11va", "vaapi (renderD129)").
+    pub fn words(&self) -> String {
+        match self {
+            Accel::D3d11va => "d3d11va".to_string(),
+            Accel::Vaapi(node) => {
+                let name = node.rsplit('/').next().unwrap_or(node);
+                format!("vaapi ({name})")
+            }
+            Accel::Auto => "auto".to_string(),
+            Accel::Software => "software".to_string(),
+        }
+    }
+}
+
+/// The ways to try in order (PC5): Direct3D 11 on Windows; VA-API on Linux
+/// at each render node present (`present`, in the order the encoder tries
+/// them), or only at `pinned` (`POCKETDESK_VAAPI_DEVICE`); then whatever
+/// ffmpeg finds; then the processor. Only the processor with `hardware`
+/// off.
+pub fn accel_chain(
+    hardware: bool,
+    windows: bool,
+    linux: bool,
+    pinned: Option<&str>,
+    present: &[String],
+) -> Vec<Accel> {
+    let mut chain = Vec::new();
+    if hardware {
+        if windows {
+            chain.push(Accel::D3d11va);
+        }
+        if linux {
+            match pinned.map(str::trim).filter(|p| !p.is_empty()) {
+                Some(node) => chain.push(Accel::Vaapi(node.to_string())),
+                None => chain.extend(render_nodes(present).into_iter().map(Accel::Vaapi)),
+            }
+        }
+        chain.push(Accel::Auto);
+    }
+    chain.push(Accel::Software);
+    chain
+}
+
+/// The render nodes in `present` (paths under `/dev/dri`), in the
+/// encoder's order: `renderD128` up, an odd name after.
+fn render_nodes(present: &[String]) -> Vec<String> {
+    let name = |p: &String| p.rsplit('/').next().unwrap_or("").to_string();
+    let number = |p: &String| {
+        name(p)
+            .strip_prefix("renderD")
+            .and_then(|n| n.parse::<u32>().ok())
+    };
+    let mut nodes: Vec<String> = present
+        .iter()
+        .filter(|p| name(p).starts_with("renderD"))
+        .cloned()
+        .collect();
+    nodes.sort_by_key(|p| (number(p).unwrap_or(u32::MAX), p.clone()));
+    nodes.dedup();
+    nodes
+}
+
+/// The render nodes on this computer, as paths (none off Linux).
+pub fn present_render_nodes() -> Vec<String> {
+    std::fs::read_dir("/dev/dri")
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// This computer's ways to decode, in order, `hardware` or not (PC5).
+pub fn local_accel_chain(hardware: bool) -> Vec<Accel> {
+    let pinned = std::env::var("POCKETDESK_VAAPI_DEVICE").ok();
+    accel_chain(
+        hardware,
+        cfg!(windows),
+        cfg!(target_os = "linux"),
+        pinned.as_deref(),
+        &present_render_nodes(),
+    )
+}
+
+/// How a decoded picture's samples are laid out (PC5): RGBA, four bytes a
+/// pixel, or NV12, a byte of luma a pixel then a half-size plane of
+/// interleaved chroma (12 bits a pixel).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Planes {
+    Rgba,
+    Nv12,
+}
+
+impl Planes {
+    fn pix_fmt(self) -> &'static str {
+        match self {
+            Planes::Rgba => "rgba",
+            Planes::Nv12 => "nv12",
+        }
+    }
+}
+
+/// What a YUV picture's samples mean (PC5): BT.709's matrix or BT.601's,
+/// and the full range or the limited one (16 to 235). A stream that says
+/// nothing is BT.601 and limited, as ffmpeg reads it, and as the encoders
+/// here make it (ffmpeg's BGRA to YUV conversion, signalling nothing).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Colour {
+    pub bt709: bool,
+    pub full: bool,
+}
+
+/// One decoded picture.
+pub struct Picture {
+    pub width: usize,
+    pub height: usize,
+    pub planes: Planes,
+    pub data: Vec<u8>,
+    pub colour: Colour,
+}
+
+impl Picture {
+    /// The picture as RGBA, for a screenshot or a window that cannot draw
+    /// NV12.
+    pub fn to_rgba(&self) -> Vec<u8> {
+        match self.planes {
+            Planes::Rgba => self.data.clone(),
+            Planes::Nv12 => crate::nv12::to_rgba(
+                &crate::nv12::Layout::new(self.width, self.height),
+                &self.data,
+                self.colour,
+            ),
+        }
+    }
+}
+
+/// The bytes one picture takes, `width` by `height`, laid out as `planes`.
+pub fn picture_len(planes: Planes, width: usize, height: usize) -> usize {
+    match planes {
+        Planes::Rgba => width * height * 4,
+        Planes::Nv12 => crate::nv12::Layout::new(width, height).len(),
+    }
+}
+
+/// What a decoder is asked for (PC5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodeWanted {
+    pub codec: Codec,
+    /// The picture's size when the stream's SPS said it; `None` takes it
+    /// from the first decoded picture (HEVC).
+    pub size: Option<(u16, u16)>,
+    pub accel: Accel,
+    pub planes: Planes,
+}
+
+/// Why a size is not one to decode: empty, or past H.264's largest (BK7
+/// review I1: each picture's memory is asked for before ffmpeg says a
+/// word).
+fn size_problem(w: usize, h: usize) -> Option<io::Error> {
+    if w == 0 || h == 0 {
+        return Some(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "an empty screen",
+        ));
+    }
+    if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_SIDE * MAX_SIDE_SHORT {
+        return Some(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("a picture too large to show ({w}x{h})"),
+        ));
+    }
+    None
+}
+
+/// The sidecar's arguments for `wanted` (PC5). Each flag here removes a
+/// frame of delay ffmpeg would otherwise add (measured with ffmpeg 8):
+/// `nobuffer` is left out, as it drops the packets read while probing (the
+/// keyframe), and the rawvideo encoder holds a frame unless it runs on one
+/// thread. A card's way asks for the card's own frames and downloads them,
+/// so a card that cannot decode stops ffmpeg rather than leaving it to
+/// decode on the processor unsaid; `auto` cannot, so its log says which it
+/// took. The log is verbose for the lines read: the size, the colours and
+/// `auto`'s way.
+pub fn decoder_args(wanted: &DecodeWanted, fps_mode: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "verbose", "-nostats"]
+        .map(String::from)
+        .to_vec();
+    let mut filters: Vec<String> = Vec::new();
+    match &wanted.accel {
+        Accel::D3d11va => {
+            args.extend(
+                ["-hwaccel", "d3d11va", "-hwaccel_output_format", "d3d11"].map(String::from),
+            );
+            filters.push("hwdownload,format=nv12".to_string());
+        }
+        Accel::Vaapi(node) => {
+            args.extend(["-hwaccel", "vaapi", "-hwaccel_device"].map(String::from));
+            args.push(node.clone());
+            args.extend(["-hwaccel_output_format", "vaapi"].map(String::from));
+            filters.push("hwdownload,format=nv12".to_string());
+        }
+        Accel::Auto => args.extend(["-hwaccel", "auto"].map(String::from)),
+        Accel::Software => {}
+    }
+    args.extend(
+        [
+            "-flags",
+            "low_delay",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-f",
+            wanted.codec.demuxer(),
+            "-i",
+            "pipe:0",
+        ]
+        .map(String::from),
+    );
+    // Whatever the stream's crop, frames come out the size read.
+    if let Some((w, h)) = wanted.size {
+        filters.push(format!("scale={w}:{h}"));
+    }
+    if !filters.is_empty() {
+        args.push("-vf".to_string());
+        args.push(filters.join(","));
+    }
+    args.extend(
+        [
+            // FFmpeg 9 refuses `-vsync`, 4.4 knows nothing else.
+            fps_mode,
+            "passthrough",
+            "-threads",
+            "1",
+            // A broken stretch is waited out, not given up on.
+            "-max_error_rate",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            wanted.planes.pix_fmt(),
+            "pipe:1",
+        ]
+        .map(String::from),
+    );
+    args
+}
+
+/// The size and colours of the pictures ffmpeg writes, from its output
+/// stream's line ("Stream #0:0: Video: rawvideo (NV12 / …), nv12(tv,
+/// bt709, progressive), 1920x1080 …"): said once the first picture is
+/// decoded, before it is written (PC5).
+pub fn output_line(line: &str) -> Option<((usize, usize), Colour)> {
+    let video = line.split_once("Video: rawvideo")?.1;
+    let all_digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let size = video.split([',', ' ']).find_map(|word| {
+        let (w, h) = word.split_once('x')?;
+        if !(all_digits(w) && all_digits(h)) {
+            return None;
+        }
+        Some((w.parse().ok()?, h.parse().ok()?))
+    })?;
+    let mut colour = Colour::default();
+    for format in ["nv12(", "rgba("] {
+        if let Some((_, rest)) = video.split_once(format) {
+            let inside = rest.split(')').next().unwrap_or("");
+            for word in inside.split([',', ' ', '/']) {
+                match word {
+                    "pc" => colour.full = true,
+                    "bt709" => colour.bt709 = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+    Some((size, colour))
+}
+
+/// The way `-hwaccel auto` took, from its line ("Using auto hwaccel type
+/// dxva2 with new default device.").
+pub fn auto_line(line: &str) -> Option<String> {
+    let rest = line.split_once("Using auto hwaccel type ")?.1;
+    rest.split_whitespace().next().map(str::to_string)
+}
+
+/// What a running sidecar has done, for the window's choice of way (PC5).
+#[derive(Debug, Default)]
+struct DecoderInfo {
+    pictures: AtomicU64,
+    ended: AtomicBool,
+    auto: Mutex<Option<String>>,
+}
+
 /// The `ffmpeg` sidecar that decodes one encoder's stream.
 pub struct Decoder {
     child: Child,
     stdin: ChildStdin,
+    codec: Codec,
+    planes: Planes,
+    info: Arc<DecoderInfo>,
 }
 
 impl Decoder {
-    pub fn start(
-        width: u16,
-        height: u16,
+    /// A phone's cast: H.264 of a size known, decoded on the processor to
+    /// RGBA, as before PC5.
+    pub fn start(width: u16, height: u16, out: Box<dyn FnMut(Picture) + Send>) -> io::Result<Self> {
+        Self::open(
+            &DecodeWanted {
+                codec: Codec::H264,
+                size: Some((width, height)),
+                accel: Accel::Software,
+                planes: Planes::Rgba,
+            },
+            out,
+        )
+    }
+
+    /// A sidecar for `wanted`, its pictures to `out`.
+    pub fn open(
+        wanted: &DecodeWanted,
         mut out: Box<dyn FnMut(Picture) + Send>,
     ) -> io::Result<Self> {
-        let (w, h) = (usize::from(width), usize::from(height));
-        if w == 0 || h == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "an empty screen",
-            ));
-        }
-        // BK7 review I1: each picture is w x h x 4 bytes, asked for before
-        // ffmpeg says a word; a size no H.264 level allows is refused.
-        if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_SIDE * MAX_SIDE_SHORT {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("a picture too large to show ({w}x{h})"),
-            ));
+        if let Some((w, h)) = wanted.size
+            && let Some(problem) = size_problem(usize::from(w), usize::from(h))
+        {
+            return Err(problem);
         }
         let mut command = Command::new("ffmpeg");
-        // Each flag here removes a frame of delay ffmpeg would otherwise add
-        // (measured with ffmpeg 8): `nobuffer` is left out, as it drops the
-        // packets read while probing (the keyframe), and the rawvideo
-        // encoder holds a frame unless it runs on one thread.
         command
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-flags",
-                "low_delay",
-                "-probesize",
-                "32",
-                "-analyzeduration",
-                "0",
-                "-f",
-                "h264",
-                "-i",
-                "pipe:0",
-                "-vf",
-            ])
-            // Whatever the stream's crop, frames come out the size read.
-            .arg(format!("scale={w}:{h}"))
-            // FFmpeg 9 refuses `-vsync`, 4.4 knows nothing else.
-            .args([
-                fps_mode_flag("ffmpeg"),
-                "passthrough",
-                "-threads",
-                "1",
-                // A broken stretch is waited out, not given up on.
-                "-max_error_rate",
-                "1",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "rgba",
-                "pipe:1",
-            ])
+            .args(decoder_args(wanted, fps_mode_flag("ffmpeg")))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -323,29 +620,115 @@ impl Decoder {
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("no stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("no stderr"))?;
+        let info = Arc::new(DecoderInfo::default());
+        let colour = Arc::new(Mutex::new(Colour::default()));
+        let (size_tx, size_rx) = std::sync::mpsc::channel::<(usize, usize)>();
+        {
+            let (info, colour) = (info.clone(), colour.clone());
+            std::thread::Builder::new()
+                .name("video-decode-log".into())
+                .spawn(move || read_log(stderr, &info, &colour, &size_tx))?;
+        }
+        let planes = wanted.planes;
+        let known = wanted.size.map(|(w, h)| (usize::from(w), usize::from(h)));
+        let thread_info = info.clone();
         std::thread::Builder::new()
             .name("video-decode".into())
             .spawn(move || {
-                loop {
-                    let mut rgba = vec![0u8; w * h * 4];
-                    if stdout.read_exact(&mut rgba).is_err() {
-                        break;
+                // The size is the stream's, or else the first picture's.
+                let size = known.or_else(|| size_rx.recv().ok());
+                if let Some((w, h)) = size.filter(|(w, h)| size_problem(*w, *h).is_none()) {
+                    let len = picture_len(planes, w, h);
+                    loop {
+                        let mut data = vec![0u8; len];
+                        if stdout.read_exact(&mut data).is_err() {
+                            break;
+                        }
+                        thread_info.pictures.fetch_add(1, Ordering::Relaxed);
+                        let colour = *colour.lock().unwrap_or_else(|e| e.into_inner());
+                        out(Picture {
+                            width: w,
+                            height: h,
+                            planes,
+                            data,
+                            colour,
+                        });
                     }
-                    out(Picture {
-                        width: w,
-                        height: h,
-                        rgba,
-                    });
                 }
+                thread_info.ended.store(true, Ordering::Release);
             })?;
-        Ok(Self { child, stdin })
+        Ok(Self {
+            child,
+            stdin,
+            codec: wanted.codec,
+            planes: wanted.planes,
+            info,
+        })
     }
 
     /// One access unit, decoded at once.
     pub fn feed(&mut self, access_unit: &[u8]) -> io::Result<()> {
         self.stdin.write_all(access_unit)?;
-        self.stdin.write_all(&AUD)?;
+        self.stdin.write_all(self.codec.delimiter())?;
         self.stdin.flush()
+    }
+
+    /// How its pictures are laid out.
+    pub fn planes(&self) -> Planes {
+        self.planes
+    }
+
+    /// The pictures it has given.
+    pub fn pictures(&self) -> u64 {
+        self.info.pictures.load(Ordering::Relaxed)
+    }
+
+    /// Whether it has stopped giving pictures (ffmpeg ended).
+    pub fn ended(&self) -> bool {
+        self.info.ended.load(Ordering::Acquire)
+    }
+
+    /// The way `auto` took, once ffmpeg said.
+    pub fn auto_took(&self) -> Option<String> {
+        self.info
+            .auto
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+}
+
+/// Read ffmpeg's log to its end: the output's size (sent once), its
+/// colours and `auto`'s way.
+fn read_log(
+    stderr: std::process::ChildStderr,
+    info: &DecoderInfo,
+    colour: &Mutex<Colour>,
+    size: &std::sync::mpsc::Sender<(usize, usize)>,
+) {
+    let mut reader = io::BufReader::new(stderr);
+    let mut line = Vec::new();
+    let mut sized = false;
+    loop {
+        line.clear();
+        match io::BufRead::read_until(&mut reader, b'\n', &mut line) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some((read, said)) = output_line(&text) {
+            *colour.lock().unwrap_or_else(|e| e.into_inner()) = said;
+            if !sized {
+                sized = true;
+                let _ = size.send(read);
+            }
+        } else if let Some(way) = auto_line(&text) {
+            *info.auto.lock().unwrap_or_else(|e| e.into_inner()) = Some(way);
+        }
     }
 }
 
@@ -382,6 +765,7 @@ pub fn save_png(stem: &str, width: usize, height: usize, rgba: Vec<u8>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::nv12::Layout;
 
     fn picture() -> egui::Rect {
         egui::Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(200.0, 400.0))
@@ -630,7 +1014,7 @@ mod tests {
             64,
             128,
             Box::new(move |p| {
-                let _ = tx.send((p.width, p.height, p.rgba.len()));
+                let _ = tx.send((p.width, p.height, p.data.len()));
             }),
         )
         .expect("ffmpeg starts");
@@ -638,6 +1022,273 @@ mod tests {
         for _ in 0..3 {
             let got = rx.recv_timeout(Duration::from_secs(10)).expect("a picture");
             assert_eq!(got, (64, 128, 64 * 128 * 4));
+        }
+    }
+
+    /// An H.264 stream ffmpeg encodes from `source` (a lavfi graph), or
+    /// `None` without an ffmpeg that can.
+    fn encoded(source: &str, frames: u32) -> Option<Vec<u8>> {
+        let out = Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg(source)
+            .args(["-frames:v", &frames.to_string()])
+            .args(["-pix_fmt", "yuv420p", "-c:v", "libx264", "-bf", "0"])
+            .args(["-f", "h264", "pipe:1"])
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        (out.status.success() && !out.stdout.is_empty()).then_some(out.stdout)
+    }
+
+    /// Decode `stream` as `wanted` asks: each picture's size, planes and
+    /// bytes, as many as `count`, or what came in 10 s.
+    fn decode(wanted: &DecodeWanted, stream: &[u8], count: usize) -> Vec<Picture> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut decoder = Decoder::open(
+            wanted,
+            Box::new(move |p| {
+                let _ = tx.send(p);
+            }),
+        )
+        .expect("ffmpeg starts");
+        let _ = decoder.feed(stream);
+        (0..count)
+            .map_while(|_| rx.recv_timeout(Duration::from_secs(10)).ok())
+            .collect()
+    }
+
+    /// PC5: the arguments for each way: a card's own frames downloaded as
+    /// NV12, `auto` left to ffmpeg, the size scaled to when the stream said
+    /// it, and the planes asked for.
+    #[test]
+    fn each_way_asks_ffmpeg_for_its_own() {
+        let mut wanted = DecodeWanted {
+            codec: Codec::H264,
+            size: Some((1920, 1080)),
+            accel: Accel::Software,
+            planes: Planes::Rgba,
+        };
+        let joined = |w: &DecodeWanted| decoder_args(w, "-fps_mode").join(" ");
+        let software = joined(&wanted);
+        assert!(!software.contains("-hwaccel"), "{software}");
+        assert!(software.contains("-f h264 -i pipe:0 -vf scale=1920:1080 -fps_mode passthrough"));
+        assert!(
+            software.ends_with("-f rawvideo -pix_fmt rgba pipe:1"),
+            "{software}"
+        );
+        wanted.accel = Accel::D3d11va;
+        wanted.planes = Planes::Nv12;
+        let d3d = joined(&wanted);
+        assert!(
+            d3d.contains("-hwaccel d3d11va -hwaccel_output_format d3d11 -flags low_delay"),
+            "{d3d}"
+        );
+        assert!(
+            d3d.contains("-vf hwdownload,format=nv12,scale=1920:1080"),
+            "{d3d}"
+        );
+        assert!(d3d.ends_with("-pix_fmt nv12 pipe:1"), "{d3d}");
+        wanted.accel = Accel::Vaapi("/dev/dri/renderD129".into());
+        let vaapi = joined(&wanted);
+        assert!(
+            vaapi.contains(
+                "-hwaccel vaapi -hwaccel_device /dev/dri/renderD129 -hwaccel_output_format vaapi"
+            ),
+            "{vaapi}"
+        );
+        assert!(vaapi.contains("-vf hwdownload,format=nv12,"), "{vaapi}");
+        wanted.accel = Accel::Auto;
+        wanted.size = None;
+        let auto = joined(&wanted);
+        assert!(auto.contains("-hwaccel auto -flags"), "{auto}");
+        assert!(!auto.contains("-vf"), "no size, no scale: {auto}");
+        assert!(
+            auto.contains("-loglevel verbose"),
+            "the lines read are verbose"
+        );
+    }
+
+    /// PC5: the ways in order on each system, the VA-API nodes as the
+    /// encoder tries them, the pinned node alone, and the processor alone
+    /// with the setting off.
+    #[test]
+    fn the_ways_to_decode_go_card_first_and_end_on_the_processor() {
+        let nodes: Vec<String> = [
+            "/dev/dri/renderD129",
+            "/dev/dri/card0",
+            "/dev/dri/renderD128",
+            "/dev/dri/renderD9999x",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            accel_chain(true, true, false, None, &nodes),
+            [Accel::D3d11va, Accel::Auto, Accel::Software]
+        );
+        assert_eq!(
+            accel_chain(true, false, true, None, &nodes),
+            [
+                Accel::Vaapi("/dev/dri/renderD128".into()),
+                Accel::Vaapi("/dev/dri/renderD129".into()),
+                Accel::Vaapi("/dev/dri/renderD9999x".into()),
+                Accel::Auto,
+                Accel::Software
+            ]
+        );
+        assert_eq!(
+            accel_chain(true, false, true, Some("/dev/dri/renderD130"), &nodes),
+            [
+                Accel::Vaapi("/dev/dri/renderD130".into()),
+                Accel::Auto,
+                Accel::Software
+            ],
+            "POCKETDESK_VAAPI_DEVICE pins one"
+        );
+        assert_eq!(
+            accel_chain(true, false, true, Some(" "), &[]),
+            [Accel::Auto, Accel::Software],
+            "an empty pin and no node"
+        );
+        assert_eq!(
+            accel_chain(true, false, false, None, &nodes),
+            [Accel::Auto, Accel::Software]
+        );
+        for (windows, linux) in [(true, false), (false, true)] {
+            assert_eq!(
+                accel_chain(false, windows, linux, None, &nodes),
+                [Accel::Software],
+                "the setting off"
+            );
+        }
+        assert_eq!(
+            Accel::Vaapi("/dev/dri/renderD129".into()).words(),
+            "vaapi (renderD129)"
+        );
+    }
+
+    /// PC5: the output's size and colours from ffmpeg 8's own lines, and
+    /// `auto`'s way.
+    #[test]
+    fn ffmpegs_lines_say_the_size_the_colours_and_the_way() {
+        let plain = "  Stream #0:0: Video: rawvideo (NV12 / 0x3231564E), nv12(progressive), 318x181 [SAR 1:1 DAR 318:181], q=2-31, 20720 kb/s, 30 fps, 30 tbn";
+        assert_eq!(output_line(plain), Some(((318, 181), Colour::default())));
+        let hd = "  Stream #0:0: Video: rawvideo, 1 reference frame (NV12 / 0x3231564E), nv12(tv, bt709, progressive, left), 1920x1080 [SAR 1:1 DAR 16:9], q=2-31";
+        assert_eq!(
+            output_line(hd),
+            Some((
+                (1920, 1080),
+                Colour {
+                    bt709: true,
+                    full: false
+                }
+            ))
+        );
+        let full = "Stream #0:0: Video: rawvideo (RGBA / 0x41424752), rgba(pc, gbr/bt709/bt709, progressive), 64x128, q=2-31";
+        assert_eq!(
+            output_line(full),
+            Some((
+                (64, 128),
+                Colour {
+                    bt709: true,
+                    full: true
+                }
+            ))
+        );
+        assert_eq!(
+            output_line("  Stream #0:0: Video: h264 (Main), yuv420p(progressive), 1920x1080"),
+            None,
+            "the input's line"
+        );
+        assert_eq!(output_line("Output #0, rawvideo, to 'pipe:1':"), None);
+        assert_eq!(
+            auto_line(
+                "[vist#0:0/h264 @ 0000022f03885040] [dec:h264 @ 0000022f02e8db80] Using auto hwaccel type dxva2 with new default device."
+            ),
+            Some("dxva2".to_string())
+        );
+        assert_eq!(auto_line("Stream mapping:"), None);
+    }
+
+    /// PC5: NV12 out of the sidecar is a third of RGBA's bytes, and its
+    /// colours turned to RGB here match ffmpeg's own RGBA within a step or
+    /// two. Skipped without an ffmpeg that encodes H.264.
+    #[test]
+    fn nv12_from_the_sidecar_matches_its_rgba() {
+        let Some(stream) = encoded("testsrc2=size=66x34:rate=10", 3) else {
+            eprintln!("no ffmpeg with libx264 here: skipped");
+            return;
+        };
+        let mut wanted = DecodeWanted {
+            codec: Codec::H264,
+            size: Some((66, 34)),
+            accel: Accel::Software,
+            planes: Planes::Rgba,
+        };
+        let rgba = decode(&wanted, &stream, 3);
+        wanted.planes = Planes::Nv12;
+        let nv12 = decode(&wanted, &stream, 3);
+        assert_eq!((rgba.len(), nv12.len()), (3, 3));
+        assert_eq!(rgba[0].data.len(), 66 * 34 * 4);
+        assert_eq!(nv12[0].data.len(), 66 * 34 + 66 * 17, "12 bits a pixel");
+        assert_eq!(nv12[0].planes, Planes::Nv12);
+        let mine = nv12[2].to_rgba();
+        let theirs = &rgba[2].data;
+        assert_eq!(mine.len(), theirs.len());
+        let mean = mine
+            .iter()
+            .zip(theirs)
+            .map(|(a, b)| u64::from(a.abs_diff(*b)))
+            .sum::<u64>() as f64
+            / mine.len() as f64;
+        assert!(mean < 3.0, "a mean step of {mean:.2}");
+    }
+
+    /// PC5: with no size given, the size is the first picture's, from
+    /// ffmpeg's line, even an odd one.
+    #[test]
+    fn with_no_size_the_first_picture_says_it() {
+        let Some(stream) = encoded("testsrc2=size=318x182:rate=10", 2) else {
+            eprintln!("no ffmpeg with libx264 here: skipped");
+            return;
+        };
+        let wanted = DecodeWanted {
+            codec: Codec::H264,
+            size: None,
+            accel: Accel::Software,
+            planes: Planes::Nv12,
+        };
+        let pictures = decode(&wanted, &stream, 2);
+        assert_eq!(pictures.len(), 2);
+        assert_eq!((pictures[0].width, pictures[0].height), (318, 182));
+        assert_eq!(pictures[0].data.len(), Layout::new(318, 182).len());
+    }
+
+    /// PC5: Direct3D 11 decodes where the card can (a machine without one
+    /// stops ffmpeg, the window's cue for the next way); `auto` decodes on
+    /// whatever it finds. Skipped without ffmpeg and libx264.
+    #[test]
+    fn a_card_decodes_or_stops_and_auto_decodes() {
+        let Some(stream) = encoded("testsrc2=size=128x72:rate=10", 3) else {
+            eprintln!("no ffmpeg with libx264 here: skipped");
+            return;
+        };
+        let mut wanted = DecodeWanted {
+            codec: Codec::H264,
+            size: Some((128, 72)),
+            accel: Accel::Auto,
+            planes: Planes::Nv12,
+        };
+        let auto = decode(&wanted, &stream, 3);
+        assert_eq!(auto.len(), 3, "auto decodes");
+        if cfg!(windows) {
+            wanted.accel = Accel::D3d11va;
+            let card = decode(&wanted, &stream, 3);
+            if card.is_empty() {
+                eprintln!("no Direct3D 11 decoder here: the window would go on");
+            } else {
+                assert_eq!(card.len(), 3);
+                assert_eq!((card[0].width, card[0].height), (128, 72));
+            }
         }
     }
 }

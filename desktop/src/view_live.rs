@@ -31,7 +31,7 @@ use pocketdesk_core::protocol::kdeconnect::TrustStore;
 use pocketdesk_core::protocol::permissions::Capability;
 
 use crate::computer_view::percentile;
-use crate::video::{Admit, Decoder, KeyGate};
+use crate::video::{Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Planes};
 
 /// Stops the servers and removes their folders however the run ends.
 struct Cleanup {
@@ -105,10 +105,6 @@ fn server(exe: &Path, base: &Path, config: &Path, state: &Path, pattern: bool) -
     command.spawn().unwrap()
 }
 
-/// Where a picture goes.
-type Out = Box<dyn FnMut(crate::video::Picture) + Send>;
-/// A way of decoding: the decoder for a config message, if it starts.
-type Start<'a> = &'a dyn Fn(&Message, Out) -> Option<Decoder>;
 /// Each picture's decode time, bytes, size and when it came.
 type Came = Vec<(Duration, usize, (usize, usize), Instant)>;
 
@@ -125,8 +121,15 @@ struct Measured {
 }
 
 /// Join A's view relay as the window does and decode for `secs` after the
-/// first picture with the decoder `start` makes.
-fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
+/// first picture, `accel`'s way to `planes`; `None` when no picture came
+/// within 20 s of the decoder's start.
+fn measure(
+    a_state: &Path,
+    b_id: &str,
+    secs: u64,
+    accel: &Accel,
+    planes: Planes,
+) -> Option<Measured> {
     let file = wait_for(30, "A's view.json for B", || {
         wire::read(a_state).filter(|f| f.device_id == b_id)
     });
@@ -144,6 +147,7 @@ fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
     let mut gate = KeyGate::default();
     let mut measured = Measured::default();
     let begun = Instant::now();
+    let mut started: Option<Instant> = None;
     let mut window: Option<Instant> = None;
     loop {
         if window.is_none() && !out.lock().unwrap().is_empty() {
@@ -159,13 +163,22 @@ fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
             begun.elapsed() < Duration::from_secs(90),
             "no picture within 90 s"
         );
+        if window.is_none() && started.is_some_and(|t| t.elapsed() > Duration::from_secs(20)) {
+            return None;
+        }
         let message = Message::read(&mut stream).expect("the relay");
         match &message {
-            Message::Config { .. } => {
+            Message::Config { width, height } => {
                 fed.lock().unwrap().clear();
                 let (fed, out) = (fed.clone(), out.clone());
-                decoder = start(
-                    &message,
+                let wanted = DecodeWanted {
+                    codec: Codec::H264,
+                    size: Some((*width, *height)),
+                    accel: accel.clone(),
+                    planes,
+                };
+                decoder = Decoder::open(
+                    &wanted,
                     Box::new(move |p| {
                         let now = Instant::now();
                         let took = fed
@@ -175,9 +188,11 @@ fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
                             .map_or(Duration::ZERO, |t| now - t);
                         out.lock()
                             .unwrap()
-                            .push((took, p.rgba.len(), (p.width, p.height), now));
+                            .push((took, p.data.len(), (p.width, p.height), now));
                     }),
-                );
+                )
+                .ok();
+                started = Some(Instant::now());
                 gate = KeyGate::default();
                 measured.codec = "H.264";
             }
@@ -197,7 +212,9 @@ fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
                 }
                 measured.frames_in += 1;
                 fed.lock().unwrap().push_back(Instant::now());
-                d.feed(data).expect("the decoder takes it");
+                if d.feed(data).is_err() {
+                    return None;
+                }
             }
             Message::End { why } => panic!("the view ended: {why}"),
             _ => {}
@@ -211,7 +228,7 @@ fn measure(a_state: &Path, b_id: &str, secs: u64, start: Start) -> Measured {
     let mut took: Vec<Duration> = got.iter().map(|g| g.0).collect();
     measured.p50 = percentile(&mut took, 0.5);
     measured.p95 = percentile(&mut took, 0.95);
-    measured
+    Some(measured)
 }
 
 fn ms(d: Option<Duration>) -> String {
@@ -309,13 +326,21 @@ fn the_windows_decoder_on_a_real_view() {
     } else {
         "this screen"
     };
-    let software_rgba = |message: &Message, out: Out| match message {
-        Message::Config { width, height } => Decoder::start(*width, *height, out).ok(),
-        _ => None,
-    };
-    let ways: [(&str, Start); 1] = [("software, RGBA", &software_rgba)];
-    for (name, start) in ways {
-        let m = measure(&a_state, &b_id, secs, start);
+    let ways = [
+        ("software, RGBA (before PC5)", Accel::Software, Planes::Rgba),
+        ("software, NV12", Accel::Software, Planes::Nv12),
+        ("d3d11va, NV12", Accel::D3d11va, Planes::Nv12),
+        ("auto, NV12", Accel::Auto, Planes::Nv12),
+    ];
+    let wanted = std::env::var("PD_LIVE_WAYS").unwrap_or_default();
+    for (name, accel, planes) in ways {
+        if !wanted.is_empty() && !wanted.split(',').any(|w| name.starts_with(w.trim())) {
+            continue;
+        }
+        let Some(m) = measure(&a_state, &b_id, secs, &accel, planes) else {
+            println!("{screen}, {name}: no picture");
+            continue;
+        };
         println!(
             "{screen}, {}, {name}: {} frames in, {} pictures in {secs} s, decode p50 {} p95 {}, {} bytes a picture, {:?}",
             m.codec,
@@ -326,7 +351,9 @@ fn the_windows_decoder_on_a_real_view() {
             m.bytes_per_picture,
             m.size
         );
-        assert!(m.pictures > 0, "{name}: no picture");
+        if accel == Accel::Software {
+            assert!(m.pictures > 0, "{name}: no picture");
+        }
     }
     let session_id = wire::read(&a_state).map(|v| v.session_id);
     let _ = computers::request(
