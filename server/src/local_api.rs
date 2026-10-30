@@ -166,6 +166,9 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 // U3: the owner's rename, else what it calls itself; null
                 // until it has said.
                 "name": store.name(&id),
+                // Item 4: the Pocketdesk release it last said it runs; null
+                // until one that says has connected.
+                "version": store.version(&id),
                 "grant_remaining_secs": store.grant_remaining(&id),
                 "in_session": live.iter().any(|s| s.device_id.as_deref() == Some(id.as_str())),
                 "key_bound": bound.is_some_and(|k| k.tls.is_some()),
@@ -1728,6 +1731,7 @@ mod tests {
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("phone-a").unwrap();
         store.note_claimed_name("phone-a", "Galaxy A71").unwrap();
+        store.note_claimed_version("phone-a", "0.8.1").unwrap();
         store
             .trust_device_with_ttl("phone-b", std::time::Duration::from_secs(60))
             .unwrap();
@@ -1805,6 +1809,8 @@ mod tests {
         let b = all.iter().find(|d| d["id"] == "phone-b").unwrap();
         assert_eq!(a["name"], "Galaxy A71");
         assert_eq!(b["name"], Value::Null, "none said yet");
+        assert_eq!(a["version"], "0.8.1");
+        assert_eq!(b["version"], Value::Null, "an older phone says none");
         assert_eq!(a["in_session"], true);
         assert_eq!(a["key_bound"], true);
         assert_eq!(a["grant_remaining_secs"], Value::Null);

@@ -191,6 +191,31 @@ pub fn note_claimed_name(device_id: &str, claimed: &str) {
     }
 }
 
+/// Keep the Pocketdesk release a paired device says it runs in its
+/// identity (item 4), as [`note_claimed_name`] keeps its name: written
+/// under the store's lock only when it changed. Blocking file work.
+pub fn note_claimed_version(device_id: &str, claimed: &str) {
+    let Ok(path) = state::trust_store_path() else {
+        return;
+    };
+    let Some(version) = pocketdesk_core::version::clean_version(claimed) else {
+        return;
+    };
+    let unchanged = TrustStore::read(&path)
+        .map(|store| {
+            !store.is_trusted(device_id) || store.version(device_id) == Some(version.as_str())
+        })
+        .unwrap_or(true);
+    if unchanged {
+        return;
+    }
+    if let Err(e) = TrustStore::update(&path, |store| {
+        store.note_claimed_version(device_id, &version)
+    }) {
+        tracing::debug!("Could not keep {device_id}'s version: {e}");
+    }
+}
+
 /// F5: may this device send `packet_type`? Packets that use no capability
 /// always pass. [conn_key] is the deviceId a connection goes by: on TCP the
 /// one its identity named in the handshake and its TLS key backed (phase B),
@@ -1825,6 +1850,23 @@ mod tests {
         assert_eq!(store.name("names-paired-phone"), Some("Galaxy A71"));
         assert_eq!(store.name("names-stranger-phone"), None);
         TrustStore::update(&path, |store| store.untrust_device("names-paired-phone")).unwrap();
+    }
+
+    /// Item 4: a paired device's release, from its identity, is kept
+    /// cleaned; a device not paired, or a word that is no version, leaves
+    /// nothing.
+    #[test]
+    fn a_paired_devices_release_is_kept_and_an_unpaired_ones_is_not() {
+        crate::state::use_test_dirs();
+        let path = state::trust_store_path().unwrap();
+        TrustStore::update(&path, |store| store.trust_device("versions-paired-phone")).unwrap();
+        note_claimed_version("versions-paired-phone", "0.8.1 ");
+        note_claimed_version("versions-paired-phone", "newest");
+        note_claimed_version("versions-stranger-phone", "0.8.1");
+        let store = TrustStore::read(&path).unwrap();
+        assert_eq!(store.version("versions-paired-phone"), Some("0.8.1"));
+        assert_eq!(store.version("versions-stranger-phone"), None);
+        TrustStore::update(&path, |store| store.untrust_device("versions-paired-phone")).unwrap();
     }
 
     #[test]
