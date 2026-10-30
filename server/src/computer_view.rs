@@ -1187,6 +1187,49 @@ pub type PrivacySend = Arc<dyn Fn(&str, NetworkPacket) + Send + Sync>;
 pub struct PrivacyHost {
     pub send: PrivacySend,
     pub answers: mpsc::Receiver<(String, serde_json::Value)>,
+    /// Tells the owner here what went wrong (PR #561 review I3: a lock on
+    /// close that failed): a notification, or a stand-in in tests.
+    pub notice: PrivacyNotice,
+}
+
+/// Shows the owner a notice, in words (PR #561 review I3).
+pub type PrivacyNotice = Arc<dyn Fn(String) + Send + Sync>;
+
+/// How long a lock asked as the window closes waits for its answer before
+/// the owner is told it did not come (PR #561 review I3).
+pub const LOCK_WAIT: Duration = Duration::from_secs(10);
+
+/// A lock asked of the computer `device_id` (`name`), as ask `id`, at
+/// `since`, whose answer is awaited (PR #561 review I3).
+struct LockPending {
+    device_id: String,
+    name: String,
+    id: u64,
+    since: Instant,
+}
+
+/// What an answer says of a lock: done (`Ok`), not done and why (`Err`),
+/// or nothing of one.
+pub fn lock_heard(body: &serde_json::Value) -> Option<Result<(), String>> {
+    if body.get("locked").is_some() {
+        return Some(Ok(()));
+    }
+    if let Some(why) = body.get("lockError") {
+        return Some(Err(why.as_str().unwrap_or("its lock failed").to_string()));
+    }
+    if body.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let why = body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("it refused");
+        return Some(Err(why.to_string()));
+    }
+    None
+}
+
+/// What the owner is told when the computer `name` was not locked.
+pub fn lock_failed_words(name: &str, why: &str) -> String {
+    format!("Couldn't lock {name}: {why}")
 }
 
 /// Where the answers that come on a link or a connection go: the relay
@@ -1212,7 +1255,19 @@ impl PrivacyHost {
                 }
             });
         });
-        Self { send, answers }
+        let notice: PrivacyNotice = Arc::new(|words: String| {
+            tracing::info!("{words}");
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn_blocking(move || {
+                    crate::platform::notify("Pocketdesk", &words, Duration::from_secs(10))
+                });
+            }
+        });
+        Self {
+            send,
+            answers,
+            notice,
+        }
     }
 }
 
@@ -1265,10 +1320,9 @@ pub fn privacy_step(ask: u8, holding: bool, status: &ViewStatus, name: &str) -> 
 pub fn privacy_packet(step: &PrivacyStep) -> Option<NetworkPacket> {
     let body = match step {
         PrivacyStep::Grab => serde_json::json!({ "action": "grab" }),
-        PrivacyStep::Release { lock: false } => serde_json::json!({ "action": "release" }),
-        PrivacyStep::Release { lock: true } => {
-            serde_json::json!({ "action": "release", "lock": true })
-        }
+        // The lock goes as its own status (review I3), never refused for
+        // a grab another device holds.
+        PrivacyStep::Release { .. } => serde_json::json!({ "action": "release" }),
         PrivacyStep::Lock => serde_json::json!({ "action": "status", "lock": true }),
         PrivacyStep::Refuse(_) | PrivacyStep::Nothing => return None,
     };
@@ -1402,10 +1456,10 @@ impl PrivacyHold {
         self.waiting = true;
     }
 
-    /// Let it go there, locking that computer when `lock`.
-    fn let_go(mut self, lock: bool) {
+    /// Let it go there.
+    fn let_go(mut self) {
         self.done = true;
-        if let Some(packet) = privacy_packet(&PrivacyStep::Release { lock }) {
+        if let Some(packet) = privacy_packet(&PrivacyStep::Release { lock: false }) {
             (self.send)(&self.device_id, tagged(packet, next_ask_id()));
         }
     }
@@ -1486,7 +1540,22 @@ pub async fn run_with(
     let PrivacyHost {
         send: privacy_send,
         answers: mut privacy_answers,
+        notice: privacy_notice,
     } = privacy;
+    let mut lock_pending: Option<LockPending> = None;
+    // Ask the computer `device_id` (`name`) to lock, its answer awaited.
+    let ask_lock = |device_id: &str, name: &str| {
+        let id = next_ask_id();
+        if let Some(packet) = privacy_packet(&PrivacyStep::Lock) {
+            privacy_send(device_id, tagged(packet, id));
+        }
+        LockPending {
+            device_id: device_id.to_string(),
+            name: name.to_string(),
+            id,
+            since: Instant::now(),
+        }
+    };
     let port = match listener.local_addr() {
         Ok(addr) => addr.port(),
         Err(e) => {
@@ -1715,10 +1784,13 @@ pub async fn run_with(
                 else {
                     // The view went before its window's last word: its
                     // privacy was let go as it ended; a lock is still asked.
-                    if ask == wire::PRIVACY_LOCK
-                        && let Some(packet) = privacy_packet(&PrivacyStep::Lock)
-                    {
-                        privacy_send(&device_id, tagged(packet, next_ask_id()));
+                    if ask == wire::PRIVACY_LOCK {
+                        let name = computers::read(&state_dir)
+                            .computers
+                            .into_iter()
+                            .find(|c| c.device_id == device_id)
+                            .map_or_else(|| "that computer".to_string(), |c| c.name);
+                        lock_pending = Some(ask_lock(&device_id, &name));
                     }
                     continue;
                 };
@@ -1733,14 +1805,15 @@ pub async fn run_with(
                     }
                     PrivacyStep::Release { lock } => {
                         if let Some(hold) = v.privacy.take() {
-                            hold.let_go(lock);
+                            hold.let_go();
+                        }
+                        if lock {
+                            lock_pending = Some(ask_lock(&v.device_id, &v.name));
                         }
                         ViewPrivacy::Off
                     }
-                    step @ PrivacyStep::Lock => {
-                        if let Some(packet) = privacy_packet(&step) {
-                            privacy_send(&v.device_id, tagged(packet, next_ask_id()));
-                        }
+                    PrivacyStep::Lock => {
+                        lock_pending = Some(ask_lock(&v.device_id, &v.name));
                         v.status.privacy.clone()
                     }
                     PrivacyStep::Refuse(why) => ViewPrivacy::Refused(why),
@@ -1750,6 +1823,20 @@ pub async fn run_with(
                 say_privacy(v, viewer.as_ref(), said);
             }
             Some((device_id, body)) = privacy_answers.recv() => {
+                // The answer to a lock asked as the window closed (review
+                // I3): a lock not done is said to the owner here.
+                if let Some(pending) = lock_pending
+                    .as_ref()
+                    .filter(|p| p.device_id == device_id && answers_ask(&body, p.id))
+                    && let Some(heard) = lock_heard(&body)
+                {
+                    match heard {
+                        Ok(()) => tracing::info!(device_id = %pending.device_id, "Locked another computer as its window closed"),
+                        Err(why) => privacy_notice(lock_failed_words(&pending.name, &why)),
+                    }
+                    lock_pending = None;
+                    continue;
+                }
                 // Only an answer to the hold's newest ask (review M3): one to
                 // an older ask, refused late, leaves a newer grab alone.
                 let Some(v) = view.as_mut().filter(|v| {
@@ -1779,6 +1866,13 @@ pub async fn run_with(
                 }
             }
             _ = heartbeat.tick() => {
+                // A lock whose answer never came (the link down, that
+                // computer gone) is said too (review I3).
+                if let Some(pending) = lock_pending
+                    .take_if(|p| p.since.elapsed() >= LOCK_WAIT)
+                {
+                    privacy_notice(lock_failed_words(&pending.name, "it did not answer."));
+                }
                 // A window gone (closed, crashed): its socket closed, so its
                 // reader ended, or its writer can no longer write.
                 if viewer.as_ref().is_some_and(|v| {
@@ -2297,7 +2391,8 @@ mod tests {
         );
         assert_eq!(
             body(PrivacyStep::Release { lock: true }),
-            Some(serde_json::json!({"action": "release", "lock": true}))
+            Some(serde_json::json!({"action": "release"})),
+            "the lock goes as its own status (review I3)"
         );
         assert_eq!(
             body(PrivacyStep::Lock),
@@ -2310,6 +2405,30 @@ mod tests {
         assert_eq!(
             renewal().body,
             serde_json::json!({"action": "grab", "renew": true})
+        );
+    }
+
+    /// PR #561 review I3: a lock's answer says whether it was done, and
+    /// why not; an answer about something else says nothing of it.
+    #[test]
+    fn a_locks_answer_says_whether_it_was_done() {
+        use serde_json::json;
+        assert_eq!(
+            lock_heard(&json!({"ok": true, "locked": "loginctl"})),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            lock_heard(&json!({"ok": true, "lockError": "no screen locker found"})),
+            Some(Err("no screen locker found".into()))
+        );
+        assert_eq!(
+            lock_heard(&json!({"ok": false, "error": "it is off there"})),
+            Some(Err("it is off there".into()))
+        );
+        assert_eq!(lock_heard(&json!({"ok": true, "grabbed": 2})), None);
+        assert_eq!(
+            lock_failed_words("Desk", "it did not answer."),
+            "Couldn't lock Desk: it did not answer."
         );
     }
 
@@ -2446,14 +2565,11 @@ mod tests {
             ],
             "dropped: let go there"
         );
-        PrivacyHold::ask("desk", send.clone(), now).let_go(true);
+        PrivacyHold::ask("desk", send.clone(), now).let_go();
         assert_eq!(
             taken()[1],
-            (
-                "desk".into(),
-                serde_json::json!({"action": "release", "lock": true})
-            ),
-            "let go once, with the lock"
+            ("desk".into(), serde_json::json!({"action": "release"})),
+            "let go once"
         );
         let mut refused = PrivacyHold::ask("desk", send.clone(), now);
         refused.done = true;

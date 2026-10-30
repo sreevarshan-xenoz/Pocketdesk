@@ -2166,7 +2166,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "With that computer's own lock, once the window was let in. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
+                        "With that computer's own lock, when the window closes while it shows that computer (not while it reconnects, nor when Pocketdesk quits with it open); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
                     );
                 });
             }

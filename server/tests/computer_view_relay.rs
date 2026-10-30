@@ -925,6 +925,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
             let _ = asked_tx.send((id.to_string(), without_id(packet.body)));
         }),
         answers: answers_rx,
+        notice: Arc::new(|_| {}),
     };
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let (commands, rx) = mpsc::channel(4);
@@ -1027,11 +1028,16 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         .unwrap();
     privacy_said(&mut window, &ViewPrivacy::On).await;
     window.write_all(&say(wire::PRIVACY_LOCK)).await.unwrap();
+    // Let go, then the lock as its own status (review I3).
+    assert_eq!(
+        next_ask(&mut asked).await,
+        ("desk".into(), serde_json::json!({"action": "release"}))
+    );
     assert_eq!(
         next_ask(&mut asked).await,
         (
             "desk".into(),
-            serde_json::json!({"action": "release", "lock": true})
+            serde_json::json!({"action": "status", "lock": true})
         )
     );
     commands
@@ -1068,6 +1074,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
             let _ = asked_tx.send(without_id(packet.body));
         }),
         answers: answers_rx,
+        notice: Arc::new(|_| {}),
     };
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let (commands, rx) = mpsc::channel(4);
@@ -1195,6 +1202,7 @@ fn stand_in_host(
             asked(id, packet.body);
         }),
         answers,
+        notice: Arc::new(|_| {}),
     }
 }
 
@@ -1264,4 +1272,103 @@ fn without_id(mut body: serde_json::Value) -> serde_json::Value {
     );
     body.as_object_mut().unwrap().remove("id");
     body
+}
+
+/// PR #561 review I3: a lock asked as the window closes that is not done
+/// there (refused, or its locker failed) is said to the owner here; one
+/// done says nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lock_on_close_not_done_is_said() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-lock");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let (told_tx, mut told) = mpsc::unbounded_channel::<String>();
+    let mut host = stand_in_host(
+        move |_, body| {
+            let _ = asked_tx.send(body);
+        },
+        answers_rx,
+    );
+    host.notice = Arc::new(move |words| {
+        let _ = told_tx.send(words);
+    });
+    let (commands, relay, mut window) = controlled_view(&dir, addr, cert, host).await;
+    let wait = Duration::from_secs(5);
+    let lock = Message::Privacy(wire::PRIVACY_LOCK).encode();
+
+    // Refused there: said here, by the computer's name and why.
+    window.write_all(&lock).await.unwrap();
+    let ask = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (&ask["action"], &ask["lock"]),
+        (&"status".into(), &true.into())
+    );
+    let why = "\u{201c}Lock, sleep, privacy and wake others\u{201d} is off for this computer there";
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&ask, serde_json::json!({"ok": false, "error": why})),
+        ))
+        .await
+        .unwrap();
+    let said = tokio::time::timeout(wait, told.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(said, format!("Couldn't lock Desk: {why}"));
+
+    // Its locker failed: said too.
+    window.write_all(&lock).await.unwrap();
+    let ask = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    answers
+        .send((
+            "desk".into(),
+            answer_to(
+                &ask,
+                serde_json::json!({"ok": true, "grabbed": 0, "ttlLeft": null, "lockError": "no screen locker found"}),
+            ),
+        ))
+        .await
+        .unwrap();
+    let said = tokio::time::timeout(wait, told.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(said, "Couldn't lock Desk: no screen locker found");
+
+    // Done: nothing to say.
+    window.write_all(&lock).await.unwrap();
+    let ask = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&ask, serde_json::json!({"ok": true, "grabbed": 0, "ttlLeft": null, "locked": "loginctl"})),
+        ))
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), told.recv())
+            .await
+            .is_err(),
+        "a lock done says nothing"
+    );
+    drop(window);
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
 }
