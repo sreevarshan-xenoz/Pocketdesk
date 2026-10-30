@@ -701,6 +701,7 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
         monitor: wanted.monitor,
         hevc: offer_hevc(
             state.hevc_setting,
+            state.hw_decode,
             crate::video::decodes_hevc(),
             state.hevc_refused,
         ),
@@ -728,10 +729,11 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
 }
 
 /// Whether a view asks for HEVC (PC5, PR #562 review I3): with "Use HEVC
-/// when both can" on, this app's ffmpeg shown to decode it, and the view
-/// not given up on it.
-pub fn offer_hevc(setting: bool, decodes: bool, refused: bool) -> bool {
-    setting && decodes && !refused
+/// when both can" on, decoding on the graphics card on too (review M10: on
+/// the processor HEVC decodes about twice as slowly as H.264), this app's
+/// ffmpeg shown to decode it, and the view not given up on it.
+pub fn offer_hevc(setting: bool, hw_decode: bool, decodes: bool, refused: bool) -> bool {
+    setting && hw_decode && decodes && !refused
 }
 
 /// Whether a view whose last way just gave up (`step`) is asked for again
@@ -2555,10 +2557,17 @@ mod tests {
     /// is given up once, when the last way gives nothing on HEVC.
     #[test]
     fn hevc_is_asked_for_only_when_this_app_decodes_it_and_given_up_once() {
-        assert!(offer_hevc(true, true, false));
-        assert!(!offer_hevc(false, true, false), "the setting off");
-        assert!(!offer_hevc(true, false, false), "this ffmpeg cannot");
-        assert!(!offer_hevc(true, true, true), "given up for this view");
+        assert!(offer_hevc(true, true, true, false));
+        assert!(!offer_hevc(false, true, true, false), "the setting off");
+        assert!(
+            !offer_hevc(true, false, true, false),
+            "no graphics card decode (review M10)"
+        );
+        assert!(!offer_hevc(true, true, false, false), "this ffmpeg cannot");
+        assert!(
+            !offer_hevc(true, true, true, true),
+            "given up for this view"
+        );
         let hevc = Some(Codec::Hevc);
         assert!(redial_without_hevc(Step::Exhausted, hevc, false));
         assert!(!redial_without_hevc(Step::Exhausted, hevc, true), "once");
@@ -2589,6 +2598,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut state = State {
             hevc_setting: true,
+            hw_decode: true,
             hevc_refused: true,
             ..State::default()
         };

@@ -94,15 +94,21 @@ const STATS_EVERY: Duration = Duration::from_secs(1);
 /// The codecs a view offers the other computer (PC5): HEVC beside H.264
 /// when the app's ask said its ffmpeg decodes it (`asked`, PR #562 review
 /// I3: the app's sidecar decodes, not this process) and
-/// `computer_view_hevc` is on here (`wanted`); else H.264 alone, said by
-/// sending none. An app before PC5 never asks, so it never hears HEVC.
+/// `computer_view_hevc` and `computer_view_hw_decode` are on here
+/// (`wanted`; review M10: HEVC on the processor is slower than H.264);
+/// else H.264 alone, said by sending none. An app before PC5 never asks,
+/// so it never hears HEVC.
 pub fn codec_caps(asked: bool, wanted: bool) -> Option<u8> {
     (asked && wanted).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
 }
 
 /// The codecs a view the app asked for (`asked` HEVC or not) offers now.
 fn view_codec_caps(asked: bool) -> Option<u8> {
-    codec_caps(asked, crate::events::current_config().computer_view_hevc)
+    let config = crate::events::current_config();
+    codec_caps(
+        asked,
+        config.computer_view_hevc && config.computer_view_hw_decode,
+    )
 }
 
 /// What a keyframe says the stream is (PC5): H.264 of the size its SPS
