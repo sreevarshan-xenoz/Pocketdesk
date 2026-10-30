@@ -28,7 +28,7 @@ pub(crate) const HELD_ELSEWHERE: &str = "another phone or computer holds privacy
 /// here, and that device could no longer be reached with them.
 pub(crate) const DRIVEN_FROM_HERE: &str = "this computer's keyboard and mouse are on yours now (the shared keyboard and mouse); privacy mode would leave them nowhere";
 
-/// Why a computer's grab is refused while this computer's keyboard and
+/// Why a grab (a phone's too) is refused while this computer's keyboard and
 /// mouse are away on any device (PR #572 review I1): privacy mode would
 /// swallow the keys that bring them home.
 pub(crate) const AWAY_ELSEWHERE: &str = "this computer's keyboard and mouse are on another device now (the shared keyboard and mouse); privacy mode would leave them nowhere";
@@ -424,7 +424,7 @@ fn refusal(
         // review I3); a renewal as much as a first grab.
         let refused = if standing.driving.as_deref() == Some(device) {
             Some(DRIVEN_FROM_HERE)
-        } else if computer && standing.driving.is_some() {
+        } else if standing.driving.is_some() {
             // Away elsewhere: the keys that bring them home would be
             // swallowed (PR #572 review I1).
             Some(AWAY_ELSEWHERE)
@@ -738,10 +738,15 @@ mod tests {
             refusal("status", false, None, "desk", true, &on("desk")),
             None
         );
+        let (said, _) = refusal("grab", false, None, "phone", false, &on("laptop")).unwrap();
         assert_eq!(
-            refusal("grab", false, None, "phone", false, &on("laptop")),
+            said["error"], AWAY_ELSEWHERE,
+            "a phone too, the keys elsewhere (PR #572 re-review N8)"
+        );
+        assert_eq!(
+            refusal("grab", false, None, "phone", false, &Standing::default()),
             None,
-            "a phone, the keys elsewhere"
+            "a phone, the keys home"
         );
         assert_eq!(
             refusal("grab", false, None, "desk", true, &Standing::default()),

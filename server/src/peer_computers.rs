@@ -787,7 +787,14 @@ async fn forget_untrusted_mine(
     let Ok(trust) = crate::state::trust_store_path() else {
         return;
     };
-    for device_id in untrusted_mine_at(dir, &trust) {
+    let untrusted = untrusted_mine_at(dir, &trust);
+    // One trusted again before its listing went is told anew if unpaired
+    // later (PR #572 re-review N8).
+    TOLD_FORGET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|id| untrusted.contains(id));
+    for device_id in untrusted {
         // Told once, even if its listing is not forgotten at once (a
         // computers.json that does not write): not again each pass (PR
         // #572 review).
