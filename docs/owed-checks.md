@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1018 open items.
+1024 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 156 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 157 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 106 |
+| A second computer | 111 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -525,6 +525,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
+**234. Pointer lock and relative mouse (PC7)**
+
+- On a test machine (never the owner's box), run `POCKETDESK_POINTER_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_grab_locks_and_frees -- --ignored` (without the variable it skips) and move the mouse during the five seconds: the pointer stays hidden and inside the window, the test reports relative moves above zero, and the pointer comes back free as the window closes. On Windows, and on the laptop under Hyprland (Wayland, locked in place) and under an X11 session if one is at hand (confined). (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -998,6 +1002,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Both ways of the link: repeat the on and off with the laptop as the computer that keeps the link (its id sorts first) and with Windows keeping it, by pairing the other way round or a throwaway pair of ids. (where: second computer)
 - Lock it when I close the window, on (bar or Settings), with the switch on there: closing the window locks the laptop (`loginctl lock-session` or hyprlock); with the switch off there it does not, and a notification here says "Couldn't lock" with that switch's name; with the option off it does not. Never the other way round: Windows here is the owner's box and is never the one locked. (where: second computer)
 - With a phone holding privacy on the laptop first, Hide what I do there says another phone or computer holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)
+
+**234. Pointer lock and relative mouse (PC7)**
+
+- The laptop viewing Windows, a 3D or mouse-look program in front on Windows (Blender's viewport fly mode, or a game in a window): Lock the pointer turns it as the mouse moves, with no edge stop; "Ctrl+Alt+Shift+M frees the pointer" shows for about 3 s; the chord frees it. Never the other way round with the owner's box grabbed. (where: second computer)
+- Windows (a test machine) viewing the laptop's headless sway stand-in, locked: `wev` on the stand-in counts relative motion events while the mouse moves (counts only), and none once freed (the moves go absolute again). (where: second computer)
+- Locked, each of these frees it at once and the pointer shows again: Ctrl+Alt+Shift pressed and let go alone; Alt+Tab or a click elsewhere (focus loss); View only; closing the window; the view dropping into Reconnecting. Coming back to the window does not lock again by itself. (where: second computer)
+- With the shared keyboard and mouse on and the laptop placed beside the viewing computer: locked, pushing against that edge (and pressing the switch key) never crosses, the badge says a screen window holds the pointer; freed, the edge crosses again. With a game in front holding the edges already, locking and freeing says nothing more. (where: second computer)
+- A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
