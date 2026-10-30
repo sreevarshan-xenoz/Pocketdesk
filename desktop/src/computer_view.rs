@@ -480,11 +480,8 @@ pub fn give_up(
 /// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
 /// here (PR #551 review M8).
 pub fn stats_chord(event: &egui::Event) -> bool {
-    matches!(
-        event,
-        egui::Event::Key { key: egui::Key::S, pressed: true, modifiers, .. }
-            if modifiers.ctrl && modifiers.alt && modifiers.shift
-    )
+    matches!(event, egui::Event::Key { pressed: true, .. })
+        && view_pointer::chord_is(event, egui::Key::S)
 }
 
 /// `events` without the stats' switch, the pointer lock's (PC7) or the
@@ -493,17 +490,11 @@ pub fn stats_chord(event: &egui::Event) -> bool {
 pub fn keep_chord_here(events: &mut Vec<egui::Event>) {
     let screens = events.iter().any(|event| screen_chord(event).is_some());
     events.retain(|event| {
-        !matches!(
-            event,
-            egui::Event::Key { key: egui::Key::S, modifiers, .. }
-                if modifiers.ctrl && modifiers.alt && modifiers.shift
-        ) && !view_pointer::is_lock_chord_key(event)
-            && !matches!(
-                event,
-                egui::Event::Key { key, modifiers, .. }
-                    if modifiers.ctrl && modifiers.alt && modifiers.shift
-                        && screen_key(*key).is_some()
-            )
+        !view_pointer::chord_is(event, egui::Key::S)
+            && !view_pointer::is_lock_chord_key(event)
+            && view_pointer::chord_key(event)
+                .and_then(screen_key)
+                .is_none()
             && !(screens && matches!(event, egui::Event::Text(_)))
     });
 }
@@ -713,19 +704,10 @@ pub fn screen_buttons(layout: &[wire::ScreenPlace], count: usize) -> Vec<egui::R
 
 /// The screen Ctrl+Alt+Shift+1 to 9 pressed asks for (PC11), from 0.
 pub fn screen_chord(event: &egui::Event) -> Option<u32> {
-    let egui::Event::Key {
-        key,
-        pressed: true,
-        modifiers,
-        ..
-    } = event
-    else {
-        return None;
-    };
-    if !(modifiers.ctrl && modifiers.alt && modifiers.shift) {
+    if !matches!(event, egui::Event::Key { pressed: true, .. }) {
         return None;
     }
-    screen_key(*key)
+    view_pointer::chord_key(event).and_then(screen_key)
 }
 
 /// The screen a number key names, from 0: 1 to 9.
@@ -5644,13 +5626,16 @@ mod tests {
     /// would type; nothing else does.
     #[test]
     fn ctrl_alt_shift_and_a_number_picks_a_screen_here() {
-        let key = |key, pressed, modifiers| egui::Event::Key {
+        // As egui-winit says a key: what it types, and where it sits (PR
+        // #570 review I3: with Shift, the 1 key types "!").
+        let typed = |key, physical, pressed, modifiers| egui::Event::Key {
             key,
-            physical_key: None,
+            physical_key: Some(physical),
             pressed,
             repeat: false,
             modifiers,
         };
+        let key = |key, pressed, modifiers| typed(key, key, pressed, modifiers);
         let all = egui::Modifiers {
             ctrl: true,
             alt: true,
@@ -5666,6 +5651,18 @@ mod tests {
             ..all
         };
         assert_eq!(screen_chord(&key(egui::Key::Num2, true, ctrl_alt)), None);
+        let bang = typed(egui::Key::Exclamationmark, egui::Key::Num1, true, all);
+        assert_eq!(screen_chord(&bang), Some(0), "Shift+1 types !");
+        let slash = typed(egui::Key::Slash, egui::Key::Num7, true, all);
+        assert_eq!(screen_chord(&slash), Some(6), "a German Shift+7");
+        let mut kept = vec![bang.clone(), slash];
+        keep_chord_here(&mut kept);
+        assert!(kept.is_empty(), "kept here, never sent");
+        // The stats' and the pointer's chords, where a layout moves S or M.
+        let s = typed(egui::Key::O, egui::Key::S, true, all);
+        assert!(stats_chord(&s));
+        let m = typed(egui::Key::Comma, egui::Key::M, true, all);
+        assert!(view_pointer::lock_chord(&m));
         let mut events = vec![
             key(egui::Key::Num2, true, all),
             egui::Event::Text("@".into()),

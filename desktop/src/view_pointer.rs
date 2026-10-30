@@ -30,23 +30,52 @@ pub const HINT: &str = "Ctrl+Alt+Shift+M frees the pointer";
 /// How long it says it.
 pub const HINT_FOR: Duration = Duration::from_secs(3);
 
+/// The key of a chord with Ctrl+Alt+Shift held, pressed, held or let go:
+/// the key where it sits on the keyboard (PR #570 review I3), as Shift and
+/// the layout change what it types (Shift+1 types "!", a key egui names
+/// apart), else the key it types.
+pub fn chord_key(event: &egui::Event) -> Option<egui::Key> {
+    match event {
+        egui::Event::Key {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        } if modifiers.ctrl && modifiers.alt && modifiers.shift => {
+            Some(physical_key.unwrap_or(*key))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `event` is Ctrl+Alt+Shift and the letter `letter`, pressed,
+/// held or let go: the key that types it, or the key where it sits (PR
+/// #570 review I3), whichever the layout says.
+pub fn chord_is(event: &egui::Event, letter: egui::Key) -> bool {
+    matches!(
+        event,
+        egui::Event::Key { key, physical_key, modifiers, .. }
+            if modifiers.ctrl && modifiers.alt && modifiers.shift
+                && (*key == letter || *physical_key == Some(letter))
+    )
+}
+
 /// Whether `event` is Ctrl+Alt+Shift+M pressed: the lock's switch.
 pub fn lock_chord(event: &egui::Event) -> bool {
     matches!(
         event,
-        egui::Event::Key { key: egui::Key::M, pressed: true, repeat: false, modifiers, .. }
-            if modifiers.ctrl && modifiers.alt && modifiers.shift
-    )
+        egui::Event::Key {
+            pressed: true,
+            repeat: false,
+            ..
+        }
+    ) && chord_is(event, egui::Key::M)
 }
 
 /// Whether `event` is the lock's switch, pressed, held or let go: it is
 /// this window's, not the other computer's.
 pub fn is_lock_chord_key(event: &egui::Event) -> bool {
-    matches!(
-        event,
-        egui::Event::Key { key: egui::Key::M, modifiers, .. }
-            if modifiers.ctrl && modifiers.alt && modifiers.shift
-    )
+    chord_is(event, egui::Key::M)
 }
 
 /// What the lock is decided on, each pass of the window.
@@ -144,12 +173,13 @@ impl ReleaseChord {
         for event in events {
             if let egui::Event::Key {
                 key,
+                physical_key,
                 pressed,
                 modifiers,
                 ..
             } = event
             {
-                if *pressed && !is_chord_key(*key) {
+                if *pressed && !is_chord_key(physical_key.unwrap_or(*key)) {
                     self.spoiled = true;
                 }
                 fired |= self.look(*modifiers);
