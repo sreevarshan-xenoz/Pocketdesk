@@ -1850,7 +1850,7 @@ pub async fn run_with(
                     PrivacyStep::Nothing if ask == wire::PRIVACY_SHOW => ViewPrivacy::Off,
                     PrivacyStep::Nothing => v.status.privacy.clone(),
                 };
-                say_privacy(v, viewer.as_ref(), said);
+                answer_privacy(v, viewer.as_ref(), said);
             }
             Some((device_id, body)) = privacy_answers.recv() => {
                 // The answer to a lock asked as the window closed (review
@@ -2004,6 +2004,13 @@ fn say_privacy(view: &mut View, viewer: Option<&Viewer>, privacy: ViewPrivacy) {
     if view.status.privacy == privacy {
         return;
     }
+    answer_privacy(view, viewer, privacy);
+}
+
+/// The view's privacy now stands as `privacy`, said to its window whether
+/// or not it changed (PR #561 review M5): the window's own ask showed it
+/// asked or off at once, and hears how it really stands.
+fn answer_privacy(view: &mut View, viewer: Option<&Viewer>, privacy: ViewPrivacy) {
     view.status.privacy = privacy;
     if let Some(w) = viewer.filter(|w| w.session_id == view.session_id) {
         let _ = w.tx.try_send(Message::Status(view.status.clone()));
