@@ -944,7 +944,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         if let Some(key) = send_key
             && controls(status.control, view_only, connected, true)
         {
-            let chord = state.input.chord(key.keys());
+            let chord = state.input.chord(key.keys(), status.windows);
             send(&mut state, chord);
         }
         if quality != state.quality {

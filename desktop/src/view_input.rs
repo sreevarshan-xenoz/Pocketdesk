@@ -639,12 +639,14 @@ impl WindowInput {
     }
 
     /// `keys` pressed in order and let go in reverse there, as a chord from
-    /// the Send keys menu (PC4); a key held there already stays held. Print
+    /// the Send keys menu (PC4); a key held there already stays held. To a
+    /// computer that is not Windows (`windows` not `Some(true)`), Print
     /// Screen goes with no Alt held there: Alt held is let go first and
     /// pressed again after, so it is never Alt+SysRq, Linux's magic SysRq
-    /// (PR #559 review I4).
-    pub fn chord(&mut self, keys: &[u16]) -> Vec<InputPacket> {
-        let lifted: Vec<u16> = if keys.contains(&KEY_SYSRQ) {
+    /// (PR #559 review I4). Windows keeps Alt+Print Screen, its picture of
+    /// the window in front (re-review N4).
+    pub fn chord(&mut self, keys: &[u16], windows: Option<bool>) -> Vec<InputPacket> {
+        let lifted: Vec<u16> = if keys.contains(&KEY_SYSRQ) && windows != Some(true) {
             [LEFT_ALT, RIGHT_ALT]
                 .into_iter()
                 .filter(|alt| self.down_there.contains(alt))
@@ -1171,7 +1173,7 @@ mod tests {
     fn a_chord_goes_down_in_order_and_up_in_reverse() {
         let mut input = WindowInput::default();
         assert_eq!(
-            words(&input.chord(SendKey::CtrlShiftEsc.keys())),
+            words(&input.chord(SendKey::CtrlShiftEsc.keys(), None)),
             [
                 "KeyEvent { key: 29, pressed: true }",
                 "KeyEvent { key: 42, pressed: true }",
@@ -1183,7 +1185,7 @@ mod tests {
         );
         assert!(!input.holds(), "nothing is left held");
         assert_eq!(
-            words(&input.chord(SendKey::Lock.keys())),
+            words(&input.chord(SendKey::Lock.keys(), None)),
             [
                 "KeyEvent { key: 125, pressed: true }",
                 "KeyEvent { key: 38, pressed: true }",
@@ -1192,7 +1194,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            words(&input.chord(SendKey::PrintScreen.keys())),
+            words(&input.chord(SendKey::PrintScreen.keys(), None)),
             [
                 "KeyEvent { key: 99, pressed: true }",
                 "KeyEvent { key: 99, pressed: false }",
@@ -1201,7 +1203,7 @@ mod tests {
         // Alt held through the window: Alt+Tab taps Tab alone.
         input.take(&[key(egui::Key::AltLeft, true)], picture(), Instant::now());
         assert_eq!(
-            words(&input.chord(SendKey::AltTab.keys())),
+            words(&input.chord(SendKey::AltTab.keys(), None)),
             [
                 "KeyEvent { key: 15, pressed: true }",
                 "KeyEvent { key: 15, pressed: false }",
@@ -1211,7 +1213,7 @@ mod tests {
         // Review I4: Print Screen with Alt held there lets Alt go first and
         // presses it again after, never Alt+SysRq.
         assert_eq!(
-            words(&input.chord(SendKey::PrintScreen.keys())),
+            words(&input.chord(SendKey::PrintScreen.keys(), None)),
             [
                 "KeyEvent { key: 56, pressed: false }",
                 "KeyEvent { key: 99, pressed: true }",
@@ -1220,6 +1222,14 @@ mod tests {
             ]
         );
         assert!(input.holds(), "Alt is held there again, as it is here");
+        // Re-review N4: to Windows, Alt+Print Screen stays itself.
+        assert_eq!(
+            words(&input.chord(SendKey::PrintScreen.keys(), Some(true))),
+            [
+                "KeyEvent { key: 99, pressed: true }",
+                "KeyEvent { key: 99, pressed: false }",
+            ]
+        );
     }
 
     /// PC4: a key the grab took is held there until let go, Shift held
