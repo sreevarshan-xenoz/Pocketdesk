@@ -399,6 +399,12 @@ pub struct Config {
     /// (PC4); Ctrl+Alt+Shift takes them back. On by default.
     #[serde(default = "default_true")]
     pub computer_view_grab_keys: bool,
+    /// The other computer is locked as the window that shows its screen
+    /// closes (PC8), with that computer's own lock, which its "Lock, sleep,
+    /// privacy and wake others" switch for this one allows. Off until
+    /// chosen, there or in Settings.
+    #[serde(default)]
+    pub computer_view_lock_on_close: bool,
     /// Tell the owner's paired computers how to wake this one (PC6): the
     /// MAC and broadcast address of the adapter its link leaves by, sent on
     /// each link as it comes up. Off, it tells them to forget what they
@@ -629,6 +635,7 @@ impl Default for Config {
             computer_view_stats: false,
             computer_view_clipboard: true,
             computer_view_grab_keys: true,
+            computer_view_lock_on_close: false,
             computer_wake_facts: true,
         }
     }
@@ -889,6 +896,7 @@ impl Config {
         "computer_view_stats",
         "computer_view_clipboard",
         "computer_view_grab_keys",
+        "computer_view_lock_on_close",
         "computer_wake_facts",
     ];
 }
@@ -1395,6 +1403,36 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_grab_keys"]
+        );
+    }
+
+    /// PC8: the window locks the other computer as it closes only once
+    /// chosen, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_locks_it_on_close_only_once_chosen() {
+        let path = temp("computer-view-lock");
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            !Config::load_from(&path)
+                .unwrap()
+                .computer_view_lock_on_close
+        );
+        assert!(!Config::default().computer_view_lock_on_close);
+        let chosen = Config {
+            computer_view_lock_on_close: true,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_lock_on_close"])
+            .unwrap();
+        assert!(
+            Config::load_from(&path)
+                .unwrap()
+                .computer_view_lock_on_close
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_lock_on_close"]
         );
     }
 

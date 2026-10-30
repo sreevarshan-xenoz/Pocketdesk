@@ -156,6 +156,8 @@ pub async fn unregister_client(connection_id: &str) {
         .remove(connection_id);
     // A nearby computer's ask on it is over (it frees the prompt's slot).
     crate::nearby::connection_closed(connection_id);
+    // A computer's privacy grab asked on it ends with it (PC8).
+    crate::plugins::privacy::connection_closed(connection_id);
     let mut clients = ACTIVE_CLIENTS.lock().await;
     clients.retain(|c| c.connection_id() != connection_id);
     tracing::info!(
