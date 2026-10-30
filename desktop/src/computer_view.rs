@@ -1264,6 +1264,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             pointer.surrender_focus();
                             lock(shared).pointer.toggle();
                         }
+                        // The way out, said on the greyed bar for as long
+                        // as it is locked (PR #563 re-review N5).
+                        if pointer_locked {
+                            ui.label(view_pointer::HINT);
+                        }
                         // PC8: the other computer's own privacy mode.
                         let mut hide = hiding(&status.privacy);
                         let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
@@ -3248,6 +3253,10 @@ mod tests {
         harness.step();
         harness.step();
         assert!(lock(&shared).pointer.locked(), "the chord locked it");
+        // The greyed bar says the way out (re-review N5), beside the
+        // picture's own hint of the first seconds.
+        let said = harness.query_all_by_label(view_pointer::HINT).count();
+        assert_eq!(said, 2, "the bar and the picture say how to free it");
         // The picture's size changing (a new size said, its picture not
         // come yet) leaves locked input going (PR #563 review M6).
         lock(&shared).size = Some((w as u16 + 2, h as u16));
