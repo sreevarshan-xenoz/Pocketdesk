@@ -2240,7 +2240,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "The other computer's own keyboard layout then says what each key types. The window's bar switches it for each computer, and that choice is kept for that computer; this is the start for a computer never switched. Text from an input method still goes as text.",
+                        "The other computer's own keyboard layout then says what each key types. The window's bar switches it for each computer, and that choice is kept for that computer; this is the start for a computer never switched. Shortcuts follow the key's place there too, and the keypad's digits go as the main keyboard's.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.

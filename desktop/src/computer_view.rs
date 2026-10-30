@@ -298,7 +298,7 @@ pub const POSITION_HINT: &str = "Games usually want Keys by position";
 /// What the bar's "Keys by position" says of itself.
 pub fn keys_by_position_hover(name: &str) -> String {
     format!(
-        "Send every key as the key at its place on the keyboard, not as the text it types here: for games and programs that read keys by where they sit (WASD). {name}'s own keyboard layout then says what each key types. Kept for {name}."
+        "Send every key as the key at its place on the keyboard, not as the text it types here: for games and programs that read keys by where they sit (WASD). {name}'s own keyboard layout then says what each key types, and shortcuts follow the key's place (on an AZERTY keyboard there, the key in A's place is Q). The keypad's digits, Enter, minus and slash go as the main keyboard's. Kept for {name}."
     )
 }
 
@@ -668,7 +668,10 @@ fn switch_keys(shared: &Mutex<State>, state_dir: &Path, device_id: &str, on: boo
         device_id: device_id.to_string(),
         on,
     };
+    // The switch shows only while the window is connected, through this
+    // computer's server, which takes the ask (PR #573 review N5).
     if let Err(e) = computers::request(state_dir, ask, now_unix()) {
+        eprintln!("Pocketdesk: Keys by position not saved for this computer: {e}");
         state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
     }
 }
@@ -2890,7 +2893,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             // change while locked keeps the movement and what is held
             // (PR #563 review M6).
             let current = current || state.pointer.locked();
-            let on = controls(status.control, state.view_only, connected, current) && focused;
+            // Reconnecting, nothing reaches that computer: what is held is
+            // let go here and there (PR #573 review N7).
+            let on = controls(status.control, state.view_only, connected, current)
+                && focused
+                && status.reconnecting == 0;
             // Keys by position switched, or a fresh input after a rejoin:
             // what is held goes first.
             let by_position = state.keys_by_position;
@@ -7168,6 +7175,33 @@ mod tests {
             ],
             "each W by its place, no text, and each let go"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #573 review N7: a W held by position is let go as the view
+    /// starts reconnecting, and nothing is held once it is back.
+    #[test]
+    fn keys_held_by_position_are_let_go_as_the_view_reconnects() {
+        let (shared, relay, dir) = mic_window(
+            "keys-reconnect",
+            Arc::new(|_| Err(io::Error::other("no microphone in this test"))),
+        );
+        lock(&shared).keys_by_position = true;
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        press_w(&mut harness);
+        lock(&shared).status.reconnecting = 1;
+        harness.step();
+        assert!(!lock(&shared).input.holds(), "let go while reconnecting");
+        lock(&shared).status.reconnecting = 0;
+        harness.step();
+        assert!(!lock(&shared).input.holds());
+        drop(harness);
+        drop(shared);
+        assert_eq!(heard_keys(relay), ["w down", "w up"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
