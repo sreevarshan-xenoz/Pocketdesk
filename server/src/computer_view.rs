@@ -1342,6 +1342,26 @@ pub fn privacy_ends(status: &ViewStatus, name: &str) -> Option<String> {
     }
 }
 
+/// A new id for a privacy ask (PR #561 review M3): the other computer says
+/// it again in its answer, so an answer to an older ask is not taken for
+/// the newest.
+fn next_ask_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `packet` with the ask's `id`.
+pub fn tagged(mut packet: NetworkPacket, id: u64) -> NetworkPacket {
+    packet.body["id"] = serde_json::json!(id);
+    packet
+}
+
+/// Whether the answer `body` answers the ask `id`: it names it, or names
+/// none (a computer before the review, which says no id).
+pub fn answers_ask(body: &serde_json::Value, id: u64) -> bool {
+    body.get("id").is_none_or(|said| said.as_u64() == Some(id))
+}
+
 /// The window's privacy mode held on the other computer (PC8): asked, then
 /// renewed, and let go there however it ends here, as the hold drops.
 struct PrivacyHold {
@@ -1349,8 +1369,10 @@ struct PrivacyHold {
     send: PrivacySend,
     /// That computer said it holds it.
     on: bool,
-    /// When the last grab or renewal went, and whether it is unanswered.
+    /// When the last grab or renewal went, its id, and whether it is
+    /// unanswered.
     sent: Instant,
+    asked: u64,
     waiting: bool,
     /// Let go already, or never held there (refused).
     done: bool,
@@ -1358,21 +1380,24 @@ struct PrivacyHold {
 
 impl PrivacyHold {
     fn ask(device_id: &str, send: PrivacySend, now: Instant) -> Self {
+        let asked = next_ask_id();
         if let Some(packet) = privacy_packet(&PrivacyStep::Grab) {
-            send(device_id, packet);
+            send(device_id, tagged(packet, asked));
         }
         Self {
             device_id: device_id.to_string(),
             send,
             on: false,
             sent: now,
+            asked,
             waiting: true,
             done: false,
         }
     }
 
     fn renew(&mut self, now: Instant) {
-        (self.send)(&self.device_id, renewal());
+        self.asked = next_ask_id();
+        (self.send)(&self.device_id, tagged(renewal(), self.asked));
         self.sent = now;
         self.waiting = true;
     }
@@ -1381,7 +1406,7 @@ impl PrivacyHold {
     fn let_go(mut self, lock: bool) {
         self.done = true;
         if let Some(packet) = privacy_packet(&PrivacyStep::Release { lock }) {
-            (self.send)(&self.device_id, packet);
+            (self.send)(&self.device_id, tagged(packet, next_ask_id()));
         }
     }
 }
@@ -1391,7 +1416,7 @@ impl Drop for PrivacyHold {
         if !self.done
             && let Some(packet) = privacy_packet(&PrivacyStep::Release { lock: false })
         {
-            (self.send)(&self.device_id, packet);
+            (self.send)(&self.device_id, tagged(packet, next_ask_id()));
         }
     }
 }
@@ -1693,7 +1718,7 @@ pub async fn run_with(
                     if ask == wire::PRIVACY_LOCK
                         && let Some(packet) = privacy_packet(&PrivacyStep::Lock)
                     {
-                        privacy_send(&device_id, packet);
+                        privacy_send(&device_id, tagged(packet, next_ask_id()));
                     }
                     continue;
                 };
@@ -1714,7 +1739,7 @@ pub async fn run_with(
                     }
                     step @ PrivacyStep::Lock => {
                         if let Some(packet) = privacy_packet(&step) {
-                            privacy_send(&v.device_id, packet);
+                            privacy_send(&v.device_id, tagged(packet, next_ask_id()));
                         }
                         v.status.privacy.clone()
                     }
@@ -1725,10 +1750,12 @@ pub async fn run_with(
                 say_privacy(v, viewer.as_ref(), said);
             }
             Some((device_id, body)) = privacy_answers.recv() => {
-                let Some(v) = view
-                    .as_mut()
-                    .filter(|v| v.device_id == device_id && v.privacy.is_some())
-                else {
+                // Only an answer to the hold's newest ask (review M3): one to
+                // an older ask, refused late, leaves a newer grab alone.
+                let Some(v) = view.as_mut().filter(|v| {
+                    v.device_id == device_id
+                        && v.privacy.as_ref().is_some_and(|h| answers_ask(&body, h.asked))
+                }) else {
                     continue;
                 };
                 let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
@@ -1741,10 +1768,10 @@ pub async fn run_with(
                         say_privacy(v, watching, ViewPrivacy::On);
                     }
                     Some(Err(why)) => {
-                        // Not held there: nothing to let go.
-                        if let Some(mut hold) = v.privacy.take() {
-                            hold.done = true;
-                        }
+                        // Let go there anyway, as the hold drops: a release
+                        // with nothing held is nothing, and one that crossed
+                        // a grant is not left held.
+                        v.privacy = None;
                         tracing::info!(device_id = %v.device_id, "Privacy there refused: {why}");
                         say_privacy(v, watching, ViewPrivacy::Refused(why));
                     }
@@ -2286,6 +2313,26 @@ mod tests {
         );
     }
 
+    /// PR #561 review M3: an answer is matched to its ask by the id the
+    /// other computer says again; one before the review says none.
+    #[test]
+    fn an_answer_is_matched_to_its_ask() {
+        use serde_json::json;
+        assert!(answers_ask(&json!({"ok": true, "id": 7}), 7));
+        assert!(
+            !answers_ask(&json!({"ok": false, "id": 6}), 7),
+            "an older ask's"
+        );
+        assert!(
+            answers_ask(&json!({"ok": true}), 7),
+            "a host that says none"
+        );
+        assert!(!answers_ask(&json!({"ok": true, "id": "7"}), 7));
+        let packet = tagged(privacy_packet(&PrivacyStep::Grab).unwrap(), 9);
+        assert_eq!(packet.body, json!({"action": "grab", "id": 9}));
+        assert_ne!(next_ask_id(), next_ask_id());
+    }
+
     /// PC8: a grab's answer holds it, a refusal says why, and a status, a
     /// release or a lock says nothing of it.
     #[test]
@@ -2381,8 +2428,12 @@ mod tests {
             Vec::<(String, serde_json::Value)>::new(),
         ));
         let to = sent.clone();
+        // Each ask names itself; the id is checked apart.
         let send: PrivacySend = Arc::new(move |id: &str, p: NetworkPacket| {
-            to.lock().unwrap().push((id.to_string(), p.body));
+            let mut body = p.body;
+            assert!(body["id"].as_u64().is_some(), "{body}");
+            body.as_object_mut().unwrap().remove("id");
+            to.lock().unwrap().push((id.to_string(), body));
         });
         let taken = || std::mem::take(&mut *sent.lock().unwrap());
         let now = Instant::now();

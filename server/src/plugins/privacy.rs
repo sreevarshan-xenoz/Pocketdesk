@@ -46,6 +46,16 @@ pub(crate) fn is_answer(body: &Value) -> bool {
     body.get("ok").is_some()
 }
 
+/// `response` naming the request `body` it answers (PR #561 review M3):
+/// the request's `id`, when it said one, so the asker matches the answer to
+/// its ask.
+pub(crate) fn answering(body: &Value, mut response: Value) -> Value {
+    if let Some(id) = body.get("id") {
+        response["id"] = id.clone();
+    }
+    response
+}
+
 /// The holder, forgotten once the grab itself has ended (released or its
 /// TTL ran out).
 fn holder() -> Option<Holder> {
@@ -158,7 +168,10 @@ pub(crate) async fn answer_denied(packet: &NetworkPacket, sender: &dyn DeviceSen
         return;
     }
     let computer = computer(sender.device_id()).await;
-    let body = json!({ "ok": false, "error": denied_words(computer) });
+    let body = answering(
+        &packet.body,
+        json!({ "ok": false, "error": denied_words(computer) }),
+    );
     let _ = sender
         .send_packet(&NetworkPacket::new(PRIVACY).with_body(body))
         .await;
@@ -247,7 +260,7 @@ pub(crate) async fn respond(
             Err(e) => response["lockError"] = json!(e.to_string()),
         }
     }
-    response
+    answering(body, response)
 }
 
 #[async_trait::async_trait]
@@ -374,6 +387,20 @@ mod tests {
         assert!(
             denied_words(false).contains("Power"),
             "a phone's words kept"
+        );
+    }
+
+    /// PR #561 review M3: an answer names the request it answers.
+    #[test]
+    fn an_answer_names_its_request() {
+        assert_eq!(
+            answering(&json!({"action": "grab", "id": 4}), json!({"ok": true})),
+            json!({"ok": true, "id": 4})
+        );
+        assert_eq!(
+            answering(&json!({"action": "grab"}), json!({"ok": true})),
+            json!({"ok": true}),
+            "a phone's request names none"
         );
     }
 

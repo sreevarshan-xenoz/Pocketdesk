@@ -2139,7 +2139,10 @@ async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
         let ttl = privacy::grab_ttl(Some(&connection));
         privacy::respond(body, device_id, Some(&connection), ttl).await
     } else {
-        serde_json::json!({ "ok": false, "error": privacy::denied_words(true) })
+        privacy::answering(
+            body,
+            serde_json::json!({ "ok": false, "error": privacy::denied_words(true) }),
+        )
     };
     if let Some(outgoing) = live(device_id) {
         let _ = outgoing

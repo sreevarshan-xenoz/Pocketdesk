@@ -922,7 +922,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
     let host = PrivacyHost {
         send: Arc::new(move |id: &str, packet: NetworkPacket| {
             assert_eq!(packet.packet_type, "kdeconnect.pocketdesk.privacy");
-            let _ = asked_tx.send((id.to_string(), packet.body));
+            let _ = asked_tx.send((id.to_string(), without_id(packet.body)));
         }),
         answers: answers_rx,
     };
@@ -999,8 +999,10 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         .await
         .unwrap();
     privacy_said(&mut window, &ViewPrivacy::Refused(ended.into())).await;
+    // Let go there anyway (review M3): nothing is left held by a refusal.
+    assert_eq!(next_ask(&mut asked).await.1["action"], "release");
 
-    // Refused by its Power switch: nothing held, nothing let go.
+    // Refused by its Power switch: let go there too, which is nothing.
     window.write_all(&say(wire::PRIVACY_HIDE)).await.unwrap();
     assert_eq!(next_ask(&mut asked).await.1["action"], "grab");
     let power =
@@ -1013,6 +1015,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         .await
         .unwrap();
     privacy_said(&mut window, &ViewPrivacy::Refused(power.into())).await;
+    assert_eq!(next_ask(&mut asked).await.1["action"], "release");
 
     // Held again, then the window closes with its lock: one release, with
     // the lock, and nothing after it.
@@ -1062,7 +1065,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
     let (answers, answers_rx) = mpsc::channel(8);
     let host = PrivacyHost {
         send: Arc::new(move |_: &str, packet: NetworkPacket| {
-            let _ = asked_tx.send(packet.body);
+            let _ = asked_tx.send(without_id(packet.body));
         }),
         answers: answers_rx,
     };
@@ -1251,4 +1254,14 @@ async fn controlled_view(
         }
     }
     (commands, relay, window)
+}
+
+/// An ask's body without the id it names itself by (PR #561 review M3).
+fn without_id(mut body: serde_json::Value) -> serde_json::Value {
+    assert!(
+        body["id"].as_u64().is_some(),
+        "every ask names itself: {body}"
+    );
+    body.as_object_mut().unwrap().remove("id");
+    body
 }
