@@ -17,7 +17,10 @@
 //! a keyboard grab sends the Windows key and Alt+Tab there
 //! ([`crate::view_grab`], PC4). "Hide what I do there" asks that computer
 //! for its own privacy mode while the window controls it, and "Lock it when
-//! I close the window" locks it as the window closes (PC8).
+//! I close the window" locks it as the window closes (PC8). "Lock the
+//! pointer" (or Ctrl+Alt+Shift+M) holds this computer's pointer in the window
+//! and sends the mouse's movement as relative moves, for games and 3D
+//! ([`crate::view_pointer`], PC7).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -39,6 +42,7 @@ use crate::video::{
 };
 use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
+use crate::view_pointer::{self, PointerLock, ReleaseChord};
 
 /// The window's id among the app's viewports.
 fn viewport_id() -> egui::ViewportId {
@@ -136,6 +140,11 @@ struct State {
     /// When "Hide what I do there" was last asked (PR #561 review): an
     /// ask still unanswered after [`ASKING_WAIT`] is given up here too.
     privacy_asked: Option<Instant>,
+    /// The pointer lock (PC7) and its release chord, and what the relay was
+    /// last told of it on this connection (`None`: nothing yet).
+    pointer: PointerLock,
+    release_chord: ReleaseChord,
+    pointer_said: Option<bool>,
 }
 
 /// How long the bar shows "Asking…" before it gives up: the relay's own
@@ -305,15 +314,15 @@ pub fn stats_chord(event: &egui::Event) -> bool {
     )
 }
 
-/// `events` without the stats' switch, pressed or let go: it is this
-/// window's, not the other computer's.
+/// `events` without the stats' switch or the pointer lock's (PC7),
+/// pressed or let go: they are this window's, not the other computer's.
 pub fn keep_chord_here(events: &mut Vec<egui::Event>) {
     events.retain(|event| {
         !matches!(
             event,
             egui::Event::Key { key: egui::Key::S, modifiers, .. }
                 if modifiers.ctrl && modifiers.alt && modifiers.shift
-        )
+        ) && !view_pointer::is_lock_chord_key(event)
     });
 }
 
@@ -709,6 +718,30 @@ fn say_privacy(state: &mut State, ask: u8) {
     }
 }
 
+/// Say the window's pointer lock to the server (PC7): only while it says
+/// locked does the relay pass relative moves on. A broken write ends input
+/// here, as [`send`]'s.
+fn say_pointer(state: &mut State, locked: bool) {
+    let Some(writer) = state.writer.as_mut() else {
+        return;
+    };
+    if Message::PointerLock(locked).write(writer).is_err() {
+        state.writer = None;
+        return;
+    }
+    state.pointer_said = Some(locked);
+}
+
+/// Whether the relay must be told the lock again: locked and not said so on
+/// this connection, or freed after it was said locked (PC7).
+pub fn pointer_to_say(locked: bool, said: Option<bool>) -> bool {
+    if locked {
+        said != Some(true)
+    } else {
+        said == Some(true)
+    }
+}
+
 /// Say the window's focus to the server (PC3); a broken write ends input
 /// here, as [`send`]'s.
 fn say_focus(state: &mut State, edge: Edge) {
@@ -810,6 +843,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
+        // The pointer is let go with the window (PC7).
+        if state.pointer.locked() || state.pointer_said == Some(true) {
+            say_pointer(&mut state, false);
+        }
+        state.pointer = PointerLock::default();
+        ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(
+            egui::viewport::CursorGrab::None,
+        ));
         // The lock, when chosen, goes before the view stops (PC8).
         if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
             say_privacy(&mut state, ask);
@@ -862,6 +903,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         switch_stats(shared, config, stats_on);
         state = lock(shared);
     }
+    // PC7: Ctrl+Alt+Shift+M switches the pointer lock; Ctrl+Alt+Shift
+    // pressed and let go alone frees it (PC4's release chord).
+    let (events, held) = ctx.input(|i| (i.events.clone(), i.modifiers));
+    if events.iter().any(view_pointer::lock_chord) {
+        state.pointer.toggle();
+    }
+    if state.release_chord.observe(&events, held) {
+        state.pointer.free();
+    }
+    let pointer_wanted = state.pointer.wanted();
     #[cfg(windows)]
     let grab_setting = state.grab.setting;
     let lock_on_close = state.lock_on_close;
@@ -955,6 +1006,18 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             grab.surrender_focus();
                             switch_grab(shared, config, grab_on);
                         }
+                    }
+                    // PC7: the pointer held in the window, its movement sent.
+                    let mut pointer_on = pointer_wanted;
+                    let pointer = ui
+                        .checkbox(&mut pointer_on, "Lock the pointer")
+                        .on_hover_text(format!(
+                            "Hold the pointer in this window and send {} how far the mouse moves, for games and 3D. Ctrl+Alt+Shift+M switches it; Ctrl+Alt+Shift alone, or leaving the window, frees it.",
+                            wanted.name
+                        ));
+                    if pointer.clicked() {
+                        pointer.surrender_focus();
+                        lock(shared).pointer.toggle();
                     }
                     // PC8: the other computer's own privacy mode.
                     let mut hide = hiding(&status.privacy);
@@ -1234,6 +1297,16 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 (Some(t), Some((w, h))) => t.size() == [usize::from(w), usize::from(h)],
                 _ => false,
             };
+            let going = ended.is_none();
+            follow_pointer(
+                &mut state,
+                &ctx,
+                picture_rect,
+                area,
+                &status,
+                going,
+                connected,
+            );
             let on = controls(status.control, state.view_only, connected, current) && focused;
             let packets = match picture_rect {
                 Some(rect) if on => {
@@ -1291,6 +1364,68 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         if let Err(e) = ask(state_dir, &mut state, wanted) {
             state.ended = Some(e);
         }
+    }
+}
+
+/// The pointer lock, each pass (PC7): it locks or lets go as
+/// [`PointerLock`] decides (a focus the system said, control, a picture),
+/// the relay hears it before this pass's moves, the window's input turns
+/// relative, and while locked the pointer is hidden and, confined, put back
+/// in the picture's middle as it strays.
+fn follow_pointer(
+    state: &mut State,
+    ctx: &egui::Context,
+    picture: Option<egui::Rect>,
+    area: egui::Rect,
+    status: &ViewStatus,
+    going: bool,
+    connected: bool,
+) {
+    let now = Instant::now();
+    let situation = view_pointer::Situation {
+        // Only a focus the system said: unknown is not focused.
+        focused: ctx.input(|i| i.viewport().focused == Some(true)),
+        controls: going
+            && status.reconnecting == 0
+            && controls(status.control, state.view_only, connected, true),
+        picture: picture.is_some(),
+    };
+    let mode = view_pointer::grab_here();
+    let over = picture.unwrap_or(area);
+    if let Some(change) = state.pointer.step(situation, now) {
+        for command in view_pointer::commands(change, mode, over) {
+            ctx.send_viewport_cmd(command);
+        }
+    }
+    let locked = state.pointer.locked();
+    if pointer_to_say(locked, state.pointer_said) {
+        say_pointer(state, locked);
+    }
+    state.input.set_relative(locked);
+    if !locked {
+        return;
+    }
+    ctx.set_cursor_icon(egui::CursorIcon::None);
+    if mode == view_pointer::GrabMode::Confined
+        && let Some(back) = view_pointer::recentre(ctx.input(|i| i.pointer.latest_pos()), over)
+    {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(back));
+    }
+    if state.pointer.hint(now) {
+        egui::Area::new(egui::Id::new("computer-view-pointer-hint"))
+            .fixed_pos(egui::pos2(over.center().x - 140.0, over.top() + 16.0))
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_black_alpha(210))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.colored_label(egui::Color32::from_gray(235), view_pointer::HINT);
+                    });
+            });
+        ctx.request_repaint_after(view_pointer::HINT_FOR);
     }
 }
 
@@ -1548,6 +1683,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         let mut state = lock(shared);
         state.stream = Some(stream.try_clone()?);
         state.writer = Some(stream.try_clone()?);
+        // A new connection's relay knows no lock yet (PC7).
+        state.pointer_said = None;
         state.session_id = Some(file.session_id);
         state.asked_at = None;
     }
@@ -2125,6 +2262,26 @@ mod tests {
         ];
         keep_chord_here(&mut events);
         assert_eq!(events.len(), 1, "only the A goes on");
+        // PC7: the pointer lock's switch stays here too.
+        let mut events = vec![
+            key(egui::Key::M, true, all),
+            key(egui::Key::M, false, all),
+            key(egui::Key::M, true, egui::Modifiers::NONE),
+        ];
+        keep_chord_here(&mut events);
+        assert_eq!(events.len(), 1, "only the plain M goes on");
+    }
+
+    /// PC7: the relay hears the lock once per connection, and the release
+    /// only after it heard the lock.
+    #[test]
+    fn the_relay_is_told_the_lock_once_a_connection() {
+        assert!(pointer_to_say(true, None), "a new connection");
+        assert!(pointer_to_say(true, Some(false)));
+        assert!(!pointer_to_say(true, Some(true)), "said already");
+        assert!(pointer_to_say(false, Some(true)));
+        assert!(!pointer_to_say(false, Some(false)));
+        assert!(!pointer_to_say(false, None), "never said locked");
     }
 
     #[test]

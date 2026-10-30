@@ -75,4 +75,7 @@ snapshots = ["dep:egui_kittest"]
 egui_kittest = { version = "=0.36.2", features = ["eframe"] }
 # C7: a fixture answer's thumbnails, as the phone encodes them.
 base64 = "0.22"
+# PC7: the pointer lock's live test opens its window off the main thread
+# (winit's event loop builder, as eframe's own).
+winit = { version = "0.30", default-features = false }
 

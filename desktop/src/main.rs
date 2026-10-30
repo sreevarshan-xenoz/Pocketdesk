@@ -42,6 +42,7 @@ mod view_follow;
 #[cfg(windows)]
 mod view_grab;
 mod view_input;
+mod view_pointer;
 mod widgets;
 
 use eframe::egui;

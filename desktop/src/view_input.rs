@@ -14,6 +14,11 @@
 //! paste only when this computer's clipboard holds text: they go back to
 //! being those keys there, whatever this clipboard holds. Whatever is held is let go when the window
 //! loses focus, closes or stops controlling.
+//!
+//! While the window holds the pointer (PC7, [`crate::view_pointer`]) the
+//! pointer goes as relative moves instead: the mouse's raw movement, summed
+//! over a pass and sent as whole steps, what is left of a step kept for the
+//! next; the buttons go without a position.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -347,12 +352,25 @@ pub struct WindowInput {
     clips: Vec<Clip>,
     /// Keys whose copy, cut or paste went already: their release is theirs.
     clipped: BTreeSet<u16>,
+    /// While the pointer is locked (PC7): the raw movement not yet sent as
+    /// a whole step, each way. `None` while it is not.
+    relative: Option<egui::Vec2>,
 }
 
 impl WindowInput {
     /// Whether anything is held on the other computer.
     pub fn holds(&self) -> bool {
         !self.down_there.is_empty() || !self.buttons.is_empty()
+    }
+
+    /// The pointer locked (PC7): its raw movement goes as relative moves,
+    /// and where it is no longer counts; freed, it goes as absolute moves
+    /// again. What was left of a step is forgotten either way.
+    pub fn set_relative(&mut self, on: bool) {
+        if on != self.relative.is_some() {
+            self.relative = on.then_some(egui::Vec2::ZERO);
+            self.pending = None;
+        }
     }
 
     /// Whether a move waits for its turn (the window should look again in
@@ -372,6 +390,33 @@ impl WindowInput {
         let mut out = Vec::new();
         for event in events {
             match event {
+                egui::Event::MouseMoved(delta) => {
+                    if let Some(sum) = self.relative.as_mut() {
+                        *sum += *delta;
+                    }
+                }
+                // Locked, where the hidden pointer is says nothing.
+                egui::Event::PointerMoved(_) if self.relative.is_some() => {}
+                egui::Event::PointerButton {
+                    button: which,
+                    pressed,
+                    ..
+                } if self.relative.is_some() => {
+                    // Its movement so far goes first, then the button, where
+                    // the other computer's pointer is.
+                    self.flush_relative(&mut out);
+                    let code = button(*which);
+                    if *pressed {
+                        self.hold_shift(&mut out);
+                        self.buttons.insert(code);
+                    } else if !self.buttons.remove(&code) {
+                        continue;
+                    }
+                    out.push(InputPacket::MouseClick {
+                        button: code,
+                        pressed: *pressed,
+                    });
+                }
                 egui::Event::PointerMoved(pos) => {
                     let clamp = !self.buttons.is_empty();
                     if let Some(at) = fraction(picture, *pos, clamp) {
@@ -461,7 +506,16 @@ impl WindowInput {
             }
         }
         self.flush(now, &mut out, false);
+        self.flush_relative(&mut out);
         out
+    }
+
+    /// The whole steps of the raw movement summed so far, as relative
+    /// moves; what is left of a step is kept.
+    fn flush_relative(&mut self, out: &mut Vec<InputPacket>) {
+        if let Some(sum) = self.relative.as_mut() {
+            out.extend(whole_moves(sum));
+        }
     }
 
     /// The move waiting, if its turn has come (or `now`, with `force`).
@@ -685,6 +739,8 @@ impl WindowInput {
 
     /// Let go of everything held on the other computer, and forget what is
     /// held here (the window lost focus, closed or stopped controlling).
+    /// A lock's movement not yet sent is forgotten; the lock is the
+    /// window's to free ([`Self::set_relative`]).
     pub fn release_all(&mut self) -> Vec<InputPacket> {
         let mut out: Vec<InputPacket> = std::mem::take(&mut self.buttons)
             .into_iter()
@@ -705,8 +761,38 @@ impl WindowInput {
         self.clipped.clear();
         self.pending = None;
         self.wheel = egui::Vec2::ZERO;
+        if let Some(sum) = self.relative.as_mut() {
+            *sum = egui::Vec2::ZERO;
+        }
         out
     }
+}
+
+/// The whole steps of `sum` (raw movement, each way) as relative moves, as
+/// many as the wire's `i16` needs; the part of a step left stays in `sum`,
+/// so slow movement is not lost to rounding.
+pub fn whole_moves(sum: &mut egui::Vec2) -> Vec<InputPacket> {
+    let mut out = Vec::new();
+    if !sum.x.is_finite() || !sum.y.is_finite() {
+        *sum = egui::Vec2::ZERO;
+        return out;
+    }
+    let (dx, dy) = (sum.x.trunc(), sum.y.trunc());
+    *sum -= egui::vec2(dx, dy);
+    let most = f32::from(i16::MAX);
+    // A pass never moves this far; a wild one is cut to a few packets.
+    let cap = most * 4.0;
+    let (mut dx, mut dy) = (dx.clamp(-cap, cap), dy.clamp(-cap, cap));
+    while dx != 0.0 || dy != 0.0 {
+        let (x, y) = (dx.clamp(-most, most), dy.clamp(-most, most));
+        out.push(InputPacket::MouseMove {
+            dx: x as i16,
+            dy: y as i16,
+        });
+        dx -= x;
+        dy -= y;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1303,5 +1389,108 @@ mod tests {
             Instant::now(),
         );
         assert!(out.is_empty());
+    }
+
+    fn moved(dx: f32, dy: f32) -> egui::Event {
+        egui::Event::MouseMoved(egui::vec2(dx, dy))
+    }
+
+    /// PC7: locked, the raw movement of a pass goes as one relative move
+    /// in whole steps, the part of a step kept for the next pass; where the
+    /// hidden pointer is says nothing.
+    #[test]
+    fn locked_the_movement_goes_as_whole_relative_steps() {
+        let now = Instant::now();
+        let mut input = WindowInput::default();
+        // Not locked: the raw movement is not sent.
+        assert!(input.take(&[moved(5.0, 5.0)], picture(), now).is_empty());
+        input.set_relative(true);
+        assert!(input.relative.is_some());
+        let packets = input.take(
+            &[
+                moved(1.5, -0.25),
+                egui::Event::PointerMoved(egui::pos2(150.0, 70.0)),
+                moved(2.25, -0.5),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(words(&packets), ["MouseMove { dx: 3, dy: 0 }"]);
+        // 0.75 and -0.75 were kept: a quarter more each way is a step.
+        let packets = input.take(&[moved(0.25, -0.25)], picture(), now);
+        assert_eq!(words(&packets), ["MouseMove { dx: 1, dy: -1 }"]);
+        assert!(input.take(&[moved(0.5, 0.0)], picture(), now).is_empty());
+        // Freed: the half step is forgotten and moves are absolute again.
+        input.set_relative(false);
+        input.set_relative(true);
+        assert!(input.take(&[moved(0.5, 0.0)], picture(), now).is_empty());
+        input.set_relative(false);
+        let packets = input.take(
+            &[
+                moved(9.0, 9.0),
+                egui::Event::PointerMoved(egui::pos2(200.0, 100.0)),
+            ],
+            picture(),
+            now,
+        );
+        assert!(
+            matches!(packets.as_slice(), [InputPacket::MouseMoveAbs { .. }]),
+            "{packets:?}"
+        );
+    }
+
+    /// PC7: locked, a button goes without a position, after the movement
+    /// before it, wherever the hidden pointer is (even off the picture).
+    #[test]
+    fn locked_a_button_goes_after_its_movement_without_a_position() {
+        let now = Instant::now();
+        let mut input = WindowInput::default();
+        input.set_relative(true);
+        let off_picture = egui::pos2(10.0, 10.0);
+        let packets = input.take(
+            &[moved(4.0, 0.0), click(off_picture, true), moved(0.0, 2.0)],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&packets),
+            [
+                "MouseMove { dx: 4, dy: 0 }",
+                "MouseClick { button: 0, pressed: true }",
+                "MouseMove { dx: 0, dy: 2 }",
+            ]
+        );
+        assert!(input.holds());
+        let packets = input.take(&[click(off_picture, false)], picture(), now);
+        assert_eq!(
+            words(&packets),
+            ["MouseClick { button: 0, pressed: false }"]
+        );
+        // A release never pressed there is nothing.
+        assert!(
+            input
+                .take(&[click(off_picture, false)], picture(), now)
+                .is_empty()
+        );
+    }
+
+    /// PC7: a pass's movement past the wire's `i16` goes as several moves;
+    /// a wild one is cut short, and one that is not a number is dropped.
+    #[test]
+    fn a_long_movement_is_split_and_a_wild_one_cut() {
+        let mut sum = egui::vec2(40_000.0, -10.0);
+        assert_eq!(
+            words(&whole_moves(&mut sum)),
+            [
+                "MouseMove { dx: 32767, dy: -10 }",
+                "MouseMove { dx: 7233, dy: 0 }",
+            ]
+        );
+        assert_eq!(sum, egui::Vec2::ZERO);
+        let mut wild = egui::vec2(1e30, 0.0);
+        assert_eq!(whole_moves(&mut wild).len(), 4);
+        let mut nan = egui::vec2(f32::NAN, 1.0);
+        assert!(whole_moves(&mut nan).is_empty());
+        assert_eq!(nan, egui::Vec2::ZERO);
     }
 }
