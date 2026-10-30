@@ -788,15 +788,37 @@ async fn forget_untrusted_mine(
         return;
     };
     for device_id in untrusted_mine_at(dir, &trust) {
-        tell_forget(&device_id).await;
+        // Told once, even if its listing is not forgotten at once (a
+        // computers.json that does not write): not again each pass (PR
+        // #572 review).
+        if first_told_forget(&device_id) {
+            tell_forget(&device_id).await;
+        }
     }
     for device_id in forget_untrusted_mine_in(dir, &trust, certs, links) {
+        TOLD_FORGET
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&device_id);
         drop_nudge(&device_id);
         if let Some(views) = views {
             let forgotten = crate::computer_view::Command::Forgotten { device_id };
             let _ = views.send(forgotten).await;
         }
     }
+}
+
+/// The computers Devices unpaired that were told to forget this one's
+/// wake facts, while their listings wait to be forgotten.
+static TOLD_FORGET: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// Whether `device_id` is told to forget for the first time now; noted.
+fn first_told_forget(device_id: &str) -> bool {
+    TOLD_FORGET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(device_id.to_string())
 }
 
 /// [`untrusted_mine`] as the files at `dir` and `trust` say now.
@@ -3190,6 +3212,16 @@ mod tests {
             "its link stopped"
         );
         assert!(!still, "Other computers' Unpair untrusts it too");
+    }
+
+    /// PR #572 review: a computer Devices unpaired is told to forget once,
+    /// however many passes its listing waits.
+    #[test]
+    fn devices_unpair_tells_once() {
+        assert!(first_told_forget("pr572-told"));
+        assert!(!first_told_forget("pr572-told"));
+        TOLD_FORGET.lock().unwrap().remove("pr572-told");
+        assert!(first_told_forget("pr572-told"), "once forgotten, anew");
     }
 
     /// PR #572 review I3: a computer whose both-ways grant lapsed stays
