@@ -647,7 +647,12 @@ impl ComputerView {
     /// "Decode on the graphics card" as Settings has it (PC5): the next
     /// view follows.
     pub fn set_hw_decode(&self, on: bool) {
-        lock(&self.shared).hw_decode = on;
+        let mut state = lock(&self.shared);
+        if state.hw_decode != on {
+            // The ways are tried afresh (PR #562 re-review N3).
+            state.failed_ways.clear();
+        }
+        state.hw_decode = on;
     }
 
     /// The bar's Stats switch, saved since the last call (PC2): Settings
@@ -1890,10 +1895,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 lock(shared).clock.fed(Instant::now());
                 ladder.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
+                    let gave = d.pictures();
                     decoder = None;
                     let tried = ladder.way().clone();
                     let step = ladder.failed();
-                    remember_failed(shared, stream_is, tried, step);
+                    remember_failed(shared, stream_is, tried, step, gave);
                     if give_up_hevc(shared, step, stream_is) {
                         return Ok(String::new());
                     }
@@ -2059,8 +2065,9 @@ fn climb(
         return Step::Stay;
     };
     let tried = ladder.way().clone();
-    let step = ladder.check(d.pictures(), d.ended(), Instant::now());
-    remember_failed(shared, stream_is, tried, step);
+    let gave = d.pictures();
+    let step = ladder.check(gave, d.ended(), Instant::now());
+    remember_failed(shared, stream_is, tried, step, gave);
     match step {
         Step::Next => {
             *decoder = start_decoder(shared, ctx, stream_is, ladder.way());
@@ -2095,14 +2102,18 @@ fn give_up_hevc(
 }
 
 /// A way that gave up (`step` from it) is remembered as failed for the
-/// stream's codec (PR #562 review M3); the processor never is.
+/// stream's codec (PR #562 review M3), only when it never gave a picture
+/// (`gave`, re-review N3: one that worked and then stopped, a driver reset
+/// or a crash, is tried again next time); the processor never is.
 fn remember_failed(
     shared: &Mutex<State>,
     stream_is: Option<(Codec, Option<(u16, u16)>)>,
     tried: Accel,
     step: Step,
+    gave: u64,
 ) {
     if matches!(step, Step::Next | Step::Exhausted)
+        && gave == 0
         && tried != Accel::Software
         && let Some((codec, _)) = stream_is
     {
@@ -2558,10 +2569,12 @@ mod tests {
     fn a_way_that_failed_is_passed_over_next_time() {
         let shared = Mutex::new(State::default());
         let hevc = Some((Codec::Hevc, None));
-        remember_failed(&shared, hevc, Accel::D3d11va, Step::Next);
-        remember_failed(&shared, hevc, Accel::Auto, Step::Stay);
-        remember_failed(&shared, hevc, Accel::Software, Step::Exhausted);
-        remember_failed(&shared, None, Accel::Auto, Step::Next);
+        remember_failed(&shared, hevc, Accel::D3d11va, Step::Next, 0);
+        remember_failed(&shared, hevc, Accel::Auto, Step::Stay, 0);
+        remember_failed(&shared, hevc, Accel::Software, Step::Exhausted, 0);
+        remember_failed(&shared, None, Accel::Auto, Step::Next, 0);
+        // A way that worked, then stopped (re-review N3), is not.
+        remember_failed(&shared, hevc, Accel::Auto, Step::Next, 120);
         assert_eq!(
             lock(&shared).failed_ways,
             [(Codec::Hevc, Accel::D3d11va)].into_iter().collect()
@@ -2579,6 +2592,20 @@ mod tests {
         let mut all = Ladder::new(ways, None);
         all.skip(|_| true);
         assert_eq!(all.way(), &Accel::Software, "never past the last");
+        // Turning decoding on the card off or on tries every way afresh
+        // (re-review N3).
+        let ctx = egui::Context::default();
+        let dir = std::env::temp_dir().join(format!("pd-pc5-n3-{}", std::process::id()));
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.set_hw_decode(true);
+        lock(&view.shared)
+            .failed_ways
+            .insert((Codec::H264, Accel::D3d11va));
+        view.set_hw_decode(true);
+        assert_eq!(lock(&view.shared).failed_ways.len(), 1, "unchanged, kept");
+        view.set_hw_decode(false);
+        assert!(lock(&view.shared).failed_ways.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PR #562 review I3: a view asks for HEVC only with the setting on,
