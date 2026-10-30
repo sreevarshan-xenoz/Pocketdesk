@@ -6611,4 +6611,77 @@ mod tests {
         view.quit();
         let _ = std::fs::remove_dir_all(&dir);
     }
+    /// PR #570 re-review T2: a switch with the mic on, driven through the
+    /// window's passes with a fake microphone: the old view's relay hears
+    /// it stop; once the new view controls, the new relay hears "on"
+    /// before the start and any frame, and the bar says Mic on again.
+    #[test]
+    fn the_mic_starts_again_on_the_next_screens_view() {
+        use egui_kittest::kittest::Queryable;
+        struct Fake;
+        impl view_mic::MicSource for Fake {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(vec![100; view_mic::FRAME_SAMPLES / 2])
+            }
+        }
+        let (shared, mut old_relay, dir) = mic_window(
+            "resume",
+            Arc::new(|_| Ok(Box::new(Fake) as Box<dyn view_mic::MicSource>)),
+        );
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).mic.on());
+        std::thread::sleep(Duration::from_millis(100));
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        {
+            let mut state = lock(&shared);
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(!state.mic.on() && state.mic_resume.is_some());
+        }
+        harness.step();
+        assert!(!lock(&shared).mic.on(), "waits for the next view");
+        // The next screen's view joins and controls there.
+        let (mut new_relay, writer) = {
+            let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            (listener.accept().unwrap().0, writer)
+        };
+        {
+            let mut state = lock(&shared);
+            state.writer = Some(writer);
+            state.mic_said = None;
+            state.status = ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                monitor: 1,
+                ..ViewStatus::default()
+            };
+        }
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).mic.on(), "started again");
+        assert!(lock(&shared).mic_resume.is_none());
+        assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 1);
+        std::thread::sleep(Duration::from_millis(300));
+        drop(harness);
+        {
+            let mut state = lock(&shared);
+            state.mic.stopped();
+            stop_mic(&mut state);
+            state.writer = None;
+        }
+        let old = heard_mic(&mut old_relay);
+        assert_eq!(old.last(), Some(&"off"), "{old:?}");
+        let new = heard_mic(&mut new_relay);
+        assert_eq!(&new[..2], ["on", "start"], "{new:?}");
+        assert!(new.contains(&"frame"), "{new:?}");
+        assert_eq!(new.last(), Some(&"off"), "{new:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
