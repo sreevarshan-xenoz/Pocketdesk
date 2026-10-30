@@ -377,8 +377,8 @@ impl ComputersView {
                     .clicked();
             });
         }
-        let wifi = computer.wake.as_ref().is_some_and(|w| !w.wired);
-        ui.label(RichText::new(wake_note(wifi)).color(crate::theme::muted(ui)));
+        let unwired = computer.wake.as_ref().is_some_and(|w| !w.wired);
+        ui.label(RichText::new(wake_note(unwired)).color(crate::theme::muted(ui)));
         let name = computer.name.clone();
         if wake {
             self.wake(state_dir, id, &name, now_unix);
@@ -985,10 +985,10 @@ pub fn timed_out(name: &str) -> String {
     )
 }
 
-/// The note beside Wake (PC6), naming a Wi-Fi adapter.
-pub fn wake_note(wifi: bool) -> String {
-    if wifi {
-        format!("{WAKE_NOTE} Its adapter is Wi-Fi.")
+/// The note beside Wake (PC6), naming an adapter that is not wired (Wi-Fi, a bridge, a virtual one; review M-5).
+pub fn wake_note(unwired: bool) -> String {
+    if unwired {
+        format!("{WAKE_NOTE} Its adapter is not wired.")
     } else {
         WAKE_NOTE.to_string()
     }
@@ -1066,7 +1066,7 @@ mod tests {
         assert!(!can_wake(&refused, true), "unpaired there");
         assert!(!can_wake(&computer("away: x"), true), "never said");
         assert!(wake_note(true).contains("Wi-Fi rarely wakes"));
-        assert!(wake_note(true).ends_with("Its adapter is Wi-Fi."));
+        assert!(wake_note(true).ends_with("Its adapter is not wired."));
         assert_eq!(wake_note(false), WAKE_NOTE);
     }
 
@@ -1145,7 +1145,7 @@ mod tests {
         computers::update(&dir, |file| file.computers.push(sleeping(false))).unwrap();
         let mut harness = list(&dir, ComputersView::default());
         let noted = harness
-            .query_by_label_contains("Its adapter is Wi-Fi")
+            .query_by_label_contains("Its adapter is not wired")
             .is_some();
         let unreachable = harness
             .query_by_label_contains("can't be reached now")
