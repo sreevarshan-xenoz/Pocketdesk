@@ -4,11 +4,18 @@
 //! index, and the session switches to it. Sway and Hyprland, through their
 //! IPC; elsewhere the phone is told the computer cannot.
 //! - Sway: `create_output`, `output … mode --custom`, `output … unplug`.
-//! - Hyprland (0.56 on): `output create headless <name>`, its size from a
-//!   monitor rule set with `eval hl.monitor({…})` (real Lua, so not caught by
-//!   the broken `dispatch`/`keyword` of hyprwm/Hyprland#16224), and `output
-//!   remove <name>`. It takes the name it is given, so each is
-//!   `PD-<tag>-<n>`, the tag this server's own (from its state folder).
+//! - Hyprland (0.56 on): a monitor rule for the name set with `eval
+//!   hl.monitor({…})` (real Lua, so not caught by the broken
+//!   `dispatch`/`keyword` of hyprwm/Hyprland#16224), then `output create
+//!   headless <name>`, which comes up at the rule's size and place, and
+//!   `output remove <name>`. It takes the name it is given, so each is
+//!   `PD-<tag>-<n>`, the tag this server's own (from its state folder; with
+//!   none, no screen is added). Hyprland 0.56 has no way to drop a rule, so
+//!   one stays per name until Hyprland reloads its config; names reuse the
+//!   smallest free `n`, so they stay few.
+//!
+//! Adds run one at a time, from the check of what a phone has to the record
+//! of what it got, so the limits hold whatever a phone sends at once.
 //!
 //! An output lasts while its phone has a session or link, and those a server
 //! that stopped left are swept by the next one in the same compositor
@@ -89,22 +96,23 @@ fn desk() -> Option<Desk> {
     }
 }
 
-/// This server's tag in the names of the screens it makes on Hyprland: four
-/// hex digits of an FNV-1a hash of its state folder, so a second server (a
-/// throwaway beside the real one) never takes or removes the other's.
+/// This server's tag in the names of the screens it makes on Hyprland: the
+/// eight hex digits of an FNV-1a hash of its state folder, so a second
+/// server (a throwaway beside the real one) never takes or removes the
+/// other's.
 pub fn hypr_tag(state_dir: &std::path::Path) -> String {
     let mut hash: u32 = 0x811c_9dc5;
     for b in state_dir.to_string_lossy().bytes() {
         hash ^= u32::from(b);
         hash = hash.wrapping_mul(0x0100_0193);
     }
-    format!("{:04x}", (hash ^ (hash >> 16)) & 0xffff)
+    format!("{hash:08x}")
 }
 
-fn this_tag() -> String {
-    crate::state::state_dir()
-        .map(|d| hypr_tag(&d))
-        .unwrap_or_else(|_| "0000".into())
+/// `None` with no state folder: then no tag is safe to share, so no screen
+/// is added or swept.
+fn this_tag() -> Option<String> {
+    crate::state::state_dir().ok().map(|d| hypr_tag(&d))
 }
 
 /// Whether `name` is a screen made on Hyprland by the server tagged `tag`:
@@ -125,26 +133,46 @@ pub fn hypr_name(tag: &str, outputs: &[Output]) -> String {
         .unwrap_or_default()
 }
 
-/// The request that sizes the screen `name` (made by this server, so its
-/// name is safe inside a Lua string): its mode, right of the others
+/// Whether `name` has the shape of a screen name this server makes:
+/// `PD-` and eight lowercase hex digits, `-` and up to nine digits. Only
+/// such a name goes into a Lua string.
+pub fn is_hypr_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("PD-") else {
+        return false;
+    };
+    let Some((tag, n)) = rest.split_once('-') else {
+        return false;
+    };
+    tag.len() == 8
+        && tag.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && (1..=9).contains(&n.len())
+        && n.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The request that sizes the screen `name`: its mode, right of the others
 /// (`auto-right` leaves the outputs there where they are; a fixed position
 /// moved a monitor whose own rule is `auto`, found in the spike), scale 1.
-pub fn hypr_monitor_rule(name: &str, width: u32, height: u32) -> String {
-    format!(
-        "eval hl.monitor({{ output = \"{name}\", mode = \"{width}x{height}@60\", position = \"auto-right\", scale = 1 }})"
-    )
+/// `None` unless `name` is one this server makes and both sides are within
+/// [`MIN_SIDE`]..=[`MAX_SIDE`], so nothing else reaches the Lua.
+pub fn hypr_monitor_rule(name: &str, width: u32, height: u32) -> Option<String> {
+    let side = MIN_SIDE..=MAX_SIDE;
+    (is_hypr_name(name) && side.contains(&width) && side.contains(&height)).then(|| {
+        format!(
+            "eval hl.monitor({{ output = \"{name}\", mode = \"{width}x{height}@60\", position = \"auto-right\", scale = 1 }})"
+        )
+    })
 }
 
 /// Hyprland's answer to a write: `ok`, else its words (`error: …`, `output
-/// not found`).
+/// not found`); `unknown request` (no `eval` before 0.56) says which
+/// Hyprland is needed.
 pub fn hypr_ok(reply: &str) -> std::io::Result<()> {
-    if reply.trim() == "ok" {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!(
-            "Hyprland refused: {}",
-            reply.trim()
-        )))
+    match reply.trim() {
+        "ok" => Ok(()),
+        "unknown request" => Err(std::io::Error::other(
+            "this Hyprland is older than 0.56, which adding a screen needs",
+        )),
+        other => Err(std::io::Error::other(format!("Hyprland refused: {other}"))),
     }
 }
 
@@ -277,40 +305,81 @@ fn run(command: &str) -> std::io::Result<()> {
     }
 }
 
-/// One add at a time: two at once could each take the other's new output.
-static CREATING: Mutex<()> = Mutex::new(());
-
 /// Make an output of `width`×`height` right of the others; its name and
-/// where it went.
+/// where it went. The caller holds [`Screens::adding`].
 fn create(width: u32, height: u32) -> std::io::Result<(String, i32)> {
-    let _one = CREATING.lock().unwrap_or_else(|e| e.into_inner());
     match desk() {
-        Some(Desk::Hyprland) => create_hyprland(width, height),
+        Some(Desk::Hyprland) => {
+            let tag =
+                this_tag().ok_or_else(|| std::io::Error::other("no state folder to name it by"))?;
+            create_hyprland(
+                &hypr,
+                &tag,
+                width,
+                height,
+                std::time::Duration::from_secs(2),
+            )
+        }
         _ => create_sway(width, height),
     }
 }
 
-/// On Hyprland: make the output by its name, size it, and wait (up to 2 s)
-/// until the monitor list shows the size, as the mode is set a frame later.
-fn create_hyprland(width: u32, height: u32) -> std::io::Result<(String, i32)> {
-    let name = hypr_name(&this_tag(), &outputs()?);
-    hypr_ok(&hypr(&format!("output create headless {name}"))?)?;
-    let sized = hypr(&hypr_monitor_rule(&name, width, height)).and_then(|r| hypr_ok(&r));
-    if let Err(e) = sized {
-        remove(&name);
-        return Err(e);
+/// Removes the output `name` when dropped, unless kept: once `output create`
+/// is sent, every way out but success removes it (a reply that timed out may
+/// still have made it).
+struct RemoveUnlessKept<'a> {
+    request: &'a dyn Fn(&str) -> std::io::Result<String>,
+    name: &'a str,
+    kept: bool,
+}
+
+impl Drop for RemoveUnlessKept<'_> {
+    fn drop(&mut self) {
+        if self.kept {
+            return;
+        }
+        let removed = (self.request)(&format!("output remove {}", self.name));
+        if let Err(e) = removed.and_then(|r| hypr_ok(&r)) {
+            tracing::warn!("Could not remove the screen {}: {e}", self.name);
+        }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+}
+
+/// On Hyprland, through `request` (its socket; a fake in tests): set the
+/// rule for a new name, make the output by that name (it comes up at the
+/// rule's size), and wait up to `wait` for the monitor list to show it at
+/// that size. A list that cannot be read meanwhile is "not yet".
+fn create_hyprland(
+    request: &dyn Fn(&str) -> std::io::Result<String>,
+    tag: &str,
+    width: u32,
+    height: u32,
+    wait: std::time::Duration,
+) -> std::io::Result<(String, i32)> {
+    let name = hypr_name(tag, &hypr_outputs(&request("j/monitors")?)?);
+    let rule = hypr_monitor_rule(&name, width, height)
+        .ok_or_else(|| std::io::Error::other("not a screen this computer makes"))?;
+    hypr_ok(&request(&rule)?)?;
+    let mut made = RemoveUnlessKept {
+        request,
+        name: &name,
+        kept: false,
+    };
+    hypr_ok(&request(&format!("output create headless {name}"))?)?;
+    let deadline = std::time::Instant::now() + wait;
     loop {
-        let shown = outputs()?.into_iter().find(|o| o.name == name);
+        let shown = request("j/monitors")
+            .and_then(|raw| hypr_outputs(&raw))
+            .ok()
+            .and_then(|all| all.into_iter().find(|o| o.name == name));
         if let Some(o) = &shown
-            && o.rect.width == width as i32
-            && o.rect.height == height as i32
+            && u32::try_from(o.rect.width) == Ok(width)
+            && u32::try_from(o.rect.height) == Ok(height)
         {
-            return Ok((name, o.rect.x));
+            made.kept = true;
+            return Ok((name.clone(), o.rect.x));
         }
         if std::time::Instant::now() >= deadline {
-            remove(&name);
             return Err(std::io::Error::other(match shown {
                 Some(_) => "Hyprland did not give the screen its size",
                 None => "Hyprland made no screen",
@@ -341,7 +410,7 @@ fn create_sway(width: u32, height: u32) -> std::io::Result<(String, i32)> {
 
 fn remove(name: &str) {
     let removed = match desk() {
-        Some(Desk::Hyprland) if is_hypr_screen(name, &this_tag()) => {
+        Some(Desk::Hyprland) if this_tag().is_some_and(|tag| is_hypr_screen(name, &tag)) => {
             hypr(&format!("output remove {name}")).and_then(|r| hypr_ok(&r))
         }
         Some(Desk::Sway) if is_virtual(name) => run(&format!("output {name} unplug")),
@@ -386,12 +455,76 @@ struct Made {
     instance: Option<String>,
 }
 
+/// The screens made and the lock adds take.
+struct Screens {
+    made: Mutex<Made>,
+    /// Held by an add from the check of what its phone has to the record of
+    /// what it got, and by the sweep at start: two adds at once could
+    /// otherwise each pass the limits, or take the other's new output.
+    adding: Mutex<()>,
+}
+
+impl Screens {
+    const fn new() -> Self {
+        Self {
+            made: Mutex::new(Made {
+                phones: BTreeMap::new(),
+                instance: None,
+            }),
+            adding: Mutex::new(()),
+        }
+    }
+}
+
+fn screens() -> &'static Screens {
+    static SCREENS: Screens = Screens::new();
+    &SCREENS
+}
+
 fn made() -> &'static Mutex<Made> {
-    static MADE: Mutex<Made> = Mutex::new(Made {
-        phones: BTreeMap::new(),
-        instance: None,
-    });
-    &MADE
+    &screens().made
+}
+
+/// What adding and removing need from the computer: [`Live`], or a fake in
+/// tests.
+trait Host: Sync {
+    /// Why no screen can be added here, if none can.
+    fn cannot(&self) -> Option<&'static str>;
+    fn outputs(&self) -> std::io::Result<Vec<Output>>;
+    fn create(&self, width: u32, height: u32) -> std::io::Result<(String, i32)>;
+    fn remove(&self, name: &str);
+    fn capture_index(&self, name: &str, x: i32) -> Option<u32>;
+    fn save(&self, made: &Made);
+}
+
+/// The compositor this server runs in.
+struct Live;
+
+impl Host for Live {
+    fn cannot(&self) -> Option<&'static str> {
+        match desk() {
+            None => Some("This computer cannot add a screen: only Sway and Hyprland can for now"),
+            Some(Desk::Hyprland) if this_tag().is_none() => {
+                Some("This computer cannot add a screen: Pocketdesk has no state folder here")
+            }
+            _ => None,
+        }
+    }
+    fn outputs(&self) -> std::io::Result<Vec<Output>> {
+        outputs()
+    }
+    fn create(&self, width: u32, height: u32) -> std::io::Result<(String, i32)> {
+        create(width, height)
+    }
+    fn remove(&self, name: &str) {
+        remove(name)
+    }
+    fn capture_index(&self, name: &str, x: i32) -> Option<u32> {
+        capture_index(name, x)
+    }
+    fn save(&self, made: &Made) {
+        save(made)
+    }
 }
 
 fn this_instance() -> Option<String> {
@@ -450,6 +583,7 @@ pub fn configure(allowed: bool) {
 /// Hyprland, this server's tagged outputs not on that list (made just before
 /// a crash, never saved) are removed now.
 pub fn clear_left_over() {
+    let _one = screens().adding.lock().unwrap_or_else(|e| e.into_inner());
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
@@ -470,8 +604,18 @@ pub fn clear_left_over() {
             let _ = std::fs::remove_file(path);
         }
     }
-    if desk() == Some(Desk::Hyprland) {
-        let tag = this_tag();
+    kept.extend(
+        made()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .phones
+            .values()
+            .flatten()
+            .cloned(),
+    );
+    if desk() == Some(Desk::Hyprland)
+        && let Some(tag) = this_tag()
+    {
         for o in outputs().unwrap_or_default() {
             if is_hypr_screen(&o.name, &tag) && !kept.contains(&o.name) {
                 tracing::info!("Removing the screen {} a stopped server left", o.name);
@@ -557,8 +701,14 @@ impl Plugin for VirtualScreenPlugin {
         }
         let phone = sender.device_id().to_string();
         let action = packet.body["action"].as_str().unwrap_or("").to_string();
-        let width = packet.body["width"].as_u64().unwrap_or(0) as u32;
-        let height = packet.body["height"].as_u64().unwrap_or(0) as u32;
+        // A side past u32 is no size, never a wrapped one.
+        let side = |key: &str| {
+            packet.body[key]
+                .as_u64()
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(0)
+        };
+        let (width, height) = (side("width"), side("height"));
         let reply = tokio::task::spawn_blocking(move || answer(&phone, &action, width, height))
             .await
             .unwrap_or_else(|_| serde_json::json!({ "error": "the computer failed to answer" }));
@@ -570,74 +720,76 @@ impl Plugin for VirtualScreenPlugin {
 
 /// What a phone's request comes to: `{name, index}`, `{removed}` or `{error}`.
 fn answer(phone: &str, action: &str, width: u32, height: u32) -> serde_json::Value {
+    answer_with(screens(), &Live, phone, action, width, height)
+}
+
+fn answer_with(
+    screens: &Screens,
+    host: &dyn Host,
+    phone: &str,
+    action: &str,
+    width: u32,
+    height: u32,
+) -> serde_json::Value {
     use serde_json::json;
     // Taking one's own screen back is always allowed.
     if action == "add" && !ALLOWED.load(std::sync::atomic::Ordering::Relaxed) {
         return json!({ "error": "This computer does not let phones add a screen (Settings, \"Phones may add a screen\")" });
     }
+    let made = || screens.made.lock().unwrap_or_else(|e| e.into_inner());
     match action {
         "remove" => {
             let names = {
-                let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
+                let mut made = made();
                 let names = made.phones.remove(phone).unwrap_or_default();
-                save(&made);
+                host.save(&made);
                 names
             };
-            names.iter().for_each(|n| remove(n));
+            names.iter().for_each(|n| host.remove(n));
             json!({ "removed": names.len() })
         }
         "add" => {
             let Some((w, h)) = screen_size(width, height) else {
                 return json!({ "error": "not a screen size" });
             };
-            if desk().is_none() {
-                return json!({ "error": "This computer cannot add a screen: only Sway and Hyprland can for now" });
+            if let Some(why) = host.cannot() {
+                return json!({ "error": why });
             }
+            let _one = screens.adding.lock().unwrap_or_else(|e| e.into_inner());
             // One screen per phone: asked again, it is the same one (the
             // session may be showing it; replacing it would freeze that).
             let existing = made()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
                 .phones
                 .get(phone)
                 .and_then(|names| names.first().cloned());
             if let Some(name) = existing {
-                let place = outputs()
+                let place = host
+                    .outputs()
                     .ok()
                     .and_then(|all| all.into_iter().find(|o| o.name == name));
                 if let Some(output) = place
-                    && let Some(index) = capture_index(&name, output.rect.x)
+                    && let Some(index) = host.capture_index(&name, output.rect.x)
                 {
                     return json!({ "name": name, "index": index, "width": output.rect.width, "height": output.rect.height });
                 }
                 // Gone from the compositor meanwhile: forget it and make another.
-                made()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .phones
-                    .remove(phone);
+                made().phones.remove(phone);
             }
             // A few at most, whatever ids phones announce.
-            let held = made()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .phones
-                .values()
-                .map(Vec::len)
-                .sum::<usize>();
+            let held = made().phones.values().map(Vec::len).sum::<usize>();
             if held >= MAX_SCREENS {
                 return json!({ "error": "The computer has as many phone screens as it takes" });
             }
-            match create(w, h) {
+            match host.create(w, h) {
                 Ok((name, x)) => {
-                    let Some(index) = capture_index(&name, x) else {
-                        remove(&name);
+                    let Some(index) = host.capture_index(&name, x) else {
+                        host.remove(&name);
                         return json!({ "error": "The computer made a screen but cannot stream it (its monitor list does not show it)" });
                     };
                     {
-                        let mut made = made().lock().unwrap_or_else(|e| e.into_inner());
+                        let mut made = made();
                         made.phones.insert(phone.to_string(), vec![name.clone()]);
-                        save(&made);
+                        host.save(&made);
                     }
                     added_at()
                         .lock()
@@ -750,7 +902,7 @@ mod tests {
     #[test]
     fn a_hyprland_screen_is_named_with_the_servers_tag() {
         let tag = hypr_tag(std::path::Path::new("/home/user/.local/state/pocketdesk"));
-        assert_eq!(tag.len(), 4);
+        assert_eq!(tag.len(), 8);
         assert!(tag.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(
             tag,
@@ -762,33 +914,286 @@ mod tests {
             hypr_tag(std::path::Path::new("/tmp/throwaway/state")),
             "another server, another tag"
         );
-        assert_eq!(hypr_name("ab12", &[output("eDP-1", 0, 1920)]), "PD-ab12-1");
+        assert!(is_hypr_name(&format!("PD-{tag}-1")));
+        assert_eq!(
+            hypr_name("0a1b2c3d", &[output("eDP-1", 0, 1920)]),
+            "PD-0a1b2c3d-1"
+        );
         let taken = [
             output("eDP-1", 0, 1920),
-            output("PD-ab12-1", 1920, 1080),
-            output("PD-ab12-3", 3000, 1080),
+            output("PD-0a1b2c3d-1", 1920, 1080),
+            output("PD-0a1b2c3d-3", 3000, 1080),
         ];
-        assert_eq!(hypr_name("ab12", &taken), "PD-ab12-2");
+        assert_eq!(hypr_name("0a1b2c3d", &taken), "PD-0a1b2c3d-2");
     }
 
     #[test]
     fn only_this_servers_hyprland_screens_are_taken_or_removed() {
-        assert!(is_hypr_screen("PD-ab12-1", "ab12"));
-        assert!(is_hypr_screen("PD-ab12-17", "ab12"));
-        assert!(!is_hypr_screen("PD-cd34-1", "ab12"), "another server's");
-        assert!(!is_hypr_screen("PD-ab12-", "ab12"));
-        assert!(!is_hypr_screen("PD-ab12-1x", "ab12"));
-        assert!(!is_hypr_screen("PD-ab121", "ab12"));
-        assert!(!is_hypr_screen("eDP-1", "ab12"));
-        assert!(!is_hypr_screen("HEADLESS-1", "ab12"));
+        let tag = "0a1b2c3d";
+        assert!(is_hypr_screen("PD-0a1b2c3d-1", tag));
+        assert!(is_hypr_screen("PD-0a1b2c3d-17", tag));
+        assert!(!is_hypr_screen("PD-0a1b2c3e-1", tag), "another server's");
+        assert!(!is_hypr_screen("PD-0a1b2c3d-", tag));
+        assert!(!is_hypr_screen("PD-0a1b2c3d-1x", tag));
+        assert!(!is_hypr_screen("PD-0a1b2c3d1", tag));
+        assert!(!is_hypr_screen("eDP-1", tag));
+        assert!(!is_hypr_screen("HEADLESS-1", tag));
     }
 
     #[test]
     fn a_hyprland_screen_is_sized_by_a_lua_monitor_rule() {
         assert_eq!(
-            hypr_monitor_rule("PD-ab12-1", 1080, 2400),
-            r#"eval hl.monitor({ output = "PD-ab12-1", mode = "1080x2400@60", position = "auto-right", scale = 1 })"#
+            hypr_monitor_rule("PD-0a1b2c3d-1", 1080, 2400).as_deref(),
+            Some(
+                r#"eval hl.monitor({ output = "PD-0a1b2c3d-1", mode = "1080x2400@60", position = "auto-right", scale = 1 })"#
+            )
         );
+    }
+
+    #[test]
+    fn nothing_but_a_screen_name_and_sizes_reach_the_lua() {
+        for name in [
+            r#"PD-0a1b2c3d-1"})os.execute("true")--"#,
+            "PD-0a1b2c3d-",
+            "PD-0A1B2C3D-1",
+            "PD-0a1b2c3-1",
+            "PD-0a1b2c3d-1234567890",
+            "eDP-1",
+            "",
+        ] {
+            assert_eq!(hypr_monitor_rule(name, 1080, 2400), None, "{name}");
+        }
+        for (w, h) in [
+            (0, 2400),
+            (1080, 0),
+            (100_000, 2400),
+            (1080, 100_000),
+            (319, 2400),
+        ] {
+            assert_eq!(hypr_monitor_rule("PD-0a1b2c3d-1", w, h), None, "{w}x{h}");
+        }
+        assert!(hypr_monitor_rule("PD-0a1b2c3d-1", MIN_SIDE, MAX_SIDE).is_some());
+    }
+
+    /// A scripted reply to a request, given the request's number from 1.
+    type Reply = Box<dyn Fn(&str, usize) -> std::io::Result<String> + Send + Sync>;
+
+    /// Hyprland through a script of replies, with every request kept.
+    struct FakeHyprland {
+        sent: Mutex<Vec<String>>,
+        reply: Reply,
+    }
+
+    impl FakeHyprland {
+        fn new(
+            reply: impl Fn(&str, usize) -> std::io::Result<String> + Send + Sync + 'static,
+        ) -> Self {
+            Self {
+                sent: Mutex::new(Vec::new()),
+                reply: Box::new(reply),
+            }
+        }
+        fn request(&self, req: &str) -> std::io::Result<String> {
+            let mut sent = self.sent.lock().unwrap();
+            sent.push(req.to_string());
+            let n = sent.len();
+            drop(sent);
+            (self.reply)(req, n)
+        }
+        fn sent(&self) -> Vec<String> {
+            self.sent.lock().unwrap().clone()
+        }
+        fn create(&self) -> std::io::Result<(String, i32)> {
+            create_hyprland(
+                &|r| self.request(r),
+                "0a1b2c3d",
+                1080,
+                2400,
+                std::time::Duration::from_millis(300),
+            )
+        }
+    }
+
+    const SIZED: &str = r#"[{"name":"eDP-1","x":0,"y":0,"width":1920,"height":1080},
+        {"name":"PD-0a1b2c3d-1","x":1920,"y":0,"width":1080,"height":2400}]"#;
+    const ONLY_EDP: &str = r#"[{"name":"eDP-1","x":0,"y":0,"width":1920,"height":1080}]"#;
+
+    #[test]
+    fn a_hyprland_screen_is_ruled_then_made_and_kept() {
+        let fake = FakeHyprland::new(|req, n| {
+            Ok(match req {
+                "j/monitors" if n == 1 => ONLY_EDP,
+                "j/monitors" => SIZED,
+                _ => "ok",
+            }
+            .to_string())
+        });
+        assert_eq!(fake.create().unwrap(), ("PD-0a1b2c3d-1".to_string(), 1920));
+        let sent = fake.sent();
+        assert!(
+            sent[1].starts_with("eval hl.monitor"),
+            "the rule first: {sent:?}"
+        );
+        assert_eq!(sent[2], "output create headless PD-0a1b2c3d-1");
+        assert!(!sent.iter().any(|r| r.starts_with("output remove")));
+    }
+
+    #[test]
+    fn a_made_screen_is_removed_when_its_list_cannot_be_read() {
+        let fake = FakeHyprland::new(|req, n| match req {
+            "j/monitors" if n == 1 => Ok(ONLY_EDP.into()),
+            "j/monitors" => Err(std::io::Error::other("timed out")),
+            _ => Ok("ok".into()),
+        });
+        assert!(fake.create().is_err());
+        assert_eq!(
+            fake.sent().last().map(String::as_str),
+            Some("output remove PD-0a1b2c3d-1")
+        );
+    }
+
+    #[test]
+    fn a_screen_whose_create_reply_timed_out_is_removed() {
+        let fake = FakeHyprland::new(|req, _| match req {
+            "j/monitors" => Ok(ONLY_EDP.into()),
+            r if r.starts_with("output create") => Err(std::io::Error::other("timed out")),
+            _ => Ok("ok".into()),
+        });
+        assert!(fake.create().is_err());
+        assert_eq!(
+            fake.sent().last().map(String::as_str),
+            Some("output remove PD-0a1b2c3d-1")
+        );
+    }
+
+    #[test]
+    fn a_screen_never_sized_is_removed() {
+        let fake = FakeHyprland::new(|req, _| {
+            Ok(match req {
+                "j/monitors" => ONLY_EDP,
+                _ => "ok",
+            }
+            .to_string())
+        });
+        let err = fake.create().unwrap_err();
+        assert!(err.to_string().contains("made no screen"), "{err}");
+        assert_eq!(
+            fake.sent().last().map(String::as_str),
+            Some("output remove PD-0a1b2c3d-1")
+        );
+    }
+
+    #[test]
+    fn an_older_hyprland_is_named_and_nothing_is_made() {
+        let fake = FakeHyprland::new(|req, _| {
+            Ok(match req {
+                "j/monitors" => ONLY_EDP,
+                _ => "unknown request",
+            }
+            .to_string())
+        });
+        let err = fake.create().unwrap_err();
+        assert!(err.to_string().contains("0.56"), "{err}");
+        assert!(
+            !fake
+                .sent()
+                .iter()
+                .any(|r| r.starts_with("output create") || r.starts_with("output remove")),
+            "{:?}",
+            fake.sent()
+        );
+    }
+
+    /// A computer whose outputs are what was made, each made slowly.
+    #[derive(Default)]
+    struct FakeHost {
+        outputs: Mutex<Vec<Output>>,
+        made: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Host for FakeHost {
+        fn cannot(&self) -> Option<&'static str> {
+            None
+        }
+        fn outputs(&self) -> std::io::Result<Vec<Output>> {
+            Ok(self.outputs.lock().unwrap().clone())
+        }
+        fn create(&self, width: u32, _height: u32) -> std::io::Result<(String, i32)> {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            let n = self.made.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let name = format!("PD-0a1b2c3d-{n}");
+            let x = 1920 * n as i32;
+            self.outputs
+                .lock()
+                .unwrap()
+                .push(output(&name, x, width as i32));
+            Ok((name, x))
+        }
+        fn remove(&self, name: &str) {
+            self.outputs.lock().unwrap().retain(|o| o.name != name);
+        }
+        fn capture_index(&self, _name: &str, _x: i32) -> Option<u32> {
+            Some(1)
+        }
+        fn save(&self, _made: &Made) {}
+    }
+
+    #[test]
+    fn a_phone_asking_many_times_at_once_gets_one_screen() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let names: Vec<String> = std::thread::scope(|s| {
+            let asks: Vec<_> = (0..8)
+                .map(|_| {
+                    s.spawn(|| {
+                        answer_with(&screens, &host, "race-phone", "add", 1080, 2400)["name"]
+                            .as_str()
+                            .unwrap()
+                            .to_string()
+                    })
+                })
+                .collect();
+            asks.into_iter().map(|a| a.join().unwrap()).collect()
+        });
+        assert_eq!(host.made.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(names.iter().all(|n| n == &names[0]), "{names:?}");
+        assert_eq!(host.outputs.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn many_phones_at_once_get_at_most_the_limit() {
+        let screens = Screens::new();
+        let host = FakeHost::default();
+        let added = std::thread::scope(|s| {
+            let asks: Vec<_> = (0..10)
+                .map(|i| {
+                    let (screens, host) = (&screens, &host);
+                    s.spawn(move || {
+                        answer_with(screens, host, &format!("race-phone-{i}"), "add", 1080, 2400)
+                            .get("name")
+                            .is_some()
+                    })
+                })
+                .collect();
+            asks.into_iter()
+                .map(|a| a.join().unwrap())
+                .filter(|&ok| ok)
+                .count()
+        });
+        assert_eq!(added, MAX_SCREENS);
+        assert_eq!(
+            host.made.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_SCREENS
+        );
+        let recorded: usize = screens
+            .made
+            .lock()
+            .unwrap()
+            .phones
+            .values()
+            .map(Vec::len)
+            .sum();
+        assert_eq!(recorded, MAX_SCREENS, "every screen made is on the record");
     }
 
     #[test]
@@ -798,13 +1203,19 @@ mod tests {
         let err = hypr_ok("output not found").unwrap_err();
         assert!(err.to_string().contains("output not found"));
         assert!(hypr_ok("error: hl.monitor: error applying field 'mode'").is_err());
+        assert!(
+            hypr_ok("unknown request")
+                .unwrap_err()
+                .to_string()
+                .contains("older than 0.56")
+        );
         assert!(hypr_ok("").is_err());
         let raw = r#"[
             {"name":"eDP-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.0,"activeWorkspace":{"id":1}},
-            {"name":"PD-ab12-1","x":1920,"y":0,"width":1080,"height":2400}
+            {"name":"PD-0a1b2c3d-1","x":1920,"y":0,"width":1080,"height":2400}
         ]"#;
         let outputs = hypr_outputs(raw).unwrap();
-        assert_eq!(outputs[1].name, "PD-ab12-1");
+        assert_eq!(outputs[1].name, "PD-0a1b2c3d-1");
         assert_eq!(
             outputs[1].rect,
             Rect {
@@ -849,7 +1260,7 @@ mod tests {
                 .as_str()
                 .expect("a screen was added")
                 .to_string();
-            assert!(is_hypr_screen(&name, &this_tag()), "{name}");
+            assert!(is_hypr_screen(&name, &this_tag().unwrap()), "{name}");
             assert_eq!(
                 (reply["width"].as_u64(), reply["height"].as_u64()),
                 (Some(1080), Some(2400))

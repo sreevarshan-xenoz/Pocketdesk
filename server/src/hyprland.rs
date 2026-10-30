@@ -10,13 +10,12 @@
 //! active window geometry for capture cropping, and follow window
 //! activations/moves via socket2 events.
 //!
-//! Only the read side is implemented here: the *write* grammar of socket1
-//! (`dispatch`, `keyword`, `setoption`) has been broken upstream since the
-//! Lua IPC rewrite in 0.56 — plain `hyprctl dispatch workspace 3` errors on a
-//! stock 0.56.2 compositor (hyprwm/Hyprland discussion #16224) — so no action
-//! dispatchers live here. (`output create`/`output remove` and `eval` with
-//! real Lua are not caught by it; the phone's second screen uses them, through
-//! [`HyprlandIpc::request_blocking`].) Workspace switching already works through injected
+//! No `dispatch`/`keyword`/`setoption` writes live here: that grammar of
+//! socket1 has been broken upstream since the Lua IPC rewrite in 0.56 — plain
+//! `hyprctl dispatch workspace 3` errors on a stock 0.56.2 compositor
+//! (hyprwm/Hyprland discussion #16224). [`HyprlandIpc::request_blocking`]
+//! carries the `output create`/`output remove` and `eval` (real Lua) writes
+//! that 0.56 still accepts, for the phone's second screen. Workspace switching already works through injected
 //! keybinds (ShortcutBar), and window focus can ride the input-injection path
 //! if the picker needs it.
 
