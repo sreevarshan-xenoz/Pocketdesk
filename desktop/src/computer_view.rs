@@ -1822,11 +1822,26 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
             }
             Message::End { why } => return Ok(why),
-            Message::Heartbeat
-            | Message::WantKeyframe
-            | Message::Input(_)
-            | Message::Focus(_)
-            | Message::Privacy(_) => {}
+            // A still screen sends no frames, only the relay's heartbeat
+            // every 2 s: a card that stalled on its first keyframe is left
+            // then too, not at the next movement (PR #562 review M2).
+            Message::Heartbeat => {
+                let step = climb(
+                    shared,
+                    ctx,
+                    file.session_id,
+                    &mut ladder,
+                    &mut decoder,
+                    &mut gate,
+                    stream_is,
+                );
+                // The next way starts from a keyframe, asked for now.
+                if step == Step::Next {
+                    Message::WantKeyframe.write(&mut asks)?;
+                }
+            }
+            Message::WantKeyframe | Message::Input(_) | Message::Focus(_) | Message::Privacy(_) => {
+            }
         }
     }
 }
