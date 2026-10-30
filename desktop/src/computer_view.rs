@@ -1482,8 +1482,10 @@ fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<()
         state.mic_resume = true;
     }
     let privacy = state.status.privacy.clone();
-    state.record_carry = state.record_want;
     let going = state.ended.is_none();
+    // Carried only from a view going: one already ended has no recording
+    // to end, and a later end would wrongly start one (PR #570 review M2).
+    state.record_carry = state.record_want && going;
     ask(state_dir, state, Wanted { monitor, ..wanted })?;
     if going {
         state.status.privacy = privacy;
@@ -5853,6 +5855,11 @@ mod tests {
         // The same screen again asks nothing.
         switch_screen(&dir, &mut state, 1).unwrap();
         assert!(computers::take_all(&dir, now_unix()).is_empty());
+        // From a view that ended, no recording is carried (review M2).
+        state.record_carry = false;
+        state.ended = Some("Lost the connection to Desk.".into());
+        switch_screen(&dir, &mut state, 0).unwrap();
+        assert!(!state.record_carry);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
