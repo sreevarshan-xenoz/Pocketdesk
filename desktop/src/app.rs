@@ -984,6 +984,13 @@ impl PocketdeskApp {
                 Config::path().ok(),
             )
         });
+        // PC4: the keyboard grab follows Settings in every window.
+        #[cfg(windows)]
+        view.set_grab_keys(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.computer_view_grab_keys),
+        );
         if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
             self.notice = crate::notice::Notice::error(e);
         }
@@ -3340,6 +3347,8 @@ impl PocketdeskApp {
                         // An open screen window follows its Stats switch.
                         if let Some(view) = &self.computer_view {
                             view.set_stats(form.saved_computer_view_stats());
+                            #[cfg(windows)]
+                            view.set_grab_keys(form.saved_computer_view_grab_keys());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }
@@ -4357,6 +4366,16 @@ impl eframe::App for PocketdeskApp {
                 }
                 if let Some(Ok(form)) = self.settings.as_mut() {
                     form.saved_elsewhere_computer_view_stats(on);
+                }
+            }
+            // PC4: its "Send Win and Alt+Tab there", likewise.
+            #[cfg(windows)]
+            if let Some(on) = view.take_grab_saved() {
+                if let Some(config) = self.config.as_mut() {
+                    config.computer_view_grab_keys = on;
+                }
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_computer_view_grab_keys(on);
                 }
             }
         }

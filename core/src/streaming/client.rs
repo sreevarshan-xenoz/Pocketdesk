@@ -97,6 +97,15 @@ pub const SCREEN_FEATURE_PEN: u8 = 1;
 /// is view-only (its device's Input permission is off). Computers before
 /// BK7 do not say it; their [`SCREEN_FEATURE_PEN`] meant the same.
 pub const SCREEN_FEATURE_INPUT: u8 = 2;
+/// The computer says which system it runs (PC4): with it,
+/// [`SCREEN_FEATURE_WINDOWS`] is meaningful. Computers before PC4 do not
+/// say it.
+pub const SCREEN_FEATURE_SYSTEM_SAID: u8 = 4;
+/// The computer runs Windows (else Linux), when
+/// [`SCREEN_FEATURE_SYSTEM_SAID`] is set: another computer's window offers
+/// the keys that system takes (Ctrl+Shift+Esc and Lock in place of
+/// Ctrl+Alt+Del, which only a SYSTEM service can send there).
+pub const SCREEN_FEATURE_WINDOWS: u8 = 8;
 
 /// A remote's ready stream carries one byte of what the computer offers
 /// it (G4): this bit marks the byte as said. Computers before G4 send a
@@ -134,6 +143,13 @@ pub fn screen_features(payload: &[u8]) -> u8 {
 pub fn screen_takes_input(features: u8) -> Option<bool> {
     (features & SCREEN_FEATURES_SAID != 0)
         .then_some(features & (SCREEN_FEATURE_INPUT | SCREEN_FEATURE_PEN) != 0)
+}
+
+/// Whether the computer runs Windows, from what its screen session's ready
+/// stream said ([`screen_features`]): `None` until it says (PC4).
+pub fn screen_runs_windows(features: u8) -> Option<bool> {
+    (features & SCREEN_FEATURES_SAID != 0 && features & SCREEN_FEATURE_SYSTEM_SAID != 0)
+        .then_some(features & SCREEN_FEATURE_WINDOWS != 0)
 }
 
 /// What a session is for.
@@ -1068,6 +1084,24 @@ mod remote_tests {
             remote_stream(transport::STREAM_KIND_READY, false, false),
             RemoteStream::Ready
         );
+    }
+
+    /// PC4: a screen session says which system its computer runs; one
+    /// before PC4 says nothing of it.
+    #[test]
+    fn a_screen_session_says_its_system() {
+        let said = SCREEN_FEATURES_SAID | SCREEN_FEATURE_SYSTEM_SAID;
+        assert_eq!(
+            screen_runs_windows(said | SCREEN_FEATURE_WINDOWS),
+            Some(true)
+        );
+        assert_eq!(screen_runs_windows(said), Some(false), "Linux");
+        assert_eq!(
+            screen_runs_windows(SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT),
+            None,
+            "a computer before PC4"
+        );
+        assert_eq!(screen_runs_windows(SCREEN_FEATURE_SYSTEM_SAID), None);
     }
 
     #[test]

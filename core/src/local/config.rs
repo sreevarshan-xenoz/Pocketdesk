@@ -393,6 +393,12 @@ pub struct Config {
     /// as it loses it. Taken here too only while on. On by default.
     #[serde(default = "default_true")]
     pub computer_view_clipboard: bool,
+    /// On Windows, while the window that shows another computer's screen
+    /// controls it, has the focus and fills the screen, the Windows key,
+    /// Alt+Tab, Alt+Esc and Ctrl+Esc go to that computer and not this one
+    /// (PC4); Ctrl+Alt+Shift takes them back. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_grab_keys: bool,
     /// Tell the owner's paired computers how to wake this one (PC6): the
     /// MAC and broadcast address of the adapter its link leaves by, sent on
     /// each link as it comes up. Off, it tells them to forget what they
@@ -622,6 +628,7 @@ impl Default for Config {
             computer_view_only: false,
             computer_view_stats: false,
             computer_view_clipboard: true,
+            computer_view_grab_keys: true,
             computer_wake_facts: true,
         }
     }
@@ -881,6 +888,7 @@ impl Config {
         "computer_view_only",
         "computer_view_stats",
         "computer_view_clipboard",
+        "computer_view_grab_keys",
         "computer_wake_facts",
     ];
 }
@@ -1365,6 +1373,28 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_stats"]
+        );
+    }
+
+    /// PC4: the window's keyboard grab is on until turned off, and the
+    /// choice saves and reads back.
+    #[test]
+    fn a_computers_window_grabs_the_keys_until_turned_off() {
+        let path = temp("computer-view-grab");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_grab_keys);
+        assert!(Config::default().computer_view_grab_keys);
+        let chosen = Config {
+            computer_view_grab_keys: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_grab_keys"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_grab_keys);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_grab_keys"]
         );
     }
 

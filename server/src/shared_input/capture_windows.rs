@@ -11,9 +11,11 @@
 //! (WTS session notifications) and sleep (`WM_POWERBROADCAST`). Injected
 //! input always passes: what another computer sends this one is never
 //! carried off again. Ctrl+Alt+Del is Windows' own, which no hook sees,
-//! and the lock that follows brings the keyboard and mouse home; Win+L
-//! while away is swallowed, brings them home, and then locks this computer
-//! ([`locks_here`]). The
+//! and the lock that follows brings the keyboard and mouse home. Win+L is
+//! Windows' own too: Windows locks this computer whatever the hook returns;
+//! the hook keeps the L from the other computer and starts bringing the
+//! keyboard and mouse home ([`locks_here`]), and the session lock it hears
+//! brings them home if the lock came first. The
 //! loop looks at what is in front every half second for the gaming lock
 //! ([`game_lock`]), and at once when a window comes to the front (an
 //! out-of-context `EVENT_SYSTEM_FOREGROUND` hook, in only with the mouse
@@ -510,11 +512,12 @@ fn on_key(s: &mut ThreadState, message: u32, info: &KBDLLHOOKSTRUCT) -> bool {
             return true;
         }
     }
-    // Win+L: swallowed like any key (Windows never saw the Win key go
-    // down, so passed on it would type an "l"), never sent; the driver
-    // brings the keyboard and mouse home and locks this computer. Its
-    // key-up is swallowed below if the hook is still in then; once home
-    // the hook is out, and the key-up reaches Windows on its own.
+    // Win+L: Windows handles it itself and locks this computer, whatever
+    // this hook returns. The L is kept from the other computer, and the
+    // driver brings the keyboard and mouse home (and asks for the lock,
+    // which may already be done; the session lock it hears brings them
+    // home too). Its key-up is swallowed below if the hook is still in
+    // then; once home the hook is out, and the key-up reaches Windows.
     if down && locks_here(modifiers_down(s.mods), info.vkCode) {
         let _ = s.events.send(Captured::LockKey);
         return true;
@@ -544,8 +547,9 @@ fn may_open(away_on: Option<&str>, to: &str) -> bool {
 }
 
 /// Whether the key `vk` going down with modifiers `mods` held while away
-/// is Win+L, which locks this computer: the driver brings the keyboard and
-/// mouse home and then locks it ([`Captured::LockKey`]).
+/// is Win+L, which Windows handles itself and locks this computer: the
+/// driver brings the keyboard and mouse home ([`Captured::LockKey`]), and
+/// Windows locks.
 pub(crate) fn locks_here(mods: u32, vk: u32) -> bool {
     vk == u32::from(b'L') && mods & MOD_WIN != 0
 }

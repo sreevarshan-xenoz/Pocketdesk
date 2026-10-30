@@ -335,6 +335,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_grab_keys",
+        "Send Win and Alt+Tab there",
+        Section::Computers,
+    ),
+    (
         "computer_wake_facts",
         "Let my computers wake this one",
         Section::Computers,
@@ -512,6 +517,9 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         // BK4: only Windows drives with Explorer's drag. BK6: the sound
         // follows the mouse to the computer driving, Windows.
         "shared_input_files" | "shared_input_sound" => cfg!(windows),
+        // PC4: the keyboard grab is Windows' low-level hook; on Linux the
+        // window has only its Send keys menu.
+        "computer_view_grab_keys" => cfg!(windows),
         // N10: an MPRIS player on Linux.
         "phone_media_controls" => cfg!(any(windows, target_os = "linux")),
         _ => true,
@@ -595,6 +603,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_stats"
             // PC3: read by the server at each focus of the window.
             | "computer_view_clipboard"
+            // PC4: read by an open window at once.
+            | "computer_view_grab_keys"
             | "events"
             | "events_detail"
             | "hooks"
@@ -779,6 +789,21 @@ impl SettingsForm {
         self.saved.computer_view_stats = on;
         self.edited.computer_view_stats = on;
         self.running.computer_view_stats = on;
+    }
+
+    /// "Send Win and Alt+Tab there" as saved (PC4), for an open window.
+    #[cfg(windows)]
+    pub fn saved_computer_view_grab_keys(&self) -> bool {
+        self.saved.computer_view_grab_keys
+    }
+
+    /// The window's bar saved `computer_view_grab_keys` (PC4): this form
+    /// says the same, with nothing left to save.
+    #[cfg(windows)]
+    pub fn saved_elsewhere_computer_view_grab_keys(&mut self, on: bool) {
+        self.saved.computer_view_grab_keys = on;
+        self.edited.computer_view_grab_keys = on;
+        self.running.computer_view_grab_keys = on;
     }
 
     /// `keys`, the shared keyboard and mouse's, were saved elsewhere (the
@@ -2107,6 +2132,18 @@ impl SettingsForm {
                         "Only while the window controls that computer, and with this on on both. Never a password manager's copy, nor one Never send keeps here. With Clipboard with my computers on here, the window leaves copies to that sync: turn it on on the other computer too, or nothing crosses. Files dropped on the window go to its Downloads either way.",
                     );
                 });
+                if drawn_here("computer_view_grab_keys") {
+                    row(ui, "computer_view_grab_keys", |ui| {
+                        ui.checkbox(
+                            &mut e.computer_view_grab_keys,
+                            "send Win and Alt+Tab there: the Windows key, Alt+Tab, Alt+Esc and Ctrl+Esc go to the computer whose screen window controls it, has the focus and fills the screen",
+                        );
+                        note(
+                            ui,
+                            "Press and let go of Ctrl+Alt+Shift to keep them here until the window leaves full screen or loses the focus. The window's Send keys menu sends them too, and Task Manager to a Windows computer.",
+                        );
+                    });
+                }
                 // PC6: what Wake on the other computers needs from this one.
                 row(ui, "computer_wake_facts", |ui| {
                     ui.checkbox(
@@ -2883,6 +2920,7 @@ mod tests {
             "computer_view_only",
             "computer_view_stats",
             "computer_view_clipboard",
+            "computer_view_grab_keys",
         ] {
             assert!(
                 SETTINGS
@@ -2891,7 +2929,9 @@ mod tests {
                 "{key}"
             );
             assert!(applies_live(key), "{key}");
-            assert!(drawn_here(key), "{key}");
+            // PC4: the keyboard grab is Windows' alone.
+            let here = key != "computer_view_grab_keys" || cfg!(windows);
+            assert_eq!(drawn_here(key), here, "{key}");
         }
         assert_eq!(computer_quality_label("auto"), "Auto");
         assert_eq!(computer_quality_label("quality"), "Best");

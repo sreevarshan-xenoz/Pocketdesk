@@ -100,7 +100,7 @@ The stream is QUIC (`pocketdesk-stream`).
   A cast then sends `[0xFA,…]` streams. Input travels as tagged packets, tags 0 to 15. The tables are in `docs/protocol.md` §3.2, from `core/src/streaming/{client,streamer,input_packet}.rs`.
 - **From the computer:** each frame or audio packet goes on its own uni-stream, with an 18-byte header, little-endian:
   - sequence, u64;
-  - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played; a screen session's, sent as it is admitted, one byte of what the computer takes: bit 7 set, bit 0 a pen, only with the Input permission), `3` keyframe wanted (a cast);
+  - kind, u8: `0` video, `1` audio, `2` ready (a session without a picture was admitted; a sound session's carries one byte: bit 7 set, bit 0 the computer's sound sent, bit 1 the phone's mic played; a screen session's, sent as it is admitted, one byte of what the computer takes: bit 7 set, bit 0 a pen, only with the Input permission, bit 1 input taken at all (BK7), bit 2 its system said and bit 3 that system Windows (PC4)), `3` keyframe wanted (a cast);
   - a keyframe flag, u8;
   - a timestamp in microseconds, u64.
 
