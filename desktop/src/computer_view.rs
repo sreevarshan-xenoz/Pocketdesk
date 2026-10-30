@@ -941,7 +941,9 @@ fn new_window(ctx: &egui::Context, state_dir: &Path, slot: u8) -> Arc<Mutex<Stat
         slot,
         ..State::default()
     }));
-    let worker = shared.clone();
+    // Held weakly (PR #570 review M7): the worker ends once its window's
+    // state goes, as in a test.
+    let worker = Arc::downgrade(&shared);
     let ctx = ctx.clone();
     let watched = state_dir.to_path_buf();
     let name = if slot == 0 {
@@ -2917,13 +2919,20 @@ pub fn file_safe(name: &str) -> String {
 
 /// The worker: find the view this window wants, show it until it ends,
 /// again.
-fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
-    let slot = lock(shared).slot;
+fn watch(state_dir: &Path, worker: &std::sync::Weak<Mutex<State>>, ctx: &egui::Context) {
+    let Some(slot) = worker.upgrade().map(|shared| lock(&shared).slot) else {
+        return;
+    };
     let viewport = viewport_id(slot);
     let mut wait = POLL;
     loop {
         std::thread::sleep(wait);
         wait = POLL;
+        // The window's state gone (the app ending, a test over): done.
+        let Some(shared) = worker.upgrade() else {
+            return;
+        };
+        let shared = &shared;
         let (wanted, newer_than, asked) = {
             let mut state = lock(shared);
             let Some(wanted) = state.wanted.clone() else {
@@ -6239,5 +6248,22 @@ mod tests {
         assert!(!lock(&view.windows()[2]).view_only, "Windows: as chosen");
         view.quit();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review M7: a window's worker holds its state weakly, so once
+    /// the window's state goes (a test over, the app ending) it lets go and
+    /// ends rather than polling for ever.
+    #[test]
+    fn a_windows_worker_ends_with_its_state() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-worker-end-{}", std::process::id()));
+        let window = new_window(&egui::Context::default(), &dir, 2);
+        let weak = Arc::downgrade(&window);
+        drop(window);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while weak.strong_count() > 0 {
+            assert!(Instant::now() < deadline, "TIMEOUT: the worker kept it");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(weak.upgrade().is_none());
     }
 }
