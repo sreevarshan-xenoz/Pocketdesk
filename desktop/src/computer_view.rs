@@ -1108,17 +1108,18 @@ impl ComputerView {
     /// a stalled relay keeps the quit well under a second.
     pub fn quit(&self) {
         let windows = self.windows();
+        // Each later window that would lock its computer as it closes: the
+        // last of them locks it (review I2).
+        let lockers: Vec<Option<String>> = windows.iter().map(|w| would_lock(&lock(w))).collect();
         for (n, window) in windows.iter().enumerate() {
             let mut state = lock(window);
             let device = state.wanted.as_ref().map(|w| w.device_id.clone());
-            state.same_computer_open = device.is_some_and(|device| {
-                windows[n + 1..].iter().any(|later| {
-                    lock(later)
-                        .wanted
-                        .as_ref()
-                        .is_some_and(|w| w.device_id == device)
-                })
-            });
+            let later: Vec<Option<String>> = lockers
+                .iter()
+                .enumerate()
+                .map(|(m, l)| if m > n { l.clone() } else { None })
+                .collect();
+            state.same_computer_open = shown_elsewhere(device.as_deref(), &later, n);
             quit_view(&self.state_dir, &mut state);
         }
     }
@@ -1141,6 +1142,8 @@ impl ComputerView {
             .iter()
             .map(|w| lock(w).wanted.as_ref().map(|w| w.device_id.clone()))
             .collect();
+        // The computers each window would lock as it closes (review I2).
+        let lockers: Vec<Option<String>> = windows.iter().map(|w| would_lock(&lock(w))).collect();
         // The computers each window sends the mic to (PC11).
         let sending: Vec<Option<String>> = windows
             .iter()
@@ -1161,7 +1164,7 @@ impl ComputerView {
                         .enumerate()
                         .any(|(m, to)| m != n && to.as_ref() == Some(device))
                 });
-                state.same_computer_open = shown_elsewhere(&devices, n);
+                state.same_computer_open = shown_elsewhere(devices[n].as_deref(), &lockers, n);
                 state.open_new.take()
             };
             if let Some(monitor) = asked {
@@ -1247,15 +1250,30 @@ impl ComputerView {
     }
 }
 
-/// Whether the computer the window `n` shows (of `devices`, each window's)
-/// is shown by another window too (PC11).
-pub fn shown_elsewhere(devices: &[Option<String>], n: usize) -> bool {
-    devices.get(n).cloned().flatten().is_some_and(|device| {
-        devices
+/// Whether `device`, the computer the window `n` shows, is in `others`
+/// (each window's computer where it counts, `None` where not) for a window
+/// other than `n` (PC11).
+pub fn shown_elsewhere(device: Option<&str>, others: &[Option<String>], n: usize) -> bool {
+    device.is_some_and(|device| {
+        others
             .iter()
             .enumerate()
-            .any(|(m, other)| m != n && other.as_deref() == Some(device.as_str()))
+            .any(|(m, other)| m != n && other.as_deref() == Some(device))
     })
+}
+
+/// The computer a window would lock as it closes, if any (PR #570 review
+/// I2): one it shows, its view going and shown. A window ended, waiting to
+/// be let in, reconnecting or switching would not, so it never keeps
+/// another window's close from locking.
+fn would_lock(state: &State) -> Option<String> {
+    let going = state.ended.is_none()
+        && state.status.phase == Phase::Showing
+        && state.status.reconnecting == 0
+        && state.switching.is_none();
+    going
+        .then(|| state.wanted.as_ref().map(|w| w.device_id.clone()))
+        .flatten()
 }
 
 /// A write to the relay as Pocketdesk quits waits at most this long: the
@@ -5682,11 +5700,37 @@ mod tests {
     #[test]
     fn a_computer_shown_in_another_window_is_seen() {
         let devices = [Some("desk".to_string()), None, Some("desk".to_string())];
-        assert!(shown_elsewhere(&devices, 0));
-        assert!(shown_elsewhere(&devices, 2));
-        assert!(!shown_elsewhere(&devices, 1));
+        let at = |n: usize| devices[n].as_deref();
+        assert!(shown_elsewhere(at(0), &devices, 0));
+        assert!(shown_elsewhere(at(2), &devices, 2));
+        assert!(!shown_elsewhere(at(1), &devices, 1));
         let once = [Some("desk".to_string()), Some("lap".to_string())];
-        assert!(!shown_elsewhere(&once, 0));
+        assert!(!shown_elsewhere(once[0].as_deref(), &once, 0));
+        // PR #570 review I2: a window that would not lock (ended, not
+        // shown) keeps no other's close from locking.
+        let showing = |device: &str| State {
+            wanted: Some(Wanted {
+                device_id: device.into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        assert_eq!(would_lock(&showing("desk")).as_deref(), Some("desk"));
+        let ended = State {
+            ended: Some("Desk refused it.".into()),
+            ..showing("desk")
+        };
+        assert_eq!(would_lock(&ended), None);
+        let waiting = State {
+            status: ViewStatus::default(),
+            ..showing("desk")
+        };
+        assert_eq!(would_lock(&waiting), None);
     }
 
     /// PC11: switching screens keeps the window's state: the pointer let go
@@ -6058,6 +6102,37 @@ mod tests {
         lock(&shared).decoder_gen = next;
         publisher(&shared, &ctx, next)(picture());
         assert!(lock(&shared).picture.is_some(), "the new screen's shows");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review I2: with "Lock it when I close the window" on, a
+    /// window whose view of the same computer ended does not keep the
+    /// shown window from locking it as Pocketdesk quits.
+    #[test]
+    fn a_window_ended_keeps_no_lock_from_the_one_shown() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-lock-ended-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        view.open_new_window(&ctx, &view.shared, 1);
+        computers::take_all(&dir, now_unix());
+        for window in view.windows() {
+            let mut state = lock(&window);
+            state.lock_on_close = true;
+            state.status.phase = Phase::Showing;
+        }
+        lock(&view.windows()[1]).ended = Some("Desk refused it.".into());
+        view.quit();
+        let mut locks: Vec<(u8, bool)> = computers::take_all(&dir, now_unix())
+            .into_iter()
+            .filter_map(|r| match r.ask {
+                ComputerAsk::StopView { lock, window, .. } => Some((window, lock)),
+                _ => None,
+            })
+            .collect();
+        locks.sort();
+        assert_eq!(locks, [(0, true), (1, false)]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
