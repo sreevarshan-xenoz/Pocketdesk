@@ -28,6 +28,11 @@
 //! (unless a kernel-level anti-cheat runs or the program in front is
 //! elevated): the hooks are back only while they are away, and gone again
 //! as they come home.
+//!
+//! While a computer's screen window here holds the pointer
+//! ([`view_hold`](super::view_hold), PC7), the edges lead nowhere as for a
+//! game, and the switch key waits until the window frees it: the window's
+//! relative mouse and a crossing never both drive.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -222,6 +227,9 @@ pub struct Driver {
     /// is watched, so the pointer it puts on the edge facing it never
     /// carries this computer's keyboard and mouse back there: which.
     driven: Option<String>,
+    /// A computer's screen window here holds the pointer (PC7): no edge
+    /// leads anywhere, and the switch key waits, until it lets go.
+    view_held: bool,
 }
 
 impl Driver {
@@ -250,6 +258,7 @@ impl Driver {
             silent: HashSet::new(),
             visits: 0,
             driven: None,
+            view_held: false,
         }
     }
 
@@ -338,6 +347,40 @@ impl Driver {
         }
         self.settle(&mut out);
         out
+    }
+
+    /// Whether a computer's screen window here holds the pointer (PC7, as
+    /// [`super::view_hold::pointer_held`] says). While it does the edges
+    /// lead nowhere ([`Mode::Off`]) and the switch key waits; a visit under
+    /// way (the window cannot have locked it from here, but a hold may come
+    /// late) comes home first.
+    pub fn set_view_held(&mut self, held: bool) -> Vec<Action> {
+        let mut out = Vec::new();
+        if held == self.view_held {
+            return out;
+        }
+        self.view_held = held;
+        if held && let Some(away) = self.away.clone() {
+            self.go_home(
+                &mut out,
+                away.park,
+                true,
+                Some("A screen window here took the pointer"),
+            );
+        } else if self.driven.is_none() && !self.game_held && !self.targets().is_empty() {
+            out.push(note(if held {
+                "A screen window holds the pointer: the edges lead nowhere until it lets go"
+            } else {
+                "The screen window let go of the pointer: the edges lead to the other computers                  again"
+            }));
+        }
+        self.settle(&mut out);
+        out
+    }
+
+    /// Whether a computer's screen window here holds the pointer.
+    pub fn view_held(&self) -> bool {
+        self.view_held
     }
 
     /// Whether another computer drives this one now.
@@ -660,6 +703,7 @@ impl Driver {
         } else if self.locked
             || self.driven.is_some()
             || self.game_held
+            || self.view_held
             || self.targets().is_empty()
         {
             Mode::Off
@@ -777,7 +821,9 @@ impl Driver {
         // move already on its way may still come).
         // Driven: the pointer on this computer is the other computer's,
         // put here by it (BK8 live: put on the edge facing it, it bounced).
+        // A screen window holding the pointer: likewise (PC7).
         if !self.game_held
+            && !self.view_held
             && self.driven.is_none()
             && !self.foreground_pending
             && let Some(crossing) = self.layout.crossing(&self.this, at, dx, dy)
@@ -839,6 +885,12 @@ impl Driver {
     /// the next, the last comes home. With a game in front at home it forces
     /// the keyboard and mouse off it, if the gaming lock allows.
     fn hotkey(&mut self, out: &mut Vec<Action>) {
+        if self.away.is_none() && self.view_held {
+            out.push(note(
+                "A screen window holds the pointer: free it first (Ctrl+Alt+Shift+M)",
+            ));
+            return;
+        }
         let forcing = self.away.is_none() && self.game_held;
         if forcing && let Some((fg, kernel_anti_cheat)) = &self.foreground {
             let lock = game_lock::decide(
@@ -2730,5 +2782,85 @@ mod tests {
             );
         }
         assert_eq!(d.mode(), Mode::Off);
+    }
+
+    /// PC7: a screen window holding the pointer takes the hooks out and
+    /// leads the edges nowhere, says so once, refuses the switch key, and
+    /// gives the edges back as it lets go.
+    #[test]
+    fn a_window_holding_the_pointer_pauses_the_edges() {
+        let layout = desk(false);
+        let mut d = driver(layout.clone(), &["L"]);
+        assert_eq!(d.start(), vec![Action::SetMode(Mode::Watch)]);
+        let held = d.set_view_held(true);
+        assert!(held.contains(&Action::SetMode(Mode::Off)), "{held:?}");
+        assert!(
+            held.iter().any(|a| matches!(a, Action::Badge(_))),
+            "{held:?}"
+        );
+        assert!(d.view_held());
+        assert_eq!(d.set_view_held(true), vec![], "said again, nothing");
+        // A move or a barrier hit already on its way crosses nowhere.
+        d.on(moved(3440, 480));
+        assert_eq!(sends(&d.on(moved(3455, 480))), vec![]);
+        let edge = Captured::Edge {
+            x: 3455,
+            y: 480,
+            dx: 1,
+            dy: 0,
+        };
+        assert_eq!(sends(&d.on(edge)), vec![]);
+        // The switch key waits for the window.
+        let switch = d.on(Captured::Hotkey);
+        assert_eq!(sends(&switch), vec![]);
+        assert!(switch.iter().any(|a| matches!(a, Action::Badge(_))));
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Off);
+        let freed = d.set_view_held(false);
+        assert!(freed.contains(&Action::SetMode(Mode::Watch)), "{freed:?}");
+        // The first position watched only marks where it is.
+        assert_eq!(d.on(moved(3455, 480)), vec![]);
+        d.on(moved(3440, 480));
+        let crossed = d.on(moved(3455, 480));
+        let (x, y) = layout.normalized("L", (0, 480));
+        assert_eq!(sends(&crossed), vec![sent("L", Msg::Enter { x, y })]);
+    }
+
+    /// PC7: a hold that comes while away brings the keyboard and mouse
+    /// home first, letting go of what was held there.
+    #[test]
+    fn a_window_taking_the_pointer_while_away_brings_them_home() {
+        let mut d = away_on_linux(false);
+        d.on(key(0x1D, true));
+        let home = d.set_view_held(true);
+        let sent_home = sends(&home);
+        assert!(sent_home.contains(&sent("L", evdev(29, false))), "{home:?}");
+        assert!(sent_home.contains(&sent("L", Msg::Leave)), "{home:?}");
+        assert_eq!(d.away_on(), None);
+        assert_eq!(d.mode(), Mode::Off);
+    }
+
+    /// PC7: with a game holding them already, the window's hold says
+    /// nothing more of the edges, and nothing as it lets go while the game
+    /// still holds them.
+    #[test]
+    fn a_window_hold_under_a_game_says_nothing_of_the_edges() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(Captured::Foreground {
+            fg: Foreground {
+                fullscreen: true,
+                ..Default::default()
+            },
+            kernel_anti_cheat: false,
+        });
+        for held in [true, false] {
+            let said = d.set_view_held(held);
+            assert!(
+                !said.iter().any(|a| matches!(a, Action::Badge(_))),
+                "{said:?}"
+            );
+            assert_eq!(d.mode(), Mode::Off);
+        }
     }
 }

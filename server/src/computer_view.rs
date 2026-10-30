@@ -2131,6 +2131,9 @@ fn start_viewer(
         // The window's pointer is locked (PC7): its own latest word, kept
         // here, never taken from a packet. Only then do relative moves go.
         let mut pointer_locked = false;
+        // Meanwhile shared input leaves the screens' edges alone; given
+        // back as the window frees it or this reader ends (gap 12).
+        let mut hold: Option<crate::shared_input::view_hold::PointerHold> = None;
         while read.read_exact(&mut head).await.is_ok() {
             let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
             match head[0] {
@@ -2167,6 +2170,10 @@ fn start_viewer(
                         break;
                     }
                     pointer_locked = locked[0] == 1;
+                    if pointer_locked != hold.is_some() {
+                        hold =
+                            pointer_locked.then(crate::shared_input::view_hold::PointerHold::take);
+                    }
                 }
                 wire::INPUT if len > 0 && len <= wire::MAX_INPUT => {
                     let mut packet = vec![0u8; len];
@@ -2422,6 +2429,8 @@ mod tests {
     /// neither 0 nor 1 ends the window's reader.
     #[tokio::test]
     async fn relative_moves_go_only_while_the_window_holds_the_pointer() {
+        // It holds the pointer for a while: the count's tests take turns.
+        let _alone = crate::shared_input::view_hold::TESTS.lock().await;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let mut window = TcpStream::connect(listener.local_addr().unwrap())
             .await
@@ -2472,6 +2481,50 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// PC7: while the window says its pointer is locked, shared input's
+    /// edges are paused; they come back as it frees it, and as its viewer
+    /// goes with the pointer still locked.
+    #[tokio::test]
+    async fn the_windows_lock_pauses_shared_input_until_freed_or_gone() {
+        use crate::shared_input::view_hold::{TESTS, pointer_held};
+        let _alone = TESTS.lock().await;
+        async fn until(held: bool, step: &str) {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            while pointer_held() != held {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "TIMEOUT: held {held} after {step}"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, _queued) = mpsc::channel(4);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, _asked) = mpsc::channel(4);
+        let viewer = start_viewer(relay_end, 5, "desk".into(), input, focus, privacy);
+        assert!(!pointer_held());
+        let say = |locked| Message::PointerLock(locked).encode();
+        window.write_all(&say(true)).await.unwrap();
+        until(true, "the lock").await;
+        window.write_all(&say(true)).await.unwrap();
+        window.write_all(&say(false)).await.unwrap();
+        until(false, "the release").await;
+        window.write_all(&say(true)).await.unwrap();
+        until(true, "the lock again").await;
+        // The window gone: the relay drops its viewer (its socket closed,
+        // or at the next heartbeat), which ends the reader. A closed socket
+        // alone is not waited for here: another test's child process may
+        // briefly share it.
+        drop(window);
+        drop(viewer);
+        until(false, "the window gone").await;
     }
 
     fn controlled() -> ViewStatus {
