@@ -23,6 +23,38 @@ struct Holder {
 /// (PR #561 review M2: a computer may hold it now, or be the one refused).
 pub(crate) const HELD_ELSEWHERE: &str = "another phone or computer holds privacy mode";
 
+/// Why a grab is refused from the device this computer's shared keyboard
+/// and mouse are on now (range review I3): privacy mode would swallow them
+/// here, and that device could no longer be reached with them.
+pub(crate) const DRIVEN_FROM_HERE: &str = "this computer's keyboard and mouse are on yours now (the shared keyboard and mouse); privacy mode would leave them nowhere";
+
+/// Why a grab (a phone's too) is refused while this computer's keyboard and
+/// mouse are away on any device (PR #572 review I1): privacy mode would
+/// swallow the keys that bring them home.
+pub(crate) const AWAY_ELSEWHERE: &str = "this computer's keyboard and mouse are on another device now (the shared keyboard and mouse); privacy mode would leave them nowhere";
+
+/// Why a computer's grab is refused from one of this computer's
+/// shared-input computers (PR #572 review I1): its keyboard and mouse may
+/// be the only ones that reach the other, wherever they are this moment.
+pub(crate) const SHARES_INPUT: &str = "this computer shares its keyboard and mouse with yours (the shared keyboard and mouse); privacy mode could leave you no way back";
+
+/// How this computer's shared keyboard and mouse stand for a privacy ask
+/// (PR #572 review I1): the device they are on now, and whether the asker
+/// is one of this computer's shared-input computers, with shared input on.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Standing {
+    pub driving: Option<String>,
+    pub shares: bool,
+}
+
+/// [`Standing`] as this computer stands now, for `device`'s ask. Reads
+/// files (blocking), and only for a computer's grab.
+fn standing_now(action: &str, device: &str, computer: bool) -> Standing {
+    let driving = crate::shared_input::status::keyboard_on_device();
+    let shares = action == "grab" && computer && crate::shared_input::status::shares_with(device);
+    Standing { driving, shares }
+}
+
 /// The device whose grab is held: only it may refresh or release it (R3).
 static OWNER: Mutex<Option<Holder>> = Mutex::new(None);
 
@@ -96,6 +128,106 @@ pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
     }
 }
 
+/// Whether `device_id` holds the grab now, by the last word on it (no
+/// look at the grab itself).
+pub(crate) fn holds(device_id: &str) -> bool {
+    OWNER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|h| h.device == device_id)
+}
+
+/// Whether the session here was unlocked since a computer's grab was seen
+/// with it locked (PR #572 review I1): `was` is whether it was seen
+/// locked, `held` whether a computer holds the grab, `locked` the session
+/// as read now (`None`: not known).
+fn unlocked_now(was: &mut bool, held: bool, locked: Option<bool>) -> bool {
+    if !held {
+        *was = false;
+        return false;
+    }
+    match locked {
+        Some(true) => {
+            *was = true;
+            false
+        }
+        Some(false) => std::mem::take(was),
+        None => false,
+    }
+}
+
+/// The holder in `owner` if it is a computer's (it asked on a connection or
+/// a link), taken out; a phone's is left.
+fn take_computer_holder(owner: &mut Option<Holder>) -> Option<Holder> {
+    owner.take_if(|h| h.connection.is_some())
+}
+
+/// Whether the session was seen locked while a computer held the grab.
+static SEEN_LOCKED: Mutex<bool> = Mutex::new(false);
+
+/// The live-session watcher's look each second (PR #572 review I1): with a
+/// computer holding the grab, the session here locked (Ctrl+Alt+Del) and
+/// then unlocked lets the grab go, so whoever unlocks this computer always
+/// gets its keyboard and mouse back. On Linux, logind's Unlock does the
+/// same ([`session_unlocked`]). Blocking.
+pub(crate) fn unlock_tick() {
+    let held = OWNER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|h| h.connection.is_some());
+    let locked = if held {
+        privacy::session_locked()
+    } else {
+        None
+    };
+    let unlocked = unlocked_now(
+        &mut SEEN_LOCKED.lock().unwrap_or_else(|e| e.into_inner()),
+        held,
+        locked,
+    );
+    if unlocked {
+        session_unlocked();
+    }
+}
+
+/// The session here was unlocked (PR #572 review I1): a grab a computer
+/// holds is let go. Blocking.
+pub(crate) fn session_unlocked() {
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(holder) = take_computer_holder(&mut owner) else {
+        return;
+    };
+    let count = privacy::release_input();
+    drop(owner);
+    tracing::warn!(
+        device_id = %holder.device,
+        released = count,
+        "Privacy grab released: this computer was unlocked here"
+    );
+}
+
+/// A visit of this computer's shared keyboard and mouse to `device_id`
+/// starts (range review I3): a grab it holds here is let go, so the keys
+/// and clicks reach it. Best effort: while a grab is held, its hooks (or
+/// `EVIOCGRAB`) keep the switch and the edges from shared input, so a
+/// visit can rarely start; the refusals in [`refusal`] and the unlock
+/// ([`session_unlocked`]) are what hold (PR #572 review I1). Blocking.
+pub(crate) fn release_held_by(device_id: &str) {
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    if take_held_by(&mut owner, device_id).is_none() {
+        return;
+    }
+    let count = privacy::release_input();
+    drop(owner);
+    tracing::info!(
+        device_id,
+        released = count,
+        "Privacy grab released: this computer's keyboard and mouse went to the device holding it"
+    );
+}
+
 /// The connection `connection_id` closed (PC8): a computer's grab asked on
 /// it ends with it. A phone's is kept (it may come back on a new
 /// connection), to its TTL as before.
@@ -132,6 +264,12 @@ fn release_closed(connection_id: &str) {
 /// out; `owner` is left as it was for any other.
 fn take_if_closed(owner: &mut Option<Holder>, connection_id: &str) -> Option<Holder> {
     owner.take_if(|h| ends_with(h, connection_id))
+}
+
+/// The holder in `owner` if it is `device_id`, taken out; `owner` is left
+/// as it was for any other.
+fn take_held_by(owner: &mut Option<Holder>, device_id: &str) -> Option<Holder> {
+    owner.take_if(|h| h.device == device_id)
 }
 
 /// How long a computer's grab lives without a renewal (PR #561 review I1):
@@ -270,9 +408,37 @@ pub(crate) async fn respond(
 }
 
 /// Why `device` may not do `action` (with `renew`) while `holder` holds the
-/// grab, as the answer says it, and whether a lock asked with it is refused
-/// too; `None` when it may.
-fn refusal(action: &str, renew: bool, holder: Option<&str>, device: &str) -> Option<(Value, bool)> {
+/// grab and this computer's keyboard and mouse are on `driving` (the
+/// shared keyboard and mouse), as the answer says it, and whether a lock
+/// asked with it is refused too; `None` when it may.
+fn refusal(
+    action: &str,
+    renew: bool,
+    holder: Option<&str>,
+    device: &str,
+    computer: bool,
+    standing: &Standing,
+) -> Option<(Value, bool)> {
+    if action == "grab" {
+        // The device these keys and clicks are on would lose them (range
+        // review I3); a renewal as much as a first grab.
+        let refused = if standing.driving.as_deref() == Some(device) {
+            Some(DRIVEN_FROM_HERE)
+        } else if standing.driving.is_some() {
+            // Away elsewhere: the keys that bring them home would be
+            // swallowed (PR #572 review I1).
+            Some(AWAY_ELSEWHERE)
+        } else if computer && standing.shares {
+            // Judged on standing, not on where the keyboard is this moment
+            // (PR #572 review I1): it may come home before the ask lands.
+            Some(SHARES_INPUT)
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            return Some((json!({ "ok": false, "error": why }), true));
+        }
+    }
     if !may_act(action, holder, device) {
         return Some((json!({ "ok": false, "error": HELD_ELSEWHERE }), true));
     }
@@ -296,17 +462,40 @@ fn act(
     connection: Option<&str>,
     ttl: Duration,
 ) -> (Value, bool) {
+    act_standing(action, renew, device, connection, ttl, standing_now)
+}
+
+/// [`act`], with how this computer's shared keyboard and mouse stand read
+/// by `standing` (the action, the asker, whether it is a computer).
+fn act_standing(
+    action: &str,
+    renew: bool,
+    device: &str,
+    connection: Option<&str>,
+    ttl: Duration,
+    standing: impl FnOnce(&str, &str, bool) -> Standing,
+) -> (Value, bool) {
+    // A computer asks on a connection or a link of its own (PC8).
+    let computer = connection.is_some();
+    let standing = standing(action, device, computer);
     let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
     if owner.is_some() && privacy::privacy_status().0 == 0 {
         *owner = None;
     }
     let holder = owner.as_ref().map(|h| h.device.clone());
-    if let Some((answer, refused)) = refusal(action, renew, holder.as_deref(), device) {
+    if let Some((answer, refused)) = refusal(
+        action,
+        renew,
+        holder.as_deref(),
+        device,
+        computer,
+        &standing,
+    ) {
         if refused {
             tracing::warn!(
                 device_id = %device,
                 holder = holder.as_deref().unwrap_or(""),
-                "Privacy {action} refused: another device holds the grab"
+                "Privacy {action} refused: another device holds the grab, or this keyboard and mouse are on the asker"
             );
         }
         return (answer, refused);
@@ -470,20 +659,186 @@ mod tests {
     /// kinds of holder.
     #[test]
     fn a_grab_held_elsewhere_is_said_for_a_phone_or_a_computer() {
-        let (said, refused) = refusal("grab", false, Some("phone-a"), "desk").unwrap();
+        let (said, refused) = refusal(
+            "grab",
+            false,
+            Some("phone-a"),
+            "desk",
+            false,
+            &Standing::default(),
+        )
+        .unwrap();
         assert!(refused, "a lock with it is not done");
         assert_eq!(
             said["error"], "another phone or computer holds privacy mode",
             "{said}"
         );
-        let (said, refused) = refusal("release", false, Some("desk"), "phone-a").unwrap();
+        let (said, refused) = refusal(
+            "release",
+            false,
+            Some("desk"),
+            "phone-a",
+            false,
+            &Standing::default(),
+        )
+        .unwrap();
         assert!(refused);
         assert_eq!(said["error"], HELD_ELSEWHERE);
-        let (said, refused) = refusal("grab", true, None, "desk").unwrap();
+        let (said, refused) =
+            refusal("grab", true, None, "desk", false, &Standing::default()).unwrap();
         assert!(!refused, "a renewal refused does not refuse a lock");
         assert_eq!(said["error"], "privacy mode ended there");
-        assert_eq!(refusal("status", false, Some("phone-a"), "desk"), None);
-        assert_eq!(refusal("grab", false, None, "desk"), None);
+        assert_eq!(
+            refusal(
+                "status",
+                false,
+                Some("phone-a"),
+                "desk",
+                false,
+                &Standing::default()
+            ),
+            None
+        );
+        assert_eq!(
+            refusal("grab", false, None, "desk", false, &Standing::default()),
+            None
+        );
+    }
+
+    /// Range review I3, PR #572 review I1: a grab (and a lock with it) is
+    /// refused from the device these keys are on, from any computer while
+    /// they are away, and from a shared-input computer wherever they are; a
+    /// renewal too. Its release and status still go; a phone is judged as
+    /// before.
+    #[test]
+    fn a_grab_is_refused_on_the_shared_keyboards_standing() {
+        let on = |device: &str| Standing {
+            driving: Some(device.to_string()),
+            shares: false,
+        };
+        let shares = Standing {
+            driving: None,
+            shares: true,
+        };
+        let (said, refused) = refusal("grab", false, None, "desk", true, &on("desk")).unwrap();
+        assert!(refused, "a lock with it is not done");
+        assert_eq!(said["error"], DRIVEN_FROM_HERE);
+        let (said, _) = refusal("grab", false, None, "desk", true, &on("laptop")).unwrap();
+        assert_eq!(said["error"], AWAY_ELSEWHERE);
+        let (said, _) = refusal("grab", false, None, "desk", true, &shares).unwrap();
+        assert_eq!(said["error"], SHARES_INPUT);
+        let (said, refused) = refusal("grab", true, Some("desk"), "desk", true, &shares).unwrap();
+        assert!(refused, "nor renewed");
+        assert_eq!(said["error"], SHARES_INPUT);
+        assert_eq!(
+            refusal("release", false, Some("desk"), "desk", true, &shares),
+            None
+        );
+        assert_eq!(
+            refusal("status", false, None, "desk", true, &on("desk")),
+            None
+        );
+        let (said, _) = refusal("grab", false, None, "phone", false, &on("laptop")).unwrap();
+        assert_eq!(
+            said["error"], AWAY_ELSEWHERE,
+            "a phone too, the keys elsewhere (PR #572 re-review N8)"
+        );
+        assert_eq!(
+            refusal("grab", false, None, "phone", false, &Standing::default()),
+            None,
+            "a phone, the keys home"
+        );
+        assert_eq!(
+            refusal("grab", false, None, "desk", true, &Standing::default()),
+            None
+        );
+    }
+
+    /// PR #572 review I1, through `act`: a computer's grab and renewal from
+    /// a shared-input computer are refused before anything is grabbed, and
+    /// its standing is asked with the asker and that it is a computer.
+    #[test]
+    fn act_refuses_a_shared_input_computer_before_grabbing() {
+        let mut asked = None;
+        let (said, refused) = act_standing(
+            "grab",
+            false,
+            "pr572-desk",
+            Some("link:pr572-desk"),
+            COMPUTER_GRAB_TTL,
+            |action, device, computer| {
+                asked = Some((action.to_string(), device.to_string(), computer));
+                Standing {
+                    driving: None,
+                    shares: true,
+                }
+            },
+        );
+        assert!(refused);
+        assert_eq!(said["error"], SHARES_INPUT);
+        assert_eq!(asked, Some(("grab".into(), "pr572-desk".into(), true)));
+        let (said, refused) = act_standing(
+            "grab",
+            true,
+            "pr572-desk",
+            Some("link:pr572-desk"),
+            COMPUTER_GRAB_TTL,
+            |_, _, _| Standing {
+                driving: Some("pr572-elsewhere".into()),
+                shares: false,
+            },
+        );
+        assert!(refused, "the renewal");
+        assert_eq!(said["error"], AWAY_ELSEWHERE);
+        assert!(!held_by_test("pr572-desk"), "nothing held");
+    }
+
+    /// PR #572 review I1: a computer's grab ends once the session here was
+    /// seen locked and then unlocked; not while locked, not with nothing
+    /// known, and a phone's grab is left.
+    #[test]
+    fn an_unlock_here_ends_a_computers_grab() {
+        let mut was = false;
+        assert!(
+            !unlocked_now(&mut was, true, Some(false)),
+            "never seen locked"
+        );
+        assert!(!unlocked_now(&mut was, true, Some(true)));
+        assert!(!unlocked_now(&mut was, true, None), "not known");
+        assert!(unlocked_now(&mut was, true, Some(false)), "unlocked");
+        assert!(!unlocked_now(&mut was, true, Some(false)), "once");
+        assert!(!unlocked_now(&mut was, true, Some(true)));
+        assert!(!unlocked_now(&mut was, false, Some(false)), "no grab held");
+        assert!(!was, "forgotten with the grab");
+
+        let computer = Holder {
+            device: "desk".into(),
+            connection: Some("link:desk".into()),
+        };
+        let mut owner = Some(computer.clone());
+        assert_eq!(take_computer_holder(&mut owner), Some(computer));
+        let phone = Holder {
+            device: "phone".into(),
+            connection: None,
+        };
+        let mut owner = Some(phone.clone());
+        assert_eq!(take_computer_holder(&mut owner), None);
+        assert_eq!(owner, Some(phone), "a phone's grab stays");
+    }
+
+    /// Range review I3: a visit to the device holding the grab takes it out;
+    /// a visit elsewhere leaves it.
+    #[test]
+    fn a_visit_takes_out_only_the_grab_of_the_device_visited() {
+        let held = Holder {
+            device: "desk".into(),
+            connection: Some("link:desk".into()),
+        };
+        let mut owner = Some(held.clone());
+        assert_eq!(take_held_by(&mut owner, "laptop"), None);
+        assert_eq!(owner, Some(held.clone()));
+        assert_eq!(take_held_by(&mut owner, "desk"), Some(held));
+        assert_eq!(owner, None);
     }
 
     /// PR #561 review M10: a closing connection takes out only the holder

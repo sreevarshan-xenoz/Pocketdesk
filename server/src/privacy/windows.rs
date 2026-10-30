@@ -76,6 +76,50 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+/// Whether this session is locked now (PR #572 review I1), from
+/// `WTSSessionInfoEx`'s flags; `None` when it cannot be read.
+pub fn session_locked() -> Option<bool> {
+    use windows::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTS_SESSIONSTATE_LOCK,
+        WTS_SESSIONSTATE_UNLOCK, WTSFreeMemory, WTSINFOEXW, WTSQuerySessionInformationW,
+        WTSSessionInfoEx,
+    };
+    let mut buffer = windows::core::PWSTR::null();
+    let mut bytes = 0u32;
+    // SAFETY: the out-pointers are this frame's; the buffer is freed below.
+    let read = unsafe {
+        WTSQuerySessionInformationW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            WTS_CURRENT_SESSION,
+            WTSSessionInfoEx,
+            &mut buffer,
+            &mut bytes,
+        )
+    };
+    if read.is_err() || buffer.is_null() {
+        return None;
+    }
+    let flags = if bytes as usize >= std::mem::size_of::<WTSINFOEXW>() {
+        // SAFETY: the buffer holds a WTSINFOEXW of level 1.
+        let info = unsafe { &*(buffer.0 as *const WTSINFOEXW) };
+        if info.Level == 1 {
+            // SAFETY: level 1 says which member of the union is there.
+            Some(unsafe { info.Data.WTSInfoExLevel1.SessionFlags })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    // SAFETY: allocated by WTSQuerySessionInformationW.
+    unsafe { WTSFreeMemory(buffer.0 as *mut _) };
+    match flags {
+        Some(f) if f == WTS_SESSIONSTATE_LOCK as i32 => Some(true),
+        Some(f) if f == WTS_SESSIONSTATE_UNLOCK as i32 => Some(false),
+        _ => None,
+    }
+}
+
 /// The ring's thickness for a monitor of `width` x `height`.
 pub(crate) fn ring_thickness(width: i32, height: i32) -> i32 {
     (width.min(height) / 100).clamp(6, 24)

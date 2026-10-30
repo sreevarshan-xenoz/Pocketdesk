@@ -24,6 +24,11 @@ pub fn privacy_status() -> (usize, Option<u64>) {
     (0, None)
 }
 
+/// Whether the session here is locked: not known on this OS.
+pub fn session_locked() -> Option<bool> {
+    None
+}
+
 /// No locker backend: reports the reason.
 pub fn lock_screen() -> Result<&'static str, String> {
     Err("screen lock is not supported on this OS yet".to_string())

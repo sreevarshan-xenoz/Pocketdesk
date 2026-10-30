@@ -128,6 +128,12 @@ pub struct ViewStatus {
     /// keys. `None` until it says, or from a computer before PC4.
     #[serde(default)]
     pub windows: Option<bool>,
+    /// Whether the other computer plays this one's microphone in this
+    /// session (PC10 review): its "Use the phone as a microphone" for this
+    /// computer, and control. `None` until it says, or from a computer
+    /// before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mic: Option<bool>,
     /// Whether the other computer hides what the window does there (PC8):
     /// its privacy mode, asked from the window's bar. Off for a server
     /// before PC8.

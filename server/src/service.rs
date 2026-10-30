@@ -158,6 +158,12 @@ pub async fn run(config: Config) -> Result<()> {
     // R4 D2: mirror live streaming sessions to the state dir, notify the
     // desktop when one starts, and consume `pocketdesk kick` requests.
     tokio::spawn(crate::live_sessions::run_watcher());
+    // A computer's privacy grab ends as this session is unlocked (PR #572
+    // review I1); Windows is looked at by the watcher above.
+    #[cfg(target_os = "linux")]
+    tokio::spawn(crate::privacy::watch_unlocks(|| {
+        tokio::task::spawn_blocking(crate::plugins::privacy::session_unlocked);
+    }));
     // F7b: files the desktop app sends to a phone in a session.
     tokio::spawn(crate::offers::run_watcher());
     tokio::spawn(crate::plugins::links::run_watcher());

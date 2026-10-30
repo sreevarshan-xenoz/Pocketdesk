@@ -1379,6 +1379,11 @@ async fn attempt(
         if let Some(windows) = pocketdesk_core::streaming::screen_runs_windows(features) {
             next.windows = Some(windows);
         }
+        // Whether it plays this computer's mic, so the window says why
+        // nothing is heard (PC10 review).
+        if let Some(mic) = pocketdesk_core::streaming::screen_takes_mic(features) {
+            next.mic = Some(mic);
+        }
         if admitted {
             next.phase = Phase::Showing;
             if !shown {
@@ -1468,6 +1473,25 @@ struct LockPending {
     name: String,
     id: u64,
     since: Instant,
+}
+
+/// Await `lock`'s answer beside the others in `pending`: one lock a
+/// computer (range review M3), a newer ask of the same computer taking the
+/// older's place.
+fn pend_lock(pending: &mut Vec<LockPending>, lock: LockPending) {
+    pending.retain(|p| p.device_id != lock.device_id);
+    pending.push(lock);
+}
+
+/// The lock in `pending` that `body` from `device_id` answers, if any.
+fn lock_answered(
+    pending: &[LockPending],
+    device_id: &str,
+    body: &serde_json::Value,
+) -> Option<usize> {
+    pending
+        .iter()
+        .position(|p| p.device_id == device_id && answers_ask(body, p.id))
 }
 
 /// What an answer says of a lock: done (`Ok`), not done and why (`Err`),
@@ -1945,7 +1969,7 @@ pub async fn run_with(
         answers: mut privacy_answers,
         notice: privacy_notice,
     } = privacy;
-    let mut lock_pending: Option<LockPending> = None;
+    let mut lock_pending: Vec<LockPending> = Vec::new();
     // Ask the computer `device_id` (`name`) to lock, its answer awaited.
     let ask_lock = |device_id: &str, name: &str| {
         let id = next_ask_id();
@@ -1967,9 +1991,12 @@ pub async fn run_with(
         }
     };
     let dialer = Arc::new(dialer);
-    // A file left by a server that stopped mid-view names nothing now.
+    // A file left by a server that stopped mid-view names nothing now, nor
+    // does one left half-written (range review M8).
     for window in 0..wire::MAX_VIEWS {
-        let _ = std::fs::remove_file(state_dir.join(wire::file_name(window)));
+        let file = state_dir.join(wire::file_name(window));
+        let _ = std::fs::remove_file(file.with_extension("json.tmp"));
+        let _ = std::fs::remove_file(file);
     }
     let mut next_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2019,7 +2046,7 @@ pub async fn run_with(
                                     if let Some(hold) = v.privacy.take() {
                                         hold.let_go();
                                     }
-                                    lock_pending = Some(ask_lock(&v.device_id, &v.name));
+                                    pend_lock(&mut lock_pending, ask_lock(&v.device_id, &v.name));
                                 }
                                 None => privacy_notice(lock_failed_words(
                                     "the other computer",
@@ -2273,7 +2300,7 @@ pub async fn run_with(
                         .ok()
                         .flatten()
                         .unwrap_or_else(|| "that computer".to_string());
-                        lock_pending = Some(ask_lock(&device_id, &name));
+                        pend_lock(&mut lock_pending, ask_lock(&device_id, &name));
                     }
                     continue;
                 };
@@ -2298,12 +2325,12 @@ pub async fn run_with(
                             hold.let_go();
                         }
                         if lock {
-                            lock_pending = Some(ask_lock(&v.device_id, &v.name));
+                            pend_lock(&mut lock_pending, ask_lock(&v.device_id, &v.name));
                         }
                         ViewPrivacy::Off
                     }
                     PrivacyStep::Lock => {
-                        lock_pending = Some(ask_lock(&v.device_id, &v.name));
+                        pend_lock(&mut lock_pending, ask_lock(&v.device_id, &v.name));
                         v.status.privacy.clone()
                     }
                     PrivacyStep::Refuse(why) => ViewPrivacy::Refused(why),
@@ -2315,16 +2342,14 @@ pub async fn run_with(
             Some((device_id, body)) = privacy_answers.recv() => {
                 // The answer to a lock asked as the window closed (review
                 // I3): a lock not done is said to the owner here.
-                if let Some(pending) = lock_pending
-                    .as_ref()
-                    .filter(|p| p.device_id == device_id && answers_ask(&body, p.id))
+                if let Some(at) = lock_answered(&lock_pending, &device_id, &body)
                     && let Some(heard) = lock_heard(&body)
                 {
+                    let pending = lock_pending.remove(at);
                     match heard {
                         Ok(()) => tracing::info!(device_id = %pending.device_id, "Locked another computer as its window closed"),
                         Err(why) => privacy_notice(lock_failed_words(&pending.name, &why)),
                     }
-                    lock_pending = None;
                     continue;
                 }
                 // Only an answer to the hold's newest ask (review M3): one to
@@ -2352,7 +2377,9 @@ pub async fn run_with(
                         // with nothing held is nothing, and one that crossed
                         // a grant is not left held.
                         v.privacy = None;
-                        tracing::info!(device_id = %v.device_id, "Privacy there refused: {why}");
+                        // Its words are the other computer's: the window
+                        // says them, the log does not (range review M7).
+                        tracing::info!(device_id = %v.device_id, "Privacy there refused");
                         say_privacy(v, watching, ViewPrivacy::Refused(why));
                     }
                     None => {}
@@ -2361,11 +2388,13 @@ pub async fn run_with(
             _ = heartbeat.tick() => {
                 // A lock whose answer never came (the link down, that
                 // computer gone) is said too (review I3).
-                if let Some(pending) = lock_pending
-                    .take_if(|p| p.since.elapsed() >= LOCK_WAIT)
-                {
-                    privacy_notice(lock_failed_words(&pending.name, "it did not answer."));
-                }
+                lock_pending.retain(|pending| {
+                    let late = pending.since.elapsed() >= LOCK_WAIT;
+                    if late {
+                        privacy_notice(lock_failed_words(&pending.name, "it did not answer."));
+                    }
+                    !late
+                });
                 let now = Instant::now();
                 for (view, viewer) in views.iter_mut().zip(viewers.iter_mut()) {
                     beat(view, viewer, &state_dir, now);
@@ -2477,6 +2506,12 @@ pub fn focus_passes(last: Option<(bool, Instant)>, focused: bool, now: Instant) 
 /// (PC3), while that computer said `control` of this one's input: the
 /// clipboard follows, as [`crate::clipboard_push::window_focus_does`] says.
 fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
+    // Noted now, in the order the windows said it (PR #572 review I2): the
+    // tasks below may run in any order.
+    let at = Instant::now();
+    let turn = (control == Some(true))
+        .then(|| crate::clipboard_push::note_window_focus(&device_id, focused, at))
+        .flatten();
     tokio::spawn(async move {
         // config.toml is a file: read off the loop.
         let on =
@@ -2486,8 +2521,12 @@ fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
         let sync = crate::clipboard_push::with_computers();
         use crate::clipboard_push::WindowFocus;
         match crate::clipboard_push::window_focus_does(focused, on, sync, control) {
-            Some(WindowFocus::Push) => crate::clipboard_push::push_for_window(&device_id).await,
-            Some(WindowFocus::AskBack) => crate::clipboard_push::ask_back(&device_id).await,
+            Some(WindowFocus::Push) => {
+                crate::clipboard_push::window_gained_focus(&device_id, turn, at).await
+            }
+            Some(WindowFocus::AskBack) => {
+                crate::clipboard_push::window_lost_focus(&device_id, turn, at).await
+            }
             None => {}
         }
     });
@@ -4279,6 +4318,35 @@ mod tests {
             renewal().body,
             serde_json::json!({"action": "grab", "renew": true})
         );
+    }
+
+    /// Range review M3: locks asked of two computers are both awaited, each
+    /// answered on its own; a newer ask of the same computer replaces its
+    /// older one.
+    #[test]
+    fn a_lock_is_awaited_for_each_computer() {
+        use serde_json::json;
+        let lock = |device_id: &str, id: u64| LockPending {
+            device_id: device_id.to_string(),
+            name: device_id.to_string(),
+            id,
+            since: Instant::now(),
+        };
+        let mut pending = Vec::new();
+        pend_lock(&mut pending, lock("desk", 1));
+        pend_lock(&mut pending, lock("laptop", 2));
+        assert_eq!(pending.len(), 2, "the second does not overwrite the first");
+        let at = lock_answered(&pending, "desk", &json!({"ok": true, "id": 1})).unwrap();
+        assert_eq!(pending.remove(at).device_id, "desk");
+        assert_eq!(
+            lock_answered(&pending, "laptop", &json!({"ok": true, "id": 1})),
+            None,
+            "another ask's answer"
+        );
+        assert!(lock_answered(&pending, "laptop", &json!({"ok": true, "id": 2})).is_some());
+        pend_lock(&mut pending, lock("laptop", 3));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, 3);
     }
 
     /// PR #561 review I3: a lock's answer says whether it was done, and

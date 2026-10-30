@@ -3243,6 +3243,14 @@ Built 2026-10-30. The window's bar has a numbered button for each of the other c
 - [ ] Open four windows, then a fifth from any bar: "At most 4 screen windows at once" shows and nothing else opens; the server's memory and the far computer's CPU with four views (counts only). (where: second computer)
 - [ ] With "Hide what I do there" on in one window, ask it in the second window of the same computer: it says another window already hides it, and nothing changes there. (where: second computer)
 
+## 239. The range review after 0.8.2
+
+Built 2026-10-30. Fixes from the review of everything merged since 0.8.2: a computer this one shares its keyboard and mouse with is refused this computer's privacy mode, and so is any computer while they are away; unlocking the session here ends a computer's grab.
+
+- [ ] Windows and the Linux laptop sharing the keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there", once with Windows' keyboard on the laptop and once with it home: both times the bar says it was refused (it shares its keyboard and mouse), and Windows' keys and clicks still work. With shared input off on Windows, the same ask is taken (keyboard blocked, ring shown); then Ctrl+Alt+Del, Lock, and unlock Windows (and again with Windows+L): within about a second of the unlock the grab ends and Windows' keyboard and mouse work. On the laptop as the far side (a grab from Windows' window, shared input off there): `loginctl lock-session`, then `loginctl unlock-session` over ssh, ends the grab only with a locker that sets the locked hint (note which: hyprlock, swaylock, GNOME); and unplugging and plugging the laptop's USB keyboard back in gives a keyboard that types while the grab holds. (where: second computer)
+- [ ] Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
+- [ ] Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

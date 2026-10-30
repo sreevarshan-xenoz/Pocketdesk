@@ -739,7 +739,12 @@ fn session_permissions_in(
 ) -> Option<DevicePermissions> {
     let store = store?;
     match device_id.filter(|id| store.is_trusted(id)) {
-        Some(id) => Some(store.permissions(id)),
+        Some(id) => {
+            let mut permissions = store.permissions(id);
+            // A computer's mic plays only while it controls (PC10 review).
+            permissions.mic_needs_control = store.is_computer(id);
+            Some(permissions)
+        }
         None if pairing_required => None,
         None => Some(DevicePermissions::default()),
     }
@@ -2432,6 +2437,21 @@ forged log line"
             Some(DevicePermissions::default()),
             "pairing off: an unpaired device gets the defaults"
         );
+    }
+
+    /// PC10 review: a computer's session marks its mic as needing control,
+    /// so the host drops it in a view-only session; a phone's does not.
+    #[test]
+    fn a_computers_session_needs_control_for_its_mic() {
+        let mut store = temp_store("session-mic");
+        store.trust_device("phone-m").unwrap();
+        store
+            .trust_computer_as("desk-m", DevicePermissions::computer_mine())
+            .unwrap();
+        let desk = session_permissions_in(Some(&store), Some("desk-m"), true).unwrap();
+        assert!(desk.mic_needs_control);
+        let phone = session_permissions_in(Some(&store), Some("phone-m"), true).unwrap();
+        assert!(!phone.mic_needs_control);
     }
 
     /// A plugin that adds a packet type must either map it to a capability

@@ -55,6 +55,127 @@ fn grab_state() -> &'static Mutex<GrabState> {
     })
 }
 
+/// Whether the session here is locked, polled: logind says it by its
+/// Unlock signal and `LockedHint` instead ([`watch_unlocks`]).
+pub fn session_locked() -> Option<bool> {
+    None
+}
+
+/// Call `unlocked` each time logind says this session was unlocked (PR #572
+/// review I1): its `Unlock` signal, or its `LockedHint` going false. Ends
+/// when the system bus or the session cannot be reached.
+pub async fn watch_unlocks(unlocked: impl Fn() + Send + Sync + 'static) {
+    // Tried again after each failure, waiting longer each time (PR #572
+    // re-review N7), and said once at info until it runs again.
+    let mut wait = UNLOCK_RETRY_FIRST;
+    let mut said: Option<&'static str> = None;
+    loop {
+        let started = Instant::now();
+        let why = watch_unlocks_once(&unlocked).await;
+        if started.elapsed() >= UNLOCK_RETRY_MOST {
+            // It ran a good while: the next failure starts the waits over.
+            wait = UNLOCK_RETRY_FIRST;
+            said = None;
+        }
+        if said != Some(why) {
+            tracing::info!(
+                "Privacy: an unlock here is not heard for now ({why}); tried again in {} s",
+                wait.as_secs()
+            );
+            said = Some(why);
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(UNLOCK_RETRY_MOST);
+    }
+}
+
+/// The first wait before the unlock listener is tried again.
+const UNLOCK_RETRY_FIRST: Duration = Duration::from_secs(5);
+
+/// The longest wait before it is tried again, and how long it must have
+/// run for the waits to start over.
+const UNLOCK_RETRY_MOST: Duration = Duration::from_secs(300);
+
+/// How often the listener checks it still watches this user's session (a
+/// server that outlives a logout and a new login).
+const UNLOCK_SESSION_LOOK: Duration = Duration::from_secs(60);
+
+/// One run of [`watch_unlocks`]: why it could not run, or why it ended.
+async fn watch_unlocks_once(unlocked: &(impl Fn() + Send + Sync)) -> &'static str {
+    use futures_lite::StreamExt as _;
+    let Ok(conn) = zbus::Connection::system().await else {
+        return "no system bus";
+    };
+    let Some(path) = session_path(&conn).await else {
+        return "no logind session";
+    };
+    let Ok(session) = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.login1",
+        path.clone(),
+        "org.freedesktop.login1.Session",
+    )
+    .await
+    else {
+        return "the session could not be read";
+    };
+    let Ok(mut unlocks) = session.receive_signal("Unlock").await else {
+        return "the session's signals could not be heard";
+    };
+    let mut hints = session.receive_property_changed::<bool>("LockedHint").await;
+    let mut look = tokio::time::interval(UNLOCK_SESSION_LOOK);
+    look.tick().await;
+    tracing::debug!("Privacy: an unlock here is heard from logind");
+    loop {
+        tokio::select! {
+            signal = unlocks.next() => {
+                if signal.is_none() {
+                    return "the session's signals ended";
+                }
+                unlocked();
+            }
+            hint = hints.next() => {
+                let Some(hint) = hint else {
+                    return "the session's locked hint ended";
+                };
+                if matches!(hint.get().await, Ok(false)) {
+                    unlocked();
+                }
+            }
+            _ = look.tick() => {
+                if session_path(&conn).await.as_deref() != Some(path.as_str()) {
+                    return "this user's session changed";
+                }
+            }
+        }
+    }
+}
+
+/// This user's session's object path on logind: the one `session/auto`
+/// stands for (the server's own session, else the user's display session),
+/// by its id, since signals come from the real path.
+async fn session_path(conn: &zbus::Connection) -> Option<String> {
+    let auto = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1/session/auto",
+        "org.freedesktop.login1.Session",
+    )
+    .await
+    .ok()?;
+    let id: String = auto.get_property("Id").await.ok()?;
+    let manager = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await
+    .ok()?;
+    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSession", &(id,)).await.ok()?;
+    Some(path.as_str().to_string())
+}
+
 /// Classification, factored out for unit tests. A device is grabbed when it
 /// looks like a physical keyboard or mouse. Our own injection devices
 /// (`Pocketdesk Virtual *`) must never be grabbed — that would silence the

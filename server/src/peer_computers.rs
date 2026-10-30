@@ -225,7 +225,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 }
             }
         }
-        forget_untrusted_mine(&dir, &cert_manager, &mut links);
+        forget_untrusted_mine(&dir, &cert_manager, &mut links, views.as_ref()).await;
         lapse_pending(&dir);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
@@ -684,6 +684,10 @@ const AWAIT_LOOK: Duration = Duration::from_secs(2);
 /// that one is not linked to this one.
 const AWAITING: &str = "away: waiting for it to link to this one";
 
+/// What a link that could not be dialled says, whatever the dial's error
+/// (range review M9).
+const DIAL_FAILED: &str = "away: it did not answer";
+
 /// Say how the link to `device_id`, a computer paired both ways that keeps
 /// the link itself (PC1), is doing while it is listed: "linked" while it is
 /// connected here by that link ([`is_the_link`]: files, the clipboard and
@@ -757,48 +761,105 @@ fn is_the_link(
     }
 }
 
-/// The computers paired both ways (PC1) that are no longer trusted here as
-/// computers (`trusted`): unpaired on the Devices page, which takes away
-/// what they may do here, so they are forgotten here too.
+/// The computers paired both ways (PC1), or whose grant both ways lapsed,
+/// that are no longer trusted here as computers (`trusted`): unpaired on
+/// the Devices page, which takes away what they may do here, so they are
+/// forgotten here too.
 fn untrusted_mine(file: &computers::ComputersFile, trusted: impl Fn(&str) -> bool) -> Vec<String> {
     file.computers
         .iter()
-        .filter(|c| c.mine && !trusted(&c.device_id))
+        .filter(|c| (c.mine || file.lapsed.contains(&c.device_id)) && !trusted(&c.device_id))
         .map(|c| c.device_id.clone())
         .collect()
 }
 
 /// Forget each computer paired both ways that the Devices page unpaired
-/// ([`untrusted_mine`]); a trust store that does not read forgets none.
-fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<String, Link>) {
-    if let Ok(trust) = crate::state::trust_store_path() {
-        forget_untrusted_mine_in(dir, &trust, certs, links);
+/// ([`untrusted_mine`]); a trust store that does not read forgets none. As
+/// Unpair under Other computers does (range review M1): it is told to
+/// forget how to wake this one while its link is up, its nudge goes, and
+/// its view, if shown, ends with it.
+async fn forget_untrusted_mine(
+    dir: &Path,
+    certs: &CertManager,
+    links: &mut HashMap<String, Link>,
+    views: Option<&mpsc::Sender<crate::computer_view::Command>>,
+) {
+    let Ok(trust) = crate::state::trust_store_path() else {
+        return;
+    };
+    let untrusted = untrusted_mine_at(dir, &trust);
+    // One trusted again before its listing went is told anew if unpaired
+    // later (PR #572 re-review N8).
+    TOLD_FORGET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|id| untrusted.contains(id));
+    for device_id in untrusted {
+        // Told once, even if its listing is not forgotten at once (a
+        // computers.json that does not write): not again each pass (PR
+        // #572 review).
+        if first_told_forget(&device_id) {
+            tell_forget(&device_id).await;
+        }
+    }
+    for device_id in forget_untrusted_mine_in(dir, &trust, certs, links) {
+        TOLD_FORGET
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&device_id);
+        drop_nudge(&device_id);
+        if let Some(views) = views {
+            let forgotten = crate::computer_view::Command::Forgotten { device_id };
+            let _ = views.send(forgotten).await;
+        }
     }
 }
 
+/// The computers Devices unpaired that were told to forget this one's
+/// wake facts, while their listings wait to be forgotten.
+static TOLD_FORGET: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// Whether `device_id` is told to forget for the first time now; noted.
+fn first_told_forget(device_id: &str) -> bool {
+    TOLD_FORGET
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(device_id.to_string())
+}
+
+/// [`untrusted_mine`] as the files at `dir` and `trust` say now.
+fn untrusted_mine_at(dir: &Path, trust: &Path) -> Vec<String> {
+    let file = computers::read(dir);
+    if !file.computers.iter().any(|c| c.mine) && file.lapsed.is_empty() {
+        return Vec::new();
+    }
+    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
+        return Vec::new();
+    };
+    untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id))
+}
+
+/// Forget [`untrusted_mine_at`]'s computers: their links stop and their
+/// listings go. The ones forgotten.
 fn forget_untrusted_mine_in(
     dir: &Path,
     trust: &Path,
     certs: &CertManager,
     links: &mut HashMap<String, Link>,
-) {
-    let file = computers::read(dir);
-    if !file.computers.iter().any(|c| c.mine) {
-        return;
-    }
-    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
-        return;
-    };
-    for device_id in untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id)) {
-        if let Some(link) = links.remove(&device_id) {
+) -> Vec<String> {
+    let forgotten = untrusted_mine_at(dir, trust);
+    for device_id in &forgotten {
+        if let Some(link) = links.remove(device_id) {
             link.task.abort();
         }
         tracing::info!(
             device_id,
             "A computer unpaired on Devices is forgotten here too"
         );
-        forget_in(dir, Some(trust), certs, &device_id);
+        forget_in(dir, Some(trust), certs, device_id);
     }
+    forgotten
 }
 
 /// Pair as [`pair`] does; once paired, the link starts over now, not after
@@ -1690,7 +1751,9 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
             }
             LinkEnd::Failed(why) => {
                 tracing::debug!(device_id, "No link to another computer: {why}");
-                set_link(&dir, &device_id, &format!("away: {why}"));
+                // Fixed words: the dial's own may name addresses and relays,
+                // and are kept in computers.json (range review M9).
+                set_link(&dir, &device_id, DIAL_FAILED);
                 let wait = backoff;
                 backoff = (backoff * 2).min(BACKOFF_MOST);
                 wait
@@ -2202,8 +2265,15 @@ async fn run_link(
     let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
     // Paired both ways and recorded here: said on the link, for the other
-    // to give what it granted (PC1 re-review I-2).
-    if computer.mine {
+    // to give what it granted (PC1 re-review I-2). Not once its grant
+    // lapsed here (PR #572 review I3): no both-ways word, no wake facts.
+    let both_ways = {
+        let (dir, id) = (dir.to_path_buf(), computer.device_id.clone());
+        tokio::task::spawn_blocking(move || computers::read(&dir).both_ways(&id))
+            .await
+            .unwrap_or(false)
+    };
+    if both_ways {
         let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
         // How to wake this computer (PC6), for the other, which lists this
         // one only when paired both ways: by the adapter toward it.
@@ -2256,8 +2326,9 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         if is_screens_answer(&packet.body) {
             keep_screens(device_id, &packet.body);
         } else if let Some(outgoing) = live(device_id) {
-            // Asked by a computer this one keeps the link to, paired both
-            // ways (PC1): it shows this one's screen too.
+            // Asked by a computer this one keeps the link to, paired
+            // either way (range review M4): only screen names and layout,
+            // which a connection answers any paired device too.
             let _ = outgoing.send(crate::plugins::monitors::answer()).await;
         }
         return;
@@ -2314,6 +2385,8 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             if let Err(e) = crate::plugins::clipboard::set_clipboard(content).await {
                 tracing::warn!("Another computer's clipboard was not set: {e}");
             }
+            // A push waiting on this answer reads the clipboard now.
+            crate::clipboard_push::window_text_landed(&packet.body);
         } else if let Some((id, size)) = crate::clipboard_push::told_image(&packet.body) {
             // Its image (BK3): fetched on a stream it opens on the link.
             let follows = crate::clipboard_push::marked(&packet.body);
@@ -3125,7 +3198,7 @@ mod tests {
         let task = tokio::spawn(std::future::pending::<()>());
         let watch = task.abort_handle();
         links.insert("unpaired".to_string(), Link { task, dials: true });
-        forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
+        let forgotten = forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
         let listed: Vec<String> = computers::read(&dir)
             .computers
             .into_iter()
@@ -3139,12 +3212,52 @@ mod tests {
         let still = TrustStore::read(&trust).unwrap().is_trusted("kept");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(listed, ["kept"]);
+        assert_eq!(forgotten, ["unpaired"], "said, for its view and nudge");
         assert!(!keys_left, "its keys went with it");
         assert!(
             stopped && !links.contains_key("unpaired"),
             "its link stopped"
         );
         assert!(!still, "Other computers' Unpair untrusts it too");
+    }
+
+    /// PR #572 review: a computer Devices unpaired is told to forget once,
+    /// however many passes its listing waits.
+    #[test]
+    fn devices_unpair_tells_once() {
+        assert!(first_told_forget("pr572-told"));
+        assert!(!first_told_forget("pr572-told"));
+        TOLD_FORGET.lock().unwrap().remove("pr572-told");
+        assert!(first_told_forget("pr572-told"), "once forgotten, anew");
+    }
+
+    /// PR #572 review I3: a computer whose both-ways grant lapsed stays
+    /// `mine` here, so Unpair under Other computers still takes its trust.
+    #[test]
+    fn forget_untrusts_a_lapsed_computer() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        let dir = temp("forget-lapsed");
+        let trust = dir.join("trusted_devices.json");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: true,
+                ..facts().into_peer("lap", "", 1)
+            });
+            file.pending.push("lap".to_string());
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.lapse_pending(1 + computers::PENDING_FOR);
+        })
+        .unwrap();
+        let lapsed = computers::read(&dir);
+        forget_in(&dir, Some(&trust), &certs, "lap");
+        let still = TrustStore::read(&trust).unwrap().is_trusted("lap");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(lapsed.lapsed.contains(&"lap".to_string()) && !lapsed.both_ways("lap"));
+        assert!(!still, "Forget untrusts it");
     }
 
     /// PC1 re-review I-2: only a connection that proved the iroh key the

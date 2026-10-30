@@ -164,6 +164,8 @@ impl Plugin for ClipboardPlugin {
                     if let Err(e) = set_clipboard(content).await {
                         tracing::warn!("Failed to set clipboard: {}", e);
                     }
+                    // A push waiting on this answer reads the clipboard now.
+                    crate::clipboard_push::window_text_landed(&packet.body);
                 }
             }
             "kdeconnect.clipboard.connect" => {
@@ -330,6 +332,8 @@ pub(crate) async fn put_image(from: &str, png: Vec<u8>, id: Option<&str>) -> Res
         crate::clipboard_push::forget_image_from(&image.id);
         return Err(e);
     }
+    // A push waiting on an answer that was this image reads it now.
+    crate::clipboard_push::image_landed();
     Ok(())
 }
 

@@ -37,6 +37,14 @@ const CLIENT_PACKET_READ: Duration = Duration::from_secs(5);
 /// How often the connection monitor checks for that silence.
 const SILENCE_CHECK: Duration = Duration::from_secs(5);
 
+/// Whether a mic packet from a session stays here (PC10 review): a
+/// computer's start and frames while its session is view-only. Its stop
+/// always passes, so "Pocketdesk Mic" never outlives it; a phone's mic
+/// goes on in a view-only session (R4 E2).
+fn mic_held_back(mic_needs_control: bool, enabled: bool, view_only: bool) -> bool {
+    mic_needs_control && enabled && view_only
+}
+
 /// Whether a client unheard for `silent` has abandoned its session.
 fn client_went_silent(silent: Duration) -> bool {
     silent >= CLIENT_SILENT_LIMIT
@@ -100,9 +108,16 @@ impl Drop for CastEnded {
 /// pen only for a phone whose input is taken (E3 review: one in view-only
 /// was offered a pen whose every stroke was dropped), and whether its input
 /// is taken at all (BK7: another computer's window says it is view-only),
-/// and which system this computer runs (PC4: that window offers its keys).
-fn screen_feature_byte(input: bool) -> u8 {
-    let mut byte = super::client::SCREEN_FEATURES_SAID | super::client::SCREEN_FEATURE_SYSTEM_SAID;
+/// and which system this computer runs (PC4: that window offers its keys),
+/// and whether its microphone is played here (PC10 review: that window
+/// says why nothing is heard).
+fn screen_feature_byte(input: bool, mic: bool) -> u8 {
+    let mut byte = super::client::SCREEN_FEATURES_SAID
+        | super::client::SCREEN_FEATURE_SYSTEM_SAID
+        | super::client::SCREEN_FEATURE_MIC_SAID;
+    if mic {
+        byte |= super::client::SCREEN_FEATURE_MIC;
+    }
     if cfg!(windows) {
         byte |= super::client::SCREEN_FEATURE_WINDOWS;
     }
@@ -553,7 +568,12 @@ impl StreamingServer {
         // A sound session gives no input at all (N5).
         let force_view_only = !permissions.allows(Capability::Input) || sound || phone_sound_only;
         let laser = self.laser;
-        let allow_mic = permissions.allows(Capability::Mic) && !input_only;
+        // A computer's mic needs control too (PC10 review): never in a
+        // session that may not drive this one.
+        let mic_needs_control = permissions.mic_needs_control;
+        let allow_mic = permissions.allows(Capability::Mic)
+            && !input_only
+            && !(mic_needs_control && force_view_only);
         let allow_audio = permissions.allows(Capability::Audio) && !input_only;
         // A cast's sound plays here with its own permission (K5).
         let allow_phone_sound =
@@ -716,7 +736,7 @@ impl StreamingServer {
                         timestamp_us: 0,
                     };
                     let mut said = header.as_bytes().to_vec();
-                    said.push(screen_feature_byte(!force_view_only));
+                    said.push(screen_feature_byte(!force_view_only, allow_mic));
                     if let Err(e) = ready.write_all(&said).await {
                         debug!(error = %e, "Could not say what this computer takes");
                     }
@@ -1701,12 +1721,21 @@ impl StreamingServer {
                                                     continue;
                                                 }
                                                 // Mic audio (R4 E2) is session
-                                                // media, not injected input — it
-                                                // flows to the relay even while
-                                                // view-only is latched.
-                                                if matches!(packet, InputPacket::Mic { .. }) {
+                                                // media, not injected input — a
+                                                // phone's flows to the relay even
+                                                // while view-only is latched. A
+                                                // computer's start and frames do
+                                                // not (PC10 review); its stop
+                                                // always passes.
+                                                if let InputPacket::Mic { enabled, .. } = &packet {
+                                                    let held_back = mic_held_back(
+                                                        mic_needs_control,
+                                                        *enabled,
+                                                        monitor_view_only.load(Ordering::Relaxed),
+                                                    );
                                                     // F5: no mic permission, no relay.
                                                     if allow_mic
+                                                        && !held_back
                                                         && let Some(tx) = &monitor_mic_tx
                                                         && tx.try_send(packet).is_err()
                                                     {
@@ -2361,6 +2390,20 @@ mod tests {
         assert!(client_went_silent(Duration::from_secs(30)));
     }
 
+    /// PC10 review: a computer's mic plays only while its session may
+    /// drive this one; its stop always passes; a phone's goes on in a
+    /// view-only session (R4 E2).
+    #[test]
+    fn a_computers_mic_stays_out_of_a_view_only_session() {
+        assert!(
+            mic_held_back(true, true, true),
+            "a computer's frames, view-only"
+        );
+        assert!(!mic_held_back(true, false, true), "its stop passes");
+        assert!(!mic_held_back(true, true, false), "while it controls");
+        assert!(!mic_held_back(false, true, true), "a phone's");
+    }
+
     /// This PC's layout: a 2560x1080 primary at the origin and a 2048x1152
     /// screen to its right, 91 px higher.
     const TWO_SCREENS: PointerSpace = PointerSpace {
@@ -2749,11 +2792,11 @@ mod tests {
     fn a_pen_is_offered_only_to_a_phone_whose_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_PEN, screen_features};
         assert_eq!(
-            screen_features(&[screen_feature_byte(true)]) & SCREEN_FEATURE_PEN,
+            screen_features(&[screen_feature_byte(true, true)]) & SCREEN_FEATURE_PEN,
             SCREEN_FEATURE_PEN
         );
         assert_eq!(
-            screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_PEN,
+            screen_features(&[screen_feature_byte(false, false)]) & SCREEN_FEATURE_PEN,
             0,
             "said, and no pen"
         );
@@ -2765,11 +2808,11 @@ mod tests {
     fn a_screen_session_hears_whether_its_input_is_taken() {
         use super::super::client::{SCREEN_FEATURE_INPUT, screen_features};
         assert_eq!(
-            screen_features(&[screen_feature_byte(true)]) & SCREEN_FEATURE_INPUT,
+            screen_features(&[screen_feature_byte(true, true)]) & SCREEN_FEATURE_INPUT,
             SCREEN_FEATURE_INPUT
         );
         assert_eq!(
-            screen_features(&[screen_feature_byte(false)]) & SCREEN_FEATURE_INPUT,
+            screen_features(&[screen_feature_byte(false, false)]) & SCREEN_FEATURE_INPUT,
             0,
             "said, and view-only"
         );
@@ -2781,8 +2824,21 @@ mod tests {
         use super::super::client::{screen_features, screen_runs_windows};
         for input in [true, false] {
             assert_eq!(
-                screen_runs_windows(screen_features(&[screen_feature_byte(input)])),
+                screen_runs_windows(screen_features(&[screen_feature_byte(input, input)])),
                 Some(cfg!(windows))
+            );
+        }
+    }
+
+    /// PC10 review: a screen session hears whether its microphone is
+    /// played here.
+    #[test]
+    fn a_screen_session_hears_whether_its_mic_is_played() {
+        use super::super::client::{screen_features, screen_takes_mic};
+        for mic in [true, false] {
+            assert_eq!(
+                screen_takes_mic(screen_features(&[screen_feature_byte(true, mic)])),
+                Some(mic)
             );
         }
     }
