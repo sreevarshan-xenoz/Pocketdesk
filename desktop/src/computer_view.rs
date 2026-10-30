@@ -1153,23 +1153,29 @@ impl ComputerView {
         self.take_each(|state| state.lock_saved.take())
     }
 
-    /// The computer this computer's microphone goes to now, and from which
-    /// window, if any (PR #569 review I2; PC11: any window's): the main
-    /// window says so on every page.
+    /// Every computer this computer's microphone goes to now, each with the
+    /// window it goes from, if any (PR #569 review I2; PC11: any window's,
+    /// and all of them, re-review N5): the main window says so on every
+    /// page.
     pub fn mic_on_air(&self) -> Option<String> {
-        self.windows().iter().find_map(|window| {
-            let state = lock(window);
-            state
-                .mic
-                .on()
-                .then(|| {
-                    state
-                        .wanted
-                        .as_ref()
-                        .map(|w| mic_window_words(&w.name, w.monitor))
-                })
-                .flatten()
-        })
+        let sending: Vec<String> = self
+            .windows()
+            .iter()
+            .filter_map(|window| {
+                let state = lock(window);
+                state
+                    .mic
+                    .on()
+                    .then(|| {
+                        state
+                            .wanted
+                            .as_ref()
+                            .map(|w| mic_window_words(&w.name, w.monitor))
+                    })
+                    .flatten()
+            })
+            .collect();
+        (!sending.is_empty()).then(|| sending.join("; "))
     }
 
     /// Stop sending the microphone, from the main window, in every window
@@ -6569,6 +6575,40 @@ mod tests {
         assert_eq!(state.decoder_gen, after, "no decoder for the old view");
         assert!(after > decoders);
         drop(state);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 re-review N5: the main window names every computer the mic
+    /// goes to, two windows of two computers each sending.
+    #[test]
+    fn the_main_window_names_every_computer_the_mic_goes_to() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-mic-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        view.open_new_window(&ctx, &view.shared, 1);
+        lock(&view.windows()[1]).wanted = Some(Wanted {
+            device_id: "lap".into(),
+            name: "Lap".into(),
+            monitor: 1,
+        });
+        assert_eq!(view.mic_on_air(), None);
+        for window in view.windows() {
+            let mut state = lock(&window);
+            state.mic.toggle();
+            state.mic.step(true);
+        }
+        assert_eq!(
+            view.mic_on_air(),
+            Some(format!(
+                "{}; {}",
+                mic_window_words("Desk", 0),
+                mic_window_words("Lap", 1)
+            ))
+        );
+        view.stop_mic();
+        assert_eq!(view.mic_on_air(), None);
+        view.quit();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
