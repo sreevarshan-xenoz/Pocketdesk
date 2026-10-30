@@ -113,7 +113,10 @@ fn stop(a_state: &Path) {
     let session_id = wire::read(a_state).map(|v| v.session_id);
     computers::request(
         a_state,
-        ComputerAsk::StopView { session_id },
+        ComputerAsk::StopView {
+            session_id,
+            lock: false,
+        },
         pin::now_unix(),
     )
     .unwrap();

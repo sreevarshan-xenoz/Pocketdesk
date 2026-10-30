@@ -4375,6 +4375,11 @@ impl eframe::App for PocketdeskApp {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.pair.reset(&self.state_dir);
+        // A computer's window open as Pocketdesk quits closes as it would by
+        // itself: its lock on close (PC8) is asked, its view stopped.
+        if let Some(view) = &self.computer_view {
+            view.quit();
+        }
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

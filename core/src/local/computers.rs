@@ -363,10 +363,15 @@ pub enum ComputerAsk {
     /// Stop showing the computer's screen (its window closed): the view
     /// `session_id` (`view.json`'s) when the window knew it, else the one
     /// shown now. A Stop for a view since replaced stops nothing (BK7
-    /// review M1).
+    /// review M1). `lock`: the window's lock on close (PC8) did not reach
+    /// the view relay (no connection as it closed, between joins, or its
+    /// write failed), so the server asks that computer to lock as it stops
+    /// the view, and says here when it could not (PR #568 review I2).
     StopView {
         #[serde(default)]
         session_id: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lock: bool,
     },
 }
 
@@ -793,6 +798,7 @@ mod tests {
             &dir,
             ComputerAsk::StopView {
                 session_id: Some(9),
+                lock: false,
             },
             101,
         )
@@ -802,6 +808,7 @@ mod tests {
             id: "a".to_string(),
             ask: ComputerAsk::StopView {
                 session_id: Some(9),
+                lock: false,
             },
             created_unix: 1,
             created_ms: 2,
@@ -904,7 +911,10 @@ mod tests {
             let mut asked = Vec::new();
             for n in 0..12 {
                 let ask = if n % 2 == 0 {
-                    ComputerAsk::StopView { session_id: None }
+                    ComputerAsk::StopView {
+                        session_id: None,
+                        lock: false,
+                    }
                 } else {
                     ComputerAsk::View {
                         device_id: format!("desk-{n}"),
@@ -930,7 +940,23 @@ mod tests {
         let old: ComputerRequest =
             serde_json::from_str(r#"{"id":"a","ask":"stop_view","created_unix":1}"#).unwrap();
         assert_eq!(old.created_ms, 0);
-        assert_eq!(old.ask, ComputerAsk::StopView { session_id: None });
+        assert_eq!(
+            old.ask,
+            ComputerAsk::StopView {
+                session_id: None,
+                lock: false
+            }
+        );
+        // The lock rides the stop only when asked (PR #568 review I2).
+        let locking = serde_json::to_value(ComputerAsk::StopView {
+            session_id: None,
+            lock: true,
+        })
+        .unwrap();
+        assert_eq!(
+            locking,
+            serde_json::json!({"ask": "stop_view", "session_id": null, "lock": true})
+        );
     }
 
     /// PC1 review C1: a pairing ask says whether the owner here let the
