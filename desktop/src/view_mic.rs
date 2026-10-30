@@ -157,7 +157,17 @@ pub trait MicSource {
     /// The next samples (none after a short wait is fine); an error once
     /// the microphone is gone.
     fn read(&mut self) -> io::Result<Vec<i16>>;
+
+    /// How to end it at once from another thread, so a read blocked on it
+    /// returns (PR #569 review M4: a stalled recorder never keeps the
+    /// thread or its process). None: a stop waits for the next read.
+    fn stopper(&self) -> Option<Stopper> {
+        None
+    }
 }
+
+/// Ends a [`MicSource`] from another thread.
+pub type Stopper = Box<dyn FnOnce() + Send>;
 
 /// How the microphone stopped going.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +241,15 @@ pub fn opus_encoder() -> Result<impl FnMut(&[i16]) -> Result<Vec<u8>, String>, S
 /// ends at its next read, sending nothing more).
 pub struct MicRun {
     stop: Arc<AtomicBool>,
+    /// The source's [`Stopper`], once it is open (taken and called as the
+    /// run is dropped).
+    stopper: Arc<std::sync::Mutex<Option<Stopper>>>,
+}
+
+fn slot(stopper: &std::sync::Mutex<Option<Stopper>>) -> std::sync::MutexGuard<'_, Option<Stopper>> {
+    stopper
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl MicRun {
@@ -243,24 +262,43 @@ impl MicRun {
         ended: impl FnOnce(Ended) + Send + 'static,
     ) -> io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
-        let stopping = stop.clone();
+        let stopper = Arc::new(std::sync::Mutex::new(None));
+        let (stopping, stopper_slot) = (stop.clone(), stopper.clone());
         std::thread::Builder::new()
             .name("view-mic".into())
             .spawn(move || {
                 let how = (|| {
                     let mut encode = opus_encoder().map_err(Ended::Failed)?;
                     let mut source = open().map_err(|e| Ended::Failed(e.to_string()))?;
+                    // Its stopper is kept for the drop; a drop that came
+                    // while it opened ends it now. The slot's lock orders
+                    // the two, so neither misses the other.
+                    if let Some(stop_it) = source.stopper() {
+                        let mut kept = slot(&stopper_slot);
+                        if stopping.load(Ordering::Acquire) {
+                            drop(kept);
+                            stop_it();
+                        } else {
+                            *kept = Some(stop_it);
+                        }
+                    }
                     Ok::<_, Ended>(pump(&mut *source, &mut encode, &mut send, &stopping))
                 })();
                 ended(how.unwrap_or_else(|how| how));
             })?;
-        Ok(Self { stop })
+        Ok(Self { stop, stopper })
     }
 }
 
 impl Drop for MicRun {
     fn drop(&mut self) {
+        let mut kept = slot(&self.stopper);
         self.stop.store(true, Ordering::Release);
+        let stop_it = kept.take();
+        drop(kept);
+        if let Some(stop_it) = stop_it {
+            stop_it();
+        }
     }
 }
 
@@ -304,6 +342,18 @@ pub fn named(names: &[String], wanted: &str) -> Option<usize> {
     names
         .iter()
         .position(|name| name.to_lowercase().contains(&wanted))
+}
+
+/// `why`, and the last thing the recorder said on its error output, if
+/// anything (PR #569 review M4).
+#[cfg(any(test, target_os = "linux"))]
+pub fn with_said(why: &str, said: &str) -> String {
+    let said = said.trim();
+    if said.is_empty() {
+        why.to_string()
+    } else {
+        format!("{why}: {said}")
+    }
 }
 
 /// Little-endian 16-bit samples from `bytes`, a byte left over from the
@@ -355,20 +405,48 @@ mod recorder {
     //! The microphone on Linux, through PipeWire's own recorder (or the
     //! PulseAudio one PipeWire also answers): no audio library in the app.
 
-    use std::io::{self, Read};
-    use std::process::{Child, ChildStdout, Command, Stdio};
+    use std::io::{self, BufRead, Read};
+    use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use super::MicSource;
+    use super::{MicSource, Stopper};
 
     /// A recorder that gives up this soon (unknown option, no server) is
     /// taken not to work, and the next is tried.
     const SETTLE: Duration = Duration::from_millis(300);
 
     pub struct Recorder {
-        child: Child,
+        child: Arc<Mutex<Child>>,
         out: ChildStdout,
         carry: Option<u8>,
+        said: Arc<Mutex<String>>,
+    }
+
+    fn held<T>(lock: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The recorder's error output, a line at a time, to this app's (as
+    /// its debug output), the last line kept for the bar's reason.
+    fn follow_errors(
+        program: &'static str,
+        errors: ChildStderr,
+        said: Arc<Mutex<String>>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        std::thread::Builder::new()
+            .name("view-mic-errors".into())
+            .spawn(move || {
+                for line in io::BufReader::new(errors).lines() {
+                    let Ok(line) = line else { break };
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    eprintln!("{program}: {line}");
+                    *held(&said) = line;
+                }
+            })
+            .ok()
     }
 
     pub fn open(device: Option<&str>) -> io::Result<Box<dyn MicSource>> {
@@ -378,7 +456,7 @@ mod recorder {
                 .args(&args)
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .spawn();
             let mut child = match spawned {
                 Ok(child) => child,
@@ -387,6 +465,11 @@ mod recorder {
                     continue;
                 }
             };
+            let said = Arc::new(Mutex::new(String::new()));
+            let errors = child
+                .stderr
+                .take()
+                .and_then(|errors| follow_errors(program, errors, said.clone()));
             std::thread::sleep(SETTLE);
             match child.try_wait() {
                 Ok(None) => {
@@ -397,12 +480,22 @@ mod recorder {
                         continue;
                     };
                     return Ok(Box::new(Recorder {
-                        child,
+                        child: Arc::new(Mutex::new(child)),
                         out,
                         carry: None,
+                        said,
                     }));
                 }
-                Ok(Some(status)) => why.push(format!("{program} stopped ({status})")),
+                Ok(Some(status)) => {
+                    // Its error output ends with it: what it said is read.
+                    if let Some(errors) = errors {
+                        let _ = errors.join();
+                    }
+                    why.push(super::with_said(
+                        &format!("{program} stopped ({status})"),
+                        &held(&said),
+                    ));
+                }
                 Err(e) => why.push(format!("{program}: {e}")),
             }
         }
@@ -419,17 +512,25 @@ mod recorder {
             if n == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "the recorder stopped",
+                    super::with_said("the recorder stopped", &held(&self.said)),
                 ));
             }
             Ok(super::samples_le(&bytes[..n], &mut self.carry))
+        }
+
+        fn stopper(&self) -> Option<Stopper> {
+            let child = self.child.clone();
+            Some(Box::new(move || {
+                let _ = held(&child).kill();
+            }))
         }
     }
 
     impl Drop for Recorder {
         fn drop(&mut self) {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+            let mut child = held(&self.child);
+            let _ = child.kill();
+            let _ = child.wait();
         }
     }
 }
@@ -819,6 +920,63 @@ mod tests {
         rx.recv_timeout(wait).expect("the start");
         drop(run);
         assert_eq!(ended_rx.recv_timeout(wait).unwrap(), Ended::Stopped);
+    }
+
+    /// PR #569 review M4: dropping the run ends a source whose read is
+    /// blocked (a stalled recorder) through its stopper, at once.
+    #[test]
+    fn dropping_the_run_ends_a_blocked_read() {
+        use std::sync::mpsc;
+        struct Stalled {
+            woken: mpsc::Receiver<()>,
+            wake: mpsc::Sender<()>,
+        }
+        impl MicSource for Stalled {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                // Blocks until stopped, as a recorder that sends nothing.
+                self.woken.recv().map_err(|_| io::Error::other("closed"))?;
+                Err(io::Error::other("killed"))
+            }
+            fn stopper(&self) -> Option<Stopper> {
+                let wake = self.wake.clone();
+                Some(Box::new(move || {
+                    let _ = wake.send(());
+                }))
+            }
+        }
+        let (opened_tx, opened_rx) = mpsc::channel();
+        let (ended_tx, ended_rx) = mpsc::channel();
+        let run = MicRun::start(
+            move || {
+                let (wake, woken) = mpsc::channel();
+                let _ = opened_tx.send(());
+                Ok(Box::new(Stalled { woken, wake }) as Box<dyn MicSource>)
+            },
+            |_| true,
+            move |how| {
+                let _ = ended_tx.send(how);
+            },
+        )
+        .unwrap();
+        let wait = std::time::Duration::from_secs(10);
+        opened_rx.recv_timeout(wait).unwrap();
+        // The start went; the read is blocked now (or about to be).
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(run);
+        assert_eq!(
+            ended_rx.recv_timeout(wait).unwrap(),
+            Ended::Failed("killed".into()),
+            "the blocked read returned"
+        );
+    }
+
+    #[test]
+    fn a_recorders_last_words_join_the_reason() {
+        assert_eq!(with_said("pw-record stopped", "  "), "pw-record stopped");
+        assert_eq!(
+            with_said("pw-record stopped", "error: no such target\n"),
+            "pw-record stopped: error: no such target"
+        );
     }
 
     #[test]
