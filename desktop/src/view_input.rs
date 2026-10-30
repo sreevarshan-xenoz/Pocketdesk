@@ -19,6 +19,15 @@
 //! pointer goes as relative moves instead: the mouse's raw movement, summed
 //! over a pass and sent as whole steps, what is left of a step kept for the
 //! next; the buttons go without a position.
+//!
+//! With **Keys by position** (scancode mode, [`WindowInput::set_by_position`])
+//! every key, letters and digits among them, goes as the evdev code of where
+//! it sits on the keyboard ([`by_position`]), Shift at once like any key, and
+//! the text this computer's layout makes of it stays here: the other
+//! computer's own layout says what the key types, and a game reads WASD
+//! where WASD sit, whatever either layout prints on them. Text that came
+//! from no key (an input method's, a keypad key egui does not place) still
+//! goes as text.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -175,6 +184,166 @@ pub fn evdev(key: egui::Key) -> Option<u16> {
         BrowserBack => 158,
         _ => return None,
     })
+}
+
+/// Keys by position: each key egui places on the keyboard (its
+/// `physical_key`, named after what a US keyboard prints there) and the
+/// Linux evdev code of that place on a standard 104/105-key keyboard. The
+/// other computer presses that code as itself: Windows by its scancode
+/// (`KEYEVENTF_SCANCODE`), Linux as the evdev key, so its own layout says
+/// what it types.
+///
+/// What egui cannot tell is not here: it reports the keypad's digits,
+/// Enter, minus and slash as their main-block twins (so they go as those),
+/// the keypad's `+` only as [`egui::Key::Plus`] (the keypad's, as no main
+/// key is Plus by position), and no key at all for Caps Lock, Num Lock,
+/// Scroll Lock, Print Screen, Pause, the Menu key or the keypad's `*` and
+/// `.` (their text, if any, goes as text). The keys egui names that sit
+/// nowhere are in `UNPLACED` (the table's test holds the two together).
+pub const BY_POSITION: &[(egui::Key, u16)] = {
+    use egui::Key::*;
+    &[
+        (Escape, 1),
+        (Num1, 2),
+        (Num2, 3),
+        (Num3, 4),
+        (Num4, 5),
+        (Num5, 6),
+        (Num6, 7),
+        (Num7, 8),
+        (Num8, 9),
+        (Num9, 10),
+        (Num0, 11),
+        (Minus, 12),
+        (Equals, 13),
+        (Backspace, 14),
+        (Tab, 15),
+        (Q, 16),
+        (W, 17),
+        (E, 18),
+        (R, 19),
+        (T, 20),
+        (Y, 21),
+        (U, 22),
+        (I, 23),
+        (O, 24),
+        (P, 25),
+        (OpenBracket, 26),
+        (CloseBracket, 27),
+        (Enter, 28),
+        (ControlLeft, LEFT_CTRL),
+        (A, 30),
+        (S, 31),
+        (D, 32),
+        (F, 33),
+        (G, 34),
+        (H, 35),
+        (J, 36),
+        (K, 37),
+        (L, 38),
+        (Semicolon, 39),
+        (Quote, 40),
+        (Backtick, 41),
+        (ShiftLeft, LEFT_SHIFT),
+        (Backslash, 43),
+        (Z, 44),
+        (X, KEY_X),
+        (C, KEY_C),
+        (V, KEY_V),
+        (B, 48),
+        (N, 49),
+        (M, 50),
+        (Comma, 51),
+        (Period, 52),
+        (Slash, 53),
+        (ShiftRight, RIGHT_SHIFT),
+        (AltLeft, LEFT_ALT),
+        (Space, 57),
+        (F1, 59),
+        (F2, 60),
+        (F3, 61),
+        (F4, 62),
+        (F5, 63),
+        (F6, 64),
+        (F7, 65),
+        (F8, 66),
+        (F9, 67),
+        (F10, 68),
+        // KEY_KPPLUS: the only key egui calls Plus by its place.
+        (Plus, 78),
+        // KEY_102ND, the ISO key beside the left Shift.
+        (IntlBackslash, 86),
+        (F11, 87),
+        (F12, 88),
+        (ControlRight, RIGHT_CTRL),
+        (AltRight, RIGHT_ALT),
+        (Home, 102),
+        (ArrowUp, 103),
+        (PageUp, 104),
+        (ArrowLeft, 105),
+        (ArrowRight, 106),
+        (End, 107),
+        (ArrowDown, 108),
+        (PageDown, 109),
+        (Insert, KEY_INSERT),
+        (Delete, KEY_DELETE),
+        (SuperLeft, LEFT_META),
+        (SuperRight, RIGHT_META),
+        (F13, 183),
+        (F14, 184),
+        (F15, 185),
+        (F16, 186),
+        (F17, 187),
+        (F18, 188),
+        (F19, 189),
+        (F20, 190),
+        (F21, 191),
+        (F22, 192),
+        (F23, 193),
+        (F24, 194),
+    ]
+};
+
+/// The keys egui names that are no place on the keyboard, on purpose not
+/// in [`BY_POSITION`]: characters it reports only by what a key typed
+/// (Colon, Pipe, the curly brackets...), Copy, Cut and Paste (egui makes
+/// them its clipboard events, which go as Ctrl+C, X and V), the browser's
+/// Back (by meaning only), and F25 to F35, which Linux has no code for.
+#[cfg(test)]
+pub const UNPLACED: &[egui::Key] = {
+    use egui::Key::*;
+    &[
+        Copy,
+        Cut,
+        Paste,
+        Colon,
+        Pipe,
+        Questionmark,
+        Exclamationmark,
+        OpenCurlyBracket,
+        CloseCurlyBracket,
+        BrowserBack,
+        F25,
+        F26,
+        F27,
+        F28,
+        F29,
+        F30,
+        F31,
+        F32,
+        F33,
+        F34,
+        F35,
+    ]
+};
+
+/// The evdev code of the place `key` (egui's `physical_key`) sits on the
+/// keyboard, or `None` for one that sits nowhere.
+pub fn by_position(key: egui::Key) -> Option<u16> {
+    BY_POSITION
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|&(_, code)| code)
 }
 
 const KEY_ESC: u16 = 1;
@@ -355,6 +524,11 @@ pub struct WindowInput {
     /// While the pointer is locked (PC7): the raw movement not yet sent as
     /// a whole step, each way. `None` while it is not.
     relative: Option<egui::Vec2>,
+    /// Keys by position (scancode mode): every key goes as where it sits.
+    by_position: bool,
+    /// A key just went by its position: the text egui made of it here is
+    /// not sent as well.
+    keyed: bool,
 }
 
 impl WindowInput {
@@ -373,6 +547,23 @@ impl WindowInput {
         }
     }
 
+    /// Keys by position on or off: what is held there is let go first, so
+    /// nothing pressed one way is left down the other way.
+    pub fn set_by_position(&mut self, on: bool) -> Vec<InputPacket> {
+        if on == self.by_position {
+            return Vec::new();
+        }
+        let out = self.release_all();
+        self.by_position = on;
+        out
+    }
+
+    /// Whether keys go by their position.
+    #[cfg(test)]
+    pub fn by_position(&self) -> bool {
+        self.by_position
+    }
+
     /// Whether a move waits for its turn (the window should look again in
     /// [`MOVE_EVERY`]).
     pub fn waiting(&self) -> bool {
@@ -389,6 +580,9 @@ impl WindowInput {
     ) -> Vec<InputPacket> {
         let mut out = Vec::new();
         for event in events {
+            // The text of a key that went by its position comes right after
+            // it, in the same pass.
+            let keyed = std::mem::take(&mut self.keyed);
             match event {
                 egui::Event::MouseMoved(delta) => {
                     if let Some(sum) = self.relative.as_mut() {
@@ -479,9 +673,26 @@ impl WindowInput {
                     pressed,
                     ..
                 } => {
-                    let key = physical_key.unwrap_or(*key);
-                    let Some(code) = evdev(key) else { continue };
-                    self.key(key, code, *pressed, &mut out);
+                    // By position, the key where it sits; one egui places
+                    // nowhere goes as before, its text as text.
+                    let (key, code, placed) = match physical_key {
+                        Some(at) if self.by_position => (*at, by_position(*at), true),
+                        _ => {
+                            let key = physical_key.unwrap_or(*key);
+                            (key, evdev(key), false)
+                        }
+                    };
+                    let Some(code) = code else { continue };
+                    self.key(key, code, *pressed, placed, &mut out);
+                    self.keyed = placed && *pressed;
+                }
+                // That computer's layout makes this key's text there.
+                egui::Event::Text(_) if keyed => {}
+                // An input method's text is typing, whatever the keys did.
+                egui::Event::Ime(egui::ImeEvent::Commit(text))
+                    if self.by_position && !text.is_empty() =>
+                {
+                    out.push(InputPacket::Text(text.clone()));
                 }
                 egui::Event::Text(text) if !text.is_empty() => {
                     // With Ctrl or Alt held it is a shortcut, sent as keys.
@@ -550,7 +761,16 @@ impl WindowInput {
         }
     }
 
-    fn key(&mut self, key: egui::Key, code: u16, pressed: bool, out: &mut Vec<InputPacket>) {
+    /// `key` (`code` there) going down or up; `placed`, by its position:
+    /// it goes as a key whatever it types, Shift at once.
+    fn key(
+        &mut self,
+        key: egui::Key,
+        code: u16,
+        pressed: bool,
+        placed: bool,
+        out: &mut Vec<InputPacket>,
+    ) {
         if !pressed {
             // A modifier let go first: what it made a copy, cut or paste of
             // goes now, with it still held there.
@@ -595,16 +815,16 @@ impl WindowInput {
             return;
         }
         self.down_here.insert(code);
-        if is_shift(code) {
+        if is_shift(code) && !placed {
             // Held there once something needs it.
             return;
         }
         let chord = self.down_here.iter().any(|c| is_chord_modifier(*c));
-        if types(key) && !chord {
+        if types(key) && !chord && !placed {
             // It arrives as text.
             return;
         }
-        if !is_chord_modifier(code) {
+        if !is_chord_modifier(code) && !is_shift(code) {
             self.hold_shift(out);
         }
         // A key held repeats: each repeat is pressed again.
@@ -759,6 +979,7 @@ impl WindowInput {
         self.down_here.clear();
         self.clips.clear();
         self.clipped.clear();
+        self.keyed = false;
         self.pending = None;
         self.wheel = egui::Vec2::ZERO;
         if let Some(sum) = self.relative.as_mut() {
@@ -1493,5 +1714,185 @@ mod tests {
         let mut nan = egui::vec2(f32::NAN, 1.0);
         assert!(whole_moves(&mut nan).is_empty());
         assert_eq!(nan, egui::Vec2::ZERO);
+    }
+
+    /// Keys by position: every key egui names is placed once or is on the
+    /// list of keys that sit nowhere; no two keys share a place; and every
+    /// place is one a Windows keyboard names by its scancode, which the
+    /// Windows host presses as that scancode again (the server's
+    /// `every_scancode_read_back_is_pressed_as_itself`).
+    #[test]
+    fn every_key_is_placed_once_or_unplaced_on_purpose() {
+        use pocketdesk_core::input::windows_scan::evdev_from_scan;
+        for key in egui::Key::ALL {
+            let placed = BY_POSITION.iter().filter(|(k, _)| k == key).count();
+            let unplaced = UNPLACED.iter().filter(|k| *k == key).count();
+            assert_eq!(placed + unplaced, 1, "{key:?}");
+        }
+        assert_eq!(BY_POSITION.len() + UNPLACED.len(), egui::Key::ALL.len());
+        let codes: BTreeSet<u16> = BY_POSITION.iter().map(|&(_, c)| c).collect();
+        assert_eq!(codes.len(), BY_POSITION.len(), "a place used twice");
+        let scanned: BTreeSet<u16> = [false, true]
+            .into_iter()
+            .flat_map(|ext| (0..=0x7Fu16).filter_map(move |s| evdev_from_scan(s, ext)))
+            .collect();
+        for (key, code) in BY_POSITION {
+            assert!(scanned.contains(code), "{key:?} ({code}) has no scancode");
+        }
+        for (key, code) in [
+            (egui::Key::W, 17),
+            (egui::Key::A, 30),
+            (egui::Key::Z, 44),
+            (egui::Key::Num1, 2),
+            (egui::Key::Semicolon, 39),
+            (egui::Key::IntlBackslash, 86),
+            (egui::Key::Plus, 78),
+            (egui::Key::Equals, 13),
+            (egui::Key::F24, 194),
+            (egui::Key::ShiftRight, 54),
+        ] {
+            assert_eq!(by_position(key), Some(code), "{key:?}");
+        }
+        assert_eq!(by_position(egui::Key::Colon), None);
+        assert_eq!(by_position(egui::Key::F25), None);
+    }
+
+    /// Keys by position: a letter goes as its key and the text this layout
+    /// made of it stays here (an AZERTY keyboard's A key types "q" here,
+    /// and goes as A's place); Shift goes at once, as a game's run key.
+    #[test]
+    fn by_position_every_key_goes_as_itself_and_its_text_stays_here() {
+        let mut input = WindowInput::default();
+        assert!(input.set_by_position(true).is_empty());
+        assert!(input.by_position());
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::A, true),
+                egui::Event::Text("q".into()),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::W, true),
+                egui::Event::Text("Z".into()),
+                key(egui::Key::W, true),
+                egui::Event::Text("Z".into()),
+                key(egui::Key::W, false),
+                key(egui::Key::A, false),
+                key(egui::Key::Space, true),
+                egui::Event::Text(" ".into()),
+                key(egui::Key::Space, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 30, pressed: true }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 17, pressed: true }",
+                "KeyEvent { key: 17, pressed: true }",
+                "KeyEvent { key: 17, pressed: false }",
+                "KeyEvent { key: 30, pressed: false }",
+                "KeyEvent { key: 57, pressed: true }",
+                "KeyEvent { key: 57, pressed: false }",
+            ],
+            "no text: that computer's layout types it"
+        );
+        assert!(input.holds(), "Shift is held there");
+        let out = input.take(&[key(egui::Key::ShiftLeft, false)], picture(), now);
+        assert_eq!(words(&out), ["KeyEvent { key: 42, pressed: false }"]);
+        assert!(!input.holds());
+    }
+
+    /// Keys by position: text that came from no key, an input method's
+    /// or a keypad key egui does not place, still goes as text; a key egui
+    /// knows only by what it typed goes as before.
+    #[test]
+    fn by_position_text_from_no_key_still_goes() {
+        let mut input = WindowInput::default();
+        let _ = input.set_by_position(true);
+        let unplaced = egui::Event::Key {
+            key: egui::Key::Period,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let out = input.take(
+            &[
+                egui::Event::Text("*".into()),
+                egui::Event::Ime(egui::ImeEvent::Commit("\u{65e5}".into())),
+                egui::Event::Ime(egui::ImeEvent::Preedit {
+                    text: "x".into(),
+                    active_range_chars: None,
+                }),
+                unplaced,
+                egui::Event::Text(".".into()),
+            ],
+            picture(),
+            Instant::now(),
+        );
+        assert_eq!(
+            words(&out),
+            ["Text(\"*\")", "Text(\"\u{65e5}\")", "Text(\".\")"]
+        );
+    }
+
+    /// Keys by position off: typing is as before, and an input method's
+    /// text is nothing new.
+    #[test]
+    fn off_typing_goes_as_text_as_before() {
+        let out = run(&[
+            key(egui::Key::A, true),
+            egui::Event::Text("q".into()),
+            key(egui::Key::A, false),
+            egui::Event::Ime(egui::ImeEvent::Commit("x".into())),
+        ]);
+        assert_eq!(out, ["Text(\"q\")"]);
+    }
+
+    /// Switching Keys by position lets go of everything held there first,
+    /// either way, so a key pressed one way is never left down the other;
+    /// switching to what it is already sends nothing.
+    #[test]
+    fn switching_by_position_lets_go_of_what_is_held() {
+        let mut input = WindowInput::default();
+        let _ = input.set_by_position(true);
+        let now = Instant::now();
+        let held = input.take(
+            &[key(egui::Key::ShiftLeft, true), key(egui::Key::W, true)],
+            picture(),
+            now,
+        );
+        assert_eq!(held.len(), 2);
+        assert!(input.set_by_position(true).is_empty());
+        assert_eq!(
+            words(&input.set_by_position(false)),
+            [
+                "KeyEvent { key: 17, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+            ]
+        );
+        assert!(!input.holds());
+        // The fingers let go later: nothing, as nothing is held there.
+        let out = input.take(
+            &[key(egui::Key::W, false), key(egui::Key::ShiftLeft, false)],
+            picture(),
+            now,
+        );
+        assert!(out.is_empty(), "{out:?}");
+        // And back on, a key held as text there (Ctrl) is let go too.
+        let _ = input.take(&[key(egui::Key::ControlLeft, true)], picture(), now);
+        assert_eq!(
+            words(&input.set_by_position(true)),
+            ["KeyEvent { key: 29, pressed: false }"]
+        );
+        // Everything let go at once (focus lost, closed, view only).
+        let _ = input.take(&[key(egui::Key::D, true)], picture(), now);
+        assert_eq!(
+            words(&input.release_all()),
+            ["KeyEvent { key: 32, pressed: false }"]
+        );
+        assert!(input.by_position(), "the mode outlives a release");
     }
 }
