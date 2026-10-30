@@ -715,6 +715,14 @@ impl ComputerView {
         lock(&self.shared).lock_saved.take()
     }
 
+    /// Pocketdesk quits with the window open: it closes as it would by its
+    /// own close button, the lock on close (PC8) asked first, each write
+    /// held to [`QUIT_WRITE`] so a stalled relay keeps the quit well under a
+    /// second.
+    pub fn quit(&self) {
+        quit_view(&self.state_dir, &mut lock(&self.shared));
+    }
+
     /// Call each pass: keeps the window open while a screen is wanted.
     pub fn show(&self, ctx: &egui::Context) {
         let title = {
@@ -732,6 +740,36 @@ impl ComputerView {
         ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
             draw(&shared, &state_dir, config.as_deref(), ui);
         });
+    }
+}
+
+/// A write to the relay as Pocketdesk quits waits at most this long: the
+/// close's few writes (the lock, the pointer, the focus, keys let go) stay
+/// well under a second even when the relay's reader is held up.
+const QUIT_WRITE: Duration = Duration::from_millis(100);
+
+/// Each write to the relay from now waits at most [`QUIT_WRITE`]; set on
+/// the writer itself, the handle the writes go through.
+fn hold_writes_short(state: &State) {
+    if let Some(writer) = &state.writer {
+        let _ = writer.set_write_timeout(Some(QUIT_WRITE));
+    }
+}
+
+/// [`ComputerView::quit`]: with a window open, its last words to the relay
+/// (the lock when chosen, then the pointer let go), and the view stopped.
+fn quit_view(state_dir: &Path, state: &mut State) {
+    if state.wanted.is_none() {
+        return;
+    }
+    hold_writes_short(state);
+    say_closing(state);
+    stop_view(state_dir, state);
+    state.wanted = None;
+    // The keyboard grab comes out with the window (PC4).
+    #[cfg(windows)]
+    {
+        state.grab.hook = None;
     }
 }
 
@@ -2653,6 +2691,60 @@ mod tests {
             Message::PointerLock(false)
         );
         assert!(!state.pointer.locked());
+    }
+
+    /// PC8: Pocketdesk quitting with the window open locks the other
+    /// computer as its close would, the lock first, each write held short,
+    /// and stops the view; with no window open it does nothing.
+    #[test]
+    fn quitting_with_the_window_open_locks_it_and_stops_the_view() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-quit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            session_id: Some(9),
+            writer: Some(writer),
+            lock_on_close: true,
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            pointer_said: Some(true),
+            ..State::default()
+        };
+        hold_writes_short(&state);
+        assert_eq!(
+            state.writer.as_ref().unwrap().write_timeout().unwrap(),
+            Some(QUIT_WRITE)
+        );
+        quit_view(&dir, &mut state);
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::Privacy(wire::PRIVACY_LOCK)
+        );
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::PointerLock(false)
+        );
+        assert!(state.wanted.is_none() && state.writer.is_none());
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::StopView {
+                session_id: Some(9)
+            }]
+        );
+        // Nothing open: nothing said, nothing asked.
+        quit_view(&dir, &mut state);
+        assert!(computers::take_all(&dir, now_unix()).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PC8: the ask goes to the relay as its one-byte message and the bar
