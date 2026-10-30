@@ -976,11 +976,12 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         ("desk".into(), serde_json::json!({"action": "grab"}))
     );
     privacy_said(&mut window, &ViewPrivacy::Asking).await;
-    // Another computer's answer is not this view's.
+    // Another computer's answer is not this view's (review M8): its
+    // refusal never reaches the window.
     answers
         .send((
             "other".into(),
-            serde_json::json!({"ok": true, "grabbed": 2}),
+            serde_json::json!({"ok": false, "error": "not this view's"}),
         ))
         .await
         .unwrap();
@@ -988,7 +989,12 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         .send(("desk".into(), serde_json::json!({"ok": true, "grabbed": 2})))
         .await
         .unwrap();
-    privacy_said(&mut window, &ViewPrivacy::On).await;
+    privacy_said_never(
+        &mut window,
+        &ViewPrivacy::On,
+        &ViewPrivacy::Refused("not this view's".into()),
+    )
+    .await;
 
     // That computer ends it (as a renewal refused says): the window says why.
     let ended = "privacy mode ended there";
@@ -1371,4 +1377,25 @@ async fn a_lock_on_close_not_done_is_said() {
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// [`privacy_said`], failing if the window is told `never` first.
+async fn privacy_said_never(window: &mut TcpStream, want: &ViewPrivacy, never: &ViewPrivacy) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "privacy {want:?} said within 10 s"
+        );
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(window))
+                .await
+                .expect("a message")
+        {
+            assert_ne!(&status.privacy, never);
+            if &status.privacy == want {
+                return;
+            }
+        }
+    }
 }

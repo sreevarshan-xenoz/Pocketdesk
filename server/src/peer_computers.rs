@@ -2134,21 +2134,31 @@ async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
         tokio::task::spawn_blocking(move || crate::plugins::pair::permits(&id, privacy::PRIVACY))
             .await
             .unwrap_or(false);
-    let response = if permitted {
-        let connection = privacy::link_connection(device_id);
-        let ttl = privacy::grab_ttl(Some(&connection));
-        privacy::respond(body, device_id, Some(&connection), ttl).await
-    } else {
-        privacy::answering(
-            body,
-            serde_json::json!({ "ok": false, "error": privacy::denied_words(true) }),
-        )
+    let response = match refused_on_link(body, permitted) {
+        Some(refusal) => refusal,
+        None => {
+            let connection = privacy::link_connection(device_id);
+            let ttl = privacy::grab_ttl(Some(&connection));
+            privacy::respond(body, device_id, Some(&connection), ttl).await
+        }
     };
     if let Some(outgoing) = live(device_id) {
         let _ = outgoing
             .send(NetworkPacket::new(privacy::PRIVACY).with_body(response))
             .await;
     }
+}
+
+/// The answer to a privacy request `body` on the link from a computer that
+/// is not `permitted` it here (its Power switch off), or `None` to do it.
+fn refused_on_link(body: &serde_json::Value, permitted: bool) -> Option<serde_json::Value> {
+    use crate::plugins::privacy;
+    (!permitted).then(|| {
+        privacy::answering(
+            body,
+            serde_json::json!({ "ok": false, "error": privacy::denied_words(true) }),
+        )
+    })
 }
 
 /// Record how the link to `device_id` is doing, when it changed.
@@ -2335,6 +2345,48 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PC8 (PR #561 review M8): on the link this computer keeps, another
+    /// computer's privacy answer goes to the window that asked, if it was
+    /// asked, and is never answered; a request from a computer without
+    /// Power here is refused by name. Nothing here grabs or locks.
+    #[tokio::test]
+    async fn privacy_on_the_link_is_heard_and_refused_as_on_a_connection() {
+        crate::state::use_test_dirs();
+        let dir = std::env::temp_dir().join(format!("pd-pc8-link-{}", std::process::id()));
+        let mut host = crate::computer_view::PrivacyHost::real();
+        let (outgoing, mut sent) = mpsc::channel(4);
+        let _live = LiveLink::new("pc8-link-desk", outgoing);
+        crate::computer_view::remember_asked("pc8-link-desk");
+        let answer = NetworkPacket::new(crate::plugins::privacy::PRIVACY)
+            .with_body(serde_json::json!({"ok": true, "grabbed": 2, "id": 5}));
+        take(&dir, "pc8-link-desk", &answer).await;
+        let heard = tokio::time::timeout(std::time::Duration::from_secs(2), host.answers.recv())
+            .await
+            .expect("heard")
+            .expect("the relay's channel");
+        assert_eq!(heard.0, "pc8-link-desk");
+        assert_eq!(heard.1["id"], 5);
+        // A device never asked is not heard.
+        take(&dir, "pc8-link-phone", &answer).await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), host.answers.recv())
+                .await
+                .is_err()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(sent.try_recv().is_err(), "an answer is never answered");
+
+        let request = serde_json::json!({"action": "grab", "id": 6});
+        let refusal = refused_on_link(&request, false).expect("refused");
+        assert_eq!(refusal["ok"], false);
+        assert_eq!(refusal["id"], 6);
+        assert!(refusal["error"].as_str().unwrap().contains("this computer"));
+        assert_eq!(refused_on_link(&request, true), None, "done when permitted");
+        // A link ending with no grab of its own held lets nothing go.
+        drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// BK7: a computer's screens, as its monitors answer names them, in
     /// its own order, and none from an answer that names none.

@@ -1765,16 +1765,20 @@ where
                             }
                             // PC8: another computer's answer to this one's
                             // window asks nothing here, so no switch here
-                            // decides whether it is heard.
-                            if !pairing_packet
-                                && crate::plugins::privacy::take_answer(&device_id, &packet)
-                            {
+                            // decides whether it is heard; then F5, the
+                            // owner's per-device permissions (spec P3).
+                            let gate = if pairing_packet {
+                                Gate::Dispatch
+                            } else {
+                                gate(&packet, || {
+                                    crate::plugins::pair::permits(&device_id, &packet_type)
+                                })
+                            };
+                            if gate == Gate::Answer {
+                                crate::computer_view::privacy_answer(&device_id, &packet.body);
                                 continue;
                             }
-                            // F5: the owner's per-device permissions (spec P3).
-                            if !pairing_packet
-                                && !crate::plugins::pair::permits(&device_id, &packet_type)
-                            {
+                            if gate == Gate::Denied {
                                 if denied_said.insert(packet_type.clone()) {
                                     tracing::info!(
                                         "Denied {packet_type} from {device_id}: not permitted \
@@ -2161,6 +2165,58 @@ struct PidFileGuard {
 impl Drop for PidFileGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// What the control loop does with a paired device's packet (PC8, PR #561
+/// review M8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Gate {
+    /// An answer to this computer's window's privacy ask: heard before the
+    /// permission gate, which never sees it.
+    Answer,
+    /// Not permitted for this device (`permitted` said no).
+    Denied,
+    /// To the plugins.
+    Dispatch,
+}
+
+/// The gate for `packet` from a paired device: a privacy answer first,
+/// whatever `permitted` would say, then the device's permissions.
+pub(crate) fn gate(packet: &NetworkPacket, permitted: impl FnOnce() -> bool) -> Gate {
+    if packet.packet_type == crate::plugins::privacy::PRIVACY
+        && crate::plugins::privacy::is_answer(&packet.body)
+    {
+        Gate::Answer
+    } else if permitted() {
+        Gate::Dispatch
+    } else {
+        Gate::Denied
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    /// PR #561 review M8: a privacy answer from a computer without Power
+    /// here is heard, never denied, and its permission is not even asked;
+    /// a privacy request is held to Power as any packet.
+    #[test]
+    fn a_privacy_answer_passes_the_gate_and_a_request_does_not() {
+        let answer = NetworkPacket::new(crate::plugins::privacy::PRIVACY)
+            .with_body(serde_json::json!({"ok": true, "grabbed": 2, "id": 3}));
+        assert_eq!(
+            gate(&answer, || panic!("an answer asks no permission")),
+            Gate::Answer
+        );
+        let request = NetworkPacket::new(crate::plugins::privacy::PRIVACY)
+            .with_body(serde_json::json!({"action": "grab"}));
+        assert_eq!(gate(&request, || false), Gate::Denied);
+        assert_eq!(gate(&request, || true), Gate::Dispatch);
+        let other =
+            NetworkPacket::new("kdeconnect.clipboard").with_body(serde_json::json!({"ok": true}));
+        assert_eq!(gate(&other, || false), Gate::Denied, "only privacy answers");
     }
 }
 
