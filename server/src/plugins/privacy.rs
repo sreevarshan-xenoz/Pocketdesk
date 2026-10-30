@@ -100,6 +100,19 @@ pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
 /// it ends with it. A phone's is kept (it may come back on a new
 /// connection), to its TTL as before.
 pub(crate) fn connection_closed(connection_id: &str) {
+    // Releasing blocks (Windows joins its hook thread): off the async
+    // worker when there is one (PR #561 re-review N5).
+    let id = connection_id.to_string();
+    match tokio::runtime::Handle::try_current() {
+        Ok(runtime) => {
+            runtime.spawn_blocking(move || release_closed(&id));
+        }
+        Err(_) => release_closed(&id),
+    }
+}
+
+/// [`connection_closed`]'s work, blocking.
+fn release_closed(connection_id: &str) {
     // Checked, taken and released under one lock (PR #561 review M10): a
     // grab that another device wins in between is never left ownerless.
     let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
@@ -369,6 +382,26 @@ pub(crate) fn take_answer(device_id: &str, packet: &NetworkPacket) -> bool {
     }
     crate::computer_view::privacy_answer(device_id, &packet.body);
     true
+}
+
+/// Tests elsewhere: make `device` the holder, asked on `connection`, as a
+/// grab would, without grabbing anything.
+#[cfg(test)]
+pub(crate) fn hold_for_test(device: &str, connection: &str) {
+    *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Holder {
+        device: device.to_string(),
+        connection: Some(connection.to_string()),
+    });
+}
+
+/// Tests elsewhere: whether `device` is the holder.
+#[cfg(test)]
+pub(crate) fn held_by_test(device: &str) -> bool {
+    OWNER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .is_some_and(|h| h.device == device)
 }
 
 #[cfg(test)]

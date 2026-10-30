@@ -1862,11 +1862,20 @@ pub async fn run_with(
                     // The view went before its window's last word: its
                     // privacy was let go as it ended; a lock is still asked.
                     if ask == wire::PRIVACY_LOCK {
-                        let name = computers::read(&state_dir)
-                            .computers
-                            .into_iter()
-                            .find(|c| c.device_id == device_id)
-                            .map_or_else(|| "that computer".to_string(), |c| c.name);
+                        // computers.json is a file: read off the runtime
+                        // (PR #561 re-review N5).
+                        let (dir, id) = (state_dir.clone(), device_id.clone());
+                        let name = tokio::task::spawn_blocking(move || {
+                            computers::read(&dir)
+                                .computers
+                                .into_iter()
+                                .find(|c| c.device_id == id)
+                                .map(|c| c.name)
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "that computer".to_string());
                         lock_pending = Some(ask_lock(&device_id, &name));
                     }
                     continue;

@@ -2507,8 +2507,25 @@ mod tests {
         assert_eq!(refusal["id"], 6);
         assert!(refusal["error"].as_str().unwrap().contains("this computer"));
         assert_eq!(refused_on_link(&request, true), None, "done when permitted");
-        // A link ending with no grab of its own held lets nothing go.
+        // A link ending lets go the grab asked on it, and no other (the
+        // grab itself is never taken here: nothing is held to release).
+        crate::plugins::privacy::hold_for_test("pc8-link-desk", "link:pc8-link-desk");
+        drop(crate::plugins::privacy::LinkGrab("pc8-link-other".into()));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            crate::plugins::privacy::held_by_test("pc8-link-desk"),
+            "another link's"
+        );
         drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
+        let mut released = false;
+        for _ in 0..50 {
+            if !crate::plugins::privacy::held_by_test("pc8-link-desk") {
+                released = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(released, "its own link's end lets it go");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
