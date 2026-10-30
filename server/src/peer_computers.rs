@@ -171,12 +171,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     let_drive(&dir, &device_id, allow);
                 }
                 // PC6: the magic packet, as the computer told this one.
-                ComputerAsk::Wake { device_id } => {
-                    let dir = dir.clone();
-                    tokio::task::spawn_blocking(move || {
-                        crate::computer_wake::wake(&dir, &device_id)
-                    });
-                }
+                ComputerAsk::Wake { device_id } => asked_wake(&dir, device_id),
                 ComputerAsk::View { device_id, monitor } => {
                     // PC6: viewed now, for the recents.
                     viewed(&dir, &device_id);
@@ -1453,10 +1448,50 @@ enum LinkEnd {
     Failed(String),
 }
 
+/// Each kept link's nudge (PC6): a Wake asked for its computer cuts the
+/// link's backoff short, so the woken computer is dialed again at once
+/// rather than up to a minute later.
+static NUDGES: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
+    LazyLock::new(Default::default);
+
+/// The nudge of the link to `device_id`.
+fn nudge_of(device_id: &str) -> Arc<tokio::sync::Notify> {
+    NUDGES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(device_id.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Dial the computer `device_id` again now, and back off from the start
+/// (PC6: it was just woken). A link waiting for nothing keeps the nudge
+/// for its next wait.
+fn nudge(device_id: &str) {
+    nudge_of(device_id).notify_one();
+}
+
+/// Wait `wait`, or less when nudged; whether it was nudged.
+async fn back_off(wait: Duration, nudged: &tokio::sync::Notify) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(wait) => false,
+        _ = nudged.notified() => true,
+    }
+}
+
+/// The owner's Wake for the computer `device_id` (PC6): the magic packet,
+/// off the runtime, and its link dialed again at once.
+fn asked_wake(dir: &Path, device_id: String) {
+    nudge(&device_id);
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || crate::computer_wake::wake(&dir, &device_id));
+}
+
 /// Keep the link to `device_id` up while it is paired, backing off.
 async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
     let me = crate::kde::host_identity();
     let mut backoff = BACKOFF_FIRST;
+    let nudged = nudge_of(&device_id);
     loop {
         let Some(computer) = computers::read(&dir)
             .computers
@@ -1512,7 +1547,10 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
                 wait
             }
         };
-        tokio::time::sleep(wait).await;
+        // Woken (PC6): dialed again now, and backing off from the start.
+        if back_off(wait, &nudged).await {
+            backoff = BACKOFF_FIRST;
+        }
     }
 }
 
@@ -2400,6 +2438,39 @@ mod tests {
                 paired_unix: 1,
             }]
         );
+    }
+
+    /// PC6 review I-1: a nudge cuts a pending backoff short, and one
+    /// given while nothing waits cuts the next wait.
+    #[tokio::test]
+    async fn a_nudge_cuts_the_backoff_short() {
+        let nudged = nudge_of("pc-nudge");
+        let started = std::time::Instant::now();
+        let waiting = tokio::spawn({
+            let nudged = nudged.clone();
+            async move { back_off(Duration::from_secs(60), &nudged).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        nudge("pc-nudge");
+        assert!(waiting.await.unwrap(), "nudged");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            !back_off(Duration::from_millis(10), &nudged).await,
+            "a wait not nudged runs out"
+        );
+    }
+
+    /// PC6 review M-9: the run loop's Wake nudges that computer's link
+    /// (and sends the packet off the runtime: none here, as it is not
+    /// listed).
+    #[tokio::test]
+    async fn a_wake_asked_dials_its_computer_again() {
+        let dir = temp("asked-wake");
+        asked_wake(&dir, "pc-asked".to_string());
+        let started = std::time::Instant::now();
+        assert!(back_off(Duration::from_secs(60), &nudge_of("pc-asked")).await);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PC6: asking for a computer's screen records when, for the recents;

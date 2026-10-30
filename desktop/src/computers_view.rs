@@ -69,8 +69,9 @@ pub struct ComputersView {
     waking: Option<Waking>,
 }
 
-/// How long "Wake it and show" waits for the computer's link (PC6).
-pub const WAKE_WAIT: Duration = Duration::from_secs(60);
+/// How long "Wake it and show" waits for the computer's link (PC6): a
+/// wake, the system's resume and the link's dial can take over a minute.
+pub const WAKE_WAIT: Duration = Duration::from_secs(120);
 
 /// What is said wherever Wake is offered (PC6).
 pub const WAKE_NOTE: &str = "Wake-on-LAN works best wired: Wi-Fi rarely wakes a computer.";
@@ -1057,7 +1058,7 @@ mod tests {
         assert_eq!(wake_note(false), WAKE_NOTE);
     }
 
-    /// PC6: a wake that waits to show counts down 60 s, shows as the link
+    /// PC6: a wake that waits to show counts down 120 s, shows as the link
     /// comes, and gives up after.
     #[test]
     fn a_wake_waits_a_minute_for_the_link() {
@@ -1067,10 +1068,10 @@ mod tests {
             name: "Desk".to_string(),
             since,
         };
-        assert_eq!(waking.step(false, since), WakeStep::Waiting(60));
+        assert_eq!(waking.step(false, since), WakeStep::Waiting(120));
         assert_eq!(
             waking.step(false, since + Duration::from_millis(17_500)),
-            WakeStep::Waiting(43)
+            WakeStep::Waiting(103)
         );
         assert_eq!(
             waking.step(true, since + Duration::from_secs(20)),
@@ -1078,7 +1079,7 @@ mod tests {
         );
         assert_eq!(waking.step(false, since + WAKE_WAIT), WakeStep::TimedOut);
         assert!(waiting_words("Desk", 43).ends_with("(43 s)"));
-        assert!(timed_out("Desk").starts_with("Desk did not come up within 60 s"));
+        assert!(timed_out("Desk").starts_with("Desk did not come up within 120 s"));
     }
 
     /// PC6: Show its screen on a sleeping computer offers to wake it
