@@ -19,6 +19,10 @@ struct Holder {
     connection: Option<String>,
 }
 
+/// Why a grab or release is refused while another device holds the grab
+/// (PR #561 review M2: a computer may hold it now, or be the one refused).
+pub(crate) const HELD_ELSEWHERE: &str = "another phone or computer holds privacy mode";
+
 /// The device whose grab is held: only it may refresh or release it (R3).
 static OWNER: Mutex<Option<Holder>> = Mutex::new(None);
 
@@ -224,7 +228,7 @@ pub(crate) async fn respond(
                 holder = holder.as_deref().unwrap_or(""),
                 "Privacy {action} refused: another device holds the grab"
             );
-            json!({ "ok": false, "error": "another phone holds privacy mode" })
+            json!({ "ok": false, "error": HELD_ELSEWHERE })
         }
         "grab" if renewal_refused(renew, holder.as_deref(), device) => {
             json!({ "ok": false, "error": "privacy mode ended there" })
@@ -372,6 +376,13 @@ mod tests {
         );
         assert_eq!(grab_ttl(None), privacy::GRAB_TTL);
         assert!(COMPUTER_GRAB_TTL < privacy::GRAB_TTL);
+    }
+
+    /// PR #561 review M2: a refusal for a grab held elsewhere names both
+    /// kinds of holder.
+    #[test]
+    fn a_grab_held_elsewhere_is_said_for_a_phone_or_a_computer() {
+        assert!(HELD_ELSEWHERE.contains("phone or computer"));
     }
 
     /// PC8: an answer is never taken for a request, so two computers never
