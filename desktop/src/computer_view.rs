@@ -607,6 +607,23 @@ pub fn window_title(name: &str, mic_on: bool) -> String {
     }
 }
 
+/// The bar's "Mic on", at full colour even while the bar is greyed for a
+/// locked pointer (PR #569 review M7): painted with its layer's own
+/// painter, which the greyed scope does not fade.
+fn on_air_label(ui: &mut egui::Ui) -> egui::Response {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(view_mic::ON_AIR.to_string(), font, ON_AIR_RED);
+    let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    ui.ctx()
+        .layer_painter(ui.layer_id())
+        .galley(rect.min, galley, ON_AIR_RED);
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, view_mic::ON_AIR));
+    response
+}
+
 /// What the main window says, on every page, while a screen window sends
 /// this computer's microphone (PR #569 review I2).
 pub fn mic_on_air_words(name: &str) -> String {
@@ -1511,12 +1528,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         }
                     }
                     if mic_on {
-                        ui.label(
-                            egui::RichText::new(view_mic::ON_AIR)
-                                .strong()
-                                .color(ON_AIR_RED),
-                        )
-                        .on_hover_text(format!(
+                        on_air_label(ui).on_hover_text(format!(
                             "This computer's microphone goes to {} now",
                             wanted.name
                         ));
@@ -4024,6 +4036,52 @@ mod tests {
         view.stop_mic();
         assert_eq!(view.mic_on_air(), None);
         assert!(!lock(&shared).mic.wanted());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #569 review M7: "Mic on" stays on the bar while the pointer is
+    /// locked and the bar greyed.
+    #[test]
+    fn mic_on_stays_on_the_greyed_bar_while_the_pointer_is_locked() {
+        use egui_kittest::kittest::Queryable;
+        struct Silent;
+        impl view_mic::MicSource for Silent {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(Vec::new())
+            }
+        }
+        let (shared, _relay, dir) = mic_window(
+            "locked",
+            Arc::new(|_| Ok(Box::new(Silent) as Box<dyn view_mic::MicSource>)),
+        );
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(true);
+        harness.step();
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        harness.step();
+        let all = egui::Modifiers {
+            alt: true,
+            ctrl: true,
+            shift: true,
+            mac_cmd: false,
+            command: true,
+        };
+        harness.key_press_modifiers(all, egui::Key::M);
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).pointer.locked(), "locked");
+        assert!(lock(&shared).mic.on(), "the mic goes on");
+        assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
