@@ -2654,16 +2654,18 @@ mod tests {
         assert_eq!(clock.shown(t), Shown::default());
         for n in 0..30u64 {
             clock.fed(ms(n * 33));
-            // One slow picture in thirty: the median keeps to the rest,
-            // the 95th percentile shows it (PC5).
-            clock.decoded(ms(n * 33 + if n == 7 { 40 } else { 5 }), 100);
+            // Two slow pictures in thirty-one: the median keeps to the
+            // rest, the 95th percentile (the 30th by nearest rank) shows
+            // them (PC5; one alone would sit above it, review M8).
+            let slow = n == 7 || n == 20;
+            clock.decoded(ms(n * 33 + if slow { 40 } else { 5 }), 100);
         }
         clock.fed(ms(1000));
         clock.decoded(ms(1006), 400);
         let shown = clock.shown(ms(1006));
         assert_eq!(shown.fps, 30);
         assert_eq!(shown.decode.map(|d| d.as_millis()), Some(5));
-        assert_eq!(shown.decode_p95.map(|d| d.as_millis()), Some(6));
+        assert_eq!(shown.decode_p95.map(|d| d.as_millis()), Some(40));
         assert_eq!(shown.bytes, (30 * 100 + 400) / 31);
         // Nothing for two seconds: none shown, no decode time.
         assert_eq!(clock.shown(ms(3100)), Shown::default());
