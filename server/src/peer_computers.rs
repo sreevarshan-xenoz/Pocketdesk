@@ -480,18 +480,54 @@ pub(crate) fn ask_screens(device_id: &str) {
         link.send(NetworkPacket::new(MONITORS));
         return;
     }
+    // One ask on a connection at a time (PC9a review N2): a send that hangs
+    // is not stacked on by the view's asks again.
+    if !SCREENS_ASKING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(device_id.to_string())
+    {
+        return;
+    }
     let device_id = device_id.to_string();
     tokio::spawn(async move {
         let client = crate::state::clone_clients()
             .await
             .into_iter()
             .find(|c| c.device_id() == device_id);
-        if let Some(client) = client
-            && let Err(e) = client.send_packet(&NetworkPacket::new(MONITORS)).await
-        {
-            tracing::debug!(device_id, "Its screens were not asked: {e}");
+        if let Some(client) = client {
+            match tokio::time::timeout(
+                SCREENS_ASK_WAIT,
+                client.send_packet(&NetworkPacket::new(MONITORS)),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::debug!(device_id, "Its screens were not asked: {e}"),
+                Err(_) => tracing::debug!(device_id, "Its screens were not asked in time"),
+            }
         }
+        SCREENS_ASKING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&device_id);
     });
+}
+
+/// The computers whose screens are being asked on a connection now.
+static SCREENS_ASKING: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// How long an ask for a computer's screens may take to send.
+const SCREENS_ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the computer `device_id` has answered with its screens since
+/// this server started, even naming none (PC9a review N2).
+pub(crate) fn screens_answered(device_id: &str) -> bool {
+    SCREENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(device_id)
 }
 
 /// Keep what the computer `device_id` said of its screens (`body`, a

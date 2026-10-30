@@ -803,18 +803,30 @@ pub fn may_reconnect(reason: Option<&str>) -> bool {
     !ENDED_ON_PURPOSE.contains(&reason.as_str())
 }
 
-/// How often a view asks the other computer's screens again while it does
-/// not know them (PC9a).
+/// How often a view asks the other computer's screens again while it has
+/// no answer (PC9a).
 const SCREENS_AGAIN: Duration = Duration::from_secs(5);
 
-/// Whether to ask the other computer's screens again: only while none are
-/// known, and at most each [`SCREENS_AGAIN`] (`asked` is the last ask,
-/// moved on when this says yes).
-pub fn ask_screens_again(unknown: bool, asked: &mut Instant, now: Instant) -> bool {
-    if !unknown || now.saturating_duration_since(*asked) < SCREENS_AGAIN {
+/// How many times one connection of a view asks again (PC9a review N2): a
+/// computer too old to answer is not asked for the view's whole life.
+const SCREENS_TRIES: u32 = 6;
+
+/// Whether to ask the other computer's screens again: only while it has
+/// not answered, at most each [`SCREENS_AGAIN`] and [`SCREENS_TRIES`]
+/// times (`asked` is the last ask and `tries` the asks so far, both moved
+/// on when this says yes).
+pub fn ask_screens_again(
+    answered: bool,
+    asked: &mut Instant,
+    tries: &mut u32,
+    now: Instant,
+) -> bool {
+    if answered || *tries >= SCREENS_TRIES || now.saturating_duration_since(*asked) < SCREENS_AGAIN
+    {
         return false;
     }
     *asked = now;
+    *tries += 1;
     true
 }
 
@@ -1305,6 +1317,7 @@ async fn attempt(
     let mut stats_tick = tokio::time::interval(STATS_EVERY);
     let mut second = Instant::now();
     let mut screens_asked = Instant::now();
+    let mut screens_tries = 0;
     loop {
         tokio::select! {
             packet = frames.recv() => {
@@ -1373,13 +1386,14 @@ async fn attempt(
             }
             _ = look.tick() => {}
             _ = stats_tick.tick() => {
-                // Its screens, asked again while not known (PC9a): the
+                // Its screens, asked again while it has not answered (PC9a): the
                 // ask as the view began finds no link when the link is
                 // still coming up (that computer just restarted), and the
                 // window's screen buttons would stay empty for the view.
                 if ask_screens_again(
-                    crate::peer_computers::screens(&computer.device_id).is_empty(),
+                    crate::peer_computers::screens_answered(&computer.device_id),
                     &mut screens_asked,
+                    &mut screens_tries,
                     Instant::now(),
                 ) {
                     crate::peer_computers::ask_screens(&computer.device_id);
@@ -4866,38 +4880,31 @@ mod tests {
         assert_eq!(tries.dropped(at(200)), Some((1, Duration::from_secs(1))));
     }
 
-    /// PC9a: the screens are asked again only while unknown, at most each
-    /// 5 s.
+    /// PC9a: the screens are asked again only until an answer comes, at
+    /// most each 5 s and six times.
     #[test]
-    fn unknown_screens_are_asked_again_now_and_then() {
+    fn unanswered_screens_are_asked_again_a_few_times() {
         let start = Instant::now();
-        let mut asked = start;
-        assert!(!ask_screens_again(
-            true,
-            &mut asked,
-            start + Duration::from_secs(4)
-        ));
-        assert!(ask_screens_again(
-            true,
-            &mut asked,
-            start + Duration::from_secs(5)
-        ));
-        assert_eq!(asked, start + Duration::from_secs(5));
-        assert!(!ask_screens_again(
-            true,
-            &mut asked,
-            start + Duration::from_secs(9)
-        ));
-        assert!(!ask_screens_again(
-            false,
-            &mut asked,
-            start + Duration::from_secs(60)
-        ));
-        assert!(ask_screens_again(
-            true,
-            &mut asked,
-            start + Duration::from_secs(60)
-        ));
+        let (mut asked, mut tries) = (start, 0);
+        let at = |s: u64| start + Duration::from_secs(s);
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(4)));
+        assert!(ask_screens_again(false, &mut asked, &mut tries, at(5)));
+        assert_eq!((asked, tries), (at(5), 1));
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(9)));
+        assert!(!ask_screens_again(true, &mut asked, &mut tries, at(60)));
+        for n in 0..5 {
+            assert!(ask_screens_again(
+                false,
+                &mut asked,
+                &mut tries,
+                at(100 + 10 * n)
+            ));
+        }
+        assert_eq!(tries, 6);
+        assert!(
+            !ask_screens_again(false, &mut asked, &mut tries, at(1000)),
+            "six tries at most"
+        );
     }
 
     /// PC9a review I1: a transport's own "refused" (a dial to an endpoint
