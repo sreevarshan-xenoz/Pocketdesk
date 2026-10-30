@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1029 open items.
+1031 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 115 |
+| A second computer | 117 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -1014,9 +1014,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The laptop viewing Windows, a 3D or mouse-look program in front on Windows (Blender's viewport fly mode, or a game in a window): Lock the pointer turns it as the mouse moves, with no edge stop; "Ctrl+Alt+Shift+M frees the pointer" shows for about 3 s; the chord frees it. Never the other way round with the owner's box grabbed. (where: second computer)
 - Windows (a test machine) viewing the laptop's headless sway stand-in, locked: `wev` on the stand-in counts relative motion events while the mouse moves (counts only), and none once freed (the moves go absolute again). (where: second computer)
-- Locked, each of these frees it at once and the pointer shows again: Ctrl+Alt+Shift pressed and let go alone; Alt+Tab or a click elsewhere (focus loss); View only; closing the window; the view dropping into Reconnecting. Coming back to the window does not lock again by itself. (where: second computer)
+- Locked, each of these frees it at once and the pointer shows again: Ctrl+Alt+Shift pressed and let go alone (in full screen with “Send Win and Alt+Tab there” on, note that it also gives Win and Alt+Tab back to this computer until the window leaves full screen; Ctrl+Alt+Shift+M frees only the pointer); Alt+Tab or a click elsewhere (focus loss); View only; closing the window; the view dropping into Reconnecting. Coming back to the window does not lock again by itself. (where: second computer)
 - With the shared keyboard and mouse on and the laptop placed beside the viewing computer: locked, pushing against that edge (and pressing the switch key) never crosses, the badge says a screen window holds the pointer; freed, the edge crosses again. With a game in front holding the edges already, locking and freeing says nothing more. (where: second computer)
-- A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding. (where: second computer)
+- A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding; and a fast circle on a slow internet road comes back to where it started (a relative move the relay's full queue drops is owed and goes with the next, PR #563 review M5). (where: second computer)
+- Locked from the bar (on Wayland, where the hidden pointer stays on the bar's switch), click in the picture several times: each click reaches the far computer and the lock stays on; the bar looks greyed out until it is freed. (where: second computer)
+- Locked, stop the window answering (suspend the desktop app with Resource Monitor's Suspend Process on Windows or `kill -STOP` on Linux, on a test machine): within about 3 s the shared keyboard and mouse's edges lead on again, and the badge says so. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
