@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1058 open items.
+1066 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 41 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
 | A phone with a SIM | 39 |
-| A second phone | 15 |
+| A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 132 |
+| A second computer | 135 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -130,6 +130,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
+
+**240. Remove a lost device from another of yours (remote revoke)**
+
+- Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeDevicesThere` or `nativeRemoveThere`. Pair the OPPO with a throwaway server's own code (Pair page, not "Someone else's"): `pocketdesk devices --json` there says `"owner": true` for it; a phone paired before this build says `false` until it pairs again.
+- On the OPPO, the throwaway computer's card → Devices on this computer: the list shows the OPPO first ("phone, this phone, connected") with no Remove, and each other device with Remove…; the answer names no address or key (logcat of the answer, counts only).
+- Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
+- Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -718,6 +725,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
 
+**240. Remove a lost device from another of yours (remote revoke)**
+
+- Pair a second device (a guest grant, `pocketdesk pair --grant 15m`, from a scripted client or a second phone) and Remove it from the OPPO: the dialog names it, Remove takes it off at once (`pocketdesk devices --json` no longer lists it), its open session and control connection end within a second, and the throwaway computer shows "<OPPO's name> removed <device> from this computer" once; `pocketdesk events` shows `device_removed` with `by` the OPPO's id.
+
 ## Away from home: another network, or through a router
 
 **8. Notifications + find-my-device (R3#11c, Tier-2 #11)**
@@ -1066,6 +1077,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows and the Linux laptop sharing the keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there", once with Windows' keyboard on the laptop and once with it home: both times the bar says it was refused (it shares its keyboard and mouse), and Windows' keys and clicks still work. With shared input off on Windows, the same ask is taken (keyboard blocked, ring shown); then Ctrl+Alt+Del, Lock, and unlock Windows (and again with Windows+L): within about a second of the unlock the grab ends and Windows' keyboard and mouse work. On the laptop as the far side (a grab from Windows' window, shared input off there): `loginctl lock-session`, then `loginctl unlock-session` over ssh, ends the grab only with a locker that sets the locked hint (note which: hyprlock, swaylock, GNOME); and unplugging and plugging the laptop's USB keyboard back in gives a keyboard that types while the grab holds. (where: second computer)
 - Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
+
+**240. Remove a lost device from another of yours (remote revoke)**
+
+- Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer)
+- A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
+- From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

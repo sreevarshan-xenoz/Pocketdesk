@@ -3251,6 +3251,19 @@ Built 2026-10-30. Fixes from the review of everything merged since 0.8.2: a comp
 - [ ] Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
 - [ ] Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
 
+## 240. Remove a lost device from another of yours (remote revoke)
+
+Built 2026-10-30. An owner device (a phone paired with the computer's own code, or a computer paired both ways) lists a computer's paired devices and removes one there: `kdeconnect.pocketdesk.remote_devices` and its answer, Settings → Other computers → "Devices there…" on the desktop, the computer card's "Devices on this computer" on the phone. Unit-tested only; the bridge .so with it was not built.
+
+- [ ] Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeDevicesThere` or `nativeRemoveThere`. Pair the OPPO with a throwaway server's own code (Pair page, not "Someone else's"): `pocketdesk devices --json` there says `"owner": true` for it; a phone paired before this build says `false` until it pairs again.
+- [ ] On the OPPO, the throwaway computer's card → Devices on this computer: the list shows the OPPO first ("phone, this phone, connected") with no Remove, and each other device with Remove…; the answer names no address or key (logcat of the answer, counts only).
+- [ ] Pair a second device (a guest grant, `pocketdesk pair --grant 15m`, from a scripted client or a second phone) and Remove it from the OPPO: the dialog names it, Remove takes it off at once (`pocketdesk devices --json` no longer lists it), its open session and control connection end within a second, and the throwaway computer shows "<OPPO's name> removed <device> from this computer" once; `pocketdesk events` shows `device_removed` with `by` the OPPO's id.
+- [ ] Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
+- [ ] Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
+- [ ] Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer)
+- [ ] A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
+- [ ] From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and
