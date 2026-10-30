@@ -1245,6 +1245,7 @@ impl PrivacyHost {
         let (tx, answers) = mpsc::channel(16);
         *ANSWERS.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
         let send: PrivacySend = Arc::new(|device_id: &str, packet: NetworkPacket| {
+            remember_asked(device_id);
             let Ok(runtime) = tokio::runtime::Handle::try_current() else {
                 return;
             };
@@ -1271,9 +1272,38 @@ impl PrivacyHost {
     }
 }
 
+/// The computers a privacy ask went to (PR #561 review M4): only their
+/// answers enter the relay's channel, so a paired phone sending answers
+/// cannot crowd out the computer's.
+static ASKED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Note that a privacy ask went to `device_id`.
+pub(crate) fn remember_asked(device_id: &str) {
+    let mut asked = ASKED.lock().unwrap_or_else(|e| e.into_inner());
+    if !asked.iter().any(|d| d == device_id) {
+        asked.push(device_id.to_string());
+    }
+}
+
+/// Whether a privacy ask ever went to `device_id` from here.
+pub(crate) fn was_asked(device_id: &str) -> bool {
+    ASKED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|d| d == device_id)
+}
+
 /// An answer from the computer `device_id` to a privacy ask (PC8), for the
-/// view that asked it, if any.
+/// view that asked it, if any; from a device never asked, dropped here.
 pub(crate) fn privacy_answer(device_id: &str, body: &serde_json::Value) {
+    if !was_asked(device_id) {
+        tracing::debug!(
+            device_id,
+            "A privacy answer from a device not asked; dropped"
+        );
+        return;
+    }
     if let Some(tx) = ANSWERS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         let _ = tx.try_send((device_id.to_string(), body.clone()));
     }
@@ -2429,6 +2459,27 @@ mod tests {
         assert_eq!(
             lock_failed_words("Desk", "it did not answer."),
             "Couldn't lock Desk: it did not answer."
+        );
+    }
+
+    /// PR #561 review M4: only a computer asked has its answers taken; a
+    /// phone (never asked) is dropped before the relay's channel.
+    #[test]
+    fn only_a_computer_asked_is_heard() {
+        assert!(!was_asked("pc8-test-phone"));
+        remember_asked("pc8-test-desk");
+        remember_asked("pc8-test-desk");
+        assert!(was_asked("pc8-test-desk"));
+        assert!(!was_asked("pc8-test-phone"));
+        assert_eq!(
+            ASKED
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|d| *d == "pc8-test-desk")
+                .count(),
+            1,
+            "kept once"
         );
     }
 
