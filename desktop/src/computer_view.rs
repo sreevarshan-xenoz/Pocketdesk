@@ -60,6 +60,12 @@ const NO_ANSWER: Duration = Duration::from_secs(20);
 /// [`REJOIN_WINDOW`].
 const REJOINS: usize = 3;
 const REJOIN_WINDOW: Duration = Duration::from_secs(10);
+/// A window whose own write stalled (the relay's reader held up by a slow
+/// far link) ends its connection and joins again; those rejoins are counted
+/// apart, at most this many in [`STALL_REJOIN_WINDOW`] (PR #563 re-review
+/// N3), so a slow link costs some input but keeps the picture.
+const STALL_REJOINS: usize = 20;
+const STALL_REJOIN_WINDOW: Duration = Duration::from_secs(60);
 /// How long a screenshot's or recording's line stays.
 const SAVED_NOTE: Duration = Duration::from_secs(8);
 /// How long a drop's last word stays (PC3).
@@ -100,8 +106,12 @@ struct State {
     /// closes: a view the worker shows is still this window's while it is
     /// unchanged.
     asked: u64,
-    /// When this window last joined its view again (BK7 re-review N3).
+    /// When this window last joined its view again (BK7 re-review N3), and
+    /// when it did after its own write stalled (PR #563 re-review N3).
     rejoins: Vec<Instant>,
+    stall_rejoins: Vec<Instant>,
+    /// This connection was ended because a write to the relay stalled.
+    stalled: bool,
     /// The view being shown.
     session_id: Option<u64>,
     status: ViewStatus,
@@ -785,6 +795,7 @@ fn ask_with(
     state.wanted = Some(wanted);
     state.asked += 1;
     state.rejoins.clear();
+    state.stall_rejoins.clear();
     Ok(())
 }
 
@@ -893,8 +904,8 @@ fn send(state: &mut State, packets: Vec<InputPacket>) {
         if bytes.len() > wire::MAX_INPUT {
             continue;
         }
-        if Message::Input(bytes).write(writer).is_err() {
-            lost_writer(state);
+        if let Err(e) = Message::Input(bytes).write(writer) {
+            lost_writer(state, &e);
             return;
         }
     }
@@ -906,8 +917,8 @@ fn say_privacy(state: &mut State, ask: u8) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
-    if Message::Privacy(ask).write(writer).is_err() {
-        lost_writer(state);
+    if let Err(e) = Message::Privacy(ask).write(writer) {
+        lost_writer(state, &e);
         return;
     }
     // Said at once here; the server's status says how it went.
@@ -927,8 +938,8 @@ fn say_pointer(state: &mut State, locked: bool) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
-    if Message::PointerLock(locked).write(writer).is_err() {
-        lost_writer(state);
+    if let Err(e) = Message::PointerLock(locked).write(writer) {
+        lost_writer(state, &e);
         return;
     }
     state.pointer_said = Some(locked);
@@ -958,20 +969,39 @@ fn say_focus(state: &mut State, edge: Edge) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
-    if Message::Focus(edge == Edge::Gain).write(writer).is_err() {
-        lost_writer(state);
+    if let Err(e) = Message::Focus(edge == Edge::Gain).write(writer) {
+        lost_writer(state, &e);
     }
 }
 
 /// A write to the relay failed (it timed out, or the relay went): the
 /// connection is ended, not left half open, so the relay reads its end and
 /// lets go of what this window held there (its pointer lock, PC7 review
-/// I1), and the worker joins the view again (PC2) with a fresh one.
-fn lost_writer(state: &mut State) {
+/// I1), and the worker joins the view again (PC2) with a fresh one. A write
+/// that timed out is a stall, its rejoin counted apart ([`STALL_REJOINS`]).
+fn lost_writer(state: &mut State, error: &io::Error) {
+    state.stalled |= write_stalled(error.kind());
     state.writer = None;
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
+}
+
+/// Whether a write that failed with `kind` timed out (the relay's reader
+/// held up), not a relay gone: Windows says `TimedOut`, Unix `WouldBlock`.
+pub fn write_stalled(kind: io::ErrorKind) -> bool {
+    matches!(kind, io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+}
+
+/// Whether one more rejoin fits: fewer than `most` in `times` within
+/// `within` of `now`, and if so it is counted.
+pub fn may_rejoin(times: &mut Vec<Instant>, most: usize, within: Duration, now: Instant) -> bool {
+    times.retain(|at| now.saturating_duration_since(*at) < within);
+    let room = times.len() < most;
+    if room {
+        times.push(now);
+    }
+    room
 }
 
 /// Files or folders dropped on the window go to its computer (PC3), as the
@@ -1937,11 +1967,24 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         let dropped =
             cut && ours && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
         // At most this often, then the view ends (BK7 re-review N3): a
-        // relay that drops the window each time is not joined for ever.
-        state.rejoins.retain(|at| at.elapsed() < REJOIN_WINDOW);
-        let rejoin = dropped && state.rejoins.len() < REJOINS;
+        // relay that drops the window each time is not joined for ever. A
+        // cut this window made as its write stalled has its own, gentler
+        // count (PR #563 re-review N3): a slow link degrades the input, not
+        // the view.
+        let stalled = std::mem::take(&mut state.stalled);
+        let now = Instant::now();
+        let rejoin = dropped
+            && if stalled {
+                may_rejoin(
+                    &mut state.stall_rejoins,
+                    STALL_REJOINS,
+                    STALL_REJOIN_WINDOW,
+                    now,
+                )
+            } else {
+                may_rejoin(&mut state.rejoins, REJOINS, REJOIN_WINDOW, now)
+            };
         if rejoin {
-            state.rejoins.push(Instant::now());
             let release = state.input.release_all();
             send(&mut state, release);
             state.stream = None;
@@ -1955,6 +1998,10 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         // that would not take it too.
         if ours {
             let why = match ended {
+                _ if dropped && stalled => format!(
+                    "The link to {} stayed too slow for this window's input. Reconnect to try again.",
+                    wanted.name
+                ),
                 _ if dropped => format!(
                     "The view of {} kept dropping this window. Reconnect to try again.",
                     wanted.name
@@ -1998,8 +2045,10 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         let mut state = lock(shared);
         state.stream = Some(stream.try_clone()?);
         state.writer = Some(stream.try_clone()?);
-        // A new connection's relay knows no lock yet (PC7).
+        // A new connection's relay knows no lock yet (PC7), and has not
+        // stalled.
         state.pointer_said = None;
+        state.stalled = false;
         state.session_id = Some(file.session_id);
         state.asked_at = None;
     }
@@ -3359,6 +3408,67 @@ mod tests {
             0,
             "the relay reads its end"
         );
+    }
+
+    /// PR #563 re-review N3: a write that timed out is a stall, its rejoin
+    /// counted apart; a relay gone is not.
+    #[test]
+    fn a_stalled_write_is_told_from_a_relay_gone() {
+        assert!(write_stalled(io::ErrorKind::TimedOut), "Windows");
+        assert!(write_stalled(io::ErrorKind::WouldBlock), "Unix");
+        for kind in [
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+        ] {
+            assert!(!write_stalled(kind), "{kind:?}");
+        }
+        let mut state = State::default();
+        lost_writer(&mut state, &io::Error::from(io::ErrorKind::BrokenPipe));
+        assert!(!state.stalled);
+        lost_writer(&mut state, &io::Error::from(io::ErrorKind::TimedOut));
+        assert!(state.stalled);
+        // A later broken write does not take the stall back.
+        lost_writer(&mut state, &io::Error::from(io::ErrorKind::BrokenPipe));
+        assert!(state.stalled);
+    }
+
+    /// PR #563 re-review N3: the stall rejoins' count is gentler than the
+    /// plain one, and both forget rejoins past their window.
+    #[test]
+    fn rejoins_are_counted_within_their_window() {
+        let t = Instant::now();
+        let mut plain = Vec::new();
+        for i in 0..REJOINS {
+            assert!(may_rejoin(&mut plain, REJOINS, REJOIN_WINDOW, t), "{i}");
+        }
+        assert!(!may_rejoin(&mut plain, REJOINS, REJOIN_WINDOW, t));
+        assert_eq!(plain.len(), REJOINS, "a refusal is not counted");
+        assert!(may_rejoin(
+            &mut plain,
+            REJOINS,
+            REJOIN_WINDOW,
+            t + REJOIN_WINDOW
+        ));
+        // Three stalls in a few seconds still rejoin, many times over.
+        let mut stalls = Vec::new();
+        for i in 0..STALL_REJOINS {
+            let at = t + Duration::from_millis(500) * i as u32;
+            assert!(
+                may_rejoin(&mut stalls, STALL_REJOINS, STALL_REJOIN_WINDOW, at),
+                "{i}"
+            );
+        }
+        assert!(STALL_REJOINS > REJOINS * 3);
+        assert!(STALL_REJOIN_WINDOW > REJOIN_WINDOW);
+        // A link that never comes back still ends the view in the end.
+        let at = t + Duration::from_secs(11);
+        assert!(!may_rejoin(
+            &mut stalls,
+            STALL_REJOINS,
+            STALL_REJOIN_WINDOW,
+            at
+        ));
     }
 
     /// PC7: the relay hears the lock once per connection and again each
