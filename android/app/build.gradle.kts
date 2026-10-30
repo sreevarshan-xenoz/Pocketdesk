@@ -105,4 +105,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    // JVM tests that save computers (HostStore) need a real org.json: android.jar's is a stub.
+    testImplementation("org.json:json:20240303")
 }
