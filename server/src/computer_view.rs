@@ -779,18 +779,75 @@ pub fn fits(len: usize) -> bool {
     len.saturating_add(16) <= pocketdesk_core::local::cast::MAX_MESSAGE
 }
 
-/// The words a computer closes a session with when it ends or refuses it on
-/// purpose: its End (a kick), a refusal or its owner's no, an unpairing, a
-/// permission it does not give.
-const ENDED_ON_PURPOSE: [&str; 4] = ["kicked", "refused", "not paired", "not allowed"];
+/// The reasons a computer closes a session with when it ends or refuses it
+/// on purpose: its End (a kick), a refusal or its owner's no, an
+/// unpairing, a permission it does not give. Matched whole (PC9a review
+/// I1): a transport's own words, such as a closed endpoint's "refused" to
+/// a dial during a stop, are not an end on purpose.
+const ENDED_ON_PURPOSE: [&str; 7] = [
+    "kicked by user",
+    "session refused",
+    "not paired",
+    "input not allowed",
+    "sound not allowed",
+    "phone sound not allowed",
+    "phone screen not allowed",
+];
 
 /// Whether a view the other computer closed with `reason` is dialled again
 /// by itself (PC2): not when that computer ended it on purpose. A server
 /// stopping or restarting, a link gone, the encoder rebuilt or permissions
 /// changed are worth another dial.
 pub fn may_reconnect(reason: Option<&str>) -> bool {
-    let reason = reason.unwrap_or("").to_ascii_lowercase();
-    !ENDED_ON_PURPOSE.iter().any(|word| reason.contains(word))
+    let reason = reason.unwrap_or("").trim().to_ascii_lowercase();
+    !ENDED_ON_PURPOSE.contains(&reason.as_str())
+}
+
+/// How often a view asks the other computer's screens again while it has
+/// no answer (PC9a).
+const SCREENS_AGAIN: Duration = Duration::from_secs(5);
+
+/// How many times one connection of a view asks again (PC9a review N2): a
+/// computer too old to answer is not asked for the view's whole life.
+const SCREENS_TRIES: u32 = 6;
+
+/// Whether to ask the other computer's screens again: only while it has
+/// not answered, at most each [`SCREENS_AGAIN`] and [`SCREENS_TRIES`]
+/// times (`asked` is the last ask and `tries` the asks so far, both moved
+/// on when this says yes).
+pub fn ask_screens_again(
+    answered: bool,
+    asked: &mut Instant,
+    tries: &mut u32,
+    now: Instant,
+) -> bool {
+    if answered || *tries >= SCREENS_TRIES || now.saturating_duration_since(*asked) < SCREENS_AGAIN
+    {
+        return false;
+    }
+    *asked = now;
+    *tries += 1;
+    true
+}
+
+/// A link to the other computer that came up since the view last looked
+/// (`ups` against `seen`) starts its screens' asks afresh (PC9a review
+/// N6): the tries back to none and the next ask due now, so a link slower
+/// than six asks still brings the screens. Says whether it came up.
+pub fn link_came_up(
+    ups: u64,
+    seen: &mut u64,
+    tries: &mut u32,
+    asked: &mut Instant,
+    now: Instant,
+) -> bool {
+    if ups == *seen {
+        return false;
+    }
+    *seen = ups;
+    *tries = 0;
+    *asked = now.checked_sub(SCREENS_AGAIN).unwrap_or(now);
+    true
 }
 
 /// The words for a session that ended for good: before the other computer
@@ -1279,6 +1336,9 @@ async fn attempt(
     let mut counts = FrameCounts::default();
     let mut stats_tick = tokio::time::interval(STATS_EVERY);
     let mut second = Instant::now();
+    let mut screens_asked = Instant::now();
+    let mut screens_tries = 0;
+    let mut screens_link_ups = crate::peer_computers::link_ups(&computer.device_id);
     loop {
         tokio::select! {
             packet = frames.recv() => {
@@ -1347,6 +1407,25 @@ async fn attempt(
             }
             _ = look.tick() => {}
             _ = stats_tick.tick() => {
+                // Its screens, asked again while it has not answered (PC9a): the
+                // ask as the view began finds no link when the link is
+                // still coming up (that computer just restarted), and the
+                // window's screen buttons would stay empty for the view.
+                link_came_up(
+                    crate::peer_computers::link_ups(&computer.device_id),
+                    &mut screens_link_ups,
+                    &mut screens_tries,
+                    &mut screens_asked,
+                    Instant::now(),
+                );
+                if ask_screens_again(
+                    crate::peer_computers::screens_answered(&computer.device_id),
+                    &mut screens_asked,
+                    &mut screens_tries,
+                    Instant::now(),
+                ) {
+                    crate::peer_computers::ask_screens(&computer.device_id);
+                }
                 // How the picture comes, for the window's stats (PC2).
                 let (fps, kbps) = counts.second(second.elapsed());
                 second = Instant::now();
@@ -4828,6 +4907,71 @@ mod tests {
         // Shown for long enough: a later drop starts afresh.
         tries.shown(at(10));
         assert_eq!(tries.dropped(at(200)), Some((1, Duration::from_secs(1))));
+    }
+
+    /// PC9a: the screens are asked again only until an answer comes, at
+    /// most each 5 s and six times.
+    #[test]
+    fn unanswered_screens_are_asked_again_a_few_times() {
+        let start = Instant::now();
+        let (mut asked, mut tries) = (start, 0);
+        let at = |s: u64| start + Duration::from_secs(s);
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(4)));
+        assert!(ask_screens_again(false, &mut asked, &mut tries, at(5)));
+        assert_eq!((asked, tries), (at(5), 1));
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(9)));
+        assert!(!ask_screens_again(true, &mut asked, &mut tries, at(60)));
+        for n in 0..5 {
+            assert!(ask_screens_again(
+                false,
+                &mut asked,
+                &mut tries,
+                at(100 + 10 * n)
+            ));
+        }
+        assert_eq!(tries, 6);
+        assert!(
+            !ask_screens_again(false, &mut asked, &mut tries, at(1000)),
+            "six tries at most"
+        );
+    }
+
+    /// PC9a review N6: a link that comes up after the six asks were spent
+    /// starts them afresh, with the next ask due at once.
+    #[test]
+    fn a_link_coming_up_starts_the_screens_asks_afresh() {
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+        let (mut asked, mut tries, mut seen) = (start, 6, 1);
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(100)));
+        assert!(!link_came_up(1, &mut seen, &mut tries, &mut asked, at(100)));
+        assert_eq!(tries, 6, "the same link changes nothing");
+        assert!(link_came_up(2, &mut seen, &mut tries, &mut asked, at(100)));
+        assert_eq!((seen, tries), (2, 0));
+        assert!(
+            ask_screens_again(false, &mut asked, &mut tries, at(100)),
+            "asked at once on the new link"
+        );
+    }
+
+    /// PC9a review I1: a transport's own "refused" (a dial to an endpoint
+    /// closing for a stop) is dialled again; the server's refusal is not.
+    #[test]
+    fn only_the_servers_own_refusal_is_final() {
+        for again in [
+            "connection refused",
+            "aborted by peer: the server refused to accept a new connection",
+            "server stopping",
+        ] {
+            assert!(may_reconnect(Some(again)), "{again}");
+        }
+        for kept in [
+            "session refused",
+            " Session refused ",
+            "phone screen not allowed",
+        ] {
+            assert!(!may_reconnect(Some(kept)), "{kept}");
+        }
     }
 
     /// PC2: a view the other computer ended on purpose (its End, a refusal,
