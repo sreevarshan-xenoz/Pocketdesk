@@ -714,19 +714,31 @@ impl Decoder {
             command.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = command.spawn()?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| io::Error::other("no stdin"))?;
-        let mut stdout = child
+        let Some(stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::other("no stdin"));
+        };
+        let info = Arc::new(DecoderInfo::default());
+        // Held from here, so whatever fails below stops ffmpeg as it drops
+        // (PR #562 review M12), never leaving it behind.
+        let mut decoder = Self {
+            child,
+            stdin,
+            codec: wanted.codec,
+            planes: wanted.planes,
+            info: info.clone(),
+        };
+        let mut stdout = decoder
+            .child
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("no stdout"))?;
-        let stderr = child
+        let stderr = decoder
+            .child
             .stderr
             .take()
             .ok_or_else(|| io::Error::other("no stderr"))?;
-        let info = Arc::new(DecoderInfo::default());
         let colour = Arc::new(Mutex::new(Colour::default()));
         let (size_tx, size_rx) = std::sync::mpsc::channel::<(usize, usize)>();
         {
@@ -763,13 +775,7 @@ impl Decoder {
                 }
                 thread_info.ended.store(true, Ordering::Release);
             })?;
-        Ok(Self {
-            child,
-            stdin,
-            codec: wanted.codec,
-            planes: wanted.planes,
-            info,
-        })
+        Ok(decoder)
     }
 
     /// One access unit, decoded at once.
