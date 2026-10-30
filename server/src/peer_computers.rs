@@ -2135,7 +2135,9 @@ async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
             .await
             .unwrap_or(false);
     let response = if permitted {
-        privacy::respond(body, device_id, Some(&privacy::link_connection(device_id))).await
+        let connection = privacy::link_connection(device_id);
+        let ttl = privacy::grab_ttl(Some(&connection));
+        privacy::respond(body, device_id, Some(&connection), ttl).await
     } else {
         serde_json::json!({ "ok": false, "error": privacy::denied_words(true) })
     };

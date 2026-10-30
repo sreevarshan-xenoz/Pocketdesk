@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use crate::privacy;
 use std::sync::Mutex;
+use std::time::Duration;
 
 /// The privacy packet: a request, or its answer (which says `ok`).
 pub const PRIVACY: &str = "kdeconnect.pocketdesk.privacy";
@@ -98,6 +99,21 @@ pub(crate) fn connection_closed(connection_id: &str) {
     );
 }
 
+/// How long a computer's grab lives without a renewal (PR #561 review I1):
+/// its window renews every 10 s, so three renewals missed end it, where a
+/// phone's lives [`privacy::GRAB_TTL`] (10 minutes) as before.
+pub const COMPUTER_GRAB_TTL: Duration = Duration::from_secs(30);
+
+/// The grab's TTL for a holder that asked on `connection` (a computer) or
+/// on none (a phone).
+pub(crate) fn grab_ttl(connection: Option<&str>) -> Duration {
+    if connection.is_some() {
+        COMPUTER_GRAB_TTL
+    } else {
+        privacy::GRAB_TTL
+    }
+}
+
 /// The connection id that the link this computer keeps to `device_id`
 /// stands for (PC8), for a grab asked on that link.
 pub(crate) fn link_connection(device_id: &str) -> String {
@@ -170,9 +186,15 @@ async fn computer(device_id: &str) -> bool {
 /// Do what the privacy request `body` from `device` asks and say how it
 /// went (`{ok, grabbed?, ttlLeft?, locked?, error?}`). `connection` is the
 /// connection a computer asked on, its grab ending with it (PC8); `None`
-/// for a phone. Shared by the plugin and the link this computer keeps to a
-/// computer.
-pub(crate) async fn respond(body: &Value, device: &str, connection: Option<&str>) -> Value {
+/// for a phone. `ttl` is how long a grab lives without a refresh
+/// ([`grab_ttl`]). Shared by the plugin and the link this computer keeps to
+/// a computer.
+pub(crate) async fn respond(
+    body: &Value,
+    device: &str,
+    connection: Option<&str>,
+    ttl: Duration,
+) -> Value {
     let action = body
         .get("action")
         .and_then(|v| v.as_str())
@@ -194,7 +216,7 @@ pub(crate) async fn respond(body: &Value, device: &str, connection: Option<&str>
         "grab" if renewal_refused(renew, holder.as_deref(), device) => {
             json!({ "ok": false, "error": "privacy mode ended there" })
         }
-        "grab" => match privacy::grab_input(privacy::GRAB_TTL) {
+        "grab" => match privacy::grab_input(ttl) {
             Ok(count) => {
                 *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(Holder {
                     device: device.to_string(),
@@ -255,7 +277,8 @@ impl Plugin for PrivacyPlugin {
         let connection = computer(device)
             .await
             .then(|| sender.connection_id().to_string());
-        let response = respond(&packet.body, device, connection.as_deref()).await;
+        let ttl = grab_ttl(connection.as_deref());
+        let response = respond(&packet.body, device, connection.as_deref(), ttl).await;
         sender
             .send_packet(&NetworkPacket::new(PRIVACY).with_body(response))
             .await
@@ -322,6 +345,20 @@ mod tests {
         };
         assert!(!ends_with(&phone, "conn-7"));
         assert_eq!(link_connection("desk"), "link:desk");
+    }
+
+    /// PR #561 review I1: a computer's grab lapses after three missed
+    /// renewals of its window, a phone's after 10 minutes as before.
+    #[test]
+    fn a_computers_grab_lapses_soon_without_its_renewals() {
+        assert_eq!(grab_ttl(Some("conn-7")), COMPUTER_GRAB_TTL);
+        assert_eq!(
+            COMPUTER_GRAB_TTL,
+            3 * crate::computer_view::PRIVACY_RENEW,
+            "three renewals"
+        );
+        assert_eq!(grab_ttl(None), privacy::GRAB_TTL);
+        assert!(COMPUTER_GRAB_TTL < privacy::GRAB_TTL);
     }
 
     /// PC8: an answer is never taken for a request, so two computers never
