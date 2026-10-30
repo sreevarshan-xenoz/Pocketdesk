@@ -1207,27 +1207,28 @@ async fn seed_desktop_state(
         Road::Local { local, .. } => local,
         Road::Internet => None,
     };
-    let for_computer = tokio::task::spawn_blocking(move || {
-        let dir = crate::state::state_dir().ok()?;
-        crate::computer_wake::seed_packet(
-            &dir,
-            &device_id,
-            crate::plugins::pair::is_computer_device(&device_id),
-            reached,
-        )
+    let (is_computer, for_computer) = tokio::task::spawn_blocking(move || {
+        let is_computer = crate::plugins::pair::is_computer_device(&device_id);
+        let packet = crate::state::state_dir().ok().and_then(|dir| {
+            crate::computer_wake::seed_packet(&dir, &device_id, is_computer, reached)
+        });
+        (is_computer, packet)
     })
     .await
-    .ok()
-    .flatten();
+    .unwrap_or((false, None));
     if let Some(packet) = for_computer {
         let _ = sender.send_packet(&packet).await;
     }
     // How to wake this computer, for the adapter the phone reached (N6). A
     // connection over the internet reached none: the phone keeps the one it
-    // learned at home.
+    // learned at home. A computer gets only the packet above, under its
+    // rules (PC6 review M-2).
     let Road::Local { local, .. } = road else {
         return;
     };
+    if !crate::wake_info::told_to(is_computer) {
+        return;
+    }
     let wake = tokio::task::spawn_blocking(move || crate::wake_info::packet_for_connection(local))
         .await
         .ok();
