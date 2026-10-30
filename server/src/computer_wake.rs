@@ -178,13 +178,27 @@ pub fn targets(
 }
 
 /// Send the magic packet for `computer` to `targets`, a few times (core's
-/// `send_wake`); how many took it. Blocking.
+/// `send_wake`); how many took it, or why not in words that name no MAC
+/// and no address ([`failure`]). Blocking.
 pub fn send(computer: &PeerComputer, targets: &[SocketAddr]) -> Result<usize, String> {
     let wake = computer
         .wake
         .as_ref()
         .ok_or_else(|| "it never said how to wake it".to_string())?;
-    pocketdesk_core::tailscale::wol::send_wake(&wake.mac, targets).map_err(|e| format!("{e:#}"))
+    pocketdesk_core::tailscale::wol::send_wake(&wake.mac, targets).map_err(|e| failure(&e))
+}
+
+/// Why a wake was not sent, for the log (PC6 review I-2): fixed words and
+/// at most the kind of the system's error. Core's own words name the
+/// targets (and, for a bad MAC, the MAC), which stay out of the log.
+fn failure(e: &anyhow::Error) -> String {
+    match e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+    {
+        Some(io) => format!("no target took the packet ({:?})", io.kind()),
+        None => "no target took the packet".to_string(),
+    }
 }
 
 /// Wake the computer `device_id` as it told this one (the app's Wake).
@@ -204,6 +218,7 @@ pub fn wake(dir: &Path, device_id: &str) {
     );
     match send(computer, &targets) {
         Ok(reached) => tracing::info!(device_id, reached, "Sent the wake to another computer"),
+        // `e` is [`failure`]'s, with no MAC and no address.
         Err(e) => tracing::warn!(device_id, "Could not wake another computer: {e}"),
     }
 }
@@ -394,6 +409,36 @@ mod tests {
         let matched = got[..n] == expected[..];
         println!("matched {}", if matched { "yes" } else { "no" });
         assert!(matched);
+    }
+
+    /// PC6 review I-2: why a wake failed names neither the MAC nor an
+    /// address, only fixed words and the system error's kind.
+    #[test]
+    fn a_failed_wake_names_no_mac_and_no_address() {
+        let core_words = anyhow::anyhow!(
+            "the wake could not be sent (192.0.2.255:9: unreachable; 192.0.2.10:9: refused)"
+        );
+        let bound = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "00:00:5E:00:53:01 at 192.0.2.10",
+        ))
+        .context("Failed to bind UDP socket for WOL");
+        let bad_mac = pocketdesk_core::tailscale::wol::magic_packet("00:00:5E:00:53:0Z")
+            .expect_err("not a MAC");
+        for (e, said) in [
+            (core_words, "no target took the packet"),
+            (bound, "no target took the packet (PermissionDenied)"),
+            (bad_mac, "no target took the packet"),
+        ] {
+            let words = failure(&e);
+            assert_eq!(words, said);
+            assert!(!words.contains("192.0.2") && !words.contains("00:00:5E"));
+        }
+        // The other ways a wake fails here say no more.
+        let never = send(&computer("desk"), &[]).unwrap_err();
+        assert_eq!(never, "it never said how to wake it");
+        let none = send(&told_computer(&[]), &[]).unwrap_err();
+        assert_eq!(none, "no target took the packet");
     }
 
     /// PC6: with telling off, the packet on a link says to forget.
