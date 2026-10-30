@@ -1073,6 +1073,8 @@ private fun HostCard(
                             }
                             section.actions.forEach { action ->
                                 val remove = action == CardMenu.Action.REMOVE
+                                // Kept apart from Rename above it (PR #580 review N3).
+                                if (remove) HorizontalDivider(modifier = Modifier.padding(start = 24.dp))
                                 DropdownMenuItem(
                                     text = {
                                         Text(
