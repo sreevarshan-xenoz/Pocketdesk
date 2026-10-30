@@ -1119,6 +1119,11 @@ impl MicLink {
     pub fn set_controls(&self, controls: bool) {
         self.controls
             .store(controls, std::sync::atomic::Ordering::Release);
+        // Frames waiting as control goes are not sent (PR #569 re-review
+        // N1).
+        if !controls {
+            self.clear();
+        }
     }
 
     pub fn controls(&self) -> bool {
@@ -1176,7 +1181,8 @@ async fn forward_mic(
             continue;
         };
         let current = conn.borrow().clone();
-        if let Some(current) = current {
+        // Taken as control went (re-review N1): dropped.
+        if let Some(current) = current.filter(|_| mic.controls()) {
             let packet = InputPacket::Mic {
                 enabled: true,
                 opus,
@@ -3361,6 +3367,37 @@ mod tests {
             "{got:?}"
         );
         drop(window);
+    }
+
+    /// PR #569 re-review N1: control going clears the frames waiting, and
+    /// a frame taken without control is dropped, not sent.
+    #[tokio::test]
+    async fn frames_waiting_as_control_goes_are_not_sent() {
+        let link = controlling();
+        for byte in 0..3u8 {
+            link.push(vec![byte]);
+        }
+        link.set_controls(false);
+        assert!(link.waiting().is_empty());
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+        let conn: SharedConnection = Arc::new(Kept(kept.clone()));
+        conn_now.send_replace(Some(conn));
+        let _forward_mic = AbortOnDrop(tokio::spawn(forward_mic(link.clone(), conn_rx)));
+        link.push(vec![9]);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(kept.lock().unwrap().is_empty(), "nothing without control");
+        link.set_controls(true);
+        link.push(vec![10]);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while kept.lock().unwrap().is_empty() {
+            assert!(tokio::time::Instant::now() < deadline, "TIMEOUT: frame");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            format!("{:?}", kept.lock().unwrap()),
+            "[Mic { enabled: true, opus: [10] }]"
+        );
     }
 
     /// PC10 review I3: past the backlog the oldest frames are dropped.
