@@ -23,6 +23,11 @@ struct Holder {
 /// (PR #561 review M2: a computer may hold it now, or be the one refused).
 pub(crate) const HELD_ELSEWHERE: &str = "another phone or computer holds privacy mode";
 
+/// Why a grab is refused from the device this computer's shared keyboard
+/// and mouse are on now (range review I3): privacy mode would swallow them
+/// here, and that device could no longer be reached with them.
+pub(crate) const DRIVEN_FROM_HERE: &str = "this computer's keyboard and mouse are on yours now (the shared keyboard and mouse); privacy mode would leave them nowhere";
+
 /// The device whose grab is held: only it may refresh or release it (R3).
 static OWNER: Mutex<Option<Holder>> = Mutex::new(None);
 
@@ -96,6 +101,23 @@ pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
     }
 }
 
+/// A visit of this computer's shared keyboard and mouse to `device_id`
+/// starts (range review I3): a grab it holds here is let go, so the keys
+/// and clicks reach it. Blocking.
+pub(crate) fn release_held_by(device_id: &str) {
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    if take_held_by(&mut owner, device_id).is_none() {
+        return;
+    }
+    let count = privacy::release_input();
+    drop(owner);
+    tracing::info!(
+        device_id,
+        released = count,
+        "Privacy grab released: this computer's keyboard and mouse went to the device holding it"
+    );
+}
+
 /// The connection `connection_id` closed (PC8): a computer's grab asked on
 /// it ends with it. A phone's is kept (it may come back on a new
 /// connection), to its TTL as before.
@@ -132,6 +154,12 @@ fn release_closed(connection_id: &str) {
 /// out; `owner` is left as it was for any other.
 fn take_if_closed(owner: &mut Option<Holder>, connection_id: &str) -> Option<Holder> {
     owner.take_if(|h| ends_with(h, connection_id))
+}
+
+/// The holder in `owner` if it is `device_id`, taken out; `owner` is left
+/// as it was for any other.
+fn take_held_by(owner: &mut Option<Holder>, device_id: &str) -> Option<Holder> {
+    owner.take_if(|h| h.device == device_id)
 }
 
 /// How long a computer's grab lives without a renewal (PR #561 review I1):
@@ -270,9 +298,21 @@ pub(crate) async fn respond(
 }
 
 /// Why `device` may not do `action` (with `renew`) while `holder` holds the
-/// grab, as the answer says it, and whether a lock asked with it is refused
-/// too; `None` when it may.
-fn refusal(action: &str, renew: bool, holder: Option<&str>, device: &str) -> Option<(Value, bool)> {
+/// grab and this computer's keyboard and mouse are on `driving` (the
+/// shared keyboard and mouse), as the answer says it, and whether a lock
+/// asked with it is refused too; `None` when it may.
+fn refusal(
+    action: &str,
+    renew: bool,
+    holder: Option<&str>,
+    device: &str,
+    driving: Option<&str>,
+) -> Option<(Value, bool)> {
+    // The device these keys and clicks are on would lose them (range
+    // review I3).
+    if action == "grab" && driving == Some(device) {
+        return Some((json!({ "ok": false, "error": DRIVEN_FROM_HERE }), true));
+    }
     if !may_act(action, holder, device) {
         return Some((json!({ "ok": false, "error": HELD_ELSEWHERE }), true));
     }
@@ -301,12 +341,15 @@ fn act(
         *owner = None;
     }
     let holder = owner.as_ref().map(|h| h.device.clone());
-    if let Some((answer, refused)) = refusal(action, renew, holder.as_deref(), device) {
+    let driving = crate::shared_input::status::keyboard_on_device();
+    if let Some((answer, refused)) =
+        refusal(action, renew, holder.as_deref(), device, driving.as_deref())
+    {
         if refused {
             tracing::warn!(
                 device_id = %device,
                 holder = holder.as_deref().unwrap_or(""),
-                "Privacy {action} refused: another device holds the grab"
+                "Privacy {action} refused: another device holds the grab, or this keyboard and mouse are on the asker"
             );
         }
         return (answer, refused);
@@ -470,20 +513,57 @@ mod tests {
     /// kinds of holder.
     #[test]
     fn a_grab_held_elsewhere_is_said_for_a_phone_or_a_computer() {
-        let (said, refused) = refusal("grab", false, Some("phone-a"), "desk").unwrap();
+        let (said, refused) = refusal("grab", false, Some("phone-a"), "desk", None).unwrap();
         assert!(refused, "a lock with it is not done");
         assert_eq!(
             said["error"], "another phone or computer holds privacy mode",
             "{said}"
         );
-        let (said, refused) = refusal("release", false, Some("desk"), "phone-a").unwrap();
+        let (said, refused) = refusal("release", false, Some("desk"), "phone-a", None).unwrap();
         assert!(refused);
         assert_eq!(said["error"], HELD_ELSEWHERE);
-        let (said, refused) = refusal("grab", true, None, "desk").unwrap();
+        let (said, refused) = refusal("grab", true, None, "desk", None).unwrap();
         assert!(!refused, "a renewal refused does not refuse a lock");
         assert_eq!(said["error"], "privacy mode ended there");
-        assert_eq!(refusal("status", false, Some("phone-a"), "desk"), None);
-        assert_eq!(refusal("grab", false, None, "desk"), None);
+        assert_eq!(
+            refusal("status", false, Some("phone-a"), "desk", None),
+            None
+        );
+        assert_eq!(refusal("grab", false, None, "desk", None), None);
+    }
+
+    /// Range review I3: a grab (and a lock with it) from the device this
+    /// computer's shared keyboard and mouse are on now is refused, as its
+    /// keys would be swallowed here; its release and status still go, and
+    /// another device is judged as before.
+    #[test]
+    fn a_grab_from_the_computer_driven_from_here_is_refused() {
+        let (said, refused) = refusal("grab", false, None, "desk", Some("desk")).unwrap();
+        assert!(refused, "a lock with it is not done");
+        assert_eq!(said["error"], DRIVEN_FROM_HERE);
+        let (_, refused) = refusal("grab", true, Some("desk"), "desk", Some("desk")).unwrap();
+        assert!(refused, "nor renewed");
+        assert_eq!(
+            refusal("release", false, Some("desk"), "desk", Some("desk")),
+            None
+        );
+        assert_eq!(refusal("status", false, None, "desk", Some("desk")), None);
+        assert_eq!(refusal("grab", false, None, "desk", Some("laptop")), None);
+    }
+
+    /// Range review I3: a visit to the device holding the grab takes it out;
+    /// a visit elsewhere leaves it.
+    #[test]
+    fn a_visit_takes_out_only_the_grab_of_the_device_visited() {
+        let held = Holder {
+            device: "desk".into(),
+            connection: Some("link:desk".into()),
+        };
+        let mut owner = Some(held.clone());
+        assert_eq!(take_held_by(&mut owner, "laptop"), None);
+        assert_eq!(owner, Some(held.clone()));
+        assert_eq!(take_held_by(&mut owner, "desk"), Some(held));
+        assert_eq!(owner, None);
     }
 
     /// PR #561 review M10: a closing connection takes out only the holder

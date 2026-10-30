@@ -3243,6 +3243,12 @@ Built 2026-10-30. The window's bar has a numbered button for each of the other c
 - [ ] Open four windows, then a fifth from any bar: "At most 4 screen windows at once" shows and nothing else opens; the server's memory and the far computer's CPU with four views (counts only). (where: second computer)
 - [ ] With "Hide what I do there" on in one window, ask it in the second window of the same computer: it says another window already hides it, and nothing changes there. (where: second computer)
 
+## 239. The range review after 0.8.2
+
+Built 2026-10-30. Fixes from the review of everything merged since 0.8.2: a computer driven from here through the shared keyboard and mouse is refused this computer's privacy mode, and a grab it holds ends as they go there.
+
+- [ ] Windows with its keyboard and mouse on the Linux laptop through the shared keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there": the bar says it was refused (this computer's keyboard and mouse are on yours now), and Windows' keys and clicks still reach the laptop. Bring them home, turn it on (Windows' keyboard is blocked, its ring shows), then move to the laptop with the switch key: the grab ends on Windows and the keys reach the laptop. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

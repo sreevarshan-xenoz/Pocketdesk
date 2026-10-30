@@ -25,12 +25,26 @@ use super::wire::{REFUSE_RELAYED, REFUSE_SHARING_OFF};
 static KEYBOARD_ON: Mutex<String> = Mutex::new(String::new());
 
 /// Note where this computer's keyboard and mouse are: on `device_id`, or
-/// here with `None`.
+/// here with `None`. A visit starting on a computer that holds this one's
+/// privacy mode lets that go first (range review I3): its keys and clicks
+/// would otherwise be swallowed here before they could reach it.
 pub fn set_keyboard_on(device_id: Option<&str>) {
     let mut on = KEYBOARD_ON.lock().unwrap_or_else(|e| e.into_inner());
     if on.as_str() != device_id.unwrap_or_default() {
         *on = device_id.unwrap_or_default().to_string();
+        if let Some(id) = device_id {
+            // Releasing blocks (Windows joins its hook thread): never on
+            // the input thread that called this.
+            let id = id.to_string();
+            std::thread::spawn(move || crate::plugins::privacy::release_held_by(&id));
+        }
     }
+}
+
+/// The computer this one's keyboard and mouse are on now, if any (range
+/// review I3: it may not take this computer's privacy mode).
+pub fn keyboard_on_device() -> Option<String> {
+    Some(keyboard_on()).filter(|on| !on.is_empty())
 }
 
 fn keyboard_on() -> String {
@@ -570,8 +584,10 @@ mod tests {
     fn the_keyboard_is_here_until_the_driver_says_otherwise() {
         set_keyboard_on(Some("L"));
         assert_eq!(keyboard_on(), "L");
+        assert_eq!(keyboard_on_device().as_deref(), Some("L"));
         set_keyboard_on(None);
         assert_eq!(keyboard_on(), "");
+        assert_eq!(keyboard_on_device(), None);
     }
 
     /// BK8: how Linux's input-capture portal stands goes into the status
