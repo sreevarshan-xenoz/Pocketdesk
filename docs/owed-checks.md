@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1036 open items.
+1040 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 119 |
+| A second computer | 123 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -1007,10 +1007,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Turn that switch on on the laptop: Hide what I do there turns on within a second, the laptop's keyboard and touchpad stop working there while the window still drives it, and the bar says it is hidden; the laptop's ring shows on its screen (look at the laptop, or a screencopy count of red edge pixels) and is not in the window's picture. (where: second computer)
 - Turn it off from the bar, turn View only on, and close the window, each in turn: the laptop's keyboard and touchpad work again within a second each time. (where: second computer)
 - With it on, cut the link (stop Windows' server, or turn Wi-Fi off on Windows): the laptop's keyboard and touchpad come back without waiting for the 10-minute TTL (note how long), and the window, once back, says privacy ended. (where: second computer)
-- With it on, end the desktop app on Windows from Task Manager (a crash, not a close): the laptop's keyboard and touchpad come back within about 4 s. (where: second computer)
+- With it on, end the desktop app on Windows from Task Manager (a crash, not a close): the laptop's keyboard and touchpad come back within about 8 s (the relay waits 4 s for the window to come back first). (where: second computer)
 - Both ways of the link: repeat the on and off with the laptop as the computer that keeps the link (its id sorts first) and with Windows keeping it, by pairing the other way round or a throwaway pair of ids. (where: second computer)
 - Lock it when I close the window, on (bar or Settings), with the switch on there: closing the window locks the laptop (`loginctl lock-session` or hyprlock); with the switch off there it does not, and a notification here says "Couldn't lock" with that switch's name; with the option off it does not. Never the other way round: Windows here is the owner's box and is never the one locked. (where: second computer)
 - With a phone holding privacy on the laptop first, Hide what I do there says another phone or computer holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)
+- Lock it when I close the window on, the switch on there: quit Pocketdesk here from the tray with the window open (showing the laptop): the laptop locks, the app is gone within about a second, and the laptop's session list no longer shows the view. With the window reconnecting as you quit, it does not lock. (where: second computer)
+- With Hide what I do there on, stall the window's writes (on a test machine: slow the link with `clumsy` on Windows or `tc qdisc ... netem delay 2000ms` on the laptop while dragging the mouse fast, so the relay's input queue fills): the window's connection ends and it joins again within a second, the bar stays “hidden” and the laptop's keyboard and touchpad stay blocked throughout (no “Privacy ended: the window closed”). (where: second computer)
+- Lock it when I close the window on, the pointer locked, the link slowed as above: close the window during a stall: the laptop still locks (the lock goes before the pointer's free). (where: second computer)
 
 **234. A faster picture: hardware decode, NV12 and HEVC (PC5)**
 
@@ -1028,6 +1031,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding; and a fast circle on a slow internet road comes back about where it started (a relative move the relay's full queue drops is owed and goes with the next, up to 256 counts each way; past that, after a long stall, the rest is dropped so the view never spins, PR #563 review M5 and re-review N4). (where: second computer)
 - Locked from the bar (on Wayland, where the hidden pointer stays on the bar's switch), click in the picture several times: each click reaches the far computer and the lock stays on; the bar looks greyed out until it is freed. (where: second computer)
 - Locked, stop the window answering (suspend the desktop app with Resource Monitor's Suspend Process on Windows or `kill -STOP` on Linux, on a test machine): within about 3 s the shared keyboard and mouse's edges lead on again, and the badge says so. (where: second computer)
+- Locked, on a slow far link (`clumsy` or `netem delay 2000ms` as above), move the mouse hard for 30 s: the window drops and joins again several times (the picture stays), the moves resume after each, and the view does not end with “kept dropping this window”; only a link that stays stalled past about 20 rejoins in a minute ends it, saying the link stayed too slow. (where: second computer)
 
 **236. The rest of the pages (Desktop UX 4)**
 
