@@ -1345,6 +1345,11 @@ fn ask_with(
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
+    // The old view's decoder may still give pictures (frames in flight, or
+    // read already): they are dropped, never taken for the next screen's
+    // (PR #570 review I1).
+    state.decoder_gen += 1;
+    state.picture = None;
     state.writer = None;
     state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
     state.session_id = None;
@@ -6013,6 +6018,46 @@ mod tests {
         assert_eq!(marked(&view), [false, true]);
         assert_eq!(windows.len(), 2);
         view.quit();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review I1: a picture the old screen's decoder still gives
+    /// after a switch is dropped: it neither ends the switch (nor its
+    /// time) nor shows; the next screen's first picture does.
+    #[test]
+    fn an_old_screens_picture_after_a_switch_is_dropped() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-old-picture-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Arc::new(Mutex::new(State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            decoder_gen: 4,
+            ..State::default()
+        }));
+        let ctx = egui::Context::default();
+        let picture = || Picture {
+            width: 8,
+            height: 8,
+            planes: Planes::Rgba,
+            data: vec![0; 8 * 8 * 4],
+            colour: crate::video::Colour::default(),
+        };
+        let mut old = publisher(&shared, &ctx, 4);
+        switch_screen(&dir, &mut lock(&shared), 1).unwrap();
+        old(picture());
+        {
+            let state = lock(&shared);
+            assert!(state.picture.is_none(), "the old screen's picture");
+            assert!(state.switching.is_some(), "still switching");
+        }
+        // The next screen's decoder starts with a newer number.
+        let next = lock(&shared).decoder_gen + 1;
+        lock(&shared).decoder_gen = next;
+        publisher(&shared, &ctx, next)(picture());
+        assert!(lock(&shared).picture.is_some(), "the new screen's shows");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
