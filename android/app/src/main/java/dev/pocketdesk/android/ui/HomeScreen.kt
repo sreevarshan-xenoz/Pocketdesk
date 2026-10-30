@@ -96,6 +96,7 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.lifecycle.repeatOnLifecycle
 
 /** How a move of a saved computer to a found address went (O3). */
 private enum class MoveOutcome { MOVED, REFUSED, UNREACHED }
@@ -330,12 +331,15 @@ fun HomeScreen(
     }
     // UX1: the cards' "Used 2 min ago", read once per list and resume
     // (review N3: not from the preferences at every recomposition), and the
-    // clock it is told against, a tick a minute while Home shows.
+    // clock it is told against, a tick a minute while Home shows: only while
+    // resumed, so a paused app is not woken each minute (UX2, review N9).
     val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
-    val minuteNow by produceState(System.currentTimeMillis(), resumes) {
-        while (true) {
-            value = System.currentTimeMillis()
-            delay(60_000L - value % 60_000L)
+    val minuteNow by produceState(System.currentTimeMillis(), lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis()
+                delay(60_000L - value % 60_000L)
+            }
         }
     }
     // The Health card's Choose opens the picker itself (E6).
