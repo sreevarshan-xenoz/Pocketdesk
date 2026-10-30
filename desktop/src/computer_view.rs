@@ -596,6 +596,23 @@ pub fn screen_choices(status: &ViewStatus) -> Vec<String> {
     status.monitors.clone()
 }
 
+/// The window's title: the computer's name, and "Mic on" first while this
+/// computer's microphone goes there (PR #569 review I2), so the taskbar
+/// says it too.
+pub fn window_title(name: &str, mic_on: bool) -> String {
+    if mic_on {
+        format!("{} \u{b7} {name} \u{b7} screen", view_mic::ON_AIR)
+    } else {
+        format!("{name} \u{b7} screen")
+    }
+}
+
+/// What the main window says, on every page, while a screen window sends
+/// this computer's microphone (PR #569 review I2).
+pub fn mic_on_air_words(name: &str) -> String {
+    format!("Mic on: this computer's microphone goes to {name}.")
+}
+
 /// The bar's "Mic on" (PC10): red, as a recording light.
 pub const ON_AIR_RED: egui::Color32 = egui::Color32::from_rgb(255, 92, 92);
 
@@ -732,12 +749,36 @@ impl ComputerView {
         lock(&self.shared).lock_saved.take()
     }
 
+    /// The computer this computer's microphone goes to now, if any (PR #569
+    /// review I2): the main window says so on every page.
+    pub fn mic_on_air(&self) -> Option<String> {
+        let state = lock(&self.shared);
+        state
+            .mic
+            .on()
+            .then(|| state.wanted.as_ref().map(|w| w.name.clone()))
+            .flatten()
+    }
+
+    /// Stop sending the microphone, from the main window (PR #569 review
+    /// I2).
+    pub fn stop_mic(&self) {
+        let mut state = lock(&self.shared);
+        let sending = state.mic.on();
+        state.mic.stopped();
+        if sending {
+            stop_mic(&mut state);
+        }
+        drop(state);
+        self.ctx.request_repaint_of(viewport_id());
+    }
+
     /// Call each pass: keeps the window open while a screen is wanted.
     pub fn show(&self, ctx: &egui::Context) {
         let title = {
             let state = lock(&self.shared);
             let Some(wanted) = &state.wanted else { return };
-            format!("{} \u{b7} screen", wanted.name)
+            window_title(&wanted.name, state.mic.on())
         };
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
@@ -986,6 +1027,22 @@ fn stop_mic(state: &mut State) {
     }
 }
 
+/// Whether the window may send its microphone now (PR #569 review I2):
+/// it controls that computer (Control on there, View only off, connected),
+/// and the view neither ended nor reconnects. Checked by the capture on
+/// each frame as well as by each pass, so a window that gets no passes
+/// (minimised, hidden) still stops.
+fn mic_may_go(state: &State) -> bool {
+    state.ended.is_none()
+        && state.status.reconnecting == 0
+        && controls(
+            state.status.control,
+            state.view_only,
+            state.writer.is_some(),
+            true,
+        )
+}
+
 /// "Send my mic", each pass (PC10): it starts as [`MicSwitch`] decides
 /// (wanted, and the window controls that computer), the relay told before
 /// any frame, and stops as it decides otherwise.
@@ -1020,7 +1077,11 @@ fn follow_mic(
             let sending = shared.clone();
             let send = move |packet: InputPacket| {
                 let mut state = lock(&sending);
-                if state.mic_gen != generation || !state.mic.on() || state.mic_said != Some(true) {
+                if state.mic_gen != generation
+                    || !state.mic.on()
+                    || state.mic_said != Some(true)
+                    || !mic_may_go(&state)
+                {
                     return false;
                 }
                 send(&mut state, vec![packet]);
@@ -1065,7 +1126,11 @@ fn follow_mic(
                 }
             }
         }
-        Some(view_mic::Change::Stop) => stop_mic(state),
+        Some(view_mic::Change::Stop) => {
+            stop_mic(state);
+            // The bar, drawn before, stops saying "Mic on" at once.
+            ctx.request_repaint_of(viewport_id());
+        }
         None => {}
     }
 }
@@ -3515,7 +3580,8 @@ mod tests {
         name: &str,
         open: MicOpener,
     ) -> (Arc<Mutex<State>>, std::net::TcpStream, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("pd-computer-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-mic-{name}-{}", std::process::id()));
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (relay, _) = listener.accept().unwrap();
@@ -3706,7 +3772,7 @@ mod tests {
             }
         }
         let (shared, _relay, dir) = mic_window(
-            "rejoin",
+            "mic-rejoin",
             Arc::new(|_| Ok(Box::new(Quiet) as Box<dyn view_mic::MicSource>)),
         );
         let mut harness = egui_kittest::Harness::new_ui({
@@ -3757,6 +3823,204 @@ mod tests {
                 );
             }
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A microphone that gives a frame every 10 ms, its reads counted.
+    struct Counted(Arc<std::sync::atomic::AtomicUsize>);
+    impl view_mic::MicSource for Counted {
+        fn read(&mut self) -> io::Result<Vec<i16>> {
+            std::thread::sleep(Duration::from_millis(5));
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(vec![100; view_mic::FRAME_SAMPLES / 2])
+        }
+    }
+
+    /// Every message the relay heard, as words, until the socket ends.
+    fn heard_mic(relay: &mut std::net::TcpStream) -> Vec<&'static str> {
+        use std::io::Read;
+        relay
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut heard = Vec::new();
+        let mut buf = [0u8; 65536];
+        while let Ok(n) = relay.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            heard.extend_from_slice(&buf[..n]);
+        }
+        let mut reader = io::Cursor::new(heard);
+        let mut said = Vec::new();
+        while let Ok(message) = Message::read(&mut reader) {
+            let word = match message {
+                Message::Mic(true) => "on",
+                Message::Mic(false) => "off",
+                Message::Input(bytes) => match InputPacket::decode(&bytes) {
+                    Ok(InputPacket::Mic {
+                        enabled: true,
+                        opus,
+                    }) if opus.is_empty() => "start",
+                    Ok(InputPacket::Mic { enabled: true, .. }) => "frame",
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            if word == "frame" && said.last() == Some(&"frame") {
+                continue;
+            }
+            said.push(word);
+        }
+        said
+    }
+
+    /// PR #569 review I2: control lost (Control off there, the view
+    /// reconnecting or ending, View only) stops the microphone from the
+    /// capture itself, with no pass of the window drawn: it stops sending,
+    /// the switch goes off, and the relay hears off.
+    #[test]
+    fn the_mic_stops_with_no_pass_drawn_as_control_goes() {
+        use egui_kittest::kittest::Queryable;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        type Lose = fn(&mut State);
+        let ways: [(&str, Lose); 4] = [
+            ("control off there", |s| s.status.control = Some(false)),
+            ("reconnecting", |s| s.status.reconnecting = 1),
+            ("ended", |s| s.ended = Some("gone".into())),
+            ("view only", |s| s.view_only = true),
+        ];
+        for (way, lose) in ways {
+            let reads = Arc::new(AtomicUsize::new(0));
+            let counted = reads.clone();
+            let (shared, mut relay, dir) = mic_window(
+                "nodraw",
+                Arc::new(move |_| {
+                    Ok(Box::new(Counted(counted.clone())) as Box<dyn view_mic::MicSource>)
+                }),
+            );
+            let mut harness = egui_kittest::Harness::new_ui({
+                let (shared, dir) = (shared.clone(), dir.clone());
+                move |ui| draw(&shared, &dir, None, ui)
+            });
+            harness.step();
+            harness.get_by_label("Send my mic").click();
+            harness.step();
+            harness.step();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while reads.load(Ordering::SeqCst) < 4 {
+                assert!(Instant::now() < deadline, "TIMEOUT: {way}: no frame");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Control goes; no pass is drawn from here.
+            lose(&mut lock(&shared));
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while lock(&shared).mic.on() {
+                assert!(Instant::now() < deadline, "TIMEOUT: {way}: still on");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(!lock(&shared).mic.wanted(), "{way}");
+            assert_eq!(
+                window_title("Desk", lock(&shared).mic.on()),
+                "Desk \u{b7} screen"
+            );
+            drop(harness);
+            drop(shared);
+            assert_eq!(
+                heard_mic(&mut relay),
+                ["on", "start", "frame", "off"],
+                "{way}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// PR #569 review M9: with a microphone that gives nothing yet, the
+    /// window's own pass stops it as the view reconnects or Control goes
+    /// off there.
+    #[test]
+    fn a_pass_stops_the_mic_as_the_view_reconnects_or_control_goes() {
+        use egui_kittest::kittest::Queryable;
+        struct Silent;
+        impl view_mic::MicSource for Silent {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(Vec::new())
+            }
+        }
+        type Lose = fn(&mut State);
+        let ways: [(&str, Lose); 2] = [
+            ("reconnecting", |s| s.status.reconnecting = 2),
+            ("control off there", |s| s.status.control = Some(false)),
+        ];
+        for (way, lose) in ways {
+            let (shared, mut relay, dir) = mic_window(
+                "pass",
+                Arc::new(|_| Ok(Box::new(Silent) as Box<dyn view_mic::MicSource>)),
+            );
+            let mut harness = egui_kittest::Harness::new_ui({
+                let (shared, dir) = (shared.clone(), dir.clone());
+                move |ui| draw(&shared, &dir, None, ui)
+            });
+            harness.step();
+            harness.get_by_label("Send my mic").click();
+            harness.step();
+            harness.step();
+            assert!(lock(&shared).mic.on(), "{way}");
+            lose(&mut lock(&shared));
+            harness.step();
+            assert!(!lock(&shared).mic.on(), "{way}: the pass stopped it");
+            // The bar drawn before it stopped says so until the next pass.
+            harness.step();
+            assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 0);
+            drop(harness);
+            drop(shared);
+            // The start may or may not have gone before it stopped.
+            let mut heard = heard_mic(&mut relay);
+            heard.retain(|w| *w != "start");
+            assert_eq!(heard, ["on", "off"], "{way}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// PR #569 review I2: "Mic on" is in the window's title and said to
+    /// the main window, and the main window's Stop stops it.
+    #[test]
+    fn the_title_and_the_main_window_say_mic_on() {
+        use egui_kittest::kittest::Queryable;
+        assert_eq!(window_title("Desk", false), "Desk \u{b7} screen");
+        assert_eq!(
+            window_title("Desk", true),
+            "Mic on \u{b7} Desk \u{b7} screen"
+        );
+        assert!(mic_on_air_words("Desk").contains("goes to Desk"));
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = reads.clone();
+        let (shared, _relay, dir) = mic_window(
+            "onair",
+            Arc::new(move |_| {
+                Ok(Box::new(Counted(counted.clone())) as Box<dyn view_mic::MicSource>)
+            }),
+        );
+        let ctx = egui::Context::default();
+        let view = ComputerView {
+            shared: shared.clone(),
+            state_dir: dir.clone(),
+            config: None,
+            ctx: ctx.clone(),
+        };
+        assert_eq!(view.mic_on_air(), None);
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        harness.step();
+        assert_eq!(view.mic_on_air().as_deref(), Some("Desk"));
+        view.stop_mic();
+        assert_eq!(view.mic_on_air(), None);
+        assert!(!lock(&shared).mic.wanted());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

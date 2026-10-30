@@ -4597,6 +4597,33 @@ impl eframe::App for PocketdeskApp {
         if !self.snapshot.running && self.tab != Tab::Status {
             egui::Panel::top("stopped").show(ui, |ui| self.stopped_bar(ui));
         }
+        // PC10 review I2: a screen window sending this computer's
+        // microphone says so here too, on every page, with Stop.
+        if let Some(view) = &self.computer_view
+            && let Some(name) = view.mic_on_air()
+        {
+            egui::Panel::top("mic-on-air").show(ui, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(crate::computer_view::mic_on_air_words(&name))
+                            .color(crate::computer_view::ON_AIR_RED)
+                            .strong(),
+                    );
+                    if ui
+                        .button("Stop")
+                        .on_hover_text("Stop sending this computer's microphone")
+                        .clicked()
+                    {
+                        view.stop_mic();
+                    }
+                });
+                ui.add_space(4.0);
+            });
+            // Said again as it stops, whichever window stops it.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(self.tab.name());
             ui.label(RichText::new(self.tab.purpose()).color(crate::theme::muted(ui)));
