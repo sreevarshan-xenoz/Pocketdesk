@@ -182,7 +182,7 @@ pub(crate) fn offers(
 /// computer is not paired both ways here, or no TLS key is bound to the
 /// phone here to vouch for it with.
 pub(crate) fn prepare(
-    dir: &Path,
+    keys: Option<&HashMap<String, device_keys::DeviceKeys>>,
     store: &TrustStore,
     file: &ComputersFile,
     phone: &str,
@@ -191,9 +191,10 @@ pub(crate) fn prepare(
     if !is_mine_computer(store, file, computer) {
         return Err(Refusal::NotMine);
     }
-    let keys = device_keys::read(dir)
-        .map_err(|_| Refusal::Failed)?
-        .remove(phone)
+    let keys = keys
+        .ok_or(Refusal::Failed)?
+        .get(phone)
+        .cloned()
         .unwrap_or_default();
     let Some(tls) = keys.tls else {
         return Err(Refusal::NoKey);
@@ -211,13 +212,13 @@ pub(crate) fn prepare(
 }
 
 /// The pairing link to `computer` (as listed here) the phone is handed:
-/// the other computer's `pin`, its addresses (its own word first, then
-/// those listed here), its ports, and the certificate and iroh endpoint
-/// this computer pinned for it (its own word for the endpoint only when
-/// none is listed).
+/// the other computer's `pin`, the addresses listed here (then any more it
+/// names itself), the ports listed here, and the certificate and iroh
+/// endpoint this computer pinned for it.
 pub(crate) fn link_to(computer: &PeerComputer, name: &str, pin: &str, facts: &Value) -> PairLink {
-    // Each fact read by itself: one that does not read is left to what is
-    // listed here.
+    // What this computer lists and pinned comes first (PR review 5): the
+    // other's word only adds addresses to try after them, each pinned to
+    // the certificate this computer pinned.
     let said: Vec<String> = facts
         .get("addresses")
         .and_then(Value::as_array)
@@ -229,35 +230,22 @@ pub(crate) fn link_to(computer: &PeerComputer, name: &str, pin: &str, facts: &Va
                 .collect()
         })
         .unwrap_or_default();
-    let mut addresses = order_addresses(said);
-    for address in &computer.addresses {
-        if !addresses.contains(address) {
-            addresses.push(address.clone());
+    let mut addresses = computer.addresses.clone();
+    for address in order_addresses(said) {
+        if !addresses.contains(&address) {
+            addresses.push(address);
         }
     }
     addresses.truncate(MOST_ADDRESSES);
-    let port = |key: &str, listed: u16| {
-        facts
-            .get(key)
-            .and_then(Value::as_u64)
-            .and_then(|p| u16::try_from(p).ok())
-            .filter(|p| *p != 0)
-            .unwrap_or(listed)
-    };
-    let endpoint = computer
-        .endpoint
-        .clone()
-        .or_else(|| facts.get("endpoint").filter(|e| e.is_object()).cloned())
-        .map(|e| e.to_string());
     PairLink {
         name: name.to_string(),
         device_id: computer.device_id.clone(),
         addresses,
-        control_port: port("controlPort", computer.control_port),
-        stream_port: port("streamPort", computer.stream_port),
+        control_port: computer.control_port,
+        stream_port: computer.stream_port,
         pin: pin.to_string(),
         fingerprint: Some(computer.fingerprint.to_ascii_lowercase()),
-        endpoint,
+        endpoint: computer.endpoint.as_ref().map(|e| e.to_string()),
         mine: false,
     }
 }
@@ -304,13 +292,13 @@ where
         tokio::task::spawn_blocking(move || {
             TrustStore::read(trust)
                 .ok()
-                .map(|store| (store, computers::read(&dir)))
+                .map(|store| (store, computers::read(&dir), device_keys::read(&dir).ok()))
         })
         .await
         .ok()
         .flatten()
     };
-    let Some((store, file)) = read else {
+    let Some((store, file, keys)) = read else {
         return refused(Refusal::Failed);
     };
     if !is_owner_phone(&store, &file, asker) {
@@ -332,7 +320,7 @@ where
             if !paced(&PAIRS, asker, INTRODUCTIONS_PER_WINDOW, PACE_WINDOW) {
                 return refused(Refusal::Busy);
             }
-            let introduction = match prepare(dir, &store, &file, asker, device_id) {
+            let introduction = match prepare(keys.as_ref(), &store, &file, asker, device_id) {
                 Ok(introduction) => introduction,
                 Err(refusal) => return refused(refusal),
             };
@@ -355,7 +343,20 @@ where
                 return refused(Refusal::NotMine);
             };
             let link = link_to(computer, &shown(&store, &file, device_id), &pin, &facts);
-            record_introduced(dir, asker, device_id);
+            // Still an owner phone after the wait (PR review 1): one
+            // unpaired here meanwhile is handed nothing, and nothing is kept.
+            let kept = {
+                let (dir, trust) = (dir.to_path_buf(), trust.to_path_buf());
+                let (asker, computer) = (asker.to_string(), device_id.clone());
+                tokio::task::spawn_blocking(move || {
+                    record_introduced_in(&dir, &trust, &asker, &computer)
+                })
+                .await
+                .unwrap_or(Err(Refusal::Failed))
+            };
+            if let Err(refusal) = kept {
+                return refused(refusal);
+            }
             tracing::info!(
                 asker,
                 computer = %device_id,
@@ -370,13 +371,33 @@ where
     }
 }
 
-/// Keep that `phone` was introduced between this computer and `computer`.
-fn record_introduced(dir: &Path, phone: &str, computer: &str) {
+/// Keep that `phone` was introduced between this computer and `computer`,
+/// deciding again under `computers.json`'s lock that it is still an owner
+/// phone here (it may have been removed while the other computer was
+/// asked): else nothing is kept, and it is refused.
+pub(crate) fn record_introduced_in(
+    dir: &Path,
+    trust: &Path,
+    phone: &str,
+    computer: &str,
+) -> Result<(), Refusal> {
     let now = pocketdesk_core::local::pin::now_unix();
-    let saved = computers::update(dir, |file| note_introduced(file, phone, computer, now));
+    let mut outcome = Err(Refusal::Failed);
+    let saved = computers::update(dir, |file| {
+        outcome = match TrustStore::read(trust) {
+            Ok(store) if is_owner_phone(&store, file, phone) => {
+                note_introduced(file, phone, computer, now);
+                Ok(())
+            }
+            Ok(_) => Err(Refusal::NotOwner),
+            Err(_) => Err(Refusal::Failed),
+        };
+    });
     if let Err(e) = saved {
         tracing::warn!("Could not keep an introduction: {e}");
+        return Err(Refusal::Failed);
     }
+    outcome
 }
 
 /// [`record_introduced`] on `file`: one entry per phone and computer.
@@ -468,7 +489,8 @@ const PIN_FOR: Duration = Duration::from_secs(PIN_FOR_SECS);
 
 /// Why the id `phone` cannot be introduced here, or `None` when it is
 /// free: paired here either way, a computer listed here, this computer's
-/// own or the introducer's id, or bound to another TLS key than `tls`.
+/// own or the introducer's id, or bound to another TLS key than `tls`, or
+/// another iroh key than the one named.
 fn id_taken(
     dir: &Path,
     store: &TrustStore,
@@ -486,6 +508,12 @@ fn id_taken(
             device_keys::check(dir, id, Slot::Tls, Some(&phone.tls)),
             Verdict::Refused(_)
         )
+        || phone.iroh.as_deref().is_some_and(|iroh| {
+            matches!(
+                device_keys::check(dir, id, Slot::Iroh, Some(iroh)),
+                Verdict::Refused(device_keys::Refusal::WrongKey)
+            )
+        })
 }
 
 /// Decide whether the computer `from` may introduce the phone in
@@ -521,11 +549,12 @@ pub(crate) fn decide_in(
 fn mint(from: &str, introduction: Introduction) -> Result<String, Refusal> {
     let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
     pins.retain(|p| p.minted.elapsed() < PIN_FOR);
+    // A phone introduced again replaces its waiting PIN, before the cap
+    // (PR review 3).
+    pins.retain(|p| p.phone.device_id != introduction.phone.device_id);
     if pins.len() >= PINS_WAITING {
         return Err(Refusal::Busy);
     }
-    // A phone introduced again replaces its waiting PIN.
-    pins.retain(|p| p.phone.device_id != introduction.phone.device_id);
     let pin = loop {
         let pin = pocketdesk_core::local::pin::mint_value();
         if !pins.iter().any(|p| p.pin == pin) {
@@ -831,18 +860,45 @@ pub(crate) fn due_in(
 /// Send the removals this computer owes ([`owe_removals`]) to the
 /// computers it can reach now, as remote revoke's `remove`.
 pub(crate) async fn send_owed(dir: &Path) {
-    let owes = !computers::read(dir).owed_removals.is_empty();
+    // A phone removed while an introduction was under way is owed too,
+    // whenever its record landed (PR review 1): the paired list read now.
+    let owes = {
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let file = computers::read(&dir);
+            if !file.introduced.is_empty()
+                && let Ok(trust) = crate::state::trust_store_path()
+                && let Ok(store) = TrustStore::read(trust)
+            {
+                owe_removals(&dir, &store.trusted_devices());
+                return !computers::read(&dir).owed_removals.is_empty();
+            }
+            !file.owed_removals.is_empty()
+        })
+        .await
+        .unwrap_or(false)
+    };
     if !owes {
         return;
     }
     let reachable = reachable_now().await;
     let now = pocketdesk_core::local::pin::now_unix();
-    let mut due = Vec::new();
-    let changed = computers::update(dir, |file| due = due_in(file, now, &reachable));
-    if let Err(e) = changed {
-        tracing::debug!("Could not read the removals owed to other computers: {e}");
-        return;
-    }
+    let due = {
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let mut due = Vec::new();
+            computers::update(&dir, |file| due = due_in(file, now, &reachable)).map(|()| due)
+        })
+        .await
+    };
+    let due = match due {
+        Ok(Ok(due)) => due,
+        Ok(Err(e)) => {
+            tracing::debug!("Could not read the removals owed to other computers: {e}");
+            return;
+        }
+        Err(_) => return,
+    };
     for owed in due {
         let request = revoke::Request {
             request: owed.request.clone(),

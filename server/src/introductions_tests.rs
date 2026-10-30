@@ -339,12 +339,15 @@ async fn the_phone_gets_a_link_made_of_the_pin_and_what_this_computer_pinned() {
     let link = PairLink::from_uri(&link).unwrap();
     assert_eq!(link.device_id, "mine-pc");
     assert_eq!(link.pin, "042917");
-    // The certificate and endpoint this computer pinned, never its word.
+    // The certificate, endpoint and ports this computer pinned and lists,
+    // never the other's word for them.
     assert_eq!(link.fingerprint.as_deref(), Some(B_CERT));
-    assert!(link.endpoint.unwrap().contains(&"ee".repeat(32)));
-    // Its addresses first, then those listed here, once each.
-    assert_eq!(link.addresses, vec!["192.0.2.20", "192.0.2.10"]);
-    assert_eq!((link.control_port, link.stream_port), (1817, 4817));
+    let endpoint = link.endpoint.unwrap();
+    assert!(endpoint.contains(&"ee".repeat(32)));
+    assert!(!endpoint.contains(&"ff".repeat(32)));
+    assert_eq!((link.control_port, link.stream_port), (1716, 4716));
+    // Those listed here first, then any more it names, once each.
+    assert_eq!(link.addresses, vec!["192.0.2.10", "192.0.2.20"]);
     assert_eq!(link.name, "Computer mine-pc");
     assert!(!link.mine);
     // Kept, for a removal to follow.
@@ -537,6 +540,9 @@ fn a_pin_pairs_only_its_phone_with_its_key_once_and_in_time() {
         assert!(mint("a", introduction(&format!("cap-{n}"))).is_ok());
     }
     assert_eq!(mint("a", introduction("cap-over")), Err(Refusal::Busy));
+    // A phone already waiting replaces its own PIN, cap or not.
+    assert!(mint("a", introduction("cap-0")).is_ok());
+    assert_eq!(PINS.lock().unwrap().len(), PINS_WAITING);
     // The same phone introduced again replaces its own waiting PIN.
     PINS.lock().unwrap().clear();
     let first = mint("a", introduction("again-phone")).unwrap();
@@ -690,7 +696,7 @@ async fn a_phone_introduced_by_a_pairs_with_b_as_an_owner_phone() {
         panic!("no link");
     };
     let link = PairLink::from_uri(&link).unwrap();
-    assert_eq!(link.addresses[0], "192.0.2.30");
+    assert_eq!(link.addresses, vec!["192.0.2.10", "192.0.2.30"]);
     // The phone pairs at B with the link's PIN, proving its key.
     let intro = take_pin("loop-phone", Some(&key_of(PHONE_TLS)), &link.pin).expect("the PIN");
     admit_in(&b.dir, &b.trust(), &intro, true, "mine-pc", 9).unwrap();
@@ -859,4 +865,48 @@ fn the_permissions_given_never_exceed_the_defaults_or_the_introducers() {
     let given = permissions_for(&DevicePermissions::someone_else());
     assert!(given.ask_first);
     assert!(!given.allows(Capability::Input));
+}
+
+#[tokio::test]
+async fn a_phone_removed_while_the_other_computer_was_asked_is_handed_nothing() {
+    let d = Dirs::new("removed-meanwhile");
+    household(&d, "owner-10");
+    let trust = d.trust();
+    let answer = answer_phone_in(
+        &d.dir,
+        &d.trust(),
+        "owner-10",
+        &pair("r-10", "mine-pc"),
+        |_| true,
+        |_, _| async move {
+            // Unpaired here while the other computer answered.
+            TrustStore::update(&trust, |s| s.untrust_device("owner-10")).unwrap();
+            Ok(("042917".to_string(), json!({})))
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read_phone_answer(&answer).unwrap().1,
+        PhoneAnswer::Refused(Refusal::NotOwner)
+    );
+    assert!(d.file().introduced.is_empty());
+}
+
+#[test]
+fn an_id_bound_to_another_iroh_key_is_never_introduced() {
+    let d = Dirs::new("taken-iroh");
+    computer_b(&d, "a-iroh");
+    device_keys::register(&d.dir, "iroh-phone", Slot::Iroh, &"77".repeat(32)).unwrap();
+    assert_eq!(
+        decide_in(
+            &d.dir,
+            &d.trust(),
+            "a-iroh",
+            &introduction("iroh-phone"),
+            true,
+            "b-self"
+        ),
+        Err(Refusal::Taken)
+    );
 }
