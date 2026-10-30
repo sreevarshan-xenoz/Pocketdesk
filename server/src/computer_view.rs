@@ -1114,6 +1114,28 @@ pub struct MicLink {
     /// Held while a frame is taken and on its way, so a stop waits for it
     /// and is never overtaken by a frame queued before it.
     sending: tokio::sync::Mutex<()>,
+    /// Which view sends each computer the window's mic (PC11): one a
+    /// computer, shared by the relay's views, as that computer has one
+    /// "Pocketdesk Mic".
+    holders: MicHolders,
+}
+
+/// The view (its session) sending each computer the mic, by its id (PC11).
+pub type MicHolders = Arc<std::sync::Mutex<HashMap<String, u64>>>;
+
+/// Take the mic of the computer `device_id` for the view `session_id`:
+/// whether it is that view's now (no other view's).
+pub fn claim_mic(holders: &MicHolders, device_id: &str, session_id: u64) -> bool {
+    let mut held = holders.lock().unwrap_or_else(|p| p.into_inner());
+    *held.entry(device_id.to_string()).or_insert(session_id) == session_id
+}
+
+/// Give the computer `device_id`'s mic back, if the view `session_id` has it.
+pub fn release_mic(holders: &MicHolders, device_id: &str, session_id: u64) {
+    let mut held = holders.lock().unwrap_or_else(|p| p.into_inner());
+    if held.get(device_id) == Some(&session_id) {
+        held.remove(device_id);
+    }
 }
 
 impl MicLink {
@@ -1951,6 +1973,8 @@ pub async fn run_with(
     // PC11: up to MAX_VIEWS views, one for each of the app's windows, each
     // with its own token, session and relay connection.
     let mut views: Views = Default::default();
+    // One window's mic a computer (PC11).
+    let mic_holders: MicHolders = Default::default();
     let mut viewers: Viewers = Default::default();
     let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64);
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
@@ -2036,7 +2060,10 @@ pub async fn run_with(
                     tracing::warn!(error = %e, "Could not say where the view is");
                 }
                 let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE);
-                let mic = Arc::new(MicLink::default());
+                let mic = Arc::new(MicLink {
+                    holders: mic_holders.clone(),
+                    ..MicLink::default()
+                });
                 let (task, ended) = match computer {
                     Some(computer) => (
                         Some(tokio::spawn(session(
@@ -2594,15 +2621,32 @@ struct WindowMic {
     on: bool,
     input: mpsc::Sender<InputPacket>,
     link: Arc<MicLink>,
+    /// The computer and the view, for the one mic a computer (PC11).
+    device_id: String,
+    session_id: u64,
 }
 
 impl WindowMic {
-    fn new(input: mpsc::Sender<InputPacket>, link: Arc<MicLink>) -> Self {
+    fn new(
+        input: mpsc::Sender<InputPacket>,
+        link: Arc<MicLink>,
+        device_id: String,
+        session_id: u64,
+    ) -> Self {
         Self {
             on: false,
             input,
             link,
+            device_id,
+            session_id,
         }
+    }
+
+    /// On, when no other view sends that computer the mic (PC11): a second
+    /// window's stays off, its frames dropped; whether it went on.
+    fn start(&mut self) -> bool {
+        self.on = self.on || claim_mic(&self.link.holders, &self.device_id, self.session_id);
+        self.on
     }
 
     /// The frames waiting are forgotten, one on its way is waited for, and
@@ -2611,6 +2655,7 @@ impl WindowMic {
         self.link.quiet().await;
         self.input.send(mic_stop()).await?;
         self.on = false;
+        release_mic(&self.link.holders, &self.device_id, self.session_id);
         Ok(())
     }
 }
@@ -2628,6 +2673,7 @@ impl Drop for WindowMic {
         if !self.on {
             return;
         }
+        release_mic(&self.link.holders, &self.device_id, self.session_id);
         self.link.clear();
         // Waited for on a task of its own (review M2): a full queue does
         // not lose it, given a little while; and after the frame on its
@@ -2696,7 +2742,7 @@ fn start_viewer(
         // Relative movement that found the queue full, not yet sent.
         let mut owed = (0i32, 0i32);
         // The window's "Send my mic" (PC10): its own latest word, kept here.
-        let mut mic = WindowMic::new(input.clone(), mic_link);
+        let mut mic = WindowMic::new(input.clone(), mic_link, device_id.clone(), session_id);
         loop {
             if pointer_locked {
                 let left = lease_until.saturating_duration_since(tokio::time::Instant::now());
@@ -2789,7 +2835,9 @@ fn start_viewer(
                     // again. A gap of one frame, never a mic left on (PR #569
                     // re-review N3).
                     if on[0] == 1 {
-                        mic.on = true;
+                        if !mic.start() {
+                            tracing::info!("A second window's mic for one computer stays off");
+                        }
                     } else if mic.on {
                         // Waited for, not dropped: the other computer
                         // takes its mic down.
@@ -3369,6 +3417,81 @@ mod tests {
             }
             .encode(),
         )
+    }
+
+    /// PC11: one view sends a computer the mic at a time; another view of
+    /// it is refused until the first gives it back, and its own give-back
+    /// takes nothing from the first.
+    #[test]
+    fn one_view_a_computer_sends_the_mic() {
+        let holders = MicHolders::default();
+        assert!(claim_mic(&holders, "desk", 1));
+        assert!(claim_mic(&holders, "desk", 1), "its own again");
+        assert!(!claim_mic(&holders, "desk", 2), "a second window refused");
+        assert!(claim_mic(&holders, "lap", 2), "another computer's is free");
+        release_mic(&holders, "desk", 2);
+        assert!(!claim_mic(&holders, "desk", 2), "not the second's to give");
+        release_mic(&holders, "desk", 1);
+        assert!(claim_mic(&holders, "desk", 2));
+    }
+
+    /// PC11: two windows of one computer: the second's "on" is refused
+    /// while the first sends, so its frames never go and its "off" sends
+    /// no stop; the first's frames go on.
+    #[tokio::test]
+    async fn a_second_windows_mic_for_one_computer_stays_off() {
+        let holders = MicHolders::default();
+        let link = |holders: &MicHolders| {
+            let link = Arc::new(MicLink {
+                holders: holders.clone(),
+                ..MicLink::default()
+            });
+            link.set_controls(true);
+            link
+        };
+        let joined = async |session_id, link: Arc<MicLink>| {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let window = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (relay_end, _) = listener.accept().await.unwrap();
+            let (input, queued) = mpsc::channel(16);
+            let (focus, _focused) = mpsc::channel(4);
+            let (privacy, _asked) = mpsc::channel(4);
+            let viewer = start_viewer(
+                relay_end,
+                session_id,
+                "desk".into(),
+                input,
+                link,
+                focus,
+                privacy,
+            );
+            (window, viewer, queued)
+        };
+        let (first_link, second_link) = (link(&holders), link(&holders));
+        let (mut first, _first_viewer, _first_queued) = joined(1, first_link.clone()).await;
+        let (mut second, _second_viewer, mut second_queued) = joined(2, second_link.clone()).await;
+        for message in [Message::Mic(true), mic_frame(1)] {
+            first.write_all(&message.encode()).await.unwrap();
+        }
+        link_holds(&first_link, &[vec![1]]).await;
+        for message in [
+            Message::Mic(true),
+            mic_frame(9),
+            Message::Mic(false),
+            Message::WantKeyframe,
+        ] {
+            second.write_all(&message.encode()).await.unwrap();
+        }
+        // The keyframe ask after it: everything before it was read.
+        let got = tokio::time::timeout(Duration::from_secs(2), second_queued.recv())
+            .await
+            .unwrap();
+        assert_eq!(format!("{got:?}"), "Some(RequestKeyframe)", "no mic stop");
+        assert!(second_link.waiting().is_empty(), "its frame never went");
+        first.write_all(&mic_frame(2).encode()).await.unwrap();
+        link_holds(&first_link, &[vec![1], vec![2]]).await;
     }
 
     /// Until `link` holds `frames` (bounded).
