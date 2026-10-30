@@ -517,6 +517,7 @@ mod tests {
         struct Live {
             start: Instant,
             lock: PointerLock,
+            asked: bool,
             input: crate::view_input::WindowInput,
             moves: Arc<Mutex<(usize, i64)>>,
         }
@@ -525,9 +526,13 @@ mod tests {
                 let ctx = ui.ctx().clone();
                 let area = ui.max_rect();
                 let elapsed = self.start.elapsed();
-                if elapsed > Duration::from_millis(500) && elapsed < Duration::from_secs(6) {
-                    self.lock.wanted = true;
-                } else {
+                // Asked once, as the bar would; a lock that lapsed (the
+                // focus lost) is not asked again, as in the window (PR
+                // #563 review M10).
+                if !self.asked && elapsed > Duration::from_millis(500) {
+                    self.asked = true;
+                    self.lock.toggle();
+                } else if elapsed >= Duration::from_secs(6) {
                     self.lock.free();
                 }
                 let now = Situation {
@@ -556,9 +561,8 @@ mod tests {
                 }
                 if self.lock.locked() {
                     ctx.set_cursor_icon(egui::CursorIcon::None);
-                    if mode == GrabMode::Confined
-                        && let Some(back) = recentre(ctx.input(|i| i.pointer.latest_pos()), area)
-                    {
+                    // As the window does, whatever the mode.
+                    if let Some(back) = recentre(ctx.input(|i| i.pointer.latest_pos()), area) {
                         ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(back));
                     }
                 }
@@ -573,6 +577,7 @@ mod tests {
         let app = Live {
             start: Instant::now(),
             lock: PointerLock::default(),
+            asked: false,
             input: crate::view_input::WindowInput::default(),
             moves: moves.clone(),
         };
