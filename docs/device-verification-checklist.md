@@ -3196,6 +3196,14 @@ Built 2026-10-30. A computer's screen window's ffmpeg sidecar decodes on the gra
 - [ ] Record a view that came as HEVC (Stats say `HEVC`) for ten seconds: the MKV plays in a player and is ten seconds long (`ffprobe` says `codec_name=hevc`). (where: second computer)
 - [ ] "Decode a computer's screen on the graphics card" off: the next view's Stats say `software`; on again, the card. Compare the ffmpeg sidecar's CPU in Task Manager (or `top` on the laptop) for the card and software at the same screen, 1440p and full motion. (where: second computer)
 
+## 236. The rest of the pages (Desktop UX 4)
+
+Built 2026-10-30. Kittest drove each new empty card and its button, the greyed reasons and Pair at the smallest window; the Sessions snapshots were drawn by Mesa. Not seen on a real screen: fonts, scaling, and the cards with real data.
+- [ ] On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), with nothing paired: Sessions, Files, Messages, Notifications, Phone files, Clipboard, Activity, Diagnostics and Logs each show a card saying what will show there and how, light and dark, nothing clipped at the smallest window; each button on them (Pair a phone, Open Devices, Turn it on in Settings, Clipboard settings) opens what it says. (where: owner)
+- [ ] With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
+- [ ] Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)
+- [ ] Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

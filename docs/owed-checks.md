@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1024 open items.
+1028 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 156 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 157 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 111 |
+| A second computer | 112 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -126,6 +126,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **230. Look and feel (Desktop UX 3)**
 
 - On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -524,6 +528,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **231. Keys that reach the other computer (PC4)**
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), with nothing paired: Sessions, Files, Messages, Notifications, Phone files, Clipboard, Activity, Diagnostics and Logs each show a card saying what will show there and how, light and dark, nothing clipped at the smallest window; each button on them (Pair a phone, Open Devices, Turn it on in Settings, Clipboard settings) opens what it says. (where: owner)
 
 ## A phone with a SIM
 
@@ -1006,6 +1014,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - HEVC both ways: with `allow_hevc` on on the other computer, Stats say `HEVC` and the picture is right; another screen, or a resolution change there, restarts it at the new size; with "Use HEVC when both can" off here (next view) it is H.264 again. Note the bitrate Stats say for each codec on the same screen. (where: second computer)
 - Record a view that came as HEVC (Stats say `HEVC`) for ten seconds: the MKV plays in a player and is ten seconds long (`ffprobe` says `codec_name=hevc`). (where: second computer)
 - "Decode a computer's screen on the graphics card" off: the next view's Stats say `software`; on again, the card. Compare the ffmpeg sidecar's CPU in Task Manager (or `top` on the laptop) for the card and software at the same screen, 1440p and full motion. (where: second computer)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -2536,3 +2548,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **221. No lag while sharing (BK10)**
 
 - The setting in the desktop app's Keyboard and mouse section on Windows and Linux; turned off, the next `share-test` says "the link kept quick: no". (where: by hand)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)
