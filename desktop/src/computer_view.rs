@@ -939,6 +939,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         stop_view(state_dir, &mut state);
         state.wanted = None;
         state.fullscreen = false;
+        // The GPU's picture goes with the window (PR #562 review M5): now,
+        // if this pass is drawn, else as the window next opens.
+        state.on_gpu = None;
+        if state.gpu.holds() {
+            ui.painter().add(state.gpu.free(ui.max_rect()));
+        }
         // The keyboard grab comes out with the window (PC4).
         #[cfg(windows)]
         {
@@ -972,6 +978,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let texture = state.texture.clone();
     let gpu = state.gpu.clone();
     let on_gpu = state.on_gpu;
+    // No picture on the GPU now (the view ended, or RGBA instead): its GL
+    // objects go (PR #562 review M5).
+    if on_gpu.is_none() && gpu.holds() {
+        ui.painter().add(gpu.free(ui.max_rect()));
+    }
     // The size of the picture drawn, wherever it is drawn from.
     let drawn = on_gpu.or_else(|| texture.as_ref().map(egui::TextureHandle::size));
     let status = state.status.clone();

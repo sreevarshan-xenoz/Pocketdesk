@@ -190,6 +190,34 @@ impl Gpu {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).pending = Some(picture);
     }
 
+    /// Whether it holds GL objects (a shader, textures with a picture).
+    pub fn holds(&self) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .gl
+            .is_some()
+    }
+
+    /// A callback that frees its GL objects and the picture they hold, for
+    /// a window that no longer draws one (PR #562 review M5); the next
+    /// picture makes them again.
+    pub fn free(self: &Arc<Self>, rect: egui::Rect) -> egui::PaintCallback {
+        let gpu = self.clone();
+        egui::PaintCallback {
+            rect,
+            callback: Arc::new(egui_glow::CallbackFn::new(move |_info, painter| {
+                let mut inner = gpu.inner.lock().unwrap_or_else(|e| e.into_inner());
+                inner.pending = None;
+                if let Some(drawn) = inner.gl.take() {
+                    // SAFETY: egui_glow's paint callback, its context
+                    // current; the objects are this context's.
+                    unsafe { drawn.delete(painter.gl()) };
+                }
+            })),
+        }
+    }
+
     /// Draw the last picture put over `rect`, tinted.
     pub fn paint(self: &Arc<Self>, rect: egui::Rect, tint: egui::Color32) -> egui::PaintCallback {
         let gpu = self.clone();
@@ -382,6 +410,16 @@ impl Drawn {
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.active_texture(glow::TEXTURE0);
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, alignment);
+        }
+    }
+
+    /// Delete the shader, the vertex array and the textures.
+    unsafe fn delete(self, gl: &glow::Context) {
+        unsafe {
+            gl.delete_program(self.program);
+            gl.delete_vertex_array(self.vao);
+            gl.delete_texture(self.y);
+            gl.delete_texture(self.uv);
         }
     }
 
@@ -579,6 +617,9 @@ mod tests {
                     gl.viewport(0, 0, w, h);
                     drawn.upload(gl, &picture);
                     drawn.draw(gl, [1.0; 4]);
+                    // Its objects go as a closed window's do (review M5);
+                    // what it drew stays in the framebuffer read below.
+                    drawn.delete(gl);
                     let mut pixels = vec![0u8; (w * h * 4) as usize];
                     gl.read_pixels(
                         0,
