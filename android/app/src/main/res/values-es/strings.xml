@@ -734,6 +734,11 @@
     <string name="shortcut_failed">%1$s no llegó al equipo: %2$s</string>
     <!-- U3: names for computers. -->
     <string name="lock_confirm_title_named">¿Bloquear %1$s?</string>
+    <string name="card_menu_on_computer">En el equipo</string>
+    <string name="card_menu_from_phone">Desde este teléfono</string>
+    <string name="card_menu_manage">Administrar</string>
+    <string name="card_menu_open">Desplegado</string>
+    <string name="card_menu_closed">Plegado</string>
     <string name="card_rename">Renombrar</string>
     <string name="card_more">Más opciones para %1$s</string>
     <string name="status_paired">Emparejado</string>

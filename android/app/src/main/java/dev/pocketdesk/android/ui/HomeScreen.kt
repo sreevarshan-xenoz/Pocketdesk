@@ -85,6 +85,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.material3.MenuDefaults
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 
 /** How a move of a saved computer to a found address went (O3). */
 private enum class MoveOutcome { MOVED, REFUSED, UNREACHED }
@@ -962,6 +968,9 @@ private fun HostCard(
     val title = name ?: host.address
     val connectLabel = stringResource(R.string.connect)
     var menu by remember { mutableStateOf(false) }
+    var manageOpen by remember { mutableStateOf(false) }
+    val expandedWord = stringResource(R.string.card_menu_open)
+    val collapsedWord = stringResource(R.string.card_menu_closed)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -982,63 +991,80 @@ private fun HostCard(
                     IconButton(onClick = { menu = true }) {
                         LlIcon(LlIcons.MoreVert, stringResource(R.string.card_more, title))
                     }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        // What it does first, then its upkeep, then Remove (E6).
-                        val uses = buildList {
-                            // BF2: a glance at its screen, first: the quickest.
-                            if (Prefs.peek(context)) add(R.string.card_peek to onPeek)
-                            // The phone as the computer's speaker and mic (N5).
-                            add(R.string.sound_button to onSound)
-                            // F1: the buttons its owner set up there.
-                            add(R.string.card_deck to onDeck)
-                            // F2: its CPU, memory, disks, battery, uptime.
-                            add(R.string.card_state to onState)
-                            // F6: the back camera, shown in the computer's window.
-                            add(R.string.card_show_camera to onCamera)
-                            // M7: the phone's sound there, with no picture (Android 10+).
-                            if (dev.pocketdesk.android.cast.CastSoundRule.offeredAlone(android.os.Build.VERSION.SDK_INT)) {
-                                add(R.string.card_phone_sound to onPhoneSound)
+                    DropdownMenu(
+                        expanded = menu,
+                        onDismissRequest = {
+                            menu = false
+                            manageOpen = false
+                        },
+                    ) {
+                        // UX2: headed sections, its upkeep folded under
+                        // Manage (it was 13 items in one flat list).
+                        val sections = CardMenu.sections(
+                            peek = Prefs.peek(context),
+                            phoneSound = dev.pocketdesk.android.cast.CastSoundRule.offeredAlone(android.os.Build.VERSION.SDK_INT),
+                            hasWake = hasWake,
+                        )
+                        fun run(action: CardMenu.Action) {
+                            menu = false
+                            manageOpen = false
+                            when (action) {
+                                CardMenu.Action.WAKE -> onWake()
+                                CardMenu.Action.PEEK -> onPeek()
+                                CardMenu.Action.SOUND -> onSound()
+                                CardMenu.Action.DECK -> onDeck()
+                                CardMenu.Action.STATE -> onState()
+                                CardMenu.Action.CAMERA -> onCamera()
+                                CardMenu.Action.PHONE_SOUND -> onPhoneSound()
+                                CardMenu.Action.EARLIER_COPY -> onHistory()
+                                CardMenu.Action.CHECK -> onCheck()
+                                CardMenu.Action.WAKE_SETTINGS -> onWakeSettings()
+                                CardMenu.Action.ALLOWED -> onAllowed()
+                                CardMenu.Action.DEVICES -> onDevices()
+                                CardMenu.Action.RENAME -> onRename()
+                                CardMenu.Action.REMOVE -> onRemove()
                             }
-                            // D3: an earlier copy, sent to this computer again.
-                            add(R.string.card_send_earlier_copy to onHistory)
-                            if (hasWake) add(R.string.wake to onWake)
                         }
-                        val upkeep = listOf(
-                            R.string.wake_settings to onWakeSettings,
-                            R.string.doctor_title to onCheck,
-                            // M2a: both sides of each feature.
-                            R.string.card_allowed to onAllowed,
-                            // Remote revoke: a lost device removed from here.
-                            R.string.card_devices_there to onDevices,
-                            R.string.card_rename to onRename,
-                        )
-                        uses.forEach { (label, action) ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(label)) },
-                                onClick = {
-                                    menu = false
-                                    action()
-                                },
-                            )
+                        sections.forEachIndexed { i, section ->
+                            if (i > 0) HorizontalDivider()
+                            if (section.folded) {
+                                val manageLabel = stringResource(R.string.card_menu_manage)
+                                DropdownMenuItem(
+                                    text = { Text(manageLabel) },
+                                    trailingIcon = {
+                                        LlIcon(
+                                            LlIcons.ChevronRight,
+                                            null,
+                                            modifier = Modifier.rotate(if (manageOpen) 270f else 90f),
+                                        )
+                                    },
+                                    onClick = { manageOpen = !manageOpen },
+                                    modifier = Modifier.semantics {
+                                        stateDescription = if (manageOpen) expandedWord else collapsedWord
+                                    },
+                                )
+                                if (!manageOpen) return@forEachIndexed
+                            } else {
+                                CardMenuHeading(stringResource(cardMenuHeading(section.kind)))
+                            }
+                            section.actions.forEach { action ->
+                                val remove = action == CardMenu.Action.REMOVE
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(cardMenuLabel(action)),
+                                            color = if (remove) MaterialTheme.colorScheme.error else Color.Unspecified,
+                                        )
+                                    },
+                                    onClick = { run(action) },
+                                    contentPadding = if (section.folded) {
+                                        PaddingValues(start = 24.dp, end = 12.dp)
+                                    } else {
+                                        MenuDefaults.DropdownMenuItemContentPadding
+                                    },
+                                )
+                            }
                         }
-                        HorizontalDivider()
-                        upkeep.forEach { (label, action) ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(label)) },
-                                onClick = {
-                                    menu = false
-                                    action()
-                                },
-                            )
-                        }
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.remove_host), color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                menu = false
-                                onRemove()
-                            },
-                        )
                     }
                 }
             }
@@ -1089,6 +1115,42 @@ private fun HostCard(
             }
         }
     }
+}
+
+/** A card menu section's heading (UX2): small, in the accent colour, read as a heading. */
+@Composable
+private fun CardMenuHeading(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp)
+            .semantics { heading() },
+    )
+}
+
+private fun cardMenuHeading(kind: CardMenu.Kind): Int = when (kind) {
+    CardMenu.Kind.COMPUTER -> R.string.card_menu_on_computer
+    CardMenu.Kind.PHONE -> R.string.card_menu_from_phone
+    CardMenu.Kind.MANAGE -> R.string.card_menu_manage
+}
+
+private fun cardMenuLabel(action: CardMenu.Action): Int = when (action) {
+    CardMenu.Action.WAKE -> R.string.wake
+    CardMenu.Action.PEEK -> R.string.card_peek
+    CardMenu.Action.SOUND -> R.string.sound_button
+    CardMenu.Action.DECK -> R.string.card_deck
+    CardMenu.Action.STATE -> R.string.card_state
+    CardMenu.Action.CAMERA -> R.string.card_show_camera
+    CardMenu.Action.PHONE_SOUND -> R.string.card_phone_sound
+    CardMenu.Action.EARLIER_COPY -> R.string.card_send_earlier_copy
+    CardMenu.Action.CHECK -> R.string.doctor_title
+    CardMenu.Action.WAKE_SETTINGS -> R.string.wake_settings
+    CardMenu.Action.ALLOWED -> R.string.card_allowed
+    CardMenu.Action.DEVICES -> R.string.card_devices_there
+    CardMenu.Action.RENAME -> R.string.card_rename
+    CardMenu.Action.REMOVE -> R.string.remove_host
 }
 
 /** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
