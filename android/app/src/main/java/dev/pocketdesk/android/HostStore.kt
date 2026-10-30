@@ -116,6 +116,8 @@ object HostStore {
             KEY_PAIRED_PREFIX,
             KEY_NAME_PREFIX,
             KEY_CHOSEN_NAME_PREFIX,
+            // Item 4: the release it said it runs.
+            KEY_VERSION_PREFIX,
             // O6: the player chosen for the computer.
             KEY_PLAYER_PREFIX,
         )
@@ -172,6 +174,7 @@ object HostStore {
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
     private const val KEY_PLAYER_PREFIX = "computer_player:"
+    private const val KEY_VERSION_PREFIX = "computer_version:"
 
     /** O6: the player chosen for the computer at [address], or null for the computer's own choice. */
     fun player(ctx: Context, address: String): String? =
@@ -213,6 +216,22 @@ object HostStore {
         if (hosts(ctx).none { it.address == address } || claimedName(ctx, address) == name) return false
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putString("$KEY_NAME_PREFIX$address", name)
+        }
+        return true
+    }
+
+    /** The Pocketdesk release the computer at [address] said it runs (item 4), or null. */
+    fun claimedVersion(ctx: Context, address: String): String? = stored(ctx, "$KEY_VERSION_PREFIX$address")
+
+    /**
+     * Keep the release the computer at [address] says it runs, as each
+     * connection hears it; a saved computer only. Whether it changed.
+     */
+    fun saveClaimedVersion(ctx: Context, address: String, raw: String?): Boolean {
+        val version = PeerVersion.clean(raw) ?: return false
+        if (hosts(ctx).none { it.address == address } || claimedVersion(ctx, address) == version) return false
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putString("$KEY_VERSION_PREFIX$address", version)
         }
         return true
     }

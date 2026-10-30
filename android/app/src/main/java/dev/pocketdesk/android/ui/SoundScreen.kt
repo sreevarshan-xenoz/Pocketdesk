@@ -88,6 +88,8 @@ fun SoundScreen(
         val told = when (state) {
             State.Ready -> {
                 RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
+                // Item 4: and the release it runs.
+                HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
                 shownName = HostStore.shownName(context, address)
                 tell.up(Prefs.tellOtherApps(context))
             }

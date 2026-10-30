@@ -412,6 +412,11 @@
     <string name="connect_anyway">Conectar igualmente</string>
     <string name="settings_offer_wake">Ofrecer encender un equipo que no responde</string>
     <string name="settings_offer_wake_summary">Conectar comprueba antes y ofrece Encender y conectar</string>
+    <string name="version_runs">ejecuta %1$s</string>
+    <string name="version_runs_older">ejecuta %1$s, más antigua que esta app: actualízala</string>
+    <string name="version_runs_newer">ejecuta %1$s, más nueva que esta app: actualiza esta app</string>
+    <string name="settings_version_hints">Avisarme cuando mis dispositivos usen versiones distintas</string>
+    <string name="settings_version_hints_summary">La tarjeta de un equipo dice cuál actualizar cuando usa otra versión de Pocketdesk. No se consulta internet</string>
     <!-- N7: several phones -->
     <string name="driving_other">Otro teléfono controla: este solo mira</string>
     <string name="settings_show_driving">Avisar cuando controla otro teléfono</string>

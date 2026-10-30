@@ -111,6 +111,8 @@ fun RemoteInputScreen(
                 // U3: the name the computer gave itself on this connection,
                 // into the title too (U3 review: it kept the address).
                 RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
+                // Item 4: and the release it runs.
+                HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
                 shownName = HostStore.shownName(context, address)
                 tell.up(Prefs.tellOtherApps(context))
             }

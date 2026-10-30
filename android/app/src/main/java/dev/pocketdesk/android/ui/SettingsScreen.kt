@@ -522,6 +522,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.revealPin(context),
                     { Prefs.setRevealPin(context, it) },
                 )
+                // Item 4: which to update when a computer runs another release.
+                SettingSwitch(
+                    stringResource(R.string.settings_version_hints),
+                    stringResource(R.string.settings_version_hints_summary),
+                    Prefs.versionHints(context),
+                    { Prefs.setVersionHints(context, it) },
+                )
             }
 
             // N6: what Wake does once the packet is out. How each computer

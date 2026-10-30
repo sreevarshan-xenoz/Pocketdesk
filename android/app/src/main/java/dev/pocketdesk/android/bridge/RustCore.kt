@@ -51,6 +51,7 @@ object RustCore {
     private external fun nativeTakeSmsRequests(): String
     private external fun nativeControlPeer(): String
     private external fun nativePeerName(address: String): String
+    private external fun nativePeerVersion(address: String): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -448,6 +449,10 @@ object RustCore {
     /** The name the computer at [address] gave itself when last connected (U3), or null. */
     fun peerName(address: String): String? =
         runCatching { nativePeerName(address) }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** The Pocketdesk release the computer at [address] said it runs when last connected (item 4), or null. */
+    fun peerVersion(address: String): String? =
+        runCatching { nativePeerVersion(address) }.getOrNull()?.takeIf { it.isNotBlank() }
 
     /** The computer the live control connection is to, or null. */
     fun controlPeer(): Pair<String, Int>? =
