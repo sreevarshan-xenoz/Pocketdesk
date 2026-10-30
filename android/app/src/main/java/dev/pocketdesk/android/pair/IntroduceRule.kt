@@ -44,6 +44,16 @@ object IntroduceRule {
     /** Whether a pairing link names the computer that was asked for. */
     fun linkFits(link: PairLink, asked: String): Boolean = link.deviceId == asked
 
+    /**
+     * The pairing link an answer hands over, or null: only an answer to this
+     * ask ([asked]), only a pairing link, and only one to the computer that
+     * was asked for ([computer]).
+     */
+    fun takeLink(asked: String, answered: String?, computer: String, link: String?): PairLink? {
+        if (!isAnswerTo(asked, answered) || !isPairLink(link)) return null
+        return PairLink.parse(link!!).getOrNull()?.takeIf { linkFits(it, computer) }
+    }
+
     /** A fresh id for one ask: the computer's answer names it. */
     fun newRequest(): String = java.util.UUID.randomUUID().toString().replace("-", "")
 

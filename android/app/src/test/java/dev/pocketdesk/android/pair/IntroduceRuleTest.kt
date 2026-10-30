@@ -50,12 +50,21 @@ class IntroduceRuleTest {
     }
 
     @Test
-    fun onlyTheAnswerToThisAskIsTaken() {
-        val asked = IntroduceRule.newRequest()
-        assertTrue(IntroduceRule.isAnswerTo(asked, asked))
-        assertFalse(IntroduceRule.isAnswerTo(asked, "other"))
-        assertFalse(IntroduceRule.isAnswerTo("", ""))
-        assertFalse(asked == IntroduceRule.newRequest())
+    fun onlyTheLinkAnsweringThisAskForThatComputerIsTaken() {
+        val link = "pocketdesk://pair?v=1&name=Arch&id=b&a=192.0.2.20&cp=1716&sp=4716&pin=042917&fp=" + "ab".repeat(32)
+        // This ask's answer, for the computer asked: taken.
+        val taken = IntroduceRule.takeLink("ask-2", "ask-2", "b", link)
+        assertEquals("b", taken?.deviceId)
+        assertEquals("042917", taken?.pin)
+        // A late answer to an earlier ask is not this one's.
+        assertNull(IntroduceRule.takeLink("ask-2", "ask-1", "b", link))
+        assertNull(IntroduceRule.takeLink("", "", "b", link))
+        // A link to another computer than the one asked for.
+        assertNull(IntroduceRule.takeLink("ask-2", "ask-2", "c", link))
+        // Not a pairing link, or one that does not read.
+        assertNull(IntroduceRule.takeLink("ask-2", "ask-2", "b", "https://example.com/"))
+        assertNull(IntroduceRule.takeLink("ask-2", "ask-2", "b", "pocketdesk://pair?v=1&id=b"))
+        assertNull(IntroduceRule.takeLink("ask-2", "ask-2", "b", null))
     }
 
     @Test

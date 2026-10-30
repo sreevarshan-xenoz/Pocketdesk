@@ -30,7 +30,6 @@ import dev.pocketdesk.android.Prefs
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.pair.IntroduceRule
-import dev.pocketdesk.android.pair.PairLink
 import dev.pocketdesk.android.pair.PairOutcome
 import dev.pocketdesk.android.pair.RustPairOps
 import dev.pocketdesk.android.pair.pairedComputerIds
@@ -109,9 +108,9 @@ fun IntroduceSheet(
                 RustCore.introduce(address, controlPort, offer.id, asked)
             }.mapCatching { JSONObject(it) }.getOrNull()
                 ?.takeIf { IntroduceRule.isAnswerTo(asked, it.optString("request")) }
-            val linkText = answer?.optString("link")?.takeIf { IntroduceRule.isPairLink(it) }
-            val link = linkText?.let { PairLink.parse(it).getOrNull() }
-                ?.takeIf { IntroduceRule.linkFits(it, offer.id) }
+            val link = answer?.let {
+                IntroduceRule.takeLink(asked, it.optString("request"), offer.id, it.optString("link"))
+            }
             said = when {
                 answer == null -> {
                     record(IntroduceRule.Outcome(IntroduceRule.Kind.UNREACHABLE, name))
