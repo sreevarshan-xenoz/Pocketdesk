@@ -1182,6 +1182,9 @@ impl ComputerView {
     /// (PR #569 review I2, PC11).
     pub fn stop_mic(&self) {
         self.each(|state| {
+            // A mic waiting to start again after a switch is stopped too
+            // (PR #570 check S1): Stop means every mic.
+            state.mic_resume = None;
             let sending = state.mic.on();
             state.mic.stopped();
             if sending {
@@ -6682,6 +6685,76 @@ mod tests {
         assert_eq!(&new[..2], ["on", "start"], "{new:?}");
         assert!(new.contains(&"frame"), "{new:?}");
         assert_eq!(new.last(), Some(&"off"), "{new:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check S1: the main window's Stop also stops a mic waiting
+    /// to start again after a switch: once the new view controls, even
+    /// after the while has passed, it stays off.
+    #[test]
+    fn the_main_stop_cancels_a_mic_waiting_after_a_switch() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-stop-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        {
+            let mut state = lock(&view.shared);
+            state.mic_open = Some(Arc::new(|_| panic!("no microphone opens here")));
+            state.mic.toggle();
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(state.mic_resume.is_some());
+        }
+        view.stop_mic();
+        let mut state = lock(&view.shared);
+        assert!(state.mic_resume.is_none(), "Stop means every mic");
+        // Whenever the new view comes to control there (30 s on in fake
+        // time too), nothing starts.
+        let resume = MicResume {
+            device_id: "desk".into(),
+            asked: state.asked,
+            until: Instant::now() + MIC_RESUME_FOR,
+        };
+        let later = Instant::now() + MIC_RESUME_FOR;
+        assert_eq!(
+            mic_resumes(
+                None,
+                Some("desk"),
+                state.asked,
+                later,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Nothing
+        );
+        assert_eq!(
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                state.asked,
+                later,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::GiveUp,
+            "and one left would have lapsed"
+        );
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        state.writer = Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        state.status = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            ..ViewStatus::default()
+        };
+        let shared = Arc::new(Mutex::new(State::default()));
+        follow_mic(&shared, &mut state, None, &ctx, true);
+        assert!(!state.mic.wanted() && !state.mic.on());
+        assert_eq!(state.mic_said, None, "the relay told nothing");
+        state.writer = None;
+        drop(state);
+        view.quit();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
