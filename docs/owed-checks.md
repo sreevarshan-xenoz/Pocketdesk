@@ -8,11 +8,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 158 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 156 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 96 |
+| A second computer | 98 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -525,11 +525,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
-**232. Your computers on the Overview and in the tray, and waking one that sleeps (PC6)**
-
-- Sleep the laptop by hand (wired, if it has a port): its card on Windows' Overview shows Wake with the note on wired and Wi-Fi; Wake wakes it, and its card says linked again within about a minute. Once more on Wi-Fi only: say whether it woke. (where: owner)
-- With the laptop asleep, Show its screen on its card offers "Wake it and show": the countdown runs, the laptop wakes, and its window opens by itself; Cancel during the countdown stops the wait (the window does not open later). With Wake-on-LAN off on the laptop, a minute later the notice says it did not come up. (where: owner)
-
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -987,7 +982,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **232. Your computers on the Overview and in the tray, and waking one that sleeps (PC6)**
 
-- With the link up, Windows' `computers.json` holds the laptop's entry with `wake` (its adapter's MAC and broadcast); the laptop's own Diagnostics names the same adapter. Turn "Let my computers wake this one" off on the laptop and restart its server: once the link is back, the entry has no `wake`, and Wake no longer shows. (where: second computer)
+- With the link up, Windows' `computers.json` holds the laptop's entry with `wake` (its adapter's MAC and broadcast); the laptop's own Diagnostics names the same adapter. Paired one way instead, neither computer's entry gets `wake`, and no Wake shows. Turn "Let my computers wake this one" off on the laptop and restart its server: once the link is back, the entry has no `wake`, and Wake no longer shows. (where: second computer)
+- Sleep the laptop by hand, on the laptop itself, never this Windows box (wired, if it has a port): its card on Windows' Overview shows Wake with the note on wired and Wi-Fi; Wake wakes it, and its card says linked again within about a minute. Once more on Wi-Fi only: say whether it woke. (where: second computer)
+- With the laptop asleep, Show its screen on its card offers "Wake it and show": the countdown runs, the laptop wakes, and its window opens by itself (note how many seconds the countdown had used); Cancel during the countdown stops the wait (the window does not open later). With Wake-on-LAN off on the laptop, two minutes later the notice says it did not come up. (where: second computer)
 - The tray on Windows (and the laptop's tray, SNI, for a computer it pasted) lists "Show <name>'s screen" above Quit, the most recently viewed first, and "Wake <name>" only while that computer sleeps; Show opens the window, or with it asleep the Overview with the offer to wake it. (where: second computer)
 - Show two computers' screens one after the other: the Overview's cards and the tray list the last one shown first, with "viewed just now". (where: second computer)
 
