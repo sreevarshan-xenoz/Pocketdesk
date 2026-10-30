@@ -698,7 +698,6 @@ object Prefs {
         return token
     }
 
-    /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
     /** Item 4: say which to update when a computer runs another Pocketdesk release (on). */
     fun versionHints(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_VERSION_HINTS, true)
@@ -708,6 +707,7 @@ object Prefs {
         bump()
     }
 
+    /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */
     fun offerWake(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_OFFER_WAKE, true)
 

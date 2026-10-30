@@ -3047,8 +3047,6 @@ mod tests {
         assert!(quick_note().contains("byte every 50 ms"));
     }
 
-    /// PC6: letting the other computers wake this one is with them, and
-    /// waits for a restart: the links are told as they come up.
     /// Item 4: the version hints are with the phones, apply at once and
     /// are drawn everywhere.
     #[test]
@@ -3061,6 +3059,8 @@ mod tests {
         assert!(drawn_here(key));
     }
 
+    /// PC6: letting the other computers wake this one is with them, and
+    /// waits for a restart: the links are told as they come up.
     #[test]
     fn letting_computers_wake_this_one_is_with_the_computers() {
         let key = "computer_wake_facts";
