@@ -91,6 +91,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 
 /** How a move of a saved computer to a found address went (O3). */
 private enum class MoveOutcome { MOVED, REFUSED, UNREACHED }
@@ -1302,25 +1307,37 @@ private fun BackgroundCard(limit: BackgroundLimit, onAllow: () -> Unit, onDismis
                 ),
                 style = MaterialTheme.typography.titleSmall,
             )
+            // UX2: the phone maker's own setting is a link at the end of the
+            // sentence, and the card's two answers have the row under it (a
+            // link button on a row of its own left a tall empty band beside
+            // it; AJ2: on the answers' row, three buttons wrapped).
+            val why = stringResource(R.string.bg_why)
+            val guideLabel = stringResource(R.string.bg_maker_guide)
+            val linkStyle = TextLinkStyles(
+                SpanStyle(
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                    textDecoration = TextDecoration.Underline,
+                ),
+            )
             Text(
-                stringResource(R.string.bg_why),
+                buildAnnotatedString {
+                    append(why)
+                    if (guide != null) {
+                        append(" ")
+                        val open = LinkAnnotation.Clickable("maker-guide", linkStyle) {
+                            if (!BackgroundRunning.openGuide(context, guide)) {
+                                android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        withLink(open) { append(guideLabel) }
+                    }
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
             )
-            // The phone maker's own setting reads as a link under the text,
-            // the card's two answers on their row (AJ2: three buttons wrapped
-            // into a lone button above the other two).
-            if (guide != null) {
-                TextButton(
-                    onClick = {
-                        if (!BackgroundRunning.openGuide(context, guide)) {
-                            android.widget.Toast.makeText(context, guide, android.widget.Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 0.dp),
-                ) { Text(stringResource(R.string.bg_maker_guide)) }
-            }
-            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            FlowRow(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.bg_dont_remind)) }
                 TextButton(onClick = onAllow) { Text(stringResource(R.string.bg_allow)) }
             }
