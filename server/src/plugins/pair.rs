@@ -241,6 +241,23 @@ fn kept_link_clipboard_in(store: Option<&TrustStore>, device_id: &str) -> bool {
     })
 }
 
+/// [`permits`] for a request that comes over the link this computer keeps
+/// to `device_id`: only a computer this one trusts may ask for anything that
+/// needs a permission. A computer this one paired into alone keeps no trust
+/// entry here, and the defaults [`permits`] falls back to (Power among them)
+/// are a paired device's, not a stranger's (range review C1).
+pub fn link_permits(device_id: &str, packet_type: &str) -> bool {
+    let store = state::trust_store_path()
+        .ok()
+        .and_then(|path| TrustStore::read(path).ok());
+    link_permits_in(store.as_ref(), device_id, packet_type)
+}
+
+/// [`link_permits`] against a given store.
+fn link_permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
+    store.is_some_and(|s| s.is_trusted(device_id)) && permits_in(store, device_id, packet_type)
+}
+
 /// [`permits`] against a given store; without one, nothing that needs a
 /// permission is allowed.
 fn permits_in(store: Option<&TrustStore>, device_id: &str, packet_type: &str) -> bool {
@@ -2285,6 +2302,30 @@ forged log line"
         let path = std::env::temp_dir().join(format!("ll-perm-{name}-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&path);
         TrustStore::load_or_create(path).unwrap()
+    }
+
+    #[test]
+    fn a_link_request_needs_a_computer_trusted_here() {
+        use pocketdesk_core::protocol::permissions::Capability;
+        let privacy = crate::plugins::privacy::PRIVACY;
+        let mut store = temp_store("link-permits");
+        assert!(
+            !link_permits_in(Some(&store), "computer-1", privacy),
+            "a computer this one paired into alone asks for nothing"
+        );
+        store.trust_device("computer-1").unwrap();
+        let mut permissions = store.permissions("computer-1");
+        permissions.set(Capability::Power, true);
+        store.set_permissions("computer-1", permissions).unwrap();
+        assert!(link_permits_in(Some(&store), "computer-1", privacy));
+        let mut permissions = store.permissions("computer-1");
+        permissions.set(Capability::Power, false);
+        store.set_permissions("computer-1", permissions).unwrap();
+        assert!(
+            !link_permits_in(Some(&store), "computer-1", privacy),
+            "its Power switch off here"
+        );
+        assert!(!link_permits_in(None, "computer-1", privacy));
     }
 
     #[test]

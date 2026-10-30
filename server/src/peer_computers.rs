@@ -2389,15 +2389,16 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
 
 /// Answer the privacy request `body` that the computer `device_id` made on
 /// the link this one keeps to it (PC8), as the plugin answers one on a
-/// connection here: its Power switch here decides, and its grab ends with
-/// the link.
+/// connection here: its Power switch here decides (a computer this one
+/// trusts only, range review C1), and its grab ends with the link.
 async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
     use crate::plugins::privacy;
     let id = device_id.to_string();
-    let permitted =
-        tokio::task::spawn_blocking(move || crate::plugins::pair::permits(&id, privacy::PRIVACY))
-            .await
-            .unwrap_or(false);
+    let permitted = tokio::task::spawn_blocking(move || {
+        crate::plugins::pair::link_permits(&id, privacy::PRIVACY)
+    })
+    .await
+    .unwrap_or(false);
     let response = match refused_on_link(body, permitted) {
         Some(refusal) => refusal,
         None => {
