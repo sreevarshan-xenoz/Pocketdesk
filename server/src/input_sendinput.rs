@@ -371,6 +371,26 @@ mod tests {
         assert_eq!(stroke_for(86), Some(Stroke::Scan(0x56, false)));
     }
 
+    /// PR #573 review N6: the keys added, held to the set-1 scancodes
+    /// Microsoft's keyboard scan code specification gives them, written
+    /// here apart from `windows_scan` (the round trip above only says the
+    /// two tables agree). Whether a layout without these keys does
+    /// anything with them is a device check (§240).
+    #[test]
+    fn the_keys_added_are_their_documented_set1_scancodes() {
+        for (code, stroke) in [
+            (96, Stroke::Scan(0x1C, true)),   // KEY_KPENTER: E0 1C
+            (98, Stroke::Scan(0x35, true)),   // KEY_KPSLASH: E0 35
+            (89, Stroke::Scan(0x73, false)),  // KEY_RO (ABNT slash, JIS ro)
+            (92, Stroke::Scan(0x79, false)),  // KEY_HENKAN (Convert)
+            (93, Stroke::Scan(0x70, false)),  // KEY_KATAKANAHIRAGANA
+            (94, Stroke::Scan(0x7B, false)),  // KEY_MUHENKAN (No convert)
+            (124, Stroke::Scan(0x7D, false)), // KEY_YEN
+        ] {
+            assert_eq!(stroke_for(code), Some(stroke), "evdev {code}");
+        }
+    }
+
     #[test]
     fn letters_and_digits_are_their_own_scancodes() {
         assert_eq!(
