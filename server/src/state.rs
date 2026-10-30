@@ -166,6 +166,45 @@ pub async fn unregister_client(connection_id: &str) {
     );
 }
 
+/// The devices whose connections are to close now (remote revoke): each
+/// control connection's loop listens, and ends its own when its device is
+/// named, rather than at its next packet or a minute idle.
+static CLOSING: LazyLock<tokio::sync::broadcast::Sender<String>> =
+    LazyLock::new(|| tokio::sync::broadcast::channel(16).0);
+
+/// Listen for [`close_device`].
+pub fn closing() -> tokio::sync::broadcast::Receiver<String> {
+    CLOSING.subscribe()
+}
+
+/// Close every control connection of `device_id` (remote revoke: it was
+/// removed). A connection whose loop missed it (too many at once) still
+/// closes at its next packet, as one no longer paired does.
+pub fn close_device(device_id: &str) {
+    let _ = CLOSING.send(device_id.to_string());
+}
+
+/// Wait until [`close_device`] names `device_id` on `closing`; never, once
+/// nothing can name it. A receiver that fell behind (too many at once)
+/// may have missed its name: it ends then if `gone` says the device is
+/// no longer let in (PR #574 review N9).
+pub async fn closed(
+    device_id: &str,
+    closing: &mut tokio::sync::broadcast::Receiver<String>,
+    gone: impl Fn() -> bool,
+) {
+    loop {
+        match closing.recv().await {
+            Ok(id) if id == device_id => return,
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) if gone() => return,
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                std::future::pending::<()>().await
+            }
+        }
+    }
+}
+
 /// Whether pushes are restricted to paired clients (`pairing_required`).
 /// Defaults to the safe side until the service sets it from config.
 static PAIRING_REQUIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

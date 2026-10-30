@@ -478,6 +478,10 @@ pub struct TrustStore {
     computers: HashSet<String>,
     /// U3: deviceId -> what it calls itself and the owner's rename.
     names: HashMap<String, DeviceName>,
+    /// Remote revoke: the phones paired with the owner's own code (never
+    /// someone else's, a profile's or a guest's), which may list and
+    /// remove this computer's other devices from afar.
+    owners: HashSet<String>,
 }
 
 /// A paired device's name (U3): what it calls itself in its identity, and
@@ -633,6 +637,7 @@ impl TrustStore {
                 permissions: HashMap::new(),
                 computers: HashSet::new(),
                 names: HashMap::new(),
+                owners: HashSet::new(),
             });
         }
 
@@ -657,7 +662,7 @@ impl TrustStore {
             .into_iter()
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
-        let computers = decoded
+        let computers: HashSet<String> = decoded
             .computers
             .into_iter()
             .filter(|id| trusted_device_ids.contains(id))
@@ -668,6 +673,12 @@ impl TrustStore {
             .into_iter()
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
+        // An owner phone is one paired for good, and a phone.
+        let owners = decoded
+            .owners
+            .into_iter()
+            .filter(|id| trusted_device_ids.contains(id) && !computers.contains(id))
+            .collect();
         Ok(Self {
             path,
             trusted_device_ids,
@@ -675,6 +686,7 @@ impl TrustStore {
             permissions,
             computers,
             names,
+            owners,
         })
     }
 
@@ -713,7 +725,31 @@ impl TrustStore {
         self.permissions.remove(device_id);
         self.computers.remove(device_id);
         self.names.remove(device_id);
+        self.owners.remove(device_id);
         self.persist()
+    }
+
+    /// Trust the phone `device_id` for good, paired with the owner's own
+    /// code (`owner`, remote revoke) or not: someone else's phone, or one
+    /// with a profile's permissions, is not an owner phone, and pairing
+    /// again as one takes the mark away.
+    pub fn trust_phone(&mut self, device_id: impl Into<String>, owner: bool) -> Result<()> {
+        let id = device_id.into();
+        if owner {
+            self.owners.insert(id.clone());
+        } else {
+            self.owners.remove(&id);
+        }
+        self.trust_device(id)
+    }
+
+    /// Whether `device_id` is a phone paired with the owner's own code
+    /// (remote revoke), paired for good: never a guest's grant, nor a
+    /// computer.
+    pub fn is_owner_phone(&self, device_id: &str) -> bool {
+        self.owners.contains(device_id)
+            && self.trusted_device_ids.contains(device_id)
+            && !self.computers.contains(device_id)
     }
 
     /// The name a device is shown by (U3): the owner's rename, else what
@@ -785,6 +821,9 @@ impl TrustStore {
         self.grants.remove(&id);
         self.trusted_device_ids.insert(id.clone());
         self.permissions.insert(id.clone(), permissions);
+        // A computer's standing is its own (both ways or not), never a
+        // phone's mark.
+        self.owners.remove(&id);
         self.computers.insert(id);
         self.persist()
     }
@@ -847,12 +886,15 @@ impl TrustStore {
         permanent.sort();
         let mut computers: Vec<String> = self.computers.iter().cloned().collect();
         computers.sort();
+        let mut owners: Vec<String> = self.owners.iter().cloned().collect();
+        owners.sort();
         let payload = TrustStoreFile {
             trusted_device_ids: permanent,
             grants: self.grants.clone(),
             permissions: self.permissions.clone(),
             computers,
             names: self.names.clone(),
+            owners,
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -883,6 +925,8 @@ struct TrustStoreFile {
     computers: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     names: HashMap<String, DeviceName>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    owners: Vec<String>,
 }
 
 #[derive(Default)]

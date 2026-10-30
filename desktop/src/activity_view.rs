@@ -38,7 +38,9 @@ impl Filter {
             Filter::All => true,
             Filter::Sessions => kind.starts_with("session_"),
             // A lock when a phone left is about phones too (E5).
-            Filter::Phones => kind.starts_with("phone_") || kind == "away_locked",
+            Filter::Phones => {
+                kind.starts_with("phone_") || kind == "away_locked" || kind == "device_removed"
+            }
             Filter::FilesAndLinks => matches!(kind, "file_received" | "link_received"),
             Filter::Messages => matches!(kind, "notification" | "text_received"),
             Filter::Hooks => {
@@ -310,6 +312,14 @@ pub fn describe(event: &Event) -> String {
         "phone_unlinked" => "Disconnected".to_string(),
         "phone_paired" => "Paired".to_string(),
         "phone_unpaired" => "Unpaired".to_string(),
+        // Remote revoke: who removed it, by the start of its id.
+        "device_removed" => match text(event, "by") {
+            Some(by) => format!(
+                "Removed from afar by {}",
+                by.chars().take(8).collect::<String>()
+            ),
+            None => "Removed from afar".to_string(),
+        },
         "phone_battery" => format!(
             "Battery {} %{}",
             number(event, "charge").unwrap_or(0),
@@ -496,6 +506,14 @@ mod tests {
         let mut named = event("deck_pressed", json!({"kind": "media", "ok": true}));
         named.fields.insert("label".into(), json!("Pause"));
         assert_eq!(describe(&named), "Deck \"Pause\" pressed (a media key)");
+    }
+
+    /// Remote revoke: a removal from afar says who did it.
+    #[test]
+    fn a_removal_from_afar_says_who() {
+        let removed = event("device_removed", json!({"by": "a1b2c3d4e5f6"}));
+        assert_eq!(describe(&removed), "Removed from afar by a1b2c3d4");
+        assert!(Filter::Phones.admits("device_removed"));
     }
 
     /// J4: Search narrows by the line as shown, with the kind chip.
