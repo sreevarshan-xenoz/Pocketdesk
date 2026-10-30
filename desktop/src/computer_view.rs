@@ -1155,6 +1155,21 @@ fn mic_may_go(state: &State) -> bool {
         )
 }
 
+/// Why the microphone stopped by itself, the same whether the capture or
+/// the window's pass noticed first (PR #569 re-review N4): the
+/// connection went, or the other computer took control back (Control off
+/// there); nothing for what this window did itself (View only here, the
+/// view ending or reconnecting, which say so themselves).
+fn mic_stop_words(state: &State) -> Option<&'static str> {
+    if state.writer.is_none() || state.mic_said != Some(true) {
+        Some(view_mic::CUT_WORDS)
+    } else if state.status.control != Some(true) {
+        Some(view_mic::TAKEN_WORDS)
+    } else {
+        None
+    }
+}
+
 /// "Send my mic", each pass (PC10): it starts as [`MicSwitch`] decides
 /// (wanted, and the window controls that computer), the relay told before
 /// any frame, and stops as it decides otherwise.
@@ -1208,12 +1223,16 @@ fn follow_mic(
                 let mut state = lock(&ending);
                 if state.mic_gen == generation {
                     let note = match how {
-                        view_mic::Ended::Failed(why) => Some(view_mic::failed_words(&why)),
-                        view_mic::Ended::Refused => Some(view_mic::CUT_WORDS.to_string()),
+                        view_mic::Ended::Failed(why) => Some(Some(view_mic::failed_words(&why))),
+                        // Why, as the window's pass would say it (re-review
+                        // N4), whichever notices first.
+                        view_mic::Ended::Refused => {
+                            Some(mic_stop_words(&state).map(str::to_string))
+                        }
                         view_mic::Ended::Stopped => None,
                     };
                     if let Some(note) = note {
-                        state.mic_note = Some(note);
+                        state.mic_note = note;
                         state.mic.stopped();
                         stop_mic(&mut state);
                     }
@@ -1242,6 +1261,11 @@ fn follow_mic(
             }
         }
         Some(view_mic::Change::Stop) => {
+            // Stopped by the view, not the bar: said as the capture would
+            // say it (re-review N4).
+            if !controlling && let Some(words) = mic_stop_words(state) {
+                state.mic_note = Some(words.to_string());
+            }
             stop_mic(state);
             // The bar, drawn before, stops saying "Mic on" at once.
             ctx.request_repaint_of(viewport_id());
@@ -4265,6 +4289,9 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             assert!(!lock(&shared).mic.wanted(), "{way}");
+            // Re-review N4: the same words as the pass would give.
+            let expected = (way == "control off there").then(|| view_mic::TAKEN_WORDS.to_string());
+            assert_eq!(lock(&shared).mic_note, expected, "{way}");
             assert_eq!(
                 window_title("Desk", lock(&shared).mic.on()),
                 "Desk \u{b7} screen"
@@ -4315,6 +4342,9 @@ mod tests {
             lose(&mut lock(&shared));
             harness.step();
             assert!(!lock(&shared).mic.on(), "{way}: the pass stopped it");
+            // Re-review N4: the same words as the capture would give.
+            let expected = (way == "control off there").then(|| view_mic::TAKEN_WORDS.to_string());
+            assert_eq!(lock(&shared).mic_note, expected, "{way}");
             // The bar drawn before it stopped says so until the next pass.
             harness.step();
             assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 0);

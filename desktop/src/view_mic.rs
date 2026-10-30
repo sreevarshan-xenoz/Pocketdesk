@@ -307,6 +307,10 @@ impl Drop for MicRun {
 pub const CUT_WORDS: &str =
     "Mic stopped: the connection to the view was cut. Turn Send my mic on again.";
 
+/// What the bar says as the microphone stopped because the other computer
+/// stopped taking this one's input (PR #569 re-review N4).
+pub const TAKEN_WORDS: &str = "Mic stopped: the other computer took control back. Turn Send my mic on again once it gives it.";
+
 /// Why the microphone could not be used, as the bar says it.
 pub fn failed_words(why: &str) -> String {
     format!("Couldn't use this computer's microphone: {why}")
