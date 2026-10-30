@@ -107,6 +107,8 @@ object RustCore {
     private external fun nativeListDeck(address: String, port: Int): String
     private external fun nativeSystemState(address: String, port: Int): String
     private external fun nativeAllowed(address: String, port: Int): String
+    private external fun nativeDevicesThere(address: String, port: Int): String
+    private external fun nativeRemoveThere(address: String, port: Int, deviceId: String): String
     private external fun nativePressDeck(address: String, port: Int, index: Int, label: String): String
     private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
     private external fun nativeTaskResult(id: String): String
@@ -667,6 +669,13 @@ object RustCore {
 
     /** M2a: what the computer allows this phone, `{"allowed": {<feature>: {"permission", "setting"}}}`. */
     fun allowed(address: String, port: Int): Result<String> = envelope(nativeAllowed(address, port))
+
+    /** Remote revoke: the devices paired with the computer, or its refusal for a phone not the owner's. */
+    fun devicesThere(address: String, port: Int): Result<String> = envelope(nativeDevicesThere(address, port))
+
+    /** Remote revoke: remove [deviceId] from the computer: `{"removed", "reason"}` or `{"refused"}`. */
+    fun removeThere(address: String, port: Int, deviceId: String): Result<String> =
+        envelope(nativeRemoveThere(address, port, deviceId))
 
     /** The computer's deck (F1): `{"buttons": [{"index", "label", "kind"}]}`. */
     fun listDeck(address: String, port: Int): Result<String> = envelope(nativeListDeck(address, port))

@@ -184,6 +184,7 @@ fun HomeScreen(
     var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     // BB3: the computers that said the phone is not paired, read again every
     // few seconds, as that word comes and goes with no change here.
@@ -556,6 +557,7 @@ fun HomeScreen(
                         onState = { stateFor = host },
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
+                        onDevices = { devicesFor = host },
                     )
                 }
                 item {
@@ -720,6 +722,16 @@ fun HomeScreen(
             controlPort = host.controlPort,
             computer = HostStore.shownName(context, host.address),
             onDismiss = { allowedFor = null },
+        )
+    }
+
+    // Remote revoke: the devices paired with the computer, each with Remove.
+    devicesFor?.let { host ->
+        DevicesThereSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            onDismiss = { devicesFor = null },
         )
     }
 
@@ -893,6 +905,7 @@ private fun HostCard(
     onState: () -> Unit,
     onPeek: () -> Unit,
     onAllowed: () -> Unit,
+    onDevices: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = name ?: host.address
@@ -944,6 +957,8 @@ private fun HostCard(
                             R.string.doctor_title to onCheck,
                             // M2a: both sides of each feature.
                             R.string.card_allowed to onAllowed,
+                            // Remote revoke: a lost device removed from here.
+                            R.string.card_devices_there to onDevices,
                             R.string.card_rename to onRename,
                         )
                         uses.forEach { (label, action) ->

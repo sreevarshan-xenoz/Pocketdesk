@@ -31,6 +31,7 @@ mod phone_screen;
 mod photo_requests;
 mod quiet_requests;
 mod rates;
+mod remote_devices;
 mod session;
 mod tasks;
 mod typing;
@@ -1598,6 +1599,36 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeAllowed
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let json = envelope(RUNTIME.block_on(deck::allowed(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// The devices paired with the computer (remote revoke): `{"ok":
+/// "{\"devices\": [...]}"}`, or its refusal for a phone not the owner's.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeDevicesThere(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let json = envelope(RUNTIME.block_on(remote_devices::list(address, port as u16)));
+    to_jstring(&mut env, json)
+}
+
+/// Remove `deviceId` from the computer (remote revoke): `{"ok":
+/// "{\"removed\", \"reason\"}"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRemoveThere(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    device_id: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let device_id = jstring_to_string(&mut env, &device_id);
+    let json = envelope(RUNTIME.block_on(remote_devices::remove(address, port as u16, device_id)));
     to_jstring(&mut env, json)
 }
 

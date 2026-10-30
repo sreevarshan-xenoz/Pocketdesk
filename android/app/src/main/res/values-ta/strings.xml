@@ -1052,4 +1052,27 @@
     <string name="settings_copies">நான் நகலெடுப்பதைத் தானாக அனுப்பு</string>
     <string name="settings_copies_summary_off">இந்தத் தொலைபேசியில் நீங்கள் நகலெடுப்பது கிளிப்போர்டு டைலிலிருந்து மட்டுமல்லாமல் தானாகவே அதன் கணினியின் கிளிப்போர்டுக்குச் செல்லும். ஒரு ஆப் உணர்திறன் உள்ளதாகக் குறிக்கும் நகல் (கடவுச்சொல்) ஒருபோதும் இல்லை. “Pocketdesk control” அணுகல்தன்மை சேவையைப் பயன்படுத்துகிறது, நகலெடுக்கும்போது தொலைபேசி கிளிப்போர்டு முன்னோட்டத்தைக் காட்ட வேண்டும்</string>
     <string name="settings_copies_summary_on">இயக்கத்தில்: நீங்கள் நகலெடுப்பது இந்தத் தொலைபேசியின் சொந்தக் கணினிக்குத் தானாகச் செல்லும், உணர்திறன் உள்ள நகல் ஒருபோதும் இல்லை. ஒவ்வொரு முறையும் Android “Pocketdesk உங்கள் கிளிப்போர்டிலிருந்து ஒட்டியது” என்று சொல்லும்</string>
+    <string name="card_devices_there">இந்தக் கணினியில் உள்ள சாதனங்கள்</string>
+    <string name="there_title">%1$s இல் உள்ள சாதனங்கள்</string>
+    <string name="there_hint">இதனுடன் இணைக்கப்பட்ட ஃபோன்களும் கணினிகளும். தொலைந்த அல்லது திருடப்பட்ட ஒன்றை நீக்குங்கள்: அது அங்கே எல்லா அணுகலையும் உடனே இழக்கும், யார் நீக்கினார் என்று கணினி சொல்லும். திரும்பப் பெற முடியாது; மீண்டும் இணைத்தால்தான் அது திரும்பும்.</string>
+    <string name="there_asking">கணினியிடம் கேட்கிறது…</string>
+    <string name="there_no_answer">கணினி பதிலளிக்கவில்லை. பழைய Pocketdesk உள்ள கணினி தன் சாதனங்களைப் பட்டியலிட முடியாது.</string>
+    <string name="there_no_answer_remove">%1$s பற்றி கணினி பதிலளிக்கவில்லை. அது நீக்கப்பட்டதா என்று பார்க்கப் பட்டியலை மீண்டும் திறங்கள்.</string>
+    <string name="there_kind_phone">ஃபோன்</string>
+    <string name="there_kind_computer">கணினி</string>
+    <string name="there_kind_you">இந்த ஃபோன்</string>
+    <string name="there_kind_yours">உங்களுடையது</string>
+    <string name="there_kind_guest">விருந்தினர்</string>
+    <string name="there_kind_connected">இணைப்பில் உள்ளது</string>
+    <string name="there_remove_more">நீக்கு…</string>
+    <string name="there_remove">நீக்கு</string>
+    <string name="there_remove_title">%1$s ஐ நீக்கவா?</string>
+    <string name="there_remove_text">%1$s, %2$s க்கான எல்லா அணுகலையும் உடனே இழக்கும்; திரும்ப வர மீண்டும் இணைக்க வேண்டும். திரும்பப் பெற முடியாது.</string>
+    <string name="there_removed">%1$s நீக்கப்பட்டது.</string>
+    <string name="there_refused_not_owner">உங்கள் சாதனத்துக்கு மட்டுமே கணினி சாதனங்களைப் பட்டியலிட்டு நீக்கும்: அதன் சொந்தக் குறியீட்டால் இணைக்கப்பட்ட ஃபோன். இந்த ஃபோனைக் கணினியின் சொந்தக் குறியீட்டால் மீண்டும் இணையுங்கள்.</string>
+    <string name="there_refused_too_many">ஒரு நிமிடத்தில் மிக அதிக நீக்கங்கள். ஒரு நிமிடம் காத்திருந்து மீண்டும் முயலுங்கள்.</string>
+    <string name="there_refused_yourself">இந்த ஃபோன் இவ்வாறு தன்னைத்தானே நீக்க முடியாது.</string>
+    <string name="there_refused_not_paired">அந்தச் சாதனம் இனி அங்கே இணைக்கப்படவில்லை.</string>
+    <string name="there_refused_last_owner">அங்கே உள்ள உங்கள் கடைசி சாதனம் அது: அதை நீக்கினால் நிர்வகிக்க எதுவும் இருக்காது.</string>
+    <string name="there_refused_failed">கணினியால் அதைச் செய்ய முடியவில்லை. மீண்டும் முயலுங்கள்.</string>
 </resources>
