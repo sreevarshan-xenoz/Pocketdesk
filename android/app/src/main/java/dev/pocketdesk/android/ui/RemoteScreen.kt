@@ -883,6 +883,11 @@ fun RemoteScreen(
             wasUp.set(true)
         }
     }
+    // UX2 (PR #580 review N1): stamped as the stream drops, not when the
+    // screen is left later from the reconnect card.
+    LaunchedEffect(streamStatus is StreamStatus.Down) {
+        if (streamStatus is StreamStatus.Down && wasUp.getAndSet(false)) HostStore.markUsed(context, address)
+    }
     LaunchedEffect(streamUps) {
         if (streamUps == 0) return@LaunchedEffect
         var offered = false

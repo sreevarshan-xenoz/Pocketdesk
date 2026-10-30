@@ -120,7 +120,12 @@ fun RemoteInputScreen(
                 wasUp.set(true)
                 tell.up(Prefs.tellOtherApps(context))
             }
-            State.Down, State.TooOld -> tell.lost()
+            State.Down, State.TooOld -> {
+                // UX2 (PR #580 review N1): stamped as it drops, not when the
+                // screen is left later from the Retry card.
+                if (wasUp.getAndSet(false)) HostStore.markUsed(context, address)
+                tell.lost()
+            }
             else -> null
         }
         told?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) }
