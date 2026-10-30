@@ -2701,8 +2701,8 @@ mod tests {
     }
 
     /// PC7: while the window says its pointer is locked, shared input's
-    /// edges are paused; they come back as it frees it, and as its viewer
-    /// goes with the pointer still locked.
+    /// edges are paused; they come back as it frees it, as its socket
+    /// closes with the pointer still locked, and as its viewer is dropped.
     #[tokio::test]
     async fn the_windows_lock_pauses_shared_input_until_freed_or_gone() {
         use crate::shared_input::view_hold::{TESTS, pointer_held};
@@ -2735,13 +2735,20 @@ mod tests {
         until(false, "the release").await;
         window.write_all(&say(true)).await.unwrap();
         until(true, "the lock again").await;
-        // The window gone: the relay drops its viewer (its socket closed,
-        // or at the next heartbeat), which ends the reader. A closed socket
-        // alone is not waited for here: another test's child process may
-        // briefly share it.
-        drop(window);
+        // The window's socket closed, its viewer kept: the reader reads
+        // the end and lets go. An explicit FIN, not a drop: another test's
+        // child may have inherited the socket's handle (mio 1.2.0's
+        // sockets are inheritable on Windows; PR #563 review I3).
+        window.shutdown().await.unwrap();
+        until(false, "the window's socket closed").await;
         drop(viewer);
-        until(false, "the window gone").await;
+        // The viewer dropped while it holds (the relay replacing or ending
+        // it): the aborted reader lets go too.
+        let (mut window, viewer, _queued) = joined_window().await;
+        window.write_all(&say(true)).await.unwrap();
+        until(true, "the lock on a fresh window").await;
+        drop(viewer);
+        until(false, "the viewer dropped").await;
     }
 
     /// Wait (at most `secs`) until the pointer is held as `held`.
