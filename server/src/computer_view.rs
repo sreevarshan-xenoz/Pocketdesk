@@ -2474,12 +2474,19 @@ impl Drop for WindowMic {
         }
         self.link.clear();
         // Waited for on a task of its own (review M2): a full queue does
-        // not lose it, given a little while.
+        // not lose it, given a little while; and after the frame on its
+        // way, so a late frame never starts the mic again there after the
+        // stop (re-review N2).
         let input = self.input.clone();
+        let link = self.link.clone();
         match tokio::runtime::Handle::try_current() {
             Ok(runtime) => {
                 runtime.spawn(async move {
-                    let _ = tokio::time::timeout(MIC_STOP_WAIT, input.send(mic_stop())).await;
+                    let _ = tokio::time::timeout(MIC_STOP_WAIT, async {
+                        link.quiet().await;
+                        input.send(mic_stop()).await
+                    })
+                    .await;
                 });
             }
             Err(_) => {
@@ -3306,6 +3313,48 @@ mod tests {
             "Some(RequestKeyframe)"
         );
         drop(viewer);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(Mic { enabled: false, opus: [] })"
+        );
+        drop(window);
+    }
+
+    /// PR #569 re-review N2: a viewer dropped with the mic on while a
+    /// frame is on its way sends the stop only after that frame went.
+    #[tokio::test]
+    async fn a_dropped_viewers_stop_waits_for_the_frame_on_its_way() {
+        let link = controlling();
+        let (mut window, viewer, mut queued) = joined_window_with(link.clone()).await;
+        window
+            .write_all(&Message::Mic(true).encode())
+            .await
+            .unwrap();
+        window
+            .write_all(&Message::Input(InputPacket::RequestKeyframe.encode()).encode())
+            .await
+            .unwrap();
+        let wait = Duration::from_secs(2);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(RequestKeyframe)"
+        );
+        // A frame on its way: the forwarder holds this while it sends.
+        let on_its_way = link.sending.lock().await;
+        drop(viewer);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), queued.recv())
+                .await
+                .is_err(),
+            "no stop while the frame is on its way"
+        );
+        drop(on_its_way);
         assert_eq!(
             format!(
                 "{:?}",
