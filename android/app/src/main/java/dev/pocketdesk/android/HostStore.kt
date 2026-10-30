@@ -69,16 +69,32 @@ object HostStore {
     fun save(ctx: Context, host: Host) {
         val rest = hosts(ctx).filterNot { it.address == host.address }
         writeHosts(ctx, listOf(host) + rest)
-        // UX1: when, for its card ("Used 2 hours ago").
+    }
+
+    /**
+     * UX1: a session with the saved computer at [address] came up (its
+     * stream, or a remote or sound session admitted), for its card's "Used
+     * 2 hours ago". Not on pairing, a shortcut or a tap that never connects
+     * (PR #575 review N2). Nothing for an address that is not saved.
+     */
+    fun markUsed(ctx: Context, address: String, now: Long = System.currentTimeMillis()) {
+        if (hosts(ctx).none { it.address == address }) return
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
-            putLong("$KEY_LAST_USED_PREFIX${host.address}", System.currentTimeMillis())
+            putLong("$KEY_LAST_USED_PREFIX$address", now)
         }
     }
 
-    /** UX1: when [address] was last connected to from its card, in ms since the epoch; null before. */
-    fun lastUsed(ctx: Context, address: String): Long? =
+    /**
+     * UX1: when [address] was last used, in ms since the epoch; null before,
+     * and null for a time more than five minutes ahead of [now] (a clock set
+     * forward, then back, would have pinned "Used just now"; review N1).
+     */
+    fun lastUsed(ctx: Context, address: String, now: Long = System.currentTimeMillis()): Long? =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getLong("$KEY_LAST_USED_PREFIX$address", 0L).takeIf { it > 0L }
+            .getLong("$KEY_LAST_USED_PREFIX$address", 0L)
+            .takeIf { it > 0L && it <= now + FUTURE_SLACK_MS }
+
+    private const val FUTURE_SLACK_MS = 5 * 60_000L
 
     /**
      * Keep [host] in the list without moving it to the front: a computer
