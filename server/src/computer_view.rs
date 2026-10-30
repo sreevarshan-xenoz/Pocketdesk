@@ -2303,6 +2303,55 @@ fn start_viewer(
 mod tests {
     use super::*;
 
+    async fn loopback_endpoint() -> iroh::Endpoint {
+        iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .alpns(vec![pocketdesk_core::protocol::ALPN_CONTROL.to_vec()])
+            .relay_mode(iroh::RelayMode::Disabled)
+            .bind_addr(std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .unwrap()
+            .bind()
+            .await
+            .unwrap()
+    }
+
+    /// PC2 review: the internet road to a computer whose endpoint is not
+    /// the key it paired with fails at once, saying so, and never dials
+    /// it; with no endpoint on either side it fails as plainly.
+    #[tokio::test]
+    async fn the_internet_road_to_an_unbound_endpoint_fails_without_dialing() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let (here, there) = (loopback_endpoint().await, loopback_endpoint().await);
+        let target = crate::peer_computers::WanTarget {
+            endpoint_id: there.id().to_string(),
+            relay_urls: Vec::new(),
+            direct_addrs: there
+                .bound_sockets()
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+        };
+        let started = Instant::now();
+        let unbound = dial_internet(Some(here.clone()), Some((target.clone(), false))).await;
+        assert!(started.elapsed() < Duration::from_secs(1), "no dial tried");
+        assert_eq!(
+            unbound.err().as_deref(),
+            Some("internet: its endpoint is not the key it paired with")
+        );
+        let incoming = tokio::time::timeout(Duration::from_millis(300), there.accept()).await;
+        assert!(incoming.is_err(), "nothing reached the other computer");
+        assert_eq!(
+            dial_internet(None, Some((target, true)))
+                .await
+                .err()
+                .as_deref(),
+            Some("internet: no endpoint")
+        );
+        assert_eq!(
+            dial_internet(Some(here), None).await.err().as_deref(),
+            Some("internet: no endpoint")
+        );
+    }
+
     /// PC5: a keyframe's stream is HEVC by its video parameter set, with
     /// its parameter sets as its mark (new ones: a new config); H.264 by
     /// its SPS's size; neither, nothing.
