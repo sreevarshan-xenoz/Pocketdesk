@@ -1978,7 +1978,9 @@ pub async fn run_with(
     // One window's mic a computer (PC11).
     let mic_holders: MicHolders = Default::default();
     let mut viewers: Viewers = Default::default();
-    let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64);
+    // Room for each view's, so one busy view never holds up the others
+    // (PR #570 review M9).
+    let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64 * SLOTS);
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
     let (focus_tx, mut focus_rx) = mpsc::channel::<(u64, bool)>(8);
     let (privacy_tx, mut privacy_rx) = mpsc::channel::<(u64, String, u8)>(8);
