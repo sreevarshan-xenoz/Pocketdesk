@@ -190,6 +190,14 @@ fun HomeScreen(
     var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    // Ecosystem phase 4: the computer whose other computers are offered,
+    // and whether it was offered by itself after pairing.
+    var introduceFor by remember { mutableStateOf<Pair<HostStore.Host, Boolean>?>(null) }
+    LaunchedEffect(hosts) {
+        val pending = Prefs.takeIntroducePending(context) ?: return@LaunchedEffect
+        if (!Prefs.offerMyComputers(context)) return@LaunchedEffect
+        hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
+    }
     var names by remember { mutableIntStateOf(0) }
     // BB3: the computers that said the phone is not paired, read again every
     // few seconds, as that word comes and goes with no change here.
@@ -576,6 +584,7 @@ fun HomeScreen(
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
                         onDevices = { devicesFor = host },
+                        onIntroduce = { introduceFor = host to false },
                     )
                 }
                 item {
@@ -750,6 +759,21 @@ fun HomeScreen(
             controlPort = host.controlPort,
             computer = HostStore.shownName(context, host.address),
             onDismiss = { devicesFor = null },
+        )
+    }
+
+    // Ecosystem phase 4: "Also pair with <computer>?" for each of the
+    // owner's other computers this one can introduce the phone to.
+    introduceFor?.let { (host, auto) ->
+        IntroduceSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            auto = auto,
+            onDismiss = {
+                introduceFor = null
+                hosts = HostStore.hosts(context)
+            },
         )
     }
 
@@ -957,6 +981,7 @@ private fun HostCard(
     onPeek: () -> Unit,
     onAllowed: () -> Unit,
     onDevices: () -> Unit,
+    onIntroduce: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = name ?: host.address
@@ -1010,6 +1035,8 @@ private fun HostCard(
                             R.string.card_allowed to onAllowed,
                             // Remote revoke: a lost device removed from here.
                             R.string.card_devices_there to onDevices,
+                            // Ecosystem phase 4: the owner's other computers.
+                            R.string.card_introduce to onIntroduce,
                             R.string.card_rename to onRename,
                         )
                         uses.forEach { (label, action) ->

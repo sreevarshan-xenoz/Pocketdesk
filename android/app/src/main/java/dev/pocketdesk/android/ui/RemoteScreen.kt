@@ -1661,6 +1661,8 @@ fun RemoteScreen(
                 HostStore.savePairedDesktop(context, address, serverId)
                 // A computer reached from discovery is saved once paired.
                 HostStore.keep(context, HostStore.Host(address, port, controlPort))
+                // Ecosystem phase 4: Home offers its other computers next.
+                dev.pocketdesk.android.Prefs.markIntroducePending(context, address)
                 // Paired from the "turned the session down" card: the
                 // refused stream comes back without a tap on Retry.
                 if (streamStatus is StreamStatus.Down) retryStream()

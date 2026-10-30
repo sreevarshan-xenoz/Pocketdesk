@@ -35,6 +35,9 @@ object Prefs {
     private const val KEY_LINKS_FROM_COMPUTER = "links_from_computer"
     private const val KEY_COMPUTER_ALERTS = "computer_alerts"
     private const val KEY_PEEK = "peek_on_home"
+    private const val KEY_OFFER_MY_COMPUTERS = "offer_my_computers"
+    private const val KEY_INTRODUCE_PENDING = "introduce_pending"
+    private const val KEY_INTRODUCE_LAST = "introduce_last"
     private const val KEY_QUESTIONS = "questions_from_computer"
     private const val KEY_SHARE_BATTERY = "share_battery"
     private const val KEY_STATE_WIDGET_AUTO = "state_widget_auto"
@@ -291,6 +294,38 @@ object Prefs {
 
     fun setPeek(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit { putBoolean(KEY_PEEK, enabled) }
+        bump()
+    }
+
+    /**
+     * Ecosystem phase 4: after pairing with a computer by its own code, offer
+     * the owner's other computers it is paired with both ways. On by default;
+     * each still waits for a yes here.
+     */
+    fun offerMyComputers(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_OFFER_MY_COMPUTERS, true)
+
+    fun setOfferMyComputers(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_OFFER_MY_COMPUTERS, enabled) }
+        bump()
+    }
+
+    /** The computer just paired with, whose other computers Home offers next. */
+    fun markIntroducePending(ctx: Context, address: String) {
+        prefs(ctx).edit { putString(KEY_INTRODUCE_PENDING, address) }
+    }
+
+    /** The computer just paired with, taken (offered once). */
+    fun takeIntroducePending(ctx: Context): String? {
+        val address = prefs(ctx).getString(KEY_INTRODUCE_PENDING, null)
+        if (address != null) prefs(ctx).edit { remove(KEY_INTRODUCE_PENDING) }
+        return address?.takeIf { it.isNotBlank() }
+    }
+
+    /** How the last introduction went ([dev.pocketdesk.android.pair.IntroduceRule.encode]). */
+    fun introduceLast(ctx: Context): String? = prefs(ctx).getString(KEY_INTRODUCE_LAST, null)
+
+    fun setIntroduceLast(ctx: Context, kept: String) {
+        prefs(ctx).edit { putString(KEY_INTRODUCE_LAST, kept) }
         bump()
     }
 

@@ -109,6 +109,8 @@ object RustCore {
     private external fun nativeAllowed(address: String, port: Int): String
     private external fun nativeDevicesThere(address: String, port: Int, request: String): String
     private external fun nativeRemoveThere(address: String, port: Int, deviceId: String, request: String): String
+    private external fun nativeIntroductions(address: String, port: Int, request: String): String
+    private external fun nativeIntroduce(address: String, port: Int, deviceId: String, request: String): String
     private external fun nativePressDeck(address: String, port: Int, index: Int, label: String): String
     private external fun nativeRunTask(address: String, port: Int, name: String, id: String): String
     private external fun nativeTaskResult(id: String): String
@@ -678,6 +680,14 @@ object RustCore {
     /** Remote revoke: remove [deviceId] from the computer: `{"removed", "reason"}` or `{"refused"}`. */
     fun removeThere(address: String, port: Int, deviceId: String, request: String): Result<String> =
         envelope(nativeRemoveThere(address, port, deviceId, request))
+
+    /** Ecosystem phase 4: the owner's other computers this computer could introduce the phone to. */
+    fun introductions(address: String, port: Int, request: String): Result<String> =
+        envelope(nativeIntroductions(address, port, request))
+
+    /** Ecosystem phase 4: be introduced to [deviceId]: `{"link"}` to pair with, or `{"refused"}`. */
+    fun introduce(address: String, port: Int, deviceId: String, request: String): Result<String> =
+        envelope(nativeIntroduce(address, port, deviceId, request))
 
     /** The computer's deck (F1): `{"buttons": [{"index", "label", "kind"}]}`. */
     fun listDeck(address: String, port: Int): Result<String> = envelope(nativeListDeck(address, port))
