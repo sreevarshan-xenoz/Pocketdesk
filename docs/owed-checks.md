@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-996 open items.
+1001 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 155 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 157 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 85 |
+| A second computer | 88 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -521,6 +521,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), the Overview, Devices and Keyboard and mouse pages read well in light and dark: cards, the status dot, buttons not clipped, the pages' list down the left fits without scrolling at the window's usual size. (where: owner)
 - Tab through the Overview and Devices: every button, checkbox and group switch shows the blue 2 px focus ring, and Space toggles a group switch. (where: owner)
 
+**231. Your computers on the Overview and in the tray, and waking one that sleeps (PC6)**
+
+- Sleep the laptop by hand (wired, if it has a port): its card on Windows' Overview shows Wake with the note on wired and Wi-Fi; Wake wakes it, and its card says linked again within about a minute. Once more on Wi-Fi only: say whether it woke. (where: owner)
+- With the laptop asleep, Show its screen on its card offers "Wake it and show": the countdown runs, the laptop wakes, and its window opens by itself; Cancel during the countdown stops the wait (the window does not open later). With Wake-on-LAN off on the laptop, a minute later the notice says it did not come up. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -964,6 +969,12 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With the server running, the Overview's status card shows "The server is running" with Restart server, and Restart works; stopped, its Start server starts it and no bar shows above the Overview (other pages keep the bar). (where: second computer)
 - A paired computer shows on the Overview with its link state; Show its screen opens its window; Share keyboard and mouse opens that page. (where: second computer)
+
+**231. Your computers on the Overview and in the tray, and waking one that sleeps (PC6)**
+
+- With the link up, Windows' `computers.json` holds the laptop's entry with `wake` (its adapter's MAC and broadcast); the laptop's own Diagnostics names the same adapter. Turn "Let my computers wake this one" off on the laptop and restart its server: once the link is back, the entry has no `wake`, and Wake no longer shows. (where: second computer)
+- The tray on Windows (and the laptop's tray, SNI, for a computer it pasted) lists "Show <name>'s screen" above Quit, the most recently viewed first, and "Wake <name>" only while that computer sleeps; Show opens the window, or with it asleep the Overview with the offer to wake it. (where: second computer)
+- Show two computers' screens one after the other: the Overview's cards and the tray list the last one shown first, with "viewed just now". (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
