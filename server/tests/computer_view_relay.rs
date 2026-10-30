@@ -70,6 +70,7 @@ fn paired(dir: &Path) {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         })
     })
     .unwrap();

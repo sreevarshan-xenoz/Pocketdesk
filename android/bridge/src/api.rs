@@ -1415,9 +1415,16 @@ impl From<NoReply> for String {
 
 /// Whether `reply` answers `request`: a reply that names an action (the
 /// audio replies do, T8c) answers only a request that named the same one,
-/// since every audio action replies with the same packet type. A reply
-/// left over from a request that timed out is skipped, not taken.
+/// since every audio action replies with the same packet type. A request
+/// that names its own `request` id (remote revoke) is answered only by a
+/// reply naming the same id. A reply left over from a request that timed
+/// out is skipped, not taken.
 fn reply_answers(request: &serde_json::Value, reply: &serde_json::Value) -> bool {
+    if let Some(asked) = request.get("request").and_then(|r| r.as_str())
+        && reply.get("request").and_then(|r| r.as_str()) != Some(asked)
+    {
+        return false;
+    }
     match (
         request.get("action").and_then(|a| a.as_str()),
         reply.get("action").and_then(|a| a.as_str()),
@@ -1576,6 +1583,18 @@ mod reply_tests {
             &media,
             &json!({"action": "status", "volume": 40})
         ));
+        // A request that names its id is answered by a reply with that id
+        // alone: a late answer to an earlier ask is not this one's.
+        let ask = json!({"request": "r2", "ask": "list"});
+        assert!(super::reply_answers(
+            &ask,
+            &json!({"request": "r2", "devices": []})
+        ));
+        assert!(!super::reply_answers(
+            &ask,
+            &json!({"request": "r1", "removed": true})
+        ));
+        assert!(!super::reply_answers(&ask, &json!({"devices": []})));
         // Replies that name no action, and requests that name none, as before.
         assert!(super::reply_answers(&media, &json!({"volume": 40})));
         assert!(super::reply_answers(

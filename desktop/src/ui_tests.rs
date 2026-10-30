@@ -333,6 +333,7 @@ fn other_computers_say_the_release_each_runs() {
                 mine: false,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             });
         file.note_version(id, "999.0.0");
     })
@@ -369,6 +370,7 @@ fn unpairing_a_computer_waits_for_the_server() {
                 mine: false,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             });
     })
     .expect("a computers file");
@@ -486,6 +488,7 @@ fn other_computers_say_which_is_mine() {
             mine,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         };
     pocketdesk_core::local::computers::update(fixture.state(), |file| {
         file.computers.push(computer(
@@ -543,6 +546,7 @@ fn keyboard_mouse_computers(state: &Path) {
                 mine: false,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             });
     })
     .expect("a computers file");
@@ -1962,6 +1966,7 @@ fn add_computer(state: &Path, name: &str) {
                 mine: false,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             });
     })
     .expect("a computers file");

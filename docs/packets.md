@@ -79,6 +79,8 @@ Each packet is one line of JSON on the control channel (`docs/protocol-spec.md`)
 | `kdeconnect.pocketdesk.privacy` | yes | yes | Power | privacy |
 | `kdeconnect.pocketdesk.quiet` |  | yes |  | phone_quiet |
 | `kdeconnect.pocketdesk.quiet_state` | yes |  | Mute | phone_quiet |
+| `kdeconnect.pocketdesk.remote_devices` | yes | yes | none (an owner device only) | remote_devices |
+| `kdeconnect.pocketdesk.remote_devices_answer` | yes | yes | none (only the computer asked, for the ask waiting) | remote_devices |
 | `kdeconnect.pocketdesk.shared_input.input` |  | yes |  | phone_screen |
 | `kdeconnect.pocketdesk.shared_input.pong` | yes |  | none (any paired phone) | phone_screen |
 | `kdeconnect.pocketdesk.shared_input.screen` | yes |  | none (any paired phone) | phone_screen |

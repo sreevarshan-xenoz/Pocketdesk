@@ -53,7 +53,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -185,6 +190,7 @@ fun HomeScreen(
     var stateFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
     // Item 4: this app's release, to set each computer's beside.
     val mine = remember { PeerVersion.mine(context) }
@@ -317,6 +323,16 @@ fun HomeScreen(
             if (Prefs.healthDismissed(context) != null) Prefs.setHealthDismissed(context, null)
         }
     }
+    // UX1: the cards' "Used 2 min ago", read once per list and resume
+    // (review N3: not from the preferences at every recomposition), and the
+    // clock it is told against, a tick a minute while Home shows.
+    val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
+    val minuteNow by produceState(System.currentTimeMillis(), resumes) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(60_000L - value % 60_000L)
+        }
+    }
     // The Health card's Choose opens the picker itself (E6).
     val chooseFolder = rememberDownloadFolderPicker()
     val showHealth = Prefs.healthAlerts(context) &&
@@ -406,9 +422,13 @@ fun HomeScreen(
         ) {
             Column {
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
+                // Not over a Home with nothing saved yet (UX1: it said "Your
+                // saved computers" above only a computer found on the network).
+                // Its line is kept empty, so the header does not change height
+                // as the first computer is saved (PR #575 review N8).
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    stringResource(R.string.home_subtitle),
+                    if (hosts.isNotEmpty()) stringResource(R.string.home_subtitle) else "",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -434,16 +454,7 @@ fun HomeScreen(
                     tint = MaterialTheme.colorScheme.primaryContainer,
                 )
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    stringResource(R.string.no_computers),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    stringResource(R.string.home_explainer),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FirstRunExplainer(centered = true)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = onScan) {
                     Text(stringResource(R.string.scan_pairing_code))
@@ -453,13 +464,7 @@ fun HomeScreen(
                     Text(stringResource(R.string.add_computer))
                 }
                 Spacer(Modifier.height(8.dp))
-                // A first-time user may have only the phone app: say where the
-                // computer's half comes from.
-                TextButton(onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, DESKTOP_APP_URL.toUri())) }
-                }) {
-                    Text(stringResource(R.string.home_get_desktop_app))
-                }
+                GetDesktopAppButton()
             }
         } else {
             LazyColumn(
@@ -473,9 +478,11 @@ fun HomeScreen(
                 // while the list is at its start, so they show below it; a list
                 // scrolled down keeps its place.
                 item(key = "#top") {}
-                // Only here, not on the empty Home: the background features
-                // need a paired computer to send to.
-                if (showHealth) {
+                // Only with a computer saved: the background features need
+                // one to send to (HomeCards).
+                // One system card at a time, Health first (UX1).
+                val card = HomeCards.shown(hosts.isNotEmpty(), showHealth, remindBackground)
+                if (card == HomeCards.Card.HEALTH) {
                     item(key = "#health") {
                         HealthCard(
                             problems = healthProblems.orEmpty(),
@@ -497,13 +504,23 @@ fun HomeScreen(
                         )
                     }
                 }
-                if (remindBackground) {
+                if (card == HomeCards.Card.BACKGROUND) {
                     item(key = "#background") {
                         BackgroundCard(
                             limit = backgroundLimit,
                             onAllow = { BackgroundRunning.openSettings(context, backgroundLimit) },
                             onDismiss = { Prefs.setBackgroundReminder(context, false) },
                         )
+                    }
+                }
+                // UX1: a computer found on the network had hidden the first-run
+                // explainer, and with it where the computer's half comes from.
+                if (hosts.isEmpty()) {
+                    item(key = "#first-run") {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            FirstRunExplainer(centered = false)
+                            GetDesktopAppButton()
+                        }
                     }
                 }
                 if (network.unsaved.isNotEmpty()) {
@@ -528,6 +545,8 @@ fun HomeScreen(
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         unpairedByIt = host.address in refusers,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
+                        lastUsed = lastUsed[host.address],
+                        now = minuteNow,
                         onRemote = { onRemote(host) },
                         onSound = { onSound(host) },
                         onCast = { onCast(host) },
@@ -565,6 +584,7 @@ fun HomeScreen(
                         onState = { stateFor = host },
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
+                        onDevices = { devicesFor = host },
                     )
                 }
                 item {
@@ -732,6 +752,16 @@ fun HomeScreen(
         )
     }
 
+    // Remote revoke: the devices paired with the computer, each with Remove.
+    devicesFor?.let { host ->
+        DevicesThereSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            onDismiss = { devicesFor = null },
+        )
+    }
+
     // F1: the computer's deck, outside a session.
     deckFor?.let { host ->
         DeckSheet(
@@ -870,6 +900,37 @@ private fun FoundCard(computer: FoundComputer, onConnect: () -> Unit) {
     }
 }
 
+/** What Home says before any computer is saved. */
+@Composable
+private fun FirstRunExplainer(centered: Boolean) {
+    val align = if (centered) TextAlign.Center else TextAlign.Start
+    Text(
+        stringResource(R.string.no_computers),
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = align,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        stringResource(R.string.home_explainer),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = align,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** A first-time user may have only the phone app: where the computer's half comes from. */
+@Composable
+private fun GetDesktopAppButton() {
+    val context = LocalContext.current
+    TextButton(onClick = {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, DESKTOP_APP_URL.toUri())) }
+    }) {
+        Text(stringResource(R.string.home_get_desktop_app))
+    }
+}
+
 /**
  * A saved computer (U4): its name with a status line under it, a filled
  * Connect with Remote and Show screen beside it, and the rest in a menu,
@@ -887,6 +948,8 @@ private fun HostCard(
     paired: Boolean,
     unpairedByIt: Boolean,
     hasWake: Boolean,
+    lastUsed: Long?,
+    now: Long,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
     onSound: () -> Unit,
@@ -903,6 +966,7 @@ private fun HostCard(
     onState: () -> Unit,
     onPeek: () -> Unit,
     onAllowed: () -> Unit,
+    onDevices: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = name ?: host.address
@@ -919,7 +983,7 @@ private fun HostCard(
                 Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt)),
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed), now),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -963,6 +1027,8 @@ private fun HostCard(
                             R.string.doctor_title to onCheck,
                             // M2a: both sides of each feature.
                             R.string.card_allowed to onAllowed,
+                            // Remote revoke: a lost device removed from here.
+                            R.string.card_devices_there to onDevices,
                             R.string.card_rename to onRename,
                         )
                         uses.forEach { (label, action) ->
@@ -1008,19 +1074,37 @@ private fun HostCard(
                         .padding(top = 4.dp, end = 12.dp),
                 )
             }
-            FlowRow(
+            val remoteLabel = stringResource(R.string.remote_button)
+            val castLabel = stringResource(R.string.cast_button)
+            val measurer = rememberTextMeasurer()
+            val labelStyle = MaterialTheme.typography.labelLarge
+            val density = LocalDensity.current
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Narrower than Material's 24 dp sides, so the three fit one row on a phone.
-                val pad = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
-                // The phone as a remote (T10i): trackpad and keys, no picture.
-                OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(stringResource(R.string.remote_button)) }
-                // This phone's screen on the computer (T10k).
-                OutlinedButton(onClick = onCast, contentPadding = pad) { Text(stringResource(R.string.cast_button)) }
+                // Narrower than Material's 24 dp sides, so the three fit one row
+                // on a 360 dp phone (UX1: at 16 dp "Show screen" wrapped to a
+                // second row, cut off at the fold), and narrower still when
+                // only that fits (review N7: Spanish's wrapped at 12 dp).
+                val side = remember(connectLabel, remoteLabel, castLabel, labelStyle, maxWidth, density) {
+                    val widths = listOf(connectLabel, remoteLabel, castLabel).map {
+                        with(density) { measurer.measure(it, labelStyle).size.width.toDp().value }
+                    }
+                    CardButtonFit.sideDp(widths, maxWidth.value)
+                }
+                val pad = PaddingValues(horizontal = side.dp, vertical = 8.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
+                    // The phone as a remote (T10i): trackpad and keys, no picture.
+                    OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(remoteLabel) }
+                    // This phone's screen on the computer (T10k).
+                    OutlinedButton(onClick = onCast, contentPadding = pad) { Text(castLabel) }
+                }
             }
         }
     }
@@ -1028,7 +1112,7 @@ private fun HostCard(
 
 /** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
 @Composable
-private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
+private fun statusLine(parts: List<HostStatus.Part>, now: Long): AnnotatedString {
     val accent = MaterialTheme.colorScheme.primary
     val error = MaterialTheme.colorScheme.error
     val words = parts.map { part ->
@@ -1040,6 +1124,13 @@ private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
             HostStatus.Part.UnpairedByIt -> stringResource(R.string.status_unpaired_by_it)
             HostStatus.Part.OpensAtLaunch -> stringResource(R.string.status_auto)
             is HostStatus.Part.Ports -> stringResource(R.string.host_ports, part.stream, part.control)
+            is HostStatus.Part.LastUsed -> when (val ago = HostStatus.ago(part.at, now)) {
+                HostStatus.Ago.JustNow -> stringResource(R.string.status_used_just_now)
+                is HostStatus.Ago.Minutes -> pluralStringResource(R.plurals.status_used_minutes, ago.n, ago.n)
+                is HostStatus.Ago.Hours -> pluralStringResource(R.plurals.status_used_hours, ago.n, ago.n)
+                is HostStatus.Ago.Days -> pluralStringResource(R.plurals.status_used_days, ago.n, ago.n)
+                HostStatus.Ago.LongAgo -> stringResource(R.string.status_used_long_ago)
+            }
         }
     }
     return buildAnnotatedString {

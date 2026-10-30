@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1054 open items.
+1071 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 39 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 44 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
-| A second phone | 15 |
+| A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 133 |
+| A second computer | 143 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -131,7 +131,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
 
-**240. One version across my devices**
+**241. Remove a lost device from another of yours (remote revoke)**
+
+- Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeDevicesThere` or `nativeRemoveThere`. Pair the OPPO with a throwaway server's own code (Pair page, not "Someone else's"): `pocketdesk devices --json` there says `"owner": true` for it; a phone paired before this build says `false` until it pairs again.
+- On the OPPO, the throwaway computer's card → Devices on this computer: the list shows the OPPO first ("phone, this phone, connected") with no Remove, and each other device with Remove…; the answer names no address or key (logcat of the answer, counts only).
+- Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
+- On the throwaway computer, Settings, Other computers, "Let my devices remove others from afar" off: the OPPO's Devices on this computer says the owner turned it off, and nothing is removed; on again, it lists. Start a removal and close the sheet before the answer, then open it again: the list shows what is there now, never another ask's answer.
+- Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
+
+**242. One version across my devices**
 
 - The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here)
 - A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
@@ -557,6 +565,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
 
+**240. Keys by position in a computer's screen window**
+
+- An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -722,6 +734,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **198. Files to several phones or computers at once (P6)**
 
 - Two real targets (the OPPO and a second computer, or two phones): both offered, each its own row in the sent list.
+
+**241. Remove a lost device from another of yours (remote revoke)**
+
+- Pair a second device (a guest grant, `pocketdesk pair --grant 15m`, from a scripted client or a second phone) and Remove it from the OPPO: the dialog names it, Remove takes it off at once (`pocketdesk devices --json` no longer lists it), its open session and control connection end within a second, and the throwaway computer shows "<OPPO's name> removed <device> from this computer" once; `pocketdesk events` shows `device_removed` with `by` the OPPO's id.
 
 ## Away from home: another network, or through a router
 
@@ -1072,7 +1088,23 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Windows and the Linux laptop sharing the keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there", once with Windows' keyboard on the laptop and once with it home: both times the bar says it was refused (it shares its keyboard and mouse), and Windows' keys and clicks still work. With shared input off on Windows, the same ask is taken (keyboard blocked, ring shown); then Ctrl+Alt+Del, Lock, and unlock Windows (and again with Windows+L): within about a second of the unlock the grab ends and Windows' keyboard and mouse work. On the laptop as the far side (a grab from Windows' window, shared input off there): `loginctl lock-session`, then `loginctl unlock-session` over ssh, ends the grab only with a locker that sets the locked hint (note which: hyprlock, swaylock, GNOME); and unplugging and plugging the laptop's USB keyboard back in gives a keyboard that types while the grab holds. (where: second computer)
 - Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
 
-**240. One version across my devices**
+**240. Keys by position in a computer's screen window**
+
+- The Linux laptop viewing Windows, Keys by position on, Windows' layout US: in Notepad, the laptop's keys type as on Windows' own keyboard; switch Windows to French (AZERTY): the key labelled Q on the laptop types "a" there. Off again: typing gives what the laptop's keys say, whatever Windows' layout. (where: second computer)
+- Windows viewing the laptop (Hyprland, uinput), Keys by position on: `wev` on the laptop shows each key's code as pressed at Windows (W is 17, the ISO key beside Shift 86 on a 105-key keyboard), Shift going down as pressed; holding W for a second shows one press and repeats, and one release. A game or `wev` sees WASD and Shift held together. (where: second computer)
+- With W held, switch Keys by position off, Alt+Tab away, turn View only on, and close the window, each in turn: `wev` shows W let go each time, nothing stuck. The view reconnecting (stop the laptop's server for a moment) leaves nothing held either. (where: second computer)
+- Lock the pointer with Keys by position off: the bar says "Games usually want Keys by position" with its buttons; free the pointer and click Turn on: it is on, and closing and opening the window for the same computer starts it on (another computer starts as Settings say). "Not now" in a fresh window: locking again does not offer it. (where: second computer)
+- A Linux far side on X11 (enigo, no uinput) with a German layout: Keys by position on, the laptop's Y key types "z" there (by its place, as on uinput and Windows hosts). The phone's own keys on that desktop now go by place too: note what the phone's shortcut sheet's Ctrl+Z does there with a German or AZERTY layout (before this, enigo looked the letter up in the layout). (where: second computer)
+- Keys by position on, Windows far side with two layouts (Alt+Shift switches them): press Ctrl+Alt+Shift+M and Ctrl+Alt+Shift+S at the laptop: a key logger there sees only the first two modifiers pressed and let go, never the third (Alt+Shift alone does switch the layout there, as it should). In a game there: W held, then Ctrl (crouch), then Shift (run): all three are held at once. Ctrl held then C held: C is held as long as it is, not tapped at its release. On a Dvorak layout here, Ctrl and the key printed C copies there and nothing keeps repeating after it is let go. (where: second computer)
+- A Japanese (JIS) or Brazilian (ABNT) keyboard at the laptop, Keys by position on, a Windows far side with that layout: the Ro, Yen, Henkan, Muhenkan and Katakana/Hiragana keys and the keypad's Enter and slash do there what they do on its own keyboard; with a US layout there, note what each does (the scancodes are written from Microsoft's table, not seen on a device). (where: second computer)
+
+**241. Remove a lost device from another of yours (remote revoke)**
+
+- Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer)
+- A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
+- From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
+
+**242. One version across my devices**
 
 - Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
 

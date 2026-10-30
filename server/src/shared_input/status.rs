@@ -486,6 +486,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         };
         pocketdesk_core::local::computers::update(&dir, |file| {
             file.computers.push(computer("dialed", "Arch laptop"));

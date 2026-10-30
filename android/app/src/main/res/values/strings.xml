@@ -28,6 +28,7 @@
     <string name="settings_find">Find a setting</string>
     <string name="settings_find_clear">Clear the search</string>
     <string name="settings_find_none">No setting matches “%1$s”</string>
+    <string name="settings_jump_to">Go to %1$s</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_appearance">Appearance</string>
@@ -747,6 +748,20 @@
     <string name="status_not_paired">Not paired</string>
     <string name="status_unpaired_by_it">No longer paired with this phone</string>
     <string name="status_auto">Connects at launch</string>
+    <string name="status_used_just_now">Used just now</string>
+    <plurals name="status_used_minutes">
+        <item quantity="one">Used %1$d min ago</item>
+        <item quantity="other">Used %1$d min ago</item>
+    </plurals>
+    <plurals name="status_used_hours">
+        <item quantity="one">Used %1$d hour ago</item>
+        <item quantity="other">Used %1$d hours ago</item>
+    </plurals>
+    <plurals name="status_used_days">
+        <item quantity="one">Used %1$d day ago</item>
+        <item quantity="other">Used %1$d days ago</item>
+    </plurals>
+    <string name="status_used_long_ago">Used a while ago</string>
     <string name="rename_title">Rename %1$s</string>
     <string name="rename_label">Name</string>
     <string name="rename_hint">Blank: the name it gives itself</string>
@@ -924,6 +939,31 @@
     <string name="settings_note_to_computer_summary">In the share sheet: text or a link is added, with the time, to the notes file picked in Pocketdesk on your computer</string>
     <string name="card_state">How it is doing</string>
     <string name="card_allowed">What this computer allows</string>
+    <string name="card_devices_there">Devices on this computer</string>
+    <string name="there_title">Devices on %1$s</string>
+    <string name="there_hint">The phones and computers paired with it. Remove one that is lost or stolen: it loses all access there at once, and the computer says who removed it. There is no undo; it pairs again to come back.</string>
+    <string name="there_asking">Asking the computer…</string>
+    <string name="there_no_answer">The computer did not answer. One with an older Pocketdesk cannot list its devices.</string>
+    <string name="there_no_answer_remove">The computer did not answer about %1$s. Open the list again to see whether it went.</string>
+    <string name="there_kind_phone">phone</string>
+    <string name="there_kind_computer">computer</string>
+    <string name="there_kind_you">this phone</string>
+    <string name="there_kind_yours">yours</string>
+    <string name="there_kind_guest">guest</string>
+    <string name="there_kind_connected">connected</string>
+    <string name="there_remove_more">Remove…</string>
+    <string name="there_remove">Remove</string>
+    <string name="there_remove_title">Remove %1$s?</string>
+    <string name="there_remove_text">%1$s loses all access to %2$s at once and must pair again to come back. There is no undo.</string>
+    <string name="there_removed">Removed %1$s.</string>
+    <string name="there_refused_not_owner">The computer lists and removes devices only for a device of yours: a phone paired with its own code. Pair this phone again with the computer\'s own code.</string>
+    <string name="there_refused_too_many">Too many removals in a minute. Wait a minute and try again.</string>
+    <string name="there_refused_yourself">This phone cannot remove itself this way.</string>
+    <string name="there_refused_not_paired">That device is not paired there any more.</string>
+    <string name="there_refused_last_owner">That is the last device of yours there: removing it would leave none to manage it.</string>
+    <string name="there_refused_off">The computer\'s owner turned off removing devices from afar. Remove it at the computer: Devices, Unpair.</string>
+    <string name="there_refused_busy">Too many asks in a minute. Wait a minute and try again.</string>
+    <string name="there_refused_failed">The computer could not do it. Try again.</string>
     <string name="allowed_title">What %1$s allows</string>
     <string name="allowed_hint">A feature works when it is on here and the computer allows it.</string>
     <string name="allowed_asking">Asking the computer…</string>

@@ -177,11 +177,33 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     forget_paired(&dir, &cert_manager, forgetting, &mut links, views.as_ref())
                         .await;
                 }
+                // Remote revoke: its devices, or one of them removed.
+                ComputerAsk::DevicesThere { device_id } => {
+                    let ask = pocketdesk_core::protocol::remote_devices::Ask::List;
+                    crate::remote_devices::ask(&dir, &device_id, ask).await;
+                }
+                ComputerAsk::RemoveThere { device_id, remove } => {
+                    let ask = pocketdesk_core::protocol::remote_devices::Ask::Remove {
+                        device_id: remove,
+                    };
+                    crate::remote_devices::ask(&dir, &device_id, ask).await;
+                }
+                ComputerAsk::CloseThere { device_id } => {
+                    let dir = dir.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::remote_devices::close_there(&dir, &device_id)
+                    })
+                    .await;
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
                 // PC6: the magic packet, as the computer told this one.
                 ComputerAsk::Wake { device_id } => asked_wake(&dir, device_id),
+                // The window's Keys by position, kept for that computer.
+                ComputerAsk::KeysByPosition { device_id, on } => {
+                    keys_by_position(&dir, &device_id, on);
+                }
                 ComputerAsk::View {
                     device_id,
                     monitor,
@@ -1065,6 +1087,7 @@ async fn pair_with(
         mine,
         wake: None,
         viewed_unix: 0,
+        keys_by_position: None,
     };
     let mut was = None;
     let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
@@ -2348,6 +2371,28 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         tokio::spawn(fetch_offer(device_id.to_string(), packet.body.clone()));
         return;
     }
+    // Remote revoke: its ask of this one's devices, held to the same owner
+    // gate as on a connection (a computer this one paired into alone is no
+    // owner device here), or its answer to this one's ask.
+    if packet.packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES {
+        let (to, body) = (device_id.to_string(), packet.body.clone());
+        tokio::spawn(async move {
+            if let Some(answer) = crate::remote_devices::answer(&to, &body).await
+                && let Some(outgoing) = live(&to)
+            {
+                let packet = NetworkPacket::new(
+                    pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER,
+                )
+                .with_body(answer);
+                let _ = outgoing.send(packet).await;
+            }
+        });
+        return;
+    }
+    if packet.packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER {
+        crate::remote_devices::heard(device_id, &packet.body).await;
+        return;
+    }
     if packet.packet_type == crate::plugins::share::FETCH_REFUSED {
         if let (Some(key), reason) = (
             packet.body.get("key").and_then(|v| v.as_str()),
@@ -2480,6 +2525,19 @@ fn viewed(dir: &Path, device_id: &str) {
     });
     if let Err(e) = saved {
         tracing::debug!("Could not record when a computer was viewed: {e}");
+    }
+}
+
+/// Keep the window's "Keys by position" for `device_id`, as its bar was
+/// switched; a computer not listed keeps nothing.
+fn keys_by_position(dir: &Path, device_id: &str, on: bool) {
+    let saved = computers::update(dir, |file| {
+        if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+            c.keys_by_position = Some(on);
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not keep a computer's Keys by position: {e}");
     }
 }
 
@@ -2809,6 +2867,7 @@ mod tests {
                 mine: true,
                 wake: None,
                 viewed_unix: 0,
+                keys_by_position: None,
             })
         })
         .unwrap();
@@ -2915,6 +2974,33 @@ mod tests {
         let before = pocketdesk_core::local::pin::now_unix();
         viewed(&dir, "pc-b");
         assert!(computers::read(&dir).computers[0].viewed_unix >= before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The window's Keys by position is kept on the computer's entry, on
+    /// and off again; a computer not listed keeps nothing.
+    #[test]
+    fn keys_by_position_is_kept_for_its_computer() {
+        let dir = temp("keys-by-position");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "pc-b".to_string(),
+                ..ComputerFacts::into_peer(facts(), "pc-b", "", 1)
+            })
+        })
+        .unwrap();
+        keys_by_position(&dir, "pc-x", true);
+        assert_eq!(computers::read(&dir).computers[0].keys_by_position, None);
+        keys_by_position(&dir, "pc-b", true);
+        assert_eq!(
+            computers::read(&dir).computers[0].keys_by_position,
+            Some(true)
+        );
+        keys_by_position(&dir, "pc-b", false);
+        assert_eq!(
+            computers::read(&dir).computers[0].keys_by_position,
+            Some(false)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3607,6 +3693,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();

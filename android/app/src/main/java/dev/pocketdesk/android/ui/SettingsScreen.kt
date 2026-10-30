@@ -5,7 +5,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -30,6 +34,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -47,6 +52,7 @@ import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.doctor.BackgroundLimit
 import dev.pocketdesk.android.doctor.BackgroundRunning
 import dev.pocketdesk.android.notify.PhoneNotificationPrefs
+import kotlinx.coroutines.launch
 
 /**
  * Settings, in groups (U4): This phone, Session, Files and links, In the
@@ -76,6 +82,9 @@ fun SettingsScreen(onBack: () -> Unit) {
     BackHandler(enabled = query.isNotEmpty()) { query = "" }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
+    val scroll = rememberScrollState()
+    val jumps = remember { SettingsJumps() }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -89,13 +98,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
         },
     ) { padding ->
+        // The search box and the groups' row stay on screen above the
+        // scrolled settings (PR #575 review N4: in the scroll, the row was
+        // above the fold after a first jump).
         Column(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = 24.dp),
+                    .padding(padding),
         ) {
             // O8: find a setting; Back empties the box first.
             OutlinedTextField(
@@ -122,6 +132,15 @@ fun SettingsScreen(onBack: () -> Unit) {
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             )
+            // UX1: the groups, to jump to one; not while searching, when the
+            // search already shows only what matches.
+            SettingsJumpRow(jumps, scroll, shown = !SettingsSearch.searching(query))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(scroll)
+                    .padding(bottom = 24.dp),
+            ) {
             if (filter.nothingFound()) {
                 Text(
                     stringResource(R.string.settings_find_none, query.trim()),
@@ -133,7 +152,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
                 )
             }
-            CompositionLocalProvider(LocalSettingsFilter provides filter) {
+            CompositionLocalProvider(LocalSettingsFilter provides filter, LocalSettingsJumps provides jumps) {
             // U3: what this phone calls itself to computers.
             SettingsGroup(stringResource(R.string.settings_this_phone)) {
                 var phoneName by remember { mutableStateOf(Prefs.phoneName(context)) }
@@ -631,6 +650,40 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
             }
+            }
+        }
+    }
+}
+
+/**
+ * UX1: a row of Settings' groups that scrolls [scroll] to the one tapped.
+ * Its own composable, so only it reads where the headings are (PR #575
+ * review N5: read in the screen's lambda, each heading's place recomposed
+ * every row); its own scroll is kept while a search hides it.
+ */
+@Composable
+private fun SettingsJumpRow(jumps: SettingsJumps, scroll: androidx.compose.foundation.ScrollState, shown: Boolean) {
+    val scope = rememberCoroutineScope()
+    val rowScroll = rememberScrollState()
+    if (!shown) return
+    val groups = jumps.ordered()
+    if (groups.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rowScroll)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        groups.forEach { (label, top) ->
+            // Said as "Go to Wake", not twelve bare names before the first
+            // setting (PR #575 review N6).
+            val goTo = stringResource(R.string.settings_jump_to, label)
+            SuggestionChip(
+                onClick = { scope.launch { scroll.animateScrollTo(top) } },
+                label = { Text(label) },
+                modifier = Modifier.semantics { contentDescription = goTo },
+            )
         }
     }
 }

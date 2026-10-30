@@ -19,6 +19,7 @@
     <string name="settings_find">Buscar un ajuste</string>
     <string name="settings_find_clear">Borrar la búsqueda</string>
     <string name="settings_find_none">Ningún ajuste coincide con «%1$s»</string>
+    <string name="settings_jump_to">Ir a %1$s</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_back">Atrás</string>
     <string name="settings_appearance">Apariencia</string>
@@ -744,6 +745,20 @@
     <string name="status_not_paired">Sin emparejar</string>
     <string name="status_unpaired_by_it">Ya no está emparejado con este teléfono</string>
     <string name="status_auto">Se conecta al abrir</string>
+    <string name="status_used_just_now">Usado hace un momento</string>
+    <plurals name="status_used_minutes">
+        <item quantity="one">Usado hace %1$d min</item>
+        <item quantity="other">Usado hace %1$d min</item>
+    </plurals>
+    <plurals name="status_used_hours">
+        <item quantity="one">Usado hace %1$d hora</item>
+        <item quantity="other">Usado hace %1$d horas</item>
+    </plurals>
+    <plurals name="status_used_days">
+        <item quantity="one">Usado hace %1$d día</item>
+        <item quantity="other">Usado hace %1$d días</item>
+    </plurals>
+    <string name="status_used_long_ago">Usado hace tiempo</string>
     <string name="rename_title">Renombrar %1$s</string>
     <string name="rename_label">Nombre</string>
     <string name="rename_hint">En blanco: el nombre que se da a sí mismo</string>
@@ -1065,4 +1080,29 @@
     <string name="settings_copies">Enviar lo que copio por sí solo</string>
     <string name="settings_copies_summary_off">Lo que copias en este teléfono va al portapapeles de su equipo por sí solo, no solo desde el mosaico del portapapeles. Nunca una copia que una app marca como sensible (una contraseña). Usa el servicio de accesibilidad “Pocketdesk control” y necesita que el teléfono muestre la vista previa del portapapeles al copiar</string>
     <string name="settings_copies_summary_on">Activado: lo que copias va al equipo propio de este teléfono por sí solo, nunca una copia sensible. Android avisa “Pocketdesk pegó desde tu portapapeles” cada vez</string>
+    <string name="card_devices_there">Dispositivos en esta computadora</string>
+    <string name="there_title">Dispositivos en %1$s</string>
+    <string name="there_hint">Los teléfonos y computadoras vinculados con ella. Quita uno perdido o robado: pierde todo acceso allí al instante, y la computadora dice quién lo quitó. No se puede deshacer; vuelve vinculándose de nuevo.</string>
+    <string name="there_asking">Preguntando a la computadora…</string>
+    <string name="there_no_answer">La computadora no respondió. Una con un Pocketdesk anterior no puede listar sus dispositivos.</string>
+    <string name="there_no_answer_remove">La computadora no respondió sobre %1$s. Abre la lista de nuevo para ver si se quitó.</string>
+    <string name="there_kind_phone">teléfono</string>
+    <string name="there_kind_computer">computadora</string>
+    <string name="there_kind_you">este teléfono</string>
+    <string name="there_kind_yours">tuyo</string>
+    <string name="there_kind_guest">invitado</string>
+    <string name="there_kind_connected">conectado</string>
+    <string name="there_remove_more">Quitar…</string>
+    <string name="there_remove">Quitar</string>
+    <string name="there_remove_title">¿Quitar %1$s?</string>
+    <string name="there_remove_text">%1$s pierde todo acceso a %2$s al instante y debe vincularse de nuevo para volver. No se puede deshacer.</string>
+    <string name="there_removed">Se quitó %1$s.</string>
+    <string name="there_refused_not_owner">La computadora lista y quita dispositivos solo para un dispositivo tuyo: un teléfono vinculado con su propio código. Vincula este teléfono de nuevo con el código de la computadora.</string>
+    <string name="there_refused_too_many">Demasiadas eliminaciones en un minuto. Espera un minuto e inténtalo de nuevo.</string>
+    <string name="there_refused_yourself">Este teléfono no puede quitarse a sí mismo de esta forma.</string>
+    <string name="there_refused_not_paired">Ese dispositivo ya no está vinculado allí.</string>
+    <string name="there_refused_last_owner">Es el último dispositivo tuyo allí: quitarlo no dejaría ninguno para administrarla.</string>
+    <string name="there_refused_off">El dueño de la computadora desactivó quitar dispositivos a distancia. Quítalo en la computadora: Dispositivos, Desvincular.</string>
+    <string name="there_refused_busy">Demasiadas solicitudes en un minuto. Espera un minuto e inténtalo de nuevo.</string>
+    <string name="there_refused_failed">La computadora no pudo hacerlo. Inténtalo de nuevo.</string>
 </resources>

@@ -23,6 +23,7 @@ pub mod phone_photos;
 pub mod phone_screen;
 pub mod quiet;
 pub mod relpath;
+pub mod remote_devices;
 pub mod transfer;
 pub mod typing;
 pub mod v2;

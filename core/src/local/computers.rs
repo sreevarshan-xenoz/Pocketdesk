@@ -73,6 +73,12 @@ pub struct PeerComputer {
     /// recently first.
     #[serde(default)]
     pub viewed_unix: u64,
+    /// Whether the window that shows its screen here sends keys by their
+    /// position (scancode mode, for games) rather than typing text: the
+    /// window's "Keys by position", as last chosen for this computer.
+    /// `None` until chosen, when Settings' `computer_view_scancodes` says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys_by_position: Option<bool>,
 }
 
 /// `computers` with the one viewed most recently first (PC6), those never
@@ -163,6 +169,7 @@ impl ComputerFacts {
             mine: true,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         }
     }
 }
@@ -238,6 +245,43 @@ pub struct ComputersFile {
     /// instead. Absent in files written before.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub versions: BTreeMap<String, String>,
+    /// Remote revoke: this computer's last ask of another computer's
+    /// devices ("Devices there…"), and what it answered. Absent in files
+    /// written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub there: Option<DevicesThere>,
+}
+
+/// This computer's ask of the devices paired with another of the owner's
+/// computers (remote revoke), as the server keeps it for the app.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevicesThere {
+    /// The computer asked.
+    pub device_id: String,
+    /// The ask on the wire waiting for its answer
+    /// ([`crate::protocol::remote_devices::Request::request`]); empty once
+    /// answered.
+    #[serde(default)]
+    pub request: String,
+    /// When it was asked (unix seconds).
+    pub asked_unix: u64,
+    /// The device a removal asked for, while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removing: Option<String>,
+    /// The devices there, as last listed.
+    #[serde(default)]
+    pub devices: Vec<crate::protocol::remote_devices::ThereDevice>,
+    /// When the list was last answered (unix seconds), 0 never.
+    #[serde(default)]
+    pub listed_unix: u64,
+    /// What the last removal came to: `removed <name>`, or `refused:
+    /// <code>` ([`crate::protocol::remote_devices::Refusal::code`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The computer refused to answer this one at all (`not_owner`), or
+    /// it could not be asked (`not_linked`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
 }
 
 /// How long a grant both ways waits for the link before it lapses (PC1).
@@ -330,6 +374,14 @@ impl ComputersFile {
         let computer = self.computers.remove(at);
         self.pending.retain(|id| id != device_id);
         self.lapsed.retain(|id| id != device_id);
+        // Its devices' list goes with it (remote revoke).
+        if self
+            .there
+            .as_ref()
+            .is_some_and(|t| t.device_id == device_id)
+        {
+            self.there = None;
+        }
         if self
             .last_pairing
             .as_ref()
@@ -399,6 +451,10 @@ pub enum ComputerAsk {
     /// Send the magic packet that wakes the computer `device_id` (PC6),
     /// as it told this one ([`PeerComputer::wake`]).
     Wake { device_id: String },
+    /// Remember for the computer `device_id` whether its screen window
+    /// sends keys by position ([`PeerComputer::keys_by_position`]), as the
+    /// window's bar was switched.
+    KeysByPosition { device_id: String, on: bool },
     /// Stop this computer's ask of a nearby one.
     CancelNearby,
     /// The owner here confirmed that both screens show the code of this
@@ -414,6 +470,17 @@ pub enum ComputerAsk {
         #[serde(default)]
         mine: bool,
     },
+    /// List the devices paired with the computer `device_id`, one of the
+    /// owner's paired both ways (remote revoke): the answer goes in
+    /// [`ComputersFile::there`].
+    DevicesThere { device_id: String },
+    /// Remove the device `remove` from the computer `device_id` (remote
+    /// revoke), as its own Devices page's Unpair would.
+    RemoveThere { device_id: String, remove: String },
+    /// Forget what the computer `device_id` listed (remote revoke): its
+    /// "Devices there…" was closed, and the names of its devices are not
+    /// kept here past that.
+    CloseThere { device_id: String },
     /// Stop showing the computer's screen (its window closed): the view
     /// `session_id` (`view.json`'s) when the window knew it, else the one
     /// shown now. A Stop for a view since replaced stops nothing (BK7
@@ -701,6 +768,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: 0,
+            keys_by_position: None,
         }
     }
 
@@ -960,6 +1028,41 @@ mod tests {
         let back: PeerComputer =
             serde_json::from_str(&serde_json::to_string(&told).unwrap()).unwrap();
         assert_eq!(back, told);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Keys by position: the window's choice for a computer is asked by its
+    /// id and kept on its entry; a file from before, or a computer never
+    /// switched, has no choice of its own.
+    #[test]
+    fn keys_by_position_is_asked_and_kept_for_a_computer() {
+        let dir = temp_dir("keys-by-position");
+        let ask = ComputerAsk::KeysByPosition {
+            device_id: "desk".to_string(),
+            on: true,
+        };
+        let asked = request(&dir, ask.clone(), 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        assert_eq!(
+            serde_json::to_value(&ask).unwrap(),
+            serde_json::json!({"ask": "keys_by_position", "device_id": "desk", "on": true})
+        );
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        assert!(
+            !raw.contains("keys_by_position"),
+            "no choice is not written"
+        );
+        let old: PeerComputer = serde_json::from_str(&raw).unwrap();
+        assert_eq!(old.keys_by_position, None);
+        for chosen in [Some(true), Some(false)] {
+            let kept = PeerComputer {
+                keys_by_position: chosen,
+                ..computer("desk")
+            };
+            let back: PeerComputer =
+                serde_json::from_str(&serde_json::to_string(&kept).unwrap()).unwrap();
+            assert_eq!(back, kept);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

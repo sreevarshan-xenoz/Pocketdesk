@@ -315,6 +315,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "remote_revoke",
+        "Let my devices remove others from afar",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -353,6 +358,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
     (
         "computer_view_lock_on_close",
         "Lock it when I close the window",
+        Section::Computers,
+    ),
+    (
+        "computer_view_scancodes",
+        "Keys by position",
         Section::Computers,
     ),
     (
@@ -625,6 +635,8 @@ pub fn applies_live(key: &str) -> bool {
         "version_hints" |
         // Read by the server at each nearby computer's ask.
         "nearby_pairing"
+            // Remote revoke: read by the server at each ask.
+            | "remote_revoke"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -639,6 +651,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_hevc"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
+            // Read as each window opens.
+            | "computer_view_scancodes"
             // PC10: read as the window's mic starts.
             | "computer_view_mic_device"
             | "events"
@@ -2150,6 +2164,14 @@ impl SettingsForm {
                         "Their ask shows a matching code; only your Accept pairs.",
                     );
                 });
+                // Remote revoke: an owner device lists and removes others.
+                row(ui, "remote_revoke", |ui| {
+                    ui.checkbox(&mut e.remote_revoke, name("remote_revoke"));
+                    note(
+                        ui,
+                        "Your own phone and computers paired both ways may list this computer's devices and remove a lost one. Off: only Devices → Unpair here removes one.",
+                    );
+                });
                 // BK7: "Show its screen" is on each computer's line below.
                 row(ui, "computer_view_quality", |ui| {
                     let named = e.computer_view_quality.trim().to_ascii_lowercase();
@@ -2239,6 +2261,18 @@ impl SettingsForm {
                     note(
                         ui,
                         "With that computer's own lock, when the window closes, or Pocketdesk quits with it open, while it shows that computer (not while it reconnects); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
+                    );
+                });
+                // Keys by position: the window's start for a computer with
+                // no choice of its own.
+                row(ui, "computer_view_scancodes", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_scancodes,
+                        "keys by position: a computer's screen window sends every key as the key at its place on the keyboard, for games, instead of the text it types here",
+                    );
+                    note(
+                        ui,
+                        "The other computer's own keyboard layout then says what each key types. The window's bar switches it for each computer, and that choice is kept for that computer; this is the start for a computer never switched. Shortcuts follow the key's place there too, and the keypad's digits go as the main keyboard's.",
                     );
                 });
                 // PC10: the microphone "Send my mic" sends.
@@ -3051,6 +3085,7 @@ mod tests {
             "computer_view_hw_decode",
             "computer_view_hevc",
             "computer_view_lock_on_close",
+            "computer_view_scancodes",
             "computer_view_mic_device",
         ] {
             assert!(

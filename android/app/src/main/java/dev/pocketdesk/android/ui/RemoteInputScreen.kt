@@ -114,6 +114,8 @@ fun RemoteInputScreen(
                 // Item 4: and the release it runs.
                 HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
                 shownName = HostStore.shownName(context, address)
+                // UX1: its card's "Used just now".
+                HostStore.markUsed(context, address)
                 tell.up(Prefs.tellOtherApps(context))
             }
             State.Down, State.TooOld -> tell.lost()

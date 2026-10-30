@@ -1019,6 +1019,12 @@ impl PocketdeskApp {
                 .as_ref()
                 .is_none_or(|c| c.computer_view_grab_keys),
         );
+        // Keys by position, for a computer with no choice of its own.
+        view.set_keys_by_position_default(
+            self.config
+                .as_ref()
+                .is_some_and(|c| c.computer_view_scancodes),
+        );
         // PC8: "Lock it when I close the window" follows Settings too.
         view.set_lock_on_close(
             self.config

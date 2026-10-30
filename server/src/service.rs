@@ -1684,6 +1684,9 @@ where
             }
         };
 
+        // Remote revoke: a device removed from afar is closed at once,
+        // listened for from before it is seeded (PR #574 review N9).
+        let mut closing = state::closing();
         let sender: Arc<dyn DeviceSender> = Arc::new(
             TcpDeviceSender::from_arc(writer, device_id.clone())
                 .with_peer(peer)
@@ -1728,11 +1731,19 @@ where
         tracing::info!("Entering main packet loop");
         loop {
             let mut line = String::new();
-            let read_result = timeout(
-                Duration::from_secs(60),
-                read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
-            )
-            .await;
+            let read_result = tokio::select! {
+                read = timeout(
+                    Duration::from_secs(60),
+                    read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
+                ) => read,
+                () = state::closed(&device_id, &mut closing, || {
+                    !state::may_receive_pushes(sender_ref)
+                }) => {
+                    tracing::info!("Closing {device_id}'s connection: it was removed");
+                    tell_not_paired(sender_ref).await;
+                    break;
+                }
+            };
 
             match read_result {
                 Ok(Ok(0)) => {
@@ -3256,5 +3267,76 @@ async fn follow_addresses(
             Ok(Err(e)) => tracing::warn!("Could not announce again at the new addresses: {e}"),
             Err(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Remote revoke (PR #574 review I4): a control connection whose
+    /// device is removed from afar ends at once through the loop's own
+    /// `select!`, saying `not_paired` first, though the device never sends
+    /// another packet.
+    #[tokio::test]
+    async fn a_removed_device_s_connection_closes_at_once_saying_not_paired() {
+        crate::state::use_test_dirs();
+        let device = "0d7c3a52-91e4-4b6f-8a2e-00000000c105";
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let registry = Arc::new(PluginRegistry::new());
+        let served = tokio::spawn(async move {
+            serve_control(
+                server,
+                Road::Local {
+                    peer: Some("192.0.2.7:50000".parse().unwrap()),
+                    local: None,
+                },
+                None,
+                None,
+                None,
+                None,
+                &registry,
+                None,
+                None,
+                true,
+            )
+            .await
+        });
+        let (read, mut write) = tokio::io::split(client);
+        let mut lines = BufReader::new(read).lines();
+        write
+            .write_all(format!("{HANDSHAKE_HELLO}\n").as_bytes())
+            .await
+            .unwrap();
+        assert_eq!(
+            lines.next_line().await.unwrap().as_deref(),
+            Some(HANDSHAKE_OK)
+        );
+        let identity = NetworkPacket::new("kdeconnect.identity").with_body(serde_json::json!({
+            "deviceId": device,
+            "deviceName": "Lost phone",
+            "deviceType": "phone",
+        }));
+        write.write_all(&identity.to_wire().unwrap()).await.unwrap();
+        // Named until the loop hears it: it may still be in its handshake.
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                crate::state::close_device(device);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                if served.is_finished() {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(closed.is_ok(), "the loop ends at the removal");
+        let mut rest = String::new();
+        let mut inner = lines.into_inner();
+        let _ = tokio::time::timeout(Duration::from_secs(1), inner.read_to_string(&mut rest)).await;
+        assert!(
+            rest.contains(pocketdesk_core::protocol::connection::NOT_PAIRED),
+            "not_paired said as it closes: {rest}"
+        );
     }
 }

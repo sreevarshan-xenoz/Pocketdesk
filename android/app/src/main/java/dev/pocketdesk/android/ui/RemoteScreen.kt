@@ -874,6 +874,8 @@ fun RemoteScreen(
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
             // Item 4: and the release it runs.
             HostStore.saveClaimedVersion(context, address, RustCore.peerVersion(address))
+            // UX1: its card's "Used just now".
+            HostStore.markUsed(context, address)
         }
     }
     LaunchedEffect(streamUps) {

@@ -24,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -34,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.pocketdesk.android.R
+import kotlin.math.roundToInt
 
 /*
  * The parts every Settings row is made of (U4): a group's heading, marked as
@@ -111,14 +114,43 @@ fun SettingsBlock(vararg texts: String?, content: @Composable () -> Unit) {
     if (rememberSettingShown(*texts)) content()
 }
 
+/**
+ * UX1: where each group's heading sits in Settings' scrolled column, for the
+ * row of groups under the search box to jump to: twelve groups and about a
+ * hundred rows in one scroll had only the search to find a group by.
+ */
+class SettingsJumps {
+    internal val tops = mutableStateMapOf<String, Int>()
+
+    /** The headings drawn, top to bottom, each with its offset in the column. */
+    fun ordered(): List<Pair<String, Int>> = tops.entries.sortedBy { it.value }.map { it.key to it.value }
+}
+
+/** Settings' jumps; outside Settings (the Sound screen's rows) none. */
+val LocalSettingsJumps = compositionLocalOf<SettingsJumps?> { null }
+
 /** A group's heading. */
 @Composable
 fun SettingsHeader(label: String) {
+    val jumps = LocalSettingsJumps.current
+    if (jumps != null) {
+        DisposableEffect(jumps, label) { onDispose { jumps.tops.remove(label) } }
+    }
     Text(
         label,
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
+            .then(
+                if (jumps == null) {
+                    Modifier
+                } else {
+                    Modifier.onGloballyPositioned { at ->
+                        val top = at.positionInParent().y.roundToInt()
+                        if (jumps.tops[label] != top) jumps.tops[label] = top
+                    }
+                },
+            )
             .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 4.dp)
             .semantics { heading() },
     )

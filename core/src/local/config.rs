@@ -189,6 +189,13 @@ pub struct Config {
     /// default; off, every ask is turned away unseen.
     #[serde(default = "default_nearby_pairing")]
     pub nearby_pairing: bool,
+    /// Let my devices remove others from afar (remote revoke): an owner
+    /// device (a phone paired with this computer's own code, or a computer
+    /// paired both ways) may list this computer's paired devices and
+    /// remove one. On by default; off, both are refused (`off`), and a
+    /// device is removed only here (Devices → Unpair, `pocketdesk unpair`).
+    #[serde(default = "default_remote_revoke")]
+    pub remote_revoke: bool,
     /// Keep the last this many texts that crossed between this computer and
     /// its phones, either way (D3); 0 keeps none. Off by default: the texts
     /// stay on disk, owner-only.
@@ -417,6 +424,13 @@ pub struct Config {
     /// chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_lock_on_close: bool,
+    /// A computer's screen window starts with "Keys by position" (scancode
+    /// mode): every key goes to that computer as the key at its place on
+    /// the keyboard, for games, instead of typing text. Each computer's own
+    /// choice on the window's bar, kept in `computers.json`, comes first.
+    /// Read as each window opens. Off by default.
+    #[serde(default)]
+    pub computer_view_scancodes: bool,
     /// The microphone a computer's screen window sends to that computer
     /// with "Send my mic" (PC10): part of its name as Windows lists it, or
     /// the source's name on Linux. None (blank) is the system's default
@@ -549,6 +563,10 @@ fn default_nearby_pairing() -> bool {
     true
 }
 
+fn default_remote_revoke() -> bool {
+    true
+}
+
 fn default_pairing_required() -> bool {
     true
 }
@@ -608,6 +626,7 @@ impl Default for Config {
             received_images_clipboard: false,
             computer_clipboard: false,
             nearby_pairing: true,
+            remote_revoke: true,
             clipboard_history: 0,
             clipboard_never_from: Vec::new(),
             clipboard_never_like: Vec::new(),
@@ -662,6 +681,7 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
+            computer_view_scancodes: false,
             computer_view_mic_device: None,
             computer_wake_facts: true,
             version_hints: true,
@@ -874,6 +894,7 @@ impl Config {
         "phone_media_controls",
         "computer_clipboard",
         "nearby_pairing",
+        "remote_revoke",
         "clipboard_history",
         "clipboard_never_from",
         "clipboard_never_like",
@@ -927,6 +948,7 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_lock_on_close",
+        "computer_view_scancodes",
         "computer_view_mic_device",
         "computer_wake_facts",
         "version_hints",
@@ -1525,6 +1547,28 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_lock_on_close"]
+        );
+    }
+
+    /// Keys by position: a computer's screen window types text unless
+    /// chosen, and the choice saves and reads back.
+    #[test]
+    fn a_computers_window_sends_keys_by_position_only_once_chosen() {
+        let path = temp("computer-view-scancodes");
+        std::fs::write(&path, "").unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_scancodes);
+        assert!(!Config::default().computer_view_scancodes);
+        let chosen = Config {
+            computer_view_scancodes: true,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_scancodes"])
+            .unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_scancodes);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_scancodes"]
         );
     }
 
