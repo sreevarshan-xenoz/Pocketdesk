@@ -14,6 +14,10 @@
 //! server's binary) with a real encoder, which reach iroh's relays. Run it
 //! with
 //! `POCKETDESK_SERVER_EXE=<target>/debug/pocketdesk.exe cargo test -p pocketdesk-desktop view_live -- --ignored --nocapture`.
+//!
+//! `the_decoder_on_a_running_pairs_view` measures the same on a pair that
+//! already runs, across a network too (PC9a: the Linux laptop decoding a
+//! Windows computer's screen): see its comment for the variables.
 
 use std::io::Write;
 use std::net::{Ipv4Addr, TcpStream};
@@ -253,6 +257,107 @@ fn ms(d: Option<Duration>) -> String {
     })
 }
 
+/// The ways this platform's window tries (PC5): the processor before and
+/// after PC5, the platform's card (Direct3D 11 on Windows, VA-API at each
+/// render node on Linux) and ffmpeg's own pick.
+fn ways() -> Vec<(String, Accel, Planes)> {
+    let mut ways = vec![
+        (
+            "software, RGBA (before PC5)".to_string(),
+            Accel::Software,
+            Planes::Rgba,
+        ),
+        ("software, NV12".to_string(), Accel::Software, Planes::Nv12),
+    ];
+    if cfg!(windows) {
+        ways.push(("d3d11va, NV12".to_string(), Accel::D3d11va, Planes::Nv12));
+    } else if let Ok(nodes) = std::fs::read_dir("/dev/dri") {
+        let mut nodes: Vec<String> = nodes
+            .flatten()
+            .map(|e| e.path().to_string_lossy().into_owned())
+            .filter(|n| n.contains("renderD"))
+            .collect();
+        nodes.sort();
+        for node in nodes {
+            let accel = Accel::Vaapi(node);
+            ways.push((format!("{}, NV12", accel.words()), accel, Planes::Nv12));
+        }
+    }
+    ways.push(("auto, NV12".to_string(), Accel::Auto, Planes::Nv12));
+    ways
+}
+
+/// Measure each way (`PD_LIVE_WAYS` picks some by their names' starts) on
+/// A's view of B, print the numbers, then stop the view.
+fn measure_ways(a_state: &Path, b_id: &str, secs: u64, screen: &str) {
+    let wanted = std::env::var("PD_LIVE_WAYS").unwrap_or_default();
+    for (name, accel, planes) in ways() {
+        if !wanted.is_empty() && !wanted.split(',').any(|w| name.starts_with(w.trim())) {
+            continue;
+        }
+        let Some(m) = measure(a_state, b_id, secs, &accel, planes) else {
+            println!("{screen}, {name}: no picture");
+            continue;
+        };
+        println!(
+            "{screen}, {}, {name}: {} frames in ({} KB each), {} pictures in {secs} s, decode p50 {} p95 {}, {} bytes a picture, {:?}",
+            m.codec,
+            m.frames_in,
+            m.encoded / m.frames_in.max(1) / 1000,
+            m.pictures,
+            ms(m.p50),
+            ms(m.p95),
+            m.bytes_per_picture,
+            m.size
+        );
+        if accel == Accel::Software {
+            assert!(m.pictures > 0, "{name}: no picture");
+        }
+    }
+    let session_id = wire::read(a_state).map(|v| v.session_id);
+    let _ = computers::request(
+        a_state,
+        ComputerAsk::StopView {
+            session_id,
+            lock: false,
+            window: 0,
+        },
+        pin::now_unix(),
+    );
+}
+
+/// The same measure on a pair already running, here or across a network
+/// (PC9a: the Linux laptop's window decoding a Windows computer's screen):
+/// `PD_LIVE_A_STATE` is the viewing server's state folder, `PD_LIVE_B_ID`
+/// the computer it shows, already paired, and letting it in view-only
+/// without asking (its trust entry's Input off; this test sends no input
+/// at all). `PD_LIVE_SECS` (default 10) a way. Numbers only: no picture is
+/// kept.
+#[test]
+#[ignore = "needs a running server paired with another computer"]
+fn the_decoder_on_a_running_pairs_view() {
+    let a_state = PathBuf::from(
+        std::env::var_os("PD_LIVE_A_STATE").expect("PD_LIVE_A_STATE, the viewer's state folder"),
+    );
+    let b_id = std::env::var("PD_LIVE_B_ID").expect("PD_LIVE_B_ID, the computer shown");
+    let secs = std::env::var("PD_LIVE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    computers::request(
+        &a_state,
+        ComputerAsk::View {
+            device_id: b_id.clone(),
+            monitor: 0,
+            hevc: false,
+            window: 0,
+        },
+        pin::now_unix(),
+    )
+    .unwrap();
+    measure_ways(&a_state, &b_id, secs, "the other computer's screen");
+}
+
 #[test]
 #[ignore = "starts two real servers and a real encoder, which reach iroh's relays"]
 fn the_windows_decoder_on_a_real_view() {
@@ -345,46 +450,7 @@ fn the_windows_decoder_on_a_real_view() {
     } else {
         "this screen"
     };
-    let ways = [
-        ("software, RGBA (before PC5)", Accel::Software, Planes::Rgba),
-        ("software, NV12", Accel::Software, Planes::Nv12),
-        ("d3d11va, NV12", Accel::D3d11va, Planes::Nv12),
-        ("auto, NV12", Accel::Auto, Planes::Nv12),
-    ];
-    let wanted = std::env::var("PD_LIVE_WAYS").unwrap_or_default();
-    for (name, accel, planes) in ways {
-        if !wanted.is_empty() && !wanted.split(',').any(|w| name.starts_with(w.trim())) {
-            continue;
-        }
-        let Some(m) = measure(&a_state, &b_id, secs, &accel, planes) else {
-            println!("{screen}, {name}: no picture");
-            continue;
-        };
-        println!(
-            "{screen}, {}, {name}: {} frames in ({} KB each), {} pictures in {secs} s, decode p50 {} p95 {}, {} bytes a picture, {:?}",
-            m.codec,
-            m.frames_in,
-            m.encoded / m.frames_in.max(1) / 1000,
-            m.pictures,
-            ms(m.p50),
-            ms(m.p95),
-            m.bytes_per_picture,
-            m.size
-        );
-        if accel == Accel::Software {
-            assert!(m.pictures > 0, "{name}: no picture");
-        }
-    }
-    let session_id = wire::read(&a_state).map(|v| v.session_id);
-    let _ = computers::request(
-        &a_state,
-        ComputerAsk::StopView {
-            session_id,
-            lock: false,
-            window: 0,
-        },
-        pin::now_unix(),
-    );
+    measure_ways(&a_state, &b_id, secs, screen);
     for base in [&a_base, &b_base] {
         let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
         for line in log.lines().filter(|l| {
