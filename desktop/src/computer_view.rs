@@ -996,13 +996,20 @@ fn follow_mic(
     ctx: &egui::Context,
     controlling: bool,
 ) {
+    // On, but this connection's relay never heard so (a rejoin, another
+    // computer asked, a write lost): nothing of it is heard there, so it
+    // stops and says why (PR #569 review I1).
+    if state.mic.on() && state.mic_said != Some(true) {
+        state.mic.stopped();
+        stop_mic(state);
+        state.mic_note = Some(view_mic::CUT_WORDS.to_string());
+    }
     match state.mic.step(controlling) {
         Some(view_mic::Change::Start) => {
             // The relay first: only then does it pass the frames on.
             say_mic(state, true);
             if state.mic_said != Some(true) {
-                state.mic.off();
-                state.mic.step(false);
+                state.mic.stopped();
                 return;
             }
             state.mic_gen += 1;
@@ -1021,13 +1028,22 @@ fn follow_mic(
             };
             let ending = shared.clone();
             let repaint = ctx.clone();
+            // A capture that ended by itself turns the switch off, whether
+            // the microphone failed or the relay took no more (PR #569
+            // review I1): the bar never says "Mic on" for nothing.
             let ended = move |how: view_mic::Ended| {
                 let mut state = lock(&ending);
-                if state.mic_gen == generation
-                    && let view_mic::Ended::Failed(why) = how
-                {
-                    state.mic_note = Some(view_mic::failed_words(&why));
-                    state.mic.off();
+                if state.mic_gen == generation {
+                    let note = match how {
+                        view_mic::Ended::Failed(why) => Some(view_mic::failed_words(&why)),
+                        view_mic::Ended::Refused => Some(view_mic::CUT_WORDS.to_string()),
+                        view_mic::Ended::Stopped => None,
+                    };
+                    if let Some(note) = note {
+                        state.mic_note = Some(note);
+                        state.mic.stopped();
+                        stop_mic(&mut state);
+                    }
                 }
                 drop(state);
                 repaint.request_repaint();
@@ -1044,7 +1060,8 @@ fn follow_mic(
                 }
                 Err(e) => {
                     state.mic_note = Some(view_mic::failed_words(&e.to_string()));
-                    state.mic.off();
+                    state.mic.stopped();
+                    stop_mic(state);
                 }
             }
         }
@@ -1188,8 +1205,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         }
         state.pointer = PointerLock::default();
         // The microphone stops with the window (PC10).
-        state.mic.off();
-        if state.mic.step(false).is_some() {
+        let sending = state.mic.on();
+        state.mic.stopped();
+        if sending {
             stop_mic(&mut state);
         }
         state.mic_note = None;
@@ -3669,6 +3687,76 @@ mod tests {
         harness.step();
         assert!(!lock(&shared).mic.wanted(), "the switch went off");
         assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #569 review I1: the window joins its view again (a new
+    /// connection, whose relay never heard "on"): the mic stops, the bar
+    /// says why and no longer "Mic on", and the new relay hears nothing of
+    /// the mic.
+    #[test]
+    fn a_rejoin_stops_the_mic_and_says_so() {
+        use egui_kittest::kittest::Queryable;
+        use std::io::Read;
+        struct Quiet;
+        impl view_mic::MicSource for Quiet {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(Vec::new())
+            }
+        }
+        let (shared, _relay, dir) = mic_window(
+            "rejoin",
+            Arc::new(|_| Ok(Box::new(Quiet) as Box<dyn view_mic::MicSource>)),
+        );
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).mic.on());
+        // A new connection, as `view` makes one.
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        {
+            let mut state = lock(&shared);
+            state.writer = Some(writer);
+            state.pointer_said = None;
+            state.mic_said = None;
+        }
+        harness.step();
+        harness.step();
+        assert!(!lock(&shared).mic.on(), "stopped");
+        assert!(!lock(&shared).mic.wanted(), "and off");
+        assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 0);
+        assert_eq!(harness.query_all_by_label(view_mic::CUT_WORDS).count(), 1);
+        drop(harness);
+        drop(shared);
+        relay
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        let mut heard = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = relay.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            heard.extend_from_slice(&buf[..n]);
+        }
+        let mut reader = io::Cursor::new(heard);
+        while let Ok(message) = Message::read(&mut reader) {
+            assert!(!matches!(message, Message::Mic(_)), "{message:?}");
+            if let Message::Input(bytes) = message {
+                assert!(
+                    !matches!(InputPacket::decode(&bytes), Ok(InputPacket::Mic { .. })),
+                    "no mic on the new connection"
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

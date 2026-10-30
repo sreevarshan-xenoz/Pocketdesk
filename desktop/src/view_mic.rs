@@ -67,9 +67,11 @@ impl MicSwitch {
         self.wanted = !self.wanted;
     }
 
-    /// Off, and not wanted: the window closing, or the microphone failing.
-    pub fn off(&mut self) {
+    /// Off now, and not wanted (PR #569 review I1): the window closing, or
+    /// the microphone stopping by itself; the caller stops the capture.
+    pub fn stopped(&mut self) {
         self.wanted = false;
+        self.on = false;
     }
 
     /// Whether the bar's switch shows on.
@@ -261,6 +263,11 @@ impl Drop for MicRun {
         self.stop.store(true, Ordering::Release);
     }
 }
+
+/// What the bar says as the microphone stopped because the window's
+/// connection to the view went (PR #569 review I1): it is not heard there.
+pub const CUT_WORDS: &str =
+    "Mic stopped: the connection to the view was cut. Turn Send my mic on again.";
 
 /// Why the microphone could not be used, as the bar says it.
 pub fn failed_words(why: &str) -> String {
@@ -838,12 +845,19 @@ mod tests {
         assert_eq!(mic.step(true), Some(Change::Start));
         mic.toggle();
         assert_eq!(mic.step(true), Some(Change::Stop));
-        // A failure or the window closing.
+        // Turned off from the bar again.
         mic.toggle();
         assert_eq!(mic.step(true), Some(Change::Start));
-        mic.off();
+        mic.toggle();
         assert_eq!(mic.step(true), Some(Change::Stop));
         assert!(!mic.wanted());
+        // Stopped at once (the window closing, the capture ending): no
+        // change left for the next step, and it stays off.
+        mic.toggle();
+        assert_eq!(mic.step(true), Some(Change::Start));
+        mic.stopped();
+        assert!(!mic.on() && !mic.wanted());
+        assert_eq!(mic.step(true), None);
     }
 
     #[test]
