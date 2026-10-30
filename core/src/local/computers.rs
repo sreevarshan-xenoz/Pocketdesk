@@ -239,7 +239,10 @@ pub const PENDING_FOR: u64 = 10 * 60;
 impl ComputersFile {
     /// Let each grant both ways that has waited for the link longer than
     /// [`PENDING_FOR`] since its computer paired (`paired_unix`) lapse at
-    /// `now_unix`, or one whose computer is gone; the lapsed ones.
+    /// `now_unix`, or one whose computer is gone; the lapsed ones. A lapsed
+    /// computer is paired one way here from then on, so it is no longer
+    /// `mine` (range review M2): it is told no MAC, and is linked as one
+    /// paired one way.
     pub fn lapse_pending(&mut self, now_unix: u64) -> Vec<String> {
         let paired = |id: &str| {
             self.computers
@@ -258,6 +261,13 @@ impl ComputersFile {
             if paired(id).is_some() && !self.lapsed.contains(id) {
                 self.lapsed.push(id.clone());
             }
+        }
+        for c in self
+            .computers
+            .iter_mut()
+            .filter(|c| lapsed.contains(&c.device_id))
+        {
+            c.mine = false;
         }
         lapsed
     }
@@ -1072,6 +1082,7 @@ mod tests {
     fn a_grant_waiting_for_the_link_lapses_after_ten_minutes() {
         let paired_at = |id: &str, at: u64| PeerComputer {
             paired_unix: at,
+            mine: true,
             ..computer(id)
         };
         let mut file = ComputersFile {
@@ -1083,6 +1094,9 @@ mod tests {
         assert_eq!(lapsed, ["old", "gone"]);
         assert_eq!(file.pending, ["young"]);
         assert_eq!(file.lapsed, ["old"], "said for a computer still listed");
+        let mine = |id: &str| file.computers.iter().any(|c| c.device_id == id && c.mine);
+        assert!(!mine("old"), "paired one way here now (range review M2)");
+        assert!(mine("young"), "still waiting");
         assert!(file.lapse_pending(1_000 + PENDING_FOR).is_empty(), "once");
         file.remove("old");
         assert!(file.lapsed.is_empty(), "gone with its computer");

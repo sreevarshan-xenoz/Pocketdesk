@@ -757,13 +757,14 @@ fn is_the_link(
     }
 }
 
-/// The computers paired both ways (PC1) that are no longer trusted here as
-/// computers (`trusted`): unpaired on the Devices page, which takes away
-/// what they may do here, so they are forgotten here too.
+/// The computers paired both ways (PC1), or whose grant both ways lapsed,
+/// that are no longer trusted here as computers (`trusted`): unpaired on
+/// the Devices page, which takes away what they may do here, so they are
+/// forgotten here too.
 fn untrusted_mine(file: &computers::ComputersFile, trusted: impl Fn(&str) -> bool) -> Vec<String> {
     file.computers
         .iter()
-        .filter(|c| c.mine && !trusted(&c.device_id))
+        .filter(|c| (c.mine || file.lapsed.contains(&c.device_id)) && !trusted(&c.device_id))
         .map(|c| c.device_id.clone())
         .collect()
 }
@@ -797,7 +798,7 @@ async fn forget_untrusted_mine(
 /// [`untrusted_mine`] as the files at `dir` and `trust` say now.
 fn untrusted_mine_at(dir: &Path, trust: &Path) -> Vec<String> {
     let file = computers::read(dir);
-    if !file.computers.iter().any(|c| c.mine) {
+    if !file.computers.iter().any(|c| c.mine) && file.lapsed.is_empty() {
         return Vec::new();
     }
     let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
