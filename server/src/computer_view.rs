@@ -2282,6 +2282,12 @@ fn start_viewer(
                     if read.read_exact(&mut focused).await.is_err() || focused[0] > 1 {
                         break;
                     }
+                    // A window that lost the focus has freed its pointer
+                    // (PR #563 review M8): held to it here too.
+                    if focused[0] == 0 {
+                        pointer_locked = false;
+                        hold = None;
+                    }
                     let _ = focus.try_send((session_id, focused[0] == 1));
                 }
                 // PC8: one byte, show, hide or lock; anything else ends it.
@@ -2810,6 +2816,33 @@ mod tests {
             "Some(MouseMoveAbs { x_norm: 1, y_norm: 1 })"
         );
         assert!(!viewer.reader.is_finished());
+    }
+
+    /// PR #563 review M8: the window's focus lost frees its lock at the
+    /// relay too.
+    #[tokio::test]
+    async fn a_window_losing_the_focus_frees_its_lock() {
+        let _alone = crate::shared_input::view_hold::TESTS.lock().await;
+        let (mut window, _viewer, _queued) = joined_window().await;
+        window
+            .write_all(&Message::PointerLock(true).encode())
+            .await
+            .unwrap();
+        until_held(true, "the lock", 2).await;
+        window
+            .write_all(&Message::Focus(true).encode())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            crate::shared_input::view_hold::pointer_held(),
+            "a focus gained keeps it"
+        );
+        window
+            .write_all(&Message::Focus(false).encode())
+            .await
+            .unwrap();
+        until_held(false, "the focus lost", 2).await;
     }
 
     fn controlled() -> ViewStatus {
