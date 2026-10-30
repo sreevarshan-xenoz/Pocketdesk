@@ -298,6 +298,9 @@ pub async fn run_watcher() {
                 !crate::plugins::pair::is_paired_device(id)
             });
         }
+        // A computer's grab ends as the session here is unlocked (PR #572
+        // review I1): Ctrl+Alt+Del and unlock always give the keys back.
+        crate::plugins::privacy::unlock_tick();
         if !live.is_empty() {
             let store = crate::state::trust_store_path().ok().and_then(|path| {
                 pocketdesk_core::protocol::kdeconnect::TrustStore::load_or_create(path).ok()

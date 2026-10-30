@@ -32,7 +32,9 @@ pub fn set_keyboard_on(device_id: Option<&str>) {
     let mut on = KEYBOARD_ON.lock().unwrap_or_else(|e| e.into_inner());
     if on.as_str() != device_id.unwrap_or_default() {
         *on = device_id.unwrap_or_default().to_string();
-        if let Some(id) = device_id {
+        if let Some(id) = device_id
+            && crate::plugins::privacy::holds(id)
+        {
             // Releasing blocks (Windows joins its hook thread): never on
             // the input thread that called this.
             let id = id.to_string();
@@ -46,6 +48,40 @@ pub fn set_keyboard_on(device_id: Option<&str>) {
 pub fn keyboard_on_device() -> Option<String> {
     Some(keyboard_on()).filter(|on| !on.is_empty())
 }
+
+/// Whether `device_id` is one of this computer's shared-input computers
+/// with shared input on here (PR #572 review I1): linked for it now, in
+/// `shared_screens.json`, or placed on the Keyboard and mouse page.
+/// Reads files (blocking).
+pub fn shares_with(device_id: &str) -> bool {
+    if !crate::events::current_config().shared_input {
+        return false;
+    }
+    if link::linked().iter().any(|id| id == device_id) {
+        return true;
+    }
+    let Ok(dir) = crate::state::state_dir() else {
+        return false;
+    };
+    shares_in(
+        &shared_input::read(&dir),
+        shared_input::read_layout(&dir).as_ref(),
+        device_id,
+    )
+}
+
+/// [`shares_with`]'s files: `device_id` has screens in `screens` (not as
+/// this computer) or a place in `layout`.
+fn shares_in(
+    screens: &StatusScreens,
+    layout: Option<&shared_input::LayoutFile>,
+    device_id: &str,
+) -> bool {
+    screens.get(device_id).is_some_and(|c| !c.this_computer)
+        || layout.is_some_and(|l| l.origins.contains_key(device_id))
+}
+
+type StatusScreens = shared_input::ScreensFile;
 
 fn keyboard_on() -> String {
     KEYBOARD_ON
@@ -588,6 +624,28 @@ mod tests {
         set_keyboard_on(None);
         assert_eq!(keyboard_on(), "");
         assert_eq!(keyboard_on_device(), None);
+    }
+
+    /// PR #572 review I1: a computer with screens in the file, or a place
+    /// in the arrangement, is one this computer shares input with.
+    #[test]
+    fn a_computer_in_the_arrangement_shares_input() {
+        let mut screens = StatusScreens::default();
+        screens.set_own("me", "Me", &[], 1);
+        screens.computers.push(shared_input::ComputerScreens {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            screens: Vec::new(),
+            changed_unix: 1,
+            this_computer: false,
+            phone: None,
+        });
+        assert!(shares_in(&screens, None, "desk"));
+        assert!(!shares_in(&screens, None, "me"), "this computer itself");
+        assert!(!shares_in(&screens, None, "laptop"));
+        let mut layout = shared_input::LayoutFile::default();
+        layout.origins.insert("laptop".into(), (0, 0));
+        assert!(shares_in(&screens, Some(&layout), "laptop"));
     }
 
     /// BK8: how Linux's input-capture portal stands goes into the status

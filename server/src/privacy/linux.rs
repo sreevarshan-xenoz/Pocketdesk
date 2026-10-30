@@ -55,6 +55,82 @@ fn grab_state() -> &'static Mutex<GrabState> {
     })
 }
 
+/// Whether the session here is locked, polled: logind says it by its
+/// Unlock signal and `LockedHint` instead ([`watch_unlocks`]).
+pub fn session_locked() -> Option<bool> {
+    None
+}
+
+/// Call `unlocked` each time logind says this session was unlocked (PR #572
+/// review I1): its `Unlock` signal, or its `LockedHint` going false. Ends
+/// when the system bus or the session cannot be reached.
+pub async fn watch_unlocks(unlocked: impl Fn() + Send + Sync + 'static) {
+    use futures_lite::StreamExt as _;
+    let Ok(conn) = zbus::Connection::system().await else {
+        tracing::debug!("Privacy: no system bus, so an unlock here is not heard");
+        return;
+    };
+    let Some(path) = session_path(&conn).await else {
+        tracing::debug!("Privacy: no logind session, so an unlock here is not heard");
+        return;
+    };
+    let Ok(session) = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.login1",
+        path,
+        "org.freedesktop.login1.Session",
+    )
+    .await
+    else {
+        return;
+    };
+    let Ok(mut unlocks) = session.receive_signal("Unlock").await else {
+        return;
+    };
+    let mut hints = session.receive_property_changed::<bool>("LockedHint").await;
+    loop {
+        tokio::select! {
+            signal = unlocks.next() => {
+                if signal.is_none() {
+                    return;
+                }
+                unlocked();
+            }
+            hint = hints.next() => {
+                let Some(hint) = hint else { return };
+                if matches!(hint.get().await, Ok(false)) {
+                    unlocked();
+                }
+            }
+        }
+    }
+}
+
+/// This user's session's object path on logind: the one `session/auto`
+/// stands for (the server's own session, else the user's display session),
+/// by its id, since signals come from the real path.
+async fn session_path(conn: &zbus::Connection) -> Option<String> {
+    let auto = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1/session/auto",
+        "org.freedesktop.login1.Session",
+    )
+    .await
+    .ok()?;
+    let id: String = auto.get_property("Id").await.ok()?;
+    let manager = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.login1",
+        "/org/freedesktop/login1",
+        "org.freedesktop.login1.Manager",
+    )
+    .await
+    .ok()?;
+    let path: zbus::zvariant::OwnedObjectPath = manager.call("GetSession", &(id,)).await.ok()?;
+    Some(path.as_str().to_string())
+}
+
 /// Classification, factored out for unit tests. A device is grabbed when it
 /// looks like a physical keyboard or mouse. Our own injection devices
 /// (`Pocketdesk Virtual *`) must never be grabbed — that would silence the
