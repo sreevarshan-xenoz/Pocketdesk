@@ -294,8 +294,9 @@ const HEVC_PROBE_TIME: Duration = Duration::from_secs(10);
 /// probe ends.
 static DECODES_HEVC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
-/// Probe this app's `ffmpeg` for HEVC once, on a thread of its own (the
-/// window's, never the UI's), as the app starts; later calls do nothing.
+/// Probe this app's `ffmpeg` for HEVC once, on a thread of its own, as
+/// the app starts (PR #562 re-review N1: not as the first window opens,
+/// whose ask would come first); later calls do nothing.
 pub fn start_hevc_probe() {
     static STARTED: std::sync::Once = std::sync::Once::new();
     STARTED.call_once(|| {
@@ -307,9 +308,24 @@ pub fn start_hevc_probe() {
     });
 }
 
-/// Whether this app's ffmpeg decodes HEVC: `false` until the probe said.
-pub fn decodes_hevc() -> bool {
-    DECODES_HEVC.get().copied().unwrap_or(false)
+/// Whether this app's ffmpeg decodes HEVC, once the probe has said.
+pub fn hevc_known() -> Option<bool> {
+    DECODES_HEVC.get().copied()
+}
+
+/// Whether this app's ffmpeg decodes HEVC, waiting for the probe at most
+/// `limit` (off the UI thread): `false` if it has not said by then.
+pub fn wait_for_hevc_probe(limit: Duration) -> bool {
+    let until = std::time::Instant::now() + limit;
+    loop {
+        if let Some(decodes) = hevc_known() {
+            return decodes;
+        }
+        if std::time::Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 /// Decode [`HEVC_SAMPLE`] with `program` (`ffmpeg`): whether its one

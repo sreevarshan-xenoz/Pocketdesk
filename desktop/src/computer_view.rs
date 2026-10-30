@@ -69,6 +69,9 @@ const NO_PICTURE: Duration = Duration::from_secs(2);
 /// ffmpeg or a large first picture is not taken for a decoder that cannot,
 /// which would drop an HEVC view to H.264.
 const LAST_NO_PICTURE: Duration = Duration::from_secs(6);
+/// A view asked for before the HEVC probe has said waits this long for it,
+/// off the UI thread (PR #562 re-review N1).
+const HEVC_PROBE_WAIT: Duration = Duration::from_millis(1500);
 /// How often the keyboard grab reads where the shared keyboard is (PC4).
 #[cfg(windows)]
 const ACROSS_LOOK: Duration = Duration::from_millis(500);
@@ -580,9 +583,6 @@ impl ComputerView {
     pub fn new(ctx: &egui::Context, state_dir: PathBuf, config: Option<PathBuf>) -> Self {
         let shared = Arc::new(Mutex::new(State::default()));
         let worker = shared.clone();
-        // PC5: whether this app's ffmpeg decodes HEVC, found once, off the
-        // UI thread.
-        crate::video::start_hevc_probe();
         let repaint = ctx.clone();
         let ctx = ctx.clone();
         let watched = state_dir.clone();
@@ -711,19 +711,48 @@ impl ComputerView {
 
 /// Ask the server for `wanted`'s screen; a view shown now is let go first.
 fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String> {
-    let request = ComputerAsk::View {
-        device_id: wanted.device_id.clone(),
-        monitor: wanted.monitor,
-        hevc: offer_hevc(
-            state.hevc_setting,
-            state.hw_decode,
-            crate::video::decodes_hevc(),
-            state.hevc_refused,
-        ),
-    };
+    ask_with(state_dir, state, wanted, crate::video::hevc_known())
+}
+
+/// [`ask`], with the HEVC probe's answer as it stands (`known`).
+fn ask_with(
+    state_dir: &Path,
+    state: &mut State,
+    wanted: Wanted,
+    known: Option<bool>,
+) -> Result<(), String> {
+    let could = offer_hevc(
+        state.hevc_setting,
+        state.hw_decode,
+        true,
+        state.hevc_refused,
+    );
     let release = state.input.release_all();
     send(state, release);
-    computers::request(state_dir, request, now_unix()).map_err(|e| format!("Not asked: {e}"))?;
+    match hevc_ask(could, known) {
+        HevcAsk::Now(hevc) => {
+            computers::request(state_dir, view_ask(&wanted, hevc), now_unix())
+                .map_err(|e| format!("Not asked: {e}"))?;
+        }
+        HevcAsk::Wait => {
+            // The probe has not said yet: the ask waits for it on a thread
+            // of its own, at most HEVC_PROBE_WAIT.
+            let (dir, request_for) = (state_dir.to_path_buf(), wanted.clone());
+            let waited = std::thread::Builder::new()
+                .name("computer-view-ask".into())
+                .spawn(move || {
+                    let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
+                    if let Err(e) =
+                        computers::request(&dir, view_ask(&request_for, hevc), now_unix())
+                    {
+                        eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
+                    }
+                });
+            if let Err(e) = waited {
+                return Err(format!("Not asked: {e}"));
+            }
+        }
+    }
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
@@ -749,6 +778,35 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
 /// ffmpeg shown to decode it, and the view not given up on it.
 pub fn offer_hevc(setting: bool, hw_decode: bool, decodes: bool, refused: bool) -> bool {
     setting && hw_decode && decodes && !refused
+}
+
+/// When a view's ask says whether it takes HEVC (PR #562 re-review N1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HevcAsk {
+    /// Now, saying this.
+    Now(bool),
+    /// Once the probe has said, as it could take HEVC.
+    Wait,
+}
+
+/// When and what an ask says of HEVC: at once when it `could` not take it
+/// whatever the probe says, or the probe has said (`known`); else after
+/// waiting for the probe.
+pub fn hevc_ask(could: bool, known: Option<bool>) -> HevcAsk {
+    match (could, known) {
+        (false, _) => HevcAsk::Now(false),
+        (true, Some(decodes)) => HevcAsk::Now(decodes),
+        (true, None) => HevcAsk::Wait,
+    }
+}
+
+/// The ask for `wanted`'s screen, taking HEVC or not.
+fn view_ask(wanted: &Wanted, hevc: bool) -> ComputerAsk {
+    ComputerAsk::View {
+        device_id: wanted.device_id.clone(),
+        monitor: wanted.monitor,
+        hevc,
+    }
 }
 
 /// Whether a view whose last way just gave up (`step`) is asked for again
@@ -2644,6 +2702,40 @@ mod tests {
             !give_up_hevc(&shared, Step::Exhausted, Some((Codec::Hevc, None))),
             "not twice"
         );
+    }
+
+    /// PR #562 re-review N1: an ask made after the probe said this app
+    /// decodes HEVC says hevc: true; one made before it waits; one that
+    /// could not take HEVC says false at once.
+    #[test]
+    fn an_ask_after_the_probe_says_hevc() {
+        assert_eq!(hevc_ask(true, Some(true)), HevcAsk::Now(true));
+        assert_eq!(hevc_ask(true, Some(false)), HevcAsk::Now(false));
+        assert_eq!(hevc_ask(true, None), HevcAsk::Wait);
+        assert_eq!(hevc_ask(false, None), HevcAsk::Now(false), "no wait");
+        let dir = std::env::temp_dir().join(format!("pd-pc5-n1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            hevc_setting: true,
+            hw_decode: true,
+            ..State::default()
+        };
+        let wanted = Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        ask_with(&dir, &mut state, wanted, Some(true)).unwrap();
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(
+            matches!(
+                asked.as_slice(),
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true }
+            ),
+            "{asked:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PR #562 review I3: the ask says HEVC as the window offers it.
