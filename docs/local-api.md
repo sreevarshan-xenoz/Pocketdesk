@@ -115,6 +115,7 @@ Every event has `at`, `event` and `device_id` (the phone, or null). The kinds an
 | `session_refused` | — (not paired, denied by you, or without the permission it needs) | — |
 | `phone_paired`, `phone_unpaired` | — (however it was done: the PIN, the desktop app, `pocketdesk unpair`, or a guest grant ending) | — |
 | `device_removed` | `by`, the id of the owner device that removed it from afar (remote revoke); `device_id` is the device removed. `phone_unpaired` follows as for any unpairing | — |
+| `device_introduced` | `by`, the id of the computer paired both ways that introduced the phone (ecosystem phase 4); `device_id` is the phone, now paired here as an owner phone. `phone_paired` follows as for any pairing | — |
 | `task_started` | `task` (its name) | — |
 | `task_finished` | `task`, `code` (its exit code, or null), `timed_out`; never its output | — |
 | `task_refused` | `task`, `reason` (`unknown`, `busy`, `denied`; `not_permitted`, the phone's tasks turned off while it waited, or `unpaired`, AY2) | — |

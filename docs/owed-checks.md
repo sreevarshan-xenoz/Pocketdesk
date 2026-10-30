@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1076 open items.
+1083 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 46 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 47 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 143 |
+| A second computer | 149 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
@@ -148,6 +148,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - A screen session of a few minutes, then Exit: back on Home, the card says "Used just now", not the time it started. (where: OPPO + throwaway)
 - The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
+
+**244. One pairing for all my devices: a computer introduces the phone**
+
+- Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeIntroductions` or `nativeIntroduce`.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1112,6 +1116,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **242. One version across my devices**
 
 - Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
+
+**244. One pairing for all my devices: a computer introduces the phone**
+
+- Two throwaway servers paired both ways (Windows and the Linux laptop), input off on both. Pair the OPPO with the Windows throwaway's own code: Home then shows "Also pair with <laptop>?". Pair: the laptop's `pocketdesk devices --json` lists the OPPO with `"owner": true`, the laptop notifies "<Windows> added <phone> to this computer" once, `pocketdesk events` shows `device_introduced` with `by` the Windows throwaway's id, and a view-only session from the OPPO to the laptop opens. Counts only. (where: second computer)
+- Not now leaves the laptop untouched; the card's Manage → Pair with my other computers… offers it again; with the OPPO already paired with the laptop, it offers nothing. (where: second computer)
+- The laptop's "Let my computers add my phones here" off: Pair says the other computer's owner turned it off, and nothing is added there; on again, it pairs. The phone's Settings line says how the last one went. (where: second computer)
+- The OPPO paired with the Windows throwaway as someone else's, or with a guest grant: the offer says only a phone paired with the computer's own code can be introduced, and the laptop gets nothing. A computer paired one way is never offered. (where: second computer)
+- Unpair the introduced OPPO on the Windows throwaway (Devices → Unpair): within seconds of the link being up it is gone from the laptop too, the laptop notifying "<Windows> removed <phone> from this computer". With the laptop's "Let my devices remove others from afar" off, the Windows throwaway says the phone stays paired there. Pair the OPPO again with its own code afterwards. (where: second computer)
+- An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
