@@ -67,12 +67,13 @@ of exactly that, including the one fix that merged without its confirming observ
       correct, not a bug. A decoder that cannot keep up is a different failure and shows as fps below the
       desktop's `src` rate, not here.
 - [x] Status chip: kill the server → "Down: <reason>" chip + Retry rebuilds after restarting the server. Seen: "The computer took too long to answer. Make sure it is awake and reachable." with Retry about 45 s after the server stopped; once it was back the session came back by itself, no Retry needed (2026-10-19, A71, throwaway server, by script).
-- [ ] R4 B1 screencopy backend (desktop-observable): starting a stream on (where: linux)
+- [x] R4 B1 screencopy backend (desktop-observable): starting a stream on (where: linux)
       Hyprland must NOT raise the portal screen-share grant dialog; server log shows
       "Capture started via backend Screencopy". If instead it shows "Capture backend
       Screencopy unavailable (…); trying next" followed by "Capture started via backend
       Portal", the reason is in the line — that's the fallback working, but note it as a
       finding. `POCKETDESK_SCREENCOPY=0` forces the portal path.
+      (2026-10-30, the Linux laptop (Hyprland 0.56, Intel iGPU + NVIDIA dGPU), no phone: the real `StreamingServer` capturing its desktop over loopback QUIC to the real client (`slow_link_session`, 40 s each): four sessions each logged "Screencopy capture: output at (0,0), no portal grant" and "Capture started via backend Screencopy", and no portal or share-picker window appeared in `hyprctl clients` while they ran.)
 - [ ] R4 B3 capture_backend config override: set `capture_backend = "portal"` in (where: linux)
       config.toml, restart, start a stream → log shows "Capture started via backend Portal"
       and NO screencopy attempt line (pipeline pinned). With `capture_backend = "screencopy"`
@@ -81,9 +82,11 @@ of exactly that, including the one fix that merged without its confirming observ
       portal (explicit intent surfaces). Omitting the key (or `"auto"`) restores the
       screencopy→portal fallback above. An unknown value (e.g. `"v4l2"`) makes the server
       refuse to start with a TOML parse error.
+      (The unknown value seen 2026-10-30 on the Linux laptop with a throwaway server: `capture_backend = "v4l2"` stopped it at start, exit 1, "TOML parse error at line 7, column 19 ... unknown variant `v4l2`, expected one of `auto`, `screencopy`, `portal`, `x11`, `wgc`, `dxgi`". The portal pin and the non-wlroots case not run: the pin raises the share dialog at the laptop's desk.)
 - [ ] R4 B1 idle pacing + freshness: keep the desktop static → `src` fps drops to ≤10 (where: linux)
       (damage-driven VFR); move a window → back to target fps within a frame or two, no tearing
       or upside-down frames (YInvert handling).
+      (The static half seen 2026-10-30 on the Linux laptop, no phone: with its screen still, the screencopy backend logged "screen static, repeating the last frame each second" and the client received 1.7 to 2.0 fps in every 10 s window of four 40 s sessions. Moving a window, and the picture itself, not checked.)
 - [ ] R4 B1 multi-monitor: pick monitor N in the picker → log line "Screencopy capture: output at (where: linux)
       (x,y)" shows that monitor's wl_output origin and frames are its size.
 - [x] R4 C1 codec negotiation, default off: connect normally → server log shows
@@ -98,10 +101,11 @@ of exactly that, including the one fix that merged without its confirming observ
       (The log part seen 2026-10-24 by `x3-codec`, the session up 8 s later; the decode not checked.)
 - [x] R4 C1 HEVC + window crop: pick a window during a HEVC session → encoder rebuild at (2026-10-25, the OPPO by the internet road against a throwaway server with `allow_hevc`, the runner's `ae1-crop-hevc`, the window picked by position from the phone's picker: cropped to 1395x786, rebuilt at 1395x786 H.265 (HEVC), the session up; back to the whole desktop, 2560x1440 H.265 (HEVC), the session up. Twice.)
       window size keeps HEVC and the phone reconfigures on size change without codec change.
-- [ ] R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken
+- [x] R4 C2 startup ladder (desktop-observable): on a box where hardware encoding is broken
       (e.g. force `hardware_encoder = "nvenc"` here — this box's NVIDIA driver predates FFmpeg 9
       NVENC, so the sidecar dies), start a session → server log shows "Hardware encoder unavailable
       (…); falling back to software (C2)" and video still appears within ~2 s on x264.
+      (2026-10-30, the Linux laptop (Hyprland 0.56, Intel iGPU + NVIDIA dGPU), no phone: the real `StreamingServer` capturing its desktop over loopback QUIC to the real client (`slow_link_session`, 40 s each). NVENC is no longer picked there ("NVENC compiled into FFmpeg but driver rejects it"), so the broken rung was VAAPI, twice: pointed at the NVIDIA node (`POCKETDESK_VAAPI_DEVICE`), the in-process encoder failed ("No usable encoding profile found"), the sidecar died at startup, and "VAAPI ladder exhausted (FFmpeg encoder closed stdout during startup); falling back to software (C2)" came 0.3 s after the probe, then "Video encoder: in-process FFmpeg (software)"; and with `POCKETDESK_FAIL_ENCODERS=nvenc,vaapi,qsv,amf,mf` the same fallback 3 ms after the probe. Frames reached the client in the first 10 s window both times and the 40 s session held.)
 - [ ] R4 C2 mid-session encoder kill (HEVC session): during a live `codec=H.265` session,
       `pkill -f 'ffmpeg .*vaapi'` (or kill the encoder child seen in `pstree` of the server) →
       log shows "Rebuilt encoder on software rung (C2)", video resuming within ~2 s and the phone
@@ -118,6 +122,7 @@ of exactly that, including the one fix that merged without its confirming observ
       rebuild must not re-probe the dead hardware).
       (2026-10-25, the runner's `am1-sticky-software` on the OPPO: a throwaway whose hardware rungs all fail as they open (`POCKETDESK_FAIL_ENCODERS`, a test seam) fell back to software at the session's start, once; a crop to a 1395x786 window and back rebuilt the encoder with no hardware rung tried again, the session up, its record's encoder the software sidecar.)
 - [ ] R4 C3 NVENC power pin (**NVIDIA hardware only — skip on non-NVIDIA boxes**): start an NVENC session (server log "Video encoder sidecar" on `h264_nvenc`/`hevc_nvenc`) → server log "pinned NVENC GPU 0 graphics clock to N MHz"; `nvidia-smi -q -d CLOCK -i 0` shows the graphics clock held at its max. End the session → log "restored NVENC GPU 0 to default clock management" and `nvidia-smi -q -d CLOCK` shows clocks back under adaptive management. On an unprivileged desktop the pin self-declines (log "clock lock refused ... running unpinned") and no reset is issued. (where: linux)
+      (Not runnable on the Linux laptop as of 2026-10-30: its NVIDIA card is on nouveau, so there is no NVENC and no `nvidia-smi`.)
 
 ## 2c. In-process VAAPI encode (R4 C4) — desktop/box-observable, no device needed
 
@@ -129,15 +134,17 @@ backend log line + the `POCKETDESK_VAAPI_DEVICE` override (honoured by both the 
 paths regardless of the config knob). Forcing a *specific* encoder end-to-end is a known future knob,
 not part of C4.
 
-- [ ] R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` →  (where: linux)
+- [x] R4 C4 host proof (no phone): `cargo test -p pocketdesk-core --lib encoder_vaapi` →  (where: linux)
       `test_vaapi_encode_roundtrip` encodes 40 real frames through `h264_vaapi` on this box's Intel
       iHD node and asserts Annex-B packets + ≥1 keyframe (self-skips green where no VA node exists).
-- [ ] R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the (where: linux)
+      (2026-10-30 on the Linux laptop, release build: 5 passed, `test_vaapi_encode_roundtrip` among them, with no "skipping" line, so it encoded.)
+- [x] R4 C4 device-node selection: on the hybrid Intel+NVIDIA box the probe must land on the (where: linux)
       VA-capable node, NOT the hardcoded NVIDIA `renderD128` — `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD129`
       starts a session → server log "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD129"
       and **no `ffmpeg` sidecar child** is spawned for the vaapi path (`pstree` of the server). Point the
       override at a VA-less node (e.g. `/dev/dri/renderD128`) → it degrades to sidecar-then-software (C2),
       never hangs.
+      (2026-10-30, the Linux laptop (Hyprland 0.56, Intel iGPU + NVIDIA dGPU), no phone: the real `StreamingServer` capturing its desktop over loopback QUIC to the real client (`slow_link_session`, 40 s each). The node numbers had swapped: there `renderD128` is the Intel card (i915) and `renderD129` the NVIDIA one (nouveau). With no override the probe opened `renderD128` and logged "Video encoder: in-process VAAPI (h264_vaapi) on /dev/dri/renderD128", as it did with the override set to it, and no "FFmpeg encoder process spawned" line followed; set to the NVIDIA node it went in-process, then sidecar, then software within 0.3 s and the session ran its 40 s. So the probe follows the VA-capable node whatever its number.)
 - [ ] R4 C4 quality (needs a phone): a VAAPI-encoded session decodes with correct color (no NV12 chroma (where: linux)
       shift) and the GOP (fps×2) keyframe lets first-frame render land within ~2 s.
 
@@ -619,6 +626,7 @@ Checked on the Windows dev box on 2026-10-12, with a Galaxy A71 over USB:
 - [ ] Tray: Open, Pair a phone… and Quit from the tray menu itself.
 - [ ] Start / Restart server from the app, on Windows (logon task) and Linux (systemd user unit). This is not run on the developer box by rule.
 - [ ] Linux: the app builds and opens on X11 and on Wayland (Hyprland), closing it quits (no tray on Linux yet), and the single-instance socket works.
+      (Partly seen 2026-10-30 on the Linux laptop with throwaway folders: the release build opened a "Pocketdesk" window on Hyprland, and a second launch exited at once (exit 0) with the first still running and one app process. X11 and closing the window not run.)
 - [ ] Linux tray: build one on a GTK thread (or tray-icon's ksni backend) and verify it with a StatusNotifier host, e.g. waybar's tray.
 - [ ] Settings → Save on a real `config.toml` keeps comments; the server picks the change up after Restart. (where: by hand)
 - [ ] One code, one phone: after a phone pairs, the Pair tab shows "Paired ✓" and no code, `pairing.pin` is gone, and "Pair another phone" shows a new code. Five wrong PINs typed on a phone make the tab say the code no longer works, and no new code appears until it is clicked. Leaving the tab, closing the window to the tray, and Quit each delete `pairing.pin`.
@@ -1020,7 +1028,8 @@ On the A71, 2026-10-14:
 
 Owed:
 - [x] Linux: after `pocketdesk start`, the state folder is `700` and the first start said "owner-only" once (the Azure VM, Ubuntu 24.04, 2026-10-24).
-- [ ] Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
+- [x] Linux: a `POCKETDESK_STATE_DIR` the user cannot chmod logs a warning and the server still starts. (where: linux)
+      (2026-10-30 on the Linux laptop: a throwaway server whose state folder was root's, mode 777, logged "Could not make … owner-only, so other local users may read it: Operation not permitted (os error 1)", then its control listener came up and `pocketdesk status` answered; the folder stayed root's, 777.)
 - [ ] Wake through a relay computer with Power off for the phone: the phone says the relay did not answer and asks about Power, not "Wake sent". With a target off the relay's networks: "The relay computer refused: not on this computer's network".
 - [ ] The desktop app's Devices tab reads "Lock, sleep, privacy and wake others".
 - [x] Android backup: `adb shell bmgr backupnow dev.pocketdesk.android` backs up nothing ("Backup is not allowed", 2026-10-23 on the OPPO against a throwaway server (S2)).
@@ -1973,7 +1982,8 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 ## 119. Memory at rest (D7)
 
 - [x] Windows: `scripts/memory_at_rest.ps1`, server and app at rest (2026-10-19: server 9.7 MB private, app 77–85 MB; the reliability spec's D7 section).
-- [ ] Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
+- [x] Linux: the same by hand (`/proc/<pid>/status` VmRSS and RssAnon), the app in a Wayland session.
+      (2026-10-30 on the Linux laptop, Hyprland, release build, a throwaway server and the app with nothing paired, after 90 s and again at 2.5 min: server VmRSS 69.6 MB, RssAnon 17.2 MB; app VmRSS 90.4 MB, RssAnon 19.8 MB; unchanged between the two reads.)
 - [ ] The app with a phone linked and a session running, then at rest again: back to its number. (where: by hand)
 
 ## 120. Answers that say how they went (E1)
@@ -1995,6 +2005,7 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
 - [ ] An install without `pocketdesk-tray`: the app's own tray, as before.
 - [ ] Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
+      (FAILED 2026-10-30 on the Linux laptop, waybar's tray running, release build of the server and the app together: `pocketdesk-tray` panicked in ksni's service thread, zbus "there is no reactor running, must be called from the context of a Tokio 1.x runtime" (`ksni::blocking::spawn_with_options` → zbus `Transport::connect` → `Handle::current`), then said "no tray icon (the tray host did not answer within 3 s); running without one".)
 
 ## 122. The phone as a pen (E3)
 
@@ -2714,7 +2725,8 @@ Owed:
 ## 192. Diagnostics' firewall row on Linux (O9)
 
 Built 2026-10-22. Owed (where: linux):
-- [ ] No ufw: "no firewall found". (where: linux)
+- [x] No ufw: "no firewall found". (where: linux)
+      (2026-10-30 on the Linux laptop, no ufw or firewalld, the Diagnostics checks against a throwaway server: "[ok] Firewall: no firewall found (ufw or firewalld)".)
 - [ ] ufw on with the default deny: the row is red, naming 1716/tcp and 4716/udp with `sudo ufw allow …`; after allowing them, green. (where: linux)
 - [ ] The app run without root: ufw's rules "need root to read", with `sudo ufw status`. (where: linux)
 - [ ] firewalld with KDE Connect's service: 1716/tcp in, 4716/udp named. (where: linux)
