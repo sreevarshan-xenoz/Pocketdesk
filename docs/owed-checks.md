@@ -8,11 +8,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 160 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 166 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 125 |
+| A second computer | 119 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -540,7 +540,13 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **237. The window's mic to the other computer (PC10)**
 
 - On a test machine (never the owner's box), run `POCKETDESK_MIC_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_microphone_gives_frames -- --ignored` (without the variable it skips): it reports about 50 frames in a second. On Windows, on the Linux laptop (PipeWire 1.6: `pw-record --raw`), and once there with `pw-record` hidden from `PATH` so `parec` is used. With `POCKETDESK_MIC_TEST_DEVICE` set to part of a second microphone's name, that one opens. (where: owner)
+- Windows viewing the laptop, Control on: Send my mic on; the bar says "Mic on"; on the laptop `pactl list short sources` lists `pocketdesk_mic` within a second, and `pw-record --target pocketdesk_mic` for 5 s gives a file of about 5 s with samples above silence while someone speaks at Windows (count them; never play it on the owner's box). (where: owner)
+- Turn it off from the bar, turn View only on, close the window, and cut the link (stop Windows' server), each in turn with it on: `pocketdesk_mic` is gone from the laptop's `pactl list short sources` within about 2 s each time, and the bar no longer says "Mic on". (where: owner)
+- The laptop's Devices page for Windows with "Use the phone as a microphone" off: Send my mic on at Windows makes no `pocketdesk_mic` there; on again there, from the next session, it does. Its hint on a computer's page names the screen window's Send my mic. (where: owner)
+- The laptop viewing Windows (Windows with VB-CABLE installed, its speakers muted): Send my mic on at the laptop plays into "CABLE Input" on Windows, counted by a recorder on "CABLE Output" for 5 s (samples above silence, counts only). (where: owner)
 - Windows (a test machine) with Privacy & security, Microphone, "Let desktop apps access your microphone" off: Send my mic says "Couldn't use this computer's microphone: Windows keeps the microphone from desktop apps (...)" and turns off. "Microphone for computer windows" set to a name no microphone has: it says no microphone is named like it. (where: owner)
+- With Send my mic on, Alt+Tab to another window here, and minimise the window: the window's title (and its taskbar button) starts with "Mic on", the main window says "Mic on: this computer's microphone goes to …" on every page, and the laptop's `pocketdesk_mic` stays; the main window's Stop stops it. Minimised, turn Control off for Windows on the laptop: the mic stops within a second (the laptop's `pocketdesk_mic` goes) with no look at the window. The window dropping into Reconnecting turns it off, and it stays off as the picture comes back until turned on again. (where: owner)
+- Task Manager (or `top` on the laptop): the desktop app's CPU with Send my mic on is a few percent at most, and the Stats' bitrate barely moves On a slow internet road (a relay), typing while it sends: keys arrive as without it, and the laptop's mic lags well under a second. (where: owner)
 
 ## A phone with a SIM
 
@@ -1037,15 +1043,6 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
-
-**237. The window's mic to the other computer (PC10)**
-
-- Windows viewing the laptop, Control on: Send my mic on; the bar says "Mic on"; on the laptop `pactl list short sources` lists `pocketdesk_mic` within a second, and `pw-record --target pocketdesk_mic` for 5 s gives a file of about 5 s with samples above silence while someone speaks at Windows (count them; never play it on the owner's box). (where: second computer)
-- Turn it off from the bar, turn View only on, close the window, and cut the link (stop Windows' server), each in turn with it on: `pocketdesk_mic` is gone from the laptop's `pactl list short sources` within about 2 s each time, and the bar no longer says "Mic on". (where: second computer)
-- The laptop's Devices page for Windows with "Use the phone as a microphone" off: Send my mic on at Windows makes no `pocketdesk_mic` there; on again there, from the next session, it does. Its hint on a computer's page names the screen window's Send my mic. (where: second computer)
-- The laptop viewing Windows (Windows with VB-CABLE installed, its speakers muted): Send my mic on at the laptop plays into "CABLE Input" on Windows, counted by a recorder on "CABLE Output" for 5 s (samples above silence, counts only). (where: second computer)
-- With Send my mic on, Alt+Tab to another window here: the bar still says "Mic on" and the laptop's `pocketdesk_mic` stays. The window dropping into Reconnecting turns it off, and it stays off as the picture comes back until turned on again. (where: second computer)
-- Task Manager (or `top` on the laptop): the desktop app's CPU with Send my mic on is a few percent at most, and the Stats' bitrate barely moves. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
