@@ -332,6 +332,8 @@ fn the_windows_decoder_on_a_real_view() {
         ComputerAsk::View {
             device_id: b_id.clone(),
             monitor: 0,
+            // The app's own probe, as the window asks (PR #562 review I3).
+            hevc: hevc && crate::video::probe_hevc("ffmpeg"),
         },
         pin::now_unix(),
     )

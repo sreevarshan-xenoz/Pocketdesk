@@ -140,6 +140,12 @@ struct State {
     /// The ways that gave nothing for a codec, for as long as the app runs
     /// (PR #562 review M3): the next view does not wait on them again.
     failed_ways: std::collections::HashSet<(Codec, Accel)>,
+    /// "Use HEVC when both can" as Settings has it (PC5), whether this
+    /// view gave up on HEVC (every way gave nothing, PR #562 review I3),
+    /// and whether the worker asks for it again without.
+    hevc_setting: bool,
+    hevc_refused: bool,
+    redial_h264: bool,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
     /// Files dropped on the window, on their way; the word on the last
@@ -564,6 +570,9 @@ impl ComputerView {
     pub fn new(ctx: &egui::Context, state_dir: PathBuf, config: Option<PathBuf>) -> Self {
         let shared = Arc::new(Mutex::new(State::default()));
         let worker = shared.clone();
+        // PC5: whether this app's ffmpeg decodes HEVC, found once, off the
+        // UI thread.
+        crate::video::start_hevc_probe();
         let repaint = ctx.clone();
         let ctx = ctx.clone();
         let watched = state_dir.clone();
@@ -605,6 +614,7 @@ impl ComputerView {
             .as_ref()
             .is_some_and(|w| w.device_id == device_id);
         if !same {
+            state.hevc_refused = false;
             state.quality = quality;
             state.view_only = view_only;
             state.stats_on = stats;
@@ -616,6 +626,12 @@ impl ComputerView {
     pub fn set_stats(&self, on: bool) {
         lock(&self.shared).stats_on = on;
         self.ctx.request_repaint_of(viewport_id());
+    }
+
+    /// "Use HEVC when both can" as Settings has it (PC5): the next view
+    /// follows.
+    pub fn set_hevc(&self, on: bool) {
+        lock(&self.shared).hevc_setting = on;
     }
 
     /// "Decode on the graphics card" as Settings has it (PC5): the next
@@ -683,6 +699,11 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     let request = ComputerAsk::View {
         device_id: wanted.device_id.clone(),
         monitor: wanted.monitor,
+        hevc: offer_hevc(
+            state.hevc_setting,
+            crate::video::decodes_hevc(),
+            state.hevc_refused,
+        ),
     };
     let release = state.input.release_all();
     send(state, release);
@@ -704,6 +725,19 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     state.asked += 1;
     state.rejoins.clear();
     Ok(())
+}
+
+/// Whether a view asks for HEVC (PC5, PR #562 review I3): with "Use HEVC
+/// when both can" on, this app's ffmpeg shown to decode it, and the view
+/// not given up on it.
+pub fn offer_hevc(setting: bool, decodes: bool, refused: bool) -> bool {
+    setting && decodes && !refused
+}
+
+/// Whether a view whose last way just gave up (`step`) is asked for again
+/// without HEVC: once, when the stream is HEVC (PR #562 review I3).
+pub fn redial_without_hevc(step: Step, codec: Option<Codec>, refused: bool) -> bool {
+    step == Step::Exhausted && codec == Some(Codec::Hevc) && !refused
 }
 
 /// Let go of what is held there, then end the view on the server: the
@@ -1607,6 +1641,21 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         let ended = view(&file, shared, ctx);
         end_recording(shared, Some("the screen stopped"));
         let mut state = lock(shared);
+        // HEVC gave nothing here (PR #562 review I3): the same screen is
+        // asked for again as H.264, once, if the window still wants it.
+        if std::mem::take(&mut state.redial_h264)
+            && state.asked == asked
+            && state.wanted.as_ref() == Some(&wanted)
+        {
+            let release = state.input.release_all();
+            send(&mut state, release);
+            state.input = WindowInput::default();
+            if let Err(e) = ask(state_dir, &mut state, wanted) {
+                state.ended = Some(e);
+            }
+            ctx.request_repaint_of(viewport_id());
+            continue;
+        }
         // The relay dropped this window but the view goes on (its queue
         // was full at a new size, BK7 review M3): it is joined again, with
         // what is held let go meanwhile.
@@ -1779,7 +1828,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 seq,
                 data,
             } => {
-                climb(
+                let step = climb(
                     shared,
                     ctx,
                     file.session_id,
@@ -1788,6 +1837,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     &mut gate,
                     stream_is,
                 );
+                if give_up_hevc(shared, step, stream_is) {
+                    return Ok(String::new());
+                }
                 // The GPU's shader failed (PC5): the decoder gives RGBA.
                 if decoder
                     .as_ref()
@@ -1819,6 +1871,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     let tried = ladder.way().clone();
                     let step = ladder.failed();
                     remember_failed(shared, stream_is, tried, step);
+                    if give_up_hevc(shared, step, stream_is) {
+                        return Ok(String::new());
+                    }
                     if step == Step::Next {
                         // The next way, from the next keyframe (PC5).
                         decoder = start_decoder(shared, ctx, stream_is, ladder.way());
@@ -1843,6 +1898,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     &mut gate,
                     stream_is,
                 );
+                if give_up_hevc(shared, step, stream_is) {
+                    return Ok(String::new());
+                }
                 // The next way starts from a keyframe, asked for now.
                 if step == Step::Next {
                     Message::WantKeyframe.write(&mut asks)?;
@@ -1992,6 +2050,23 @@ fn climb(
         Step::Stay | Step::Exhausted => {}
     }
     step
+}
+
+/// The last way gave nothing on HEVC (PC5, PR #562 review I3): the view
+/// is asked for again without it, once, by the worker as this one ends.
+fn give_up_hevc(
+    shared: &Mutex<State>,
+    step: Step,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+) -> bool {
+    let mut state = lock(shared);
+    let codec = stream_is.map(|(codec, _)| codec);
+    if !redial_without_hevc(step, codec, state.hevc_refused) {
+        return false;
+    }
+    state.hevc_refused = true;
+    state.redial_h264 = true;
+    true
 }
 
 /// A way that gave up (`step` from it) is remembered as failed for the
@@ -2475,6 +2550,65 @@ mod tests {
         assert_eq!(all.way(), &Accel::Software, "never past the last");
     }
 
+    /// PR #562 review I3: a view asks for HEVC only with the setting on,
+    /// this app's ffmpeg decoding it and the view not given up on it; it
+    /// is given up once, when the last way gives nothing on HEVC.
+    #[test]
+    fn hevc_is_asked_for_only_when_this_app_decodes_it_and_given_up_once() {
+        assert!(offer_hevc(true, true, false));
+        assert!(!offer_hevc(false, true, false), "the setting off");
+        assert!(!offer_hevc(true, false, false), "this ffmpeg cannot");
+        assert!(!offer_hevc(true, true, true), "given up for this view");
+        let hevc = Some(Codec::Hevc);
+        assert!(redial_without_hevc(Step::Exhausted, hevc, false));
+        assert!(!redial_without_hevc(Step::Exhausted, hevc, true), "once");
+        assert!(!redial_without_hevc(Step::Next, hevc, false), "a way left");
+        assert!(!redial_without_hevc(
+            Step::Exhausted,
+            Some(Codec::H264),
+            false
+        ));
+        let shared = Mutex::new(State::default());
+        assert!(give_up_hevc(
+            &shared,
+            Step::Exhausted,
+            Some((Codec::Hevc, None))
+        ));
+        assert!(lock(&shared).redial_h264 && lock(&shared).hevc_refused);
+        assert!(
+            !give_up_hevc(&shared, Step::Exhausted, Some((Codec::Hevc, None))),
+            "not twice"
+        );
+    }
+
+    /// PR #562 review I3: the ask says HEVC as the window offers it.
+    #[test]
+    fn the_view_ask_says_whether_it_takes_hevc() {
+        let dir = std::env::temp_dir().join(format!("pd-pc5-ask-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            hevc_setting: true,
+            hevc_refused: true,
+            ..State::default()
+        };
+        let wanted = Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        ask(&dir, &mut state, wanted).unwrap();
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(
+            matches!(
+                asked.as_slice(),
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false }
+            ),
+            "{asked:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// PC5: the percentiles by nearest rank.
     #[test]
     fn a_percentile_is_by_nearest_rank() {
@@ -2922,7 +3056,8 @@ mod tests {
             asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
             [ComputerAsk::View {
                 device_id: "desk".into(),
-                monitor: 0
+                monitor: 0,
+                hevc: false,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();

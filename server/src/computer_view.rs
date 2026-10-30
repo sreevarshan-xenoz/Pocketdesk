@@ -91,100 +91,18 @@ const LOOK: Duration = Duration::from_millis(250);
 const NOT_PAIRED: &str = "That computer is no longer paired with this one.";
 /// How often the window hears how the picture comes (PC2).
 const STATS_EVERY: Duration = Duration::from_secs(1);
-/// A one-picture HEVC stream, 16 by 16 grey (libx265, 91 bytes), that the
-/// server decodes once as it starts (PC5): the window's sidecar is the same
-/// `ffmpeg`, so a view offers HEVC only where it has shown it decodes it.
-const HEVC_SAMPLE: [u8; 91] = [
-    0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00,
-    0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40, 0x00, 0x00, 0x00, 0x01, 0x42,
-    0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e,
-    0xa0, 0x88, 0x45, 0x96, 0xea, 0xaf, 0x2b, 0xc0, 0x5a, 0x02, 0x00, 0x00, 0x03, 0x00, 0x02, 0x00,
-    0x00, 0x03, 0x00, 0x02, 0x10, 0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc1, 0x73, 0xc0, 0x89, 0x00,
-    0x00, 0x01, 0x28, 0x01, 0xaf, 0x78, 0xf8, 0x5d, 0xf7, 0xe1, 0x70,
-];
-/// Its picture as one byte a pixel.
-const HEVC_SAMPLE_BYTES: usize = 16 * 16;
-/// How long the probe may take.
-const HEVC_PROBE_TIME: Duration = Duration::from_secs(10);
-
-/// Whether this computer's `ffmpeg` decoded [`HEVC_SAMPLE`], found once.
-static DECODES_HEVC: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
-
-/// Whether this computer's `ffmpeg` decodes HEVC (PC5): probed once, as
-/// the server starts ([`crate::peer_computers::run`]), and waited for by a
-/// view that dials before it is done.
-pub async fn decodes_hevc() -> bool {
-    *DECODES_HEVC
-        .get_or_init(|| async {
-            let decodes = tokio::task::spawn_blocking(|| probe_hevc("ffmpeg"))
-                .await
-                .unwrap_or(false);
-            tracing::info!(decodes, "The view's HEVC probe");
-            decodes
-        })
-        .await
-}
-
-/// Decode [`HEVC_SAMPLE`] with `program` (`ffmpeg`): whether its one
-/// picture came out whole within [`HEVC_PROBE_TIME`] (PC5).
-pub fn probe_hevc(program: &str) -> bool {
-    use std::io::{Read, Write};
-    let mut command = std::process::Command::new(program);
-    command
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "hevc",
-            "-i",
-            "pipe:0",
-        ])
-        .args(["-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let Ok(mut child) = command.spawn() else {
-        return false;
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(&HEVC_SAMPLE);
-    }
-    let Some(mut stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return false;
-    };
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut out = Vec::new();
-        let _ = stdout.read_to_end(&mut out);
-        let _ = tx.send(out.len());
-    });
-    let decoded = rx.recv_timeout(HEVC_PROBE_TIME);
-    let _ = child.kill();
-    let _ = child.wait();
-    decoded == Ok(HEVC_SAMPLE_BYTES)
-}
-
 /// The codecs a view offers the other computer (PC5): HEVC beside H.264
-/// when `computer_view_hevc` is on (`wanted`) and the window's ffmpeg
-/// decodes it (`decodes`, unknown until the probe ran); else H.264 alone,
-/// said by sending none.
-pub fn codec_caps(wanted: bool, decodes: Option<bool>) -> Option<u8> {
-    (wanted && decodes == Some(true)).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
+/// when the app's ask said its ffmpeg decodes it (`asked`, PR #562 review
+/// I3: the app's sidecar decodes, not this process) and
+/// `computer_view_hevc` is on here (`wanted`); else H.264 alone, said by
+/// sending none. An app before PC5 never asks, so it never hears HEVC.
+pub fn codec_caps(asked: bool, wanted: bool) -> Option<u8> {
+    (asked && wanted).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
 }
 
-/// The codecs this computer's views offer now.
-async fn view_codec_caps() -> Option<u8> {
-    let wanted = crate::events::current_config().computer_view_hevc;
-    codec_caps(wanted, Some(wanted && decodes_hevc().await))
+/// The codecs a view the app asked for (`asked` HEVC or not) offers now.
+fn view_codec_caps(asked: bool) -> Option<u8> {
+    codec_caps(asked, crate::events::current_config().computer_view_hevc)
 }
 
 /// What a keyframe says the stream is (PC5): H.264 of the size its SPS
@@ -277,7 +195,12 @@ const WINDOW_GONE: &str = "Privacy ended: the window closed.";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// Show the computer `device_id`'s screen `monitor`, replacing any view.
-    Start { device_id: String, monitor: u32 },
+    /// `hevc`: the app decodes HEVC and asks for it (PC5).
+    Start {
+        device_id: String,
+        monitor: u32,
+        hevc: bool,
+    },
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one shown now.
     Stop { session_id: Option<u64> },
@@ -387,9 +310,14 @@ pub enum Dialer {
 }
 
 impl Dialer {
-    async fn dial(&self, computer: &PeerComputer, monitor: u32) -> Result<Dialed, String> {
+    async fn dial(
+        &self,
+        computer: &PeerComputer,
+        monitor: u32,
+        caps: Option<u8>,
+    ) -> Result<Dialed, String> {
         match self {
-            Dialer::Real { certs, wan } => dial(computer, certs, wan.as_ref(), monitor).await,
+            Dialer::Real { certs, wan } => dial(computer, certs, wan.as_ref(), monitor, caps).await,
             Dialer::Direct { addr, certs, id } => {
                 let (client, frames, audio) = StreamingClient::connect(
                     &addr.to_string(),
@@ -397,7 +325,7 @@ impl Dialer {
                     Some(monitor),
                     Some(id),
                     None,
-                    view_codec_caps().await,
+                    caps,
                     SessionMode::Screen,
                 )
                 .await
@@ -424,6 +352,7 @@ async fn dial(
     certs: &Arc<CertManager>,
     wan: Option<&iroh::Endpoint>,
     monitor: u32,
+    caps: Option<u8>,
 ) -> Result<Dialed, String> {
     let me = crate::kde::host_identity();
     let iroh_id = wan.map(|e| e.id().to_string());
@@ -465,8 +394,6 @@ async fn dial(
     })
     .await
     .map_err(|why| why.join("; "))?;
-    // HEVC too when the window's decoder reads it (PC5).
-    let caps = view_codec_caps().await;
     let (client, frames, audio) = StreamingClient::attach(
         conn,
         Some(monitor),
@@ -989,11 +916,13 @@ enum Outcome {
 /// One view, until it ends: dialled, shown, and after a drop dialled again
 /// by itself with [`backoff`] for about two minutes (PC2). A Stop or a
 /// window closed aborts it, so it never dials again after one.
+#[allow(clippy::too_many_arguments)]
 async fn session(
     session_id: u64,
     state_dir: PathBuf,
     mut computer: PeerComputer,
     monitor: u32,
+    hevc: bool,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
@@ -1014,7 +943,9 @@ async fn session(
     let mut shown_once = false;
     loop {
         let dial_started = Instant::now();
-        let next = match dialer.dial(&computer, monitor).await {
+        // HEVC too when the window's decoder reads it (PC5), as this
+        // computer's settings say at each dial.
+        let next = match dialer.dial(&computer, monitor, view_codec_caps(hevc)).await {
             Err(why) if !shown_once => {
                 // Its addresses stay out of the log at info (BK7 review M8):
                 // the window says them to the owner.
@@ -1829,7 +1760,7 @@ pub async fn run_with(
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
-                let Command::Start { device_id, monitor } = command else {
+                let Command::Start { device_id, monitor, hevc } = command else {
                     match command {
                         Command::Stop { session_id }
                             if stops(session_id, view.as_ref().map(|v| v.session_id)) =>
@@ -1873,6 +1804,7 @@ pub async fn run_with(
                             state_dir.clone(),
                             computer,
                             monitor,
+                            hevc,
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
@@ -2405,31 +2337,35 @@ mod tests {
         );
     }
 
-    /// PC5: HEVC is offered only with the setting on and the probe done
-    /// and good.
-    #[test]
-    fn hevc_is_offered_only_when_both_say_so() {
-        let hevc = pocketdesk_core::streaming::client::CODEC_CAP_HEVC;
-        assert_eq!(codec_caps(true, Some(true)), Some(hevc));
-        assert_eq!(codec_caps(false, Some(true)), None, "turned off");
-        assert_eq!(codec_caps(true, Some(false)), None, "ffmpeg cannot");
-        assert_eq!(codec_caps(true, None), None, "not probed yet");
-    }
+    /// A one-picture HEVC stream, 16 by 16 grey (libx265, 91 bytes).
+    const HEVC_SAMPLE: [u8; 91] = [
+        0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03,
+        0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40, 0x00, 0x00, 0x00,
+        0x01, 0x42, 0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03,
+        0x00, 0x00, 0x1e, 0xa0, 0x88, 0x45, 0x96, 0xea, 0xaf, 0x2b, 0xc0, 0x5a, 0x02, 0x00, 0x00,
+        0x03, 0x00, 0x02, 0x00, 0x00, 0x03, 0x00, 0x02, 0x10, 0x00, 0x00, 0x00, 0x01, 0x44, 0x01,
+        0xc1, 0x73, 0xc0, 0x89, 0x00, 0x00, 0x01, 0x28, 0x01, 0xaf, 0x78, 0xf8, 0x5d, 0xf7, 0xe1,
+        0x70,
+    ];
 
-    /// PC5: the probe decodes the sample with this computer's ffmpeg (when
-    /// there is one), and a missing program is a no.
+    /// PC5, PR #562 review I3: HEVC is offered only when the app asked for
+    /// it (its own ffmpeg decodes it) and the setting here is on; an app
+    /// before PC5 never asks.
     #[test]
-    fn the_hevc_probe_decodes_the_sample() {
-        assert!(!probe_hevc("pocketdesk-no-such-ffmpeg"));
-        let here = std::process::Command::new("ffmpeg")
-            .arg("-version")
-            .output()
-            .is_ok_and(|o| o.status.success());
-        if !here {
-            eprintln!("no ffmpeg here: skipped");
-            return;
-        }
-        assert!(probe_hevc("ffmpeg"), "ffmpeg decodes the sample");
+    fn hevc_is_offered_only_when_the_app_asks_and_the_setting_lets_it() {
+        let hevc = pocketdesk_core::streaming::client::CODEC_CAP_HEVC;
+        assert_eq!(codec_caps(true, true), Some(hevc));
+        assert_eq!(codec_caps(true, false), None, "turned off here");
+        assert_eq!(codec_caps(false, true), None, "the app did not ask");
+        let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
+        )
+        .unwrap();
+        let pocketdesk_core::local::computers::ComputerAsk::View { hevc: asked, .. } = older.ask
+        else {
+            panic!("a view");
+        };
+        assert_eq!(codec_caps(asked, true), None, "an app before PC5");
     }
 
     fn computer(addresses: &[&str], endpoint: Option<serde_json::Value>) -> PeerComputer {

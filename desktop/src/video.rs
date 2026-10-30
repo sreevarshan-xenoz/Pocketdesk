@@ -274,6 +274,91 @@ impl Codec {
 /// HEVC's access unit delimiter (type 35, any slice type).
 const AUD_HEVC: [u8; 7] = [0, 0, 0, 1, 0x46, 0x01, 0x50];
 
+/// A one-picture HEVC stream, 16 by 16 grey (libx265, 91 bytes): what
+/// this app's ffmpeg decodes once to show it decodes HEVC (PC5, PR #562
+/// review I3: the sidecar that decodes is this app's, not the server's).
+const HEVC_SAMPLE: [u8; 91] = [
+    0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00,
+    0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40, 0x00, 0x00, 0x00, 0x01, 0x42,
+    0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e,
+    0xa0, 0x88, 0x45, 0x96, 0xea, 0xaf, 0x2b, 0xc0, 0x5a, 0x02, 0x00, 0x00, 0x03, 0x00, 0x02, 0x00,
+    0x00, 0x03, 0x00, 0x02, 0x10, 0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc1, 0x73, 0xc0, 0x89, 0x00,
+    0x00, 0x01, 0x28, 0x01, 0xaf, 0x78, 0xf8, 0x5d, 0xf7, 0xe1, 0x70,
+];
+/// Its picture as one byte a pixel.
+const HEVC_SAMPLE_BYTES: usize = 16 * 16;
+/// How long the probe may take.
+const HEVC_PROBE_TIME: Duration = Duration::from_secs(10);
+
+/// Whether this app's `ffmpeg` decoded [`HEVC_SAMPLE`]; unset until the
+/// probe ends.
+static DECODES_HEVC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Probe this app's `ffmpeg` for HEVC once, on a thread of its own (the
+/// window's, never the UI's), as the app starts; later calls do nothing.
+pub fn start_hevc_probe() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("hevc-probe".into())
+            .spawn(|| {
+                let _ = DECODES_HEVC.set(probe_hevc("ffmpeg"));
+            });
+    });
+}
+
+/// Whether this app's ffmpeg decodes HEVC: `false` until the probe said.
+pub fn decodes_hevc() -> bool {
+    DECODES_HEVC.get().copied().unwrap_or(false)
+}
+
+/// Decode [`HEVC_SAMPLE`] with `program` (`ffmpeg`): whether its one
+/// picture came out whole within [`HEVC_PROBE_TIME`].
+pub fn probe_hevc(program: &str) -> bool {
+    let mut command = Command::new(program);
+    command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "hevc",
+            "-i",
+            "pipe:0",
+        ])
+        .args(["-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(&HEVC_SAMPLE);
+    }
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = stdout.read_to_end(&mut out);
+        let _ = tx.send(out.len());
+    });
+    let decoded = rx.recv_timeout(HEVC_PROBE_TIME);
+    let _ = child.kill();
+    let _ = child.wait();
+    decoded == Ok(HEVC_SAMPLE_BYTES)
+}
+
 /// How the sidecar decodes (PC5): on the graphics card through Direct3D
 /// 11 or VA-API (at a render node), whichever ffmpeg finds, or on the
 /// processor.
@@ -871,6 +956,22 @@ mod tests {
             "{duration} s for 2 s of frames"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #562 review I3: the probe decodes the sample with this app's
+    /// ffmpeg (when there is one), and a missing program is a no.
+    #[test]
+    fn the_hevc_probe_decodes_the_sample() {
+        assert!(!probe_hevc("pocketdesk-no-such-ffmpeg"));
+        let here = Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !here {
+            eprintln!("no ffmpeg here: skipped");
+            return;
+        }
+        assert!(probe_hevc("ffmpeg"), "ffmpeg decodes the sample");
     }
 
     /// PC5 review I1: a recording reads the stream as its codec, HEVC too,

@@ -984,6 +984,8 @@ impl PocketdeskApp {
                 Config::path().ok(),
             )
         });
+        // PC5: the next view asks for HEVC, or not, as Settings say.
+        view.set_hevc(self.config.as_ref().is_none_or(|c| c.computer_view_hevc));
         // PC5: the next view decodes on the card, or not, as Settings say.
         view.set_hw_decode(
             self.config

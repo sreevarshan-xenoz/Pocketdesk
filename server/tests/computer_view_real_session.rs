@@ -136,6 +136,7 @@ async fn the_real_servers_screen_reaches_the_window_and_the_window_its_input() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();

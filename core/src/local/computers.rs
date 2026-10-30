@@ -320,11 +320,15 @@ pub enum ComputerAsk {
     /// Show a paired computer's screen in a window here (BK7): the server
     /// dials it and relays its picture to the app ([`super::view`]).
     /// `monitor` is which of its screens, from 0. A newer view replaces an
-    /// older one.
+    /// older one. `hevc`: this app's ffmpeg decodes HEVC and its
+    /// settings let a view ask for it (PC5); an app before PC5 says not, so
+    /// its views stay H.264.
     View {
         device_id: String,
         #[serde(default)]
         monitor: u32,
+        #[serde(default)]
+        hevc: bool,
     },
     /// Ask the nearby computer `device_id` (found by its announcement, at
     /// `address`, control port `port`) to pair ([`super::nearby`]). `mine`:
@@ -780,6 +784,7 @@ mod tests {
             ComputerAsk::View {
                 device_id: "desk".to_string(),
                 monitor: 1,
+                hevc: true,
             },
             100,
         )
@@ -813,9 +818,10 @@ mod tests {
             asked.ask,
             ComputerAsk::View {
                 device_id: "desk".to_string(),
-                monitor: 0
+                monitor: 0,
+                hevc: false,
             },
-            "the first screen unless named"
+            "the first screen unless named, and no HEVC from an app before PC5"
         );
         let raw = serde_json::to_string(&computer("desk")).unwrap();
         let old: PeerComputer =
@@ -903,6 +909,7 @@ mod tests {
                     ComputerAsk::View {
                         device_id: format!("desk-{n}"),
                         monitor: 0,
+                        hevc: false,
                     }
                 };
                 asked.push(request(&dir, ask, 100).unwrap());
