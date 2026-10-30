@@ -1040,6 +1040,52 @@ mod tests {
         (endpoint, addr)
     }
 
+    /// PC2 review: the view's reconnect and the host's gate wait on
+    /// `connection::closed` over the internet road too. It waits while the
+    /// iroh connection is open, and returns soon after the peer closes it,
+    /// the close's reason readable then.
+    #[tokio::test]
+    async fn closed_returns_once_the_iroh_peer_closes() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let alpn = StreamTransportConfig::default().alpn;
+        let (server, _) = bind_loopback_endpoint(&alpn).await;
+        let (client, _) = bind_loopback_endpoint(&alpn).await;
+        let accept = {
+            let server = server.clone();
+            tokio::spawn(async move {
+                let incoming = server.accept().await.expect("incoming");
+                let conn = incoming.accept().expect("reject").await.expect("handshake");
+                IrohConnection::shared(conn)
+            })
+        };
+        let raw_client = client
+            .connect(server.addr(), &alpn)
+            .await
+            .expect("dial loopback");
+        let server_conn: SharedConnection = accept.await.expect("accept task");
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(600),
+                crate::streaming::connection::closed(server_conn.as_ref())
+            )
+            .await
+            .is_err(),
+            "open: still waiting"
+        );
+        assert_eq!(server_conn.close_reason(), None, "open");
+        raw_client.close(0u32.into(), b"kicked by user");
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::streaming::connection::closed(server_conn.as_ref()),
+        )
+        .await
+        .expect("returns once closed");
+        assert_eq!(
+            server_conn.close_reason().as_deref(),
+            Some("kicked by user")
+        );
+    }
+
     /// The control road's dial (T10a): one stream each way, carried by the
     /// dial's own endpoint.
     #[tokio::test]
