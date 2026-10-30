@@ -779,15 +779,30 @@ pub fn fits(len: usize) -> bool {
     len.saturating_add(16) <= pocketdesk_core::local::cast::MAX_MESSAGE
 }
 
-/// The words a computer closes a session with when it ends or refuses it on
-/// purpose: its End (a kick), a refusal or its owner's no, an unpairing, a
-/// permission it does not give.
-const ENDED_ON_PURPOSE: [&str; 4] = ["kicked", "refused", "not paired", "not allowed"];
+/// The reasons a computer closes a session with when it ends or refuses it
+/// on purpose: its End (a kick), a refusal or its owner's no, an
+/// unpairing, a permission it does not give. Matched whole (PC9a review
+/// I1): a transport's own words, such as a closed endpoint's "refused" to
+/// a dial during a stop, are not an end on purpose.
+const ENDED_ON_PURPOSE: [&str; 7] = [
+    "kicked by user",
+    "session refused",
+    "not paired",
+    "input not allowed",
+    "sound not allowed",
+    "phone sound not allowed",
+    "phone screen not allowed",
+];
 
 /// Whether a view the other computer closed with `reason` is dialled again
 /// by itself (PC2): not when that computer ended it on purpose. A server
 /// stopping or restarting, a link gone, the encoder rebuilt or permissions
 /// changed are worth another dial.
+pub fn may_reconnect(reason: Option<&str>) -> bool {
+    let reason = reason.unwrap_or("").trim().to_ascii_lowercase();
+    !ENDED_ON_PURPOSE.contains(&reason.as_str())
+}
+
 /// How often a view asks the other computer's screens again while it does
 /// not know them (PC9a).
 const SCREENS_AGAIN: Duration = Duration::from_secs(5);
@@ -801,11 +816,6 @@ pub fn ask_screens_again(unknown: bool, asked: &mut Instant, now: Instant) -> bo
     }
     *asked = now;
     true
-}
-
-pub fn may_reconnect(reason: Option<&str>) -> bool {
-    let reason = reason.unwrap_or("").to_ascii_lowercase();
-    !ENDED_ON_PURPOSE.iter().any(|word| reason.contains(word))
 }
 
 /// The words for a session that ended for good: before the other computer
@@ -4888,6 +4898,26 @@ mod tests {
             &mut asked,
             start + Duration::from_secs(60)
         ));
+    }
+
+    /// PC9a review I1: a transport's own "refused" (a dial to an endpoint
+    /// closing for a stop) is dialled again; the server's refusal is not.
+    #[test]
+    fn only_the_servers_own_refusal_is_final() {
+        for again in [
+            "connection refused",
+            "aborted by peer: the server refused to accept a new connection",
+            "server stopping",
+        ] {
+            assert!(may_reconnect(Some(again)), "{again}");
+        }
+        for kept in [
+            "session refused",
+            " Session refused ",
+            "phone screen not allowed",
+        ] {
+            assert!(!may_reconnect(Some(kept)), "{kept}");
+        }
     }
 
     /// PC2: a view the other computer ended on purpose (its End, a refusal,
