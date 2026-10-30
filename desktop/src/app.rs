@@ -389,7 +389,8 @@ pub const PAIR_A_COMPUTER: &str = "Pair a computer";
 
 /// Sessions with none live (UX 4): what shows there, and how.
 pub const SESSIONS_EMPTY: &str = "No one is viewing or driving this computer";
-pub const SESSIONS_HOW: &str = "A phone shows here while it views or drives it: on the phone, tap Connect on this computer's card.";
+pub const SESSIONS_HOW: &str =
+    "Whoever views or drives it shows here: on a phone, tap Connect on this computer's card.";
 /// Files with nothing to take one (UX 4).
 pub const FILES_NO_TARGET: &str = "No phone or computer can take a file right now.";
 /// Why a failed file's Send again is off.
