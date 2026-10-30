@@ -251,6 +251,55 @@ struct State {
     /// How the microphone is opened: [`view_mic::open`] unless a test
     /// gives a fake (no test opens a real microphone).
     mic_open: Option<MicOpener>,
+    /// Keys by position (scancode mode): this window's choice, and the
+    /// choice Settings make for a computer with none of its own
+    /// (`computer_view_scancodes`).
+    keys_by_position: bool,
+    keys_default: bool,
+    /// "Games usually want Keys by position", offered once a window.
+    position_hint: PositionHint,
+}
+
+/// The window's offer of Keys by position as the pointer is locked (PC7
+/// suggests a game): offered once a window, and never switched on but by
+/// its button.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum PositionHint {
+    /// Not offered yet.
+    #[default]
+    NotYet,
+    /// Offered: said on the bar until its button or "Not now".
+    Offered,
+    /// Taken, turned down or no longer needed: not offered again.
+    Done,
+}
+
+impl PositionHint {
+    /// The offer after a pass where the pointer is `locked` and keys go
+    /// `by_position` or not: offered the first time the pointer is locked
+    /// while keys go as text, and done once they go by position.
+    pub fn step(self, locked: bool, by_position: bool) -> Self {
+        match self {
+            PositionHint::NotYet if locked && !by_position => PositionHint::Offered,
+            PositionHint::Offered if by_position => PositionHint::Done,
+            other => other,
+        }
+    }
+
+    /// Whether the bar says it.
+    pub fn shown(self) -> bool {
+        self == PositionHint::Offered
+    }
+}
+
+/// The offer's words on the bar.
+pub const POSITION_HINT: &str = "Games usually want Keys by position";
+
+/// What the bar's "Keys by position" says of itself.
+pub fn keys_by_position_hover(name: &str) -> String {
+    format!(
+        "Send every key as the key at its place on the keyboard, not as the text it types here: for games and programs that read keys by where they sit (WASD). {name}'s own keyboard layout then says what each key types, and shortcuts follow the key's place (on an AZERTY keyboard there, the key in A's place is Q). The keypad's digits, Enter, minus and slash go as the main keyboard's. Kept for {name}."
+    )
 }
 
 /// The window (its slot) sending each computer the mic, by its id (PC11).
@@ -605,6 +654,34 @@ fn switch_grab(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
             state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
         }
         None => {}
+    }
+}
+
+/// "Keys by position" switched from the bar or its offer: at once (what is
+/// held there let go on the next pass), and remembered for the computer
+/// `device_id` in `computers.json`, which the server keeps.
+fn switch_keys(shared: &Mutex<State>, state_dir: &Path, device_id: &str, on: bool) {
+    let mut state = lock(shared);
+    state.keys_by_position = on;
+    state.position_hint = PositionHint::Done;
+    let ask = ComputerAsk::KeysByPosition {
+        device_id: device_id.to_string(),
+        on,
+    };
+    // This computer's server takes the ask (PR #573 review N5): left for
+    // it all the same, in case it starts within the ask's two minutes.
+    let saved = computers::request(state_dir, ask, now_unix())
+        .map_err(|e| e.to_string())
+        .and_then(|_| {
+            if pocketdesk_core::local::server::is_running(state_dir) {
+                Ok(())
+            } else {
+                Err("Pocketdesk's server is not running here".to_string())
+            }
+        });
+    if let Err(e) = saved {
+        eprintln!("Pocketdesk: Keys by position not saved for this computer: {e}");
+        state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
     }
 }
 
@@ -1144,6 +1221,15 @@ impl ComputerView {
             state.quality = quality;
             state.view_only = view_only;
             state.stats_on = stats;
+            // Keys by position as last chosen for this computer, else as
+            // Settings say.
+            state.keys_by_position = computers::read(&self.state_dir)
+                .computers
+                .iter()
+                .find(|c| c.device_id == device_id)
+                .and_then(|c| c.keys_by_position)
+                .unwrap_or(state.keys_default);
+            state.position_hint = PositionHint::default();
         }
         state.later = false;
         ask(&self.state_dir, &mut state, wanted)
@@ -1190,6 +1276,13 @@ impl ComputerView {
     #[cfg(windows)]
     pub fn take_grab_saved(&self) -> Option<bool> {
         self.take_each(|state| state.grab.saved.take())
+    }
+
+    /// "Keys by position" as Settings has it: the choice of a window
+    /// opened for a computer with none of its own. An open window keeps
+    /// its own.
+    pub fn set_keys_by_position_default(&self, on: bool) {
+        self.each(|state| state.keys_default = on);
     }
 
     /// "Lock it when I close the window" as Settings has it (PC8): an open
@@ -1346,6 +1439,8 @@ impl ComputerView {
         state.hevc_setting = from.hevc_setting;
         state.hw_decode = from.hw_decode;
         state.lock_on_close = from.lock_on_close;
+        state.keys_by_position = from.keys_by_position;
+        state.position_hint = from.position_hint;
         state.later = true;
         // A computer that is not Windows takes a window's clicks over its
         // first screen whatever screen the window shows (PR #570 review
@@ -2294,6 +2389,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     #[cfg(windows)]
     let grab_setting = state.grab.setting;
     let lock_on_close = state.lock_on_close;
+    let keys_by_position = state.keys_by_position;
+    let position_hint = state.position_hint;
     let mic_wanted = state.mic.wanted();
     let mic_on = state.mic.on();
     let mic_note = state.mic_note.clone();
@@ -2410,6 +2507,15 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         if pointer_locked {
                             ui.label(view_pointer::HINT);
                         }
+                        // Keys by position: every key as where it sits.
+                        let mut by_position = keys_by_position;
+                        let keys = ui
+                            .checkbox(&mut by_position, "Keys by position")
+                            .on_hover_text(keys_by_position_hover(&wanted.name));
+                        if keys.clicked() {
+                            keys.surrender_focus();
+                            switch_keys(shared, state_dir, &wanted.device_id, by_position);
+                        }
                         // PC8: the other computer's own privacy mode.
                         let mut hide = hiding(&status.privacy);
                         let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
@@ -2524,6 +2630,22 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
                             .wrap(),
                     );
+                }
+                // A locked pointer suggests a game (PC7): Keys by position
+                // offered once, on its button only.
+                if ended.is_none()
+                    && position_hint.shown()
+                    && controls(status.control, view_only, connected, true)
+                {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(egui::Color32::LIGHT_GRAY, POSITION_HINT);
+                        if ui.button("Turn on Keys by position").clicked() {
+                            switch_keys(shared, state_dir, &wanted.device_id, true);
+                        }
+                        if ui.button("Not now").clicked() {
+                            lock(shared).position_hint = PositionHint::Done;
+                        }
+                    });
                 }
                 if ended.is_none() && says_first_screen(status.windows, later, wanted.monitor) {
                     ui.add(
@@ -2780,16 +2902,26 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             // change while locked keeps the movement and what is held
             // (PR #563 review M6).
             let current = current || state.pointer.locked();
-            let on = controls(status.control, state.view_only, connected, current) && focused;
-            let packets = match picture_rect {
+            // Reconnecting, nothing reaches that computer: what is held is
+            // let go here and there (PR #573 review N7).
+            let on = controls(status.control, state.view_only, connected, current)
+                && focused
+                && status.reconnecting == 0;
+            // Keys by position switched, or a fresh input after a rejoin:
+            // what is held goes first.
+            let by_position = state.keys_by_position;
+            let mut packets = state.input.set_by_position(by_position);
+            packets.extend(match picture_rect {
                 Some(rect) if on => {
                     let mut events = ctx.input(|i| i.events.clone());
                     keep_chord_here(&mut events);
                     state.input.take(&events, rect, Instant::now())
                 }
                 _ => state.input.release_all(),
-            };
+            });
             send(&mut state, packets);
+            let locked = state.pointer.locked();
+            state.position_hint = state.position_hint.step(locked, by_position);
             #[cfg(windows)]
             {
                 let controlling =
@@ -6907,5 +7039,242 @@ mod tests {
         state.mic.toggle();
         let shared = Arc::new(Mutex::new(State::default()));
         follow_mic(&shared, &mut state, None, &egui::Context::default(), true);
+    }
+
+    /// Keys by position is offered the first time the pointer is locked
+    /// while keys go as text, stays offered once the lock is freed (the
+    /// bar takes no clicks while locked), and is never offered again in
+    /// that window once taken or turned down.
+    #[test]
+    fn keys_by_position_is_offered_once_as_the_pointer_locks() {
+        let hint = PositionHint::default();
+        assert_eq!(hint.step(false, false), PositionHint::NotYet);
+        assert_eq!(hint.step(true, true), PositionHint::NotYet, "on already");
+        let offered = hint.step(true, false);
+        assert!(offered.shown());
+        assert_eq!(offered.step(false, false), PositionHint::Offered);
+        assert_eq!(offered.step(false, true), PositionHint::Done);
+        assert_eq!(PositionHint::Done.step(true, false), PositionHint::Done);
+        assert!(!PositionHint::Done.shown() && !PositionHint::NotYet.shown());
+        assert!(keys_by_position_hover("Desk").contains("Kept for Desk"));
+    }
+
+    /// The relay's key words for the W key and any text, in order.
+    fn heard_keys(mut relay: TcpStream) -> Vec<&'static str> {
+        use std::io::Read;
+        relay
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut heard = Vec::new();
+        let mut buf = [0u8; 65536];
+        while let Ok(n) = relay.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            heard.extend_from_slice(&buf[..n]);
+        }
+        let mut reader = io::Cursor::new(heard);
+        let mut said = Vec::new();
+        while let Ok(message) = Message::read(&mut reader) {
+            if let Message::Input(bytes) = message {
+                match InputPacket::decode(&bytes) {
+                    Ok(InputPacket::KeyEvent { key: 17, pressed }) => {
+                        said.push(if pressed { "w down" } else { "w up" })
+                    }
+                    Ok(InputPacket::Text(_)) => said.push("text"),
+                    _ => {}
+                }
+            }
+        }
+        said
+    }
+
+    /// W pressed where it sits, with the text an AZERTY layout makes of it.
+    fn press_w(harness: &mut egui_kittest::Harness<'_>) {
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::Key {
+            key: egui::Key::Z,
+            physical_key: Some(egui::Key::W),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        events.push(egui::Event::Text("z".into()));
+        harness.step();
+    }
+
+    /// Keys by position from the bar: kept for the computer (asked of the
+    /// server), a key goes as where it sits with no text, and a key held
+    /// there is let go as the switch goes off, View only goes on, the
+    /// window loses the focus and as it closes. No key reaches this
+    /// computer: the relay is a socket here.
+    #[test]
+    fn keys_by_position_sends_keys_and_lets_go_of_what_is_held() {
+        use egui_kittest::kittest::Queryable;
+        let (shared, relay, dir) = mic_window(
+            "keys",
+            Arc::new(|_| Err(io::Error::other("no microphone in this test"))),
+        );
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        let focus = |harness: &mut egui_kittest::Harness<'_>, on: bool| {
+            harness
+                .input_mut()
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .focused = Some(on);
+        };
+        focus(&mut harness, true);
+        harness.step();
+        assert!(!lock(&shared).keys_by_position, "off unless chosen");
+        harness.get_by_label("Keys by position").click();
+        harness.step();
+        assert!(lock(&shared).keys_by_position);
+        let asked: Vec<ComputerAsk> = computers::take_all(&dir, now_unix())
+            .into_iter()
+            .map(|r| r.ask)
+            .collect();
+        assert_eq!(
+            asked,
+            [ComputerAsk::KeysByPosition {
+                device_id: "desk".into(),
+                on: true,
+            }]
+        );
+        // Off again with W held: let go.
+        press_w(&mut harness);
+        harness.get_by_label("Keys by position").click();
+        harness.step();
+        harness.step();
+        assert!(!lock(&shared).keys_by_position);
+        // On, W held, View only: let go.
+        harness.get_by_label("Keys by position").click();
+        harness.step();
+        press_w(&mut harness);
+        harness.get_by_label("View only").click();
+        harness.step();
+        harness.step();
+        // Controlling again, W held, the focus goes: let go.
+        harness.get_by_label("View only").click();
+        harness.step();
+        press_w(&mut harness);
+        focus(&mut harness, false);
+        harness.step();
+        focus(&mut harness, true);
+        harness.step();
+        // W held as the window closes: let go.
+        press_w(&mut harness);
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        harness.step();
+        drop(harness);
+        drop(shared);
+        assert_eq!(
+            heard_keys(relay),
+            [
+                "w down", "w up", "w down", "w up", "w down", "w up", "w down", "w up"
+            ],
+            "each W by its place, no text, and each let go"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #573 review N7: a W held by position is let go as the view
+    /// starts reconnecting, and nothing is held once it is back.
+    #[test]
+    fn keys_held_by_position_are_let_go_as_the_view_reconnects() {
+        let (shared, relay, dir) = mic_window(
+            "keys-reconnect",
+            Arc::new(|_| Err(io::Error::other("no microphone in this test"))),
+        );
+        lock(&shared).keys_by_position = true;
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        press_w(&mut harness);
+        lock(&shared).status.reconnecting = 1;
+        harness.step();
+        assert!(!lock(&shared).input.holds(), "let go while reconnecting");
+        lock(&shared).status.reconnecting = 0;
+        harness.step();
+        assert!(!lock(&shared).input.holds());
+        drop(harness);
+        drop(shared);
+        assert_eq!(heard_keys(relay), ["w down", "w up"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The offer on the bar: said as the pointer locks while keys go as
+    /// text, its button turns Keys by position on; "Not now" in another
+    /// window is never said again there.
+    #[test]
+    fn the_bar_offers_keys_by_position_as_the_pointer_locks() {
+        use egui_kittest::kittest::Queryable;
+        let all = egui::Modifiers {
+            alt: true,
+            ctrl: true,
+            shift: true,
+            mac_cmd: false,
+            command: true,
+        };
+        for take in [true, false] {
+            let (shared, _relay, dir) = mic_window(
+                if take { "offer-take" } else { "offer-not" },
+                Arc::new(|_| Err(io::Error::other("no microphone in this test"))),
+            );
+            let mut harness = egui_kittest::Harness::new_ui({
+                let (shared, dir) = (shared.clone(), dir.clone());
+                move |ui| draw(&shared, &dir, None, ui)
+            });
+            harness
+                .input_mut()
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .focused = Some(true);
+            harness.step();
+            assert_eq!(harness.query_all_by_label(POSITION_HINT).count(), 0);
+            harness.key_press_modifiers(all, egui::Key::M);
+            harness.step();
+            harness.step();
+            assert!(lock(&shared).pointer.locked());
+            assert_eq!(harness.query_all_by_label(POSITION_HINT).count(), 1);
+            // Freed, the offer stays for its button.
+            harness.key_press_modifiers(all, egui::Key::M);
+            harness.step();
+            harness.step();
+            assert!(!lock(&shared).pointer.locked());
+            let button = if take {
+                "Turn on Keys by position"
+            } else {
+                "Not now"
+            };
+            harness.get_by_label(button).click();
+            harness.step();
+            harness.step();
+            assert_eq!(lock(&shared).keys_by_position, take);
+            assert_eq!(lock(&shared).position_hint, PositionHint::Done);
+            assert_eq!(harness.query_all_by_label(POSITION_HINT).count(), 0);
+            // Locked again: not offered again.
+            if !take {
+                harness.key_press_modifiers(all, egui::Key::M);
+                harness.step();
+                harness.step();
+                assert!(lock(&shared).pointer.locked());
+                assert_eq!(harness.query_all_by_label(POSITION_HINT).count(), 0);
+            }
+            drop(harness);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }

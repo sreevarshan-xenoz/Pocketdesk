@@ -845,6 +845,7 @@ mod tests {
             mine: false,
             wake: None,
             viewed_unix: viewed,
+            keys_by_position: None,
         };
         let asleep = PeerComputer {
             wake: Some(ComputerWake {
