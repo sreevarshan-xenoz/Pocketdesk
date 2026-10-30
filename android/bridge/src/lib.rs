@@ -17,6 +17,7 @@ mod dials;
 mod download;
 mod extra_links;
 mod in_use;
+mod introductions;
 mod link;
 mod link_quiet;
 mod links;
@@ -1633,6 +1634,45 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRemoveT
     let device_id = jstring_to_string(&mut env, &device_id);
     let request = jstring_to_string(&mut env, &request);
     let json = envelope(RUNTIME.block_on(remote_devices::remove(
+        address,
+        port as u16,
+        device_id,
+        request,
+    )));
+    to_jstring(&mut env, json)
+}
+
+/// The computers this phone could be introduced to (ecosystem phase 4):
+/// `{"ok": "{\"computers\": [...]}"}`, or the computer's refusal.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIntroductions(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    request: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let request = jstring_to_string(&mut env, &request);
+    let json = envelope(RUNTIME.block_on(introductions::offers(address, port as u16, request)));
+    to_jstring(&mut env, json)
+}
+
+/// Introduce this phone to the computer `deviceId` (ecosystem phase 4):
+/// `{"ok": "{\"link\": \"pocketdesk://pair?...\"}"}`, or the refusal.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeIntroduce(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+    port: jint,
+    device_id: JString<'_>,
+    request: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let device_id = jstring_to_string(&mut env, &device_id);
+    let request = jstring_to_string(&mut env, &request);
+    let json = envelope(RUNTIME.block_on(introductions::introduce(
         address,
         port as u16,
         device_id,
