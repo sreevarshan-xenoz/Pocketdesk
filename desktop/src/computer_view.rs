@@ -915,9 +915,17 @@ pub fn extra_view_only(windows: Option<bool>) -> bool {
     windows != Some(true)
 }
 
-/// What a later window of such a computer says on its bar (review I4).
+/// Whether a window says [`EXTRA_INPUT_WORDS`]: of a computer whose
+/// clicks land over its first screen ([`extra_view_only`]), a later
+/// window, or one showing another screen than the first (re-review M-b).
+pub fn says_first_screen(windows: Option<bool>, later: bool, monitor: u32) -> bool {
+    extra_view_only(windows) && (later || monitor != 0)
+}
+
+/// What a window of such a computer says on its bar while it shows another
+/// screen than the first, or is a later window (review I4, re-review M-b).
 pub const EXTRA_INPUT_WORDS: &str =
-    "This computer's other screens take input in the first window only.";
+    "This computer takes clicks over its first screen, whichever screen this window shows.";
 
 /// Where the microphone goes, as the main window names it (PC11): the
 /// computer, and the window by the screen it shows.
@@ -2456,7 +2464,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             .wrap(),
                     );
                 }
-                if ended.is_none() && later && extra_view_only(status.windows) {
+                if ended.is_none() && says_first_screen(status.windows, later, wanted.monitor) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
@@ -5879,6 +5887,11 @@ mod tests {
         assert!(!extra_view_only(Some(true)));
         assert!(extra_view_only(Some(false)));
         assert!(extra_view_only(None));
+        // Re-review M-b: the first window says it too on another screen.
+        assert!(says_first_screen(Some(false), false, 1));
+        assert!(says_first_screen(Some(false), true, 0));
+        assert!(!says_first_screen(Some(false), false, 0));
+        assert!(!says_first_screen(Some(true), true, 1));
     }
 
     /// PC11: a computer two windows show is told apart from one shown once.
