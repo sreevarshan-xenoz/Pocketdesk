@@ -2230,13 +2230,16 @@ pub fn with_owed(owed: &mut (i32, i32), packet: InputPacket) -> InputPacket {
     }
 }
 
-/// A relative move that could not go is owed (bounded, so a long stall
-/// never sends one huge jump).
+/// The most relative movement owed each way: about a frame's worth, so a
+/// stall's movement past it is dropped and mouse-look never spins as the
+/// queue drains (PR #563 re-review N4).
+pub const OWED_MOST: i32 = 256;
+
+/// A relative move that could not go is owed, up to [`OWED_MOST`] each way.
 pub fn owe(owed: &mut (i32, i32), lost: &InputPacket) {
-    const MOST: i32 = 4 * i16::MAX as i32;
     if let InputPacket::MouseMove { dx, dy } = lost {
-        owed.0 = (owed.0 + i32::from(*dx)).clamp(-MOST, MOST);
-        owed.1 = (owed.1 + i32::from(*dy)).clamp(-MOST, MOST);
+        owed.0 = (owed.0 + i32::from(*dx)).clamp(-OWED_MOST, OWED_MOST);
+        owed.1 = (owed.1 + i32::from(*dy)).clamp(-OWED_MOST, OWED_MOST);
     }
 }
 
@@ -2812,23 +2815,33 @@ mod tests {
         let next = with_owed(&mut owed, InputPacket::MouseMove { dx: 1, dy: 1 });
         assert_eq!(format!("{next:?}"), "MouseMove { dx: 6, dy: -2 }");
         assert_eq!(owed, (0, 0));
-        // More than an i16 waits for the move after.
-        owed = (40_000, 0);
-        let next = with_owed(&mut owed, InputPacket::MouseMove { dx: 0, dy: 0 });
+        // A move near the wire's limit takes what fits; the rest waits.
+        owed = (10, 0);
+        let next = with_owed(
+            &mut owed,
+            InputPacket::MouseMove {
+                dx: i16::MAX,
+                dy: 0,
+            },
+        );
         assert_eq!(format!("{next:?}"), "MouseMove { dx: 32767, dy: 0 }");
-        assert_eq!(owed, (40_000 - 32_767, 0));
-        // A long stall is bounded.
+        assert_eq!(owed, (10, 0));
+        // A long stall owes at most about a frame's worth each way (re-review
+        // N4): the rest is dropped, so mouse-look never spins after it.
         let mut owed = (0, 0);
         for _ in 0..100 {
             owe(
                 &mut owed,
                 &InputPacket::MouseMove {
                     dx: i16::MAX,
-                    dy: 0,
+                    dy: -40,
                 },
             );
         }
-        assert_eq!(owed.0, 4 * i32::from(i16::MAX));
+        assert_eq!(owed, (OWED_MOST, -OWED_MOST));
+        let next = with_owed(&mut owed, InputPacket::MouseMove { dx: 3, dy: 0 });
+        assert_eq!(format!("{next:?}"), "MouseMove { dx: 259, dy: -256 }");
+        assert_eq!(owed, (0, 0));
         // Anything else goes as it is.
         let click = with_owed(
             &mut owed,
