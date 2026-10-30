@@ -972,8 +972,24 @@ pub fn mic_on_air_words(name: &str) -> String {
 
 /// Why the window's mic is not heard there (PC10 review), on the bar while
 /// it is on: the other computer said it does not play it.
-pub fn mic_refused_words(name: &str, mic_on: bool, played: Option<bool>) -> Option<String> {
-    (mic_on && played == Some(false)).then(|| {
+pub fn mic_refused_words(
+    name: &str,
+    mic_on: bool,
+    played: Option<bool>,
+    view_only: bool,
+) -> Option<String> {
+    if !mic_on {
+        return None;
+    }
+    if view_only {
+        // The window's own View only: the other computer drops the mic in
+        // a view-only session whatever it said at the start (PR #572
+        // review).
+        return Some(format!(
+            "{name} does not play this computer's microphone while this window is View only."
+        ));
+    }
+    (played == Some(false)).then(|| {
         format!(
             "{name} does not play this computer's microphone: it needs \u{201c}Use the phone as a microphone\u{201d} on for this computer on its Devices page, and this window controlling it."
         )
@@ -2518,7 +2534,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     );
                 }
                 if ended.is_none()
-                    && let Some(words) = mic_refused_words(&wanted.name, mic_on, status.mic)
+                    && let Some(words) = mic_refused_words(&wanted.name, mic_on, status.mic, view_only)
                 {
                     ui.add(
                         egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
@@ -5225,11 +5241,16 @@ mod tests {
     /// bar; one that does not say gets a hover note of what it needs.
     #[test]
     fn the_bar_says_why_the_mic_is_not_heard() {
-        let refused = mic_refused_words("Desk", true, Some(false)).unwrap();
+        let refused = mic_refused_words("Desk", true, Some(false), false).unwrap();
         assert!(refused.contains("Use the phone as a microphone"));
-        assert_eq!(mic_refused_words("Desk", true, Some(true)), None);
-        assert_eq!(mic_refused_words("Desk", true, None), None);
-        assert_eq!(mic_refused_words("Desk", false, Some(false)), None);
+        assert_eq!(mic_refused_words("Desk", true, Some(true), false), None);
+        assert_eq!(mic_refused_words("Desk", true, None, false), None);
+        assert_eq!(mic_refused_words("Desk", false, Some(false), false), None);
+        assert!(
+            mic_refused_words("Desk", true, Some(true), true)
+                .is_some_and(|w| w.contains("View only")),
+            "said played at the start, but the window is View only"
+        );
         assert!(on_air_hover("Desk", None).contains(
             "the other computer needs \u{201c}Use the phone as a microphone\u{201d} on for this one"
         ));
