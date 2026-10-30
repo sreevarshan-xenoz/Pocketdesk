@@ -1388,7 +1388,7 @@ On the Azure VM (headless Sway, no XWayland) from the A71 over the internet, 202
 - [x] After the phone left, the server removed the screen and its record; the window went back to the desktop's output.
 
 Owed:
-- [ ] "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §244).
+- [ ] "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §245).
 
 ## 76. Hotspot and tethering in Check connection
 
@@ -3313,7 +3313,7 @@ Built 2026-10-31. The computer card's menu is headed sections with its upkeep un
 - [ ] TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
 - [ ] The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
 
-## 244. A second screen at the phone's shape on Hyprland
+## 245. A second screen at the phone's shape on Hyprland
 
 Built 2026-10-31. On Hyprland 0.56 a phone's screen is a headless output named `PD-<tag>-<n>` (the tag from the server's state folder), made with `output create headless`, sized by `eval hl.monitor({…, position = "auto-right"})` and removed with `output remove`; a server that starts removes its own tagged outputs that its record does not list.
 

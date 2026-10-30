@@ -1313,7 +1313,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **75. A second screen at the phone's shape (T10j)**
 
-- "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §244).
+- "Phones may add a screen" off: refused with its reason; on Windows, GNOME or KDE: "only Sway and Hyprland can for now" (Hyprland: §245).
 
 **77. This phone's screen on the computer (T10k)**
 
@@ -1583,7 +1583,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - The Linux laptop viewing Windows: Stats say `vaapi (renderD129)` (the Intel iHD node, past the NVIDIA renderD128 that has no VA driver); with `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD128` the window moves on to `auto` or `software` within about 2 s and the picture comes; the shader draws on the laptop's GL (colours as above). (where: linux)
 
-**244. A second screen at the phone's shape on Hyprland**
+**245. A second screen at the phone's shape on Hyprland**
 
 - From a phone on the laptop: "Add a screen for this phone" in the picker, the session switches to it and a window dragged onto it shows on the phone; the screen goes about 10 s after the phone leaves. (where: linux)
 - A Hyprland whose config has a monitor rule for every output (`output = ""` with a fixed position): the phone's screen still lands right of the others. (where: linux)
