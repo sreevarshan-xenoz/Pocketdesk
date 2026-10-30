@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1031 open items.
+1032 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 117 |
+| A second computer | 118 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -917,6 +917,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **223. Both are mine (PC1)**
 
 - Pair once: the box ticked on the Windows laptop's Pair page, its link pasted in the Linux laptop's Settings, Other computers, which names the Windows laptop and its addresses (the Windows laptop's own) and says it would see and control the Linux laptop at any time without asking; ticking that it is the owner's own turns the button to "Pair both ways". Within a few seconds each lists the other, Windows saying "Mine once linked" until the link is up and then, like Linux, "Mine: sees and controls without asking", and both say linked. Pasted again unticked, the button says "Pair one way". (where: second computer)
+- The first link after pairing: Other computers says "linked" on both within about a minute of pairing, never "refused" for five minutes (a refusal in the first 2 minutes after pairing is retried on the backoff, link follow-ups 2026-10-30). (where: second computer)
 - Each views and drives the other with no prompt: "Show its screen" on Windows shows Linux's screen with control, and on Linux shows Windows' with control, with nobody at the far computer to click Allow or turn Control on; the window's bar says the other takes this computer's clicks and keys. (where: second computer)
 - The shared keyboard and mouse both ways with sharing on at both: Windows drives Linux and Linux drives Windows (BK8) over the one link, never "Waiting for <computer> to answer". (where: second computer)
 - Turned back and unpaired: on Linux's Devices page, "Ask before each session" on and Control off for the Windows laptop; the next "Show its screen" from Windows waits for Allow once there and is view-only. Unpair under Other computers on Linux: the Windows laptop leaves both Linux pages, and Windows says refused or waiting for it. (where: second computer)
