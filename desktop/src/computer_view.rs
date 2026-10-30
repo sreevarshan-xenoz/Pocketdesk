@@ -143,12 +143,27 @@ struct GrabWindow {
     across_read: Option<Instant>,
 }
 
-/// What the window measures itself (PC2): pictures shown a second, and how
-/// long the decoder takes over one.
+/// What the window measures itself (PC2): pictures shown a second, how
+/// long the decoder takes over one (the median and the 95th percentile of
+/// the last second's, PC5), and the bytes each picture brings out of the
+/// decoder and up to the screen.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Shown {
     pub fps: u32,
     pub decode: Option<Duration>,
+    pub decode_p95: Option<Duration>,
+    pub bytes: u64,
+}
+
+/// The `p`th percentile (0 to 1) of `samples`, by nearest rank: `None` for
+/// none. The samples are sorted in place.
+pub fn percentile(samples: &mut [Duration], p: f64) -> Option<Duration> {
+    if samples.is_empty() {
+        return None;
+    }
+    samples.sort_unstable();
+    let rank = (p.clamp(0.0, 1.0) * samples.len() as f64).ceil() as usize;
+    Some(samples[rank.clamp(1, samples.len()) - 1])
 }
 
 /// Times the decoder and counts the pictures shown (PC2). The sidecar gives
@@ -159,8 +174,8 @@ pub struct DecodeClock {
     fed: VecDeque<Instant>,
     since: Option<Instant>,
     pictures: u32,
-    took: Duration,
-    timed: u32,
+    took: Vec<Duration>,
+    bytes: u64,
     shown: Shown,
 }
 
@@ -177,13 +192,13 @@ impl DecodeClock {
         self.fed.push_back(at);
     }
 
-    /// A picture came out at `at`.
-    pub fn decoded(&mut self, at: Instant) {
+    /// A picture of `bytes` came out at `at`.
+    pub fn decoded(&mut self, at: Instant, bytes: usize) {
         if let Some(fed) = self.fed.pop_front() {
-            self.took += at.saturating_duration_since(fed);
-            self.timed += 1;
+            self.took.push(at.saturating_duration_since(fed));
         }
         self.pictures = self.pictures.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes as u64);
         self.roll(at);
     }
 
@@ -207,12 +222,25 @@ impl DecodeClock {
         let ms = elapsed.as_millis().max(1);
         self.shown = Shown {
             fps: u32::try_from(u128::from(self.pictures) * 1000 / ms).unwrap_or(u32::MAX),
-            decode: (self.timed > 0).then(|| self.took / self.timed),
+            decode: percentile(&mut self.took, 0.5),
+            decode_p95: percentile(&mut self.took, 0.95),
+            bytes: self.bytes / u64::from(self.pictures.max(1)),
         };
         self.pictures = 0;
-        self.took = Duration::ZERO;
-        self.timed = 0;
+        self.took.clear();
+        self.bytes = 0;
         self.since = Some(now);
+    }
+}
+
+/// Bytes in words: B, KB or MB (decimal, as a file's size is said).
+pub fn bytes_words(bytes: u64) -> String {
+    if bytes >= 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.0} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -266,18 +294,31 @@ pub fn stats_lines(status: &ViewStatus, size: Option<(u16, u16)>, shown: Shown) 
                 .rtt_ms
                 .map_or_else(|| "not known".to_string(), |ms| format!("{ms} ms"))
         ),
+        decode_words(shown),
         format!(
-            "Decode: {}",
-            shown.decode.map_or_else(
-                || "not yet".to_string(),
-                |d| format!("{:.1} ms", d.as_secs_f64() * 1000.0)
-            )
+            "Pipe: {}",
+            if shown.bytes == 0 {
+                "not yet".to_string()
+            } else {
+                format!("{} a picture", bytes_words(shown.bytes))
+            }
         ),
         format!(
             "Lost {} \u{b7} late {} \u{b7} dropped {}",
             stats.lost, stats.late, stats.dropped
         ),
     ]
+}
+
+/// The decoder's line: its median time over a picture in the last second,
+/// and its 95th percentile (PC5).
+fn decode_words(shown: Shown) -> String {
+    let ms = |d: Duration| format!("{:.1} ms", d.as_secs_f64() * 1000.0);
+    match (shown.decode, shown.decode_p95) {
+        (Some(p50), Some(p95)) => format!("Decode: {} (p95 {})", ms(p50), ms(p95)),
+        (Some(p50), None) => format!("Decode: {}", ms(p50)),
+        _ => "Decode: not yet".to_string(),
+    }
 }
 
 /// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
@@ -1520,7 +1561,7 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
     let ctx = ctx.clone();
     Box::new(move |picture| {
         let mut state = lock(&shared);
-        state.clock.decoded(Instant::now());
+        state.clock.decoded(Instant::now(), picture.rgba.len());
         state.picture = Some(picture);
         drop(state);
         ctx.request_repaint_of(viewport_id());
@@ -1630,6 +1671,8 @@ mod tests {
         let shown = Shown {
             fps: 58,
             decode: Some(Duration::from_micros(6_100)),
+            decode_p95: Some(Duration::from_micros(9_400)),
+            bytes: 3_110_400,
         };
         assert_eq!(
             stats_lines(&status, Some((1920, 1080)), shown),
@@ -1639,7 +1682,8 @@ mod tests {
                 "Frames: 59 a second in, 58 shown",
                 "Bitrate: 8.4 Mb/s",
                 "Round trip: 23 ms",
-                "Decode: 6.1 ms",
+                "Decode: 6.1 ms (p95 9.4 ms)",
+                "Pipe: 3.1 MB a picture",
                 "Lost 2 \u{b7} late 1 \u{b7} dropped 0",
             ]
         );
@@ -1659,7 +1703,24 @@ mod tests {
         assert_eq!(lines[1], "Picture: not yet");
         assert_eq!(lines[4], "Round trip: not known");
         assert_eq!(lines[5], "Decode: not yet");
+        assert_eq!(lines[6], "Pipe: not yet");
         assert_eq!(bitrate_words(950), "950 kb/s");
+        assert_eq!(bytes_words(8_294_400), "8.3 MB");
+        assert_eq!(bytes_words(4_200), "4 KB");
+        assert_eq!(bytes_words(12), "12 B");
+    }
+
+    /// PC5: the percentiles by nearest rank.
+    #[test]
+    fn a_percentile_is_by_nearest_rank() {
+        let d = Duration::from_millis;
+        assert_eq!(percentile(&mut [], 0.5), None);
+        assert_eq!(percentile(&mut [d(3)], 0.95), Some(d(3)));
+        let mut samples: Vec<Duration> = (1..=20).rev().map(d).collect();
+        assert_eq!(percentile(&mut samples, 0.5), Some(d(10)));
+        assert_eq!(percentile(&mut samples, 0.95), Some(d(19)));
+        assert_eq!(percentile(&mut samples, 1.0), Some(d(20)));
+        assert_eq!(percentile(&mut samples, 0.0), Some(d(1)));
     }
 
     /// PC2: each picture is timed against the access unit it came from,
@@ -1673,23 +1734,27 @@ mod tests {
         assert_eq!(clock.shown(t), Shown::default());
         for n in 0..30u64 {
             clock.fed(ms(n * 33));
-            clock.decoded(ms(n * 33 + 5));
+            // One slow picture in thirty: the median keeps to the rest,
+            // the 95th percentile shows it (PC5).
+            clock.decoded(ms(n * 33 + if n == 7 { 40 } else { 5 }), 100);
         }
         clock.fed(ms(1000));
-        clock.decoded(ms(1006));
+        clock.decoded(ms(1006), 400);
         let shown = clock.shown(ms(1006));
         assert_eq!(shown.fps, 30);
         assert_eq!(shown.decode.map(|d| d.as_millis()), Some(5));
+        assert_eq!(shown.decode_p95.map(|d| d.as_millis()), Some(6));
+        assert_eq!(shown.bytes, (30 * 100 + 400) / 31);
         // Nothing for two seconds: none shown, no decode time.
         assert_eq!(clock.shown(ms(3100)), Shown::default());
         // A new decoder forgets the units the old one was fed: a picture
         // with none waiting is counted, not timed.
         clock.fed(ms(3200));
         clock.restart();
-        clock.decoded(ms(3900));
+        clock.decoded(ms(3900), 1);
         clock.fed(ms(4000));
-        clock.decoded(ms(4002));
-        clock.decoded(ms(4004));
+        clock.decoded(ms(4002), 1);
+        clock.decoded(ms(4004), 1);
         let shown = clock.shown(ms(4200));
         assert_eq!(shown.fps, 2, "{shown:?}");
         assert_eq!(shown.decode.map(|d| d.as_millis()), Some(2));
