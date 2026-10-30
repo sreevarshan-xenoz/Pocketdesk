@@ -830,6 +830,26 @@ pub fn ask_screens_again(
     true
 }
 
+/// A link to the other computer that came up since the view last looked
+/// (`ups` against `seen`) starts its screens' asks afresh (PC9a review
+/// N6): the tries back to none and the next ask due now, so a link slower
+/// than six asks still brings the screens. Says whether it came up.
+pub fn link_came_up(
+    ups: u64,
+    seen: &mut u64,
+    tries: &mut u32,
+    asked: &mut Instant,
+    now: Instant,
+) -> bool {
+    if ups == *seen {
+        return false;
+    }
+    *seen = ups;
+    *tries = 0;
+    *asked = now.checked_sub(SCREENS_AGAIN).unwrap_or(now);
+    true
+}
+
 /// The words for a session that ended for good: before the other computer
 /// let this one in (it refused, or its owner said no), or after (that
 /// computer ended it).
@@ -1318,6 +1338,7 @@ async fn attempt(
     let mut second = Instant::now();
     let mut screens_asked = Instant::now();
     let mut screens_tries = 0;
+    let mut screens_link_ups = crate::peer_computers::link_ups(&computer.device_id);
     loop {
         tokio::select! {
             packet = frames.recv() => {
@@ -1390,6 +1411,13 @@ async fn attempt(
                 // ask as the view began finds no link when the link is
                 // still coming up (that computer just restarted), and the
                 // window's screen buttons would stay empty for the view.
+                link_came_up(
+                    crate::peer_computers::link_ups(&computer.device_id),
+                    &mut screens_link_ups,
+                    &mut screens_tries,
+                    &mut screens_asked,
+                    Instant::now(),
+                );
                 if ask_screens_again(
                     crate::peer_computers::screens_answered(&computer.device_id),
                     &mut screens_asked,
@@ -4905,6 +4933,24 @@ mod tests {
         assert!(
             !ask_screens_again(false, &mut asked, &mut tries, at(1000)),
             "six tries at most"
+        );
+    }
+
+    /// PC9a review N6: a link that comes up after the six asks were spent
+    /// starts them afresh, with the next ask due at once.
+    #[test]
+    fn a_link_coming_up_starts_the_screens_asks_afresh() {
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+        let (mut asked, mut tries, mut seen) = (start, 6, 1);
+        assert!(!ask_screens_again(false, &mut asked, &mut tries, at(100)));
+        assert!(!link_came_up(1, &mut seen, &mut tries, &mut asked, at(100)));
+        assert_eq!(tries, 6, "the same link changes nothing");
+        assert!(link_came_up(2, &mut seen, &mut tries, &mut asked, at(100)));
+        assert_eq!((seen, tries), (2, 0));
+        assert!(
+            ask_screens_again(false, &mut asked, &mut tries, at(100)),
+            "asked at once on the new link"
         );
     }
 

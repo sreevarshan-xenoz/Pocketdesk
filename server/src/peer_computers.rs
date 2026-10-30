@@ -541,6 +541,20 @@ impl Drop for AskingScreens {
     }
 }
 
+/// How many times each computer's link has come up since this server
+/// started (PC9a review N6): a view asks its screens afresh as it does.
+static LINK_UPS: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
+
+/// How many times the link to `device_id` has come up.
+pub(crate) fn link_ups(device_id: &str) -> u64 {
+    LINK_UPS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .copied()
+        .unwrap_or(0)
+}
+
 /// How long an ask for a computer's screens may take to send.
 const SCREENS_ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -690,6 +704,11 @@ impl LiveLink {
         LIVE.lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(device_id.to_string(), outgoing);
+        *LINK_UPS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(device_id.to_string())
+            .or_default() += 1;
         Self(device_id.to_string())
     }
 }
@@ -2753,6 +2772,18 @@ mod tests {
             AskingScreens::mark(id).is_some(),
             "a panicking ask leaves no mark"
         );
+    }
+
+    /// PC9a review N6: each time a computer's link comes up is counted.
+    #[test]
+    fn a_link_coming_up_is_counted() {
+        let id = "pc9a-n6-desk";
+        assert_eq!(link_ups(id), 0);
+        let (tx, _rx) = mpsc::channel(1);
+        drop(LiveLink::new(id, tx.clone()));
+        assert_eq!(link_ups(id), 1);
+        let _again = LiveLink::new(id, tx);
+        assert_eq!(link_ups(id), 2);
     }
 
     /// PC8 (PR #561 review M8): on the link this computer keeps, another
