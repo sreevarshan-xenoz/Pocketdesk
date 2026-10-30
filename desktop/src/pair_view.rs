@@ -336,7 +336,7 @@ const WORDS_WIDTH: f32 = 240.0;
 const NO_CERTIFICATE: &str = "Start the server once first: it makes its certificate.";
 
 /// A PIN as shown: its digits spaced.
-fn spaced_pin(pin: &str) -> String {
+pub(crate) fn spaced_pin(pin: &str) -> String {
     pin.chars()
         .flat_map(|c| [c, ' '])
         .collect::<String>()

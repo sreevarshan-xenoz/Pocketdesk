@@ -2245,10 +2245,119 @@ fn a_computers_greyed_drive_box_says_why() {
     );
 }
 
+/// PR #567 review: the line's Start the server asks the app to start it.
+/// Drawn by the page alone, so the ask is read here and no server starts
+/// (the app would start one).
+#[test]
+fn a_computers_drive_box_line_asks_to_start_the_server() {
+    let fixture = Fixture::new();
+    keyboard_mouse_computers(fixture.state());
+    let state = fixture.state().to_path_buf();
+    let mut view = crate::arrange_view::ArrangeView::default();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(720.0, 1400.0))
+        .build_ui(move |ui| {
+            crate::theme::install(ui.ctx());
+            view.show(ui, &state, &[], true, false, 0);
+        });
+    harness.run_steps(3);
+    let line = harness
+        .get_by_label(crate::arrange_view::STOPPED_LINE)
+        .rect();
+    // Setup's own Start the server is above; the line's is beside it.
+    let start = harness
+        .get_all_by_label(crate::widgets::START)
+        .find(|b| (b.rect().center().y - line.center().y).abs() < 20.0)
+        .expect("Start the server beside the line");
+    start.click();
+    harness.run_steps(1);
+    assert_eq!(
+        crate::widgets::take_ask(&harness.ctx),
+        Some(crate::widgets::Ask::StartServer)
+    );
+}
+
+/// PR #567 review: Files' sent and received cards, each with its state, and
+/// a failed file's greyed Send again saying why in a line when its phone
+/// cannot take files.
+#[test]
+fn files_lists_sent_and_received_cards_and_why_send_again_is_off() {
+    use egui_kittest::kittest::NodeT;
+    use pocketdesk_core::local::received::{self, ReceivedFile};
+    use pocketdesk_core::local::sent::{self, SentFile, SentState};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    for (id, name, state) in [
+        ("a", "notes.txt", SentState::Sent),
+        ("b", "photo.jpg", SentState::Offered),
+        (
+            "c",
+            "report.pdf",
+            SentState::Failed("the phone went away".to_string()),
+        ),
+    ] {
+        sent::record(
+            fixture.state(),
+            SentFile {
+                id: id.to_string(),
+                name: name.to_string(),
+                path: fixture.state().join(name).to_string_lossy().into_owned(),
+                size: 10,
+                device_id: PHONE.to_string(),
+                sent_unix: 100,
+                state,
+                note: None,
+            },
+        )
+        .expect("recorded");
+    }
+    let kept = fixture.state().join("kept.txt");
+    std::fs::write(&kept, "kept").expect("a received file");
+    for (name, path) in [
+        ("kept.txt", kept.clone()),
+        ("gone.txt", fixture.state().join("gone.txt")),
+    ] {
+        received::record(
+            fixture.state(),
+            ReceivedFile {
+                name: name.to_string(),
+                path: path.to_string_lossy().into_owned(),
+                size: 4,
+                received_unix: 100,
+                from: PHONE.to_string(),
+            },
+        )
+        .expect("recorded");
+    }
+    let app = fixture.open(Some(Tab::Files));
+    assert!(app.query_by_label("saved there").is_some());
+    assert!(app.query_by_label("waiting to be taken").is_some());
+    assert!(
+        app.query_by_label("not sent: the phone went away")
+            .is_some()
+    );
+    assert!(
+        app.get_by_label("Send again")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(app.query_by_label(crate::app::SEND_AGAIN_OFF).is_some());
+    assert!(app.query_by_label("kept.txt").is_some());
+    assert!(app.query_by_label("Show in folder").is_some());
+    assert!(app.query_by_label("moved or deleted").is_some());
+    assert!(
+        app.query_by_label(crate::app::FILES_NONE_RECEIVED)
+            .is_none()
+    );
+}
+
 /// UX 4: at the smallest window (640×440) the phone's code shrinks so its
-/// words beside it fit: "Whose phone is it?" and its box stay inside.
+/// words beside it fit: "Whose phone is it?", its box and the PIN stay
+/// inside, right of the code. The code waits on an address lookup on a
+/// thread: frames are stepped, up to a bound, with no sleeps.
 #[test]
 fn pair_fits_the_smallest_window() {
+    use pocketdesk_core::local::pin;
     let fixture = Fixture::new();
     let smallest = egui::vec2(640.0, 440.0);
     let state = fixture.state().to_path_buf();
@@ -2258,17 +2367,32 @@ fn pair_fits_the_smallest_window() {
             crate::theme::install(&cc.egui_ctx);
             PocketdeskApp::new(state, None, Some(Tab::Pair))
         });
-    let asked = (0..50).any(|_| {
-        app.run_steps(2);
-        let found = app.query_by_label("Whose phone is it?").is_some();
-        if !found {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        found
+    let shown = (0..5000).any(|_| {
+        app.step();
+        app.query_by_label("Whose phone is it?").is_some()
     });
-    assert!(asked, "the Pair page never showed its code");
-    let whose = app.get_by_role(egui::accesskit::Role::ComboBox).rect();
-    assert!(whose.right() <= smallest.x, "{whose:?} inside {smallest:?}");
-    let pin = app.get_by_label("Or enter this PIN:").rect();
-    assert!(pin.right() <= smallest.x, "{pin:?}");
+    assert!(shown, "the Pair page never showed its code");
+    app.run_steps(2);
+    let code = app
+        .get_by_label("Pairing code to scan with the phone")
+        .rect();
+    let digits = pin::read(fixture.state(), pin::now_unix()).expect("a code on file");
+    let spaced = crate::pair_view::spaced_pin(&digits.pin);
+    for (what, rect) in [
+        (
+            "box",
+            app.get_by_role(egui::accesskit::Role::ComboBox).rect(),
+        ),
+        ("PIN line", app.get_by_label("Or enter this PIN:").rect()),
+        ("PIN", app.get_by_label(&spaced).rect()),
+    ] {
+        assert!(
+            rect.right() <= smallest.x,
+            "{what}: {rect:?} inside {smallest:?}"
+        );
+        assert!(
+            code.right() <= rect.left(),
+            "{what}: {rect:?} right of the code {code:?}"
+        );
+    }
 }
