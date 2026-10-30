@@ -377,7 +377,10 @@ fn the_windows_decoder_on_a_real_view() {
     let session_id = wire::read(&a_state).map(|v| v.session_id);
     let _ = computers::request(
         &a_state,
-        ComputerAsk::StopView { session_id },
+        ComputerAsk::StopView {
+            session_id,
+            lock: false,
+        },
         pin::now_unix(),
     );
     for base in [&a_base, &b_base] {

@@ -363,7 +363,10 @@ fn the_clipboard_and_files_follow_the_window() {
     let session_id = wire::read(&a_state).map(|v| v.session_id);
     computers::request(
         &a_state,
-        ComputerAsk::StopView { session_id },
+        ComputerAsk::StopView {
+            session_id,
+            lock: false,
+        },
         pin::now_unix(),
     )
     .unwrap();
