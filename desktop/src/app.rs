@@ -1607,8 +1607,8 @@ impl PocketdeskApp {
         computers: &[pocketdesk_core::local::computers::PeerComputer],
         into_here: &[model::Device],
     ) {
-        let mut show = None;
         let now = now_unix();
+        let running = self.snapshot.running;
         // PC6: the one viewed most recently first.
         for computer in pocketdesk_core::local::computers::by_recent(computers) {
             crate::theme::card(ui, |ui| {
@@ -1630,24 +1630,31 @@ impl PocketdeskApp {
                         ui.label(RichText::new(viewed).color(crate::theme::muted(ui)));
                     }
                 });
-                let reach = crate::computers_view::view_reach(computer, self.snapshot.running);
+                let reach = crate::computers_view::view_reach(computer, running);
+                // PC6: with its link down and a way to wake it known,
+                // Show its screen offers to wake it first.
+                let wakes = crate::computers_view::can_wake(computer, running);
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
+                        .add_enabled(reach.is_ok() || wakes, egui::Button::new("Show its screen"))
                         .on_hover_text("Its screen in a window here.")
                         .on_disabled_hover_text(reach.err().unwrap_or_default())
                         .clicked()
                     {
-                        show = Some((computer.device_id.clone(), computer.name.clone()));
+                        self.computers.show_or_offer(computer, running);
                     }
                     if ui.button(SHARE_INPUT).clicked() {
                         crate::widgets::ask(ui.ctx(), crate::widgets::Ask::Go(Tab::KeyboardMouse));
                     }
                 });
                 // UX 1's item 2: why it is off, in a line.
-                if let Err(why) = reach {
+                if let Err(why) = reach
+                    && !wakes
+                {
                     crate::widgets::why_off(ui, &format!("{why}."), None);
                 }
+                self.computers
+                    .wake_row(ui, &self.state_dir, computer, running, now);
             });
         }
         for device in into_here {
@@ -1672,9 +1679,6 @@ impl PocketdeskApp {
                     crate::widgets::ask(ui.ctx(), crate::widgets::Ask::Go(Tab::Devices));
                 }
             });
-        }
-        if let Some((id, name)) = show {
-            self.show_computer(ui.ctx(), &id, &name);
         }
     }
 
@@ -3243,10 +3247,6 @@ impl PocketdeskApp {
                             self.snapshot.running,
                             now_unix(),
                         );
-                        // BK7: "Show its screen" opens its window.
-                        if let Some((device_id, name)) = self.computers.take_view() {
-                            self.show_computer(ui.ctx(), &device_id, &name);
-                        }
                     }
                     crate::settings_view::Section::Notifications
                         if extra(crate::settings_view::EXTRA_MUTED) =>
@@ -4295,6 +4295,15 @@ impl eframe::App for PocketdeskApp {
             self.raise_for_approvals(ctx);
             self.raise_for_tasks(ctx);
             self.update_tray();
+        }
+        // BK7, PC6: a computer's window asked for, by Show its screen or
+        // by a woken computer's link coming up.
+        self.computers.tick(&self.state_dir);
+        if let Some((device_id, name)) = self.computers.take_view() {
+            self.show_computer(ctx, &device_id, &name);
+        }
+        if self.computers.waking().is_some() {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
         self.cast
             .get_or_insert_with(|| crate::cast_view::CastView::new(ctx, self.state_dir.clone()))

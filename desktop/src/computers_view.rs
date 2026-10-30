@@ -62,6 +62,63 @@ pub struct ComputersView {
     /// Whether Windows treats this computer's network as Public, where
     /// the other computer cannot reach it.
     public: crate::network_profile::PublicNetwork,
+    /// PC6: the computer whose Show its screen, with its link down,
+    /// offers to wake it first.
+    offer: Option<String>,
+    /// PC6: a computer woken to show its screen, until its link comes.
+    waking: Option<Waking>,
+}
+
+/// How long "Wake it and show" waits for the computer's link (PC6).
+pub const WAKE_WAIT: Duration = Duration::from_secs(60);
+
+/// What is said wherever Wake is offered (PC6).
+pub const WAKE_NOTE: &str = "Wake-on-LAN works best wired: Wi-Fi rarely wakes a computer.";
+
+/// The button that wakes a computer (PC6).
+pub const WAKE: &str = "Wake";
+
+/// The offer of Show its screen with the link down (PC6).
+pub const WAKE_AND_SHOW: &str = "Wake it and show";
+
+/// A computer woken to show its screen, waiting for its link (PC6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waking {
+    pub device_id: String,
+    pub name: String,
+    pub since: Instant,
+}
+
+/// Where a wait for a woken computer stands (PC6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WakeStep {
+    /// Still waiting, this many seconds left.
+    Waiting(u64),
+    /// Its link came: show its screen.
+    Linked,
+    /// [`WAKE_WAIT`] passed without its link.
+    TimedOut,
+}
+
+impl Waking {
+    /// Where the wait stands at `now`, its link up or not.
+    pub fn step(&self, linked: bool, now: Instant) -> WakeStep {
+        let waited = now.saturating_duration_since(self.since);
+        if linked {
+            WakeStep::Linked
+        } else if waited >= WAKE_WAIT {
+            WakeStep::TimedOut
+        } else {
+            WakeStep::Waiting((WAKE_WAIT - waited).as_secs_f32().ceil() as u64)
+        }
+    }
+}
+
+/// Whether Wake is offered for `computer` (PC6): the server runs (it
+/// sends the magic packet), the link is down, and the computer told this
+/// one how to wake it.
+pub fn can_wake(computer: &PeerComputer, server_running: bool) -> bool {
+    server_running && computer.link != "linked" && computer.wake.is_some()
 }
 
 /// A link's state in words.
@@ -172,6 +229,157 @@ impl ComputersView {
     pub fn take_view(&mut self) -> Option<(String, String)> {
         self.view.take()
     }
+    /// Show `computer`'s screen (BK7), or with its link down and a way
+    /// to wake it known, offer to wake it first (PC6).
+    pub fn show_or_offer(&mut self, computer: &PeerComputer, server_running: bool) {
+        if can_wake(computer, server_running) {
+            self.offer = Some(computer.device_id.clone());
+        } else if view_reach(computer, server_running).is_ok() {
+            self.view = Some((computer.device_id.clone(), computer.name.clone()));
+        }
+    }
+
+    /// Send the magic packet for the computer `device_id` (PC6).
+    pub fn wake(&mut self, state_dir: &Path, device_id: &str, name: &str, now_unix: u64) {
+        self.ask(
+            state_dir,
+            ComputerAsk::Wake {
+                device_id: device_id.to_string(),
+            },
+            now_unix,
+            &format!("Sent the wake to {name}. It shows as linked once it is up. {WAKE_NOTE}"),
+        );
+    }
+
+    /// Wake the computer and show its screen once its link comes, within
+    /// [`WAKE_WAIT`] (PC6).
+    pub fn wake_and_show(&mut self, state_dir: &Path, device_id: &str, name: &str, now_unix: u64) {
+        self.offer = None;
+        let ask = ComputerAsk::Wake {
+            device_id: device_id.to_string(),
+        };
+        match computers::request(state_dir, ask, now_unix) {
+            Ok(_) => {
+                self.waking = Some(Waking {
+                    device_id: device_id.to_string(),
+                    name: name.to_string(),
+                    since: Instant::now(),
+                });
+                self.read_at = None;
+            }
+            Err(e) => self.notice = crate::notice::Notice::error(format!("Not asked: {e}")),
+        }
+    }
+
+    /// The computer being woken to show, if any (PC6).
+    pub fn waking(&self) -> Option<&Waking> {
+        self.waking.as_ref()
+    }
+
+    /// Follow a wake that waits to show (PC6): its window is asked for as
+    /// its link comes, or it is said that it did not come in time.
+    pub fn tick(&mut self, state_dir: &Path) {
+        if self.waking.is_none() {
+            return;
+        }
+        self.refresh(state_dir);
+        let Some(waking) = &self.waking else {
+            return;
+        };
+        let linked = self
+            .file
+            .computers
+            .iter()
+            .any(|c| c.device_id == waking.device_id && c.link == "linked");
+        match waking.step(linked, Instant::now()) {
+            WakeStep::Waiting(_) => {}
+            WakeStep::Linked => {
+                self.view = Some((waking.device_id.clone(), waking.name.clone()));
+                self.waking = None;
+            }
+            WakeStep::TimedOut => {
+                self.notice = crate::notice::Notice::error(timed_out(&waking.name));
+                self.waking = None;
+            }
+        }
+    }
+
+    /// `computer`'s wake controls (PC6), under its Show its screen: Wake
+    /// with its link down and a way known, the offer Show its screen made,
+    /// and the countdown of a wake waiting to show, with Cancel.
+    pub fn wake_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        state_dir: &Path,
+        computer: &PeerComputer,
+        server_running: bool,
+        now_unix: u64,
+    ) {
+        let id = computer.device_id.as_str();
+        if let Some(waking) = self.waking.as_ref().filter(|w| w.device_id == id) {
+            let left = match waking.step(false, Instant::now()) {
+                WakeStep::Waiting(left) => left,
+                _ => 0,
+            };
+            let mut cancel = false;
+            ui.horizontal_wrapped(|ui| {
+                ui.spinner();
+                ui.label(waiting_words(&computer.name, left));
+                cancel = ui.button("Cancel").clicked();
+            });
+            if cancel {
+                self.waking = None;
+            }
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
+            return;
+        }
+        if !can_wake(computer, server_running) {
+            if self.offer.as_deref() == Some(id) {
+                self.offer = None;
+            }
+            return;
+        }
+        let (mut wake, mut wake_show, mut show_anyway, mut cancel) = (false, false, false, false);
+        if self.offer.as_deref() == Some(id) {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!(
+                    "{}'s link is down: it may be asleep.",
+                    computer.name
+                ));
+                wake_show = ui.button(WAKE_AND_SHOW).clicked();
+                if view_reach(computer, server_running).is_ok() {
+                    show_anyway = ui
+                        .button("Show without waking")
+                        .on_hover_text("Try its address without the wake.")
+                        .clicked();
+                }
+                cancel = ui.button("Cancel").clicked();
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                wake = ui
+                    .button(WAKE)
+                    .on_hover_text("Send the Wake-on-LAN packet it told this computer how to send.")
+                    .clicked();
+            });
+        }
+        let wifi = computer.wake.as_ref().is_some_and(|w| !w.wired);
+        ui.label(RichText::new(wake_note(wifi)).color(crate::theme::muted(ui)));
+        let name = computer.name.clone();
+        if wake {
+            self.wake(state_dir, id, &name, now_unix);
+        }
+        if wake_show {
+            self.wake_and_show(state_dir, id, &name, now_unix);
+        }
+        if show_anyway {
+            self.offer = None;
+            self.view = Some((id.to_string(), name));
+        } else if cancel {
+            self.offer = None;
+        }
+    }
+
     /// The computers this one paired with, read again as the list is
     /// (UX 3: the Overview lists them).
     pub fn paired(&mut self, state_dir: &Path) -> &[PeerComputer] {
@@ -180,7 +388,7 @@ impl ComputersView {
     }
 
     fn refresh(&mut self, state_dir: &Path) {
-        let every = if self.pairing.is_some() {
+        let every = if self.pairing.is_some() || self.waking.is_some() {
             PAIRING_REFRESH
         } else {
             REFRESH
@@ -493,7 +701,8 @@ impl ComputersView {
             ui.label(RichText::new("No other computer paired yet.").weak());
         }
         let mut forget = None;
-        for computer in &self.file.computers {
+        for computer in self.file.computers.clone() {
+            let computer = &computer;
             // UX 3: a card per computer, as Devices draws each device.
             crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -511,21 +720,22 @@ impl ComputersView {
                         ui.label(RichText::new(MINE).color(crate::theme::good(ui)))
                             .on_hover_text(MINE_HOVER);
                     }
-                    // BK7: its screen in a window here.
+                    // BK7: its screen in a window here; PC6: or a wake first.
                     let reach = view_reach(computer, server_running);
+                    let wakes = can_wake(computer, server_running);
                     if ui
-                        .add_enabled(reach.is_ok(), egui::Button::new("Show its screen"))
+                        .add_enabled(reach.is_ok() || wakes, egui::Button::new("Show its screen"))
                         .on_hover_text(
                             "Its screen in a window here, controlled from it if it lets this computer (its Devices page's Control switch for this one). It may ask its owner first.",
                         )
                         .on_disabled_hover_text(reach.err().unwrap_or_default())
                         .clicked()
                     {
-                        self.view = Some((computer.device_id.clone(), computer.name.clone()));
+                        self.show_or_offer(computer, server_running);
                     }
                     // UX 1: why, beside it; a stopped server is said once,
                     // under the list.
-                    if server_running && reach.is_err() {
+                    if server_running && reach.is_err() && !wakes {
                         ui.label(
                             RichText::new(unreachable(&computer.name))
                                 .color(crate::theme::muted(ui)),
@@ -558,6 +768,7 @@ impl ComputersView {
                         self.forgetting = Some(computer.device_id.clone());
                     }
                 });
+                self.wake_row(ui, state_dir, computer, server_running, now_unix);
             });
         }
         if !server_running && !self.file.computers.is_empty() {
@@ -747,6 +958,28 @@ pub const PASTE_FIRST: &str = "Paste the link copied on the other computer first
 /// stopped (UX 1).
 pub const LIST_NEEDS_SERVER: &str = "Show its screen and Unpair need the server running.";
 
+/// What the wait for a woken computer says, `left` seconds to go (PC6).
+pub fn waiting_words(name: &str, left: u64) -> String {
+    format!("Waking {name}: its screen shows once it is up ({left} s)")
+}
+
+/// What a wake that waited in vain says (PC6).
+pub fn timed_out(name: &str) -> String {
+    format!(
+        "{name} did not come up within {} s. Is Wake-on-LAN on in its firmware and adapter settings? {WAKE_NOTE}",
+        WAKE_WAIT.as_secs()
+    )
+}
+
+/// The note beside Wake (PC6), naming a Wi-Fi adapter.
+pub fn wake_note(wifi: bool) -> String {
+    if wifi {
+        format!("{WAKE_NOTE} Its adapter is Wi-Fi.")
+    } else {
+        WAKE_NOTE.to_string()
+    }
+}
+
 /// Why `name`'s Show its screen is off with the server running (UX 1).
 fn unreachable(name: &str) -> String {
     format!("{name} can't be reached now: its link is down and no address of it is known.")
@@ -787,6 +1020,170 @@ mod tests {
             wake: None,
             viewed_unix: 0,
         }
+    }
+
+    fn sleeping(wired: bool) -> PeerComputer {
+        PeerComputer {
+            wake: Some(pocketdesk_core::local::computers::ComputerWake {
+                mac: "00:00:5E:00:53:01".to_string(),
+                broadcast: std::net::Ipv4Addr::new(192, 0, 2, 255),
+                wired,
+                told_unix: 1,
+            }),
+            ..computer("away: the link closed")
+        }
+    }
+
+    /// PC6: Wake is offered while the link is down, for a computer that
+    /// said how, and only with the server running.
+    #[test]
+    fn wake_shows_with_the_link_down_and_the_facts_known() {
+        assert!(can_wake(&sleeping(true), true));
+        assert!(!can_wake(&sleeping(true), false), "no server");
+        let linked = PeerComputer {
+            link: "linked".to_string(),
+            ..sleeping(true)
+        };
+        assert!(!can_wake(&linked, true), "up already");
+        assert!(!can_wake(&computer("away: x"), true), "never said");
+        assert!(wake_note(true).contains("Wi-Fi rarely wakes"));
+        assert!(wake_note(true).ends_with("Its adapter is Wi-Fi."));
+        assert_eq!(wake_note(false), WAKE_NOTE);
+    }
+
+    /// PC6: a wake that waits to show counts down 60 s, shows as the link
+    /// comes, and gives up after.
+    #[test]
+    fn a_wake_waits_a_minute_for_the_link() {
+        let since = Instant::now();
+        let waking = Waking {
+            device_id: "b".to_string(),
+            name: "Desk".to_string(),
+            since,
+        };
+        assert_eq!(waking.step(false, since), WakeStep::Waiting(60));
+        assert_eq!(
+            waking.step(false, since + Duration::from_millis(17_500)),
+            WakeStep::Waiting(43)
+        );
+        assert_eq!(
+            waking.step(true, since + Duration::from_secs(20)),
+            WakeStep::Linked
+        );
+        assert_eq!(waking.step(false, since + WAKE_WAIT), WakeStep::TimedOut);
+        assert!(waiting_words("Desk", 43).ends_with("(43 s)"));
+        assert!(timed_out("Desk").starts_with("Desk did not come up within 60 s"));
+    }
+
+    /// PC6: Show its screen on a sleeping computer offers to wake it
+    /// first; on one up, it shows.
+    #[test]
+    fn show_its_screen_offers_a_wake_when_the_link_is_down() {
+        let mut view = ComputersView::default();
+        view.show_or_offer(&sleeping(true), true);
+        assert_eq!(view.offer.as_deref(), Some("b"));
+        assert_eq!(view.take_view(), None);
+        let mut view = ComputersView::default();
+        view.show_or_offer(&computer("linked"), true);
+        assert_eq!(view.offer, None);
+        assert_eq!(
+            view.take_view(),
+            Some(("b".to_string(), "Desk".to_string()))
+        );
+    }
+
+    /// The list alone over `dir`, the server `running`.
+    fn list(
+        dir: &std::path::Path,
+        view: ComputersView,
+    ) -> egui_kittest::Harness<'static, ComputersView> {
+        let now = pocketdesk_core::local::pin::now_unix();
+        let state = dir.to_path_buf();
+        let mut harness = egui_kittest::Harness::new_ui_state(
+            move |ui, view: &mut ComputersView| view.show_list(ui, &state, true, now),
+            view,
+        );
+        harness.run_steps(2);
+        harness
+    }
+
+    /// PC6: Settings → Other computers offers Wake for a sleeping computer,
+    /// with the note on Wi-Fi, and Wake asks the server.
+    #[test]
+    fn wake_asks_the_server_from_the_list() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("wake");
+        computers::update(&dir, |file| file.computers.push(sleeping(false))).unwrap();
+        let mut harness = list(&dir, ComputersView::default());
+        let noted = harness
+            .query_by_label_contains("Its adapter is Wi-Fi")
+            .is_some();
+        let unreachable = harness
+            .query_by_label_contains("can't be reached now")
+            .is_some();
+        harness.get_by_label(WAKE).click();
+        harness.run_steps(2);
+        let asked: Vec<ComputerAsk> =
+            computers::take_all(&dir, pocketdesk_core::local::pin::now_unix())
+                .into_iter()
+                .map(|r| r.ask)
+                .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(noted);
+        assert!(!unreachable, "it can be woken");
+        assert_eq!(
+            asked,
+            [ComputerAsk::Wake {
+                device_id: "b".to_string()
+            }]
+        );
+    }
+
+    /// PC6: Show its screen on a sleeping computer offers "Wake it and
+    /// show", which asks the wake and counts down with Cancel.
+    #[test]
+    fn wake_it_and_show_counts_down_with_cancel() {
+        use egui_kittest::kittest::Queryable;
+        let dir = temp("wake-show");
+        computers::update(&dir, |file| file.computers.push(sleeping(true))).unwrap();
+        let mut harness = list(&dir, ComputersView::default());
+        harness.get_by_label("Show its screen").click();
+        harness.run_steps(2);
+        harness.get_by_label(WAKE_AND_SHOW).click();
+        harness.run_steps(2);
+        let counting = harness
+            .query_by_label_contains("Waking Desk: its screen shows once it is up")
+            .is_some();
+        let waking = harness.state().waking().map(|w| w.device_id.clone());
+        let asked = computers::take_all(&dir, pocketdesk_core::local::pin::now_unix()).len();
+        harness.get_by_label("Cancel").click();
+        harness.run_steps(2);
+        let cancelled = harness.state().waking().is_none();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(counting);
+        assert_eq!(waking.as_deref(), Some("b"));
+        assert_eq!(asked, 1);
+        assert!(cancelled);
+    }
+
+    /// PC6: a woken computer whose link comes up has its window asked for.
+    #[test]
+    fn a_woken_computer_is_shown_as_its_link_comes() {
+        let dir = temp("woken");
+        computers::update(&dir, |file| file.computers.push(sleeping(true))).unwrap();
+        let mut view = ComputersView::default();
+        view.wake_and_show(&dir, "b", "Desk", pocketdesk_core::local::pin::now_unix());
+        view.tick(&dir);
+        assert_eq!(view.take_view(), None, "still asleep");
+        computers::update(&dir, |file| file.computers[0].link = "linked".to_string()).unwrap();
+        view.read_at = None;
+        view.tick(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            view.take_view(),
+            Some(("b".to_string(), "Desk".to_string()))
+        );
+        assert!(view.waking().is_none());
     }
 
     /// PC6: a computer's last view reads as how long ago; never viewed,
