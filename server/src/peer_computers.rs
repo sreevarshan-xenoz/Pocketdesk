@@ -62,6 +62,8 @@ const RETRIES: [u64; 3] = [5, 15, 45];
 /// The server's side: take the app's requests and keep a link to each
 /// paired computer, for the server's life.
 pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
+    // PC5: whether a view may offer HEVC, found as the server starts.
+    tokio::spawn(crate::computer_view::decodes_hevc());
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };

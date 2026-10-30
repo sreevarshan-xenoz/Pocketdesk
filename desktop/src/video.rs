@@ -239,6 +239,7 @@ impl KeyGate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Codec {
     H264,
+    Hevc,
 }
 
 impl Codec {
@@ -246,6 +247,7 @@ impl Codec {
     fn demuxer(self) -> &'static str {
         match self {
             Codec::H264 => "h264",
+            Codec::Hevc => "hevc",
         }
     }
 
@@ -254,9 +256,13 @@ impl Codec {
     fn delimiter(self) -> &'static [u8] {
         match self {
             Codec::H264 => &AUD,
+            Codec::Hevc => &AUD_HEVC,
         }
     }
 }
+
+/// HEVC's access unit delimiter (type 35, any slice type).
+const AUD_HEVC: [u8; 7] = [0, 0, 0, 1, 0x46, 0x01, 0x50];
 
 /// How the sidecar decodes (PC5): on the graphics card through Direct3D
 /// 11 or VA-API (at a render node), whichever ffmpeg finds, or on the

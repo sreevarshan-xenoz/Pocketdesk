@@ -96,9 +96,15 @@ fn server(exe: &Path, base: &Path, config: &Path, state: &Path, pattern: bool) -
         )
         .env("POCKETDESK_DOWNLOAD_DIR", base.join("downloads"))
         .env("POCKETDESK_VIEW_SOUND_FILE", base.join("view-sound.wav"))
-        .arg("start")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .arg("start");
+    // `PD_LIVE_LOG=1`: the server's log beside its folders, for its codec
+    // lines (printed at the end, nothing else).
+    if std::env::var("PD_LIVE_LOG").is_ok_and(|v| v == "1") {
+        let log = std::fs::File::create(base.join("server.log")).unwrap();
+        command.stdout(log.try_clone().unwrap()).stderr(log);
+    } else {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
     if pattern {
         command.env("POCKETDESK_TEST_PATTERN", "1");
     }
@@ -112,6 +118,8 @@ type Came = Vec<(Duration, usize, (usize, usize), Instant)>;
 #[derive(Debug, Default)]
 struct Measured {
     frames_in: u64,
+    /// The access units' bytes over the measured seconds.
+    encoded: u64,
     pictures: u64,
     bytes_per_picture: u64,
     p50: Option<Duration>,
@@ -155,6 +163,7 @@ fn measure(
             window = Some(Instant::now());
             out.lock().unwrap().clear();
             measured.frames_in = 0;
+            measured.encoded = 0;
         }
         if window.is_some_and(|t| t.elapsed() >= Duration::from_secs(secs)) {
             break;
@@ -168,12 +177,18 @@ fn measure(
         }
         let message = Message::read(&mut stream).expect("the relay");
         match &message {
-            Message::Config { width, height } => {
+            Message::Config { .. } | Message::HevcConfig => {
                 fed.lock().unwrap().clear();
                 let (fed, out) = (fed.clone(), out.clone());
+                let (codec, size, name) = match &message {
+                    Message::Config { width, height } => {
+                        (Codec::H264, Some((*width, *height)), "H.264")
+                    }
+                    _ => (Codec::Hevc, None, "HEVC"),
+                };
                 let wanted = DecodeWanted {
-                    codec: Codec::H264,
-                    size: Some((*width, *height)),
+                    codec,
+                    size,
                     accel: accel.clone(),
                     planes,
                 };
@@ -194,7 +209,7 @@ fn measure(
                 .ok();
                 started = Some(Instant::now());
                 gate = KeyGate::default();
-                measured.codec = "H.264";
+                measured.codec = name;
             }
             Message::Frame {
                 keyframe,
@@ -211,6 +226,7 @@ fn measure(
                     }
                 }
                 measured.frames_in += 1;
+                measured.encoded += data.len() as u64;
                 fed.lock().unwrap().push_back(Instant::now());
                 if d.feed(data).is_err() {
                     return None;
@@ -342,9 +358,10 @@ fn the_windows_decoder_on_a_real_view() {
             continue;
         };
         println!(
-            "{screen}, {}, {name}: {} frames in, {} pictures in {secs} s, decode p50 {} p95 {}, {} bytes a picture, {:?}",
+            "{screen}, {}, {name}: {} frames in ({} KB each), {} pictures in {secs} s, decode p50 {} p95 {}, {} bytes a picture, {:?}",
             m.codec,
             m.frames_in,
+            m.encoded / m.frames_in.max(1) / 1000,
             m.pictures,
             ms(m.p50),
             ms(m.p95),
@@ -361,6 +378,16 @@ fn the_windows_decoder_on_a_real_view() {
         ComputerAsk::StopView { session_id },
         pin::now_unix(),
     );
+    for base in [&a_base, &b_base] {
+        let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
+        for line in log.lines().filter(|l| {
+            let l = l.to_ascii_lowercase();
+            l.contains("hevc") || l.contains("codec") || l.contains("showing another")
+        }) {
+            let at = line.find("pocketdesk").unwrap_or(0);
+            println!("log: {}", &line[at..]);
+        }
+    }
     assert!(
         !a_base.join("view-sound.wav").exists(),
         "no sound came to A"

@@ -1595,6 +1595,18 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 gate = KeyGate::default();
                 first_fed = None;
             }
+            Message::HevcConfig => {
+                // PC5: HEVC from the next keyframe, its size the first
+                // picture's.
+                if recorder.take().is_some() {
+                    end_recording(shared, Some("it stopped as the picture changed"));
+                }
+                stream_is = Some((Codec::Hevc, None));
+                lock(shared).size = None;
+                decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
+                gate = KeyGate::default();
+                first_fed = None;
+            }
             Message::Frame {
                 keyframe,
                 seq,
@@ -1733,6 +1745,12 @@ fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(P
     Box::new(move |picture| {
         let mut state = lock(&shared);
         state.clock.decoded(Instant::now(), picture.data.len());
+        // HEVC's size is the first picture's (PC5).
+        if state.size.is_none()
+            && let (Ok(w), Ok(h)) = (u16::try_from(picture.width), u16::try_from(picture.height))
+        {
+            state.size = Some((w, h));
+        }
         state.picture = Some(picture);
         drop(state);
         ctx.request_repaint_of(viewport_id());

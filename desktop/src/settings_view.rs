@@ -345,6 +345,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_hevc",
+        "Use HEVC when both can",
+        Section::Computers,
+    ),
+    (
         "computer_wake_facts",
         "Let my computers wake this one",
         Section::Computers,
@@ -610,8 +615,10 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_clipboard"
             // PC4: read by an open window at once.
             | "computer_view_grab_keys"
-            // PC5: read as each view starts.
+            // PC5: read as each view starts, and by the server as each
+            // view dials.
             | "computer_view_hw_decode"
+            | "computer_view_hevc"
             | "events"
             | "events_detail"
             | "hooks"
@@ -2162,6 +2169,16 @@ impl SettingsForm {
                         "Direct3D 11 on Windows, VA-API on Linux, else what ffmpeg finds; a card that gives no picture in 2 s is left for the processor. The window's Stats say which. Applies from the next view.",
                     );
                 });
+                row(ui, "computer_view_hevc", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_hevc,
+                        "use HEVC when both can: a computer's screen comes as HEVC when its encoder makes it and this computer's ffmpeg decodes it",
+                    );
+                    note(
+                        ui,
+                        "HEVC needs less bitrate for the same picture, which helps most over the internet. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
+                    );
+                });
                 // PC6: what Wake on the other computers needs from this one.
                 row(ui, "computer_wake_facts", |ui| {
                     ui.checkbox(
@@ -2940,6 +2957,7 @@ mod tests {
             "computer_view_clipboard",
             "computer_view_grab_keys",
             "computer_view_hw_decode",
+            "computer_view_hevc",
         ] {
             assert!(
                 SETTINGS
