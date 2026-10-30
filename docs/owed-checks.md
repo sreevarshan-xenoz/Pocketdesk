@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1040 open items.
+1047 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 123 |
+| A second computer | 130 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -1036,6 +1036,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
+
+**237. Every screen of the other computer (PC11)**
+
+- The Linux laptop with two screens (or Windows with two) shown from the other computer: the bar's buttons sit as its screens do (one above the other or side by side as in its display settings), the one shown highlighted; with a computer on 0.8.2 or older they are a row. (where: second computer)
+- Switch with a button, then with Ctrl+Alt+Shift+2 and +1 (the far computer gets no keys from them: `wev` on a Linux far side counts none): the last picture dims with "Switching to …" and the new one comes; note the Stats' "Last switch" over five switches each way, home network and internet path (before PC11 the window's own part alone was about 0.3 s more). (where: second computer)
+- A switch while locked (Lock the pointer), hiding (Hide what I do there, the far side's Power switch on) and recording: the pointer is free and shows after it; privacy stays on there throughout (the far computer's keyboard stays blocked; its ring stays); the recording's first file ends and a second starts for the new screen, both play. (where: second computer)
+- Right-click screen 2's button, Open in a new window: a second window shows screen 2 beside the first's screen 1, both moving (a video playing on each); the far computer's session list shows two sessions; the Stats in each say "Windows: 2 of 4 shown". With control: a click in each window lands on its own screen there (and on Linux far sides note whether a click on screen 2 lands on screen 2: absolute moves are not remapped per screen there). (where: second computer)
+- Close the second window: the first goes on untouched, the far computer lists one session; open it again, then stop the first window: the second goes on. Quit Pocketdesk with both open and "Lock it when I close the window" on: the far computer locks once, after both stopped. (where: second computer)
+- Open four windows, then a fifth from any bar: "At most 4 screen windows at once" shows and nothing else opens; the server's memory and the far computer's CPU with four views (counts only). (where: second computer)
+- With "Hide what I do there" on in one window, ask it in the second window of the same computer: it says another window already hides it, and nothing changes there. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
