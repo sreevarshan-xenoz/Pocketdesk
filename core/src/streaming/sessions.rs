@@ -188,7 +188,18 @@ fn is_device(info: &LiveSession, device_id: &str) -> bool {
     info.device_id.as_deref() == Some(device_id)
 }
 
+/// Close every live session, on both roads, with `reason`, and return them
+/// (PC9a: a stopping server tells each screen session why, the internet
+/// road's too, whose endpoint's own close carries no reason).
+pub fn end_all(reason: &[u8]) -> Vec<LiveSession> {
+    close_where(|_| true, reason)
+}
+
 fn kick_where(names: impl Fn(&LiveSession) -> bool) -> Vec<LiveSession> {
+    close_where(names, b"kicked by user")
+}
+
+fn close_where(names: impl Fn(&LiveSession) -> bool, reason: &[u8]) -> Vec<LiveSession> {
     let victims: Vec<Entry> = if let Ok(mut reg) = registry().lock() {
         let ids: Vec<u64> = reg
             .sessions
@@ -204,7 +215,7 @@ fn kick_where(names: impl Fn(&LiveSession) -> bool) -> Vec<LiveSession> {
     };
     let mut kicked = Vec::with_capacity(victims.len());
     for entry in victims {
-        entry.connection.close(0u32, b"kicked by user");
+        entry.connection.close(0u32, reason);
         kicked.push(entry.info);
     }
     kicked
@@ -225,6 +236,7 @@ mod tests {
         peer: SocketAddr,
         lan: bool,
         closed: Arc<AtomicBool>,
+        said: Arc<Mutex<Vec<u8>>>,
     }
 
     #[async_trait]
@@ -255,19 +267,61 @@ mod tests {
                 TransportFamily::Iroh
             }
         }
-        fn close(&self, _code: u32, _reason: &[u8]) {
+        fn close(&self, _code: u32, reason: &[u8]) {
+            *self.said.lock().unwrap() = reason.to_vec();
             self.closed.store(true, Ordering::Relaxed);
         }
     }
 
     fn dummy(lan: bool, ip_last: u8) -> (SharedConnection, Arc<AtomicBool>) {
+        let (conn, closed, _) = dummy_said(lan, ip_last);
+        (conn, closed)
+    }
+
+    /// [`dummy`], keeping the reason it was closed with.
+    fn dummy_said(
+        lan: bool,
+        ip_last: u8,
+    ) -> (SharedConnection, Arc<AtomicBool>, Arc<Mutex<Vec<u8>>>) {
         let closed = Arc::new(AtomicBool::new(false));
+        let said = Arc::new(Mutex::new(Vec::new()));
         let conn: SharedConnection = Arc::new(DummyConnection {
             peer: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, ip_last)), 4433),
             lan,
             closed: closed.clone(),
+            said: said.clone(),
         });
-        (conn, closed)
+        (conn, closed, said)
+    }
+
+    /// PC9a: a stopping server closes every session, both roads', with its
+    /// reason, and the registry is left empty of them.
+    #[test]
+    fn ending_all_closes_both_roads_with_the_reason() {
+        let _guard = test_lock();
+        let (lan, lan_closed, lan_said) = dummy_said(true, 205);
+        let (wan, wan_closed, wan_said) = dummy_said(false, 206);
+        let _lan_handle = register(Some("endall-lan".into()), &lan, Streamed::default());
+        let _wan_handle = register(Some("endall-wan".into()), &wan, Streamed::default());
+        let ended = end_all(b"server stopping");
+        assert!(
+            ended
+                .iter()
+                .any(|s| s.device_id.as_deref() == Some("endall-lan"))
+        );
+        assert!(
+            ended
+                .iter()
+                .any(|s| s.device_id.as_deref() == Some("endall-wan"))
+        );
+        assert!(lan_closed.load(Ordering::Relaxed) && wan_closed.load(Ordering::Relaxed));
+        assert_eq!(*lan_said.lock().unwrap(), b"server stopping");
+        assert_eq!(*wan_said.lock().unwrap(), b"server stopping");
+        assert!(
+            list()
+                .iter()
+                .all(|s| !s.device_id.as_deref().unwrap_or("").starts_with("endall-"))
+        );
     }
 
     /// The registry is process-global; every test that mutates it holds this

@@ -342,6 +342,9 @@ pub async fn run(config: Config) -> Result<()> {
     let quic_endpoint = quinn::Endpoint::server(server_config, quic_addr)
         .context("Failed to bind QUIC endpoint")?;
     tracing::info!("Unified QUIC listener ready on {}", quic_addr);
+    // Whatever way this function returns from here, the screen sessions
+    // are told the server stops (PC9a review N3).
+    let _close_on_return = CloseOnReturn(quic_endpoint.clone());
 
     // F19: Start notification monitor for forwarding PC notifications to Android clients
     let notification_tx = start_notification_monitor();
@@ -890,6 +893,9 @@ pub async fn run(config: Config) -> Result<()> {
             }
         }
     }
+    // The screen sessions first, so a window showing this screen hears the
+    // stop at once (PC9a).
+    close_screen_sessions(&quic_endpoint, wan_endpoint.as_ref()).await;
     // The keyboard and mouse come home from another computer before the
     // server goes: everything held there let go of and a leave sent while
     // the link is still up, and this computer's cursor shown again.
@@ -901,17 +907,41 @@ pub async fn run(config: Config) -> Result<()> {
     if !crate::shared_input::portal_drive::stop(SHARED_INPUT_STOP).await {
         tracing::warn!("Shared input: the driver did not end in time");
     }
-    // The screen sessions' connections are closed, not dropped (PC9a): a
-    // computer's window showing this screen hears the stop at once and
-    // dials again, where a dropped endpoint left it on a still picture
-    // until QUIC's idle timeout (45 s) ran out.
-    quic_endpoint.close(0u32.into(), STOPPING);
-    let _ = tokio::time::timeout(STREAMS_CLOSE_WAIT, quic_endpoint.wait_idle()).await;
-    if let Some(endpoint) = wan_endpoint.as_ref() {
-        let _ = tokio::time::timeout(STREAMS_CLOSE_WAIT, endpoint.close()).await;
-    }
 
     Ok(())
+}
+
+/// Close the screen sessions' connections, not drop them (PC9a): a
+/// computer's window showing this screen hears the stop at once and dials
+/// again, where a dropped endpoint left it on a still picture until QUIC's
+/// idle timeout (45 s) ran out. Each live session is closed with
+/// [`STOPPING`] on its own road first, since iroh's `Endpoint::close`
+/// carries no reason; then both endpoints close, waited for together.
+async fn close_screen_sessions(quic: &quinn::Endpoint, wan: Option<&iroh::Endpoint>) {
+    pocketdesk_core::streaming::sessions::end_all(STOPPING);
+    quic.close(0u32.into(), STOPPING);
+    let wan_closed = async {
+        if let Some(endpoint) = wan {
+            let _ = tokio::time::timeout(STREAMS_CLOSE_WAIT, endpoint.close()).await;
+        }
+    };
+    let _ = tokio::join!(
+        tokio::time::timeout(STREAMS_CLOSE_WAIT, quic.wait_idle()),
+        wan_closed
+    );
+}
+
+/// Closes the screen sessions as the server's run returns by any road,
+/// an early error included (PC9a review N3); a close already done is a
+/// no-op. It cannot wait, so the normal stop calls
+/// [`close_screen_sessions`] first.
+struct CloseOnReturn(quinn::Endpoint);
+
+impl Drop for CloseOnReturn {
+    fn drop(&mut self) {
+        pocketdesk_core::streaming::sessions::end_all(STOPPING);
+        self.0.close(0u32.into(), STOPPING);
+    }
 }
 
 /// The reason a stopping server gives its screen sessions' connections; a
@@ -2245,12 +2275,51 @@ pub(crate) fn gate(packet: &NetworkPacket, permitted: impl FnOnce() -> bool) -> 
 
 #[cfg(test)]
 mod stop_tests {
-    /// PC9a: what a stopping server tells the screen sessions it closes is
-    /// a reason a window dials again, not an end on purpose.
-    #[test]
-    fn a_stopping_servers_viewers_dial_again() {
-        let reason = std::str::from_utf8(super::STOPPING).unwrap();
-        assert!(crate::computer_view::may_reconnect(Some(reason)));
+    use pocketdesk_core::streaming::transport::{CertManager, StreamTransportConfig};
+
+    /// PC9a: a stopping server closes a live screen session's connection
+    /// with "server stopping", which the window dials again after.
+    #[tokio::test]
+    async fn a_stopping_servers_viewers_hear_why_and_dial_again() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let desktop = CertManager::new().expect("desktop certs");
+        let viewer = CertManager::new().expect("viewer certs");
+        let alpn = vec![StreamTransportConfig::default().alpn];
+        let server = quinn::Endpoint::server(
+            desktop.server_config(alpn.clone()).expect("server config"),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .expect("bind");
+        let addr = server.local_addr().unwrap();
+        let accepting = server.clone();
+        let accept = tokio::spawn(async move {
+            let incoming = accepting.accept().await.expect("incoming");
+            let incoming = match crate::conn_budget::proven(incoming) {
+                Some(incoming) => incoming,
+                None => accepting.accept().await.expect("the proven attempt"),
+            };
+            incoming.await.expect("accept")
+        });
+        let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).expect("client");
+        client.set_default_client_config(viewer.client_config(alpn).expect("client config"));
+        let conn = client
+            .connect(addr, "pocketdesk.local")
+            .expect("dial")
+            .await
+            .expect("connect");
+        let _held = accept.await.expect("accept task");
+        super::close_screen_sessions(&server, None).await;
+        let why = tokio::time::timeout(std::time::Duration::from_secs(5), conn.closed())
+            .await
+            .expect("the viewer hears the close within 5 s");
+        let reason = match why {
+            quinn::ConnectionError::ApplicationClosed(close) => {
+                String::from_utf8_lossy(&close.reason).into_owned()
+            }
+            other => panic!("closed otherwise: {other}"),
+        };
+        assert_eq!(reason, "server stopping");
+        assert!(crate::computer_view::may_reconnect(Some(&reason)));
     }
 }
 
