@@ -902,6 +902,13 @@ fn ask_with(
             }
         }
     }
+    // The microphone stops with the view it went to (PR #569 re-review
+    // N5): never a frame named for the next computer.
+    let sending = state.mic.on();
+    state.mic.stopped();
+    if sending {
+        stop_mic(state);
+    }
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
@@ -4360,6 +4367,34 @@ mod tests {
         view.stop_mic();
         assert_eq!(view.mic_on_air(), None);
         assert!(!lock(&shared).mic.wanted());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #569 re-review N5: asking for another computer's screen stops
+    /// the microphone at once, the relay hearing off.
+    #[test]
+    fn asking_for_another_screen_stops_the_mic() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let dir = std::env::temp_dir().join(format!("pd-computer-mic-ask-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut state = State {
+            writer: Some(writer.try_clone().unwrap()),
+            stream: Some(writer),
+            mic_said: Some(true),
+            ..State::default()
+        };
+        state.mic.toggle();
+        assert_eq!(state.mic.step(true), Some(view_mic::Change::Start));
+        let other = Wanted {
+            device_id: "lab".into(),
+            name: "Lab".into(),
+            monitor: 0,
+        };
+        let _ = ask_with(&dir, &mut state, other, Some(false));
+        assert!(!state.mic.on() && !state.mic.wanted());
+        assert_eq!(heard_mic(&mut relay), ["off"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
