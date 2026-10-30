@@ -146,6 +146,8 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
         Default::default()
     };
     let store = trust_store(state_dir)?;
+    // Remote revoke: which devices may list and remove the others.
+    let listed = pocketdesk_core::local::computers::read(state_dir);
     let devices: Vec<Value> = store
         .trusted_devices()
         .into_iter()
@@ -170,6 +172,7 @@ pub fn devices(state_dir: &Path, now_unix: u64, running: bool) -> Result<Value, 
                 "in_session": live.iter().any(|s| s.device_id.as_deref() == Some(id.as_str())),
                 "key_bound": bound.is_some_and(|k| k.tls.is_some()),
                 "internet_key_bound": bound.is_some_and(|k| k.iroh.is_some()),
+                "owner": crate::remote_devices::is_owner_device(&store, &listed, &id),
                 "permissions": allowed,
                 // The phone's last battery report (T8b), or null.
                 "battery": batteries.get(&id),
@@ -1807,6 +1810,7 @@ mod tests {
         assert_eq!(b["name"], Value::Null, "none said yet");
         assert_eq!(a["in_session"], true);
         assert_eq!(a["key_bound"], true);
+        assert_eq!(a["owner"], false, "not paired with the owner's own code");
         assert_eq!(a["grant_remaining_secs"], Value::Null);
         assert_eq!(a["permissions"]["exec"], false, "off unless granted");
         assert_eq!(a["permissions"]["files"], true);

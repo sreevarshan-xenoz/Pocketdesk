@@ -1206,7 +1206,12 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
                 // the two shows the other computer recorded it too (review
                 // M1): `peer_computers::grant_on_link` gives the rest then.
                 None if computer => store.trust_computer(phone_id.clone()),
-                None => store.trust_device(phone_id.clone()),
+                // Remote revoke: only the owner's own code makes an owner
+                // phone, which may remove this computer's devices from afar.
+                None => store.trust_phone(
+                    phone_id.clone(),
+                    is_owner_code(someone_else, profile.is_some()),
+                ),
             }
         });
         match outcome {
@@ -1294,6 +1299,13 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
         }
         respond_pair(sender, false, "").await;
     }
+}
+
+/// Whether a phone's permanent pairing is the owner's own (remote revoke):
+/// not someone else's code, and not one that names a permission profile
+/// (which pairs as someone else's, P9). A guest's grant never reaches here.
+fn is_owner_code(someone_else: bool, profile: bool) -> bool {
+    !someone_else && !profile
 }
 
 /// Why a pairing with a PIN handed to a nearby computer (`nearby`) is
@@ -2500,6 +2512,10 @@ forged log line"
             // what it sends the phone.
             "kdeconnect.pocketdesk.shared_input.screen",
             "kdeconnect.pocketdesk.shared_input.pong",
+            // Remote revoke: answered only for an owner device (the plugin
+            // holds the gate); an answer is taken only for the ask waiting.
+            "kdeconnect.pocketdesk.remote_devices",
+            "kdeconnect.pocketdesk.remote_devices_answer",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(

@@ -1697,13 +1697,21 @@ where
         let mut let_in_once = seeded;
 
         tracing::info!("Entering main packet loop");
+        // Remote revoke: a device removed from afar is closed at once.
+        let mut closing = state::closing();
         loop {
             let mut line = String::new();
-            let read_result = timeout(
-                Duration::from_secs(60),
-                read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
-            )
-            .await;
+            let read_result = tokio::select! {
+                read = timeout(
+                    Duration::from_secs(60),
+                    read_line_capped(&mut reader, &mut line, MAX_PACKET_LINE),
+                ) => read,
+                () = state::closed(&device_id, &mut closing) => {
+                    tracing::info!("Closing {device_id}'s connection: it was removed");
+                    tell_not_paired(sender_ref).await;
+                    break;
+                }
+            };
 
             match read_result {
                 Ok(Ok(0)) => {

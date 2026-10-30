@@ -68,6 +68,7 @@ pub mod privacy;
 pub mod quiet_hours;
 pub mod quiet_phone;
 pub mod relay;
+pub mod remote_devices;
 pub mod remote_sound;
 pub mod ring_phone;
 pub mod service;

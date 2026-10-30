@@ -177,6 +177,17 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     forget_paired(&dir, &cert_manager, forgetting, &mut links, views.as_ref())
                         .await;
                 }
+                // Remote revoke: its devices, or one of them removed.
+                ComputerAsk::DevicesThere { device_id } => {
+                    let ask = pocketdesk_core::protocol::remote_devices::Ask::List;
+                    crate::remote_devices::ask(&dir, &device_id, ask).await;
+                }
+                ComputerAsk::RemoveThere { device_id, remove } => {
+                    let ask = pocketdesk_core::protocol::remote_devices::Ask::Remove {
+                        device_id: remove,
+                    };
+                    crate::remote_devices::ask(&dir, &device_id, ask).await;
+                }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
@@ -2340,6 +2351,28 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
     }
     if packet.packet_type == crate::offers::OFFER {
         tokio::spawn(fetch_offer(device_id.to_string(), packet.body.clone()));
+        return;
+    }
+    // Remote revoke: its ask of this one's devices, held to the same owner
+    // gate as on a connection (a computer this one paired into alone is no
+    // owner device here), or its answer to this one's ask.
+    if packet.packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES {
+        let (to, body) = (device_id.to_string(), packet.body.clone());
+        tokio::spawn(async move {
+            if let Some(answer) = crate::remote_devices::answer(&to, &body).await
+                && let Some(outgoing) = live(&to)
+            {
+                let packet = NetworkPacket::new(
+                    pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER,
+                )
+                .with_body(answer);
+                let _ = outgoing.send(packet).await;
+            }
+        });
+        return;
+    }
+    if packet.packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER {
+        crate::remote_devices::heard(device_id, &packet.body).await;
         return;
     }
     if packet.packet_type == crate::plugins::share::FETCH_REFUSED {
