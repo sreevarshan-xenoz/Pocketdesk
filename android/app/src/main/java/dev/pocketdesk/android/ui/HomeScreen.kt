@@ -457,9 +457,11 @@ fun HomeScreen(
                 // while the list is at its start, so they show below it; a list
                 // scrolled down keeps its place.
                 item(key = "#top") {}
-                // Only here, not on the empty Home: the background features
-                // need a paired computer to send to.
-                if (showHealth && hosts.isNotEmpty()) {
+                // Only with a computer saved: the background features need
+                // one to send to (HomeCards).
+                // One system card at a time, Health first (UX1).
+                val card = HomeCards.shown(hosts.isNotEmpty(), showHealth, remindBackground)
+                if (card == HomeCards.Card.HEALTH) {
                     item(key = "#health") {
                         HealthCard(
                             problems = healthProblems.orEmpty(),
@@ -481,7 +483,7 @@ fun HomeScreen(
                         )
                     }
                 }
-                if (remindBackground && hosts.isNotEmpty()) {
+                if (card == HomeCards.Card.BACKGROUND) {
                     item(key = "#background") {
                         BackgroundCard(
                             limit = backgroundLimit,
