@@ -82,6 +82,21 @@ pub struct ComputersView {
 /// wake, the system's resume and the link's dial can take over a minute.
 pub const WAKE_WAIT: Duration = Duration::from_secs(120);
 
+/// Of the release a computer said on the link this one dials and the one
+/// it said dialing this one, the newer (item 4): a computer updated and
+/// heard on one road while the other's connection stays up from before
+/// shows its new release, never the older word. Either alone is taken; two
+/// that are not both releases keep the link's.
+pub fn newer_release<'a>(link: Option<&'a str>, dialed_in: Option<&'a str>) -> Option<&'a str> {
+    match (link, dialed_in) {
+        (Some(a), Some(b)) => match pocketdesk_core::version::skew(a, b) {
+            Some(pocketdesk_core::version::Skew::PeerNewer) => Some(b),
+            _ => Some(a),
+        },
+        (a, b) => a.or(b),
+    }
+}
+
 /// What is said wherever Wake is offered (PC6).
 pub const WAKE_NOTE: &str = "Wake-on-LAN works best wired: Wi-Fi rarely wakes a computer.";
 
@@ -420,12 +435,13 @@ impl ComputersView {
         self.version_hints = hints;
     }
 
-    /// The release `computer` runs: as it said on the link this one dials,
-    /// else as it said dialing this one.
+    /// The release `computer` runs, from what it said on the link this one
+    /// dials (`computers.json`) and dialing this one (the trust store).
     fn version_of(&self, computer: &PeerComputer) -> Option<&str> {
-        self.file
-            .version(&computer.device_id)
-            .or_else(|| self.versions.get(&computer.device_id).map(String::as_str))
+        newer_release(
+            self.file.version(&computer.device_id),
+            self.versions.get(&computer.device_id).map(String::as_str),
+        )
     }
 
     fn refresh(&mut self, state_dir: &Path) {
@@ -1311,6 +1327,22 @@ const MINE_HOVER: &str = "Paired both ways from a link made for another of your 
 
 #[cfg(test)]
 mod tests {
+    /// Item 4 (PR #579 review N2): of the two words on a computer's
+    /// release, the newer shows.
+    #[test]
+    fn the_newer_of_a_computers_two_releases_shows() {
+        use super::newer_release;
+        assert_eq!(newer_release(Some("0.8.2"), Some("0.9.0")), Some("0.9.0"));
+        assert_eq!(newer_release(Some("0.9.0"), Some("0.8.2")), Some("0.9.0"));
+        assert_eq!(
+            newer_release(Some("0.8.2"), Some("0.8.2-dev")),
+            Some("0.8.2")
+        );
+        assert_eq!(newer_release(None, Some("0.8.1")), Some("0.8.1"));
+        assert_eq!(newer_release(Some("0.8.1"), None), Some("0.8.1"));
+        assert_eq!(newer_release(None, None), None);
+    }
+
     use super::*;
 
     fn computer(link: &str) -> PeerComputer {
