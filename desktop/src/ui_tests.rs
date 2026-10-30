@@ -2176,3 +2176,32 @@ fn the_clipboard_says_why_it_is_empty_or_cannot_send() {
             .is_some()
     );
 }
+
+/// UX 4: Activity with nothing logged, and with the log off (its button
+/// opens Settings), and Diagnostics before a run, each say so in a card.
+#[test]
+fn the_help_pages_say_what_shows_there() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Activity));
+    assert!(app.query_by_label(crate::activity_view::EMPTY).is_some());
+    assert!(app.query_by_label(crate::activity_view::LOG_OFF).is_none());
+    go_to(&app, Tab::Diagnostics);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::diagnostics_view::NOT_RUN)
+            .is_some()
+    );
+    assert!(app.query_by_label_contains("say what to fix").is_some());
+
+    std::fs::write(fixture.config().join("config.toml"), "events = false\n").expect("config");
+    let mut app = fixture.open(Some(Tab::Activity));
+    assert!(app.query_by_label(crate::activity_view::LOG_OFF).is_some());
+    // Off, the log says only that: not "nothing has happened" as well.
+    assert!(app.query_by_label(crate::activity_view::EMPTY).is_none());
+    app.get_by_label("Turn it on in Settings").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Settings.purpose()).is_some(),
+        "Settings opened"
+    );
+}
