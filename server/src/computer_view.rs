@@ -1244,17 +1244,22 @@ impl PrivacyHost {
     pub fn real() -> Self {
         let (tx, answers) = mpsc::channel(16);
         *ANSWERS.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
-        let send: PrivacySend = Arc::new(|device_id: &str, packet: NetworkPacket| {
+        // One ordered sender per computer (PR #561 re-review N3): a Hide
+        // then a Show go in that order, and a lock goes only while its
+        // answer is still awaited.
+        let queues: Arc<std::sync::Mutex<HashMap<String, PrivacyQueue>>> = Arc::default();
+        let send: PrivacySend = Arc::new(move |device_id: &str, packet: NetworkPacket| {
             remember_asked(device_id);
-            let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-                return;
-            };
-            let device_id = device_id.to_string();
-            runtime.spawn(async move {
-                if let Err(e) = crate::clipboard_push::send_to_computer(&device_id, &packet).await {
-                    tracing::debug!("Privacy not asked of {device_id}: {e}");
-                }
+            let mut queues = queues.lock().unwrap_or_else(|e| e.into_inner());
+            let queue = queues.entry(device_id.to_string()).or_insert_with(|| {
+                privacy_queue(
+                    device_id,
+                    |device_id: String, packet: NetworkPacket| async move {
+                        crate::clipboard_push::send_to_computer(&device_id, &packet).await
+                    },
+                )
             });
+            let _ = queue.send((packet, Instant::now()));
         });
         let notice: PrivacyNotice = Arc::new(|words: String| {
             tracing::info!("{words}");
@@ -1270,6 +1275,48 @@ impl PrivacyHost {
             notice,
         }
     }
+}
+
+/// A computer's privacy asks, waiting their turn (PR #561 re-review N3).
+type PrivacyQueue = mpsc::UnboundedSender<(NetworkPacket, Instant)>;
+
+/// A lock still goes this long after it was asked, and no longer: past it
+/// the owner may already have been told it never came ([`LOCK_WAIT`]), so a
+/// lock never lands after that word.
+pub const LOCK_SEND_BY: Duration = Duration::from_secs(8);
+
+/// Whether `packet`, asked at `asked`, still goes at `now`: a lock only
+/// within [`LOCK_SEND_BY`], anything else always (a release late is still
+/// a release).
+pub fn still_goes(packet: &NetworkPacket, asked: Instant, now: Instant) -> bool {
+    let lock = packet.body.get("lock").and_then(|v| v.as_bool()) == Some(true);
+    !lock || now.saturating_duration_since(asked) < LOCK_SEND_BY
+}
+
+/// The ordered sender to the computer `device_id`: one task sends its asks
+/// one after the other, as [`crate::clipboard_push::send_to_computer`]
+/// does (its connection here, else the link this one keeps).
+fn privacy_queue<F, Fut>(device_id: &str, deliver: F) -> PrivacyQueue
+where
+    F: Fn(String, NetworkPacket) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(), String>> + Send,
+{
+    let (tx, mut rx) = mpsc::unbounded_channel::<(NetworkPacket, Instant)>();
+    let device_id = device_id.to_string();
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            while let Some((packet, asked)) = rx.recv().await {
+                if !still_goes(&packet, asked, Instant::now()) {
+                    tracing::info!(device_id, "A lock asked too long ago was not sent");
+                    continue;
+                }
+                if let Err(e) = deliver(device_id.clone(), packet).await {
+                    tracing::info!("Privacy not asked of {device_id}: {e}");
+                }
+            }
+        });
+    }
+    tx
 }
 
 /// The computers a privacy ask went to (PR #561 review M4): only their
@@ -2490,6 +2537,60 @@ mod tests {
             1,
             "kept once"
         );
+    }
+
+    /// PR #561 re-review N3: a lock goes only while its answer is awaited;
+    /// any other ask goes however late.
+    #[test]
+    fn a_lock_late_is_not_sent() {
+        let at = Instant::now();
+        let lock = privacy_packet(&PrivacyStep::Lock).unwrap();
+        let release = privacy_packet(&PrivacyStep::Release { lock: false }).unwrap();
+        assert!(still_goes(&lock, at, at));
+        assert!(!still_goes(&lock, at, at + LOCK_SEND_BY));
+        assert!(still_goes(&release, at, at + LOCK_SEND_BY * 4));
+        assert!(LOCK_SEND_BY < LOCK_WAIT, "never after the owner was told");
+    }
+
+    /// PR #561 re-review N3: the asks to one computer go in order, from one
+    /// queue, even when one takes longer to send than the next; a lock
+    /// asked too long ago does not go.
+    #[tokio::test]
+    async fn a_computers_asks_keep_their_order() {
+        let sent = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let to = sent.clone();
+        let queue = privacy_queue("desk", move |_device: String, packet: NetworkPacket| {
+            let to = to.clone();
+            async move {
+                let action = packet.body["action"].as_str().unwrap().to_string();
+                // The first is slow to send: a later one must not pass it.
+                if action == "grab" {
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                }
+                to.lock().unwrap().push(action);
+                Ok(())
+            }
+        });
+        let now = Instant::now();
+        for step in [PrivacyStep::Grab, PrivacyStep::Release { lock: false }] {
+            queue.send((privacy_packet(&step).unwrap(), now)).unwrap();
+        }
+        let stale = now
+            .checked_sub(LOCK_SEND_BY)
+            .expect("a clock that far back");
+        queue
+            .send((privacy_packet(&PrivacyStep::Lock).unwrap(), stale))
+            .unwrap();
+        queue
+            .send((privacy_packet(&PrivacyStep::Lock).unwrap(), now))
+            .unwrap();
+        for _ in 0..50 {
+            if sent.lock().unwrap().len() >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(*sent.lock().unwrap(), ["grab", "release", "status"]);
     }
 
     /// PR #561 review M3: an answer is matched to its ask by the id the
