@@ -24,14 +24,19 @@
 //! and [`PINS_WAITING`] at once. Its answer is a PIN of its own, kept in
 //! memory for [`PIN_FOR_SECS`], which pairs only that phone id on a
 //! connection proving the TLS key the introducing computer named, once
-//! ([`take_pin`]). As the phone pairs, everything is decided again under
-//! the files' locks ([`admit_in`]): the introducer is still paired both
-//! ways, the switch still on, the id still free. The phone is then an
-//! owner phone here, with this computer's defaults for a new phone
-//! narrowed to what the introducing computer allows it (never more than
-//! either), and its keys as the introducing computer bound them. This
-//! computer says so ("<A> added <phone> to this computer") and writes
-//! `device_introduced`.
+//! ([`take_pin`]), discarded after [`PIN_MISSES`] wrong PINs from that
+//! phone or on the introducing computer's cancel. As the phone pairs,
+//! everything is decided again under the files' locks ([`admit_in`]): the
+//! introducer is still paired both ways, the switch still on, the id still
+//! free. The phone is then an owner phone here that the introducer
+//! introduced (never introduced onward, and demoted when the introducer is
+//! no longer paired both ways), with this computer's defaults for a new
+//! phone narrowed to what the introducing computer allows it and to what
+//! this computer allows the introducer ([`permissions_for`]), and its keys
+//! as the introducing computer bound them. This computer says so ("<A>
+//! added <phone> to this computer"), writes `device_introduced` and
+//! confirms the pairing to the introducer, which keeps the introduction
+//! only then.
 //!
 //! **Removal follows the introduction.** Each computer keeps which phones
 //! were introduced between it and which computer (`computers.json`'s
@@ -48,7 +53,8 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::computers::{
-    self, ComputersFile, Introduced, OWED_FOR, OWED_RESEND, OwedRemoval, PeerComputer,
+    self, ComputersFile, Introduced, OWED_FOR, OWED_RESEND, OwedRemoval, PENDING_INTRODUCTION_FOR,
+    PeerComputer, PendingIntroduction,
 };
 use pocketdesk_core::local::device_keys::{self, Slot, Verdict};
 use pocketdesk_core::local::pair_link::{PairLink, order_addresses};
@@ -301,10 +307,12 @@ where
     let Some((store, file, keys)) = read else {
         return refused(Refusal::Failed);
     };
-    if !is_owner_phone(&store, &file, asker) {
+    // Only a phone paired with this computer's own code: one another
+    // computer introduced here is never introduced onward (PR #581 I2).
+    if !introduces(&store, &file, asker) {
         tracing::warn!(
             asker,
-            "Refused an introduction ask from a phone not the owner's"
+            "Refused an introduction ask from a phone not paired with this computer's own code"
         );
         return refused(Refusal::NotOwner);
     }
@@ -327,6 +335,7 @@ where
             if !reachable(device_id) {
                 return refused(Refusal::NotLinked);
             }
+            let asked = introduction.request.clone();
             let (pin, facts) = match ask(device_id.clone(), introduction).await {
                 Ok(answer) => answer,
                 Err(refusal) => {
@@ -343,18 +352,23 @@ where
                 return refused(Refusal::NotMine);
             };
             let link = link_to(computer, &shown(&store, &file, device_id), &pin, &facts);
-            // Still an owner phone after the wait (PR review 1): one
-            // unpaired here meanwhile is handed nothing, and nothing is kept.
+            // Still a phone of this computer's own code after the wait (PR
+            // review 1): one removed meanwhile is handed nothing, and the
+            // other computer is told to drop its PIN (PR #581 I1).
             let kept = {
                 let (dir, trust) = (dir.to_path_buf(), trust.to_path_buf());
-                let (asker, computer) = (asker.to_string(), device_id.clone());
+                let (asker, computer, asked) =
+                    (asker.to_string(), device_id.clone(), asked.clone());
                 tokio::task::spawn_blocking(move || {
-                    record_introduced_in(&dir, &trust, &asker, &computer)
+                    record_pending_in(&dir, &trust, &asker, &computer, &asked)
                 })
                 .await
                 .unwrap_or(Err(Refusal::Failed))
             };
             if let Err(refusal) = kept {
+                let cancel =
+                    NetworkPacket::new(INTRODUCE_PHONE).with_body(wire::cancel_body(&asked));
+                crate::remote_devices::send_to_computer(device_id, cancel).await;
                 return refused(refusal);
             }
             tracing::info!(
@@ -371,22 +385,37 @@ where
     }
 }
 
-/// Keep that `phone` was introduced between this computer and `computer`,
-/// deciding again under `computers.json`'s lock that it is still an owner
-/// phone here (it may have been removed while the other computer was
-/// asked): else nothing is kept, and it is refused.
-pub(crate) fn record_introduced_in(
+/// Whether `phone` may be introduced from here: an owner phone paired with
+/// this computer's own code, never one another computer introduced.
+fn introduces(store: &TrustStore, file: &ComputersFile, phone: &str) -> bool {
+    is_owner_phone(store, file, phone) && store.is_own_code_owner(phone)
+}
+
+/// Keep that `phone` was introduced to `computer` under `request`, as
+/// waiting for that computer to confirm it paired (PR #581 N3), deciding
+/// again under `computers.json`'s lock that it may still be introduced (it
+/// may have been removed while the other computer was asked): else nothing
+/// is kept, and it is refused.
+pub(crate) fn record_pending_in(
     dir: &Path,
     trust: &Path,
     phone: &str,
     computer: &str,
+    request: &str,
 ) -> Result<(), Refusal> {
     let now = pocketdesk_core::local::pin::now_unix();
     let mut outcome = Err(Refusal::Failed);
     let saved = computers::update(dir, |file| {
         outcome = match TrustStore::read(trust) {
-            Ok(store) if is_owner_phone(&store, file, phone) => {
-                note_introduced(file, phone, computer, now);
+            Ok(store) if introduces(&store, file, phone) => {
+                file.pending_introductions
+                    .retain(|p| !(p.phone == phone && p.computer == computer));
+                file.pending_introductions.push(PendingIntroduction {
+                    phone: phone.to_string(),
+                    computer: computer.to_string(),
+                    request: request.to_string(),
+                    unix: now,
+                });
                 Ok(())
             }
             Ok(_) => Err(Refusal::NotOwner),
@@ -400,7 +429,7 @@ pub(crate) fn record_introduced_in(
     outcome
 }
 
-/// [`record_introduced`] on `file`: one entry per phone and computer.
+/// One entry per phone and computer in `file`'s introductions.
 fn note_introduced(file: &mut ComputersFile, phone: &str, computer: &str, now: u64) {
     file.introduced
         .retain(|i| !(i.phone == phone && i.computer == computer));
@@ -411,10 +440,45 @@ fn note_introduced(file: &mut ComputersFile, phone: &str, computer: &str, now: u
     });
 }
 
+/// The other computer `from` confirmed the phone `phone` introduced under
+/// `request` paired there: the introduction is kept from now (PR #581 N3).
+/// Whether one waited.
+pub(crate) fn confirm_in(
+    file: &mut ComputersFile,
+    from: &str,
+    request: &str,
+    phone: &str,
+    now: u64,
+) -> bool {
+    let Some(at) = file
+        .pending_introductions
+        .iter()
+        .position(|p| p.computer == from && p.request == request && p.phone == phone)
+    else {
+        return false;
+    };
+    file.pending_introductions.remove(at);
+    note_introduced(file, phone, from, now);
+    true
+}
+
 /// The introductions waiting for the other computer's answer: by request
 /// id, the computer asked and where its answer goes.
 type Waiting = HashMap<String, (String, tokio::sync::oneshot::Sender<ComputerAnswer>)>;
 static WAITING: LazyLock<Mutex<Waiting>> = LazyLock::new(Default::default);
+
+/// A waiting introduction's entry, taken out however the wait ends, a
+/// dropped one included (PR #581 N5).
+struct WaitingEntry(String);
+
+impl Drop for WaitingEntry {
+    fn drop(&mut self) {
+        WAITING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
 
 /// Ask `computer` to take `introduction`, on the link between the two, and
 /// wait [`ANSWER_WAIT`] for its PIN and facts.
@@ -428,6 +492,7 @@ async fn ask_computer(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(request.clone(), (computer.clone(), tx));
+    let _entry = WaitingEntry(request);
     let packet = NetworkPacket::new(INTRODUCE_PHONE).with_body(introduction.body());
     let sent = crate::remote_devices::send_to_computer(&computer, packet).await;
     let answer = if sent {
@@ -438,13 +503,10 @@ async fn ask_computer(
     } else {
         None
     };
-    WAITING
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&request);
     match answer {
         Some(ComputerAnswer::Accepted { pin, facts }) => Ok((pin, facts)),
         Some(ComputerAnswer::Refused(refusal)) => Err(refusal),
+        Some(ComputerAnswer::Paired { .. }) => Err(Refusal::Failed),
         None if sent => Err(Refusal::NoAnswer),
         None => Err(Refusal::NotLinked),
     }
@@ -452,11 +514,33 @@ async fn ask_computer(
 
 /// Take another computer's answer to an introduction: only from the
 /// computer asked, and only for the introduction waiting (its random
-/// request id).
+/// request id). Its word that an introduced phone paired keeps the
+/// introduction it confirms.
 pub(crate) fn heard(from: &str, body: &Value) {
     let Some((request, answer)) = wire::read_computer_answer(body) else {
         return;
     };
+    if let ComputerAnswer::Paired { device_id } = answer {
+        if let Ok(dir) = crate::state::state_dir() {
+            let from = from.to_string();
+            let now = pocketdesk_core::local::pin::now_unix();
+            let confirm = move || {
+                let saved = computers::update(&dir, |file| {
+                    if !confirm_in(file, &from, &request, &device_id, now) {
+                        tracing::debug!("A confirmation of no introduction waiting; dropped");
+                    }
+                });
+                if let Err(e) = saved {
+                    tracing::debug!("Could not keep a confirmed introduction: {e}");
+                }
+            };
+            match tokio::runtime::Handle::try_current() {
+                Ok(_) => drop(tokio::task::spawn_blocking(confirm)),
+                Err(_) => confirm(),
+            }
+        }
+        return;
+    }
     let mut waiting = WAITING.lock().unwrap_or_else(|e| e.into_inner());
     let asked = waiting.get(&request).is_some_and(|(to, _)| to == from);
     if !asked {
@@ -472,7 +556,8 @@ pub(crate) fn heard(from: &str, body: &Value) {
 
 /// A PIN this computer handed another of the owner's computers for a
 /// phone it introduced: it pairs that phone, on a connection proving that
-/// key, once, within [`PIN_FOR_SECS`].
+/// key, once, within [`PIN_FOR_SECS`], and is discarded after
+/// [`PIN_MISSES`] wrong PINs from that phone.
 #[derive(Debug, Clone)]
 pub(crate) struct IntroPin {
     pub pin: String,
@@ -480,10 +565,22 @@ pub(crate) struct IntroPin {
     pub permissions: DevicePermissions,
     /// The computer that introduced it.
     pub introducer: String,
+    /// The introduction's request id, which the confirmation names.
+    pub request: String,
     pub minted: Instant,
+    /// Wrong PINs the phone sent while it waited.
+    pub misses: u32,
 }
 
-static PINS: LazyLock<Mutex<Vec<IntroPin>>> = LazyLock::new(Default::default);
+/// Wrong PINs after which a phone's introduction PIN is discarded.
+pub(crate) const PIN_MISSES: u32 = 3;
+
+pub(crate) static PINS: LazyLock<Mutex<Vec<IntroPin>>> = LazyLock::new(Default::default);
+
+/// The tests that mint or take introduction PINs take turns: the list is
+/// one for the process.
+#[cfg(test)]
+pub(crate) static PIN_TURN: Mutex<()> = Mutex::new(());
 
 const PIN_FOR: Duration = Duration::from_secs(PIN_FOR_SECS);
 
@@ -517,8 +614,9 @@ fn id_taken(
 }
 
 /// Decide whether the computer `from` may introduce the phone in
-/// `introduction` here: paired both ways, the owner's switch (`enabled`)
-/// on, the id free, and not past the pace.
+/// `introduction` here: within the pace (refusals counted too, PR #581
+/// N4), paired both ways, the owner's switch (`enabled`) on, the id free.
+/// What this computer allows `from`, for the phone's permissions.
 pub(crate) fn decide_in(
     dir: &Path,
     trust: &Path,
@@ -526,7 +624,10 @@ pub(crate) fn decide_in(
     introduction: &Introduction,
     enabled: bool,
     own_id: &str,
-) -> Result<(), Refusal> {
+) -> Result<DevicePermissions, Refusal> {
+    if !paced(&TAKEN, from, INTRODUCTIONS_PER_WINDOW, PACE_WINDOW) {
+        return Err(Refusal::Busy);
+    }
     let store = TrustStore::read(trust).map_err(|_| Refusal::Failed)?;
     let file = computers::read(dir);
     if !is_mine_computer(&store, &file, from) {
@@ -538,20 +639,24 @@ pub(crate) fn decide_in(
     if id_taken(dir, &store, &file, &introduction.phone, own_id, from) {
         return Err(Refusal::Taken);
     }
-    if !paced(&TAKEN, from, INTRODUCTIONS_PER_WINDOW, PACE_WINDOW) {
-        return Err(Refusal::Busy);
-    }
-    Ok(())
+    Ok(store.permissions(from))
 }
 
 /// Mint the PIN for `introduction` from `from`, unless [`PINS_WAITING`]
-/// already wait: a PIN no other waiting one has.
-fn mint(from: &str, introduction: Introduction) -> Result<String, Refusal> {
+/// already wait or another computer's PIN waits for that phone (PR #581
+/// N4): a PIN no other waiting one has. The same computer introducing the
+/// phone again replaces its own waiting PIN, before the cap.
+pub(crate) fn mint(from: &str, introduction: Introduction) -> Result<String, Refusal> {
     let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
     pins.retain(|p| p.minted.elapsed() < PIN_FOR);
-    // A phone introduced again replaces its waiting PIN, before the cap
-    // (PR review 3).
-    pins.retain(|p| p.phone.device_id != introduction.phone.device_id);
+    let phone = introduction.phone.device_id.as_str();
+    if pins
+        .iter()
+        .any(|p| p.phone.device_id == phone && p.introducer != from)
+    {
+        return Err(Refusal::Busy);
+    }
+    pins.retain(|p| p.phone.device_id != phone);
     if pins.len() >= PINS_WAITING {
         return Err(Refusal::Busy);
     }
@@ -563,17 +668,63 @@ fn mint(from: &str, introduction: Introduction) -> Result<String, Refusal> {
     };
     pins.push(IntroPin {
         pin: pin.clone(),
+        request: introduction.request,
         phone: introduction.phone,
         permissions: introduction.permissions,
         introducer: from.to_string(),
         minted: Instant::now(),
+        misses: 0,
     });
     Ok(pin)
 }
 
-/// Answer the computer `from`'s introduction in `body`; `None` for a body
-/// that does not read.
+/// Drop the PIN waiting for the introduction `request` that `from` made
+/// (PR #581 I1: the phone was removed there). Whether one waited.
+pub(crate) fn cancel_pin(from: &str, request: &str) -> bool {
+    let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
+    let before = pins.len();
+    pins.retain(|p| !(p.introducer == from && p.request == request));
+    pins.len() != before
+}
+
+/// Drop the PIN waiting for `phone` from the introducer `from` (PR #581 I1:
+/// a removal it owed names the phone before it paired). Whether one waited.
+pub(crate) fn cancel_phone(from: &str, phone: &str) -> bool {
+    let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
+    let before = pins.len();
+    pins.retain(|p| !(p.introducer == from && p.phone.device_id == phone));
+    pins.len() != before
+}
+
+/// A wrong PIN from `device_id`, while an introduction PIN waits for it:
+/// counted against that PIN alone, which goes after [`PIN_MISSES`], and
+/// never against the owner's own PIN (PR #581 I1). Whether one waited.
+pub(crate) fn miss(device_id: &str) -> bool {
+    let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
+    pins.retain(|p| p.minted.elapsed() < PIN_FOR);
+    let Some(pin) = pins.iter_mut().find(|p| p.phone.device_id == device_id) else {
+        return false;
+    };
+    pin.misses += 1;
+    if pin.misses >= PIN_MISSES {
+        tracing::warn!("Discarded an introduction PIN after {PIN_MISSES} wrong PINs");
+        pins.retain(|p| p.phone.device_id != device_id);
+    }
+    true
+}
+
+/// Answer the computer `from`'s introduction in `body`, or take its
+/// cancel; `None` for a body that does not read or a cancel.
 pub(crate) async fn answer_computer(from: &str, body: &Value) -> Option<Value> {
+    if let Some(request) = wire::read_cancel(body) {
+        if cancel_pin(from, &request) {
+            tracing::info!(
+                from,
+                "Dropped an introduction PIN: the phone was removed there"
+            );
+        }
+        return None;
+    }
     let introduction = Introduction::parse(body)?;
     let request = introduction.request.clone();
     let (Ok(dir), Ok(trust)) = (crate::state::state_dir(), crate::state::trust_store_path()) else {
@@ -651,12 +802,26 @@ pub(crate) fn added_words(admitted: &Admitted) -> String {
     )
 }
 
-/// The permissions an introduced phone gets here: this computer's defaults
-/// for a new owner phone, narrowed to what the introducing computer allows
-/// it, and never this computer's keyboard and mouse onto the phone (BK5),
-/// which only its own page sets.
-pub(crate) fn permissions_for(introduced: &DevicePermissions) -> DevicePermissions {
+/// The permissions an introduced phone gets here (PR #581 I2): this
+/// computer's defaults for a new owner phone, narrowed to what the
+/// introducing computer allows it (`introduced`), and with each feature
+/// this computer turned off for the introducing computer itself
+/// (`for_introducer`: one a computer paired both ways has, now off) off
+/// too, and held for the owner when the introducer's sessions are. Never
+/// this computer's keyboard and mouse onto the phone (BK5), which only its
+/// own page sets.
+pub(crate) fn permissions_for(
+    introduced: &DevicePermissions,
+    for_introducer: &DevicePermissions,
+) -> DevicePermissions {
     let mut permissions = DevicePermissions::default().narrowed_to(introduced);
+    let granted = DevicePermissions::computer_mine();
+    for capability in Capability::ALL {
+        if granted.allows(capability) && !for_introducer.allows(capability) {
+            permissions.set(capability, false);
+        }
+    }
+    permissions.ask_first |= for_introducer.ask_first;
     permissions.set(Capability::SharedInput, false);
     permissions
 }
@@ -666,7 +831,8 @@ pub(crate) fn permissions_for(introduced: &DevicePermissions) -> DevicePermissio
 /// takes them): the introducer still paired both ways, the owner's switch
 /// (`enabled`) still on, the id still free. Its keys are bound as the
 /// introducer bound them, then its permissions set, then it is trusted as
-/// an owner phone, and the introduction is kept.
+/// an owner phone that introducer introduced, the introduction kept and a
+/// confirmation owed to the introducer.
 pub(crate) fn admit_in(
     dir: &Path,
     trust: &Path,
@@ -701,9 +867,14 @@ pub(crate) fn admit_in(
             if let Some(iroh) = &phone.iroh {
                 device_keys::register(dir, &phone.device_id, Slot::Iroh, iroh)?;
             }
-            // The permissions before the trust (M2 review).
-            store.set_permissions(&phone.device_id, permissions_for(&intro.permissions))?;
-            store.trust_phone(phone.device_id.clone(), true)?;
+            // The permissions before the trust (M2 review), held to what
+            // this computer allows the introducer now.
+            let for_introducer = store.permissions(&intro.introducer);
+            store.set_permissions(
+                &phone.device_id,
+                permissions_for(&intro.permissions, &for_introducer),
+            )?;
+            store.trust_introduced_phone(phone.device_id.clone(), intro.introducer.clone())?;
             if !phone.name.is_empty() {
                 store.note_claimed_name(&phone.device_id, &phone.name)?;
             }
@@ -725,6 +896,13 @@ pub(crate) fn admit_in(
         };
         if outcome.is_ok() {
             note_introduced(file, &phone.device_id, &intro.introducer, now);
+            // The introducer keeps the introduction only on this word.
+            file.owed_confirmations.push(PendingIntroduction {
+                phone: phone.device_id.clone(),
+                computer: intro.introducer.clone(),
+                request: intro.request.clone(),
+                unix: now,
+            });
         }
     });
     if held.is_err() {
@@ -771,12 +949,7 @@ pub(crate) async fn pair_introduced(
                 serde_json::json!({ "by": introducer }),
                 serde_json::json!({}),
             );
-            if !cfg!(test) {
-                let words = added_words(&admitted);
-                tokio::task::spawn_blocking(move || {
-                    crate::platform::notify("A phone was added", &words, Duration::from_secs(30))
-                });
-            }
+            say("A phone was added", added_words(&admitted));
             crate::plugins::pair::respond_pair(
                 sender,
                 true,
@@ -794,126 +967,333 @@ pub(crate) async fn pair_introduced(
     }
 }
 
+/// Notify the owner (never in a test).
+fn say(summary: &'static str, words: String) {
+    if cfg!(test) {
+        return;
+    }
+    let notify = move || {
+        crate::platform::notify(summary, &words, Duration::from_secs(30));
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(_) => drop(tokio::task::spawn_blocking(notify)),
+        Err(_) => notify(),
+    }
+}
+
+/// The introduced owner phones whose introducer is no longer paired both
+/// ways here (unpaired, or its grant lapsed) lose the owner mark: they stay
+/// paired, with their permissions as they are (PR #581 I2). The phones
+/// demoted, each with this computer's name for its introducer.
+pub(crate) fn demote_orphans_in(dir: &Path, trust: &Path) -> Vec<(String, String)> {
+    let Ok(store) = TrustStore::read(trust) else {
+        return Vec::new();
+    };
+    let file = computers::read(dir);
+    let orphans: Vec<(String, String)> = store
+        .introduced_owners()
+        .into_iter()
+        .filter(|(_, by)| !is_mine_computer(&store, &file, by))
+        .collect();
+    if orphans.is_empty() {
+        return orphans;
+    }
+    let mut demoted = Vec::new();
+    let saved = TrustStore::update(trust, |store| {
+        for (phone, by) in &orphans {
+            if store.introducer(phone) == Some(by.as_str()) && !is_mine_computer(store, &file, by) {
+                store.demote_owner(phone)?;
+                let name = store
+                    .name(phone)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| phone.chars().take(8).collect());
+                demoted.push((name, crate::remote_devices::asker_name(store, &file, by)));
+            }
+        }
+        Ok(())
+    });
+    if let Err(e) = saved {
+        tracing::warn!("Could not take the owner mark from introduced phones: {e}");
+    }
+    demoted
+}
+
+/// [`demote_orphans_in`] on this computer's files, each said.
+fn demote_orphans(dir: &Path, trust: &Path) {
+    for (phone, by) in demote_orphans_in(dir, trust) {
+        tracing::warn!(
+            "An introduced phone is no longer an owner phone here: its introducer is not paired both ways"
+        );
+        say(
+            "A phone is no longer treated as yours",
+            format!(
+                "{phone}, added by {by}, stays paired here but may no longer manage this computer's devices: {by} is no longer paired both ways with it. Pair the phone with this computer's own code to make it yours again."
+            ),
+        );
+    }
+}
+
 // ---- Removal follows the introduction ----
 
 /// Owe a removal for each phone introduced between this computer and
-/// another that is no longer among the `paired` here, at `now`; whether
-/// any was owed.
+/// another, or waiting for that computer's confirmation, that is no longer
+/// among the `paired` here, at `now`; whether any was owed. One not yet
+/// confirmed carries a cancel of its PIN there (PR #581 I1).
 pub(crate) fn owe_in(file: &mut ComputersFile, paired: &[String], now: u64) -> bool {
     let (gone, kept): (Vec<Introduced>, Vec<Introduced>) = std::mem::take(&mut file.introduced)
         .into_iter()
         .partition(|i| !paired.contains(&i.phone));
     file.introduced = kept;
-    for i in &gone {
-        let owed = file
+    let (waiting, still): (Vec<PendingIntroduction>, Vec<PendingIntroduction>) =
+        std::mem::take(&mut file.pending_introductions)
+            .into_iter()
+            .partition(|p| !paired.contains(&p.phone));
+    file.pending_introductions = still;
+    let owed = gone
+        .iter()
+        .map(|i| (i.phone.clone(), i.computer.clone(), None))
+        .chain(
+            waiting
+                .iter()
+                .map(|p| (p.phone.clone(), p.computer.clone(), Some(p.request.clone()))),
+        );
+    let mut any = false;
+    for (phone, computer, cancel) in owed {
+        any = true;
+        if let Some(o) = file
             .owed_removals
-            .iter()
-            .any(|o| o.phone == i.phone && o.computer == i.computer);
-        if !owed {
-            file.owed_removals.push(OwedRemoval {
-                phone: i.phone.clone(),
-                computer: i.computer.clone(),
-                unix: now,
-                request: uuid::Uuid::new_v4().simple().to_string(),
-                sent_unix: 0,
-            });
+            .iter_mut()
+            .find(|o| o.phone == phone && o.computer == computer)
+        {
+            o.cancel = o.cancel.take().or(cancel);
+            continue;
         }
+        file.owed_removals.push(OwedRemoval {
+            phone,
+            computer,
+            unix: now,
+            request: uuid::Uuid::new_v4().simple().to_string(),
+            sent_unix: 0,
+            cancel,
+        });
     }
-    !gone.is_empty()
+    any
 }
 
-/// [`owe_in`] on this computer's file, read first so a file with nothing
-/// introduced is not written (nor made).
-pub(crate) fn owe_removals(dir: &Path, paired: &[String]) {
+/// [`owe_in`] against the trust store at `trust` as it is now. A store
+/// that is missing or does not read owes nothing (PR #581 N2): no phone is
+/// taken for removed because its record could not be read. A file with
+/// nothing introduced is not written (nor made).
+pub(crate) fn owe_removals(dir: &Path, trust: &Path) {
     let file = computers::read(dir);
-    if !file.introduced.iter().any(|i| !paired.contains(&i.phone)) {
+    if file.introduced.is_empty() && file.pending_introductions.is_empty() {
+        return;
+    }
+    if !trust.exists() {
+        return;
+    }
+    let Ok(store) = TrustStore::read(trust) else {
+        return;
+    };
+    let paired = store.trusted_devices();
+    let due = file
+        .introduced
+        .iter()
+        .map(|i| &i.phone)
+        .chain(file.pending_introductions.iter().map(|p| &p.phone))
+        .any(|phone| !paired.contains(phone));
+    if !due {
         return;
     }
     let now = pocketdesk_core::local::pin::now_unix();
     if let Err(e) = computers::update(dir, |file| {
-        owe_in(file, paired, now);
+        owe_in(file, &paired, now);
     }) {
         tracing::warn!("Could not owe a removed phone's removal to another computer: {e}");
     }
 }
 
-/// The owed removals to send at `now` to the computers `reachable` now,
-/// each marked sent; those owed past [`OWED_FOR`] dropped.
+/// The owed removals to send at `now` to the computers `reachable` now
+/// (sent ones are marked only once sent, [`mark_sent`]), and those dropped:
+/// owed past [`OWED_FOR`], or to a computer no longer listed here (PR #581
+/// N1), which the caller says. Unconfirmed introductions past
+/// [`PENDING_INTRODUCTION_FOR`] are dropped too.
 pub(crate) fn due_in(
     file: &mut ComputersFile,
     now: u64,
     reachable: impl Fn(&str) -> bool,
-) -> Vec<OwedRemoval> {
-    file.owed_removals
-        .retain(|o| now.saturating_sub(o.unix) < OWED_FOR);
-    let mut due = Vec::new();
-    for owed in &mut file.owed_removals {
-        let waited = owed.sent_unix == 0 || now.saturating_sub(owed.sent_unix) >= OWED_RESEND;
-        if waited && reachable(&owed.computer) {
-            owed.sent_unix = now;
-            due.push(owed.clone());
-        }
-    }
-    due
+) -> (Vec<OwedRemoval>, Vec<OwedRemoval>) {
+    let listed: Vec<String> = file.computers.iter().map(|c| c.device_id.clone()).collect();
+    let (dropped, kept): (Vec<OwedRemoval>, Vec<OwedRemoval>) =
+        std::mem::take(&mut file.owed_removals)
+            .into_iter()
+            .partition(|o| now.saturating_sub(o.unix) >= OWED_FOR || !listed.contains(&o.computer));
+    file.owed_removals = kept;
+    file.pending_introductions
+        .retain(|p| now.saturating_sub(p.unix) < PENDING_INTRODUCTION_FOR);
+    file.owed_confirmations.retain(|p| {
+        now.saturating_sub(p.unix) < PENDING_INTRODUCTION_FOR && listed.contains(&p.computer)
+    });
+    let due = file
+        .owed_removals
+        .iter()
+        .filter(|o| o.sent_unix == 0 || now.saturating_sub(o.sent_unix) >= OWED_RESEND)
+        .filter(|o| reachable(&o.computer))
+        .cloned()
+        .collect();
+    (due, dropped)
 }
 
-/// Send the removals this computer owes ([`owe_removals`]) to the
-/// computers it can reach now, as remote revoke's `remove`.
-pub(crate) async fn send_owed(dir: &Path) {
-    // A phone removed while an introduction was under way is owed too,
-    // whenever its record landed (PR review 1): the paired list read now.
+/// Mark the owed removal `request` sent at `now` (PR #581 N1: only once it
+/// went).
+pub(crate) fn mark_sent(file: &mut ComputersFile, request: &str, now: u64) {
+    if let Some(o) = file.owed_removals.iter_mut().find(|o| o.request == request) {
+        o.sent_unix = now;
+    }
+}
+
+/// The packets an owed removal goes as: the cancel of its PIN there first,
+/// when the introduction was not yet confirmed, then the removal, marked
+/// as one owed for an introduction (PR #581 N3).
+pub(crate) fn owed_packets(owed: &OwedRemoval) -> Vec<NetworkPacket> {
+    let mut packets = Vec::new();
+    if let Some(cancel) = &owed.cancel {
+        packets.push(NetworkPacket::new(INTRODUCE_PHONE).with_body(wire::cancel_body(cancel)));
+    }
+    let mut body = revoke::Request {
+        request: owed.request.clone(),
+        ask: Ask::Remove {
+            device_id: owed.phone.clone(),
+        },
+    }
+    .body();
+    body["introduced"] = true.into();
+    packets.push(NetworkPacket::new(revoke::REMOTE_DEVICES).with_body(body));
+    packets
+}
+
+/// Send what this computer owes the computers it can reach now: the
+/// removals of phones introduced between them ([`owe_removals`]), and the
+/// confirmations of introduced phones that paired here. `send` sends one
+/// packet to one computer, saying whether it went. The removals dropped
+/// unsent, for the caller to say.
+pub(crate) async fn send_owed_with<S, F>(
+    dir: &Path,
+    trust: &Path,
+    reachable: impl Fn(&str) -> bool + Send + 'static,
+    send: S,
+) -> Vec<OwedRemoval>
+where
+    S: Fn(String, NetworkPacket) -> F,
+    F: Future<Output = bool>,
+{
     let owes = {
-        let dir = dir.to_path_buf();
+        let (dir, trust) = (dir.to_path_buf(), trust.to_path_buf());
         tokio::task::spawn_blocking(move || {
+            owe_removals(&dir, &trust);
             let file = computers::read(&dir);
-            if !file.introduced.is_empty()
-                && let Ok(trust) = crate::state::trust_store_path()
-                && let Ok(store) = TrustStore::read(trust)
-            {
-                owe_removals(&dir, &store.trusted_devices());
-                return !computers::read(&dir).owed_removals.is_empty();
-            }
             !file.owed_removals.is_empty()
+                || !file.owed_confirmations.is_empty()
+                || !file.pending_introductions.is_empty()
         })
         .await
         .unwrap_or(false)
     };
     if !owes {
-        return;
+        return Vec::new();
     }
-    let reachable = reachable_now().await;
     let now = pocketdesk_core::local::pin::now_unix();
-    let due = {
+    let worked = {
         let dir = dir.to_path_buf();
         tokio::task::spawn_blocking(move || {
-            let mut due = Vec::new();
-            computers::update(&dir, |file| due = due_in(file, now, &reachable)).map(|()| due)
+            let mut out = (Vec::new(), Vec::new(), Vec::new());
+            computers::update(&dir, |file| {
+                let (due, dropped) = due_in(file, now, &reachable);
+                let confirmations = file
+                    .owed_confirmations
+                    .iter()
+                    .filter(|c| reachable(&c.computer))
+                    .cloned()
+                    .collect();
+                out = (due, dropped, confirmations);
+            })
+            .map(|()| out)
         })
         .await
     };
-    let due = match due {
-        Ok(Ok(due)) => due,
+    let (due, dropped, confirmations) = match worked {
+        Ok(Ok(out)) => out,
         Ok(Err(e)) => {
-            tracing::debug!("Could not read the removals owed to other computers: {e}");
-            return;
+            tracing::debug!("Could not read what is owed to other computers: {e}");
+            return Vec::new();
         }
-        Err(_) => return,
+        Err(_) => return Vec::new(),
     };
-    for owed in due {
-        let request = revoke::Request {
-            request: owed.request.clone(),
-            ask: Ask::Remove {
-                device_id: owed.phone.clone(),
-            },
-        };
-        let packet = NetworkPacket::new(revoke::REMOTE_DEVICES).with_body(request.body());
-        if crate::remote_devices::send_to_computer(&owed.computer, packet).await {
+    let mut sent = Vec::new();
+    for owed in &due {
+        let mut went = true;
+        for packet in owed_packets(owed) {
+            went &= send(owed.computer.clone(), packet).await;
+        }
+        if went {
             tracing::info!(
                 computer = %owed.computer,
                 "Asked another computer to remove a phone removed here, introduced between the two"
             );
+            sent.push(owed.request.clone());
         }
     }
+    let mut confirmed = Vec::new();
+    for c in &confirmations {
+        let packet = NetworkPacket::new(INTRODUCE_PHONE_ANSWER)
+            .with_body(wire::confirmed_answer(&c.request, &c.phone));
+        if send(c.computer.clone(), packet).await {
+            confirmed.push(c.request.clone());
+        }
+    }
+    if !sent.is_empty() || !confirmed.is_empty() {
+        let dir = dir.to_path_buf();
+        let _ = tokio::task::spawn_blocking(move || {
+            computers::update(&dir, |file| {
+                for request in &sent {
+                    mark_sent(file, request, now);
+                }
+                file.owed_confirmations
+                    .retain(|c| !confirmed.contains(&c.request));
+            })
+        })
+        .await;
+    }
+    dropped
+}
+
+/// Send what this computer owes the computers linked now, say any removal
+/// dropped unsent, and take the owner mark from phones whose introducer is
+/// no longer paired both ways. Every few seconds, from the watcher.
+pub(crate) async fn send_owed(dir: &Path) {
+    let Ok(trust) = crate::state::trust_store_path() else {
+        return;
+    };
+    let reachable = reachable_now().await;
+    let dropped = send_owed_with(dir, &trust, reachable, |computer, packet| async move {
+        crate::remote_devices::send_to_computer(&computer, packet).await
+    })
+    .await;
+    for owed in dropped {
+        tracing::warn!(
+            computer = %owed.computer,
+            "Dropped a removal owed to another computer unsent"
+        );
+        let short: String = owed.phone.chars().take(8).collect();
+        say(
+            "A phone may stay paired elsewhere",
+            format!(
+                "A phone removed here ({short}) could not be removed from another of your computers it was added to (it was not reached in time, or was unpaired here): remove it there (Devices → Unpair)."
+            ),
+        );
+    }
+    let (dir, trust) = (dir.to_path_buf(), trust.clone());
+    let _ = tokio::task::spawn_blocking(move || demote_orphans(&dir, &trust)).await;
 }
 
 /// Take another computer's answer to an owed removal (`request`): dropped
@@ -977,21 +1357,53 @@ pub(crate) fn answered(dir: &Path, from: &str, request: &str, answer: &revoke::A
             reason = refusal.code(),
             "Another computer kept a phone removed here, introduced between the two"
         );
-        if !cfg!(test) {
-            let short: String = phone.chars().take(8).collect();
-            let words = format!(
+        let short: String = phone.chars().take(8).collect();
+        say(
+            "A phone stays paired elsewhere",
+            format!(
                 "A phone removed here ({short}) stays paired with another of your computers: remove it there (Devices → Unpair)."
-            );
-            tokio::task::spawn_blocking(move || {
-                crate::platform::notify(
-                    "A phone stays paired elsewhere",
-                    &words,
-                    Duration::from_secs(30),
-                )
-            });
-        }
+            ),
+        );
     }
     true
+}
+
+/// How a removal another computer owes this one for an introduction is
+/// taken here (PR #581 N3, I1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwedGate {
+    /// The phone had not paired yet: its waiting PIN from that computer is
+    /// dropped, and that is the removal.
+    Cancelled,
+    /// The phone was introduced between the two: removed as asked.
+    Remove,
+    /// The phone was not introduced between the two: not removed this way
+    /// (that computer can still remove it by asking, as remote revoke).
+    NotIntroduced,
+}
+
+/// [`OwedGate`] for the removal of `target` that `asker` owed this computer.
+pub(crate) fn owed_gate_in(dir: &Path, trust: &Path, asker: &str, target: &str) -> OwedGate {
+    if cancel_phone(asker, target) {
+        return OwedGate::Cancelled;
+    }
+    let file = computers::read(dir);
+    let recorded = file
+        .introduced
+        .iter()
+        .any(|i| i.phone == target && i.computer == asker)
+        || file
+            .pending_introductions
+            .iter()
+            .any(|p| p.phone == target && p.computer == asker);
+    let introduced_by = TrustStore::read(trust)
+        .ok()
+        .is_some_and(|store| store.introducer(target) == Some(asker));
+    if recorded || introduced_by {
+        OwedGate::Remove
+    } else {
+        OwedGate::NotIntroduced
+    }
 }
 
 /// Forget that `phone` was introduced between this computer and
@@ -999,6 +1411,8 @@ pub(crate) fn answered(dir: &Path, from: &str, request: &str, answer: &revoke::A
 /// back to it.
 pub(crate) fn forget_in(file: &mut ComputersFile, phone: &str, computer: &str) {
     file.introduced
+        .retain(|i| !(i.phone == phone && i.computer == computer));
+    file.pending_introductions
         .retain(|i| !(i.phone == phone && i.computer == computer));
 }
 
@@ -1028,7 +1442,29 @@ impl Plugin for IntroductionsPlugin {
         sender: &dyn DeviceSender,
     ) -> pocketdesk_core::error::Result<()> {
         if packet.packet_type == INTRODUCE {
-            if let Some(body) = answer_phone(sender.device_id(), &packet.body).await {
+            // A pairing ask waits up to ANSWER_WAIT for the other computer:
+            // off this connection's packet loop, answered on the same
+            // connection (PR #581 N5).
+            let pairing = PhoneRequest::parse(&packet.body)
+                .is_some_and(|r| matches!(r.ask, PhoneAsk::Pair { .. }));
+            let connection = sender.connection_id().to_string();
+            let own = if pairing {
+                crate::state::clone_clients()
+                    .await
+                    .into_iter()
+                    .find(|c| c.connection_id() == connection)
+            } else {
+                None
+            };
+            if let Some(own) = own {
+                let body = packet.body.clone();
+                tokio::spawn(async move {
+                    if let Some(answer) = answer_phone(own.device_id(), &body).await {
+                        let packet = NetworkPacket::new(INTRODUCE_ANSWER).with_body(answer);
+                        let _ = own.send_packet(&packet).await;
+                    }
+                });
+            } else if let Some(body) = answer_phone(sender.device_id(), &packet.body).await {
                 sender
                     .send_packet(&NetworkPacket::new(INTRODUCE_ANSWER).with_body(body))
                     .await?;

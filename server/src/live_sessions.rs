@@ -410,10 +410,11 @@ pub async fn run_watcher() {
             }
             // Ecosystem phase 4: a phone introduced between this computer
             // and another, removed here however it went, is owed there.
-            if let Ok(dir) = crate::state::state_dir() {
-                let paired = paired.clone();
+            if let (Ok(dir), Ok(trust)) =
+                (crate::state::state_dir(), crate::state::trust_store_path())
+            {
                 let _ = tokio::task::spawn_blocking(move || {
-                    crate::introductions::owe_removals(&dir, &paired)
+                    crate::introductions::owe_removals(&dir, &trust)
                 })
                 .await;
             }

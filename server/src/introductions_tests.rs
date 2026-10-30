@@ -5,9 +5,9 @@ use super::*;
 use pocketdesk_core::protocol::introductions::{PhoneAnswer, read_phone_answer};
 use serde_json::json;
 
-/// The introduction PINs are one list for the process: the tests that
-/// mint or take them take turns.
-static PIN_TURN: Mutex<()> = Mutex::new(());
+// The introduction PINs, and the pace counters (`LISTS`, `PAIRS`,
+// `TAKEN`), are one for the process: the tests that mint or take PINs take
+// turns (`PIN_TURN`), and each test paces under ids of its own.
 
 fn pin_turn() -> std::sync::MutexGuard<'static, ()> {
     PIN_TURN.lock().unwrap_or_else(|e| e.into_inner())
@@ -150,6 +150,23 @@ async fn ask_phone(
         .await
         .expect("an answer");
     read_phone_answer(&answer).expect("it reads").1
+}
+
+/// [`decide_in`], its permissions aside.
+fn decide(
+    dir: &std::path::Path,
+    trust: &std::path::Path,
+    from: &str,
+    introduction: &Introduction,
+    enabled: bool,
+    own_id: &str,
+) -> Result<(), Refusal> {
+    decide_in(dir, trust, from, introduction, enabled, own_id).map(|_| ())
+}
+
+/// Let `from` introduce again at once (the pace is the process's).
+fn unpace(from: &str) {
+    TAKEN.lock().unwrap().asks.remove(from);
 }
 
 /// The bytes of a hex key.
@@ -325,7 +342,7 @@ async fn the_phone_gets_a_link_made_of_the_pin_and_what_this_computer_pinned() {
     .await
     .unwrap();
     // What the other computer was told: the phone and its keys here.
-    let (to, introduction) = asked.lock().unwrap().take().unwrap();
+    let (to, introduction) = asked.lock().unwrap().clone().unwrap();
     assert_eq!(to, "mine-pc");
     assert_eq!(introduction.phone.device_id, "owner-8");
     assert_eq!(introduction.phone.tls, PHONE_TLS);
@@ -350,16 +367,37 @@ async fn the_phone_gets_a_link_made_of_the_pin_and_what_this_computer_pinned() {
     assert_eq!(link.addresses, vec!["192.0.2.10", "192.0.2.20"]);
     assert_eq!(link.name, "Computer mine-pc");
     assert!(!link.mine);
-    // Kept, for a removal to follow.
-    let introduced = d.file().introduced;
-    assert_eq!(introduced.len(), 1);
+    // Kept as waiting for the other computer's word that it paired.
+    let file = d.file();
+    assert!(file.introduced.is_empty());
+    assert_eq!(file.pending_introductions.len(), 1);
+    let pending = &file.pending_introductions[0];
     assert_eq!(
-        (
-            introduced[0].phone.as_str(),
-            introduced[0].computer.as_str()
-        ),
+        (pending.phone.as_str(), pending.computer.as_str()),
         ("owner-8", "mine-pc")
     );
+    assert_eq!(pending.request, introduction.request);
+}
+
+/// A computer listed (one way), for the owed-removal tests.
+fn listed(id: &str) -> PeerComputer {
+    PeerComputer {
+        device_id: id.to_string(),
+        name: id.to_string(),
+        addresses: vec![],
+        control_port: 1716,
+        stream_port: 4716,
+        fingerprint: B_CERT.to_string(),
+        endpoint: None,
+        paired_unix: 1,
+        link: String::new(),
+        link_unix: 0,
+        lets_drive: false,
+        mine: true,
+        wake: None,
+        viewed_unix: 0,
+        keys_by_position: None,
+    }
 }
 
 fn introduction(phone: &str) -> Introduction {
@@ -387,8 +425,9 @@ fn an_introduction_is_taken_only_from_a_computer_paired_both_ways() {
         "owner-9",
         "someone-else",
     ] {
+        unpace(from);
         assert_eq!(
-            decide_in(
+            decide(
                 &d.dir,
                 &d.trust(),
                 from,
@@ -401,7 +440,7 @@ fn an_introduction_is_taken_only_from_a_computer_paired_both_ways() {
         );
     }
     assert_eq!(
-        decide_in(
+        decide(
             &d.dir,
             &d.trust(),
             "mine-pc",
@@ -418,7 +457,7 @@ fn the_owners_switch_turns_introductions_away() {
     let d = Dirs::new("off");
     computer_b(&d, "a-off");
     assert_eq!(
-        decide_in(
+        decide(
             &d.dir,
             &d.trust(),
             "a-off",
@@ -444,8 +483,9 @@ fn an_id_in_use_here_is_never_introduced() {
         "a-taken",
         "bound-phone",
     ] {
+        unpace("a-taken");
         assert_eq!(
-            decide_in(
+            decide(
                 &d.dir,
                 &d.trust(),
                 "a-taken",
@@ -458,9 +498,10 @@ fn an_id_in_use_here_is_never_introduced() {
         );
     }
     // Bound to the same key (keys left behind): the same phone.
+    unpace("a-taken");
     device_keys::replace(&d.dir, "left-phone", PHONE_TLS).unwrap();
     assert_eq!(
-        decide_in(
+        decide(
             &d.dir,
             &d.trust(),
             "a-taken",
@@ -478,7 +519,7 @@ fn a_computers_introductions_are_paced() {
     computer_b(&d, "a-pace");
     for _ in 0..INTRODUCTIONS_PER_WINDOW {
         assert_eq!(
-            decide_in(
+            decide(
                 &d.dir,
                 &d.trust(),
                 "a-pace",
@@ -490,7 +531,7 @@ fn a_computers_introductions_are_paced() {
         );
     }
     assert_eq!(
-        decide_in(
+        decide(
             &d.dir,
             &d.trust(),
             "a-pace",
@@ -562,7 +603,9 @@ fn intro_pin(introducer: &str, phone: &str, permissions: DevicePermissions) -> I
         phone: introduced.phone,
         permissions,
         introducer: introducer.to_string(),
+        request: "r-pin".to_string(),
         minted: Instant::now(),
+        misses: 0,
     }
 }
 
@@ -701,8 +744,33 @@ async fn a_phone_introduced_by_a_pairs_with_b_as_an_owner_phone() {
     let intro = take_pin("loop-phone", Some(&key_of(PHONE_TLS)), &link.pin).expect("the PIN");
     admit_in(&b.dir, &b.trust(), &intro, true, "mine-pc", 9).unwrap();
     assert!(b.store().is_owner_phone("loop-phone"));
+    assert_eq!(b.store().introducer("loop-phone"), Some("a-loop"));
+    assert!(!b.store().is_own_code_owner("loop-phone"));
     assert_eq!(b.file().introduced[0].computer, "a-loop");
-    assert_eq!(a.file().introduced[0].computer, "mine-pc");
+    // B owes A its word, and A keeps the introduction only on it.
+    let owed = b.file().owed_confirmations;
+    assert_eq!(owed.len(), 1);
+    assert!(a.file().introduced.is_empty());
+    computers::update(&a.dir, |file| {
+        assert!(!confirm_in(
+            file,
+            "another-pc",
+            &owed[0].request,
+            "loop-phone",
+            10
+        ));
+        assert!(confirm_in(
+            file,
+            "mine-pc",
+            &owed[0].request,
+            "loop-phone",
+            10
+        ));
+    })
+    .unwrap();
+    let file = a.file();
+    assert_eq!(file.introduced[0].computer, "mine-pc");
+    assert!(file.pending_introductions.is_empty());
 }
 
 #[test]
@@ -733,17 +801,28 @@ fn an_owed_removal_goes_when_its_computer_is_reachable_and_again_unanswered() {
     note_introduced(&mut file, "p", "b", 1);
     note_introduced(&mut file, "p", "c", 1);
     owe_in(&mut file, &[], 1000);
-    let due = due_in(&mut file, 1000, |id| id == "b");
+    for id in ["b", "c"] {
+        file.computers.push(listed(id));
+    }
+    let (due, dropped) = due_in(&mut file, 1000, |id| id == "b");
     assert_eq!(due.len(), 1);
     assert_eq!(due[0].computer, "b");
-    // Not again before its wait.
-    assert!(due_in(&mut file, 1001, |id| id == "b").is_empty());
+    assert!(dropped.is_empty());
+    // Not sent: due again at once (PR #581 N1).
+    assert_eq!(due_in(&mut file, 1001, |id| id == "b").0.len(), 1);
+    // Sent: not again before its wait.
+    mark_sent(&mut file, &due[0].request, 1001);
+    assert!(due_in(&mut file, 1002, |id| id == "b").0.is_empty());
     assert_eq!(
-        due_in(&mut file, 1000 + OWED_RESEND, |id| id == "b").len(),
+        due_in(&mut file, 1001 + OWED_RESEND, |id| id == "b")
+            .0
+            .len(),
         1
     );
-    // Past its time, dropped unsent.
-    assert!(due_in(&mut file, 1000 + OWED_FOR, |_| true).is_empty());
+    // Past its time, dropped unsent, for the caller to say.
+    let (due, dropped) = due_in(&mut file, 1000 + OWED_FOR, |_| true);
+    assert!(due.is_empty());
+    assert_eq!(dropped.len(), 2);
     assert!(file.owed_removals.is_empty());
 }
 
@@ -814,7 +893,7 @@ fn a_removal_asked_by_a_computer_owes_it_none_back() {
 }
 
 #[test]
-fn unpairing_a_computer_forgets_what_was_introduced_with_it() {
+fn unpairing_a_computer_forgets_its_introductions_and_drops_its_owed_removals_said() {
     let d = Dirs::new("unpair-pc");
     computer_b(&d, "a-unpair");
     computers::update(&d.dir, |file| {
@@ -824,9 +903,14 @@ fn unpairing_a_computer_forgets_what_was_introduced_with_it() {
         file.remove("a-unpair");
     })
     .unwrap();
-    let file = d.file();
+    let mut file = d.file();
     assert!(file.introduced.is_empty());
-    assert!(file.owed_removals.is_empty());
+    // The owed removal is dropped by the server, which says so (N1).
+    assert_eq!(file.owed_removals.len(), 1);
+    let (due, dropped) = due_in(&mut file, 2, |_| true);
+    assert!(due.is_empty());
+    assert_eq!(dropped.len(), 1);
+    assert_eq!(dropped[0].phone, "p");
 }
 
 #[test]
@@ -850,7 +934,7 @@ fn the_permissions_given_never_exceed_the_defaults_or_the_introducers() {
     for capability in Capability::ALL {
         wide.set(capability, true);
     }
-    let given = permissions_for(&wide);
+    let given = permissions_for(&wide, &DevicePermissions::computer_mine());
     for capability in Capability::ALL {
         if capability == Capability::SharedInput {
             assert!(!given.allows(capability));
@@ -862,7 +946,10 @@ fn the_permissions_given_never_exceed_the_defaults_or_the_introducers() {
             );
         }
     }
-    let given = permissions_for(&DevicePermissions::someone_else());
+    let given = permissions_for(
+        &DevicePermissions::someone_else(),
+        &DevicePermissions::computer_mine(),
+    );
     assert!(given.ask_first);
     assert!(!given.allows(Capability::Input));
 }
@@ -899,7 +986,7 @@ fn an_id_bound_to_another_iroh_key_is_never_introduced() {
     computer_b(&d, "a-iroh");
     device_keys::register(&d.dir, "iroh-phone", Slot::Iroh, &"77".repeat(32)).unwrap();
     assert_eq!(
-        decide_in(
+        decide(
             &d.dir,
             &d.trust(),
             "a-iroh",
@@ -909,4 +996,353 @@ fn an_id_bound_to_another_iroh_key_is_never_introduced() {
         ),
         Err(Refusal::Taken)
     );
+}
+
+// ---- Fix round 1 (PR #581) ----
+
+#[test]
+fn a_computer_may_cancel_only_its_own_waiting_pin() {
+    let _turn = pin_turn();
+    PINS.lock().unwrap().clear();
+    let mut first = introduction("cancel-phone");
+    first.request = "req-a".to_string();
+    mint("a", first).unwrap();
+    assert!(!cancel_pin("c", "req-a"), "another computer's cancel");
+    assert!(!cancel_pin("a", "req-other"));
+    assert!(cancel_pin("a", "req-a"));
+    assert!(PINS.lock().unwrap().is_empty());
+    // And by the phone it names, from that computer only.
+    mint("a", introduction("cancel-phone")).unwrap();
+    assert!(!cancel_phone("c", "cancel-phone"));
+    assert!(cancel_phone("a", "cancel-phone"));
+    PINS.lock().unwrap().clear();
+}
+
+#[test]
+fn another_computers_waiting_pin_for_the_phone_is_never_replaced() {
+    let _turn = pin_turn();
+    PINS.lock().unwrap().clear();
+    mint("a", introduction("contested")).unwrap();
+    assert_eq!(mint("c", introduction("contested")), Err(Refusal::Busy));
+    assert_eq!(PINS.lock().unwrap()[0].introducer, "a");
+    PINS.lock().unwrap().clear();
+}
+
+#[test]
+fn three_wrong_pins_discard_the_introduction_pin() {
+    let _turn = pin_turn();
+    PINS.lock().unwrap().clear();
+    assert!(!miss("no-pin-phone"), "no PIN waits: not its miss");
+    let pin = mint("a", introduction("missing-phone")).unwrap();
+    assert!(miss("missing-phone"));
+    assert!(miss("missing-phone"));
+    assert_eq!(PINS.lock().unwrap().len(), 1, "two misses keep it");
+    assert!(miss("missing-phone"));
+    assert!(PINS.lock().unwrap().is_empty(), "the third discards it");
+    assert!(take_pin("missing-phone", Some(&key_of(PHONE_TLS)), &pin).is_none());
+    PINS.lock().unwrap().clear();
+}
+
+#[test]
+fn a_phone_removed_before_its_pairing_was_confirmed_owes_a_cancel_and_a_removal() {
+    let mut file = ComputersFile::default();
+    file.pending_introductions.push(PendingIntroduction {
+        phone: "p".to_string(),
+        computer: "b".to_string(),
+        request: "req-p".to_string(),
+        unix: 1,
+    });
+    assert!(owe_in(&mut file, &[], 5));
+    assert!(file.pending_introductions.is_empty());
+    let owed = &file.owed_removals[0];
+    assert_eq!(owed.cancel.as_deref(), Some("req-p"));
+    let packets = owed_packets(owed);
+    assert_eq!(packets.len(), 2);
+    assert_eq!(packets[0].packet_type, INTRODUCE_PHONE);
+    assert_eq!(
+        wire::read_cancel(&packets[0].body).as_deref(),
+        Some("req-p")
+    );
+    assert_eq!(packets[1].packet_type, revoke::REMOTE_DEVICES);
+    assert_eq!(packets[1].body["introduced"], true);
+    assert_eq!(packets[1].body["deviceId"], "p");
+}
+
+#[test]
+fn an_owed_removal_is_taken_only_for_a_phone_that_computer_introduced() {
+    let _turn = pin_turn();
+    PINS.lock().unwrap().clear();
+    let d = Dirs::new("gate");
+    computer_b(&d, "a-gate");
+    // Not paired yet: its waiting PIN from that computer goes (I1).
+    mint("a-gate", introduction("waiting-phone")).unwrap();
+    assert_eq!(
+        owed_gate_in(&d.dir, &d.trust(), "a-gate", "waiting-phone"),
+        OwedGate::Cancelled
+    );
+    assert!(PINS.lock().unwrap().is_empty());
+    // Paired with this computer's own code: not that computer's to remove
+    // this way (N3).
+    assert_eq!(
+        owed_gate_in(&d.dir, &d.trust(), "a-gate", "b-phone"),
+        OwedGate::NotIntroduced
+    );
+    // Introduced by it: removed.
+    TrustStore::update(d.trust(), |s| {
+        s.trust_introduced_phone("intro-phone", "a-gate")
+    })
+    .unwrap();
+    assert_eq!(
+        owed_gate_in(&d.dir, &d.trust(), "a-gate", "intro-phone"),
+        OwedGate::Remove
+    );
+    assert_eq!(
+        owed_gate_in(&d.dir, &d.trust(), "c-other", "intro-phone"),
+        OwedGate::NotIntroduced
+    );
+}
+
+#[test]
+fn what_b_turned_off_for_a_stays_off_for_the_phones_a_introduces() {
+    let mut for_a = DevicePermissions::computer_mine();
+    for_a.set(Capability::Input, false);
+    for_a.set(Capability::Mic, false);
+    let given = permissions_for(&DevicePermissions::default(), &for_a);
+    assert!(!given.allows(Capability::Input));
+    assert!(!given.allows(Capability::Mic));
+    // What a computer never has is not "turned off": the phone keeps the
+    // defaults for it.
+    assert_eq!(
+        given.allows(Capability::Notifications),
+        DevicePermissions::default().allows(Capability::Notifications)
+    );
+    // Held for the owner when the introducer's sessions are.
+    let mut asked = DevicePermissions::computer_mine();
+    asked.ask_first = true;
+    assert!(permissions_for(&DevicePermissions::default(), &asked).ask_first);
+}
+
+#[test]
+fn an_admitted_phone_is_held_to_what_b_allows_a_now() {
+    let d = Dirs::new("admit-for-a");
+    computer_b(&d, "a-narrow");
+    TrustStore::update(d.trust(), |s| {
+        let mut for_a = DevicePermissions::computer_mine();
+        for_a.set(Capability::Input, false);
+        s.set_permissions("a-narrow", for_a)
+    })
+    .unwrap();
+    admit_in(
+        &d.dir,
+        &d.trust(),
+        &intro_pin("a-narrow", "narrow-phone", DevicePermissions::default()),
+        true,
+        "b-self",
+        1,
+    )
+    .unwrap();
+    assert!(
+        !d.store()
+            .permissions("narrow-phone")
+            .allows(Capability::Input)
+    );
+}
+
+#[tokio::test]
+async fn an_introduced_phone_is_never_introduced_onward() {
+    let d = Dirs::new("no-chain");
+    household(&d, "owner-11");
+    TrustStore::update(d.trust(), |s| {
+        s.trust_introduced_phone("relayed-phone", "mine-pc")
+    })
+    .unwrap();
+    device_keys::replace(&d.dir, "relayed-phone", PHONE_TLS).unwrap();
+    for body in [list("r"), pair("r", "mine-pc")] {
+        assert_eq!(
+            ask_phone(&d, "relayed-phone", body, |_| true).await,
+            PhoneAnswer::Refused(Refusal::NotOwner)
+        );
+    }
+    // Still an owner phone for remote revoke.
+    assert!(crate::remote_devices::is_owner_device(
+        &d.store(),
+        &d.file(),
+        "relayed-phone"
+    ));
+    // Paired again with this computer's own code, it is one of its own.
+    TrustStore::update(d.trust(), |s| s.trust_phone("relayed-phone", true)).unwrap();
+    assert!(matches!(
+        ask_phone(&d, "relayed-phone", list("r"), |_| true).await,
+        PhoneAnswer::Listed(_)
+    ));
+}
+
+#[test]
+fn phones_a_introduced_lose_the_owner_mark_when_a_is_no_longer_mine() {
+    let d = Dirs::new("orphans");
+    computer_b(&d, "a-orphan");
+    TrustStore::update(d.trust(), |s| {
+        s.trust_introduced_phone("orphan-phone", "a-orphan")?;
+        s.note_claimed_name("orphan-phone", "Pixel").map(|_| ())
+    })
+    .unwrap();
+    assert!(
+        demote_orphans_in(&d.dir, &d.trust()).is_empty(),
+        "A still mine"
+    );
+    // A's grant lapses (it is no longer paired both ways).
+    computers::update(&d.dir, |file| file.lapsed.push("a-orphan".to_string())).unwrap();
+    let demoted = demote_orphans_in(&d.dir, &d.trust());
+    assert_eq!(demoted.len(), 1);
+    assert_eq!(demoted[0].0, "Pixel");
+    let store = d.store();
+    assert!(store.is_trusted("orphan-phone"), "stays paired");
+    assert!(!store.is_owner_phone("orphan-phone"));
+    assert_eq!(store.introducer("orphan-phone"), None);
+    assert!(demote_orphans_in(&d.dir, &d.trust()).is_empty(), "once");
+    // A unpaired at B outright, likewise.
+    let e = Dirs::new("orphans-unpaired");
+    computer_b(&e, "a-gone");
+    TrustStore::update(e.trust(), |s| {
+        s.trust_introduced_phone("p2", "a-gone")?;
+        s.untrust_device("a-gone")
+    })
+    .unwrap();
+    assert_eq!(demote_orphans_in(&e.dir, &e.trust()).len(), 1);
+    assert!(e.store().is_trusted("p2"));
+    assert!(!e.store().is_owner_phone("p2"));
+}
+
+#[test]
+fn a_missing_or_unreadable_trust_store_owes_no_removal() {
+    let d = Dirs::new("no-store");
+    computers::update(&d.dir, |file| note_introduced(file, "p", "b", 1)).unwrap();
+    owe_removals(&d.dir, &d.trust());
+    assert!(d.file().owed_removals.is_empty(), "missing");
+    std::fs::write(d.trust(), b"{ not json").unwrap();
+    owe_removals(&d.dir, &d.trust());
+    assert!(d.file().owed_removals.is_empty(), "unreadable");
+    assert_eq!(d.file().introduced.len(), 1);
+    // Read, without the phone: owed.
+    std::fs::remove_file(d.trust()).unwrap();
+    TrustStore::update(d.trust(), |s| s.trust_phone("other", true)).unwrap();
+    owe_removals(&d.dir, &d.trust());
+    assert_eq!(d.file().owed_removals.len(), 1);
+}
+
+#[test]
+fn a_computers_refused_introductions_are_paced_too() {
+    let d = Dirs::new("refused-pace");
+    computer_b(&d, "a-off-pace");
+    for _ in 0..INTRODUCTIONS_PER_WINDOW {
+        assert_eq!(
+            decide(
+                &d.dir,
+                &d.trust(),
+                "a-off-pace",
+                &introduction("x"),
+                false,
+                "b-self"
+            ),
+            Err(Refusal::Off)
+        );
+    }
+    assert_eq!(
+        decide(
+            &d.dir,
+            &d.trust(),
+            "a-off-pace",
+            &introduction("x"),
+            false,
+            "b-self"
+        ),
+        Err(Refusal::Busy)
+    );
+}
+
+#[test]
+fn a_waiting_entry_goes_however_the_wait_ends() {
+    let (tx, _rx) = tokio::sync::oneshot::channel();
+    WAITING
+        .lock()
+        .unwrap()
+        .insert("req-guard".to_string(), ("b".to_string(), tx));
+    drop(WaitingEntry("req-guard".to_string()));
+    assert!(!WAITING.lock().unwrap().contains_key("req-guard"));
+}
+
+#[tokio::test]
+async fn owed_removals_are_marked_sent_only_once_they_went_and_confirmations_go_once() {
+    let d = Dirs::new("send-owed");
+    TrustStore::update(d.trust(), |s| s.trust_phone("kept", true)).unwrap();
+    computers::update(&d.dir, |file| {
+        file.computers.push(listed("b"));
+        note_introduced(file, "gone-phone", "b", 1);
+        file.owed_confirmations.push(PendingIntroduction {
+            phone: "kept".to_string(),
+            computer: "b".to_string(),
+            request: "req-confirm".to_string(),
+            unix: pocketdesk_core::local::pin::now_unix(),
+        });
+    })
+    .unwrap();
+    // The link takes nothing: nothing is marked, nothing confirmed.
+    let tried = Mutex::new(0);
+    let dropped = send_owed_with(
+        &d.dir,
+        &d.trust(),
+        |_| true,
+        |_to, _packet| {
+            *tried.lock().unwrap() += 1;
+            async { false }
+        },
+    )
+    .await;
+    assert!(dropped.is_empty());
+    let file = d.file();
+    assert_eq!(file.owed_removals.len(), 1);
+    assert_eq!(file.owed_removals[0].sent_unix, 0);
+    assert_eq!(file.owed_confirmations.len(), 1);
+    assert_eq!(*tried.lock().unwrap(), 2);
+    // The link takes them: marked, and the confirmation goes once.
+    let sent = Mutex::new(Vec::new());
+    send_owed_with(
+        &d.dir,
+        &d.trust(),
+        |_| true,
+        |_to, packet| {
+            sent.lock().unwrap().push(packet.body.clone());
+            async { true }
+        },
+    )
+    .await;
+    let file = d.file();
+    assert!(file.owed_removals[0].sent_unix > 0);
+    assert!(file.owed_confirmations.is_empty());
+    let sent = sent.lock().unwrap();
+    assert!(sent.iter().any(|b| b["paired"] == "kept"));
+    assert!(
+        sent.iter()
+            .any(|b| b["deviceId"] == "gone-phone" && b["introduced"] == true)
+    );
+}
+
+#[test]
+fn answered_drops_an_owed_removal_and_leaves_the_apps_own_asks() {
+    let d = Dirs::new("answered");
+    computers::update(&d.dir, |file| {
+        file.computers.push(listed("b"));
+        note_introduced(file, "p", "b", 1);
+        owe_in(file, &[], 1);
+    })
+    .unwrap();
+    let request = d.file().owed_removals[0].request.clone();
+    let removed = revoke::Answer::Removed {
+        device_id: "p".to_string(),
+        outcome: Err(revoke::Refusal::Off),
+    };
+    assert!(!answered(&d.dir, "b", "an-app-ask", &removed));
+    assert!(!answered(&d.dir, "c", &request, &removed));
+    assert!(answered(&d.dir, "b", &request, &removed));
+    assert!(d.file().owed_removals.is_empty());
 }

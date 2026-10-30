@@ -362,10 +362,34 @@ async fn answer_with(asker: &str, body: &Value, enabled: bool) -> Option<Value> 
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .take(asker, Instant::now());
-            let outcome = if paced {
-                remove(&dir, &trust, asker, &device_id).await
+            // A removal another computer owed this one for a phone
+            // introduced between the two (ecosystem phase 4) is taken only
+            // for such a phone; one that has not paired yet has its waiting
+            // PIN dropped instead (PR #581 I1, N3).
+            let owed = body.get("introduced").and_then(Value::as_bool) == Some(true)
+                && store.is_computer(asker);
+            let gate = if owed {
+                let (dir, trust, asker, target) = (
+                    dir.clone(),
+                    trust.clone(),
+                    asker.to_string(),
+                    device_id.clone(),
+                );
+                tokio::task::spawn_blocking(move || {
+                    crate::introductions::owed_gate_in(&dir, &trust, &asker, &target)
+                })
+                .await
+                .unwrap_or(crate::introductions::OwedGate::NotIntroduced)
             } else {
-                Err(Refusal::TooMany)
+                crate::introductions::OwedGate::Remove
+            };
+            let outcome = match gate {
+                crate::introductions::OwedGate::Cancelled => Ok(()),
+                crate::introductions::OwedGate::NotIntroduced => Err(Refusal::NotPaired),
+                crate::introductions::OwedGate::Remove if paced => {
+                    remove(&dir, &trust, asker, &device_id).await
+                }
+                crate::introductions::OwedGate::Remove => Err(Refusal::TooMany),
             };
             Some(wire::remove_answer(&request.request, &device_id, outcome))
         }
