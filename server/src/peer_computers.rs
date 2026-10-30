@@ -147,9 +147,13 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     crate::nearby::answer(&dir, &nearby, accept, mine).await;
                 }
                 ComputerAsk::Forget { device_id } => {
+                    // PC6 review M-3: told to forget how to wake this one
+                    // while a link is up; forgotten here either way.
+                    tell_forget(&device_id).await;
                     if let Some(link) = links.remove(&device_id) {
                         link.task.abort();
                     }
+                    drop_nudge(&device_id);
                     forget(&dir, &cert_manager, &device_id);
                     // Its view, if shown, ends with it (PR #551 review I1).
                     if let Some(views) = &views {
@@ -170,7 +174,12 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
+                // PC6: the magic packet, as the computer told this one.
+                ComputerAsk::Wake { device_id } => asked_wake(&dir, device_id),
                 ComputerAsk::View { device_id, monitor } => {
+                    // PC6: viewed now, for the recents, off the runtime.
+                    let (at, id) = (dir.clone(), device_id.clone());
+                    tokio::task::spawn_blocking(move || viewed(&at, &id));
                     let views = views.get_or_insert_with(|| {
                         crate::computer_view::spawn(dir.clone(), cert_manager.clone(), wan.clone())
                     });
@@ -917,6 +926,8 @@ async fn pair_with(
         link_unix: now,
         lets_drive: false,
         mine,
+        wake: None,
+        viewed_unix: 0,
     };
     let mut was = None;
     let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
@@ -1442,10 +1453,90 @@ enum LinkEnd {
     Failed(String),
 }
 
+/// Each kept link's nudge (PC6): a Wake asked for its computer cuts the
+/// link's backoff short, so the woken computer is dialed again at once
+/// rather than up to a minute later.
+static NUDGES: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
+    LazyLock::new(Default::default);
+
+/// The nudge of the link to `device_id`.
+fn nudge_of(device_id: &str) -> Arc<tokio::sync::Notify> {
+    NUDGES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(device_id.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Dial the computer `device_id` again now, and back off from the start
+/// (PC6: it was just woken). A link waiting for nothing keeps the nudge
+/// for its next wait.
+fn nudge(device_id: &str) {
+    nudge_of(device_id).notify_one();
+}
+
+/// Forget the nudge of the link to `device_id`, as it is unpaired.
+fn drop_nudge(device_id: &str) {
+    NUDGES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(device_id);
+}
+
+/// Wait `wait`, or less when nudged; whether it was nudged.
+async fn back_off(wait: Duration, nudged: &tokio::sync::Notify) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(wait) => false,
+        _ = nudged.notified() => true,
+    }
+}
+
+/// How long an unpairing waits for its "forget how to wake me" to leave.
+const FORGET_TOLD: Duration = Duration::from_secs(1);
+
+/// Tell the computer `device_id`, when linked now, to forget how to wake
+/// this one (PC6 review M-3), before it is unpaired here: on the link this
+/// computer keeps, once the link has taken it, or on that computer's own
+/// connection here. Waits at most [`FORGET_TOLD`].
+async fn tell_forget(device_id: &str) {
+    let packet = crate::computer_wake::packet_for(false, None);
+    if let Some(outgoing) = live(device_id) {
+        let _ = tokio::time::timeout(FORGET_TOLD, async {
+            if outgoing.send(packet).await.is_err() {
+                return;
+            }
+            // Taken off the queue, then a moment to be written.
+            while outgoing.capacity() < outgoing.max_capacity() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        })
+        .await;
+        return;
+    }
+    let client = crate::state::clone_clients()
+        .await
+        .into_iter()
+        .find(|c| c.device_id() == device_id);
+    if let Some(client) = client {
+        let _ = tokio::time::timeout(FORGET_TOLD, client.send_packet(&packet)).await;
+    }
+}
+
+/// The owner's Wake for the computer `device_id` (PC6): the magic packet,
+/// off the runtime, and its link dialed again at once.
+fn asked_wake(dir: &Path, device_id: String) {
+    nudge(&device_id);
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || crate::computer_wake::wake(&dir, &device_id));
+}
+
 /// Keep the link to `device_id` up while it is paired, backing off.
 async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
     let me = crate::kde::host_identity();
     let mut backoff = BACKOFF_FIRST;
+    let nudged = nudge_of(&device_id);
     loop {
         let Some(computer) = computers::read(&dir)
             .computers
@@ -1501,7 +1592,10 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
                 wait
             }
         };
-        tokio::time::sleep(wait).await;
+        // Woken (PC6): dialed again now, and backing off from the start.
+        if back_off(wait, &nudged).await {
+            backoff = BACKOFF_FIRST;
+        }
     }
 }
 
@@ -1993,6 +2087,18 @@ async fn run_link(
     // to give what it granted (PC1 re-review I-2).
     if computer.mine {
         let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
+        // How to wake this computer (PC6), for the other, which lists this
+        // one only when paired both ways: by the adapter toward it.
+        let (addresses, tx) = (computer.addresses.clone(), outgoing_tx.clone());
+        tokio::spawn(async move {
+            let packet = tokio::task::spawn_blocking(move || {
+                crate::computer_wake::packet_toward(&addresses, None)
+            })
+            .await;
+            if let Ok(packet) = packet {
+                let _ = tx.send(packet).await;
+            }
+        });
     }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let _accepting = acceptor.map(|acceptor| {
@@ -2034,6 +2140,11 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             // ways (PC1): it shows this one's screen too.
             let _ = outgoing.send(crate::plugins::monitors::answer()).await;
         }
+        return;
+    }
+    // How to wake it while its link is down (PC6).
+    if packet.packet_type == crate::computer_wake::COMPUTER_WAKE {
+        crate::computer_wake::heard(device_id, &packet.body, true).await;
         return;
     }
     if packet.packet_type == crate::offers::OFFER {
@@ -2107,6 +2218,19 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
                 }
             }
         });
+    }
+}
+
+/// Record that the screen of `device_id` was asked for now (PC6).
+fn viewed(dir: &Path, device_id: &str) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    let saved = computers::update(dir, |file| {
+        if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+            c.viewed_unix = now;
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not record when a computer was viewed: {e}");
     }
 }
 
@@ -2335,6 +2459,8 @@ mod tests {
                 link_unix: 1,
                 lets_drive: false,
                 mine: true,
+                wake: None,
+                viewed_unix: 0,
             })
         })
         .unwrap();
@@ -2357,6 +2483,91 @@ mod tests {
                 paired_unix: 1,
             }]
         );
+    }
+
+    /// PC6 review M-3: unpairing a computer whose link is up tells it to
+    /// forget how to wake this one, on the link, before it goes.
+    #[tokio::test]
+    async fn unpairing_tells_a_linked_computer_to_forget() {
+        let (tx, mut rx) = mpsc::channel(32);
+        let _live = LiveLink::new("pc-forget", tx);
+        let read = tokio::spawn(async move { rx.recv().await });
+        let started = std::time::Instant::now();
+        tell_forget("pc-forget").await;
+        let told = read.await.unwrap().expect("told");
+        assert_eq!(told.packet_type, crate::computer_wake::COMPUTER_WAKE);
+        assert_eq!(told.body, serde_json::json!({}));
+        assert!(started.elapsed() <= FORGET_TOLD + Duration::from_millis(200));
+        // Not linked: nothing to tell, and no wait.
+        let started = std::time::Instant::now();
+        tell_forget("pc-not-linked").await;
+        assert!(started.elapsed() < FORGET_TOLD);
+    }
+
+    /// PC6 review I-1: a nudge cuts a pending backoff short, and one
+    /// given while nothing waits cuts the next wait.
+    #[tokio::test]
+    async fn a_nudge_cuts_the_backoff_short() {
+        let nudged = nudge_of("pc-nudge");
+        let started = std::time::Instant::now();
+        let waiting = tokio::spawn({
+            let nudged = nudged.clone();
+            async move { back_off(Duration::from_secs(60), &nudged).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        nudge("pc-nudge");
+        assert!(waiting.await.unwrap(), "nudged");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(
+            !back_off(Duration::from_millis(10), &nudged).await,
+            "a wait not nudged runs out"
+        );
+    }
+
+    /// PC6 re-review: an unpaired computer's nudge is forgotten.
+    #[test]
+    fn an_unpaired_computers_nudge_goes() {
+        let kept = nudge_of("pc-gone");
+        assert!(Arc::ptr_eq(&kept, &nudge_of("pc-gone")), "one per computer");
+        drop_nudge("pc-gone");
+        let listed = NUDGES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key("pc-gone");
+        assert!(!listed);
+    }
+
+    /// PC6 review M-9: the run loop's Wake nudges that computer's link
+    /// (and sends the packet off the runtime: none here, as it is not
+    /// listed).
+    #[tokio::test]
+    async fn a_wake_asked_dials_its_computer_again() {
+        let dir = temp("asked-wake");
+        asked_wake(&dir, "pc-asked".to_string());
+        let started = std::time::Instant::now();
+        assert!(back_off(Duration::from_secs(60), &nudge_of("pc-asked")).await);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC6: asking for a computer's screen records when, for the recents;
+    /// a computer not listed records nothing.
+    #[test]
+    fn a_view_asked_records_when() {
+        let dir = temp("viewed");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "pc-b".to_string(),
+                ..ComputerFacts::into_peer(facts(), "pc-b", "", 1)
+            })
+        })
+        .unwrap();
+        viewed(&dir, "pc-x");
+        assert_eq!(computers::read(&dir).computers[0].viewed_unix, 0);
+        let before = pocketdesk_core::local::pin::now_unix();
+        viewed(&dir, "pc-b");
+        assert!(computers::read(&dir).computers[0].viewed_unix >= before);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -2948,6 +3159,8 @@ mod tests {
             link_unix: 1,
             lets_drive: false,
             mine: false,
+            wake: None,
+            viewed_unix: 0,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();

@@ -1465,6 +1465,35 @@ pub fn log_tail(state_dir: &Path, lines: usize) -> Vec<String> {
         .collect()
 }
 
+/// Whether "Show its screen" can ask for `computer` now (BK7): the server
+/// dials it, so it must run, and the computer must be reachable some way,
+/// its link up or an address known. Why not, when it cannot.
+pub fn view_reach(
+    computer: &pocketdesk_core::local::computers::PeerComputer,
+    server_running: bool,
+) -> Result<(), &'static str> {
+    if !server_running {
+        return Err("Start the server first: it reaches the other computer");
+    }
+    if computer.link != "linked" && computer.addresses.is_empty() {
+        return Err("Not reachable now: its link is down and no address of it is known");
+    }
+    Ok(())
+}
+
+/// Whether Wake is offered for `computer` (PC6): the server runs (it
+/// sends the magic packet), the link is down but not refused (a computer
+/// that refused this one unpaired it, review M-7), and the computer told
+/// this one how to wake it.
+pub fn can_wake(
+    computer: &pocketdesk_core::local::computers::PeerComputer,
+    server_running: bool,
+) -> bool {
+    server_running
+        && !matches!(computer.link.as_str(), "linked" | "refused")
+        && computer.wake.is_some()
+}
+
 #[cfg(test)]
 mod tests {
     /// Q2: what a profile would turn off, only among the switches shown.

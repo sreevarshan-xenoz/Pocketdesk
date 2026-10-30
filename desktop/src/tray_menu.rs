@@ -31,6 +31,11 @@ pub enum TrayAction {
     Resume,
     /// N2: a press for the phone's player (`playPause` or `next`).
     PhoneMedia(String, &'static str),
+    /// PC6: the window showing a paired computer's screen, by its id; with
+    /// its link down, the Overview offers to wake it first.
+    ShowComputer(String),
+    /// PC6: the magic packet for a paired computer, by its id.
+    WakeComputer(String),
 }
 
 /// Whether O2's screenshot and lock reach the phone of `row` now.
@@ -299,6 +304,44 @@ pub fn with_key(mut entries: Vec<Entry>, phone: &str, key: &str) -> Vec<Entry> {
             }
         }
     }
+    entries
+}
+
+/// `entries` with the owner's paired computers before Quit (PC6), the one
+/// viewed most recently first: "Show <name>'s screen" for each, picked as
+/// the Overview's Show its screen can be, and "Wake <name>" while its link
+/// is down and it told this computer how to wake it. `running`: the server
+/// runs, which reaches them.
+pub fn with_computers(
+    mut entries: Vec<Entry>,
+    computers: &[pocketdesk_core::local::computers::PeerComputer],
+    running: bool,
+) -> Vec<Entry> {
+    if computers.is_empty() {
+        return entries;
+    }
+    let at = entries
+        .iter()
+        .rposition(|e| matches!(e, Entry::Separator))
+        .unwrap_or(entries.len());
+    let mut added = vec![Entry::Separator];
+    for computer in pocketdesk_core::local::computers::by_recent(computers) {
+        let name =
+            pocketdesk_core::local::shared_input::display_name(&computer.name, COMPUTER_CHARS);
+        let wakes = model::can_wake(computer, running);
+        let shows = wakes || model::view_reach(computer, running).is_ok();
+        added.push(Entry::Item {
+            label: format!("Show {name}'s screen"),
+            action: shows.then(|| TrayAction::ShowComputer(computer.device_id.clone())),
+        });
+        if wakes {
+            added.push(Entry::Item {
+                label: format!("Wake {name}"),
+                action: Some(TrayAction::WakeComputer(computer.device_id.clone())),
+            });
+        }
+    }
+    entries.splice(at..at, added);
     entries
 }
 
@@ -778,5 +821,81 @@ mod tests {
         assert_eq!(with[3], Entry::Separator);
         assert_eq!(with.len(), entries.len() + 1);
         assert_eq!(with_keyboard(entries.clone(), None), entries);
+    }
+
+    /// PC6: the owner's computers come before Quit, viewed last first:
+    /// Show for each that can be reached or woken, Wake for one asleep
+    /// that said how, greyed with the server stopped.
+    #[test]
+    fn computers_come_before_quit_to_show_or_wake() {
+        use super::*;
+        use pocketdesk_core::local::computers::{ComputerWake, PeerComputer};
+        let computer = |id: &str, name: &str, link: &str, viewed: u64| PeerComputer {
+            device_id: id.to_string(),
+            name: name.to_string(),
+            addresses: Vec::new(),
+            control_port: 1716,
+            stream_port: 4716,
+            fingerprint: String::new(),
+            endpoint: None,
+            paired_unix: 1,
+            link: link.to_string(),
+            link_unix: 1,
+            lets_drive: false,
+            mine: false,
+            wake: None,
+            viewed_unix: viewed,
+        };
+        let asleep = PeerComputer {
+            wake: Some(ComputerWake {
+                mac: "00:00:5E:00:53:01".to_string(),
+                broadcast: std::net::Ipv4Addr::new(192, 0, 2, 255),
+                wired: true,
+                told_unix: 1,
+            }),
+            ..computer("c", "Tower", "away: the link closed", 0)
+        };
+        let computers = [
+            computer("a", "Desk", "linked", 10),
+            asleep,
+            computer("b", "Laptop", "away: the link closed", 50),
+        ];
+        let base = menu(&[], &[], 0);
+        let with = with_computers(base.clone(), &computers, true);
+        let item = |label: &str, action: Option<TrayAction>| Entry::Item {
+            label: label.to_string(),
+            action,
+        };
+        let quit = base.len() - 2;
+        assert_eq!(
+            with[quit..quit + 6],
+            [
+                Entry::Separator,
+                item("Show Laptop's screen", None),
+                item(
+                    "Show Desk's screen",
+                    Some(TrayAction::ShowComputer("a".to_string()))
+                ),
+                item(
+                    "Show Tower's screen",
+                    Some(TrayAction::ShowComputer("c".to_string()))
+                ),
+                item(
+                    "Wake Tower",
+                    Some(TrayAction::WakeComputer("c".to_string()))
+                ),
+                Entry::Separator,
+            ]
+        );
+        assert_eq!(with.last(), base.last(), "Quit last");
+        let stopped = with_computers(base.clone(), &computers, false);
+        assert!(stopped.iter().all(|e| !matches!(
+            e,
+            Entry::Item {
+                action: Some(TrayAction::ShowComputer(_) | TrayAction::WakeComputer(_)),
+                ..
+            }
+        )));
+        assert_eq!(with_computers(base.clone(), &[], true), base);
     }
 }

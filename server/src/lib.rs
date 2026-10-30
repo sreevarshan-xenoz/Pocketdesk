@@ -14,6 +14,7 @@ pub mod cli;
 pub(crate) mod clip_history;
 pub(crate) mod clipboard_push;
 pub mod computer_view;
+pub mod computer_wake;
 pub mod config;
 pub mod conn_budget;
 pub mod crash_report;

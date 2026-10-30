@@ -62,6 +62,40 @@ pub struct PeerComputer {
     /// ([`keeps_link`]). Off in files written before.
     #[serde(default)]
     pub mine: bool,
+    /// How to wake it (PC6), as it said on its link: its adapter's MAC and
+    /// broadcast address. `None` until it says, or once it says to forget.
+    /// Owner-only, as the whole file is: a MAC identifies the computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<ComputerWake>,
+    /// When its screen was last asked for here (PC6: unix seconds; 0
+    /// never), so the Overview and the tray put the computers viewed most
+    /// recently first.
+    #[serde(default)]
+    pub viewed_unix: u64,
+}
+
+/// `computers` with the one viewed most recently first (PC6), those never
+/// viewed after, each group in the order they paired.
+pub fn by_recent(computers: &[PeerComputer]) -> Vec<&PeerComputer> {
+    let mut sorted: Vec<&PeerComputer> = computers.iter().collect();
+    sorted.sort_by_key(|c| std::cmp::Reverse(c.viewed_unix));
+    sorted
+}
+
+/// How to wake a paired computer (PC6): what it told this one about the
+/// adapter its link leaves by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputerWake {
+    /// `AA:BB:CC:DD:EE:FF`.
+    pub mac: String,
+    /// Its subnet's directed broadcast address (IPv4).
+    pub broadcast: std::net::Ipv4Addr,
+    /// Ethernet: Wi-Fi rarely wakes a computer.
+    #[serde(default)]
+    pub wired: bool,
+    /// When it last said (unix seconds).
+    #[serde(default)]
+    pub told_unix: u64,
 }
 
 fn default_stream_port() -> u16 {
@@ -126,6 +160,8 @@ impl ComputerFacts {
             link_unix: now_unix,
             lets_drive: false,
             mine: true,
+            wake: None,
+            viewed_unix: 0,
         }
     }
 }
@@ -302,6 +338,9 @@ pub enum ComputerAsk {
         #[serde(default)]
         mine: bool,
     },
+    /// Send the magic packet that wakes the computer `device_id` (PC6),
+    /// as it told this one ([`PeerComputer::wake`]).
+    Wake { device_id: String },
     /// Stop this computer's ask of a nearby one.
     CancelNearby,
     /// The owner here confirmed that both screens show the code of this
@@ -588,6 +627,8 @@ mod tests {
             link_unix: 0,
             lets_drive: false,
             mine: false,
+            wake: None,
+            viewed_unix: 0,
         }
     }
 
@@ -780,6 +821,65 @@ mod tests {
         let old: PeerComputer =
             serde_json::from_str(&raw.replace(",\"stream_port\":4716", "")).unwrap();
         assert_eq!(old.stream_port, 4716);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC6: the computers viewed most recently come first, those never
+    /// viewed after in the order they paired; a file from before reads as
+    /// never viewed.
+    #[test]
+    fn the_computers_viewed_last_come_first() {
+        let viewed = |id: &str, at: u64| PeerComputer {
+            viewed_unix: at,
+            ..computer(id)
+        };
+        let list = [
+            viewed("a", 0),
+            viewed("b", 50),
+            viewed("c", 0),
+            viewed("d", 90),
+        ];
+        let ids: Vec<&str> = by_recent(&list)
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        assert_eq!(ids, ["d", "b", "a", "c"]);
+        let raw = serde_json::to_string(&computer("a")).unwrap();
+        let old: PeerComputer =
+            serde_json::from_str(&raw.replace(",\"viewed_unix\":0", "")).unwrap();
+        assert_eq!(old.viewed_unix, 0);
+    }
+
+    /// PC6: a wake is asked for a computer by its id; a computer from a
+    /// file written before knows no way to wake it.
+    #[test]
+    fn a_wake_is_asked_for_a_computer() {
+        let dir = temp_dir("wake");
+        let ask = ComputerAsk::Wake {
+            device_id: "desk".to_string(),
+        };
+        let asked = request(&dir, ask.clone(), 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        assert_eq!(
+            serde_json::to_value(&ask).unwrap(),
+            serde_json::json!({"ask": "wake", "device_id": "desk"})
+        );
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        assert!(!raw.contains("wake"), "nothing known is not written");
+        let old: PeerComputer = serde_json::from_str(&raw).unwrap();
+        assert_eq!(old.wake, None);
+        let told = PeerComputer {
+            wake: Some(ComputerWake {
+                mac: "00:00:5E:00:53:01".to_string(),
+                broadcast: std::net::Ipv4Addr::new(192, 0, 2, 255),
+                wired: true,
+                told_unix: 5,
+            }),
+            ..computer("desk")
+        };
+        let back: PeerComputer =
+            serde_json::from_str(&serde_json::to_string(&told).unwrap()).unwrap();
+        assert_eq!(back, told);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -19,6 +19,14 @@ pub fn configure(announce: bool, outside_port: u16) {
     OUTSIDE_PORT.store(outside_port, Ordering::Relaxed);
 }
 
+/// Whether a connection is told this packet: a phone's, never a
+/// computer's (PC6 review M-2). A computer learns how to wake this one only
+/// from `computer_wake`, only when paired both ways and with
+/// `computer_wake_facts` on.
+pub fn told_to(is_computer: bool) -> bool {
+    !is_computer
+}
+
 /// The packet for `facts`. With announcing off or nothing to tell, its body
 /// is empty, so a phone forgets what an earlier connection told it.
 pub fn packet_for(announce: bool, facts: Option<&WakeFacts>, outside_port: u16) -> NetworkPacket {
@@ -79,6 +87,14 @@ mod tests {
                 "port": 40009,
             })
         );
+    }
+
+    /// PC6 review M-2: phones are told as before; a computer never gets
+    /// this packet, whatever `wake_announce` says.
+    #[test]
+    fn only_phones_are_told_this_packet() {
+        assert!(told_to(false));
+        assert!(!told_to(true));
     }
 
     #[test]
