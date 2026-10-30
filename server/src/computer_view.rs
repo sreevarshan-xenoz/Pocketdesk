@@ -2506,6 +2506,12 @@ pub fn focus_passes(last: Option<(bool, Instant)>, focused: bool, now: Instant) 
 /// (PC3), while that computer said `control` of this one's input: the
 /// clipboard follows, as [`crate::clipboard_push::window_focus_does`] says.
 fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
+    // Noted now, in the order the windows said it (PR #572 review I2): the
+    // tasks below may run in any order.
+    let at = Instant::now();
+    let turn = (control == Some(true))
+        .then(|| crate::clipboard_push::note_window_focus(&device_id, focused, at))
+        .flatten();
     tokio::spawn(async move {
         // config.toml is a file: read off the loop.
         let on =
@@ -2515,9 +2521,11 @@ fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
         let sync = crate::clipboard_push::with_computers();
         use crate::clipboard_push::WindowFocus;
         match crate::clipboard_push::window_focus_does(focused, on, sync, control) {
-            Some(WindowFocus::Push) => crate::clipboard_push::window_gained_focus(&device_id).await,
+            Some(WindowFocus::Push) => {
+                crate::clipboard_push::window_gained_focus(&device_id, turn, at).await
+            }
             Some(WindowFocus::AskBack) => {
-                crate::clipboard_push::window_lost_focus(&device_id).await
+                crate::clipboard_push::window_lost_focus(&device_id, turn, at).await
             }
             None => {}
         }

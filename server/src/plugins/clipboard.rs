@@ -164,6 +164,8 @@ impl Plugin for ClipboardPlugin {
                     if let Err(e) = set_clipboard(content).await {
                         tracing::warn!("Failed to set clipboard: {}", e);
                     }
+                    // A push waiting on this answer reads the clipboard now.
+                    crate::clipboard_push::window_text_landed(&packet.body);
                 }
             }
             "kdeconnect.clipboard.connect" => {

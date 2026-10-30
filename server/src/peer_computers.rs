@@ -2349,6 +2349,8 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             if let Err(e) = crate::plugins::clipboard::set_clipboard(content).await {
                 tracing::warn!("Another computer's clipboard was not set: {e}");
             }
+            // A push waiting on this answer reads the clipboard now.
+            crate::clipboard_push::window_text_landed(&packet.body);
         } else if let Some((id, size)) = crate::clipboard_push::told_image(&packet.body) {
             // Its image (BK3): fetched on a stream it opens on the link.
             let follows = crate::clipboard_push::marked(&packet.body);
