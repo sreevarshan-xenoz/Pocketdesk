@@ -124,6 +124,9 @@ struct State {
     same_computer_open: bool,
     /// A screen this window's bar asked to show in a new window (PC11).
     open_new: Option<u32>,
+    /// Opened from another window's bar, not by "Show its screen" (PR #570
+    /// review M3: the first window's slot may be one of them).
+    later: bool,
     /// Switching to another screen (PC11): the screen and when it was
     /// asked; the last picture shows, dimmed, until the new one comes.
     switching: Option<(u32, Instant)>,
@@ -1027,6 +1030,7 @@ impl ComputerView {
             state.view_only = view_only;
             state.stats_on = stats;
         }
+        state.later = false;
         ask(&self.state_dir, &mut state, wanted)
     }
 
@@ -1196,7 +1200,13 @@ impl ComputerView {
                 .extras
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let free = extras.iter().find(|w| lock(w).wanted.is_none()).cloned();
+            // A window not in use: one of the others, else the first's
+            // (closed while they stay, review M3).
+            let free = extras
+                .iter()
+                .chain(std::iter::once(&self.shared))
+                .find(|w| !Arc::ptr_eq(w, source) && lock(w).wanted.is_none())
+                .cloned();
             match free {
                 Some(free) => Some(free),
                 None if extras.len() + 1 < usize::from(wire::MAX_VIEWS) => {
@@ -1229,6 +1239,7 @@ impl ComputerView {
         state.hevc_setting = from.hevc_setting;
         state.hw_decode = from.hw_decode;
         state.lock_on_close = from.lock_on_close;
+        state.later = true;
         // A computer that is not Windows takes a window's clicks over its
         // first screen whatever screen the window shows (PR #570 review
         // I4): another window of it opens View only, said on its bar.
@@ -2092,7 +2103,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let record_want = state.record_want;
     let recording = state.recording.clone();
     let fullscreen = state.fullscreen;
-    let slot = state.slot;
+    let later = state.later;
     let switching = state.switching.map(|(to, _)| to);
     let last_switch = state.last_switch;
     let mut stats_on = state.stats_on;
@@ -2349,7 +2360,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             .wrap(),
                     );
                 }
-                if ended.is_none() && slot != 0 && extra_view_only(status.windows) {
+                if ended.is_none() && later && extra_view_only(status.windows) {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
@@ -5930,6 +5941,12 @@ mod tests {
                 .is_some_and(|(note, _)| note.starts_with("At most 4")),
             "said"
         );
+        // Review M3: the first window closed while the others stay: its
+        // place is used again for the next, opened from another's bar.
+        lock(&view.shared).wanted = None;
+        let third = view.windows()[3].clone();
+        view.open_new_window(&ctx, &third, 0);
+        assert!(lock(&view.shared).wanted.is_some() && lock(&view.shared).later);
         // Quit with the lock on close chosen: only the last window of the
         // computer asks it, so it never locks under another.
         for window in view.windows() {
