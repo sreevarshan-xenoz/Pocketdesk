@@ -89,6 +89,8 @@ fun SoundScreen(
             State.Ready -> {
                 RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
                 shownName = HostStore.shownName(context, address)
+                // UX1: its card's "Used just now".
+                HostStore.markUsed(context, address)
                 tell.up(Prefs.tellOtherApps(context))
             }
             State.Down, State.TooOld -> tell.lost()

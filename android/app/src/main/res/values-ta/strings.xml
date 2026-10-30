@@ -19,6 +19,7 @@
     <string name="settings_find">அமைப்பைத் தேடு</string>
     <string name="settings_find_clear">தேடலை அழி</string>
     <string name="settings_find_none">“%1$s” உடன் பொருந்தும் அமைப்பு இல்லை</string>
+    <string name="settings_jump_to">%1$s பகுதிக்குச் செல்</string>
     <string name="settings_title">அமைப்புகள்</string>
     <string name="settings_back">பின்செல்</string>
     <string name="settings_appearance">தோற்றம்</string>
@@ -733,6 +734,20 @@
     <string name="status_not_paired">இணைக்கப்படவில்லை</string>
     <string name="status_unpaired_by_it">இந்தக் கணினியில் இந்தத் தொலைபேசி இனி இணைக்கப்படவில்லை</string>
     <string name="status_auto">திறக்கும்போது இணையும்</string>
+    <string name="status_used_just_now">இப்போது பயன்படுத்தியது</string>
+    <plurals name="status_used_minutes">
+        <item quantity="one">%1$d நிமிடம் முன்பு பயன்படுத்தியது</item>
+        <item quantity="other">%1$d நிமிடங்கள் முன்பு பயன்படுத்தியது</item>
+    </plurals>
+    <plurals name="status_used_hours">
+        <item quantity="one">%1$d மணிநேரம் முன்பு பயன்படுத்தியது</item>
+        <item quantity="other">%1$d மணிநேரம் முன்பு பயன்படுத்தியது</item>
+    </plurals>
+    <plurals name="status_used_days">
+        <item quantity="one">%1$d நாள் முன்பு பயன்படுத்தியது</item>
+        <item quantity="other">%1$d நாட்கள் முன்பு பயன்படுத்தியது</item>
+    </plurals>
+    <string name="status_used_long_ago">சில காலம் முன்பு பயன்படுத்தியது</string>
     <string name="rename_title">%1$s-க்கு மறுபெயரிடு</string>
     <string name="rename_label">பெயர்</string>
     <string name="rename_hint">வெறுமையாக: அது தனக்குத் தரும் பெயர்</string>

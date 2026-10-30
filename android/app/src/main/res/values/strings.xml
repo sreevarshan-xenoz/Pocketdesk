@@ -28,6 +28,7 @@
     <string name="settings_find">Find a setting</string>
     <string name="settings_find_clear">Clear the search</string>
     <string name="settings_find_none">No setting matches “%1$s”</string>
+    <string name="settings_jump_to">Go to %1$s</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_appearance">Appearance</string>
@@ -742,6 +743,20 @@
     <string name="status_not_paired">Not paired</string>
     <string name="status_unpaired_by_it">No longer paired with this phone</string>
     <string name="status_auto">Connects at launch</string>
+    <string name="status_used_just_now">Used just now</string>
+    <plurals name="status_used_minutes">
+        <item quantity="one">Used %1$d min ago</item>
+        <item quantity="other">Used %1$d min ago</item>
+    </plurals>
+    <plurals name="status_used_hours">
+        <item quantity="one">Used %1$d hour ago</item>
+        <item quantity="other">Used %1$d hours ago</item>
+    </plurals>
+    <plurals name="status_used_days">
+        <item quantity="one">Used %1$d day ago</item>
+        <item quantity="other">Used %1$d days ago</item>
+    </plurals>
+    <string name="status_used_long_ago">Used a while ago</string>
     <string name="rename_title">Rename %1$s</string>
     <string name="rename_label">Name</string>
     <string name="rename_hint">Blank: the name it gives itself</string>

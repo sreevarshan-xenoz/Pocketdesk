@@ -872,6 +872,8 @@ fun RemoteScreen(
             streamUps++
             // U3: the name the computer gave itself on this connection.
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
+            // UX1: its card's "Used just now".
+            HostStore.markUsed(context, address)
         }
     }
     LaunchedEffect(streamUps) {
