@@ -1107,7 +1107,10 @@ fn follow_mic(
                     }
                 }
                 drop(state);
-                repaint.request_repaint();
+                // The window's own viewport, and the main window, which
+                // says "Mic on" too (PR #569 review M6).
+                repaint.request_repaint_of(viewport_id());
+                repaint.request_repaint_of(egui::ViewportId::ROOT);
             };
             let opener = state.mic_open.clone();
             let open = move || match opener {
