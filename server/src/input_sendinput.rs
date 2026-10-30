@@ -53,6 +53,16 @@ pub(crate) fn stroke_for(code: u16) -> Option<Stroke> {
         // Pause and Windows tells them apart by a prefix SendInput cannot set.
         KeyCode::KEY_NUMLOCK => Some(Stroke::Vk(VK_NUMLOCK)),
         KeyCode(c @ 1..=88) => Some(Stroke::Scan(c, false)),
+        // The keypad's Enter and slash are the main block's with the
+        // prefix, as `windows_scan` reads them back.
+        KeyCode(96) => ext(0x1C), // KEY_KPENTER
+        KeyCode(98) => ext(0x35), // KEY_KPSLASH
+        // The Japanese and Brazilian keys past the main block.
+        KeyCode(89) => Some(Stroke::Scan(0x73, false)), // KEY_RO
+        KeyCode(92) => Some(Stroke::Scan(0x79, false)), // KEY_HENKAN
+        KeyCode(93) => Some(Stroke::Scan(0x70, false)), // KEY_KATAKANAHIRAGANA
+        KeyCode(94) => Some(Stroke::Scan(0x7B, false)), // KEY_MUHENKAN
+        KeyCode(124) => Some(Stroke::Scan(0x7D, false)), // KEY_YEN
         KeyCode::KEY_RIGHTCTRL => ext(0x1D),
         KeyCode::KEY_SYSRQ => ext(0x37), // Print Screen
         KeyCode::KEY_RIGHTALT => ext(0x38),
@@ -328,6 +338,37 @@ mod tests {
         for code in phone_emittable_codes() {
             assert!(stroke_for(code).is_some(), "evdev {code} has no stroke");
         }
+    }
+
+    /// Keys by position (the window's scancode mode): every key a Windows
+    /// keyboard names by its scancode, as `windows_scan` reads it, is
+    /// pressed here again, and a key pressed by its scancode is that same
+    /// scancode, never one the layout picks.
+    #[test]
+    fn every_scancode_read_back_is_pressed_as_itself() {
+        use pocketdesk_core::input::windows_scan::evdev_from_scan;
+        let mut seen = 0;
+        for extended in [false, true] {
+            for scan in 0..=0x7Fu16 {
+                let Some(code) = evdev_from_scan(scan, extended) else {
+                    continue;
+                };
+                seen += 1;
+                match stroke_for(code) {
+                    Some(Stroke::Scan(s, e)) => assert_eq!(
+                        evdev_from_scan(s, e),
+                        Some(code),
+                        "evdev {code} goes as another key"
+                    ),
+                    Some(Stroke::Vk(_)) => {}
+                    None => panic!("evdev {code} (scan {scan:#x}, ext {extended}) has no stroke"),
+                }
+            }
+        }
+        assert!(seen > 100, "{seen}");
+        assert_eq!(stroke_for(96), Some(Stroke::Scan(0x1C, true)));
+        assert_eq!(stroke_for(98), Some(Stroke::Scan(0x35, true)));
+        assert_eq!(stroke_for(86), Some(Stroke::Scan(0x56, false)));
     }
 
     #[test]
