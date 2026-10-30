@@ -142,6 +142,8 @@ object HostStore {
             KEY_PAIRED_PREFIX,
             KEY_NAME_PREFIX,
             KEY_CHOSEN_NAME_PREFIX,
+            // Item 4: the release it said it runs.
+            KEY_VERSION_PREFIX,
             // O6: the player chosen for the computer.
             KEY_PLAYER_PREFIX,
             // UX1: when it was last used.
@@ -200,6 +202,7 @@ object HostStore {
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
     private const val KEY_PLAYER_PREFIX = "computer_player:"
+    private const val KEY_VERSION_PREFIX = "computer_version:"
     private const val KEY_LAST_USED_PREFIX = "last_used:"
 
     /** O6: the player chosen for the computer at [address], or null for the computer's own choice. */
@@ -242,6 +245,29 @@ object HostStore {
         if (hosts(ctx).none { it.address == address } || claimedName(ctx, address) == name) return false
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
             putString("$KEY_NAME_PREFIX$address", name)
+        }
+        return true
+    }
+
+    /** The Pocketdesk release the computer at [address] said it runs (item 4), or null. */
+    fun claimedVersion(ctx: Context, address: String): String? = stored(ctx, "$KEY_VERSION_PREFIX$address")
+
+    /**
+     * Keep what the computer at [address] said of its release at its latest
+     * identity ([PeerVersion.kept]): one that said none, or no version,
+     * clears it, so a downgraded computer shows no old release; nothing
+     * heard keeps it. A saved computer only. Whether it changed.
+     */
+    fun saveClaimedVersion(ctx: Context, address: String, heard: PeerVersion.Heard?): Boolean {
+        if (hosts(ctx).none { it.address == address }) return false
+        val old = claimedVersion(ctx, address)
+        val new = PeerVersion.kept(heard, old)
+        if (new == old) return false
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            when (new) {
+                null -> remove("$KEY_VERSION_PREFIX$address")
+                else -> putString("$KEY_VERSION_PREFIX$address", new)
+            }
         }
         return true
     }

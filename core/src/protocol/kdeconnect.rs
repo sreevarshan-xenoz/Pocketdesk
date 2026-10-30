@@ -132,6 +132,10 @@ pub struct DeviceIdentity {
     pub protocol_version: u32,
     pub incoming_capabilities: Vec<String>,
     pub outgoing_capabilities: Vec<String>,
+    /// The Pocketdesk release it runs (`pocketdeskVersion`), for the other
+    /// end to show; `None` sends none.
+    #[serde(default)]
+    pub pocketdesk_version: Option<String>,
 }
 
 impl DeviceIdentity {
@@ -143,18 +147,24 @@ impl DeviceIdentity {
             protocol_version: PROTOCOL_VERSION,
             incoming_capabilities: Vec::new(),
             outgoing_capabilities: Vec::new(),
+            pocketdesk_version: Some(crate::version::THIS_VERSION.to_string()),
         }
     }
 
     pub fn as_identity_packet(&self) -> NetworkPacket {
-        NetworkPacket::new("kdeconnect.identity").with_body(serde_json::json!({
+        let mut body = serde_json::json!({
             "deviceId": self.device_id,
             "deviceName": self.device_name,
             "deviceType": self.device_type,
             "protocolVersion": self.protocol_version,
             "incomingCapabilities": self.incoming_capabilities,
             "outgoingCapabilities": self.outgoing_capabilities,
-        }))
+        });
+        // An extra field: KDE Connect and an older Pocketdesk ignore it.
+        if let Some(version) = &self.pocketdesk_version {
+            body[crate::version::IDENTITY_FIELD] = Value::String(version.clone());
+        }
+        NetworkPacket::new("kdeconnect.identity").with_body(body)
     }
 }
 
@@ -478,6 +488,8 @@ pub struct TrustStore {
     computers: HashSet<String>,
     /// U3: deviceId -> what it calls itself and the owner's rename.
     names: HashMap<String, DeviceName>,
+    /// deviceId -> the Pocketdesk release it last said it runs (item 4).
+    versions: HashMap<String, String>,
     /// Remote revoke: the phones paired with the owner's own code (never
     /// someone else's, a profile's or a guest's), which may list and
     /// remove this computer's other devices from afar.
@@ -637,6 +649,7 @@ impl TrustStore {
                 permissions: HashMap::new(),
                 computers: HashSet::new(),
                 names: HashMap::new(),
+                versions: HashMap::new(),
                 owners: HashSet::new(),
             });
         }
@@ -673,6 +686,12 @@ impl TrustStore {
             .into_iter()
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
+        // And what it runs (item 4).
+        let versions = decoded
+            .versions
+            .into_iter()
+            .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
+            .collect();
         // An owner phone is one paired for good, and a phone.
         let owners = decoded
             .owners
@@ -686,6 +705,7 @@ impl TrustStore {
             permissions,
             computers,
             names,
+            versions,
             owners,
         })
     }
@@ -725,6 +745,7 @@ impl TrustStore {
         self.permissions.remove(device_id);
         self.computers.remove(device_id);
         self.names.remove(device_id);
+        self.versions.remove(device_id);
         self.owners.remove(device_id);
         self.persist()
     }
@@ -784,6 +805,35 @@ impl TrustStore {
             return Ok(false);
         }
         entry.claimed = Some(claimed);
+        self.persist()?;
+        Ok(true)
+    }
+
+    /// The Pocketdesk release a paired device last said it runs (item 4);
+    /// `None` until one that says has connected.
+    pub fn version(&self, device_id: &str) -> Option<&str> {
+        self.versions.get(device_id).map(String::as_str)
+    }
+
+    /// Keep what a paired device's latest identity says it runs: `raw` is
+    /// its `pocketdeskVersion`, `None` when it sent none. Every identity
+    /// replaces the last word, so one with none, or with one that is not a
+    /// version once cleaned (a downgrade to a release before this, another
+    /// device under the id), clears it and no old release is shown. Whether
+    /// the store changed (and was written); a device not trusted, or a
+    /// version unchanged, writes nothing.
+    pub fn note_claimed_version(&mut self, device_id: &str, raw: Option<&str>) -> Result<bool> {
+        if !self.is_trusted(device_id) {
+            return Ok(false);
+        }
+        let version = raw.and_then(crate::version::clean_version);
+        if self.version(device_id) == version.as_deref() {
+            return Ok(false);
+        }
+        match version {
+            Some(version) => self.versions.insert(device_id.to_string(), version),
+            None => self.versions.remove(device_id),
+        };
         self.persist()?;
         Ok(true)
     }
@@ -894,6 +944,7 @@ impl TrustStore {
             permissions: self.permissions.clone(),
             computers,
             names: self.names.clone(),
+            versions: self.versions.clone(),
             owners,
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
@@ -925,6 +976,8 @@ struct TrustStoreFile {
     computers: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     names: HashMap<String, DeviceName>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    versions: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     owners: Vec<String>,
 }
@@ -1350,6 +1403,78 @@ mod tests {
             None,
             "the name went with the device"
         );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Item 4: a paired device's release is kept as its latest identity
+    /// says it, cleaned, written only when it changes, cleared by one that
+    /// says none or no version, and goes with the device.
+    #[test]
+    fn a_paired_device_keeps_the_release_it_runs() {
+        let path = temp_store_path("versions");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        assert!(
+            !store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap(),
+            "not paired: nothing kept"
+        );
+        store.trust_device("phone-v").unwrap();
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some(" 0.8.1 "))
+                .unwrap()
+        );
+        assert!(
+            !store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap(),
+            "unchanged: not written again"
+        );
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("0.9.0"))
+                .unwrap()
+        );
+        assert!(
+            store.note_claimed_version("phone-v", None).unwrap(),
+            "an identity with none (a downgrade) clears it"
+        );
+        assert_eq!(TrustStore::read(&path).unwrap().version("phone-v"), None);
+        assert!(
+            !store.note_claimed_version("phone-v", None).unwrap(),
+            "already none: not written again"
+        );
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap()
+        );
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("latest"))
+                .unwrap(),
+            "not a version clears it too"
+        );
+        assert_eq!(store.version("phone-v"), None);
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("0.8.2"))
+                .unwrap()
+        );
+        assert_eq!(
+            TrustStore::read(&path).unwrap().version("phone-v"),
+            Some("0.8.2")
+        );
+        store.untrust_device("phone-v").unwrap();
+        store.trust_device("phone-v").unwrap();
+        assert_eq!(
+            TrustStore::read(&path).unwrap().version("phone-v"),
+            None,
+            "the version went with the device"
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("versions"), "none kept, none written: {raw}");
         let _ = std::fs::remove_file(path);
     }
 

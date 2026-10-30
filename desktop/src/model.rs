@@ -40,6 +40,8 @@ pub struct Device {
     pub switches: Option<pocketdesk_core::local::phone_switches::PhoneSwitches>,
     /// Another of the owner's computers, paired as one (2f).
     pub computer: bool,
+    /// The Pocketdesk release it last said it runs (item 4), if it says.
+    pub version: Option<String>,
 }
 
 /// Everything the window shows, read once per refresh.
@@ -126,6 +128,7 @@ pub fn snapshot_with(state_dir: &Path, now_unix: u64, running: bool) -> Snapshot
                     .is_some_and(|m| m.linked.iter().any(|p| p.device_id == id));
                 Device {
                     name: store.name(&id).map(str::to_string),
+                    version: store.version(&id).map(str::to_string),
                     // The owner's, even when it matches the phone's own (U3 review).
                     renamed: store.chosen_name(&id).is_some(),
                     grant_remaining: store.grant_remaining(&id),
@@ -313,6 +316,27 @@ pub struct PhoneRow<'a> {
     /// What it plays, when that may show (N2: in a session, or linked
     /// with the phone's background reporter on).
     pub playing: Option<&'a pocketdesk_core::local::phone_media::PhoneMediaState>,
+}
+
+/// A device's release in its row's words (item 4): "runs 0.8.1", and with
+/// `hints` (Settings' "Tell me when my devices run different versions")
+/// which one to update when it is not this one's; and whether it asks for
+/// an update, to draw it so. `None` for a device that says no release.
+pub fn version_words(version: Option<&str>, hints: bool) -> Option<(String, bool)> {
+    let version = version?;
+    let this = pocketdesk_core::version::THIS_VERSION;
+    Some((
+        pocketdesk_core::version::words(this, version, hints),
+        hints && pocketdesk_core::version::differs(this, version),
+    ))
+}
+
+/// What a device's release says on hover (item 4).
+pub fn version_hover() -> String {
+    format!(
+        "The Pocketdesk release it said it runs as it last connected. This computer runs {}. Each device updates on its own: from its package manager, the installer or the app store it came from.",
+        pocketdesk_core::version::THIS_VERSION
+    )
 }
 
 /// What a phone plays in a line: "Song · Artist (App)", the parts it has.
@@ -1496,6 +1520,38 @@ pub fn can_wake(
 
 #[cfg(test)]
 mod tests {
+    /// Item 4: a device's release in its row, with what to update when
+    /// hints are on; nothing for one that says none.
+    #[test]
+    fn a_devices_release_says_what_to_update() {
+        use super::version_words;
+        assert_eq!(version_words(None, true), None, "an older device says none");
+        let this = pocketdesk_core::version::THIS_VERSION;
+        assert_eq!(
+            version_words(Some(this), true),
+            Some((format!("runs {this}"), false))
+        );
+        assert_eq!(
+            version_words(Some("0.0.1"), true),
+            Some((
+                "runs 0.0.1, older than this one: update it".to_string(),
+                true
+            ))
+        );
+        assert_eq!(
+            version_words(Some("999.0.0"), true),
+            Some((
+                "runs 999.0.0, newer than this one: update this one".to_string(),
+                true
+            ))
+        );
+        assert_eq!(
+            version_words(Some("0.0.1"), false),
+            Some(("runs 0.0.1".to_string(), false)),
+            "hints off: the release, plainly"
+        );
+    }
+
     /// Q2: what a profile would turn off, only among the switches shown.
     #[test]
     fn a_profile_says_what_it_turns_off() {

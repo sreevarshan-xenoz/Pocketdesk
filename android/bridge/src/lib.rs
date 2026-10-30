@@ -2143,6 +2143,23 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePeerNam
     to_jstring(&mut env, peer_names::name(&address).unwrap_or_default())
 }
 
+/// What the computer at `address` said of its Pocketdesk release at its
+/// latest identity on this run (item 4): `{"version":"0.8.1"}`, or
+/// `{"version":null}` when it said none (the app then clears its own), or
+/// "" when no identity was heard.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePeerVersion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    let said = peer_names::version(&address)
+        .map(|version| serde_json::json!({ "version": version }).to_string())
+        .unwrap_or_default();
+    to_jstring(&mut env, said)
+}
+
 /// The replies the desktop asked this phone to text (N5b), as JSON.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeSmsRequests(

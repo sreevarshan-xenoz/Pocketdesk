@@ -417,6 +417,11 @@
     <string name="connect_anyway">Connect anyway</string>
     <string name="settings_offer_wake">Offer to wake a computer that does not answer</string>
     <string name="settings_offer_wake_summary">Connect checks first, and offers Wake and connect</string>
+    <string name="version_runs">runs %1$s</string>
+    <string name="version_runs_older">runs %1$s, older than this app: update it</string>
+    <string name="version_runs_newer">runs %1$s, newer than this app: update this app</string>
+    <string name="settings_version_hints">Tell me when my devices run different versions</string>
+    <string name="settings_version_hints_summary">A computer card says which to update when it runs another Pocketdesk release. Nothing asks the internet</string>
     <!-- N7: several phones -->
     <string name="driving_other">Another phone is driving: this one watches</string>
     <string name="settings_show_driving">Say when another phone drives</string>

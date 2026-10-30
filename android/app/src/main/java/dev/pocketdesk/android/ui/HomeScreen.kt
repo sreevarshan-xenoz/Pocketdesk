@@ -67,6 +67,7 @@ import dev.pocketdesk.android.ForgetComputer
 import dev.pocketdesk.android.HostStore
 import dev.pocketdesk.android.ComputerName
 import dev.pocketdesk.android.Prefs
+import dev.pocketdesk.android.PeerVersion
 import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import dev.pocketdesk.android.discovery.FoundComputer
@@ -206,6 +207,8 @@ fun HomeScreen(
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var names by remember { mutableIntStateOf(0) }
+    // Item 4: this app's release, to set each computer's beside.
+    val mine = remember { PeerVersion.mine(context) }
     // BB3: the computers that said the phone is not paired, read again every
     // few seconds, as that word comes and goes with no change here.
     var refusers by remember { mutableStateOf(emptySet<String>()) }
@@ -218,8 +221,11 @@ fun HomeScreen(
         }
     }
     LaunchedEffect(hosts) {
-        // The names the computers gave themselves on this run's connections.
-        if (hosts.count { h -> RustCore.peerName(h.address)?.let { HostStore.saveClaimedName(context, h.address, it) } == true } > 0) {
+        // The names the computers gave themselves on this run's connections,
+        // and (item 4) the releases they run.
+        val named = hosts.count { h -> RustCore.peerName(h.address)?.let { HostStore.saveClaimedName(context, h.address, it) } == true }
+        val versioned = hosts.count { h -> HostStore.saveClaimedVersion(context, h.address, RustCore.peerVersion(h.address)) }
+        if (named + versioned > 0) {
             names++
         }
     }
@@ -548,6 +554,9 @@ fun HomeScreen(
                     HostCard(
                         host = host,
                         name = names.let { HostStore.name(context, host.address) },
+                        version = names.let {
+                            PeerVersion.line(HostStore.claimedVersion(context, host.address), mine, Prefs.versionHints(context))
+                        },
                         checking = checkingAddress == host.address,
                         online = host.address in network.savedOnline,
                         isAuto = autoConnect && host == hosts.first(),
@@ -950,6 +959,7 @@ private fun GetDesktopAppButton() {
 private fun HostCard(
     host: HostStore.Host,
     name: String?,
+    version: PeerVersion.Line?,
     checking: Boolean,
     online: Boolean,
     isAuto: Boolean,
@@ -996,6 +1006,15 @@ private fun HostCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Item 4: the release it runs, and which to update: a
+                    // hint, never an error.
+                    version?.let { line ->
+                        Text(
+                            stringResource(line.words, line.version),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (line.update) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 Box {
                     IconButton(onClick = { menu = true }) {
