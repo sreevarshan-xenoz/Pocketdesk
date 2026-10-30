@@ -371,7 +371,7 @@ impl Driver {
             out.push(note(if held {
                 "A screen window holds the pointer: the edges lead nowhere until it lets go"
             } else {
-                "The screen window let go of the pointer: the edges lead to the other computers                  again"
+                "The screen window let go of the pointer: the edges lead on again"
             }));
         }
         self.settle(&mut out);
@@ -2818,6 +2818,12 @@ mod tests {
         assert_eq!(d.mode(), Mode::Off);
         let freed = d.set_view_held(false);
         assert!(freed.contains(&Action::SetMode(Mode::Watch)), "{freed:?}");
+        // Its words are one clean line (PR #563 review M1).
+        for said in held.iter().chain(&freed) {
+            if let Action::Badge(badge) = said {
+                assert!(!badge.text.contains("  "), "{:?}", badge.text);
+            }
+        }
         // The first position watched only marks where it is.
         assert_eq!(d.on(moved(3455, 480)), vec![]);
         d.on(moved(3440, 480));
