@@ -22,6 +22,7 @@ use pocketdesk_core::local::computers::{
 };
 use pocketdesk_core::local::pair_link::PairLink;
 use pocketdesk_core::local::paths::COMPUTERS_DIR;
+use pocketdesk_core::local::view::ScreenPlace;
 use pocketdesk_core::protocol::connection::ConnectionManager;
 use pocketdesk_core::protocol::kdeconnect::{DeviceIdentity, NetworkPacket, TransferIo};
 use pocketdesk_core::streaming::transport::CertManager;
@@ -458,8 +459,10 @@ pub(crate) fn is_linked(device_id: &str) -> bool {
 pub(crate) const MONITORS: &str = "kdeconnect.pocketdesk.monitors";
 
 /// Each linked computer's screens, by name and size, as it last answered
-/// (BK7: the window that shows its screen offers the choice).
-static SCREENS: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(Default::default);
+/// (BK7: the window that shows its screen offers the choice), and where
+/// they sit in its layout (PC11).
+type Screens = (Vec<String>, Vec<ScreenPlace>);
+static SCREENS: LazyLock<Mutex<HashMap<String, Screens>>> = LazyLock::new(Default::default);
 
 /// Ask the computer `device_id` for its screens on its link, when it is up;
 /// its answer is kept for [`screens`]. On a link the other computer keeps
@@ -490,7 +493,7 @@ pub(crate) fn keep_screens(device_id: &str, body: &serde_json::Value) {
     SCREENS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(device_id.to_string(), screens_in(body));
+        .insert(device_id.to_string(), (screens_in(body), layout_in(body)));
 }
 
 /// Whether a monitors packet is an answer (it names screens), not a
@@ -506,8 +509,55 @@ pub(crate) fn screens(device_id: &str) -> Vec<String> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(device_id)
-        .cloned()
+        .map(|(names, _)| names.clone())
         .unwrap_or_default()
+}
+
+/// Where the computer `device_id`'s screens sit, as it last said (PC11), in
+/// the order of [`screens`]; empty when not known.
+pub(crate) fn screen_layout(device_id: &str) -> Vec<ScreenPlace> {
+    SCREENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .map(|(_, layout)| layout.clone())
+        .unwrap_or_default()
+}
+
+/// Where the screens a monitors answer names sit, by their index (PC11):
+/// empty unless every one of them says its corner and size (a server
+/// before PC11 says no corner), at most 16 as [`screens_in`].
+fn layout_in(body: &serde_json::Value) -> Vec<ScreenPlace> {
+    let Some(monitors) = body.get("monitors").and_then(|m| m.as_array()) else {
+        return Vec::new();
+    };
+    let placed: Option<Vec<(u64, ScreenPlace)>> = monitors
+        .iter()
+        .take(16)
+        .enumerate()
+        .map(|(at, m)| {
+            let index = m.get("index").and_then(|v| v.as_u64()).unwrap_or(at as u64);
+            let int = |key: &str| m.get(key).and_then(|v| v.as_i64());
+            let size = |key: &str| {
+                m.get(key)
+                    .and_then(|v| v.as_u64())
+                    .and_then(|v| u32::try_from(v).ok())
+                    .filter(|v| *v > 0)
+            };
+            Some((
+                index,
+                ScreenPlace {
+                    x: i32::try_from(int("x")?).ok()?,
+                    y: i32::try_from(int("y")?).ok()?,
+                    width: size("width")?,
+                    height: size("height")?,
+                },
+            ))
+        })
+        .collect();
+    let mut placed = placed.unwrap_or_default();
+    placed.sort_by_key(|(index, _)| *index);
+    placed.into_iter().map(|(_, place)| place).collect()
 }
 
 /// The screens a monitors answer names, by their index: "name (WxH)", at
@@ -2608,6 +2658,36 @@ mod tests {
             ["Screen 1"],
             "a screen with no name is still one"
         );
+    }
+
+    /// PC11: where a computer's screens sit, from its answer, in their
+    /// order; none from an answer before PC11 (no corner) or missing one.
+    #[test]
+    fn a_computers_screen_layout_is_read_from_its_answer() {
+        let body = serde_json::json!({"count": 2, "monitors": [
+            {"index": 1, "name": "HDMI-A-1", "width": 2560, "height": 1440, "x": 1920, "y": -200},
+            {"index": 0, "name": "eDP-1", "width": 1920, "height": 1080, "x": 0, "y": 0},
+        ]});
+        let place = |x, y, width, height| ScreenPlace {
+            x,
+            y,
+            width,
+            height,
+        };
+        assert_eq!(
+            layout_in(&body),
+            [place(0, 0, 1920, 1080), place(1920, -200, 2560, 1440)]
+        );
+        let older = serde_json::json!({"monitors": [
+            {"index": 0, "name": "eDP-1", "width": 1920, "height": 1080},
+        ]});
+        assert!(layout_in(&older).is_empty(), "no corner, no layout");
+        let one_missing = serde_json::json!({"monitors": [
+            {"index": 0, "width": 1920, "height": 1080, "x": 0, "y": 0},
+            {"index": 1, "width": 1920, "height": 1080},
+        ]});
+        assert!(layout_in(&one_missing).is_empty());
+        assert!(layout_in(&serde_json::json!({})).is_empty());
     }
 
     /// BD1: a computer paired here that this one still lists as one it

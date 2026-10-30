@@ -92,6 +92,11 @@ pub struct ViewStatus {
     /// The other computer's screens, by name, when known (empty: not known).
     #[serde(default)]
     pub monitors: Vec<String>,
+    /// Where each of those screens sits in that computer's layout, in the
+    /// same order (PC11): the window's screen buttons are laid out so.
+    /// Empty when that computer did not say (a server before PC11).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layout: Vec<ScreenPlace>,
     /// The screen shown.
     #[serde(default)]
     pub monitor: u32,
@@ -117,6 +122,16 @@ pub struct ViewStatus {
     /// before PC8.
     #[serde(default)]
     pub privacy: ViewPrivacy,
+}
+
+/// Where one of the other computer's screens sits in its layout (PC11):
+/// its top-left corner and size, in that computer's own units.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenPlace {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The other computer's privacy mode, as the window asked for it (PC8).

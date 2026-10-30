@@ -1028,6 +1028,7 @@ async fn session(
             phase: Phase::Connecting,
             monitor: status.monitor,
             monitors: std::mem::take(&mut status.monitors),
+            layout: std::mem::take(&mut status.layout),
             reconnecting: attempt_no,
             ..ViewStatus::default()
         };
@@ -1254,6 +1255,7 @@ async fn attempt(
             }
         }
         next.monitors = crate::peer_computers::screens(&computer.device_id);
+        next.layout = crate::peer_computers::screen_layout(&computer.device_id);
         if next != *status {
             *status = next;
             say.say(Event::Status(status.clone())).await;

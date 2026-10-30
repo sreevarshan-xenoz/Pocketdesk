@@ -82,6 +82,8 @@ fn enumerate_monitors() -> Vec<MonitorInfo> {
                 width: m.width().unwrap_or(1920),
                 height: m.height().unwrap_or(1080),
                 is_primary: i == 0, // Heuristic: first one is primary
+                x: m.x().ok(),
+                y: m.y().ok(),
             })
             .collect();
     }
@@ -97,6 +99,8 @@ fn enumerate_monitors() -> Vec<MonitorInfo> {
             width: 1920,
             height: 1080,
             is_primary: i == 0,
+            x: None,
+            y: None,
         });
     }
     fallback
