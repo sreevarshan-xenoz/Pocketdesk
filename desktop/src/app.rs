@@ -130,7 +130,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     (
         Capability::Power,
         "Lock, sleep, privacy and wake others",
-        "Lock the screen, put the computer to sleep or shut it down, blank it for privacy, and send a wake to another computer on this network.",
+        "Lock the screen, put the computer to sleep or shut it down, block its own keyboard and mouse for privacy (a ring shows; the screen is not blanked), and send a wake to another computer on this network.",
     ),
     (
         Capability::Exec,
@@ -996,6 +996,12 @@ impl PocketdeskApp {
             self.config
                 .as_ref()
                 .is_none_or(|c| c.computer_view_grab_keys),
+        );
+        // PC8: "Lock it when I close the window" follows Settings too.
+        view.set_lock_on_close(
+            self.config
+                .as_ref()
+                .is_some_and(|c| c.computer_view_lock_on_close),
         );
         if let Err(e) = view.open(device_id, name, 0, preset, view_only, stats) {
             self.notice = crate::notice::Notice::error(e);
@@ -3355,6 +3361,7 @@ impl PocketdeskApp {
                             view.set_stats(form.saved_computer_view_stats());
                             #[cfg(windows)]
                             view.set_grab_keys(form.saved_computer_view_grab_keys());
+                            view.set_lock_on_close(form.saved_computer_view_lock_on_close());
                         }
                         self.notice = crate::notice::Notice::done("Saved.");
                     }
@@ -4372,6 +4379,15 @@ impl eframe::App for PocketdeskApp {
                 }
                 if let Some(Ok(form)) = self.settings.as_mut() {
                     form.saved_elsewhere_computer_view_stats(on);
+                }
+            }
+            // PC8: its "Lock it when I close the window", likewise.
+            if let Some(on) = view.take_lock_saved() {
+                if let Some(config) = self.config.as_mut() {
+                    config.computer_view_lock_on_close = on;
+                }
+                if let Some(Ok(form)) = self.settings.as_mut() {
+                    form.saved_elsewhere_computer_view_lock_on_close(on);
                 }
             }
             // PC4: its "Send Win and Alt+Tab there", likewise.

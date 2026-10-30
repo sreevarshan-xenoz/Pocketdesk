@@ -350,6 +350,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_lock_on_close",
+        "Lock it when I close the window",
+        Section::Computers,
+    ),
+    (
         "computer_wake_facts",
         "Let my computers wake this one",
         Section::Computers,
@@ -619,6 +624,8 @@ pub fn applies_live(key: &str) -> bool {
             // view dials.
             | "computer_view_hw_decode"
             | "computer_view_hevc"
+            // PC8: read by an open window at once.
+            | "computer_view_lock_on_close"
             | "events"
             | "events_detail"
             | "hooks"
@@ -818,6 +825,19 @@ impl SettingsForm {
         self.saved.computer_view_grab_keys = on;
         self.edited.computer_view_grab_keys = on;
         self.running.computer_view_grab_keys = on;
+    }
+
+    /// "Lock it when I close the window" as saved (PC8), for an open window.
+    pub fn saved_computer_view_lock_on_close(&self) -> bool {
+        self.saved.computer_view_lock_on_close
+    }
+
+    /// The window's bar saved `computer_view_lock_on_close` (PC8): this
+    /// form says the same, with nothing left to save.
+    pub fn saved_elsewhere_computer_view_lock_on_close(&mut self, on: bool) {
+        self.saved.computer_view_lock_on_close = on;
+        self.edited.computer_view_lock_on_close = on;
+        self.running.computer_view_lock_on_close = on;
     }
 
     /// `keys`, the shared keyboard and mouse's, were saved elsewhere (the
@@ -2179,6 +2199,16 @@ impl SettingsForm {
                         "HEVC needs less bitrate for the same picture, which helps most over the internet. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
                     );
                 });
+                row(ui, "computer_view_lock_on_close", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_lock_on_close,
+                        "lock it when I close the window: the computer whose screen the window shows locks as the window closes",
+                    );
+                    note(
+                        ui,
+                        "With that computer's own lock, when the window closes while it shows that computer (not while it reconnects, nor when Pocketdesk quits with it open); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
+                    );
+                });
                 // PC6: what Wake on the other computers needs from this one.
                 row(ui, "computer_wake_facts", |ui| {
                     ui.checkbox(
@@ -2958,6 +2988,7 @@ mod tests {
             "computer_view_grab_keys",
             "computer_view_hw_decode",
             "computer_view_hevc",
+            "computer_view_lock_on_close",
         ] {
             assert!(
                 SETTINGS

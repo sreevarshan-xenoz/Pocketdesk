@@ -15,7 +15,9 @@
 //! to that computer ([`crate::view_follow`], PC3). Its bar's Send keys
 //! menu sends the keys this computer keeps, and on Windows, in full screen,
 //! a keyboard grab sends the Windows key and Alt+Tab there
-//! ([`crate::view_grab`], PC4).
+//! ([`crate::view_grab`], PC4). "Hide what I do there" asks that computer
+//! for its own privacy mode while the window controls it, and "Lock it when
+//! I close the window" locks it as the window closes (PC8).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -27,7 +29,9 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use pocketdesk_core::local::computers::{self, ComputerAsk};
 use pocketdesk_core::local::config::{COMPUTER_VIEW_QUALITIES, Config};
-use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewStatus};
+use pocketdesk_core::local::view::{
+    self as wire, Message, Phase, ViewFile, ViewPrivacy, ViewStatus,
+};
 use pocketdesk_core::streaming::InputPacket;
 
 use crate::video::{
@@ -139,7 +143,18 @@ struct State {
     /// Windows' keyboard grab (PC4).
     #[cfg(windows)]
     grab: GrabWindow,
+    /// "Lock it when I close the window" (PC8), and a choice saved from
+    /// the bar that Settings has not heard yet.
+    lock_on_close: bool,
+    lock_saved: Option<bool>,
+    /// When "Hide what I do there" was last asked (PR #561 review): an
+    /// ask still unanswered after [`ASKING_WAIT`] is given up here too.
+    privacy_asked: Option<Instant>,
 }
+
+/// How long the bar shows "Asking…" before it gives up: the relay's own
+/// give-up (8 s, said at its next 2 s heartbeat) and a little more.
+pub const ASKING_WAIT: Duration = Duration::from_secs(11);
 
 /// The window's keyboard grab on Windows (PC4): the setting, a choice saved
 /// from the bar that Settings has not heard yet, the release, the hook
@@ -423,6 +438,25 @@ fn switch_grab(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
     }
 }
 
+/// "Lock it when I close the window" switched from the bar (PC8): at
+/// once, and remembered as `computer_view_lock_on_close`.
+fn switch_lock(shared: &Mutex<State>, config: Option<&Path>, on: bool) {
+    let mut state = lock(shared);
+    state.lock_on_close = on;
+    let saved = config.map(|path| {
+        save_switch(path, "computer_view_lock_on_close", |c| {
+            c.computer_view_lock_on_close = on
+        })
+    });
+    match saved {
+        Some(Ok(())) => state.lock_saved = Some(on),
+        Some(Err(e)) => {
+            state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
+        }
+        None => {}
+    }
+}
+
 /// What the window says while there is no picture.
 pub fn waiting_words(name: &str, status: &ViewStatus) -> String {
     match status.phase {
@@ -453,6 +487,38 @@ pub fn control_words(name: &str, control: Option<bool>, view_only: bool) -> Opti
         (None, false) => None,
         (Some(true), false) => None,
     }
+}
+
+/// Whether the bar's "Asking…", asked at `asked`, has waited too long at
+/// `now` (PR #561 review): the relay or that computer never answered.
+pub fn asking_lapsed(privacy: &ViewPrivacy, asked: Option<Instant>, now: Instant) -> bool {
+    *privacy == ViewPrivacy::Asking
+        && asked.is_some_and(|at| now.saturating_duration_since(at) >= ASKING_WAIT)
+}
+
+/// Whether "Hide what I do there" shows as on: asked or held there (PC8).
+pub fn hiding(privacy: &ViewPrivacy) -> bool {
+    matches!(privacy, ViewPrivacy::Asking | ViewPrivacy::On)
+}
+
+/// What the window says of privacy on the computer `name` (PC8): `None`
+/// while it is off with nothing to say.
+pub fn privacy_words(name: &str, privacy: &ViewPrivacy) -> Option<String> {
+    match privacy {
+        ViewPrivacy::Off => None,
+        ViewPrivacy::Asking => Some(format!("Asking {name} to hide what you do there\u{2026}")),
+        ViewPrivacy::On => Some(format!(
+            "Hidden: {name}'s own keyboard and mouse are blocked and a ring shows on its screen, until this window closes or you turn it off. It does not blank the screen there."
+        )),
+        ViewPrivacy::Refused(why) => Some(format!("Not hidden on {name}: {why}")),
+    }
+}
+
+/// The window's last word to the server as it closes (PC8): a lock of the
+/// other computer when chosen and the view was let in, else nothing (the
+/// server lets privacy go as the view ends).
+pub fn closing_ask(lock_on_close: bool, phase: Phase) -> Option<u8> {
+    (lock_on_close && phase == Phase::Showing).then_some(wire::PRIVACY_LOCK)
 }
 
 /// Whether the window's input goes to the other computer now.
@@ -572,6 +638,19 @@ impl ComputerView {
         lock(&self.shared).grab.saved.take()
     }
 
+    /// "Lock it when I close the window" as Settings has it (PC8): an open
+    /// window follows at once.
+    pub fn set_lock_on_close(&self, on: bool) {
+        lock(&self.shared).lock_on_close = on;
+        self.ctx.request_repaint_of(viewport_id());
+    }
+
+    /// The bar's "Lock it when I close the window", saved since the last
+    /// call (PC8): Settings follows it.
+    pub fn take_lock_saved(&self) -> Option<bool> {
+        lock(&self.shared).lock_saved.take()
+    }
+
     /// Call each pass: keeps the window open while a screen is wanted.
     pub fn show(&self, ctx: &egui::Context) {
         let title = {
@@ -689,6 +768,26 @@ fn send(state: &mut State, packets: Vec<InputPacket>) {
     }
 }
 
+/// Say the window's privacy ask to the server (PC8); a broken write ends
+/// input here, as [`send`]'s.
+fn say_privacy(state: &mut State, ask: u8) {
+    let Some(writer) = state.writer.as_mut() else {
+        return;
+    };
+    if Message::Privacy(ask).write(writer).is_err() {
+        state.writer = None;
+        return;
+    }
+    // Said at once here; the server's status says how it went.
+    match ask {
+        wire::PRIVACY_HIDE => {
+            state.status.privacy = ViewPrivacy::Asking;
+            state.privacy_asked = Some(Instant::now());
+        }
+        _ => state.status.privacy = ViewPrivacy::Off,
+    }
+}
+
 /// Say the window's focus to the server (PC3); a broken write ends input
 /// here, as [`send`]'s.
 fn say_focus(state: &mut State, edge: Edge) {
@@ -790,6 +889,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
+        // The lock, when chosen, goes before the view stops (PC8).
+        if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
+            say_privacy(&mut state, ask);
+        }
         stop_view(state_dir, &mut state);
         state.wanted = None;
         state.fullscreen = false;
@@ -847,6 +950,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     }
     #[cfg(windows)]
     let grab_setting = state.grab.setting;
+    let lock_on_close = state.lock_on_close;
     let size = state.size;
     let shown = state.clock.shown(Instant::now());
     let decoding = state.decoding.clone();
@@ -859,6 +963,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
 
     let mut monitor = wanted.monitor;
     let mut send_key: Option<SendKey> = None;
+    let mut privacy_ask: Option<u8> = None;
     egui::Panel::top("computer-view-bar")
         .frame(
             egui::Frame::NONE
@@ -938,6 +1043,35 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             switch_grab(shared, config, grab_on);
                         }
                     }
+                    // PC8: the other computer's own privacy mode.
+                    let mut hide = hiding(&status.privacy);
+                    let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
+                        format!(
+                            "Ask {} to block its own keyboard and mouse and show a ring on its screen while this window drives it. {} decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
+                            wanted.name, wanted.name
+                        ),
+                    );
+                    if hidden.clicked() {
+                        hidden.surrender_focus();
+                        privacy_ask = Some(if hide {
+                            wire::PRIVACY_HIDE
+                        } else {
+                            wire::PRIVACY_SHOW
+                        });
+                    }
+                }
+                if ended.is_none() && status.phase == Phase::Showing {
+                    let mut lock_on = lock_on_close;
+                    let lock_switch = ui
+                        .checkbox(&mut lock_on, "Lock it when I close the window")
+                        .on_hover_text(format!(
+                            "Lock {} as this window closes, with its own lock. Its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
+                            wanted.name
+                        ));
+                    if lock_switch.clicked() {
+                        lock_switch.surrender_focus();
+                        switch_lock(shared, config, lock_on);
+                    }
                 }
                 let shot = ui
                     .add_enabled(drawn.is_some(), egui::Button::new("Screenshot"))
@@ -1005,6 +1139,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         .wrap(),
                 );
             }
+            if ended.is_none()
+                && let Some(words) = privacy_words(&wanted.name, &status.privacy)
+            {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
+                        .wrap(),
+                );
+            }
         });
 
     // The toolbar's choices.
@@ -1026,6 +1168,24 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         if view_only && !state.view_only {
             let release = state.input.release_all();
             send(&mut state, release);
+            // Nothing to hide while this window drives nothing (PC8).
+            if hiding(&state.status.privacy) {
+                say_privacy(&mut state, wire::PRIVACY_SHOW);
+            }
+        }
+        if let Some(ask) = privacy_ask {
+            say_privacy(&mut state, ask);
+        }
+        // An ask nobody answered is given up here too (review): the bar
+        // never stays at "Asking…".
+        if asking_lapsed(&state.status.privacy, state.privacy_asked, Instant::now()) {
+            say_privacy(&mut state, wire::PRIVACY_SHOW);
+            state.status.privacy = ViewPrivacy::Refused(format!(
+                "{} did not answer; privacy is off here.",
+                wanted.name
+            ));
+        } else if state.status.privacy == ViewPrivacy::Asking {
+            ctx.request_repaint_after(Duration::from_secs(1));
         }
         state.view_only = view_only;
         if let Some(key) = send_key
@@ -1673,7 +1833,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
             }
             Message::End { why } => return Ok(why),
-            Message::Heartbeat | Message::WantKeyframe | Message::Input(_) | Message::Focus(_) => {}
+            Message::Heartbeat
+            | Message::WantKeyframe
+            | Message::Input(_)
+            | Message::Focus(_)
+            | Message::Privacy(_) => {}
         }
     }
 }
@@ -1808,6 +1972,90 @@ mod tests {
         );
         assert_eq!(control_words("Desk", Some(true), false), None);
         assert_eq!(control_words("Desk", None, false), None);
+    }
+
+    /// PC8: the bar's switch shows asked or held as on, and the window says
+    /// how privacy stands there, never that it blanks the screen.
+    #[test]
+    fn the_window_says_how_privacy_stands_there() {
+        assert!(!hiding(&ViewPrivacy::Off));
+        assert!(hiding(&ViewPrivacy::Asking));
+        assert!(hiding(&ViewPrivacy::On));
+        assert!(!hiding(&ViewPrivacy::Refused("no".into())));
+        assert_eq!(privacy_words("Desk", &ViewPrivacy::Off), None);
+        assert!(
+            privacy_words("Desk", &ViewPrivacy::Asking)
+                .unwrap()
+                .starts_with("Asking Desk")
+        );
+        let on = privacy_words("Desk", &ViewPrivacy::On).unwrap();
+        assert!(on.contains("keyboard and mouse are blocked"), "{on}");
+        assert!(on.contains("does not blank"), "{on}");
+        assert_eq!(
+            privacy_words("Desk", &ViewPrivacy::Refused("it is off there".into())).unwrap(),
+            "Not hidden on Desk: it is off there"
+        );
+    }
+
+    /// PR #561 review: "Asking…" is given up after the relay's own wait,
+    /// and only while it is still asking.
+    #[test]
+    fn asking_is_given_up_after_the_relays_wait() {
+        let at = Instant::now();
+        let later = at + ASKING_WAIT;
+        assert!(!asking_lapsed(&ViewPrivacy::Asking, Some(at), at));
+        assert!(asking_lapsed(&ViewPrivacy::Asking, Some(at), later));
+        assert!(
+            !asking_lapsed(&ViewPrivacy::On, Some(at), later),
+            "answered"
+        );
+        assert!(!asking_lapsed(&ViewPrivacy::Asking, None, later));
+        assert!(
+            ASKING_WAIT > Duration::from_secs(10),
+            "past the relay's give-up"
+        );
+    }
+
+    /// PC8: the window locks the other computer as it closes only when
+    /// chosen and once it was let in.
+    #[test]
+    fn the_window_locks_it_on_close_only_when_chosen_and_let_in() {
+        assert_eq!(closing_ask(true, Phase::Showing), Some(wire::PRIVACY_LOCK));
+        assert_eq!(closing_ask(false, Phase::Showing), None);
+        assert_eq!(closing_ask(true, Phase::Waiting), None);
+        assert_eq!(closing_ask(true, Phase::Connecting), None);
+    }
+
+    /// PC8: the ask goes to the relay as its one-byte message and the bar
+    /// shows it asked at once; with no relay nothing is said.
+    #[test]
+    fn a_privacy_ask_goes_to_the_relay() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let mut state = State {
+            writer: Some(writer),
+            ..State::default()
+        };
+        say_privacy(&mut state, wire::PRIVACY_HIDE);
+        assert_eq!(state.status.privacy, ViewPrivacy::Asking);
+        say_privacy(&mut state, wire::PRIVACY_LOCK);
+        assert_eq!(state.status.privacy, ViewPrivacy::Off);
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::Privacy(wire::PRIVACY_HIDE)
+        );
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::Privacy(wire::PRIVACY_LOCK)
+        );
+        let mut alone = State::default();
+        say_privacy(&mut alone, wire::PRIVACY_HIDE);
+        assert_eq!(
+            alone.status.privacy,
+            ViewPrivacy::Off,
+            "no relay, not asked"
+        );
     }
 
     #[test]

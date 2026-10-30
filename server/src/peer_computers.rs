@@ -2103,6 +2103,8 @@ async fn run_link(
         });
     }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
+    // A privacy grab it asked on this link ends with the link (PC8).
+    let _privacy = crate::plugins::privacy::LinkGrab(computer.device_id.clone());
     let _accepting = acceptor.map(|acceptor| {
         AbortOnDrop(tokio::spawn(async move {
             while let Some(stream) = acceptor.accept().await {
@@ -2160,6 +2162,17 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         ) {
             refused(key, reason.unwrap_or("no reason given"));
         }
+        return;
+    }
+    // Privacy (PC8): its answer to this one's window, or its window asking
+    // this one's privacy mode, held to its Power switch here as on any
+    // connection.
+    if packet.packet_type == crate::plugins::privacy::PRIVACY {
+        if crate::plugins::privacy::take_answer(device_id, packet) {
+            return;
+        }
+        let (to, body) = (device_id.to_string(), packet.body.clone());
+        tokio::spawn(async move { privacy_on_link(&to, &body).await });
         return;
     }
     // Its window lost the focus and asks for this one's clipboard (PC3).
@@ -2221,6 +2234,44 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             }
         });
     }
+}
+
+/// Answer the privacy request `body` that the computer `device_id` made on
+/// the link this one keeps to it (PC8), as the plugin answers one on a
+/// connection here: its Power switch here decides, and its grab ends with
+/// the link.
+async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
+    use crate::plugins::privacy;
+    let id = device_id.to_string();
+    let permitted =
+        tokio::task::spawn_blocking(move || crate::plugins::pair::permits(&id, privacy::PRIVACY))
+            .await
+            .unwrap_or(false);
+    let response = match refused_on_link(body, permitted) {
+        Some(refusal) => refusal,
+        None => {
+            let connection = privacy::link_connection(device_id);
+            let ttl = privacy::grab_ttl(Some(&connection));
+            privacy::respond(body, device_id, Some(&connection), ttl).await
+        }
+    };
+    if let Some(outgoing) = live(device_id) {
+        let _ = outgoing
+            .send(NetworkPacket::new(privacy::PRIVACY).with_body(response))
+            .await;
+    }
+}
+
+/// The answer to a privacy request `body` on the link from a computer that
+/// is not `permitted` it here (its Power switch off), or `None` to do it.
+fn refused_on_link(body: &serde_json::Value, permitted: bool) -> Option<serde_json::Value> {
+    use crate::plugins::privacy;
+    (!permitted).then(|| {
+        privacy::answering(
+            body,
+            serde_json::json!({ "ok": false, "error": privacy::denied_words(true) }),
+        )
+    })
 }
 
 /// Record that the screen of `device_id` was asked for now (PC6).
@@ -2420,6 +2471,65 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PC8 (PR #561 review M8): on the link this computer keeps, another
+    /// computer's privacy answer goes to the window that asked, if it was
+    /// asked, and is never answered; a request from a computer without
+    /// Power here is refused by name. Nothing here grabs or locks.
+    #[tokio::test]
+    async fn privacy_on_the_link_is_heard_and_refused_as_on_a_connection() {
+        crate::state::use_test_dirs();
+        let dir = std::env::temp_dir().join(format!("pd-pc8-link-{}", std::process::id()));
+        let mut host = crate::computer_view::PrivacyHost::real();
+        let (outgoing, mut sent) = mpsc::channel(4);
+        let _live = LiveLink::new("pc8-link-desk", outgoing);
+        crate::computer_view::remember_asked("pc8-link-desk");
+        let answer = NetworkPacket::new(crate::plugins::privacy::PRIVACY)
+            .with_body(serde_json::json!({"ok": true, "grabbed": 2, "id": 5}));
+        take(&dir, "pc8-link-desk", &answer).await;
+        let heard = tokio::time::timeout(std::time::Duration::from_secs(2), host.answers.recv())
+            .await
+            .expect("heard")
+            .expect("the relay's channel");
+        assert_eq!(heard.0, "pc8-link-desk");
+        assert_eq!(heard.1["id"], 5);
+        // A device never asked is not heard.
+        take(&dir, "pc8-link-phone", &answer).await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(300), host.answers.recv())
+                .await
+                .is_err()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(sent.try_recv().is_err(), "an answer is never answered");
+
+        let request = serde_json::json!({"action": "grab", "id": 6});
+        let refusal = refused_on_link(&request, false).expect("refused");
+        assert_eq!(refusal["ok"], false);
+        assert_eq!(refusal["id"], 6);
+        assert!(refusal["error"].as_str().unwrap().contains("this computer"));
+        assert_eq!(refused_on_link(&request, true), None, "done when permitted");
+        // A link ending lets go the grab asked on it, and no other (the
+        // grab itself is never taken here: nothing is held to release).
+        crate::plugins::privacy::hold_for_test("pc8-link-desk", "link:pc8-link-desk");
+        drop(crate::plugins::privacy::LinkGrab("pc8-link-other".into()));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(
+            crate::plugins::privacy::held_by_test("pc8-link-desk"),
+            "another link's"
+        );
+        drop(crate::plugins::privacy::LinkGrab("pc8-link-desk".into()));
+        let mut released = false;
+        for _ in 0..50 {
+            if !crate::plugins::privacy::held_by_test("pc8-link-desk") {
+                released = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(released, "its own link's end lets it go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// BK7: a computer's screens, as its monitors answer names them, in
     /// its own order, and none from an answer that names none.

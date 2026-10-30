@@ -43,6 +43,15 @@ pub const INPUT: u8 = 0x12;
 /// controls the other computer (PC3), `[focused u8]`: the clipboard follows.
 pub const FOCUS: u8 = 0x13;
 
+/// App → server: the window's privacy ask for the other computer (PC8),
+/// `[ask u8]`: [`PRIVACY_HIDE`] to hide what is done there (the host's own
+/// privacy mode), [`PRIVACY_SHOW`] to end it, [`PRIVACY_LOCK`] to end it and
+/// lock that computer as the window closes. No other value.
+pub const PRIVACY: u8 = 0x14;
+pub const PRIVACY_SHOW: u8 = 0;
+pub const PRIVACY_HIDE: u8 = 1;
+pub const PRIVACY_LOCK: u8 = 2;
+
 /// The longest input packet the app sends (a pasted text).
 pub const MAX_INPUT: usize = 16 * 1024;
 /// The longest status or reason.
@@ -97,6 +106,27 @@ pub struct ViewStatus {
     /// keys. `None` until it says, or from a computer before PC4.
     #[serde(default)]
     pub windows: Option<bool>,
+    /// Whether the other computer hides what the window does there (PC8):
+    /// its privacy mode, asked from the window's bar. Off for a server
+    /// before PC8.
+    #[serde(default)]
+    pub privacy: ViewPrivacy,
+}
+
+/// The other computer's privacy mode, as the window asked for it (PC8).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewPrivacy {
+    /// Not asked for, or ended by the window.
+    #[default]
+    Off,
+    /// Asked; that computer has not answered yet.
+    Asking,
+    /// That computer blocks its own keyboard and mouse and shows its ring.
+    On,
+    /// Off, and why: that computer refused it, did not answer, or it ended
+    /// (the link or the view dropped, or control was taken away).
+    Refused(String),
 }
 
 /// How a view's picture comes, as the server measures it (PC2). Each field
@@ -155,6 +185,8 @@ pub enum Message {
     WantKeyframe,
     Input(Vec<u8>),
     Focus(bool),
+    /// [`PRIVACY_SHOW`], [`PRIVACY_HIDE`] or [`PRIVACY_LOCK`].
+    Privacy(u8),
 }
 
 impl Message {
@@ -185,6 +217,7 @@ impl Message {
             Message::WantKeyframe => (WANT_KEYFRAME, Vec::new()),
             Message::Input(packet) => (INPUT, packet.clone()),
             Message::Focus(focused) => (FOCUS, vec![u8::from(*focused)]),
+            Message::Privacy(ask) => (PRIVACY, vec![*ask]),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -235,6 +268,7 @@ impl Message {
             WANT_KEYFRAME if len == 0 => Message::WantKeyframe,
             INPUT if len > 0 && len <= MAX_INPUT => Message::Input(payload),
             FOCUS if len == 1 && payload[0] <= 1 => Message::Focus(payload[0] == 1),
+            PRIVACY if len == 1 && payload[0] <= PRIVACY_LOCK => Message::Privacy(payload[0]),
             _ => return Err(bad()),
         })
     }
@@ -376,6 +410,17 @@ mod tests {
             ),
             Message::Focus(true),
             Message::Focus(false),
+            Message::Privacy(PRIVACY_SHOW),
+            Message::Privacy(PRIVACY_HIDE),
+            Message::Privacy(PRIVACY_LOCK),
+            Message::Status(ViewStatus {
+                privacy: ViewPrivacy::Refused("Power is off".into()),
+                ..ViewStatus::default()
+            }),
+            Message::Status(ViewStatus {
+                privacy: ViewPrivacy::On,
+                ..ViewStatus::default()
+            }),
         ];
         let mut wire = Vec::new();
         for m in &messages {
@@ -408,6 +453,11 @@ mod tests {
         assert!(Message::parse(FOCUS, Vec::new()).is_err());
         assert!(Message::parse(FOCUS, vec![2]).is_err());
         assert!(Message::parse(FOCUS, vec![1, 0]).is_err());
+        // PC8: a privacy ask is one byte, show, hide or lock, nothing else.
+        assert!(Message::parse(PRIVACY, Vec::new()).is_err());
+        assert!(Message::parse(PRIVACY, vec![3]).is_err());
+        assert!(Message::parse(PRIVACY, vec![0xff]).is_err());
+        assert!(Message::parse(PRIVACY, vec![1, 1]).is_err());
         let not_json = Message::parse(STATUS, b"{nope".to_vec());
         assert!(not_json.is_err());
         // A status from a later server, with more to say, still reads.
@@ -462,6 +512,8 @@ mod tests {
             panic!("a status");
         };
         assert_eq!((before.reconnecting, before.stats), (0, None));
+        // PC8: a server before privacy says none: off.
+        assert_eq!(before.privacy, ViewPrivacy::Off);
         // Stats from a later server with a field this one does not know,
         // and with some left out.
         let later = Message::parse(

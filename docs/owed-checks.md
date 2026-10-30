@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1010 open items.
+1018 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 98 |
+| A second computer | 106 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -987,6 +987,17 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With the laptop asleep, Show its screen on its card offers "Wake it and show": the countdown runs, the laptop wakes, and its window opens by itself (note how many seconds the countdown had used); Cancel during the countdown stops the wait (the window does not open later). With Wake-on-LAN off on the laptop, two minutes later the notice says it did not come up. (where: second computer)
 - The tray on Windows (and the laptop's tray, SNI, for a computer it pasted) lists "Show <name>'s screen" above Quit, the most recently viewed first, and "Wake <name>" only while that computer sleeps; Show opens the window, or with it asleep the Overview with the offer to wake it. (where: second computer)
 - Show two computers' screens one after the other: the Overview's cards and the tray list the last one shown first, with "viewed just now". (where: second computer)
+
+**233. Privacy for the far computer from the window (PC8)**
+
+- Windows viewing the laptop with the laptop's "Lock, sleep, privacy and wake others" off for Windows: Hide what I do there stays off and the bar says that switch is off there, by its name. (where: second computer)
+- Turn that switch on on the laptop: Hide what I do there turns on within a second, the laptop's keyboard and touchpad stop working there while the window still drives it, and the bar says it is hidden; the laptop's ring shows on its screen (look at the laptop, or a screencopy count of red edge pixels) and is not in the window's picture. (where: second computer)
+- Turn it off from the bar, turn View only on, and close the window, each in turn: the laptop's keyboard and touchpad work again within a second each time. (where: second computer)
+- With it on, cut the link (stop Windows' server, or turn Wi-Fi off on Windows): the laptop's keyboard and touchpad come back without waiting for the 10-minute TTL (note how long), and the window, once back, says privacy ended. (where: second computer)
+- With it on, end the desktop app on Windows from Task Manager (a crash, not a close): the laptop's keyboard and touchpad come back within about 4 s. (where: second computer)
+- Both ways of the link: repeat the on and off with the laptop as the computer that keeps the link (its id sorts first) and with Windows keeping it, by pairing the other way round or a throwaway pair of ids. (where: second computer)
+- Lock it when I close the window, on (bar or Settings), with the switch on there: closing the window locks the laptop (`loginctl lock-session` or hyprlock); with the switch off there it does not, and a notification here says "Couldn't lock" with that switch's name; with the option off it does not. Never the other way round: Windows here is the owner's box and is never the one locked. (where: second computer)
+- With a phone holding privacy on the laptop first, Hide what I do there says another phone or computer holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
