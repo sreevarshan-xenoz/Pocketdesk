@@ -738,12 +738,14 @@ fn screen_key(key: egui::Key) -> Option<u32> {
 }
 
 /// The stats' lines about this window among others (PC11): how many views
-/// the server holds, of how many, and how long the last switch took.
+/// the server holds, of how many (every window's, of any computer, and one
+/// ended or no longer watched until it goes: PR #570 review M4), and how
+/// long the last switch took.
 pub fn window_lines(views: u32, last_switch: Option<Duration>) -> Vec<String> {
     let mut lines = Vec::new();
     if views > 0 {
         lines.push(format!(
-            "Windows: {views} of {} shown",
+            "Views on this server: {views} of {}",
             pocketdesk_core::local::view::MAX_VIEWS
         ));
     }
@@ -5743,7 +5745,7 @@ mod tests {
         assert!(window_lines(0, None).is_empty());
         assert_eq!(
             window_lines(2, Some(Duration::from_millis(840))),
-            ["Windows: 2 of 4 shown", "Last switch: 840 ms"]
+            ["Views on this server: 2 of 4", "Last switch: 840 ms"]
         );
         assert_eq!(
             screen_hint("eDP-1 (1920x1080)", 0),
