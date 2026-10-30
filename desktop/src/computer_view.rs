@@ -298,6 +298,20 @@ fn release_window_mic(state: &mut State) {
 type MicOpener =
     Arc<dyn Fn(Option<String>) -> io::Result<Box<dyn view_mic::MicSource>> + Send + Sync>;
 
+/// The microphone a window opens without a fake: the real one.
+#[cfg(not(test))]
+fn default_mic_opener() -> MicOpener {
+    Arc::new(view_mic::open)
+}
+
+/// In tests no window ever opens the real microphone (PR #570 check T3,
+/// the no-sound rule): a test that reaches capture without a fake
+/// (`mic_open`) fails here, on its own thread, before anything opens.
+#[cfg(test)]
+fn default_mic_opener() -> MicOpener {
+    panic!("a test reached the real microphone: give its window a fake (mic_open)")
+}
+
 /// How often a locked window says so again: well inside the relay's 3 s
 /// lease, so one lost word never frees it there.
 pub const POINTER_RENEW: Duration = Duration::from_secs(1);
@@ -1967,11 +1981,10 @@ fn follow_mic(
                 repaint.request_repaint_of(viewport);
                 repaint.request_repaint_of(egui::ViewportId::ROOT);
             };
-            let opener = state.mic_open.clone();
-            let open = move || match opener {
-                Some(open) => open(device),
-                None => view_mic::open(device),
-            };
+            // Chosen here, on the window's own thread: in a test without a
+            // fake this fails the test at once (PR #570 check T3).
+            let opener = state.mic_open.clone().unwrap_or_else(default_mic_opener);
+            let open = move || opener(device);
             match MicRun::start(open, send, ended) {
                 Ok(run) => {
                     state.mic_run = Some(run);
@@ -6807,5 +6820,30 @@ mod tests {
         assert!(!lock(&shared).mic.on() && !lock(&shared).mic.wanted());
         drop(harness);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check T3: a window in a test with no fake microphone that
+    /// reaches capture fails loudly, on the test's thread, and opens
+    /// nothing.
+    #[test]
+    #[should_panic(expected = "a test reached the real microphone")]
+    fn a_test_never_opens_the_real_microphone() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            writer: Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap()),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        state.mic.toggle();
+        let shared = Arc::new(Mutex::new(State::default()));
+        follow_mic(&shared, &mut state, None, &egui::Context::default(), true);
     }
 }
