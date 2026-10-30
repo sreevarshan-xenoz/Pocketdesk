@@ -147,6 +147,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     crate::nearby::answer(&dir, &nearby, accept, mine).await;
                 }
                 ComputerAsk::Forget { device_id } => {
+                    // PC6 review M-3: told to forget how to wake this one
+                    // while a link is up; forgotten here either way.
+                    tell_forget(&device_id).await;
                     if let Some(link) = links.remove(&device_id) {
                         link.task.abort();
                     }
@@ -1479,6 +1482,38 @@ async fn back_off(wait: Duration, nudged: &tokio::sync::Notify) -> bool {
     }
 }
 
+/// How long an unpairing waits for its "forget how to wake me" to leave.
+const FORGET_TOLD: Duration = Duration::from_secs(1);
+
+/// Tell the computer `device_id`, when linked now, to forget how to wake
+/// this one (PC6 review M-3), before it is unpaired here: on the link this
+/// computer keeps, once the link has taken it, or on that computer's own
+/// connection here. Waits at most [`FORGET_TOLD`].
+async fn tell_forget(device_id: &str) {
+    let packet = crate::computer_wake::packet_for(false, None);
+    if let Some(outgoing) = live(device_id) {
+        let _ = tokio::time::timeout(FORGET_TOLD, async {
+            if outgoing.send(packet).await.is_err() {
+                return;
+            }
+            // Taken off the queue, then a moment to be written.
+            while outgoing.capacity() < outgoing.max_capacity() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        })
+        .await;
+        return;
+    }
+    let client = crate::state::clone_clients()
+        .await
+        .into_iter()
+        .find(|c| c.device_id() == device_id);
+    if let Some(client) = client {
+        let _ = tokio::time::timeout(FORGET_TOLD, client.send_packet(&packet)).await;
+    }
+}
+
 /// The owner's Wake for the computer `device_id` (PC6): the magic packet,
 /// off the runtime, and its link dialed again at once.
 fn asked_wake(dir: &Path, device_id: String) {
@@ -2438,6 +2473,25 @@ mod tests {
                 paired_unix: 1,
             }]
         );
+    }
+
+    /// PC6 review M-3: unpairing a computer whose link is up tells it to
+    /// forget how to wake this one, on the link, before it goes.
+    #[tokio::test]
+    async fn unpairing_tells_a_linked_computer_to_forget() {
+        let (tx, mut rx) = mpsc::channel(32);
+        let _live = LiveLink::new("pc-forget", tx);
+        let read = tokio::spawn(async move { rx.recv().await });
+        let started = std::time::Instant::now();
+        tell_forget("pc-forget").await;
+        let told = read.await.unwrap().expect("told");
+        assert_eq!(told.packet_type, crate::computer_wake::COMPUTER_WAKE);
+        assert_eq!(told.body, serde_json::json!({}));
+        assert!(started.elapsed() <= FORGET_TOLD + Duration::from_millis(200));
+        // Not linked: nothing to tell, and no wait.
+        let started = std::time::Instant::now();
+        tell_forget("pc-not-linked").await;
+        assert!(started.elapsed() < FORGET_TOLD);
     }
 
     /// PC6 review I-1: a nudge cuts a pending backoff short, and one
