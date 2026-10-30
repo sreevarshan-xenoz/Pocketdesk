@@ -186,6 +186,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     device_id,
                     monitor,
                     hevc,
+                    window,
                 } => {
                     // PC6: viewed now, for the recents, off the runtime.
                     let (at, id) = (dir.clone(), device_id.clone());
@@ -197,6 +198,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         device_id,
                         monitor,
                         hevc,
+                        window,
                     };
                     if views.send(start).await.is_err() {
                         tracing::warn!(
@@ -204,15 +206,20 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         );
                     }
                 }
-                ComputerAsk::StopView { session_id, lock } => {
+                ComputerAsk::StopView {
+                    session_id,
+                    lock,
+                    window,
+                } => {
                     if let Some(views) = &views {
                         // The window's lock on close that did not reach the
                         // relay goes first (PR #568 review I2).
                         if lock {
-                            let ask = crate::computer_view::Command::LockAsItStops { session_id };
+                            let ask =
+                                crate::computer_view::Command::LockAsItStops { session_id, window };
                             let _ = views.send(ask).await;
                         }
-                        let stop = crate::computer_view::Command::Stop { session_id };
+                        let stop = crate::computer_view::Command::Stop { session_id, window };
                         let _ = views.send(stop).await;
                     }
                 }

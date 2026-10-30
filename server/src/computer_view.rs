@@ -38,7 +38,6 @@ use std::time::{Duration, Instant};
 
 use pocketdesk_core::local::cast::{TOKEN_LEN, token_hex, token_matches};
 use pocketdesk_core::local::computers::{self, PeerComputer};
-use pocketdesk_core::local::paths::VIEW_FILE;
 use pocketdesk_core::local::view::{
     self as wire, Message, Phase, ViewFile, ViewPrivacy, ViewStatus,
 };
@@ -211,21 +210,24 @@ pub fn window_gone(unwatched_since: Option<Instant>, now: Instant) -> bool {
 /// What the Computers page asks of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// Show the computer `device_id`'s screen `monitor`, replacing any view.
-    /// `hevc`: the app decodes HEVC and asks for it (PC5).
+    /// Show the computer `device_id`'s screen `monitor` in the app's
+    /// window `window` (PC11: up to [`wire::MAX_VIEWS`] at once), replacing
+    /// that window's view. `hevc`: the app decodes HEVC and asks for it (PC5).
     Start {
         device_id: String,
         monitor: u32,
         hevc: bool,
+        window: u8,
     },
     /// Stop showing it: the view `session_id` when given (one since
-    /// replaced is left alone, BK7 review M1), else the one shown now.
-    Stop { session_id: Option<u64> },
-    /// Lock the computer of the view `session_id` (or of the one shown now)
-    /// as its window closes (PR #568 review I2): the window's own lock ask
-    /// did not reach this relay. Its privacy is let go first; with no such
-    /// view, the owner is told it could not lock.
-    LockAsItStops { session_id: Option<u64> },
+    /// replaced is left alone, BK7 review M1), else the one the window
+    /// `window` shows now.
+    Stop { session_id: Option<u64>, window: u8 },
+    /// Lock the computer of the view `session_id` (or of the one the window
+    /// `window` shows now) as its window closes (PR #568 review I2): the
+    /// window's own lock ask did not reach this relay. Its privacy is let go
+    /// first; with no such view, the owner is told it could not lock.
+    LockAsItStops { session_id: Option<u64>, window: u8 },
     /// The computer `device_id` was forgotten here (PR #551 review I1): its
     /// view, if shown, ends.
     Forgotten { device_id: String },
@@ -1679,11 +1681,17 @@ impl Drop for PrivacyHold {
 
 struct View {
     session_id: u64,
+    /// The app's window it is for (PC11), and so its file.
+    window: u8,
     device_id: String,
     /// The computer's name, for the window's words.
     name: String,
     /// Its privacy mode, while the window holds it (PC8).
     privacy: Option<PrivacyHold>,
+    /// The privacy came with the window from its last screen (PC11), at
+    /// this time: kept while this view connects and is let in, as a
+    /// switch's new session is not a drop, for at most [`CARRY_FOR`].
+    carried: Option<Instant>,
     token: [u8; TOKEN_LEN],
     input: mpsc::Sender<InputPacket>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -1719,6 +1727,59 @@ impl Drop for Viewer {
     fn drop(&mut self) {
         self.reader.abort();
     }
+}
+
+/// The views held, one a window (PC11), and the window watching each.
+const SLOTS: usize = wire::MAX_VIEWS as usize;
+type Views = [Option<View>; SLOTS];
+type Viewers = [Option<Viewer>; SLOTS];
+
+/// The slot of the view `session_id`, if it is still held.
+fn slot_of(views: &Views, session_id: u64) -> Option<usize> {
+    views
+        .iter()
+        .position(|v| v.as_ref().is_some_and(|v| v.session_id == session_id))
+}
+
+/// How many views are held now: what each window's stats count (PC11).
+fn held(views: &Views) -> u32 {
+    views.iter().flatten().count() as u32
+}
+
+/// Where a Stop or a lock for `session_id` from the window `window` goes:
+/// the slot holding that view, else, with no view named, the window's own.
+/// A view since replaced is in no slot, and its window's slot holds another
+/// (BK7 review M1), which [`stops`] then leaves alone.
+pub fn stop_slot(held: &[Option<u64>], session_id: Option<u64>, window: u8) -> Option<usize> {
+    session_id
+        .and_then(|id| held.iter().position(|s| *s == Some(id)))
+        .or_else(|| (usize::from(window) < held.len()).then_some(usize::from(window)))
+}
+
+/// Whether privacy is held there for the computer `device_id` by a view
+/// other than `session_id` (PC11): one computer's privacy is its own, so a
+/// second window of it does not ask it again.
+fn held_elsewhere(views: &Views, device_id: &str, session_id: u64) -> bool {
+    views
+        .iter()
+        .flatten()
+        .any(|v| v.session_id != session_id && v.device_id == device_id && v.privacy.is_some())
+}
+
+/// How long privacy carried from the window's last screen (PC11) waits for
+/// the new screen's view to be let in: about a session's start. A computer
+/// that asks its owner first would have them answer with its keyboard
+/// blocked, so it is let go past this.
+pub const CARRY_FOR: Duration = Duration::from_secs(5);
+
+/// Whether privacy carried from the window's last screen at `carried`
+/// (PC11) waits out this status at `now`: while the new view connects or
+/// waits to be let in, within [`CARRY_FOR`], not once it reconnects or is
+/// shown (and then judged as any view's).
+pub fn carried_waits(carried: Option<Instant>, status: &ViewStatus, now: Instant) -> bool {
+    carried.is_some_and(|at| now.saturating_duration_since(at) < CARRY_FOR)
+        && status.phase != Phase::Showing
+        && status.reconnecting == 0
 }
 
 /// The relay's loop, over `listener` (bound to loopback).
@@ -1768,12 +1829,16 @@ pub async fn run_with(
     };
     let dialer = Arc::new(dialer);
     // A file left by a server that stopped mid-view names nothing now.
-    let _ = std::fs::remove_file(state_dir.join(VIEW_FILE));
+    for window in 0..wire::MAX_VIEWS {
+        let _ = std::fs::remove_file(state_dir.join(wire::file_name(window)));
+    }
     let mut next_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(1, |d| d.as_millis() as u64);
-    let mut view: Option<View> = None;
-    let mut viewer: Option<Viewer> = None;
+    // PC11: up to MAX_VIEWS views, one for each of the app's windows, each
+    // with its own token, session and relay connection.
+    let mut views: Views = Default::default();
+    let mut viewers: Viewers = Default::default();
     let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64);
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
     let (focus_tx, mut focus_rx) = mpsc::channel::<(u64, bool)>(8);
@@ -1784,20 +1849,27 @@ pub async fn run_with(
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
-                let Command::Start { device_id, monitor, hevc } = command else {
+                let shown: Vec<Option<u64>> =
+                    views.iter().map(|v| v.as_ref().map(|v| v.session_id)).collect();
+                let Command::Start { device_id, monitor, hevc, window } = command else {
                     match command {
-                        Command::Stop { session_id }
-                            if stops(session_id, view.as_ref().map(|v| v.session_id)) =>
-                        {
-                            end(&mut view, &mut viewer, &state_dir, None);
+                        Command::Stop { session_id, window } => {
+                            if let Some(i) = stop_slot(&shown, session_id, window)
+                                && stops(session_id, shown[i])
+                            {
+                                end(&mut views[i], &mut viewers[i], &state_dir, None);
+                            }
                         }
-                        Command::Forgotten { device_id }
-                            if view.as_ref().is_some_and(|v| v.device_id == device_id) =>
-                        {
-                            end(&mut view, &mut viewer, &state_dir, Some(NOT_PAIRED));
+                        Command::Forgotten { device_id } => {
+                            for (view, viewer) in views.iter_mut().zip(viewers.iter_mut()) {
+                                if view.as_ref().is_some_and(|v| v.device_id == device_id) {
+                                    end(view, viewer, &state_dir, Some(NOT_PAIRED));
+                                }
+                            }
                         }
-                        Command::LockAsItStops { session_id } => {
-                            match view.as_mut().filter(|v| {
+                        Command::LockAsItStops { session_id, window } => {
+                            let slot = stop_slot(&shown, session_id, window);
+                            match slot.and_then(|i| views[i].as_mut()).filter(|v| {
                                 stops(session_id, Some(v.session_id)) && v.ended.is_none()
                             }) {
                                 Some(v) => {
@@ -1812,11 +1884,25 @@ pub async fn run_with(
                                 )),
                             }
                         }
-                        _ => {}
+                        Command::Start { .. } => {}
                     }
                     continue;
                 };
-                end(&mut view, &mut viewer, &state_dir, None);
+                // At most MAX_VIEWS, one a window (PC11): a window beyond
+                // them is never one of the app's.
+                let slot = usize::from(window);
+                if slot >= SLOTS {
+                    tracing::warn!(window, "A view for a window past the last was not shown");
+                    continue;
+                }
+                // The same window showing the same computer's other screen
+                // keeps its privacy there (PC11): the hold moves with it, so
+                // that computer's keyboard is never let go between screens.
+                let carried = views[slot]
+                    .as_mut()
+                    .filter(|v| v.device_id == device_id && v.ended.is_none())
+                    .and_then(|v| v.privacy.take().map(|hold| (hold, v.status.privacy.clone())));
+                end(&mut views[slot], &mut viewers[slot], &state_dir, None);
                 next_id += 1;
                 let session_id = next_id;
                 let computer = computers::read(&state_dir)
@@ -1833,7 +1919,7 @@ pub async fn run_with(
                     port,
                     token: token_hex(&token),
                 };
-                if let Err(e) = wire::write(&state_dir, &file) {
+                if let Err(e) = wire::write_window(&state_dir, window, &file) {
                     tracing::warn!(error = %e, "Could not say where the view is");
                 }
                 let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE);
@@ -1856,16 +1942,22 @@ pub async fn run_with(
                         Some((NOT_PAIRED.to_string(), Instant::now())),
                     ),
                 };
-                view = Some(View {
+                let (privacy, privacy_said) = match carried {
+                    Some((hold, said)) => (Some(hold), said),
+                    None => (None, ViewPrivacy::Off),
+                };
+                views[slot] = Some(View {
                     session_id,
+                    window,
                     device_id,
                     name,
-                    privacy: None,
+                    carried: privacy.is_some().then(Instant::now),
+                    privacy,
                     token,
                     input: input_tx,
                     task,
                     config: None,
-                    status: ViewStatus { monitor, ..ViewStatus::default() },
+                    status: ViewStatus { monitor, privacy: privacy_said, ..ViewStatus::default() },
                     ended,
                     unwatched_since: Some(Instant::now()),
                     asks: CastChain::default(),
@@ -1874,9 +1966,10 @@ pub async fn run_with(
                 });
             }
             Some((session_id, event)) = events.recv() => {
-                let Some(current) = view.as_mut().filter(|v| v.session_id == session_id) else {
-                    continue;
-                };
+                let Some(i) = slot_of(&views, session_id) else { continue };
+                let count = held(&views);
+                let (view, viewer) = (&mut views[i], &mut viewers[i]);
+                let Some(current) = view.as_mut() else { continue };
                 let watching = viewer.as_ref().filter(|v| v.session_id == session_id);
                 match event {
                     Event::Status(mut status) => {
@@ -1886,10 +1979,17 @@ pub async fn run_with(
                             // window's too (PR #551 review M6).
                             None => current.window_dropped = 0,
                         }
+                        status.views = count;
                         // Privacy is the relay's to say (PC8): it ends
-                        // there as the view drops or control goes.
+                        // there as the view drops or control goes; one
+                        // carried from the last screen waits for this one
+                        // to be let in (PC11).
                         status.privacy = current.status.privacy.clone();
+                        if !carried_waits(current.carried, &status, Instant::now()) {
+                            current.carried = None;
+                        }
                         if current.privacy.is_some()
+                            && current.carried.is_none()
                             && let Some(why) = privacy_ends(&status, &current.name)
                         {
                             current.privacy = None;
@@ -1907,7 +2007,7 @@ pub async fn run_with(
                         if let Some(v) = watching
                             && v.tx.try_send(config).is_err()
                         {
-                            viewer = None;
+                            *viewer = None;
                         }
                     }
                     Event::Frame { keyframe, seq, data } => {
@@ -1930,28 +2030,30 @@ pub async fn run_with(
                         // that has not come yet finds it still named, and
                         // hears why as it joins (or it goes in a minute).
                         if watching.is_some() {
-                            viewer = None;
-                            end(&mut view, &mut None, &state_dir, None);
+                            *viewer = None;
+                            end(view, &mut None, &state_dir, None);
                         }
                     }
                 }
             }
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else { continue };
-                if let Some(v) = &view
+                let tokens: Vec<([u8; TOKEN_LEN], u64)> =
+                    views.iter().flatten().map(|v| (v.token, v.session_id)).collect();
+                if !tokens.is_empty()
                     && let Ok(slot) = pending.clone().try_acquire_owned()
                 {
-                    let (token, session_id, joined) = (v.token, v.session_id, joined_tx.clone());
+                    let joined = joined_tx.clone();
                     tokio::spawn(async move {
-                        authenticate(stream, token, session_id, joined).await;
+                        authenticate(stream, tokens, joined).await;
                         drop(slot);
                     });
                 }
             }
             Some((session_id, stream)) = joined_rx.recv() => {
-                let Some(v) = view.as_mut().filter(|v| v.session_id == session_id) else {
-                    continue;
-                };
+                let Some(i) = slot_of(&views, session_id) else { continue };
+                let (view, viewer) = (&mut views[i], &mut viewers[i]);
+                let Some(v) = view.as_mut() else { continue };
                 let joined = start_viewer(
                     stream,
                     session_id,
@@ -1966,25 +2068,23 @@ pub async fn run_with(
                 }
                 if let Some((why, _)) = &v.ended {
                     let _ = joined.tx.try_send(Message::End { why: why.clone() });
-                    end(&mut view, &mut None, &state_dir, None);
-                    viewer = None;
+                    end(view, &mut None, &state_dir, None);
+                    *viewer = None;
                     continue;
                 }
                 // A new viewer starts from a keyframe.
                 let _ = v.input.try_send(InputPacket::RequestKeyframe);
                 v.unwatched_since = None;
-                tracing::info!(device_id = %v.device_id, "Another computer's screen is being shown");
-                viewer = Some(joined);
+                tracing::info!(device_id = %v.device_id, window = v.window, "Another computer's screen is being shown");
+                *viewer = Some(joined);
             }
             Some((session_id, focused)) = focus_rx.recv() => {
                 // The window watching the view now, of a view still going.
-                let Some(v) = view
-                    .as_mut()
-                    .filter(|v| v.session_id == session_id && v.ended.is_none())
-                else {
+                let Some(i) = slot_of(&views, session_id) else { continue };
+                let Some(v) = views[i].as_mut().filter(|v| v.ended.is_none()) else {
                     continue;
                 };
-                if viewer.as_ref().is_none_or(|w| w.session_id != session_id) {
+                if viewers[i].as_ref().is_none_or(|w| w.session_id != session_id) {
                     continue;
                 }
                 // The app settles the focus first; a client that does not
@@ -1997,11 +2097,14 @@ pub async fn run_with(
                 window_focus(v.device_id.clone(), focused, v.status.control);
             }
             Some((session_id, device_id, ask)) = privacy_rx.recv() => {
-                let watching = viewer.as_ref().is_some_and(|w| w.session_id == session_id);
-                let Some(v) = view
-                    .as_mut()
-                    .filter(|v| v.session_id == session_id && v.ended.is_none() && watching)
-                else {
+                let slot = slot_of(&views, session_id);
+                let watching = slot.is_some_and(|i| {
+                    viewers[i].as_ref().is_some_and(|w| w.session_id == session_id)
+                });
+                let elsewhere = held_elsewhere(&views, &device_id, session_id);
+                let Some(i) = slot.filter(|i| {
+                    watching && views[*i].as_ref().is_some_and(|v| v.ended.is_none())
+                }) else {
                     // The view went before its window's last word: its
                     // privacy was let go as it ended; a lock is still asked.
                     if ask == wire::PRIVACY_LOCK {
@@ -2023,7 +2126,14 @@ pub async fn run_with(
                     }
                     continue;
                 };
+                let Some(v) = views[i].as_mut() else { continue };
                 let said = match privacy_step(ask, v.privacy.is_some(), &v.status, &v.name) {
+                    // Another window of that computer holds it already
+                    // (PC11): its privacy is that computer's, held once.
+                    PrivacyStep::Grab if elsewhere => ViewPrivacy::Refused(format!(
+                        "Another window of {} already hides what you do there.",
+                        v.name
+                    )),
                     PrivacyStep::Grab => {
                         v.privacy = Some(PrivacyHold::ask(
                             &v.device_id,
@@ -2049,7 +2159,7 @@ pub async fn run_with(
                     PrivacyStep::Nothing if ask == wire::PRIVACY_SHOW => ViewPrivacy::Off,
                     PrivacyStep::Nothing => v.status.privacy.clone(),
                 };
-                answer_privacy(v, viewer.as_ref(), said);
+                answer_privacy(v, viewers[i].as_ref(), said);
             }
             Some((device_id, body)) = privacy_answers.recv() => {
                 // The answer to a lock asked as the window closed (review
@@ -2068,13 +2178,16 @@ pub async fn run_with(
                 }
                 // Only an answer to the hold's newest ask (review M3): one to
                 // an older ask, refused late, leaves a newer grab alone.
-                let Some(v) = view.as_mut().filter(|v| {
-                    v.device_id == device_id
-                        && v.privacy.as_ref().is_some_and(|h| answers_ask(&body, h.asked))
+                let Some(i) = views.iter().position(|v| {
+                    v.as_ref().is_some_and(|v| {
+                        v.device_id == device_id
+                            && v.privacy.as_ref().is_some_and(|h| answers_ask(&body, h.asked))
+                    })
                 }) else {
                     continue;
                 };
-                let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
+                let Some(v) = views[i].as_mut() else { continue };
+                let watching = viewers[i].as_ref().filter(|w| w.session_id == v.session_id);
                 match privacy_heard(&body) {
                     Some(Ok(())) => {
                         if let Some(hold) = v.privacy.as_mut() {
@@ -2102,73 +2215,100 @@ pub async fn run_with(
                 {
                     privacy_notice(lock_failed_words(&pending.name, "it did not answer."));
                 }
-                // A window gone (closed, crashed): its socket closed, so its
-                // reader ended, or its writer can no longer write.
-                if viewer.as_ref().is_some_and(|v| {
-                    v.reader.is_finished()
-                        || (v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed())
-                }) {
-                    viewer = None;
-                }
                 let now = Instant::now();
-                if let Some(v) = view.as_mut() {
-                    let watched = viewer.as_ref().is_some_and(|w| w.session_id == v.session_id);
-                    if watched {
-                        v.unwatched_since = None;
-                    } else if v.unwatched_since.is_none() {
-                        v.unwatched_since = Some(now);
-                    }
-                }
-                // A privacy mode held there is renewed only while a window
-                // watches (PR #561 review I2): with none for
-                // [`WINDOW_GRACE`], it is let go; else given up when that
-                // computer stopped answering (PC8). Within the grace (PR #563
-                // re-review N2) nothing is renewed or given up: the window
-                // joining again finds it as it was.
-                if let Some(v) = view.as_mut()
-                    && v.privacy.is_some()
-                {
-                    let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
-                    let due = v
-                        .privacy
-                        .as_ref()
-                        .map(|hold| privacy_due(hold.on, hold.waiting, hold.sent, now));
-                    if watching.is_none() {
-                        if window_gone(v.unwatched_since, now) {
-                            v.privacy = None;
-                            tracing::info!(device_id = %v.device_id, "Privacy there let go: no window watches it");
-                            say_privacy(v, None, ViewPrivacy::Refused(WINDOW_GONE.to_string()));
-                        }
-                    } else {
-                        match due {
-                            Some(PrivacyDue::Renew) => {
-                                if let Some(hold) = v.privacy.as_mut() {
-                                    hold.renew(now);
-                                }
-                            }
-                            Some(PrivacyDue::GiveUp) => {
-                                v.privacy = None;
-                                let why = format!("{} did not answer; privacy is off here.", v.name);
-                                say_privacy(v, watching, ViewPrivacy::Refused(why));
-                            }
-                            Some(PrivacyDue::Nothing) | None => {}
-                        }
-                    }
-                }
-                if let Some(v) = view.as_mut() {
-                    let unwatched = v.unwatched_since.is_some_and(|t| now.duration_since(t) >= UNWATCHED);
-                    let stale = v.ended.as_ref().is_some_and(|(_, at)| now.duration_since(*at) >= ENDED_KEPT);
-                    if stale || (unwatched && v.ended.is_none()) {
-                        if unwatched && v.ended.is_none() {
-                            tracing::info!(device_id = %v.device_id, "Another computer's screen ended: no window shows it");
-                        }
-                        end(&mut view, &mut viewer, &state_dir, None);
-                    }
+                for (view, viewer) in views.iter_mut().zip(viewers.iter_mut()) {
+                    beat(view, viewer, &state_dir, now);
                 }
             }
         }
     }
-    end(&mut view, &mut viewer, &state_dir, None);
+    for (view, viewer) in views.iter_mut().zip(viewers.iter_mut()) {
+        end(view, viewer, &state_dir, None);
+    }
+}
+
+/// One view's heartbeat: its window gone, its privacy renewed or let go,
+/// and the view ended when nobody watches it or it ended a while ago.
+fn beat(view: &mut Option<View>, viewer: &mut Option<Viewer>, state_dir: &Path, now: Instant) {
+    // A window gone (closed, crashed): its socket closed, so its
+    // reader ended, or its writer can no longer write.
+    if viewer.as_ref().is_some_and(|v| {
+        v.reader.is_finished() || (v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed())
+    }) {
+        *viewer = None;
+    }
+    if let Some(v) = view.as_mut() {
+        let watched = viewer
+            .as_ref()
+            .is_some_and(|w| w.session_id == v.session_id);
+        if watched {
+            v.unwatched_since = None;
+        } else if v.unwatched_since.is_none() {
+            v.unwatched_since = Some(now);
+        }
+        // Privacy carried from the window's last screen that waited its
+        // while (PC11) is judged as any view's now.
+        if v.carried.is_some() && !carried_waits(v.carried, &v.status, now) {
+            v.carried = None;
+            if v.privacy.is_some()
+                && let Some(why) = privacy_ends(&v.status, &v.name)
+            {
+                v.privacy = None;
+                say_privacy(v, viewer.as_ref(), ViewPrivacy::Refused(why));
+            }
+        }
+    }
+    // A privacy mode held there is renewed only while a window
+    // watches (PR #561 review I2): with none for
+    // [`WINDOW_GRACE`], it is let go; else given up when that
+    // computer stopped answering (PC8). Within the grace (PR #563
+    // re-review N2) nothing is renewed or given up: the window
+    // joining again finds it as it was.
+    if let Some(v) = view.as_mut()
+        && v.privacy.is_some()
+    {
+        let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
+        let due = v
+            .privacy
+            .as_ref()
+            .map(|hold| privacy_due(hold.on, hold.waiting, hold.sent, now));
+        if watching.is_none() {
+            if window_gone(v.unwatched_since, now) {
+                v.privacy = None;
+                tracing::info!(device_id = %v.device_id, "Privacy there let go: no window watches it");
+                say_privacy(v, None, ViewPrivacy::Refused(WINDOW_GONE.to_string()));
+            }
+        } else {
+            match due {
+                Some(PrivacyDue::Renew) => {
+                    if let Some(hold) = v.privacy.as_mut() {
+                        hold.renew(now);
+                    }
+                }
+                Some(PrivacyDue::GiveUp) => {
+                    v.privacy = None;
+                    let why = format!("{} did not answer; privacy is off here.", v.name);
+                    say_privacy(v, watching, ViewPrivacy::Refused(why));
+                }
+                Some(PrivacyDue::Nothing) | None => {}
+            }
+        }
+    }
+    if let Some(v) = view.as_mut() {
+        let unwatched = v
+            .unwatched_since
+            .is_some_and(|t| now.duration_since(t) >= UNWATCHED);
+        let stale = v
+            .ended
+            .as_ref()
+            .is_some_and(|(_, at)| now.duration_since(*at) >= ENDED_KEPT);
+        if stale || (unwatched && v.ended.is_none()) {
+            if unwatched && v.ended.is_none() {
+                tracing::info!(device_id = %v.device_id, "Another computer's screen ended: no window shows it");
+            }
+            end(view, viewer, state_dir, None);
+        }
+    }
 }
 
 /// A focus passed on at most this often (PR #554 review M2): the app
@@ -2221,7 +2361,8 @@ fn answer_privacy(view: &mut View, viewer: Option<&Viewer>, privacy: ViewPrivacy
     }
 }
 
-/// The view is over: its window is told, and `view.json` forgets it.
+/// The view is over: its window is told, and its file (`view.json` for
+/// the first window) forgets it.
 fn end(view: &mut Option<View>, viewer: &mut Option<Viewer>, state_dir: &Path, why: Option<&str>) {
     if let Some(v) = viewer.take() {
         let _ = v.tx.try_send(Message::End {
@@ -2229,25 +2370,38 @@ fn end(view: &mut Option<View>, viewer: &mut Option<Viewer>, state_dir: &Path, w
         });
     }
     if let Some(v) = view.take()
-        && let Err(e) = wire::remove(state_dir, v.session_id)
+        && let Err(e) = wire::remove_window(state_dir, v.window, v.session_id)
     {
         tracing::warn!(error = %e, "Could not forget the view");
     }
 }
 
-/// A connection becomes the viewer once it sends the view's token.
+/// A connection becomes a view's viewer once it sends that view's token,
+/// one of `tokens` (PC11: each view has its own).
 async fn authenticate(
     mut stream: TcpStream,
-    token: [u8; TOKEN_LEN],
-    session_id: u64,
+    tokens: Vec<([u8; TOKEN_LEN], u64)>,
     joined: mpsc::Sender<(u64, TcpStream)>,
 ) {
     let mut given = [0u8; TOKEN_LEN];
-    match tokio::time::timeout(TOKEN_WAIT, stream.read_exact(&mut given)).await {
-        Ok(Ok(_)) if token_matches(&token, &given) => {
+    let read = tokio::time::timeout(TOKEN_WAIT, stream.read_exact(&mut given)).await;
+    // Every token is compared, so the time taken says nothing of which.
+    let found = matches!(read, Ok(Ok(_)))
+        .then(|| {
+            tokens.iter().fold(None, |found, (token, session_id)| {
+                if token_matches(token, &given) {
+                    Some(*session_id)
+                } else {
+                    found
+                }
+            })
+        })
+        .flatten();
+    match found {
+        Some(session_id) => {
             let _ = joined.send((session_id, stream)).await;
         }
-        _ => tracing::warn!("Refused a view's window without the token"),
+        None => tracing::warn!("Refused a view's window without the token"),
     }
 }
 
@@ -2695,6 +2849,47 @@ mod tests {
         assert!(!stops(Some(5), Some(6)), "replaced since");
         assert!(stops(None, Some(6)), "the window never knew its view");
         assert!(!stops(Some(5), None));
+    }
+
+    /// PC11: a Stop or a lock goes to the slot holding the view it names,
+    /// else to its window's own; one past the last window finds none.
+    #[test]
+    fn a_stop_finds_the_window_of_its_view() {
+        let held = [Some(5), None, Some(9), None];
+        assert_eq!(stop_slot(&held, Some(9), 0), Some(2), "by its view");
+        assert_eq!(stop_slot(&held, None, 1), Some(1), "by its window");
+        // A view since replaced: its window's slot, where `stops` then
+        // leaves the newer view alone.
+        assert_eq!(stop_slot(&held, Some(4), 0), Some(0));
+        assert!(!stops(Some(4), held[0]));
+        assert_eq!(stop_slot(&held, None, 4), None);
+    }
+
+    /// PC11: privacy carried from the window's last screen waits while the
+    /// new view connects and is let in, for a while; a reconnect, the view
+    /// shown, or the while past, and it is judged as any view's.
+    #[test]
+    fn carried_privacy_waits_only_while_the_view_starts() {
+        let status = |phase, reconnecting| ViewStatus {
+            phase,
+            reconnecting,
+            ..ViewStatus::default()
+        };
+        let at = Instant::now();
+        let soon = at + Duration::from_secs(1);
+        assert!(carried_waits(Some(at), &status(Phase::Connecting, 0), soon));
+        assert!(carried_waits(Some(at), &status(Phase::Waiting, 0), soon));
+        assert!(!carried_waits(None, &status(Phase::Connecting, 0), soon));
+        assert!(!carried_waits(
+            Some(at),
+            &status(Phase::Connecting, 1),
+            soon
+        ));
+        assert!(!carried_waits(Some(at), &status(Phase::Showing, 0), soon));
+        // An owner asked there would answer with the keyboard blocked: let
+        // go past the while.
+        let late = at + CARRY_FOR;
+        assert!(!carried_waits(Some(at), &status(Phase::Waiting, 0), late));
     }
 
     /// BK7 review M7: with the queue to the other computer full, a press

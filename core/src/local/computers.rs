@@ -329,6 +329,12 @@ pub enum ComputerAsk {
         monitor: u32,
         #[serde(default)]
         hevc: bool,
+        /// Which of the app's screen windows asks (PC11): 0 the first, the
+        /// one every app before PC11 has; up to [`super::view::MAX_VIEWS`]
+        /// views are held at once, one a window, and a window's new ask
+        /// replaces only its own view.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        window: u8,
     },
     /// Ask the nearby computer `device_id` (found by its announcement, at
     /// `address`, control port `port`) to pair ([`super::nearby`]). `mine`:
@@ -372,7 +378,16 @@ pub enum ComputerAsk {
         session_id: Option<u64>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         lock: bool,
+        /// The window that closed (PC11): with no `session_id`, its view
+        /// is the one stopped.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        window: u8,
     },
+}
+
+/// Whether a window number is the first window's, left out of a request.
+fn is_zero(n: &u8) -> bool {
+    *n == 0
 }
 
 /// One request, as a file in `computers_out/`.
@@ -790,6 +805,7 @@ mod tests {
                 device_id: "desk".to_string(),
                 monitor: 1,
                 hevc: true,
+                window: 0,
             },
             100,
         )
@@ -799,6 +815,7 @@ mod tests {
             ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: false,
+                window: 0,
             },
             101,
         )
@@ -809,6 +826,7 @@ mod tests {
             ask: ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: false,
+                window: 0,
             },
             created_unix: 1,
             created_ms: 2,
@@ -827,6 +845,7 @@ mod tests {
                 device_id: "desk".to_string(),
                 monitor: 0,
                 hevc: false,
+                window: 0,
             },
             "the first screen unless named, and no HEVC from an app before PC5"
         );
@@ -914,12 +933,14 @@ mod tests {
                     ComputerAsk::StopView {
                         session_id: None,
                         lock: false,
+                        window: 0,
                     }
                 } else {
                     ComputerAsk::View {
                         device_id: format!("desk-{n}"),
                         monitor: 0,
                         hevc: false,
+                        window: 0,
                     }
                 };
                 asked.push(request(&dir, ask, 100).unwrap());
@@ -944,13 +965,15 @@ mod tests {
             old.ask,
             ComputerAsk::StopView {
                 session_id: None,
-                lock: false
+                lock: false,
+                window: 0
             }
         );
         // The lock rides the stop only when asked (PR #568 review I2).
         let locking = serde_json::to_value(ComputerAsk::StopView {
             session_id: None,
             lock: true,
+            window: 0,
         })
         .unwrap();
         assert_eq!(

@@ -113,18 +113,20 @@ async fn other_computer_sending(
             .expect("accepted")
             .await
             .expect("handshake");
-        serve(conn, input, frame, hang_up).await;
+        serve(conn, input, frame, hang_up, None).await;
     });
     addr
 }
 
 /// One session of the stand-in, until `hang_up` says why it closes (or the
-/// viewer goes).
+/// viewer goes). The screen its client asked for goes to `screen`, when
+/// given (PC11).
 async fn serve(
     conn: quinn::Connection,
     input: mpsc::UnboundedSender<InputPacket>,
     frame: Vec<u8>,
     hang_up: tokio::sync::oneshot::Receiver<&'static [u8]>,
+    screen: Option<Arc<std::sync::Mutex<Option<u32>>>>,
 ) {
     // What the client sends: its config streams, then input.
     let reading = conn.clone();
@@ -134,6 +136,14 @@ async fn serve(
                 continue;
             };
             if bytes.first().is_some_and(|b| *b >= 0xF0) {
+                // [0xFF, 0x00, monitor u32 LE]: the screen asked for.
+                if let Some(screen) = &screen
+                    && bytes.len() >= 6
+                    && bytes[..2] == [0xFF, 0x00]
+                {
+                    let n = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]);
+                    *screen.lock().unwrap() = Some(n);
+                }
                 continue;
             }
             if let Ok(packet) = InputPacket::decode(&bytes)
@@ -229,7 +239,7 @@ async fn other_computer_again_and_again(
             }
             let (this_tx, this_rx) = tokio::sync::oneshot::channel();
             let (input, _ignored) = mpsc::unbounded_channel();
-            let session = tokio::spawn(serve(conn, input, keyframe(), this_rx));
+            let session = tokio::spawn(serve(conn, input, keyframe(), this_rx, None));
             // The next hang-up closes this session.
             match hang_up_rx.recv().await {
                 Some(reason) => {
@@ -300,6 +310,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -464,6 +475,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -533,6 +545,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
     commands
         .send(Command::Stop {
             session_id: Some(file.session_id),
+            window: 0,
         })
         .await
         .unwrap();
@@ -577,6 +590,7 @@ async fn shown_view(
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -730,6 +744,7 @@ async fn frames_too_large_for_the_window_are_said() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -772,6 +787,7 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
             device_id: "gone".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -789,7 +805,10 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
     assert_eq!(why, "That computer is no longer paired with this one.");
     // Stopped, the file goes.
     commands
-        .send(Command::Stop { session_id: None })
+        .send(Command::Stop {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     for _ in 0..100 {
@@ -829,6 +848,7 @@ async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -874,6 +894,7 @@ async fn a_window_without_the_token_sees_nothing() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -956,6 +977,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -1059,7 +1081,10 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         )
     );
     commands
-        .send(Command::Stop { session_id: None })
+        .send(Command::Stop {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     drop(window);
@@ -1112,6 +1137,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -1141,7 +1167,10 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
         .unwrap();
     privacy_said(&mut window, &ViewPrivacy::On).await;
     commands
-        .send(Command::Stop { session_id: None })
+        .send(Command::Stop {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     let release = tokio::time::timeout(wait, asked.recv()).await.unwrap();
@@ -1340,11 +1369,17 @@ async fn a_lock_on_close_carried_by_the_stop_is_asked_or_said() {
     // lock.
     drop(window);
     commands
-        .send(Command::LockAsItStops { session_id: None })
+        .send(Command::LockAsItStops {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     commands
-        .send(Command::Stop { session_id: None })
+        .send(Command::Stop {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     let release = tokio::time::timeout(wait, asked.recv())
@@ -1377,7 +1412,10 @@ async fn a_lock_on_close_carried_by_the_stop_is_asked_or_said() {
     assert_eq!(said, "Couldn't lock Desk: that switch is off there");
     // No view now: said as not done, nothing asked.
     commands
-        .send(Command::LockAsItStops { session_id: None })
+        .send(Command::LockAsItStops {
+            session_id: None,
+            window: 0,
+        })
         .await
         .unwrap();
     let said = tokio::time::timeout(wait, told.recv())
@@ -1453,6 +1491,7 @@ async fn controlled_view(
             device_id: "desk".into(),
             monitor: 0,
             hevc: false,
+            window: 0,
         })
         .await
         .unwrap();
@@ -1600,4 +1639,356 @@ async fn privacy_said_never(window: &mut TcpStream, want: &ViewPrivacy, never: &
             }
         }
     }
+}
+
+/// A stand-in for a computer with several screens (PC11): it takes any
+/// number of sessions at once, each admitted with input taken and sending a
+/// keyframe every 50 ms, and tags the input of each with the screen that
+/// session asked for (its config stream, `[0xFF, 0x00, monitor u32 LE]`).
+async fn other_computer_per_screen(
+    cert: Arc<CertManager>,
+) -> (SocketAddr, mpsc::UnboundedReceiver<(u32, InputPacket)>) {
+    let listen = StreamTransportConfig {
+        address: "127.0.0.1:0".parse().unwrap(),
+        ..StreamTransportConfig::default()
+    };
+    let server = StreamServer::new(listen, &cert).await.expect("bind");
+    let addr = server.local_addr().unwrap();
+    let (input_tx, input_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(incoming) = server.accept_connection().await {
+            let Ok(connecting) = incoming.accept() else {
+                continue;
+            };
+            let input = input_tx.clone();
+            tokio::spawn(async move {
+                let Ok(conn) = connecting.await else { return };
+                let (plain_tx, mut plain_rx) = mpsc::unbounded_channel::<InputPacket>();
+                let monitor = Arc::new(std::sync::Mutex::new(None::<u32>));
+                let tagging = monitor.clone();
+                tokio::spawn(async move {
+                    while let Some(packet) = plain_rx.recv().await {
+                        let n = tagging.lock().unwrap().unwrap_or(u32::MAX);
+                        let _ = input.send((n, packet));
+                    }
+                });
+                let (_keep, hang_up) = tokio::sync::oneshot::channel();
+                serve(conn, plain_tx, keyframe(), hang_up, Some(monitor)).await;
+            });
+        }
+    });
+    (addr, input_rx)
+}
+
+/// The window `window`'s view file, once it names a view newer than `after`.
+async fn window_file(dir: &Path, window: u8, after: u64) -> ViewFile {
+    for _ in 0..500 {
+        if let Some(file) = wire::read_window(dir, window).filter(|f| f.session_id > after) {
+            return file;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no view for window {window}");
+}
+
+/// Read the window until it is shown with control taken there; the status.
+async fn until_controlled(window: &mut TcpStream) -> wire::ViewStatus {
+    loop {
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(window))
+                .await
+                .expect("shown within 10 s")
+            && status.phase == Phase::Showing
+            && status.control == Some(true)
+        {
+            return status;
+        }
+    }
+}
+
+/// The next input the stand-in got that is not a keyframe ask.
+async fn next_input(input: &mut mpsc::UnboundedReceiver<(u32, InputPacket)>) -> (u32, InputPacket) {
+    loop {
+        let got = tokio::time::timeout(Duration::from_secs(10), input.recv())
+            .await
+            .expect("input within 10 s")
+            .expect("the stand-in");
+        if !matches!(got.1, InputPacket::RequestKeyframe) {
+            return got;
+        }
+    }
+}
+
+/// PC11: two of the app's windows show one computer's two screens side by
+/// side: two views at once, each named in its own file with its own token
+/// and session, each window's input going to its own screen's session, the
+/// count of views said in each status; a second window's privacy ask is
+/// refused while the first holds it; stopping one window's view leaves the
+/// other's; and a window past the last is not shown.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_windows_show_one_computers_two_screens_side_by_side() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("two-windows");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, mut input) = other_computer_per_screen(cert.clone()).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = stand_in_host(
+        move |_, body| {
+            let _ = asked_tx.send(body);
+        },
+        answers_rx,
+    );
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run_with(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+        host,
+    ));
+    for (window, monitor) in [(0u8, 0u32), (1, 1)] {
+        commands
+            .send(Command::Start {
+                device_id: "desk".into(),
+                monitor,
+                hevc: false,
+                window,
+            })
+            .await
+            .unwrap();
+    }
+    let first = window_file(&dir, 0, 0).await;
+    let second = window_file(&dir, 1, 0).await;
+    assert_ne!(first.session_id, second.session_id);
+    assert_ne!(first.token, second.token, "each view has its own token");
+    assert_eq!(first.port, second.port, "one relay");
+    let mut left = join(&first).await;
+    let mut right = join(&second).await;
+    let shown_left = until_controlled(&mut left).await;
+    let shown_right = until_controlled(&mut right).await;
+    assert_eq!((shown_left.monitor, shown_right.monitor), (0, 1));
+    // Each counted: two views held, said in each window's status.
+    let counted = async |window: &mut TcpStream, want: u32| {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(tokio::time::Instant::now() < deadline, "{want} views said");
+            if let Message::Status(status) =
+                tokio::time::timeout(Duration::from_secs(10), read_message(window))
+                    .await
+                    .expect("a status")
+                && status.views == want
+            {
+                return;
+            }
+        }
+    };
+    counted(&mut left, 2).await;
+    counted(&mut right, 2).await;
+
+    // Each window's input reaches its own screen's session.
+    let click =
+        |x_norm| Message::Input(InputPacket::MouseMoveAbs { x_norm, y_norm: 1 }.encode()).encode();
+    left.write_all(&click(10)).await.unwrap();
+    let got = next_input(&mut input).await;
+    assert_eq!(
+        format!("{got:?}"),
+        "(0, MouseMoveAbs { x_norm: 10, y_norm: 1 })"
+    );
+    right.write_all(&click(20)).await.unwrap();
+    let got = next_input(&mut input).await;
+    assert_eq!(
+        format!("{got:?}"),
+        "(1, MouseMoveAbs { x_norm: 20, y_norm: 1 })"
+    );
+
+    // One computer's privacy is held once: the first window holds it, and
+    // the second's ask is refused, nothing asked there.
+    left.write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let grab = tokio::time::timeout(Duration::from_secs(5), asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(grab["action"], "grab");
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&grab, serde_json::json!({"ok": true, "grabbed": 2})),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut left, &ViewPrivacy::On).await;
+    right
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    privacy_said(
+        &mut right,
+        &ViewPrivacy::Refused("Another window of Desk already hides what you do there.".into()),
+    )
+    .await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), asked.recv())
+            .await
+            .is_err(),
+        "the second window asked nothing there"
+    );
+
+    // A window past the last is not shown.
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+            hevc: false,
+            window: wire::MAX_VIEWS,
+        })
+        .await
+        .unwrap();
+
+    // Stopping the second window's view leaves the first's.
+    commands
+        .send(Command::Stop {
+            session_id: Some(second.session_id),
+            window: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(end_of(&mut right).await, "");
+    for _ in 0..100 {
+        if wire::read_window(&dir, 1).is_none() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(wire::read_window(&dir, 1), None, "its file forgets it");
+    assert_eq!(
+        wire::read_window(&dir, wire::MAX_VIEWS),
+        None,
+        "no fifth view"
+    );
+    assert_eq!(
+        wire::read(&dir).map(|f| f.session_id),
+        Some(first.session_id)
+    );
+    counted(&mut left, 1).await;
+    left.write_all(&click(30)).await.unwrap();
+    let got = next_input(&mut input).await;
+    assert_eq!(
+        format!("{got:?}"),
+        "(0, MouseMoveAbs { x_norm: 30, y_norm: 1 })"
+    );
+    // The first window's privacy is still held: nothing let go.
+    let quiet = tokio::time::timeout(Duration::from_millis(500), async {
+        loop {
+            let body = asked.recv().await.unwrap();
+            if body["action"] != "grab" {
+                return body;
+            }
+        }
+    })
+    .await;
+    assert!(quiet.is_err(), "nothing let go: {quiet:?}");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PC11: a window that switches to another screen of the same computer
+/// keeps its privacy there: the hold moves to the new screen's view,
+/// nothing is let go between them, and the new view says it is on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn privacy_stays_as_the_window_switches_screens() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-switch");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, _input) = other_computer_per_screen(cert.clone()).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = stand_in_host(
+        move |_, body| {
+            let _ = asked_tx.send(body);
+        },
+        answers_rx,
+    );
+    let (commands, relay, mut window) = controlled_view(&dir, addr, cert, host).await;
+    let first = wire::read(&dir).expect("the first view");
+    window
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let grab = tokio::time::timeout(Duration::from_secs(5), asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(grab["action"], "grab");
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&grab, serde_json::json!({"ok": true, "grabbed": 2})),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+
+    // The window switches to the second screen.
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 1,
+            hevc: false,
+            window: 0,
+        })
+        .await
+        .unwrap();
+    assert_eq!(end_of(&mut window).await, "");
+    let next = window_file(&dir, 0, first.session_id).await;
+    let mut window = join(&next).await;
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    let shown = until_controlled(&mut window).await;
+    assert_eq!(shown.monitor, 1);
+    assert_eq!(shown.privacy, ViewPrivacy::On, "still held once shown");
+    // Nothing let go across the switch; a renewal is answered.
+    let quiet = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let body = asked.recv().await.unwrap();
+            if body["action"] != "grab" {
+                return body;
+            }
+            let held = answer_to(&body, serde_json::json!({"ok": true, "grabbed": 2}));
+            answers.send(("desk".into(), held)).await.unwrap();
+        }
+    })
+    .await;
+    assert!(quiet.is_err(), "kept across the switch: {quiet:?}");
+    // The window closes: let go then.
+    commands
+        .send(Command::Stop {
+            session_id: Some(next.session_id),
+            window: 0,
+        })
+        .await
+        .unwrap();
+    let release = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let body = asked.recv().await.unwrap();
+            if body["action"] == "release" {
+                return body;
+            }
+        }
+    })
+    .await
+    .expect("let go as the view stops");
+    assert_eq!(release["action"], "release");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
 }

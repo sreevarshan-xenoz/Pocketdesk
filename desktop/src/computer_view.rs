@@ -871,6 +871,7 @@ fn view_ask(wanted: &Wanted, hevc: bool) -> ComputerAsk {
         device_id: wanted.device_id.clone(),
         monitor: wanted.monitor,
         hevc,
+        window: 0,
     }
 }
 
@@ -905,6 +906,7 @@ fn stop_view(state_dir: &Path, state: &mut State, lock: bool) {
         ComputerAsk::StopView {
             session_id: shown,
             lock,
+            window: 0,
         },
         now_unix(),
     );
@@ -2759,6 +2761,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: false,
+                window: 0,
             }]
         );
         // Nothing open: nothing said, nothing asked.
@@ -2803,6 +2806,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: None,
                 lock: true,
+                window: 0,
             }]
         );
         quit_view(&dir, &mut gap(false, None));
@@ -2813,10 +2817,12 @@ mod tests {
                 ComputerAsk::StopView {
                     session_id: None,
                     lock: false,
+                    window: 0,
                 },
                 ComputerAsk::StopView {
                     session_id: None,
                     lock: false,
+                    window: 0,
                 }
             ]
         );
@@ -2888,6 +2894,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: true,
+                window: 0,
             }]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -3238,7 +3245,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0 }
             ),
             "{asked:?}"
         );
@@ -3267,7 +3274,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0 }
             ),
             "{asked:?}"
         );
@@ -3387,6 +3394,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(41),
                 lock: false,
+                window: 0,
             }]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -3986,6 +3994,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 0,
                 hevc: false,
+                window: 0,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();
