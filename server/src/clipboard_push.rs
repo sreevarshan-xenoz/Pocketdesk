@@ -742,6 +742,13 @@ pub(crate) fn window_text_landed(body: &serde_json::Value) {
     }
 }
 
+/// Another device's image was written to this computer's clipboard: a push
+/// waiting on an answer that was that image reads the clipboard now (PR
+/// #572 re-review N4), not after [`WRITE_WAIT`].
+pub(crate) fn image_landed() {
+    *lock(&HANDING.written) = Some(std::time::Instant::now());
+}
+
 /// Whether an answer from a computer other than `device_id` is awaited at
 /// `now` from an ask made within [`HANDOVER_WAIT`]: its window lost the
 /// focus just now. An older ask (its window lost the focus to another
