@@ -3261,9 +3261,27 @@ mod tests {
             lock(&shared).pointer.locked(),
             "the bar's switch did nothing"
         );
-        // The relay heard the lock and both halves of the click.
+        // PR #563 review M9: the chord frees it, and closing the window
+        // frees a lock taken again.
+        harness.key_press_modifiers(all, egui::Key::M);
+        harness.step();
+        assert!(!lock(&shared).pointer.locked(), "the chord freed it");
+        harness.key_press_modifiers(all, egui::Key::M);
+        harness.step();
+        assert!(lock(&shared).pointer.locked());
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        harness.step();
+        assert!(!lock(&shared).pointer.locked(), "closing freed it");
+        // The relay heard each, in order: the lock before the click, both
+        // halves of the click, then each release (the closing one before
+        // the connection's end).
         drop(harness);
-        lock(&shared).writer = None;
         drop(shared);
         relay
             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -3277,22 +3295,24 @@ mod tests {
             heard.extend_from_slice(&buf[..n]);
         }
         let mut reader = io::Cursor::new(heard);
-        let (mut locked, mut clicks) = (false, Vec::new());
+        let mut said: Vec<&str> = Vec::new();
         while let Ok(message) = Message::read(&mut reader) {
-            match message {
-                Message::PointerLock(true) => locked = true,
-                Message::Input(bytes) => {
-                    if let Ok(InputPacket::MouseClick { button, pressed }) =
-                        InputPacket::decode(&bytes)
-                    {
-                        clicks.push((button, pressed));
-                    }
-                }
-                _ => {}
+            let word = match message {
+                Message::PointerLock(true) => "lock",
+                Message::PointerLock(false) => "free",
+                Message::Input(bytes) => match InputPacket::decode(&bytes) {
+                    Ok(InputPacket::MouseClick { pressed: true, .. }) => "down",
+                    Ok(InputPacket::MouseClick { pressed: false, .. }) => "up",
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            // A lock said again each second is the same lock.
+            if said.last() != Some(&word) {
+                said.push(word);
             }
         }
-        assert!(locked);
-        assert_eq!(clicks, vec![(0, true), (0, false)]);
+        assert_eq!(said, ["lock", "down", "up", "free", "lock", "free"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
