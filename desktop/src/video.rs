@@ -102,25 +102,12 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn start(path: &std::path::Path) -> io::Result<Self> {
+    /// Record a stream of `codec` (PC5: a computer's screen may come as
+    /// HEVC) into `path`.
+    pub fn start(path: &std::path::Path, codec: Codec) -> io::Result<Self> {
         let mut command = Command::new("ffmpeg");
         command
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-use_wallclock_as_timestamps",
-                "1",
-                "-fflags",
-                "+genpts",
-                "-f",
-                "h264",
-                "-i",
-                "pipe:0",
-                "-c",
-                "copy",
-                "-y",
-            ])
+            .args(recorder_args(codec))
             .arg(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -151,6 +138,29 @@ impl Recorder {
             None => Ok(()),
         }
     }
+}
+
+/// The recorder's arguments before its file: the stream read as `codec`,
+/// copied as it is.
+pub fn recorder_args(codec: Codec) -> Vec<String> {
+    [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-use_wallclock_as_timestamps",
+        "1",
+        "-fflags",
+        "+genpts",
+        "-f",
+        codec.demuxer(),
+        "-i",
+        "pipe:0",
+        "-c",
+        "copy",
+        "-y",
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 impl Drop for Recorder {
@@ -824,7 +834,7 @@ mod tests {
         let units: Vec<&[u8]> = starts.windows(2).map(|w| &data[w[0]..w[1]]).collect();
         assert_eq!(units.len(), 20);
         let out = dir.join("out.mkv");
-        let mut recorder = Recorder::start(&out).unwrap();
+        let mut recorder = Recorder::start(&out, Codec::H264).unwrap();
         // A delta frame before the first keyframe is left out.
         recorder.feed(false, units[1]).unwrap();
         for (i, unit) in units.iter().enumerate() {
@@ -861,6 +871,16 @@ mod tests {
             "{duration} s for 2 s of frames"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC5 review I1: a recording reads the stream as its codec, HEVC too,
+    /// and copies it.
+    #[test]
+    fn a_recording_reads_the_streams_codec() {
+        let h264 = recorder_args(Codec::H264).join(" ");
+        assert!(h264.contains("-f h264 -i pipe:0 -c copy"), "{h264}");
+        let hevc = recorder_args(Codec::Hevc).join(" ");
+        assert!(hevc.contains("-f hevc -i pipe:0 -c copy"), "{hevc}");
     }
 
     /// L5: names carry the date and time, UTC.

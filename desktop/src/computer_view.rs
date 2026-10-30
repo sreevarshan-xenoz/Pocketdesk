@@ -1708,7 +1708,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             let dir = user_folder("Videos");
             let name = file_safe(&file.name);
             let path = free_name(&dir, &format!("{name} screen {}", stamp(now_unix())), "mkv");
-            let started = std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path));
+            // The stream's own codec (PC5 review I1): HEVC is copied as
+            // HEVC.
+            let codec = stream_is.map_or(Codec::H264, |(codec, _)| codec);
+            let started =
+                std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path, codec));
             let mut state = lock(shared);
             match started {
                 Ok(r) => {

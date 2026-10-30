@@ -833,7 +833,8 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         if want && recorder.is_none() {
             let dir = user_folder("Videos");
             let path = free_name(&dir, &format!("Phone screen {}", stamp(now_unix())), "mkv");
-            let started = std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path));
+            let started = std::fs::create_dir_all(&dir)
+                .and_then(|()| Recorder::start(&path, crate::video::Codec::H264));
             let mut state = lock(shared);
             match started {
                 Ok(r) => {
