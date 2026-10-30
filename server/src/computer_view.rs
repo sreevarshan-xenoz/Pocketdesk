@@ -1120,17 +1120,19 @@ pub struct MicLink {
     holders: MicHolders,
 }
 
-/// The view (its session) sending each computer the mic, by its id (PC11).
+/// The window connection sending each computer the mic, by its id (PC11).
 pub type MicHolders = Arc<std::sync::Mutex<HashMap<String, u64>>>;
 
-/// Take the mic of the computer `device_id` for the view `session_id`:
+/// Take the mic of the computer `device_id` for the window connection
+/// `session_id` (one number per connection):
 /// whether it is that view's now (no other view's).
 pub fn claim_mic(holders: &MicHolders, device_id: &str, session_id: u64) -> bool {
     let mut held = holders.lock().unwrap_or_else(|p| p.into_inner());
     *held.entry(device_id.to_string()).or_insert(session_id) == session_id
 }
 
-/// Give the computer `device_id`'s mic back, if the view `session_id` has it.
+/// Give the computer `device_id`'s mic back, if the connection `session_id`
+/// has it.
 pub fn release_mic(holders: &MicHolders, device_id: &str, session_id: u64) {
     let mut held = holders.lock().unwrap_or_else(|p| p.into_inner());
     if held.get(device_id) == Some(&session_id) {
@@ -2625,9 +2627,11 @@ struct WindowMic {
     on: bool,
     input: mpsc::Sender<InputPacket>,
     link: Arc<MicLink>,
-    /// The computer and the view, for the one mic a computer (PC11).
+    /// The computer and this window's connection, for the one mic a
+    /// computer (PC11): by the connection, so a replaced connection of the
+    /// same view never gives back the next one's (PR #570 re-review N4).
     device_id: String,
-    session_id: u64,
+    connection: u64,
 }
 
 impl WindowMic {
@@ -2635,21 +2639,21 @@ impl WindowMic {
         input: mpsc::Sender<InputPacket>,
         link: Arc<MicLink>,
         device_id: String,
-        session_id: u64,
+        connection: u64,
     ) -> Self {
         Self {
             on: false,
             input,
             link,
             device_id,
-            session_id,
+            connection,
         }
     }
 
     /// On, when no other view sends that computer the mic (PC11): a second
     /// window's stays off, its frames dropped; whether it went on.
     fn start(&mut self) -> bool {
-        self.on = self.on || claim_mic(&self.link.holders, &self.device_id, self.session_id);
+        self.on = self.on || claim_mic(&self.link.holders, &self.device_id, self.connection);
         self.on
     }
 
@@ -2659,7 +2663,7 @@ impl WindowMic {
         self.link.quiet().await;
         self.input.send(mic_stop()).await?;
         self.on = false;
-        release_mic(&self.link.holders, &self.device_id, self.session_id);
+        release_mic(&self.link.holders, &self.device_id, self.connection);
         Ok(())
     }
 }
@@ -2677,7 +2681,7 @@ impl Drop for WindowMic {
         if !self.on {
             return;
         }
-        release_mic(&self.link.holders, &self.device_id, self.session_id);
+        release_mic(&self.link.holders, &self.device_id, self.connection);
         self.link.clear();
         // Waited for on a task of its own (review M2): a full queue does
         // not lose it, given a little while; and after the frame on its
@@ -2746,7 +2750,10 @@ fn start_viewer(
         // Relative movement that found the queue full, not yet sent.
         let mut owed = (0i32, 0i32);
         // The window's "Send my mic" (PC10): its own latest word, kept here.
-        let mut mic = WindowMic::new(input.clone(), mic_link, device_id.clone(), session_id);
+        // Each connection its own number for the mic (re-review N4).
+        static CONNECTIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let connection = CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut mic = WindowMic::new(input.clone(), mic_link, device_id.clone(), connection);
         loop {
             if pointer_locked {
                 let left = lease_until.saturating_duration_since(tokio::time::Instant::now());
@@ -3439,7 +3446,8 @@ mod tests {
         assert!(claim_mic(&holders, "desk", 2));
     }
 
-    /// PC11: two windows of one computer: the second's "on" is refused
+    /// PC11: two windows of one computer (or two connections of one view,
+    /// re-review N4): the second's "on" is refused
     /// while the first sends, so its frames never go and its "off" sends
     /// no stop; the first's frames go on.
     #[tokio::test]
@@ -3475,7 +3483,7 @@ mod tests {
         };
         let (first_link, second_link) = (link(&holders), link(&holders));
         let (mut first, _first_viewer, _first_queued) = joined(1, first_link.clone()).await;
-        let (mut second, _second_viewer, mut second_queued) = joined(2, second_link.clone()).await;
+        let (mut second, _second_viewer, mut second_queued) = joined(1, second_link.clone()).await;
         for message in [Message::Mic(true), mic_frame(1)] {
             first.write_all(&message.encode()).await.unwrap();
         }
