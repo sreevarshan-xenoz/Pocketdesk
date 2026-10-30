@@ -3290,6 +3290,18 @@ Built 2026-10-30. An owner device (a phone paired with the computer's own code, 
 - [ ] A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
 - [ ] From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
 
+## 242. The card menu, window chips and font scale (Android UX 2)
+
+Built 2026-10-31. The computer card's menu is headed sections with its upkeep under Manage; a session's window chips cut long titles in the middle and show the whole title on a long-press; the background card's maker link ends its sentence; a debuggable build takes a font scale from `files/debug_font_scale`; a computer's last use is stamped as a session ends and for cast, camera and phone-sound sessions.
+
+- [x] The card menu folded and with Manage open, every action reachable, Remove last; the background card with its link inline, and the link opens the maker's guide; Home and the menu at font scale 0.85 and 1.3 (through the debug file). Checked 2026-10-31 on the OPPO against a throwaway server, by screenshot.
+- [x] A window chip with a long title is cut in its middle, and a long-press shows the whole title. Checked 2026-10-31 on the OPPO.
+- [ ] A screen session of a few minutes, then Exit: back on Home, the card says "Used just now", not the time it started. (where: OPPO + throwaway)
+- [ ] Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway)
+- [ ] The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
+- [ ] TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
+- [ ] The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

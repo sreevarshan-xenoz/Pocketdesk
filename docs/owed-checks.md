@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1068 open items.
+1073 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 42 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 44 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
@@ -15,7 +15,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A second computer | 142 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -138,6 +138,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
 - On the throwaway computer, Settings, Other computers, "Let my devices remove others from afar" off: the OPPO's Devices on this computer says the owner turned it off, and nothing is removed; on again, it lists. Start a removal and close the sheet before the answer, then open it again: the list shows what is there now, never another ask's answer.
 - Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
+
+**242. The card menu, window chips and font scale (Android UX 2)**
+
+- A screen session of a few minutes, then Exit: back on Home, the card says "Used just now", not the time it started. (where: OPPO + throwaway)
+- The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -2619,3 +2624,9 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)
+
+**242. The card menu, window chips and font scale (Android UX 2)**
+
+- Show camera, then Stop, with a computer whose card had no time: its card then says "Used just now"; the same for Show screen. (where: OPPO + throwaway)
+- The same for "Play this phone's sound there" (it makes sound, so never in a script run). (where: by hand)
+- TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
