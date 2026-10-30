@@ -2284,8 +2284,9 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         if is_screens_answer(&packet.body) {
             keep_screens(device_id, &packet.body);
         } else if let Some(outgoing) = live(device_id) {
-            // Asked by a computer this one keeps the link to, paired both
-            // ways (PC1): it shows this one's screen too.
+            // Asked by a computer this one keeps the link to, paired
+            // either way (range review M4): only screen names and layout,
+            // which a connection answers any paired device too.
             let _ = outgoing.send(crate::plugins::monitors::answer()).await;
         }
         return;
