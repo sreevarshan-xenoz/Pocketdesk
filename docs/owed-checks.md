@@ -2,11 +2,11 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1066 open items.
+1067 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 41 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 42 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
 | A phone with a SIM | 39 |
@@ -136,6 +136,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeDevicesThere` or `nativeRemoveThere`. Pair the OPPO with a throwaway server's own code (Pair page, not "Someone else's"): `pocketdesk devices --json` there says `"owner": true` for it; a phone paired before this build says `false` until it pairs again.
 - On the OPPO, the throwaway computer's card → Devices on this computer: the list shows the OPPO first ("phone, this phone, connected") with no Remove, and each other device with Remove…; the answer names no address or key (logcat of the answer, counts only).
 - Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
+- On the throwaway computer, Settings, Other computers, "Let my devices remove others from afar" off: the OPPO's Devices on this computer says the owner turned it off, and nothing is removed; on again, it lists. Start a removal and close the sheet before the answer, then open it again: the list shows what is there now, never another ask's answer.
 - Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
