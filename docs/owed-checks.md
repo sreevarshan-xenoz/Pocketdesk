@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1058 open items.
+1064 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 132 |
+| A second computer | 137 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -552,6 +552,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
 
+**240. Keys by position in a computer's screen window**
+
+- An input method here (Windows' Japanese IME, or Linux fcitx): with Keys by position on, note whether it composes in the window at all (the picture asks for no input method) and, if it commits a word, that it arrives there as text. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -1066,6 +1070,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows and the Linux laptop sharing the keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there", once with Windows' keyboard on the laptop and once with it home: both times the bar says it was refused (it shares its keyboard and mouse), and Windows' keys and clicks still work. With shared input off on Windows, the same ask is taken (keyboard blocked, ring shown); then Ctrl+Alt+Del, Lock, and unlock Windows (and again with Windows+L): within about a second of the unlock the grab ends and Windows' keyboard and mouse work. On the laptop as the far side (a grab from Windows' window, shared input off there): `loginctl lock-session`, then `loginctl unlock-session` over ssh, ends the grab only with a locker that sets the locked hint (note which: hyprlock, swaylock, GNOME); and unplugging and plugging the laptop's USB keyboard back in gives a keyboard that types while the grab holds. (where: second computer)
 - Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
+
+**240. Keys by position in a computer's screen window**
+
+- The Linux laptop viewing Windows, Keys by position on, Windows' layout US: in Notepad, the laptop's keys type as on Windows' own keyboard; switch Windows to French (AZERTY): the key labelled Q on the laptop types "a" there. Off again: typing gives what the laptop's keys say, whatever Windows' layout. (where: second computer)
+- Windows viewing the laptop (Hyprland, uinput), Keys by position on: `wev` on the laptop shows each key's code as pressed at Windows (W is 17, the ISO key beside Shift 86 on a 105-key keyboard), Shift going down as pressed; holding W for a second shows one press and repeats, and one release. A game or `wev` sees WASD and Shift held together. (where: second computer)
+- With W held, switch Keys by position off, Alt+Tab away, turn View only on, and close the window, each in turn: `wev` shows W let go each time, nothing stuck. The view reconnecting (stop the laptop's server for a moment) leaves nothing held either. (where: second computer)
+- Lock the pointer with Keys by position off: the bar says "Games usually want Keys by position" with its buttons; free the pointer and click Turn on: it is on, and closing and opening the window for the same computer starts it on (another computer starts as Settings say). "Not now" in a fresh window: locking again does not offer it. (where: second computer)
+- A Linux far side on X11 (enigo, no uinput) with a German layout: Keys by position on, the laptop's Y key types "z" there (by its place, as on uinput and Windows hosts). The phone's own keys on that desktop now go by place too: note what the phone's shortcut sheet's Ctrl+Z does there with a German or AZERTY layout (before this, enigo looked the letter up in the layout). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
