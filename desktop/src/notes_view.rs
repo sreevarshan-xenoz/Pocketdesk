@@ -16,7 +16,7 @@ const REFRESH: Duration = Duration::from_secs(2);
 /// The page with nothing to answer (UX 4): what shows, and how.
 pub const EMPTY: &str = "No notifications to answer yet";
 pub const EMPTY_HOW: &str = "Ones you can answer show here, with their buttons and a reply box. \
-     On the phone, turn on \"This phone's notifications\" in Pocketdesk's Settings.";
+     On the phone, turn on \"This phone's notifications\" and \"Let the computer answer notifications\" in Pocketdesk's Settings.";
 
 #[derive(Default)]
 pub struct NotesView {
