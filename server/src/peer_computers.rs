@@ -43,6 +43,13 @@ const BACKOFF_MOST: Duration = Duration::from_secs(60);
 /// is tried again this rarely, in case it was a moment's race.
 const REFUSED_RETRY: Duration = Duration::from_secs(300);
 
+/// A refusal this soon after this computer paired with the other is tried
+/// again on the link's backoff, not after [`REFUSED_RETRY`]: the computer
+/// that listed the other both ways as it paired (PC1) dials before the
+/// other has its answer, trusted it and recorded it, and is refused
+/// meanwhile (PC1 review).
+const JUST_PAIRED: Duration = Duration::from_secs(120);
+
 /// Without a watcher, how often the requests folder is looked at.
 const POLL: Duration = Duration::from_secs(1);
 
@@ -1590,7 +1597,12 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
                     "Another computer refused the link: paired there no more?"
                 );
                 set_link(&dir, &device_id, "refused");
-                REFUSED_RETRY
+                let now = pocketdesk_core::local::pin::now_unix();
+                let wait = refused_wait(computer.paired_unix, now, backoff);
+                if wait == backoff {
+                    backoff = (backoff * 2).min(BACKOFF_MOST);
+                }
+                wait
             }
             LinkEnd::Failed(why) => {
                 tracing::debug!(device_id, "No link to another computer: {why}");
@@ -1604,6 +1616,18 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
         if back_off(wait, &nudged).await {
             backoff = BACKOFF_FIRST;
         }
+    }
+}
+
+/// How long a link the other computer refused waits before it is dialed
+/// again: `backoff`, the link's own, within [`JUST_PAIRED`] of pairing
+/// with it (`paired_unix`, either way, so a clock set back counts too),
+/// else [`REFUSED_RETRY`].
+fn refused_wait(paired_unix: u64, now_unix: u64, backoff: Duration) -> Duration {
+    if now_unix.abs_diff(paired_unix) < JUST_PAIRED.as_secs() {
+        backoff
+    } else {
+        REFUSED_RETRY
     }
 }
 
@@ -3121,6 +3145,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(given, DevicePermissions::computer(), "lapsed, not given");
         assert!(file.pending.is_empty() && file.lapsed == ["lap"]);
+    }
+
+    /// PC1 review: the computer that lists the other as it pairs both ways
+    /// dials before the other has recorded the pairing, and is refused for
+    /// that moment. A refusal within two minutes of pairing waits the
+    /// link's backoff; later, or long before, five minutes.
+    #[test]
+    fn a_refusal_just_after_pairing_waits_the_backoff() {
+        let paired = 1_000_000;
+        let backoff = Duration::from_secs(4);
+        assert_eq!(refused_wait(paired, paired, backoff), backoff);
+        assert_eq!(refused_wait(paired, paired + 119, backoff), backoff);
+        assert_eq!(refused_wait(paired, paired + 120, backoff), REFUSED_RETRY);
+        assert_eq!(refused_wait(paired, paired + 3600, backoff), REFUSED_RETRY);
+        // A clock set back since: still near the pairing, or not.
+        assert_eq!(refused_wait(paired, paired - 30, backoff), backoff);
+        assert_eq!(refused_wait(paired, paired - 3600, backoff), REFUSED_RETRY);
+        assert_eq!(refused_wait(0, paired, backoff), REFUSED_RETRY);
     }
 
     /// PC1 third review m-E: while this computer trusts and records a
