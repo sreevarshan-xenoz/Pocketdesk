@@ -225,7 +225,7 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 }
             }
         }
-        forget_untrusted_mine(&dir, &cert_manager, &mut links);
+        forget_untrusted_mine(&dir, &cert_manager, &mut links, views.as_ref()).await;
         lapse_pending(&dir);
         if let Some(wan) = &wan {
             keep_links(&dir, wan, &mut links);
@@ -769,36 +769,63 @@ fn untrusted_mine(file: &computers::ComputersFile, trusted: impl Fn(&str) -> boo
 }
 
 /// Forget each computer paired both ways that the Devices page unpaired
-/// ([`untrusted_mine`]); a trust store that does not read forgets none.
-fn forget_untrusted_mine(dir: &Path, certs: &CertManager, links: &mut HashMap<String, Link>) {
-    if let Ok(trust) = crate::state::trust_store_path() {
-        forget_untrusted_mine_in(dir, &trust, certs, links);
+/// ([`untrusted_mine`]); a trust store that does not read forgets none. As
+/// Unpair under Other computers does (range review M1): it is told to
+/// forget how to wake this one while its link is up, its nudge goes, and
+/// its view, if shown, ends with it.
+async fn forget_untrusted_mine(
+    dir: &Path,
+    certs: &CertManager,
+    links: &mut HashMap<String, Link>,
+    views: Option<&mpsc::Sender<crate::computer_view::Command>>,
+) {
+    let Ok(trust) = crate::state::trust_store_path() else {
+        return;
+    };
+    for device_id in untrusted_mine_at(dir, &trust) {
+        tell_forget(&device_id).await;
+    }
+    for device_id in forget_untrusted_mine_in(dir, &trust, certs, links) {
+        drop_nudge(&device_id);
+        if let Some(views) = views {
+            let forgotten = crate::computer_view::Command::Forgotten { device_id };
+            let _ = views.send(forgotten).await;
+        }
     }
 }
 
+/// [`untrusted_mine`] as the files at `dir` and `trust` say now.
+fn untrusted_mine_at(dir: &Path, trust: &Path) -> Vec<String> {
+    let file = computers::read(dir);
+    if !file.computers.iter().any(|c| c.mine) {
+        return Vec::new();
+    }
+    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
+        return Vec::new();
+    };
+    untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id))
+}
+
+/// Forget [`untrusted_mine_at`]'s computers: their links stop and their
+/// listings go. The ones forgotten.
 fn forget_untrusted_mine_in(
     dir: &Path,
     trust: &Path,
     certs: &CertManager,
     links: &mut HashMap<String, Link>,
-) {
-    let file = computers::read(dir);
-    if !file.computers.iter().any(|c| c.mine) {
-        return;
-    }
-    let Ok(store) = pocketdesk_core::protocol::kdeconnect::TrustStore::read(trust) else {
-        return;
-    };
-    for device_id in untrusted_mine(&file, |id| store.is_trusted(id) && store.is_computer(id)) {
-        if let Some(link) = links.remove(&device_id) {
+) -> Vec<String> {
+    let forgotten = untrusted_mine_at(dir, trust);
+    for device_id in &forgotten {
+        if let Some(link) = links.remove(device_id) {
             link.task.abort();
         }
         tracing::info!(
             device_id,
             "A computer unpaired on Devices is forgotten here too"
         );
-        forget_in(dir, Some(trust), certs, &device_id);
+        forget_in(dir, Some(trust), certs, device_id);
     }
+    forgotten
 }
 
 /// Pair as [`pair`] does; once paired, the link starts over now, not after
@@ -3124,7 +3151,7 @@ mod tests {
         let task = tokio::spawn(std::future::pending::<()>());
         let watch = task.abort_handle();
         links.insert("unpaired".to_string(), Link { task, dials: true });
-        forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
+        let forgotten = forget_untrusted_mine_in(&dir, &trust, &certs, &mut links);
         let listed: Vec<String> = computers::read(&dir)
             .computers
             .into_iter()
@@ -3138,6 +3165,7 @@ mod tests {
         let still = TrustStore::read(&trust).unwrap().is_trusted("kept");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(listed, ["kept"]);
+        assert_eq!(forgotten, ["unpaired"], "said, for its view and nudge");
         assert!(!keys_left, "its keys went with it");
         assert!(
             stopped && !links.contains_key("unpaired"),
