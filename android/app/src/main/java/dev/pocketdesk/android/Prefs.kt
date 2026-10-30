@@ -63,6 +63,7 @@ object Prefs {
     private const val KEY_CONNECTION_DETAILS = "connection_details"
     private const val KEY_CONNECT_AFTER_WAKE = "connect_after_wake"
     private const val KEY_OFFER_WAKE = "offer_wake"
+    private const val KEY_VERSION_HINTS = "version_hints"
     private const val KEY_PHONE_NAME = "phone_name"
     private const val KEY_SHOW_DRIVING = "show_driving"
     private const val KEY_DESKTOP_SOUND = "desktop_sound"
@@ -695,6 +696,15 @@ object Prefs {
         val token = bytes.joinToString("") { "%02x".format(it) }
         prefs(ctx).edit { putString(KEY_SHARE_TOKEN, token) }
         return token
+    }
+
+    /** Item 4: say which to update when a computer runs another Pocketdesk release (on). */
+    fun versionHints(ctx: Context): Boolean =
+        prefs(ctx).getBoolean(KEY_VERSION_HINTS, true)
+
+    fun setVersionHints(ctx: Context, enabled: Boolean) {
+        prefs(ctx).edit { putBoolean(KEY_VERSION_HINTS, enabled) }
+        bump()
     }
 
     /** Connect checks first, and offers "Wake and connect" to a computer that does not answer (N6). */

@@ -73,7 +73,8 @@ The computer re-reads standing for every packet, so pairing, unpairing or a key 
 
 ## 4. Capabilities: how a client learns what a computer offers
 
-- **The identity packet** carries `deviceId`, `deviceName`, `deviceType`, `protocolVersion`, `incomingCapabilities` and `outgoingCapabilities`:
+- **The identity packet** carries `deviceId`, `deviceName`, `deviceType`, `protocolVersion`, `pocketdeskVersion`, `incomingCapabilities` and `outgoingCapabilities`:
+  - `pocketdeskVersion` is the Pocketdesk release the sender runs (`0.8.2`; a build from a checkout may add `-dev` or `+<hash>`). Both apps show the other end's and say which to update when the releases differ; it is optional, absent from KDE Connect and from Pocketdesk before it, and decides nothing;
   - `incomingCapabilities` lists every packet type the computer acts on;
   - `outgoingCapabilities` lists every packet type it pushes or answers with: its plugins' and those the server sends itself (the internet endpoint, wake info, control hand-over, the workspace HUD).
 

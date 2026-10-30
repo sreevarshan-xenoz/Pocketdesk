@@ -1198,14 +1198,42 @@ pub async fn connect_peer(peer: String, port: u16, identity: &DeviceIdentity) ->
     Ok(())
 }
 
-/// Keep what a paired phone calls itself (U3), off the runtime: the trust
-/// store is a file, written only when the name changed.
-fn note_claimed_name(device_id: &str, claimed: Option<&str>) {
-    let Some(name) = claimed.map(str::to_string) else {
-        return;
-    };
-    let id = device_id.to_string();
-    tokio::task::spawn_blocking(move || crate::plugins::pair::note_claimed_name(&id, &name));
+/// What a paired phone or computer says of itself in its identity, kept off
+/// the runtime: its name (U3), kept when it gives one, and the release it
+/// runs (item 4), which every identity replaces, so one with none clears
+/// it. The trust store is a file, written only when one changed.
+fn note_claims(device_id: &str, claims: &Claims) {
+    let (id, claims) = (device_id.to_string(), claims.clone());
+    tokio::task::spawn_blocking(move || {
+        if let Some(name) = &claims.name {
+            crate::plugins::pair::note_claimed_name(&id, name);
+        }
+        crate::plugins::pair::note_claimed_version(&id, claims.version.as_deref());
+    });
+}
+
+/// What a connecting device's identity says of it: claims, kept once it is
+/// paired, never proof.
+#[derive(Debug, Clone, Default)]
+struct Claims {
+    name: Option<String>,
+    version: Option<String>,
+}
+
+impl Claims {
+    fn of(identity: &NetworkPacket) -> Self {
+        let field = |key: &str| {
+            identity
+                .body
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        Self {
+            name: field("deviceName"),
+            version: field(pocketdesk_core::version::IDENTITY_FIELD),
+        }
+    }
 }
 
 /// Bind the control port, or the next free one when another program holds
@@ -1631,13 +1659,10 @@ where
             tracing::warn!("Control connection with an unusable deviceId; dropped");
             return Ok(());
         };
-        // U3: what the phone calls itself, kept once it is paired (at the
-        // start, and when it pairs on this connection).
-        let claimed_name = identity
-            .body
-            .get("deviceName")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
+        // U3: what the phone calls itself, and (item 4) the release it
+        // runs, kept once it is paired (at the start, and when it pairs on
+        // this connection).
+        let claims = Claims::of(&identity);
         // Shared input's channel on this connection, held while it is
         // served, for one of the owner's computers (below).
         let mut _shared_input = None;
@@ -1739,7 +1764,7 @@ where
         if state::may_receive_pushes(&*sender) {
             seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
             seeded = true;
-            note_claimed_name(&device_id, claimed_name.as_deref());
+            note_claims(&device_id, &claims);
         }
 
         // Let in on this connection at some point (BA2 review: one let in
@@ -1898,7 +1923,7 @@ where
                                 seed_desktop_state(&sender, hypr_ipc, wan_endpoint, road).await;
                                 seeded = true;
                                 let_in_once = true;
-                                note_claimed_name(&device_id, claimed_name.as_deref());
+                                note_claims(&device_id, &claims);
                             }
                         }
                         Err(e) => {

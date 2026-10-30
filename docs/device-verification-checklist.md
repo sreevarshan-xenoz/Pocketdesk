@@ -3294,6 +3294,13 @@ Built 2026-10-30. An owner device (a phone paired with the computer's own code, 
 - [ ] A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
 - [ ] From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
 
+## 242. One version across my devices
+
+Built 2026-10-31. Each identity says the release its sender runs (`pocketdeskVersion`); the server keeps a paired device's in the trust store and a linked computer's in `computers.json`, the phone keeps each computer's per address, and both apps show it: the desktop's Devices page and Settings → Other computers ("runs 0.8.1, older than this one: update it", in the warning colour), and the phone's computer card on Home ("runs 0.8.1, older than this app: update it"). Each app's "Tell me when my devices run different versions" (on) turns the advice off and leaves the release shown. Unit, round-trip, kittest and JVM tests ran here; no phone or second computer was used. Owed, counts and screenshots kept in the scratchpad (they show names):
+- [ ] The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here)
+- [ ] A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
+- [ ] Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

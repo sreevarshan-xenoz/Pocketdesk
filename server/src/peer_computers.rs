@@ -2338,7 +2338,7 @@ async fn run_link(
     let acceptor = stream.link_acceptor();
     let stream = match tokio::time::timeout(
         LINK_DIAL,
-        pocketdesk_core::protocol::connection::internet_control_handshake(
+        pocketdesk_core::protocol::connection::internet_control_handshake_named(
             stream,
             &computer.name,
             me,
@@ -2346,7 +2346,14 @@ async fn run_link(
     )
     .await
     {
-        Ok(Ok(stream)) => stream,
+        Ok(Ok((stream, claims))) => {
+            // Item 4: the release it runs, for Other computers to show;
+            // an identity that says none clears the last one.
+            if claims.sends.is_some() {
+                note_version(dir, &computer.device_id, claims.version.as_deref());
+            }
+            stream
+        }
         Ok(Err(e)) if is_refusal(&e.to_string()) => return LinkEnd::Refused,
         Ok(Err(e)) => return LinkEnd::Failed(e.to_string()),
         Err(_) => return LinkEnd::Failed("no handshake in time".to_string()),
@@ -2622,6 +2629,16 @@ fn set_link(dir: &Path, device_id: &str, link: &str) {
     });
     if let Err(e) = saved {
         tracing::debug!("Could not record the link's state: {e}");
+    }
+}
+
+/// Keep the release the computer `device_id` said it runs on the link this
+/// one dialed (item 4), `None` clearing it; written only when it changed.
+fn note_version(dir: &Path, device_id: &str, version: Option<&str>) {
+    if let Err(e) = computers::update(dir, |file| {
+        file.note_version(device_id, version);
+    }) {
+        tracing::debug!("Could not keep the computer's version: {e}");
     }
 }
 

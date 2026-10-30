@@ -51,6 +51,7 @@ object RustCore {
     private external fun nativeTakeSmsRequests(): String
     private external fun nativeControlPeer(): String
     private external fun nativePeerName(address: String): String
+    private external fun nativePeerVersion(address: String): String
     private external fun nativeSendClipboardImage(address: String, port: Int, path: String): String
     private external fun nativeFetchClipboardImage(
         address: String,
@@ -450,6 +451,20 @@ object RustCore {
     /** The name the computer at [address] gave itself when last connected (U3), or null. */
     fun peerName(address: String): String? =
         runCatching { nativePeerName(address) }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /**
+     * What the computer at [address] said of its Pocketdesk release at its
+     * latest identity on this run (item 4): null when none was heard, else
+     * the release it said, [dev.pocketdesk.android.PeerVersion.Heard.version]
+     * null when it said none.
+     */
+    fun peerVersion(address: String): dev.pocketdesk.android.PeerVersion.Heard? {
+        val said = runCatching { nativePeerVersion(address) }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            val json = JSONObject(said)
+            dev.pocketdesk.android.PeerVersion.Heard(if (json.isNull("version")) null else json.getString("version"))
+        }.getOrNull()
+    }
 
     /** The computer the live control connection is to, or null. */
     fun controlPeer(): Pair<String, Int>? =

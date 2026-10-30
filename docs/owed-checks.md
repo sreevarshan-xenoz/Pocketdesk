@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1068 open items.
+1071 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 42 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 44 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 168 |
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 142 |
+| A second computer | 143 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -138,6 +138,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Pair the OPPO as someone else's (the Pair page's "Someone else's") or with a guest grant: Devices on this computer says the computer lists and removes devices only for a device of yours, and nothing is removed.
 - On the throwaway computer, Settings, Other computers, "Let my devices remove others from afar" off: the OPPO's Devices on this computer says the owner turned it off, and nothing is removed; on again, it lists. Start a removal and close the sheet before the answer, then open it again: the list shows what is there now, never another ask's answer.
 - Six removals in a minute from the OPPO (pair throwaway ids with scripted clients): the sixth says too many and removes nothing; a minute later one goes.
+
+**242. One version across my devices**
+
+- The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here)
+- A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1098,6 +1103,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Two computers paired both ways (Windows and the Linux laptop): at the laptop, Settings → Other computers → Windows → Devices there… lists Windows' devices, the laptop marked "this computer"; Remove… a throwaway device there: it goes from Windows' Devices page, and Windows notifies. Do it once with the laptop keeping the link and once with Windows keeping it (pair again from the other side). (where: second computer)
 - A computer paired one way (no "Mine" tick): its Other computers card has no Devices there…; a scripted `remote_devices` ask from it on its link is answered `refused: not_owner`. (where: second computer)
 - From the OPPO, remove the laptop (paired both ways) from Windows: the laptop's link to Windows ends, Windows forgets it under Other computers, the laptop's own list says Windows refused it. Pair them again both ways afterwards. (where: second computer)
+
+**242. One version across my devices**
+
+- Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 

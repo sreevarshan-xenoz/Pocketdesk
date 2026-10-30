@@ -4952,6 +4952,7 @@ mod pin_certificate_tests {
             pocketdesk_core::protocol::connection::PeerClaims {
                 name: Some("Study PC".to_string()),
                 sends: None,
+                version: None,
             },
         );
         let forgot = super::forget_peer_certificate("192.0.2.80".to_string());
