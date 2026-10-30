@@ -1904,7 +1904,9 @@ fn held_elsewhere(views: &Views, device_id: &str, session_id: u64) -> bool {
 /// How long privacy carried from the window's last screen (PC11) waits for
 /// the new screen's view to be let in: about a session's start. A computer
 /// that asks its owner first would have them answer with its keyboard
-/// blocked, so it is let go past this.
+/// blocked, so it is let go past this. The real bound is the lesser of
+/// this and [`WINDOW_GRACE`] (PR #570 review M6): a new view starts
+/// unwatched, so with no window joined it is let go at the grace.
 pub const CARRY_FOR: Duration = Duration::from_secs(5);
 
 /// Whether privacy carried from the window's last screen at `carried`
