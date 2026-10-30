@@ -130,7 +130,7 @@ pub(crate) const PERMISSIONS: [(Capability, &str, &str); 25] = [
     (
         Capability::Power,
         "Lock, sleep, privacy and wake others",
-        "Lock the screen, put the computer to sleep or shut it down, blank it for privacy, and send a wake to another computer on this network.",
+        "Lock the screen, put the computer to sleep or shut it down, block its own keyboard and mouse for privacy (a ring shows; the screen is not blanked), and send a wake to another computer on this network.",
     ),
     (
         Capability::Exec,
