@@ -25,7 +25,9 @@ use pocketdesk_core::streaming::{
     InputPacket, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS,
     SCREEN_FEATURES_SAID,
 };
-use pocketdesk_server::computer_view::{Command, Dialer, PrivacyHost, run, run_with};
+use pocketdesk_server::computer_view::{
+    Command, Dialer, PRIVACY_RENEW, PrivacyHost, run, run_with,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -1187,7 +1189,9 @@ async fn privacy_is_let_go_as_the_window_goes() {
         .unwrap();
     assert_eq!(release["action"], "release");
     assert!(
-        tokio::time::timeout(Duration::from_secs(3), asked.recv())
+        // Past one renewal period and its heartbeat (re-review): a hold
+        // left behind would have renewed by now.
+        tokio::time::timeout(PRIVACY_RENEW + Duration::from_secs(3), asked.recv())
             .await
             .is_err(),
         "nothing renewed for nobody"
