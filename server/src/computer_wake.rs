@@ -172,14 +172,35 @@ pub fn keep(dir: &Path, device_id: &str, body: &serde_json::Value, now_unix: u64
     }
 }
 
-/// Take a computer's word on how to wake it, off the runtime.
-pub async fn heard(device_id: &str, body: &serde_json::Value) {
+/// [`keep`], only when `device_id` is one of the owner's computers
+/// (`is_computer`): a phone's word is never kept, even under the id of a
+/// listed computer.
+pub fn keep_from(
+    dir: &Path,
+    device_id: &str,
+    is_computer: bool,
+    body: &serde_json::Value,
+    now_unix: u64,
+) {
+    if is_computer {
+        keep(dir, device_id, body, now_unix);
+    }
+}
+
+/// Take a computer's word on how to wake it, off the runtime: from the
+/// link this computer keeps to it (`on_link`), or from a connection here,
+/// kept only when the trust store holds that device as a computer.
+pub async fn heard(device_id: &str, body: &serde_json::Value, on_link: bool) {
     let Ok(dir) = crate::state::state_dir() else {
         return;
     };
     let (device_id, body) = (device_id.to_string(), body.clone());
     let now = pocketdesk_core::local::pin::now_unix();
-    let _ = tokio::task::spawn_blocking(move || keep(&dir, &device_id, &body, now)).await;
+    let _ = tokio::task::spawn_blocking(move || {
+        let is_computer = on_link || crate::plugins::pair::is_computer_device(&device_id);
+        keep_from(&dir, &device_id, is_computer, &body, now)
+    })
+    .await;
 }
 
 /// Where the magic packet for `computer` goes, on `port`: its broadcast
@@ -490,6 +511,20 @@ mod tests {
         assert_eq!(seeded("mine", true), Some(COMPUTER_WAKE.to_string()));
         assert_eq!(seeded("one-way", true), None, "paired one way: not listed");
         assert_eq!(seeded("mine", false), None, "not a computer");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC6 review M-9: a connection that is not one of the owner's
+    /// computers is never kept, even under a listed computer's id.
+    #[test]
+    fn only_a_computers_word_is_kept() {
+        let dir = temp("from");
+        computers::update(&dir, |file| file.computers.push(computer("desk"))).unwrap();
+        let told = packet_for(true, Some(&facts())).body;
+        keep_from(&dir, "desk", false, &told, 3);
+        assert_eq!(computers::read(&dir).computers[0].wake, None, "a phone's");
+        keep_from(&dir, "desk", true, &told, 4);
+        assert!(computers::read(&dir).computers[0].wake.is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -2134,7 +2134,7 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
     }
     // How to wake it while its link is down (PC6).
     if packet.packet_type == crate::computer_wake::COMPUTER_WAKE {
-        crate::computer_wake::heard(device_id, &packet.body).await;
+        crate::computer_wake::heard(device_id, &packet.body, true).await;
         return;
     }
     if packet.packet_type == crate::offers::OFFER {

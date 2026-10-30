@@ -820,9 +820,9 @@ impl Plugin for PairPlugin {
                 }
             }
             // How to wake one of the owner's computers (PC6), kept only
-            // for a computer this one lists.
-            crate::computer_wake::COMPUTER_WAKE if is_computer_device(&conn) => {
-                crate::computer_wake::heard(&conn, &packet.body).await;
+            // from a computer, and only for one this computer lists.
+            crate::computer_wake::COMPUTER_WAKE => {
+                crate::computer_wake::heard(&conn, &packet.body, false).await;
             }
             _ => {}
         }
