@@ -114,12 +114,7 @@ impl Waking {
     }
 }
 
-/// Whether Wake is offered for `computer` (PC6): the server runs (it
-/// sends the magic packet), the link is down, and the computer told this
-/// one how to wake it.
-pub fn can_wake(computer: &PeerComputer, server_running: bool) -> bool {
-    server_running && computer.link != "linked" && computer.wake.is_some()
-}
+pub use crate::model::{can_wake, view_reach};
 
 /// A link's state in words.
 pub fn link_words(computer: &PeerComputer) -> String {
@@ -145,19 +140,6 @@ pub fn viewed_words(computer: &PeerComputer, now_unix: u64) -> Option<String> {
             crate::words::ago(now_unix, computer.viewed_unix)
         )
     })
-}
-
-/// Whether "Show its screen" can ask for `computer` now (BK7): the server
-/// dials it, so it must run, and the computer must be reachable some way,
-/// its link up or an address known. Why not, when it cannot.
-pub fn view_reach(computer: &PeerComputer, server_running: bool) -> Result<(), &'static str> {
-    if !server_running {
-        return Err("Start the server first: it reaches the other computer");
-    }
-    if computer.link != "linked" && computer.addresses.is_empty() {
-        return Err("Not reachable now: its link is down and no address of it is known");
-    }
-    Ok(())
 }
 
 /// Whether `text` looks like a pairing link (the server checks it fully),
@@ -237,6 +219,30 @@ impl ComputersView {
         } else if view_reach(computer, server_running).is_ok() {
             self.view = Some((computer.device_id.clone(), computer.name.clone()));
         }
+    }
+
+    /// Show the computer `device_id`'s screen, as the tray program's
+    /// "Show <name>'s screen" asks (PC6): offered a wake first as Show its
+    /// screen does, else said why not.
+    pub fn show_asked(&mut self, state_dir: &Path, device_id: &str, server_running: bool) {
+        self.read_at = None;
+        self.refresh(state_dir);
+        let Some(computer) = self
+            .file
+            .computers
+            .iter()
+            .find(|c| c.device_id == device_id)
+            .cloned()
+        else {
+            return;
+        };
+        if let Err(why) = view_reach(&computer, server_running)
+            && !can_wake(&computer, server_running)
+        {
+            self.notice = crate::notice::Notice::error(format!("{why}."));
+            return;
+        }
+        self.show_or_offer(&computer, server_running);
     }
 
     /// Send the magic packet for the computer `device_id` (PC6).
@@ -1164,6 +1170,38 @@ mod tests {
         assert_eq!(waking.as_deref(), Some("b"));
         assert_eq!(asked, 1);
         assert!(cancelled);
+    }
+
+    /// PC6: the tray's Show asks for a computer's window, offers a wake
+    /// for one asleep, and says why for one that cannot be reached.
+    #[test]
+    fn the_trays_show_shows_offers_or_says_why() {
+        let dir = temp("show-asked");
+        computers::update(&dir, |file| {
+            file.computers.push(sleeping(true));
+            file.computers.push(PeerComputer {
+                device_id: "up".to_string(),
+                ..computer("linked")
+            });
+            file.computers.push(PeerComputer {
+                device_id: "gone".to_string(),
+                ..computer("away: the link closed")
+            });
+        })
+        .unwrap();
+        let mut view = ComputersView::default();
+        view.show_asked(&dir, "b", true);
+        let offered = view.offer.clone();
+        view.show_asked(&dir, "up", true);
+        let shown = view.take_view();
+        view.show_asked(&dir, "gone", true);
+        let said = view.take_notice().is_some();
+        view.show_asked(&dir, "nobody", true);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(offered.as_deref(), Some("b"));
+        assert_eq!(shown, Some(("up".to_string(), "Desk".to_string())));
+        assert!(said);
+        assert_eq!(view.take_view(), None);
     }
 
     /// PC6: a woken computer whose link comes up has its window asked for.

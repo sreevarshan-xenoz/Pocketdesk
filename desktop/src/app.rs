@@ -934,6 +934,19 @@ impl PocketdeskApp {
                     self.resume();
                     false
                 }
+                TrayAction::ShowComputer(id) => {
+                    self.show_asked(&id);
+                    true
+                }
+                TrayAction::WakeComputer(id) => {
+                    let name = pocketdesk_core::local::computers::read(&self.state_dir)
+                        .computers
+                        .into_iter()
+                        .find(|c| c.device_id == id)
+                        .map_or_else(|| "the computer".to_string(), |c| c.name);
+                    self.computers.wake(&self.state_dir, &id, &name, now_unix());
+                    false
+                }
                 TrayAction::Quit => {
                     self.quitting = true;
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -995,6 +1008,12 @@ impl PocketdeskApp {
             if let Some(id) = &open.phone {
                 self.type_on(id);
             }
+        } else if open.page == pocketdesk_core::local::app_open::COMPUTER_VIEW {
+            // PC6: a computer's screen from the tray program; on the
+            // Overview, which offers to wake it first if it sleeps.
+            if let Some(id) = &open.phone {
+                self.show_asked(id);
+            }
         } else if let Some(tab) = Tab::from_key(&open.page) {
             if tab == Tab::Files && open.phone.is_some() {
                 self.send_to = open.phone;
@@ -1005,6 +1024,15 @@ impl PocketdeskApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+
+    /// Show the computer `id`'s screen as the tray asked (PC6), from the
+    /// Overview, where an offer to wake it shows.
+    fn show_asked(&mut self, id: &str) {
+        self.switch_to(Tab::Status);
+        self.chosen = Tab::Status;
+        self.computers
+            .show_asked(&self.state_dir, id, self.snapshot.running);
     }
 
     /// Open the typing window on phone `id` (M4), by its name as shown.
@@ -1021,10 +1049,16 @@ impl PocketdeskApp {
         };
         let rows = model::phone_rows(&self.snapshot, &self.last_sessions);
         let now = now_unix();
-        tray.show(crate::tray_menu::with_pause(
+        let entries = crate::tray_menu::with_pause(
             crate::tray_menu::menu(&rows, &self.snapshot.devices, now),
             pocketdesk_core::local::pause::current(&self.state_dir, now).as_ref(),
             now,
+        );
+        // PC6: the owner's computers, to show or wake.
+        tray.show(crate::tray_menu::with_computers(
+            entries,
+            &pocketdesk_core::local::computers::read(&self.state_dir).computers,
+            self.snapshot.running,
         ));
     }
 

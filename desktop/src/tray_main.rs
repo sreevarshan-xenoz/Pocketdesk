@@ -177,6 +177,12 @@ fn main() {
                 )
             });
             entries = pocketdesk_desktop::tray_menu::with_keyboard(entries, keyboard);
+            // PC6: the owner's computers, to show or wake.
+            entries = pocketdesk_desktop::tray_menu::with_computers(
+                entries,
+                &pocketdesk_core::local::computers::read(&state_dir).computers,
+                snapshot.running,
+            );
             // H4: the key names itself where its action is.
             if key.status.registered
                 && let Some(phone) = hotkey::phone(&rows)
@@ -454,6 +460,20 @@ fn act(state_dir: &Path, action: TrayAction) -> bool {
         TrayAction::PhoneMedia(id, command) => {
             model::press_phone_media(state_dir, id, command, now).map_err(std::io::Error::other)
         }
+        // PC6: the window shows it, or offers to wake it first.
+        TrayAction::ShowComputer(id) => open_window(
+            state_dir,
+            pocketdesk_core::local::app_open::COMPUTER_VIEW,
+            Some(id),
+        ),
+        TrayAction::WakeComputer(id) => pocketdesk_core::local::computers::request(
+            state_dir,
+            pocketdesk_core::local::computers::ComputerAsk::Wake {
+                device_id: id.clone(),
+            },
+            now,
+        )
+        .map(|_| ()),
         TrayAction::Quit => {
             // The window goes too, when it runs (E2).
             let _ = pocketdesk_core::local::app_open::request(
