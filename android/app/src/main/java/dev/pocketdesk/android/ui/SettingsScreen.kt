@@ -669,9 +669,13 @@ private fun SettingsJumpRow(jumps: SettingsJumps, scroll: androidx.compose.found
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         groups.forEach { (label, top) ->
+            // Said as "Go to Wake", not twelve bare names before the first
+            // setting (PR #575 review N6).
+            val goTo = stringResource(R.string.settings_jump_to, label)
             SuggestionChip(
                 onClick = { scope.launch { scroll.animateScrollTo(top) } },
                 label = { Text(label) },
+                modifier = Modifier.semantics { contentDescription = goTo },
             )
         }
     }

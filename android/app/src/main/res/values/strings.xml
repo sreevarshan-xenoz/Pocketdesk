@@ -28,6 +28,7 @@
     <string name="settings_find">Find a setting</string>
     <string name="settings_find_clear">Clear the search</string>
     <string name="settings_find_none">No setting matches “%1$s”</string>
+    <string name="settings_jump_to">Go to %1$s</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
     <string name="settings_appearance">Appearance</string>

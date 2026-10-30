@@ -19,6 +19,7 @@
     <string name="settings_find">அமைப்பைத் தேடு</string>
     <string name="settings_find_clear">தேடலை அழி</string>
     <string name="settings_find_none">“%1$s” உடன் பொருந்தும் அமைப்பு இல்லை</string>
+    <string name="settings_jump_to">%1$s பகுதிக்குச் செல்</string>
     <string name="settings_title">அமைப்புகள்</string>
     <string name="settings_back">பின்செல்</string>
     <string name="settings_appearance">தோற்றம்</string>
