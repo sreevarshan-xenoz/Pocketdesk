@@ -873,7 +873,7 @@ pub fn reconnect_words(name: &str, status: &ViewStatus) -> Option<String> {
 }
 
 /// Send `packets` to the other computer through the relay; a broken write
-/// ends input here (the reader sees the relay go).
+/// ends the connection ([`lost_writer`]).
 fn send(state: &mut State, packets: Vec<InputPacket>) {
     if packets.is_empty() {
         return;
@@ -887,20 +887,20 @@ fn send(state: &mut State, packets: Vec<InputPacket>) {
             continue;
         }
         if Message::Input(bytes).write(writer).is_err() {
-            state.writer = None;
+            lost_writer(state);
             return;
         }
     }
 }
 
 /// Say the window's privacy ask to the server (PC8); a broken write ends
-/// input here, as [`send`]'s.
+/// the connection, as [`send`]'s.
 fn say_privacy(state: &mut State, ask: u8) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
     if Message::Privacy(ask).write(writer).is_err() {
-        state.writer = None;
+        lost_writer(state);
         return;
     }
     // Said at once here; the server's status says how it went.
@@ -914,14 +914,14 @@ fn say_privacy(state: &mut State, ask: u8) {
 }
 
 /// Say the window's pointer lock to the server (PC7): only while it says
-/// locked does the relay pass relative moves on. A broken write ends input
-/// here, as [`send`]'s.
+/// locked does the relay pass relative moves on. A broken write ends the
+/// connection, as [`send`]'s.
 fn say_pointer(state: &mut State, locked: bool) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
     if Message::PointerLock(locked).write(writer).is_err() {
-        state.writer = None;
+        lost_writer(state);
         return;
     }
     state.pointer_said = Some(locked);
@@ -937,14 +937,25 @@ pub fn pointer_to_say(locked: bool, said: Option<bool>) -> bool {
     }
 }
 
-/// Say the window's focus to the server (PC3); a broken write ends input
-/// here, as [`send`]'s.
+/// Say the window's focus to the server (PC3); a broken write ends the
+/// connection, as [`send`]'s.
 fn say_focus(state: &mut State, edge: Edge) {
     let Some(writer) = state.writer.as_mut() else {
         return;
     };
     if Message::Focus(edge == Edge::Gain).write(writer).is_err() {
-        state.writer = None;
+        lost_writer(state);
+    }
+}
+
+/// A write to the relay failed (it timed out, or the relay went): the
+/// connection is ended, not left half open, so the relay reads its end and
+/// lets go of what this window held there (its pointer lock, PC7 review
+/// I1), and the worker joins the view again (PC2) with a fresh one.
+fn lost_writer(state: &mut State) {
+    state.writer = None;
+    if let Some(stream) = state.stream.take() {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
     }
 }
 
@@ -3148,6 +3159,38 @@ mod tests {
         ];
         keep_chord_here(&mut events);
         assert_eq!(events.len(), 1, "only the plain M goes on");
+    }
+
+    /// PR #563 review I1: a write to the relay that fails ends the
+    /// connection, so the relay reads its end and lets go of the window's
+    /// lock, and the worker joins again.
+    #[test]
+    fn a_failed_write_ends_the_connection() {
+        use std::io::Read;
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reading = TcpStream::connect(addr).unwrap();
+        let (mut relay_side, _) = listener.accept().unwrap();
+        // The writer is a connection whose writes fail.
+        let broken = TcpStream::connect(addr).unwrap();
+        let _other = listener.accept().unwrap();
+        broken.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut state = State {
+            stream: Some(reading),
+            writer: Some(broken),
+            ..State::default()
+        };
+        say_focus(&mut state, Edge::Gain);
+        assert!(state.writer.is_none() && state.stream.is_none());
+        relay_side
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut byte = [0u8; 1];
+        assert_eq!(
+            relay_side.read(&mut byte).unwrap(),
+            0,
+            "the relay reads its end"
+        );
     }
 
     /// PC7: the relay hears the lock once per connection, and the release
