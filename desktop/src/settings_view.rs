@@ -355,6 +355,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_mic_device",
+        "Microphone for computer windows",
+        Section::Computers,
+    ),
+    (
         "computer_wake_facts",
         "Let my computers wake this one",
         Section::Computers,
@@ -521,6 +526,8 @@ pub(crate) fn drawn_here(key: &str) -> bool {
         // R3: the lock on Linux too.
         "away_lock_minutes" => cfg!(any(windows, target_os = "linux")),
         "mic_relay_device" => cfg!(windows),
+        // PC10: the window reads the microphone on Windows and Linux.
+        "computer_view_mic_device" => cfg!(any(windows, target_os = "linux")),
         // The shared keyboard and mouse runs on Windows and Linux.
         "shared_input"
         | "shared_input_drive"
@@ -626,6 +633,8 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_hevc"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
+            // PC10: read as the window's mic starts.
+            | "computer_view_mic_device"
             | "events"
             | "events_detail"
             | "hooks"
@@ -703,6 +712,9 @@ pub struct SettingsForm {
     pub edited: Config,
     /// The text box behind `mic_relay_device` (blank means the default).
     pub mic_device_text: String,
+    /// The text box behind `computer_view_mic_device` (PC10; blank, the
+    /// system's default microphone).
+    pub view_mic_text: String,
     /// The text box behind `relay_urls`: one per line, or comma separated.
     pub relay_urls_text: String,
     /// The text box behind `[hooks]`: `kind = command`, one per line.
@@ -751,6 +763,7 @@ impl SettingsForm {
     pub fn from_config(config: Config) -> Self {
         Self {
             mic_device_text: config.mic_relay_device.clone().unwrap_or_default(),
+            view_mic_text: config.computer_view_mic_device.clone().unwrap_or_default(),
             relay_urls_text: config.relay_urls.join("\n"),
             hooks_text: hooks_text(&config.hooks),
             link_rules_text: config.link_rules.join("\n"),
@@ -774,6 +787,8 @@ impl SettingsForm {
     pub fn apply_text_fields(&mut self) {
         let text = self.mic_device_text.trim();
         self.edited.mic_relay_device = (!text.is_empty()).then(|| text.to_string());
+        let text = self.view_mic_text.trim();
+        self.edited.computer_view_mic_device = (!text.is_empty()).then(|| text.to_string());
         self.edited.relay_urls = self
             .relay_urls_text
             .split(['\n', ','])
@@ -2209,6 +2224,14 @@ impl SettingsForm {
                         "With that computer's own lock, when the window closes, or Pocketdesk quits with it open, while it shows that computer (not while it reconnects); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
                     );
                 });
+                // PC10: the microphone "Send my mic" sends.
+                if drawn_here("computer_view_mic_device") {
+                    let mic = &mut self.view_mic_text;
+                    row(ui, "computer_view_mic_device", |ui| {
+                        ui.add(egui::TextEdit::singleline(mic).hint_text("System default"));
+                        note(ui, view_mic_note());
+                    });
+                }
                 // PC6: what Wake on the other computers needs from this one.
                 row(ui, "computer_wake_facts", |ui| {
                     ui.checkbox(
@@ -2513,6 +2536,16 @@ fn task_problems(tasks: &[TaskSpec]) -> Vec<String> {
 
 /// One setting: its name, then its control and any note under it, wrapping
 /// at the page's width (U5: a grid's long labels widened the page).
+/// What "Microphone for computer windows" says of itself (PC10): how this
+/// system names a microphone.
+fn view_mic_note() -> &'static str {
+    if cfg!(windows) {
+        "The microphone a computer's screen window sends with Send my mic: part of its name as Sound settings list it under Input. Blank, the system's default. Read as the mic starts."
+    } else {
+        "The microphone a computer's screen window sends with Send my mic: the source's name as pactl list short sources lists it. Blank, the system's default. Read as the mic starts."
+    }
+}
+
 fn row(ui: &mut egui::Ui, key: &str, add: impl FnOnce(&mut egui::Ui)) {
     // One system's rows are not drawn on another (Q2 review: Linux showed
     // switches that did nothing there).
@@ -2989,6 +3022,7 @@ mod tests {
             "computer_view_hw_decode",
             "computer_view_hevc",
             "computer_view_lock_on_close",
+            "computer_view_mic_device",
         ] {
             assert!(
                 SETTINGS
@@ -3289,6 +3323,23 @@ mod tests {
             "{:?}",
             form.problems()
         );
+    }
+
+    /// PC10: a blank microphone for computer windows is the system's.
+    #[test]
+    fn a_blank_window_mic_means_the_default() {
+        let mut form = SettingsForm::from_config(Config::default());
+        assert_eq!(form.view_mic_text, "");
+        form.view_mic_text = "  ".into();
+        form.apply_text_fields();
+        assert_eq!(form.edited.computer_view_mic_device, None);
+        form.view_mic_text = " Headset ".into();
+        form.apply_text_fields();
+        assert_eq!(
+            form.edited.computer_view_mic_device.as_deref(),
+            Some("Headset")
+        );
+        assert!(view_mic_note().contains("Send my mic"));
     }
 
     #[test]

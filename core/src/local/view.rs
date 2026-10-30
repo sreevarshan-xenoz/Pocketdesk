@@ -62,6 +62,13 @@ pub const POINTER_LOCK: u8 = 0x15;
 /// computer's screens may show side by side.
 pub const MAX_VIEWS: u8 = 4;
 
+/// App → server: the window's "Send my mic" went on (`1`) or off (`0`)
+/// (PC10), `[on u8]`. Only while the window's latest word on this
+/// connection is "on" does the relay pass its [`InputPacket::Mic`] frames
+/// on; as it goes off, or the connection ends with it on, the relay sends
+/// the other computer the mic's stop itself.
+pub const MIC: u8 = 0x16;
+
 /// The longest input packet the app sends (a pasted text).
 pub const MAX_INPUT: usize = 16 * 1024;
 /// The longest status or reason.
@@ -222,6 +229,8 @@ pub enum Message {
     Privacy(u8),
     /// The window's pointer locked or freed (PC7).
     PointerLock(bool),
+    /// The window's mic on or off (PC10).
+    Mic(bool),
 }
 
 impl Message {
@@ -254,6 +263,7 @@ impl Message {
             Message::Focus(focused) => (FOCUS, vec![u8::from(*focused)]),
             Message::Privacy(ask) => (PRIVACY, vec![*ask]),
             Message::PointerLock(locked) => (POINTER_LOCK, vec![u8::from(*locked)]),
+            Message::Mic(on) => (MIC, vec![u8::from(*on)]),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -306,6 +316,7 @@ impl Message {
             FOCUS if len == 1 && payload[0] <= 1 => Message::Focus(payload[0] == 1),
             PRIVACY if len == 1 && payload[0] <= PRIVACY_LOCK => Message::Privacy(payload[0]),
             POINTER_LOCK if len == 1 && payload[0] <= 1 => Message::PointerLock(payload[0] == 1),
+            MIC if len == 1 && payload[0] <= 1 => Message::Mic(payload[0] == 1),
             _ => return Err(bad()),
         })
     }
@@ -328,26 +339,28 @@ fn cut(words: &str) -> &str {
 }
 
 /// Whether the window may send `packet` to the other computer: the pointer,
-/// the keys, typed text, a keyframe ask, the quality preset and view-only,
-/// and relative moves only while its pointer is locked (`pointer_locked`, as
-/// the window last said with [`POINTER_LOCK`], PC7). Nothing that measures
-/// the link, nor the mic, a pen, a pad, a crop or the laser: those are a
-/// phone's.
-pub fn input_allowed(packet: &InputPacket, pointer_locked: bool) -> bool {
-    if matches!(packet, InputPacket::MouseMove { .. }) {
-        return pointer_locked;
+/// the keys, typed text, a keyframe ask, the quality preset and view-only;
+/// relative moves only while its pointer is locked (`pointer_locked`, as
+/// the window last said with [`POINTER_LOCK`], PC7); and its mic's frames
+/// only while its "Send my mic" is on (`mic_on`, as it last said with
+/// [`MIC`], PC10). Nothing that measures the link, nor a pen, a pad, a crop
+/// or the laser: those are a phone's.
+pub fn input_allowed(packet: &InputPacket, pointer_locked: bool, mic_on: bool) -> bool {
+    match packet {
+        InputPacket::MouseMove { .. } => pointer_locked,
+        InputPacket::Mic { .. } => mic_on,
+        _ => matches!(
+            packet,
+            InputPacket::MouseMoveAbs { .. }
+                | InputPacket::MouseClick { .. }
+                | InputPacket::MouseScroll { .. }
+                | InputPacket::KeyEvent { .. }
+                | InputPacket::Text(_)
+                | InputPacket::RequestKeyframe
+                | InputPacket::QualityPreset { .. }
+                | InputPacket::ViewOnly { .. }
+        ),
     }
-    matches!(
-        packet,
-        InputPacket::MouseMoveAbs { .. }
-            | InputPacket::MouseClick { .. }
-            | InputPacket::MouseScroll { .. }
-            | InputPacket::KeyEvent { .. }
-            | InputPacket::Text(_)
-            | InputPacket::RequestKeyframe
-            | InputPacket::QualityPreset { .. }
-            | InputPacket::ViewOnly { .. }
-    )
 }
 
 /// `view.json`: the view the server holds now, and how the app reaches it.
@@ -486,6 +499,8 @@ mod tests {
             Message::Privacy(PRIVACY_LOCK),
             Message::PointerLock(true),
             Message::PointerLock(false),
+            Message::Mic(true),
+            Message::Mic(false),
             Message::Status(ViewStatus {
                 privacy: ViewPrivacy::Refused("Power is off".into()),
                 ..ViewStatus::default()
@@ -535,6 +550,10 @@ mod tests {
         assert!(Message::parse(POINTER_LOCK, Vec::new()).is_err());
         assert!(Message::parse(POINTER_LOCK, vec![2]).is_err());
         assert!(Message::parse(POINTER_LOCK, vec![1, 0]).is_err());
+        // PC10: the mic's word is one byte, 0 or 1.
+        assert!(Message::parse(MIC, Vec::new()).is_err());
+        assert!(Message::parse(MIC, vec![2]).is_err());
+        assert!(Message::parse(MIC, vec![1, 0]).is_err());
         let not_json = Message::parse(STATUS, b"{nope".to_vec());
         assert!(not_json.is_err());
         // A status from a later server, with more to say, still reads.
@@ -622,9 +641,10 @@ mod tests {
     }
 
     /// The window drives the pointer and the keys and picks the quality;
-    /// what a phone alone sends (the mic, a pad, a crop) never goes.
+    /// what a phone alone sends (a pad, a crop, the laser) never goes.
     #[test]
     fn only_the_pointer_keys_and_the_views_own_asks_are_sent() {
+        let gates = [(false, false), (true, false), (false, true), (true, true)];
         for allowed in [
             InputPacket::MouseMoveAbs {
                 x_norm: 1,
@@ -644,18 +664,39 @@ mod tests {
             InputPacket::QualityPreset { preset: 2 },
             InputPacket::ViewOnly { enabled: true },
         ] {
-            assert!(input_allowed(&allowed, false), "{allowed:?}");
-            assert!(input_allowed(&allowed, true), "{allowed:?} while locked");
+            for (locked, mic) in gates {
+                assert!(
+                    input_allowed(&allowed, locked, mic),
+                    "{allowed:?} locked {locked} mic {mic}"
+                );
+            }
         }
         // PC7: a relative move only while the window's pointer is locked.
         let relative = InputPacket::MouseMove { dx: 1, dy: -1 };
-        assert!(!input_allowed(&relative, false));
-        assert!(input_allowed(&relative, true));
-        for refused in [
+        assert!(!input_allowed(&relative, false, false));
+        assert!(!input_allowed(&relative, false, true));
+        assert!(input_allowed(&relative, true, false));
+        // PC10: the mic's frames, its start and its stop only while the
+        // window says its mic is on.
+        for mic in [
             InputPacket::Mic {
                 enabled: true,
                 opus: Vec::new(),
             },
+            InputPacket::Mic {
+                enabled: true,
+                opus: vec![0xF8, 0xFF, 0xFE],
+            },
+            InputPacket::Mic {
+                enabled: false,
+                opus: Vec::new(),
+            },
+        ] {
+            assert!(!input_allowed(&mic, false, false), "{mic:?}");
+            assert!(!input_allowed(&mic, true, false), "{mic:?} locked");
+            assert!(input_allowed(&mic, false, true), "{mic:?} mic on");
+        }
+        for refused in [
             InputPacket::FullQuality { enabled: true },
             InputPacket::WindowCrop {
                 x: None,
@@ -678,8 +719,12 @@ mod tests {
                 values: Vec::new(),
             },
         ] {
-            assert!(!input_allowed(&refused, false), "{refused:?}");
-            assert!(!input_allowed(&refused, true), "{refused:?} while locked");
+            for (locked, mic) in gates {
+                assert!(
+                    !input_allowed(&refused, locked, mic),
+                    "{refused:?} locked {locked} mic {mic}"
+                );
+            }
         }
     }
 

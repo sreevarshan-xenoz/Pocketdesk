@@ -45,6 +45,7 @@ mod view_grab;
 mod view_input;
 #[cfg(test)]
 mod view_live;
+mod view_mic;
 mod view_pointer;
 mod widgets;
 
