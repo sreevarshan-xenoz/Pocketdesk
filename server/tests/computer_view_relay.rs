@@ -1893,6 +1893,18 @@ async fn two_windows_show_one_computers_two_screens_side_by_side() {
         })
         .await
         .unwrap();
+    // PR #570 review M7: nothing replaced, and still two views held.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        wire::read(&dir).map(|f| f.session_id),
+        Some(first.session_id),
+        "the first window's view unchanged"
+    );
+    assert_eq!(
+        wire::read_window(&dir, 1).map(|f| f.session_id),
+        Some(second.session_id)
+    );
+    counted(&mut left, 2).await;
 
     // Stopping the second window's view leaves the first's.
     commands
@@ -2029,6 +2041,83 @@ async fn privacy_stays_as_the_window_switches_screens() {
     .await
     .expect("let go as the view stops");
     assert_eq!(release["action"], "release");
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PR #570 review M7: a window that turns to another computer lets the
+/// first computer's privacy go: the hold moves only between screens of
+/// one computer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-other-computer");
+    paired(&dir);
+    computers::update(&dir, |file| {
+        let mut lap = file.computers[0].clone();
+        lap.device_id = "lap".into();
+        lap.name = "Lap".into();
+        file.computers.push(lap);
+    })
+    .unwrap();
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (addr, _input) = other_computer_per_screen(cert.clone()).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<(String, serde_json::Value)>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = stand_in_host(
+        move |id, body| {
+            let _ = asked_tx.send((id.to_string(), body));
+        },
+        answers_rx,
+    );
+    let (commands, relay, mut window) = controlled_view(&dir, addr, cert, host).await;
+    let first = wire::read(&dir).expect("the first view");
+    window
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let (id, grab) = tokio::time::timeout(Duration::from_secs(5), asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (id.as_str(), &grab["action"]),
+        ("desk", &serde_json::json!("grab"))
+    );
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&grab, serde_json::json!({"ok": true, "grabbed": 2})),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    commands
+        .send(Command::Start {
+            device_id: "lap".into(),
+            monitor: 0,
+            hevc: false,
+            window: 0,
+        })
+        .await
+        .unwrap();
+    let (id, release) = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let (id, body) = asked.recv().await.unwrap();
+            if body["action"] == "release" {
+                return (id, body);
+            }
+        }
+    })
+    .await
+    .expect("let go as the window turns to another computer");
+    assert_eq!(
+        (id.as_str(), &release["action"]),
+        ("desk", &serde_json::json!("release"))
+    );
+    let next = window_file(&dir, 0, first.session_id).await;
+    assert_eq!(next.device_id, "lap");
     drop(commands);
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
