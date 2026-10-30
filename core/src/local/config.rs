@@ -417,6 +417,12 @@ pub struct Config {
     /// chosen, there or in Settings.
     #[serde(default)]
     pub computer_view_lock_on_close: bool,
+    /// The microphone a computer's screen window sends to that computer
+    /// with "Send my mic" (PC10): part of its name as Windows lists it, or
+    /// the source's name on Linux. None (blank) is the system's default
+    /// microphone. Read as the mic starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_view_mic_device: Option<String>,
     /// Tell the owner's paired computers how to wake this one (PC6): the
     /// MAC and broadcast address of the adapter its link leaves by, sent on
     /// each link as it comes up. Off, it tells them to forget what they
@@ -650,6 +656,7 @@ impl Default for Config {
             computer_view_hw_decode: true,
             computer_view_hevc: true,
             computer_view_lock_on_close: false,
+            computer_view_mic_device: None,
             computer_wake_facts: true,
         }
     }
@@ -913,6 +920,7 @@ impl Config {
         "computer_view_hw_decode",
         "computer_view_hevc",
         "computer_view_lock_on_close",
+        "computer_view_mic_device",
         "computer_wake_facts",
     ];
 }
@@ -1491,6 +1499,37 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_lock_on_close"]
+        );
+    }
+
+    /// PC10: the screen window's microphone is the system's default until
+    /// one is named, and a name saves and reads back.
+    #[test]
+    fn a_computers_window_mic_is_the_default_until_named() {
+        let path = temp("computer-view-mic");
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(
+            Config::load_from(&path).unwrap().computer_view_mic_device,
+            None
+        );
+        assert_eq!(Config::default().computer_view_mic_device, None);
+        let chosen = Config {
+            computer_view_mic_device: Some("USB Audio".into()),
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_mic_device"])
+            .unwrap();
+        assert_eq!(
+            Config::load_from(&path)
+                .unwrap()
+                .computer_view_mic_device
+                .as_deref(),
+            Some("USB Audio")
+        );
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_mic_device"]
         );
     }
 
