@@ -1991,9 +1991,12 @@ pub async fn run_with(
         }
     };
     let dialer = Arc::new(dialer);
-    // A file left by a server that stopped mid-view names nothing now.
+    // A file left by a server that stopped mid-view names nothing now, nor
+    // does one left half-written (range review M8).
     for window in 0..wire::MAX_VIEWS {
-        let _ = std::fs::remove_file(state_dir.join(wire::file_name(window)));
+        let file = state_dir.join(wire::file_name(window));
+        let _ = std::fs::remove_file(file.with_extension("json.tmp"));
+        let _ = std::fs::remove_file(file);
     }
     let mut next_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
