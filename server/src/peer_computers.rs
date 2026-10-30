@@ -170,6 +170,13 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
                 }
+                // PC6: the magic packet, as the computer told this one.
+                ComputerAsk::Wake { device_id } => {
+                    let dir = dir.clone();
+                    tokio::task::spawn_blocking(move || {
+                        crate::computer_wake::wake(&dir, &device_id)
+                    });
+                }
                 ComputerAsk::View { device_id, monitor } => {
                     let views = views.get_or_insert_with(|| {
                         crate::computer_view::spawn(dir.clone(), cert_manager.clone(), wan.clone())

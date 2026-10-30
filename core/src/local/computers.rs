@@ -324,6 +324,9 @@ pub enum ComputerAsk {
         #[serde(default)]
         mine: bool,
     },
+    /// Send the magic packet that wakes the computer `device_id` (PC6),
+    /// as it told this one ([`PeerComputer::wake`]).
+    Wake { device_id: String },
     /// Stop this computer's ask of a nearby one.
     CancelNearby,
     /// The owner here confirmed that both screens show the code of this
@@ -803,6 +806,39 @@ mod tests {
         let old: PeerComputer =
             serde_json::from_str(&raw.replace(",\"stream_port\":4716", "")).unwrap();
         assert_eq!(old.stream_port, 4716);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC6: a wake is asked for a computer by its id; a computer from a
+    /// file written before knows no way to wake it.
+    #[test]
+    fn a_wake_is_asked_for_a_computer() {
+        let dir = temp_dir("wake");
+        let ask = ComputerAsk::Wake {
+            device_id: "desk".to_string(),
+        };
+        let asked = request(&dir, ask.clone(), 100).unwrap();
+        assert_eq!(take_all(&dir, 101), [asked]);
+        assert_eq!(
+            serde_json::to_value(&ask).unwrap(),
+            serde_json::json!({"ask": "wake", "device_id": "desk"})
+        );
+        let raw = serde_json::to_string(&computer("desk")).unwrap();
+        assert!(!raw.contains("wake"), "nothing known is not written");
+        let old: PeerComputer = serde_json::from_str(&raw).unwrap();
+        assert_eq!(old.wake, None);
+        let told = PeerComputer {
+            wake: Some(ComputerWake {
+                mac: "00:00:5E:00:53:01".to_string(),
+                broadcast: std::net::Ipv4Addr::new(192, 0, 2, 255),
+                wired: true,
+                told_unix: 5,
+            }),
+            ..computer("desk")
+        };
+        let back: PeerComputer =
+            serde_json::from_str(&serde_json::to_string(&told).unwrap()).unwrap();
+        assert_eq!(back, told);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

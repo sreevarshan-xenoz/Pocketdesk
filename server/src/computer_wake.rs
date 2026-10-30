@@ -5,11 +5,11 @@
 //! (owner-only), and its Wake sends the magic packet from there while the
 //! link is down. `computer_wake_facts` off, a computer tells them to forget.
 
-use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pocketdesk_core::local::computers::{self, ComputerWake};
+use pocketdesk_core::local::computers::{self, ComputerWake, PeerComputer};
 use pocketdesk_core::local::wake::WakeFacts;
 use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 
@@ -146,10 +146,71 @@ pub async fn heard(device_id: &str, body: &serde_json::Value) {
     let _ = tokio::task::spawn_blocking(move || keep(&dir, &device_id, &body, now)).await;
 }
 
+/// Where the magic packet for `computer` goes, on `port`: its broadcast
+/// address, when that is on one of this computer's networks
+/// (`on_my_networks`: a broadcast elsewhere reaches nothing it could
+/// wake), and the first IPv4 address it is known at, which a router that
+/// still remembers it passes on. Empty when it never said how to wake it.
+pub fn targets(
+    computer: &PeerComputer,
+    on_my_networks: impl Fn(Ipv4Addr) -> bool,
+    port: u16,
+) -> Vec<SocketAddr> {
+    let Some(wake) = &computer.wake else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    if on_my_networks(wake.broadcast) {
+        targets.push(SocketAddr::from((wake.broadcast, port)));
+    }
+    if let Some(last) = computer
+        .addresses
+        .iter()
+        .find_map(|a| a.parse::<Ipv4Addr>().ok())
+        .filter(|ip| !ip.is_unspecified() && !ip.is_multicast())
+    {
+        let last = SocketAddr::from((last, port));
+        if !targets.contains(&last) {
+            targets.push(last);
+        }
+    }
+    targets
+}
+
+/// Send the magic packet for `computer` to `targets`, a few times (core's
+/// `send_wake`); how many took it. Blocking.
+pub fn send(computer: &PeerComputer, targets: &[SocketAddr]) -> Result<usize, String> {
+    let wake = computer
+        .wake
+        .as_ref()
+        .ok_or_else(|| "it never said how to wake it".to_string())?;
+    pocketdesk_core::tailscale::wol::send_wake(&wake.mac, targets).map_err(|e| format!("{e:#}"))
+}
+
+/// Wake the computer `device_id` as it told this one (the app's Wake).
+/// Blocking: it lists the adapters. Neither its MAC nor the addresses go
+/// in the log.
+pub fn wake(dir: &Path, device_id: &str) {
+    let file = computers::read(dir);
+    let Some(computer) = file.computers.iter().find(|c| c.device_id == device_id) else {
+        tracing::info!(device_id, "Wake: no such computer");
+        return;
+    };
+    let adapters = pocketdesk_core::local::wake::adapters();
+    let targets = targets(
+        computer,
+        |ip| pocketdesk_core::local::wake::may_relay_to(ip, &adapters),
+        WAKE_PORT,
+    );
+    match send(computer, &targets) {
+        Ok(reached) => tracing::info!(device_id, reached, "Sent the wake to another computer"),
+        Err(e) => tracing::warn!(device_id, "Could not wake another computer: {e}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pocketdesk_core::local::computers::PeerComputer;
 
     fn facts() -> WakeFacts {
         WakeFacts {
@@ -267,6 +328,71 @@ mod tests {
             .unwrap();
         assert!(!raw.contains("\"wake\""), "none is not written");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn told_computer(addresses: &[&str]) -> PeerComputer {
+        PeerComputer {
+            addresses: addresses.iter().map(|a| a.to_string()).collect(),
+            wake: told(&packet_for(true, Some(&facts())).body, 1),
+            ..computer("desk")
+        }
+    }
+
+    /// PC6: the wake goes to the broadcast when it is on this computer's
+    /// networks and to the first address the computer is known at, once
+    /// each; nowhere for a computer that never said how.
+    #[test]
+    fn the_wake_goes_to_the_broadcast_here_and_the_last_address() {
+        let home = |ip: Ipv4Addr| ip == Ipv4Addr::new(192, 0, 2, 255);
+        let at = |a: &str| a.parse::<SocketAddr>().unwrap();
+        assert_eq!(
+            targets(&told_computer(&["192.0.2.10", "198.51.100.7"]), home, 9),
+            [at("192.0.2.255:9"), at("192.0.2.10:9")]
+        );
+        assert_eq!(
+            targets(
+                &told_computer(&["2001:db8::10", "192.0.2.10"]),
+                |_| false,
+                9
+            ),
+            [at("192.0.2.10:9")],
+            "a broadcast elsewhere is not sent to; IPv6 is skipped"
+        );
+        assert_eq!(
+            targets(&told_computer(&["192.0.2.255"]), home, 9),
+            [at("192.0.2.255:9")],
+            "once"
+        );
+        assert!(targets(&told_computer(&[]), |_| false, 9).is_empty());
+        assert!(
+            targets(&computer("desk"), |_| true, 9).is_empty(),
+            "never said"
+        );
+        assert!(send(&computer("desk"), &[at("127.0.0.1:9")]).is_err());
+    }
+
+    /// PC6, live on loopback only: the magic packet sent for a computer
+    /// reaches a listener at its last address, six 0xFF and its MAC
+    /// sixteen times. Says only whether it matched.
+    #[test]
+    fn the_magic_packet_reaches_a_listener_on_loopback() {
+        let listener = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let computer = told_computer(&["127.0.0.1"]);
+        // The broadcast (a documentation one) is not on this computer's
+        // networks: only loopback is sent to.
+        let to = targets(&computer, |_| false, port);
+        assert_eq!(to, [SocketAddr::from((Ipv4Addr::LOCALHOST, port))]);
+        assert_eq!(send(&computer, &to), Ok(1));
+        let mut got = [0u8; 256];
+        let (n, _) = listener.recv_from(&mut got).unwrap();
+        let expected = pocketdesk_core::tailscale::wol::magic_packet("00:00:5E:00:53:01").unwrap();
+        let matched = got[..n] == expected[..];
+        println!("matched {}", if matched { "yes" } else { "no" });
+        assert!(matched);
     }
 
     /// PC6: with telling off, the packet on a link says to forget.
