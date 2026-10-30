@@ -3307,8 +3307,12 @@ mod tests {
                 },
                 _ => continue,
             };
-            // A lock said again each second is the same lock.
-            if said.last() != Some(&word) {
+            // A lock said again each second (the relay's lease) is the same
+            // lock, wherever it falls: only a lock after a free is a new one
+            // (PR #563 re-review N6).
+            let renewal = word == "lock"
+                && said.iter().rev().find(|w| matches!(**w, "lock" | "free")) == Some(&"lock");
+            if !renewal {
                 said.push(word);
             }
         }
