@@ -2212,6 +2212,34 @@ async fn authenticate(
     }
 }
 
+/// `packet` with the relative movement `owed` added, if it is a relative
+/// move; what does not fit its `i16`s stays owed.
+pub fn with_owed(owed: &mut (i32, i32), packet: InputPacket) -> InputPacket {
+    let InputPacket::MouseMove { dx, dy } = packet else {
+        return packet;
+    };
+    let fit = |owed: &mut i32, d: i16| {
+        let total = *owed + i32::from(d);
+        let sent = total.clamp(i32::from(i16::MIN), i32::from(i16::MAX));
+        *owed = total - sent;
+        sent as i16
+    };
+    InputPacket::MouseMove {
+        dx: fit(&mut owed.0, dx),
+        dy: fit(&mut owed.1, dy),
+    }
+}
+
+/// A relative move that could not go is owed (bounded, so a long stall
+/// never sends one huge jump).
+pub fn owe(owed: &mut (i32, i32), lost: &InputPacket) {
+    const MOST: i32 = 4 * i16::MAX as i32;
+    if let InputPacket::MouseMove { dx, dy } = lost {
+        owed.0 = (owed.0 + i32::from(*dx)).clamp(-MOST, MOST);
+        owed.1 = (owed.1 + i32::from(*dy)).clamp(-MOST, MOST);
+    }
+}
+
 /// A window's pointer lock lapses this long after its last "locked"
 /// (PR #563 review I1); the window says it again about every second.
 pub const POINTER_LEASE: Duration = Duration::from_secs(3);
@@ -2253,6 +2281,8 @@ fn start_viewer(
         // every second; one silent for POINTER_LEASE (hung, or its word
         // lost) is taken to have freed it.
         let mut lease_until = tokio::time::Instant::now();
+        // Relative movement that found the queue full, not yet sent.
+        let mut owed = (0i32, 0i32);
         loop {
             if pointer_locked {
                 let left = lease_until.saturating_duration_since(tokio::time::Instant::now());
@@ -2263,6 +2293,7 @@ fn start_viewer(
                         tracing::info!("A screen window's pointer lock lapsed unrenewed");
                         pointer_locked = false;
                         hold = None;
+                        owed = (0, 0);
                         continue;
                     }
                     Ok(Ok([])) | Ok(Err(_)) => break,
@@ -2287,6 +2318,7 @@ fn start_viewer(
                     if focused[0] == 0 {
                         pointer_locked = false;
                         hold = None;
+                        owed = (0, 0);
                     }
                     let _ = focus.try_send((session_id, focused[0] == 1));
                 }
@@ -2313,6 +2345,9 @@ fn start_viewer(
                         break;
                     }
                     pointer_locked = locked[0] == 1;
+                    if !pointer_locked {
+                        owed = (0, 0);
+                    }
                     if pointer_locked {
                         lease_until = tokio::time::Instant::now() + POINTER_LEASE;
                     }
@@ -2337,7 +2372,16 @@ fn start_viewer(
                                     break;
                                 }
                             } else {
-                                let _ = input.try_send(packet);
+                                // A relative move that found no room is
+                                // owed and goes with the next (PR #563
+                                // review M5): unlike an absolute one, a
+                                // later move does not make up for it.
+                                let packet = with_owed(&mut owed, packet);
+                                if let Err(mpsc::error::TrySendError::Full(lost)) =
+                                    input.try_send(packet)
+                                {
+                                    owe(&mut owed, &lost);
+                                }
                             }
                         }
                         _ => tracing::debug!("Dropped input the view's window may not send"),
@@ -2749,6 +2793,54 @@ mod tests {
         until(true, "the lock on a fresh window").await;
         drop(viewer);
         until(false, "the viewer dropped").await;
+    }
+
+    /// PR #563 review M5: a relative move the full queue dropped is owed,
+    /// and goes with the next; an absolute one is not.
+    #[test]
+    fn a_relative_move_dropped_is_sent_with_the_next() {
+        let mut owed = (0, 0);
+        owe(&mut owed, &InputPacket::MouseMove { dx: 5, dy: -3 });
+        owe(
+            &mut owed,
+            &InputPacket::MouseMoveAbs {
+                x_norm: 1,
+                y_norm: 1,
+            },
+        );
+        assert_eq!(owed, (5, -3));
+        let next = with_owed(&mut owed, InputPacket::MouseMove { dx: 1, dy: 1 });
+        assert_eq!(format!("{next:?}"), "MouseMove { dx: 6, dy: -2 }");
+        assert_eq!(owed, (0, 0));
+        // More than an i16 waits for the move after.
+        owed = (40_000, 0);
+        let next = with_owed(&mut owed, InputPacket::MouseMove { dx: 0, dy: 0 });
+        assert_eq!(format!("{next:?}"), "MouseMove { dx: 32767, dy: 0 }");
+        assert_eq!(owed, (40_000 - 32_767, 0));
+        // A long stall is bounded.
+        let mut owed = (0, 0);
+        for _ in 0..100 {
+            owe(
+                &mut owed,
+                &InputPacket::MouseMove {
+                    dx: i16::MAX,
+                    dy: 0,
+                },
+            );
+        }
+        assert_eq!(owed.0, 4 * i32::from(i16::MAX));
+        // Anything else goes as it is.
+        let click = with_owed(
+            &mut owed,
+            InputPacket::MouseClick {
+                button: 0,
+                pressed: true,
+            },
+        );
+        assert_eq!(
+            format!("{click:?}"),
+            "MouseClick { button: 0, pressed: true }"
+        );
     }
 
     /// Wait (at most `secs`) until the pointer is held as `held`.
