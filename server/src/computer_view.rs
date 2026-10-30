@@ -3429,7 +3429,14 @@ mod tests {
         );
         assert!(WINDOW_GRACE >= HEARTBEAT, "past one heartbeat");
         assert!(WINDOW_GRACE < UNWATCHED);
-        assert!(WINDOW_GRACE < crate::plugins::privacy::COMPUTER_GRAB_TTL);
+        // The far grab must not lapse mid-grace (PR #568 review M2): the
+        // last renewal up to PRIVACY_RENEW and a heartbeat before the window
+        // went, a heartbeat to notice, the grace landing up to a heartbeat
+        // late, and the release's heartbeat.
+        assert!(
+            PRIVACY_RENEW + HEARTBEAT + HEARTBEAT + WINDOW_GRACE + HEARTBEAT + HEARTBEAT
+                < crate::plugins::privacy::COMPUTER_GRAB_TTL
+        );
     }
 
     /// PC8: privacy ends as the view drops or control goes, never left on
