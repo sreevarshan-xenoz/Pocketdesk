@@ -931,6 +931,21 @@ fn say_privacy(state: &mut State, ask: u8) {
     }
 }
 
+/// The window's last words to the relay as it closes: the lock, when
+/// chosen (PC8), on its own and first, then the pointer let go (PC7). A
+/// free whose write stalls ends the connection, so it went second (PR #563
+/// re-review): the lock never waits on it, and the connection's end lets go
+/// of the pointer at the relay anyway.
+fn say_closing(state: &mut State) {
+    if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
+        say_privacy(state, ask);
+    }
+    if state.pointer.locked() || state.pointer_said == Some(true) {
+        say_pointer(state, false);
+    }
+    state.pointer = PointerLock::default();
+}
+
 /// Say the window's pointer lock to the server (PC7): only while it says
 /// locked does the relay pass relative moves on. A broken write ends the
 /// connection, as [`send`]'s.
@@ -1094,18 +1109,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
-        // The pointer is let go with the window (PC7).
-        if state.pointer.locked() || state.pointer_said == Some(true) {
-            say_pointer(&mut state, false);
-        }
-        state.pointer = PointerLock::default();
+        say_closing(&mut state);
         ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(
             egui::viewport::CursorGrab::None,
         ));
-        // The lock, when chosen, goes before the view stops (PC8).
-        if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
-            say_privacy(&mut state, ask);
-        }
         stop_view(state_dir, &mut state);
         state.wanted = None;
         state.fullscreen = false;
@@ -2617,6 +2624,35 @@ mod tests {
         assert_eq!(closing_ask(false, Phase::Showing), None);
         assert_eq!(closing_ask(true, Phase::Waiting), None);
         assert_eq!(closing_ask(true, Phase::Connecting), None);
+    }
+
+    /// PR #563 re-review: as the window closes, the lock goes first and on
+    /// its own, so a free that stalls never keeps it from the relay.
+    #[test]
+    fn the_lock_on_close_goes_before_the_pointer_free() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let mut state = State {
+            writer: Some(writer),
+            lock_on_close: true,
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            pointer_said: Some(true),
+            ..State::default()
+        };
+        say_closing(&mut state);
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::Privacy(wire::PRIVACY_LOCK)
+        );
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::PointerLock(false)
+        );
+        assert!(!state.pointer.locked());
     }
 
     /// PC8: the ask goes to the relay as its one-byte message and the bar
