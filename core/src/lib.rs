@@ -13,6 +13,7 @@ pub mod protocol;
 pub mod secure_fs;
 pub mod streaming;
 pub mod tailscale;
+pub mod version;
 
 /// Protocol version for compatibility checking.
 pub const PROTOCOL_VERSION: u32 = 1;

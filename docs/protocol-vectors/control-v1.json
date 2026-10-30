@@ -23,7 +23,7 @@
         {
           "expect": {
             "type": "kdeconnect.identity",
-            "body_has": ["deviceId", "deviceName", "protocolVersion", "incomingCapabilities", "outgoingCapabilities"],
+            "body_has": ["deviceId", "deviceName", "protocolVersion", "pocketdeskVersion", "incomingCapabilities", "outgoingCapabilities"],
             "capabilities_include": { "incoming": ["kdeconnect.pair", "kdeconnect.pocketdesk.tasks"], "outgoing": ["kdeconnect.pair", "kdeconnect.pocketdesk.tasks"] }
           }
         }

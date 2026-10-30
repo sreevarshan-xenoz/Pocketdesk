@@ -9,6 +9,7 @@
 //! pairing link, or forget one. A pairing link holds a PIN, so requests are
 //! owner-only too.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -238,6 +239,12 @@ pub struct ComputersFile {
     /// Absent in files written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nearby_paused_until: Option<u64>,
+    /// The Pocketdesk release each listed computer said it runs (item 4),
+    /// by device id: from the identity that admits this one on the link it
+    /// dials. A computer that dials this one says it in the trust store
+    /// instead. Absent in files written before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub versions: BTreeMap<String, String>,
     /// Remote revoke: this computer's last ask of another computer's
     /// devices ("Devices there…"), and what it answered. Absent in files
     /// written before.
@@ -329,6 +336,41 @@ pub struct DevicesThere {
 pub const PENDING_FOR: u64 = 10 * 60;
 
 impl ComputersFile {
+    /// The release the listed computer `device_id` last said it runs.
+    pub fn version(&self, device_id: &str) -> Option<&str> {
+        self.computers
+            .iter()
+            .any(|c| c.device_id == device_id)
+            .then(|| self.versions.get(device_id).map(String::as_str))
+            .flatten()
+    }
+
+    /// Keep what the listed computer `device_id`'s latest identity says it
+    /// runs, cleaned: `raw` is its `pocketdeskVersion`, `None` when it sent
+    /// none, and none or one that is no version clears the kept one (a
+    /// downgrade shows no old release). A computer no longer listed is
+    /// dropped. Whether it changed.
+    pub fn note_version(&mut self, device_id: &str, raw: Option<&str>) -> bool {
+        let listed = |id: &str| self.computers.iter().any(|c| c.device_id == id);
+        let before = self.versions.len();
+        let kept: BTreeMap<String, String> = std::mem::take(&mut self.versions)
+            .into_iter()
+            .filter(|(id, _)| listed(id))
+            .collect();
+        self.versions = kept;
+        let pruned = self.versions.len() != before;
+        if !listed(device_id) {
+            return pruned;
+        }
+        let changed = match raw.and_then(crate::version::clean_version) {
+            Some(version) => {
+                self.versions.insert(device_id.to_string(), version.clone()) != Some(version)
+            }
+            None => self.versions.remove(device_id).is_some(),
+        };
+        changed || pruned
+    }
+
     /// Let each grant both ways that has waited for the link longer than
     /// [`PENDING_FOR`] since its computer paired (`paired_unix`) lapse at
     /// `now_unix`, or one whose computer is gone; the lapsed ones. A lapsed
@@ -1216,6 +1258,41 @@ mod tests {
         let old: PairingOutcome =
             serde_json::from_str(r#"{"name":"Desk","outcome":"paired","unix":1}"#).unwrap();
         assert_eq!(old.device_id, "");
+    }
+
+    /// Item 4: a listed computer's release is kept cleaned as its latest
+    /// identity says it, cleared by one with none or no version, read back
+    /// only while it is listed, and dropped once it is not.
+    #[test]
+    fn a_listed_computers_release_is_kept_while_it_is_listed() {
+        let mut file = ComputersFile {
+            computers: vec![computer("desk")],
+            ..ComputersFile::default()
+        };
+        assert!(file.note_version("desk", Some("0.8.1")));
+        assert!(!file.note_version("desk", Some("0.8.1")), "unchanged");
+        assert!(!file.note_version("stranger", Some("0.8.1")), "not listed");
+        assert_eq!(file.version("desk"), Some("0.8.1"));
+        assert_eq!(file.version("stranger"), None);
+        assert!(file.note_version("desk", None), "a downgrade clears it");
+        assert_eq!(file.version("desk"), None);
+        assert!(!file.note_version("desk", None), "already none");
+        assert!(file.note_version("desk", Some("0.9.0")));
+        assert!(
+            file.note_version("desk", Some("newest")),
+            "no version clears it"
+        );
+        assert_eq!(file.version("desk"), None);
+        assert!(file.note_version("desk", Some("0.9.0")));
+        file.computers.clear();
+        assert_eq!(file.version("desk"), None, "forgotten");
+        file.computers.push(computer("lap"));
+        assert!(file.note_version("lap", Some("0.8.2")));
+        assert_eq!(
+            file.versions.keys().collect::<Vec<_>>(),
+            ["lap"],
+            "a forgotten one's goes"
+        );
     }
 
     /// PC1 review C1, M2: a listed computer's id with another certificate

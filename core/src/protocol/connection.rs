@@ -170,6 +170,9 @@ pub struct PeerClaims {
     /// The packet types it says it sends (`outgoingCapabilities`); `None`
     /// when it sent no identity.
     pub sends: Option<Vec<String>>,
+    /// The Pocketdesk release it says it runs, cleaned; `None` from one
+    /// that does not say (older, or KDE Connect).
+    pub version: Option<String>,
 }
 
 impl PeerClaims {
@@ -217,9 +220,15 @@ fn identity_claims(line: &str) -> PeerClaims {
                 .collect()
         })
         .unwrap_or_default();
+    let version = packet
+        .body
+        .get(crate::version::IDENTITY_FIELD)
+        .and_then(|v| v.as_str())
+        .and_then(crate::version::clean_version);
     PeerClaims {
         name,
         sends: Some(sends),
+        version,
     }
 }
 
@@ -575,6 +584,52 @@ mod tests {
         assert_eq!(bare.acks_notifications(), Some(false));
         assert_eq!(identity_claims("").acks_notifications(), None);
         assert_eq!(identity_claims("POCKETDESK_OK").acks_notifications(), None);
+    }
+
+    /// Item 4: a computer's identity says the release it runs, read back
+    /// cleaned; one from before says none, and a garbled one is dropped.
+    #[test]
+    fn the_identity_says_the_release_it_runs() {
+        let me = DeviceIdentity::new("duplex-desk", "Desk");
+        let line = String::from_utf8(me.as_identity_packet().to_wire().unwrap()).unwrap();
+        assert_eq!(
+            identity_claims(&line).version.as_deref(),
+            Some(crate::version::THIS_VERSION)
+        );
+        let older =
+            identity_claims(r#"{"type":"kdeconnect.identity","body":{"deviceName":"Desk"}}"#);
+        assert_eq!(older.version, None);
+        let garbled = identity_claims(
+            r#"{"type":"kdeconnect.identity","body":{"pocketdeskVersion":"<script>"}}"#,
+        );
+        assert_eq!(garbled.version, None);
+        let unsaid = DeviceIdentity {
+            pocketdesk_version: None,
+            ..DeviceIdentity::new("duplex-desk", "Desk")
+        };
+        assert!(
+            unsaid
+                .as_identity_packet()
+                .body
+                .get("pocketdeskVersion")
+                .is_none(),
+            "none said, no field"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_internet_handshake_hears_the_release() {
+        let identity = DeviceIdentity::new("road-phone", "Road Phone");
+        let (phone, desktop) = tokio::io::duplex(64 * 1024);
+        internet_desktop(
+            desktop,
+            "{\"type\":\"kdeconnect.identity\",\"body\":{\"deviceName\":\"Study PC\",\"pocketdeskVersion\":\"0.8.1\"}}
+",
+        );
+        let (_stream, claims) = internet_control_handshake_named(phone, "desktop", &identity)
+            .await
+            .expect("admitted");
+        assert_eq!(claims.version.as_deref(), Some("0.8.1"));
     }
 
     #[tokio::test]
