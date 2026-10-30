@@ -133,7 +133,14 @@ struct State {
     /// the bar that Settings has not heard yet.
     lock_on_close: bool,
     lock_saved: Option<bool>,
+    /// When "Hide what I do there" was last asked (PR #561 review): an
+    /// ask still unanswered after [`ASKING_WAIT`] is given up here too.
+    privacy_asked: Option<Instant>,
 }
+
+/// How long the bar shows "Asking…" before it gives up: the relay's own
+/// give-up (8 s, said at its next 2 s heartbeat) and a little more.
+pub const ASKING_WAIT: Duration = Duration::from_secs(11);
 
 /// The window's keyboard grab on Windows (PC4): the setting, a choice saved
 /// from the bar that Settings has not heard yet, the release, the hook
@@ -407,6 +414,13 @@ pub fn control_words(name: &str, control: Option<bool>, view_only: bool) -> Opti
         (None, false) => None,
         (Some(true), false) => None,
     }
+}
+
+/// Whether the bar's "Asking…", asked at `asked`, has waited too long at
+/// `now` (PR #561 review): the relay or that computer never answered.
+pub fn asking_lapsed(privacy: &ViewPrivacy, asked: Option<Instant>, now: Instant) -> bool {
+    *privacy == ViewPrivacy::Asking
+        && asked.is_some_and(|at| now.saturating_duration_since(at) >= ASKING_WAIT)
 }
 
 /// Whether "Hide what I do there" shows as on: asked or held there (PC8).
@@ -687,7 +701,10 @@ fn say_privacy(state: &mut State, ask: u8) {
     }
     // Said at once here; the server's status says how it went.
     match ask {
-        wire::PRIVACY_HIDE => state.status.privacy = ViewPrivacy::Asking,
+        wire::PRIVACY_HIDE => {
+            state.status.privacy = ViewPrivacy::Asking;
+            state.privacy_asked = Some(Instant::now());
+        }
         _ => state.status.privacy = ViewPrivacy::Off,
     }
 }
@@ -1071,6 +1088,17 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         }
         if let Some(ask) = privacy_ask {
             say_privacy(&mut state, ask);
+        }
+        // An ask nobody answered is given up here too (review): the bar
+        // never stays at "Asking…".
+        if asking_lapsed(&state.status.privacy, state.privacy_asked, Instant::now()) {
+            say_privacy(&mut state, wire::PRIVACY_SHOW);
+            state.status.privacy = ViewPrivacy::Refused(format!(
+                "{} did not answer; privacy is off here.",
+                wanted.name
+            ));
+        } else if state.status.privacy == ViewPrivacy::Asking {
+            ctx.request_repaint_after(Duration::from_secs(1));
         }
         state.view_only = view_only;
         if let Some(key) = send_key
@@ -1736,6 +1764,25 @@ mod tests {
         assert_eq!(
             privacy_words("Desk", &ViewPrivacy::Refused("it is off there".into())).unwrap(),
             "Not hidden on Desk: it is off there"
+        );
+    }
+
+    /// PR #561 review: "Asking…" is given up after the relay's own wait,
+    /// and only while it is still asking.
+    #[test]
+    fn asking_is_given_up_after_the_relays_wait() {
+        let at = Instant::now();
+        let later = at + ASKING_WAIT;
+        assert!(!asking_lapsed(&ViewPrivacy::Asking, Some(at), at));
+        assert!(asking_lapsed(&ViewPrivacy::Asking, Some(at), later));
+        assert!(
+            !asking_lapsed(&ViewPrivacy::On, Some(at), later),
+            "answered"
+        );
+        assert!(!asking_lapsed(&ViewPrivacy::Asking, None, later));
+        assert!(
+            ASKING_WAIT > Duration::from_secs(10),
+            "past the relay's give-up"
         );
     }
 
