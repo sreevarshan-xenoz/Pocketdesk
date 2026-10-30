@@ -10,7 +10,8 @@ import java.io.File
  * system refuses `settings put system font_scale` from adb (ColorOS). Only
  * in a debuggable build: there, a number in the app's own
  * `files/debug_font_scale` (written with `adb shell run-as`) replaces the
- * system's font scale for this app. Release builds never read it, so it is
+ * system's font scale in MainActivity (the app's screens; services and the
+ * share target keep the system's). Release builds never read it, so it is
  * not a setting.
  */
 object DebugFontScale {
@@ -20,10 +21,16 @@ object DebugFontScale {
     fun parse(text: String?): Float? =
         text?.trim()?.toFloatOrNull()?.takeIf { it in 0.5f..2.0f }
 
+    /** [base] with the file's scale, or [base] itself: always so in a release build. */
     fun wrap(base: Context): Context {
-        if (base.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return base
-        val scale = parse(runCatching { File(base.filesDir, FILE).readText() }.getOrNull()) ?: return base
+        val scale = scaleFor(base) ?: return base
         val config = Configuration(base.resources.configuration).apply { fontScale = scale }
         return base.createConfigurationContext(config)
+    }
+
+    /** The scale asked for, only in a debuggable build (the release guard). */
+    internal fun scaleFor(base: Context): Float? {
+        if (base.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return null
+        return parse(runCatching { File(base.filesDir, FILE).readText() }.getOrNull())
     }
 }
