@@ -100,17 +100,25 @@ pub(crate) fn release_if_owner(lost: impl Fn(&str) -> bool) {
 /// it ends with it. A phone's is kept (it may come back on a new
 /// connection), to its TTL as before.
 pub(crate) fn connection_closed(connection_id: &str) {
-    let Some(holder) = holder() else { return };
-    if !ends_with(&holder, connection_id) {
+    // Checked, taken and released under one lock (PR #561 review M10): a
+    // grab that another device wins in between is never left ownerless.
+    let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(holder) = take_if_closed(&mut owner, connection_id) else {
         return;
-    }
+    };
     let count = privacy::release_input();
-    *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    drop(owner);
     tracing::info!(
         device_id = %holder.device,
         released = count,
         "Privacy grab released: the computer holding it is no longer connected"
     );
+}
+
+/// The holder in `owner` whose grab ends as `connection_id` closes, taken
+/// out; `owner` is left as it was for any other.
+fn take_if_closed(owner: &mut Option<Holder>, connection_id: &str) -> Option<Holder> {
+    owner.take_if(|h| ends_with(h, connection_id))
 }
 
 /// How long a computer's grab lives without a renewal (PR #561 review I1):
@@ -383,6 +391,32 @@ mod tests {
     #[test]
     fn a_grab_held_elsewhere_is_said_for_a_phone_or_a_computer() {
         assert!(HELD_ELSEWHERE.contains("phone or computer"));
+    }
+
+    /// PR #561 review M10: a closing connection takes out only the holder
+    /// that asked on it, in one step.
+    #[test]
+    fn a_closing_connection_takes_out_only_its_own_holder() {
+        let computer = Holder {
+            device: "desk".into(),
+            connection: Some("conn-7".into()),
+        };
+        let mut owner = Some(computer.clone());
+        assert_eq!(take_if_closed(&mut owner, "conn-8"), None);
+        assert_eq!(
+            owner,
+            Some(computer.clone()),
+            "another connection leaves it"
+        );
+        assert_eq!(take_if_closed(&mut owner, "conn-7"), Some(computer));
+        assert_eq!(owner, None);
+        let phone = Holder {
+            device: "phone-a".into(),
+            connection: None,
+        };
+        let mut owner = Some(phone.clone());
+        assert_eq!(take_if_closed(&mut owner, "phone-a"), None);
+        assert_eq!(owner, Some(phone));
     }
 
     /// PC8: an answer is never taken for a request, so two computers never
