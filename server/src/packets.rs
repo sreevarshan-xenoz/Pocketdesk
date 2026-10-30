@@ -60,6 +60,11 @@ fn permission(packet_type: &str) -> String {
     ) {
         return "none (any phone: pairing)".to_string();
     }
+    // PC6: kept only from one of the owner's computers, and only for a
+    // computer this one lists (paired both ways).
+    if packet_type == crate::computer_wake::COMPUTER_WAKE {
+        return "none (a listed computer only)".to_string();
+    }
     match capability_for(packet_type) {
         Some(capability) => format!("{capability:?}"),
         None => "none (any paired phone)".to_string(),
@@ -105,6 +110,19 @@ pub fn render_markdown() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PC6 re-review: the wake facts' row says who they are kept from.
+    #[test]
+    fn the_computer_wake_row_names_a_listed_computer() {
+        assert_eq!(
+            permission(crate::computer_wake::COMPUTER_WAKE),
+            "none (a listed computer only)"
+        );
+        assert_eq!(
+            permission("kdeconnect.pocketdesk.both_ways"),
+            "none (any paired phone)"
+        );
+    }
 
     #[test]
     fn every_plugin_packet_is_listed_once_with_its_direction() {
