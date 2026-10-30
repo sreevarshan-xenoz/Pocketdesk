@@ -384,6 +384,9 @@ pub fn recorders(device: Option<&str>) -> Vec<(&'static str, Vec<String>)> {
         channels.clone(),
         "--format".to_string(),
         "s16".to_string(),
+        // A frame's worth (PR #569 review M5): its default buffers more.
+        "--latency".to_string(),
+        format!("{FRAME_MS}ms"),
         "--raw".to_string(),
     ];
     let mut pa = vec![
@@ -391,6 +394,7 @@ pub fn recorders(device: Option<&str>) -> Vec<(&'static str, Vec<String>)> {
         "--format=s16le".to_string(),
         format!("--rate={rate}"),
         format!("--channels={channels}"),
+        format!("--latency-msec={FRAME_MS}"),
     ];
     if let Some(device) = device {
         pw.extend(["--target".to_string(), device.to_string()]);
@@ -470,6 +474,10 @@ mod recorder {
                 .stderr
                 .take()
                 .and_then(|errors| follow_errors(program, errors, said.clone()));
+            // A recorder that works sends its first samples meanwhile:
+            // they are read as one burst of about 15 frames as it starts,
+            // which the relay's short backlog trims to its newest (PR #569
+            // review M5). Harmless: a start, not a steady delay.
             std::thread::sleep(SETTLE);
             match child.try_wait() {
                 Ok(None) => {
@@ -1057,6 +1065,8 @@ mod tests {
                 "1",
                 "--format",
                 "s16",
+                "--latency",
+                "20ms",
                 "--raw",
                 "-"
             ]
@@ -1064,7 +1074,13 @@ mod tests {
         assert_eq!(tried[1].0, "parec");
         assert_eq!(
             tried[1].1,
-            ["--raw", "--format=s16le", "--rate=48000", "--channels=1"]
+            [
+                "--raw",
+                "--format=s16le",
+                "--rate=48000",
+                "--channels=1",
+                "--latency-msec=20"
+            ]
         );
         let named = recorders(Some("alsa_input.usb-headset"));
         assert!(named[0].1.ends_with(&[
