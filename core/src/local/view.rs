@@ -58,6 +58,10 @@ pub const PRIVACY_LOCK: u8 = 2;
 /// keyboard and mouse here leave the screens' edges alone meanwhile.
 pub const POINTER_LOCK: u8 = 0x15;
 
+/// The most views the server holds at once (PC11): one a window, so one
+/// computer's screens may show side by side.
+pub const MAX_VIEWS: u8 = 4;
+
 /// App → server: the window's "Send my mic" went on (`1`) or off (`0`)
 /// (PC10), `[on u8]`. Only while the window's latest word on this
 /// connection is "on" does the relay pass its [`InputPacket::Mic`] frames
@@ -99,6 +103,11 @@ pub struct ViewStatus {
     /// The other computer's screens, by name, when known (empty: not known).
     #[serde(default)]
     pub monitors: Vec<String>,
+    /// Where each of those screens sits in that computer's layout, in the
+    /// same order (PC11): the window's screen buttons are laid out so.
+    /// Empty when that computer did not say (a server before PC11).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layout: Vec<ScreenPlace>,
     /// The screen shown.
     #[serde(default)]
     pub monitor: u32,
@@ -124,6 +133,24 @@ pub struct ViewStatus {
     /// before PC8.
     #[serde(default)]
     pub privacy: ViewPrivacy,
+    /// How many views the server holds now, this one counted, of
+    /// [`MAX_VIEWS`] (PC11); 0 from a server before PC11.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub views: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+/// Where one of the other computer's screens sits in its layout (PC11):
+/// its top-left corner and size, in that computer's own units.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScreenPlace {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The other computer's privacy mode, as the window asked for it (PC8).
@@ -363,26 +390,55 @@ impl ViewFile {
     }
 }
 
-/// The view now, if any.
+/// The file that names the view of the app's window `window` (PC11): the
+/// first window's is `view.json`, as before; the others' `view-1.json` to
+/// `view-3.json`.
+pub fn file_name(window: u8) -> String {
+    if window == 0 {
+        VIEW_FILE.to_string()
+    } else {
+        format!("view-{window}.json")
+    }
+}
+
+/// The first window's view now, if any.
 pub fn read(state_dir: &Path) -> Option<ViewFile> {
-    let raw = std::fs::read_to_string(state_dir.join(VIEW_FILE)).ok()?;
+    read_window(state_dir, 0)
+}
+
+/// The window `window`'s view now, if any (PC11).
+pub fn read_window(state_dir: &Path, window: u8) -> Option<ViewFile> {
+    let raw = std::fs::read_to_string(state_dir.join(file_name(window))).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-/// Say where the view is (the server's side): owner-only, written whole.
+/// Say where the first window's view is (the server's side).
 pub fn write(state_dir: &Path, view: &ViewFile) -> io::Result<()> {
+    write_window(state_dir, 0, view)
+}
+
+/// Say where the window `window`'s view is (PC11): owner-only, written
+/// whole.
+pub fn write_window(state_dir: &Path, window: u8, view: &ViewFile) -> io::Result<()> {
     let json = serde_json::to_string(view).map_err(io::Error::other)?;
-    let path = state_dir.join(VIEW_FILE);
+    let path = state_dir.join(file_name(window));
     let tmp = path.with_extension("json.tmp");
     std::fs::create_dir_all(state_dir)?;
     crate::secure_fs::write_private(&tmp, json.as_bytes())?;
     std::fs::rename(&tmp, &path)
 }
 
-/// The view ended: forget it, if it is still the one with `session_id`.
+/// The first window's view ended: forget it, if it is still the one with
+/// `session_id`.
 pub fn remove(state_dir: &Path, session_id: u64) -> io::Result<()> {
-    if read(state_dir).is_some_and(|v| v.session_id == session_id) {
-        match std::fs::remove_file(state_dir.join(VIEW_FILE)) {
+    remove_window(state_dir, 0, session_id)
+}
+
+/// The window `window`'s view ended (PC11): forget it, if it is still the
+/// one with `session_id`.
+pub fn remove_window(state_dir: &Path, window: u8, session_id: u64) -> io::Result<()> {
+    if read_window(state_dir, window).is_some_and(|v| v.session_id == session_id) {
+        match std::fs::remove_file(state_dir.join(file_name(window))) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
             _ => {}
         }
@@ -697,5 +753,59 @@ mod tests {
         };
         assert_eq!(bad.token_bytes(), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: each window's view has a file of its own, the first window's
+    /// the `view.json` of before, and one window's end leaves the others'.
+    #[test]
+    fn each_window_has_its_own_view_file() {
+        let dir = std::env::temp_dir().join(format!("pd-view-windows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(file_name(0), VIEW_FILE);
+        assert_eq!(file_name(1), "view-1.json");
+        let view = |session_id| ViewFile {
+            session_id,
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            port: 50000,
+            token: super::super::cast::token_hex(&[2u8; TOKEN_LEN]),
+        };
+        write(&dir, &view(7)).unwrap();
+        write_window(&dir, 2, &view(8)).unwrap();
+        assert_eq!(read_window(&dir, 0), Some(view(7)));
+        assert_eq!(read(&dir), Some(view(7)));
+        assert_eq!(read_window(&dir, 2), Some(view(8)));
+        assert_eq!(read_window(&dir, 1), None);
+        remove_window(&dir, 2, 7).unwrap();
+        assert!(
+            read_window(&dir, 2).is_some(),
+            "another view's end leaves it"
+        );
+        remove_window(&dir, 2, 8).unwrap();
+        assert_eq!(read_window(&dir, 2), None);
+        assert_eq!(read(&dir), Some(view(7)), "the first window's stays");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: the count of views reads back, and a status without it is 0.
+    #[test]
+    fn the_count_of_views_reads_back() {
+        let status = ViewStatus {
+            views: 2,
+            ..ViewStatus::default()
+        };
+        let Message::Status(back) = Message::read(&mut io::Cursor::new(
+            Message::Status(status.clone()).encode(),
+        ))
+        .unwrap() else {
+            panic!("a status");
+        };
+        assert_eq!(back, status);
+        let Message::Status(before) =
+            Message::parse(STATUS, br#"{"phase":"showing"}"#.to_vec()).unwrap()
+        else {
+            panic!("a status");
+        };
+        assert_eq!((before.views, before.layout.len()), (0, 0));
     }
 }

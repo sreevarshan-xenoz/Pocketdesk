@@ -123,6 +123,7 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
             device_id: other.to_string(),
             monitor: 0,
             hevc: false,
+            window: 0,
         },
         pin::now_unix(),
     )
@@ -135,6 +136,7 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
         ComputerAsk::StopView {
             session_id,
             lock: false,
+            window: 0,
         },
         pin::now_unix(),
     )

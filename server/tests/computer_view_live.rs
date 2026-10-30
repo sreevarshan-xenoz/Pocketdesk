@@ -116,6 +116,7 @@ fn stop(a_state: &Path) {
         ComputerAsk::StopView {
             session_id,
             lock: false,
+            window: 0,
         },
         pin::now_unix(),
     )
@@ -191,6 +192,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            window: 0,
         },
         pin::now_unix(),
     )
@@ -240,6 +242,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            window: 0,
         },
         pin::now_unix(),
     )

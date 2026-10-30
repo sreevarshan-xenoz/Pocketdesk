@@ -166,6 +166,14 @@ pub struct MonitorInfo {
     pub height: u32,
     /// Whether this is the primary monitor
     pub is_primary: bool,
+    /// Where its top-left corner sits in the desktop's layout, in the units
+    /// of its size (PC11: the window that shows another computer's screen
+    /// lays its screen buttons out so). `None` when not known, and from a
+    /// server before PC11.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<i32>,
 }
 
 /// H.264 encoding profile

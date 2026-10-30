@@ -20,7 +20,10 @@
 //! I close the window" locks it as the window closes (PC8). "Lock the
 //! pointer" (or Ctrl+Alt+Shift+M) holds this computer's pointer in the window
 //! and sends the mouse's movement as relative moves, for games and 3D
-//! ([`crate::view_pointer`], PC7).
+//! ([`crate::view_pointer`], PC7). The bar's numbered screen buttons, laid
+//! out as that computer's screens sit, switch the screen (or
+//! Ctrl+Alt+Shift+1 to 9), and a screen's "Open in a new window" shows it
+//! in a window of its own beside this one, up to four (PC11).
 
 use std::collections::VecDeque;
 use std::io::{self, BufReader, Write};
@@ -46,10 +49,26 @@ use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
 use crate::view_mic::{self, MicRun, MicSwitch};
 use crate::view_pointer::{self, PointerLock, ReleaseChord};
 
-/// The window's id among the app's viewports.
-fn viewport_id() -> egui::ViewportId {
-    egui::ViewportId::from_hash_of("pocketdesk-computer-view")
+/// The window `slot`'s id among the app's viewports: the first window's
+/// as before PC11, the others' their own.
+fn viewport_id(slot: u8) -> egui::ViewportId {
+    if slot == 0 {
+        egui::ViewportId::from_hash_of("pocketdesk-computer-view")
+    } else {
+        egui::ViewportId::from_hash_of(("pocketdesk-computer-view", slot))
+    }
 }
+
+/// Repaint the window whose state is `shared`, its lock not held.
+fn repaint(ctx: &egui::Context, shared: &Mutex<State>) {
+    let slot = lock(shared).slot;
+    ctx.request_repaint_of(viewport_id(slot));
+}
+
+/// While a window waits for the view it asked for (a switch, PC11), the
+/// worker looks this often, not every [`POLL`]: the server names a view at
+/// once, and the picture follows it.
+const ASKED_POLL: Duration = Duration::from_millis(20);
 
 /// How often the worker looks for the view.
 const POLL: Duration = Duration::from_millis(300);
@@ -97,6 +116,24 @@ struct Wanted {
 
 #[derive(Default)]
 struct State {
+    /// Which of the app's screen windows this is (PC11): 0 the first; its
+    /// view is the server's for that window.
+    slot: u8,
+    /// Another window shows the same computer (PC11): this one's closing
+    /// does not lock it.
+    same_computer_open: bool,
+    /// A screen this window's bar asked to show in a new window (PC11).
+    open_new: Option<u32>,
+    /// Opened from another window's bar, not by "Show its screen" (PR #570
+    /// review M3: the first window's slot may be one of them).
+    later: bool,
+    /// Switching to another screen (PC11): the screen and when it was
+    /// asked; the last picture shows, dimmed, until the new one comes.
+    switching: Option<(u32, Instant)>,
+    /// How long the last switch took, from the ask to the new picture.
+    last_switch: Option<Duration>,
+    /// A recording going as the screen switched goes on in a new file.
+    record_carry: bool,
     wanted: Option<Wanted>,
     /// When the view was last asked for.
     asked_at: Option<Instant>,
@@ -202,14 +239,78 @@ struct State {
     mic_gen: u64,
     mic_said: Option<bool>,
     mic_note: Option<String>,
+    /// Which window sends each computer this computer's mic (PC11), shared
+    /// by the app's windows and taken under its lock as a mic starts (PR
+    /// #570 re-review N2); and the computer this window took it for.
+    mic_claims: Option<MicClaims>,
+    mic_claimed: Option<String>,
+    /// The mic was on as this window switched screens (PC11): it starts
+    /// again once the new screen's view controls that computer, only for
+    /// that switch (PR #570 re-review N1).
+    mic_resume: Option<MicResume>,
     /// How the microphone is opened: [`view_mic::open`] unless a test
     /// gives a fake (no test opens a real microphone).
     mic_open: Option<MicOpener>,
 }
 
+/// The window (its slot) sending each computer the mic, by its id (PC11).
+type MicClaims = Arc<Mutex<std::collections::HashMap<String, u8>>>;
+
+/// Take the mic of the computer this window shows for it, unless another
+/// window has it (re-review N2): one lock, so of two windows turned on at
+/// once exactly one takes it. Without claims (a test's lone window), it
+/// may.
+fn claim_window_mic(state: &mut State) -> bool {
+    let Some(device) = state.wanted.as_ref().map(|w| w.device_id.clone()) else {
+        return false;
+    };
+    if let Some(claims) = &state.mic_claims {
+        let mut held = claims
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match held.get(&device) {
+            Some(slot) if *slot != state.slot => return false,
+            _ => {
+                held.insert(device.clone(), state.slot);
+            }
+        }
+    }
+    state.mic_claimed = Some(device);
+    true
+}
+
+/// Give back the mic this window took, if it took one.
+fn release_window_mic(state: &mut State) {
+    let Some(device) = state.mic_claimed.take() else {
+        return;
+    };
+    if let Some(claims) = &state.mic_claims {
+        let mut held = claims
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if held.get(&device) == Some(&state.slot) {
+            held.remove(&device);
+        }
+    }
+}
+
 /// Opens the microphone named (or the default), for "Send my mic".
 type MicOpener =
     Arc<dyn Fn(Option<String>) -> io::Result<Box<dyn view_mic::MicSource>> + Send + Sync>;
+
+/// The microphone a window opens without a fake: the real one.
+#[cfg(not(test))]
+fn default_mic_opener() -> MicOpener {
+    Arc::new(view_mic::open)
+}
+
+/// In tests no window ever opens the real microphone (PR #570 check T3,
+/// the no-sound rule): a test that reaches capture without a fake
+/// (`mic_open`) fails here, on its own thread, before anything opens.
+#[cfg(test)]
+fn default_mic_opener() -> MicOpener {
+    panic!("a test reached the real microphone: give its window a fake (mic_open)")
+}
 
 /// How often a locked window says so again: well inside the relay's 3 s
 /// lease, so one lost word never frees it there.
@@ -440,22 +541,22 @@ pub fn give_up(
 /// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
 /// here (PR #551 review M8).
 pub fn stats_chord(event: &egui::Event) -> bool {
-    matches!(
-        event,
-        egui::Event::Key { key: egui::Key::S, pressed: true, modifiers, .. }
-            if modifiers.ctrl && modifiers.alt && modifiers.shift
-    )
+    matches!(event, egui::Event::Key { pressed: true, .. })
+        && view_pointer::chord_is(event, egui::Key::S)
 }
 
-/// `events` without the stats' switch or the pointer lock's (PC7),
-/// pressed or let go: they are this window's, not the other computer's.
+/// `events` without the stats' switch, the pointer lock's (PC7) or the
+/// screens' (PC11), pressed or let go: they are this window's, not the
+/// other computer's. A pass with a screen's chord sends no text either.
 pub fn keep_chord_here(events: &mut Vec<egui::Event>) {
+    let screens = events.iter().any(|event| screen_chord(event).is_some());
     events.retain(|event| {
-        !matches!(
-            event,
-            egui::Event::Key { key: egui::Key::S, modifiers, .. }
-                if modifiers.ctrl && modifiers.alt && modifiers.shift
-        ) && !view_pointer::is_lock_chord_key(event)
+        !view_pointer::chord_is(event, egui::Key::S)
+            && !view_pointer::is_lock_chord_key(event)
+            && view_pointer::chord_key(event)
+                .and_then(screen_key)
+                .is_none()
+            && !(screens && matches!(event, egui::Event::Text(_)))
     });
 }
 
@@ -606,15 +707,244 @@ pub fn screen_choices(status: &ViewStatus) -> Vec<String> {
     status.monitors.clone()
 }
 
-/// The window's title: the computer's name, and "Mic on" first while this
-/// computer's microphone goes there (PR #569 review I2), so the taskbar
-/// says it too.
-pub fn window_title(name: &str, mic_on: bool) -> String {
-    if mic_on {
-        format!("{} \u{b7} {name} \u{b7} screen", view_mic::ON_AIR)
-    } else {
-        format!("{name} \u{b7} screen")
+/// The longest side of the bar's screen buttons together, and the least a
+/// button is across, in points (PC11).
+const SCREENS_HIGH: f32 = 26.0;
+const SCREENS_WIDE: f32 = 220.0;
+const SCREEN_LEAST: f32 = 16.0;
+/// A layout whose buttons would be smaller than this across, or overlap
+/// (mirrored screens), is shown as a row instead (PR #570 review M1).
+const SCREEN_SMALLEST: f32 = 10.0;
+
+/// The bar's screen buttons (PC11): one for each of `count` screens, laid
+/// out as `layout` says they sit on that computer (their corners and sizes,
+/// scaled to the bar, at most twice its height), or in a row when it does
+/// not say where each is, or the buttons would overlap or be too small to
+/// hit. Rectangles from (0, 0), in points.
+pub fn screen_buttons(layout: &[wire::ScreenPlace], count: usize) -> Vec<egui::Rect> {
+    let row = || {
+        let wide = 24.0;
+        (0..count)
+            .map(|n| {
+                egui::Rect::from_min_size(
+                    egui::pos2(n as f32 * (wide + 2.0), 0.0),
+                    egui::vec2(wide, 18.0),
+                )
+            })
+            .collect()
+    };
+    if count == 0 {
+        return Vec::new();
     }
+    if layout.len() != count {
+        return row();
+    }
+    let left = layout.iter().map(|p| p.x).min().unwrap_or(0) as f32;
+    let top = layout.iter().map(|p| p.y).min().unwrap_or(0) as f32;
+    let right = layout
+        .iter()
+        .map(|p| p.x as f32 + p.width as f32)
+        .fold(left, f32::max);
+    let bottom = layout
+        .iter()
+        .map(|p| p.y as f32 + p.height as f32)
+        .fold(top, f32::max);
+    let (wide, high) = ((right - left).max(1.0), (bottom - top).max(1.0));
+    let least = layout
+        .iter()
+        .map(|p| (p.width.min(p.height) as f32).max(1.0))
+        .fold(f32::MAX, f32::min);
+    // As high as the bar, each button big enough to hit, and the lot no
+    // wider than the bar can spare.
+    let scale = (SCREENS_HIGH / high)
+        .max(SCREEN_LEAST / least)
+        .min(SCREENS_WIDE / wide)
+        .min(2.0 * SCREENS_HIGH / high);
+    let rects: Vec<egui::Rect> = layout
+        .iter()
+        .map(|p| {
+            egui::Rect::from_min_size(
+                egui::pos2((p.x as f32 - left) * scale, (p.y as f32 - top) * scale),
+                egui::vec2(p.width as f32 * scale, p.height as f32 * scale),
+            )
+        })
+        .collect();
+    let small = rects
+        .iter()
+        .any(|r| r.width() < SCREEN_SMALLEST || r.height() < SCREEN_SMALLEST);
+    let overlap = rects.iter().enumerate().any(|(n, a)| {
+        rects[n + 1..].iter().any(|b| {
+            let both = a.intersect(*b);
+            both.width() > 0.5 && both.height() > 0.5
+        })
+    });
+    if small || overlap { row() } else { rects }
+}
+
+/// The screen Ctrl+Alt+Shift+1 to 9 pressed asks for (PC11), from 0.
+pub fn screen_chord(event: &egui::Event) -> Option<u32> {
+    if !matches!(event, egui::Event::Key { pressed: true, .. }) {
+        return None;
+    }
+    view_pointer::chord_key(event).and_then(screen_key)
+}
+
+/// The screen a number key names, from 0: 1 to 9.
+fn screen_key(key: egui::Key) -> Option<u32> {
+    use egui::Key::*;
+    [Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9]
+        .iter()
+        .position(|k| *k == key)
+        .map(|n| n as u32)
+}
+
+/// The stats' lines about this window among others (PC11): how many views
+/// the server holds, of how many (every window's, of any computer, and one
+/// ended or no longer watched until it goes: PR #570 review M4), and how
+/// long the last switch took.
+pub fn window_lines(views: u32, last_switch: Option<Duration>) -> Vec<String> {
+    let mut lines = Vec::new();
+    if views > 0 {
+        lines.push(format!(
+            "Views on this server: {views} of {}",
+            pocketdesk_core::local::view::MAX_VIEWS
+        ));
+    }
+    if let Some(took) = last_switch {
+        lines.push(format!("Last switch: {} ms", took.as_millis()));
+    }
+    lines
+}
+
+/// The words over a screen button (PC11): its name, its chord, and the
+/// way to its own window.
+pub fn screen_hint(name: &str, n: usize) -> String {
+    if n < 9 {
+        format!(
+            "{name} (Ctrl+Alt+Shift+{}). Right-click to open it in a new window.",
+            n + 1
+        )
+    } else {
+        format!("{name}. Right-click to open it in a new window.")
+    }
+}
+
+/// The bar's screen buttons (PC11), one a screen of `choices`, numbered and
+/// laid out as `layout` says they sit, `current` highlighted: the screen
+/// clicked, if one was; a screen's "Open in a new window" goes to
+/// `open_new`.
+fn screen_bar(
+    ui: &mut egui::Ui,
+    choices: &[String],
+    layout: &[wire::ScreenPlace],
+    current: u32,
+    open_new: &mut Option<u32>,
+) -> Option<u32> {
+    let rects = screen_buttons(layout, choices.len());
+    let size = rects
+        .iter()
+        .fold(egui::Vec2::ZERO, |size, rect| size.max(rect.max.to_vec2()));
+    let (area, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let mut picked = None;
+    for (n, (rect, name)) in rects.iter().zip(choices).enumerate() {
+        let rect = rect.translate(area.min.to_vec2()).shrink(1.0);
+        let selected = n as u32 == current;
+        let response = ui.interact(
+            rect,
+            ui.id().with(("computer-view-screen", n)),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                selected,
+                format!("Screen {}", n + 1),
+            )
+        });
+        let visuals = ui.visuals();
+        let (fill, text) = if selected {
+            (visuals.selection.bg_fill, visuals.selection.stroke.color)
+        } else if response.hovered() {
+            (
+                visuals.widgets.hovered.weak_bg_fill,
+                visuals.widgets.hovered.fg_stroke.color,
+            )
+        } else {
+            (
+                visuals.widgets.inactive.weak_bg_fill,
+                visuals.widgets.inactive.fg_stroke.color,
+            )
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            2.0,
+            fill,
+            visuals.widgets.inactive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            (n + 1).to_string(),
+            egui::FontId::proportional(12.0),
+            text,
+        );
+        let response = response.on_hover_text(screen_hint(name, n));
+        if response.clicked() {
+            picked = Some(n as u32);
+        }
+        response.context_menu(|ui| {
+            if ui.button("Show here").clicked() {
+                picked = Some(n as u32);
+                ui.close();
+            }
+            if ui.button("Open in a new window").clicked() {
+                *open_new = Some(n as u32);
+                ui.close();
+            }
+        });
+    }
+    picked
+}
+
+/// The window's title: the computer's name and the screen it shows (PC11,
+/// from 0), and "Mic on" first while this computer's microphone goes there
+/// (PR #569 review I2), so the taskbar says it too.
+pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
+    let shown = format!("{name} \u{b7} screen {}", screen + 1);
+    if mic_on {
+        format!("{} \u{b7} {shown}", view_mic::ON_AIR)
+    } else {
+        shown
+    }
+}
+
+/// Whether a window after the first, of a computer that runs Windows
+/// (`windows`, as its session said) or not, opens View only (PR #570
+/// review I4): only Windows maps a session's clicks onto the screen it
+/// shows; elsewhere they land over its first screen.
+pub fn extra_view_only(windows: Option<bool>) -> bool {
+    windows != Some(true)
+}
+
+/// Whether a window says [`EXTRA_INPUT_WORDS`]: of a computer whose
+/// clicks land over its first screen ([`extra_view_only`]), a later
+/// window, or one showing another screen than the first (re-review M-b).
+pub fn says_first_screen(windows: Option<bool>, later: bool, monitor: u32) -> bool {
+    extra_view_only(windows) && (later || monitor != 0)
+}
+
+/// What a window of such a computer says on its bar while it shows another
+/// screen than the first, or is a later window (review I4, re-review M-b).
+pub const EXTRA_INPUT_WORDS: &str =
+    "This computer takes clicks over its first screen, whichever screen this window shows.";
+
+/// Where the microphone goes, as the main window names it (PC11): the
+/// computer, and the window by the screen it shows.
+pub fn mic_window_words(name: &str, screen: u32) -> String {
+    format!("{name}, from the window of its screen {}", screen + 1)
 }
 
 /// The bar's "Mic on", at full colour even while the bar is greyed for a
@@ -650,9 +980,15 @@ pub fn mic_hover(name: &str) -> String {
     )
 }
 
-/// The window and its worker.
+/// The windows and their workers: the first, and up to three more that
+/// show other screens beside it (PC11).
 pub struct ComputerView {
     shared: Arc<Mutex<State>>,
+    /// The windows after the first, made as first asked for, kept for
+    /// the next.
+    extras: Mutex<Vec<Arc<Mutex<State>>>>,
+    /// Which window sends each computer the mic (PC11).
+    mic_claims: MicClaims,
     state_dir: PathBuf,
     /// The config file the bar's Stats switch is saved to (none in tests).
     config: Option<PathBuf>,
@@ -666,24 +1002,80 @@ fn lock(shared: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// A window's state and its worker, which follows its view (PC11: one a
+/// window).
+fn new_window(
+    ctx: &egui::Context,
+    state_dir: &Path,
+    slot: u8,
+    claims: MicClaims,
+) -> Arc<Mutex<State>> {
+    let shared = Arc::new(Mutex::new(State {
+        slot,
+        mic_claims: Some(claims),
+        ..State::default()
+    }));
+    // Held weakly (PR #570 review M7): the worker ends once its window's
+    // state goes, as in a test.
+    let worker = Arc::downgrade(&shared);
+    let ctx = ctx.clone();
+    let watched = state_dir.to_path_buf();
+    let name = if slot == 0 {
+        "computer-view".to_string()
+    } else {
+        format!("computer-view-{slot}")
+    };
+    let spawned = std::thread::Builder::new()
+        .name(name)
+        .spawn(move || watch(&watched, &worker, &ctx));
+    // Without the thread no screen is shown, and nothing else breaks.
+    drop(spawned);
+    shared
+}
+
 impl ComputerView {
     pub fn new(ctx: &egui::Context, state_dir: PathBuf, config: Option<PathBuf>) -> Self {
-        let shared = Arc::new(Mutex::new(State::default()));
-        let worker = shared.clone();
-        let repaint = ctx.clone();
-        let ctx = ctx.clone();
-        let watched = state_dir.clone();
-        let spawned = std::thread::Builder::new()
-            .name("computer-view".into())
-            .spawn(move || watch(&watched, &worker, &ctx));
-        // Without the thread no screen is shown, and nothing else breaks.
-        drop(spawned);
+        let mic_claims = MicClaims::default();
+        let shared = new_window(ctx, &state_dir, 0, mic_claims.clone());
         Self {
             shared,
+            extras: Mutex::new(Vec::new()),
+            mic_claims,
             state_dir,
             config,
-            ctx: repaint,
+            ctx: ctx.clone(),
         }
+    }
+
+    /// Every window, the first first.
+    fn windows(&self) -> Vec<Arc<Mutex<State>>> {
+        let extras = self
+            .extras
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::iter::once(self.shared.clone())
+            .chain(extras.iter().cloned())
+            .collect()
+    }
+
+    /// Set something in every window, and repaint each.
+    fn each(&self, set: impl Fn(&mut State)) {
+        for window in self.windows() {
+            let slot = {
+                let mut state = lock(&window);
+                set(&mut state);
+                state.slot
+            };
+            self.ctx.request_repaint_of(viewport_id(slot));
+        }
+    }
+
+    /// What every window saved from its bar since the last call: the last.
+    fn take_each<T>(&self, take: impl Fn(&mut State) -> Option<T>) -> Option<T> {
+        self.windows()
+            .iter()
+            .filter_map(|window| take(&mut lock(window)))
+            .last()
     }
 
     /// Show the computer `device_id`'s screen `monitor`: asked of the
@@ -716,116 +1108,271 @@ impl ComputerView {
             state.view_only = view_only;
             state.stats_on = stats;
         }
+        state.later = false;
         ask(&self.state_dir, &mut state, wanted)
     }
 
     /// Stats switched in Settings (PR #551 review): an open window follows.
     pub fn set_stats(&self, on: bool) {
-        lock(&self.shared).stats_on = on;
-        self.ctx.request_repaint_of(viewport_id());
+        self.each(|state| state.stats_on = on);
     }
 
     /// "Use HEVC when both can" as Settings has it (PC5): the next view
     /// follows.
     pub fn set_hevc(&self, on: bool) {
-        lock(&self.shared).hevc_setting = on;
+        self.each(|state| state.hevc_setting = on);
     }
 
     /// "Decode on the graphics card" as Settings has it (PC5): the next
     /// view follows.
     pub fn set_hw_decode(&self, on: bool) {
-        let mut state = lock(&self.shared);
-        if state.hw_decode != on {
-            // The ways are tried afresh (PR #562 re-review N3).
-            state.failed_ways.clear();
-        }
-        state.hw_decode = on;
+        self.each(|state| {
+            if state.hw_decode != on {
+                // The ways are tried afresh (PR #562 re-review N3).
+                state.failed_ways.clear();
+            }
+            state.hw_decode = on;
+        });
     }
 
     /// The bar's Stats switch, saved since the last call (PC2): Settings
     /// follows it.
     pub fn take_stats_saved(&self) -> Option<bool> {
-        lock(&self.shared).stats_saved.take()
+        self.take_each(|state| state.stats_saved.take())
     }
 
     /// "Send Win and Alt+Tab there" as Settings has it (PC4): an open
     /// window follows at once.
     #[cfg(windows)]
     pub fn set_grab_keys(&self, on: bool) {
-        lock(&self.shared).grab.setting = on;
-        self.ctx.request_repaint_of(viewport_id());
+        self.each(|state| state.grab.setting = on);
     }
 
     /// The bar's "Send Win and Alt+Tab there", saved since the last call
     /// (PC4): Settings follows it.
     #[cfg(windows)]
     pub fn take_grab_saved(&self) -> Option<bool> {
-        lock(&self.shared).grab.saved.take()
+        self.take_each(|state| state.grab.saved.take())
     }
 
     /// "Lock it when I close the window" as Settings has it (PC8): an open
     /// window follows at once.
     pub fn set_lock_on_close(&self, on: bool) {
-        lock(&self.shared).lock_on_close = on;
-        self.ctx.request_repaint_of(viewport_id());
+        self.each(|state| state.lock_on_close = on);
     }
 
     /// The bar's "Lock it when I close the window", saved since the last
     /// call (PC8): Settings follows it.
     pub fn take_lock_saved(&self) -> Option<bool> {
-        lock(&self.shared).lock_saved.take()
+        self.take_each(|state| state.lock_saved.take())
     }
 
-    /// The computer this computer's microphone goes to now, if any (PR #569
-    /// review I2): the main window says so on every page.
+    /// Every computer this computer's microphone goes to now, each with the
+    /// window it goes from, if any (PR #569 review I2; PC11: any window's,
+    /// and all of them, re-review N5): the main window says so on every
+    /// page.
     pub fn mic_on_air(&self) -> Option<String> {
-        let state = lock(&self.shared);
-        state
-            .mic
-            .on()
-            .then(|| state.wanted.as_ref().map(|w| w.name.clone()))
-            .flatten()
+        let sending: Vec<String> = self
+            .windows()
+            .iter()
+            .filter_map(|window| {
+                let state = lock(window);
+                state
+                    .mic
+                    .on()
+                    .then(|| {
+                        state
+                            .wanted
+                            .as_ref()
+                            .map(|w| mic_window_words(&w.name, w.monitor))
+                    })
+                    .flatten()
+            })
+            .collect();
+        (!sending.is_empty()).then(|| sending.join("; "))
     }
 
-    /// Stop sending the microphone, from the main window (PR #569 review
-    /// I2).
+    /// Stop sending the microphone, from the main window, in every window
+    /// (PR #569 review I2, PC11).
     pub fn stop_mic(&self) {
-        let mut state = lock(&self.shared);
-        let sending = state.mic.on();
-        state.mic.stopped();
-        if sending {
-            stop_mic(&mut state);
-        }
-        drop(state);
-        self.ctx.request_repaint_of(viewport_id());
+        self.each(|state| {
+            // A mic waiting to start again after a switch is stopped too
+            // (PR #570 check S1): Stop means every mic.
+            state.mic_resume = None;
+            let sending = state.mic.on();
+            state.mic.stopped();
+            if sending {
+                stop_mic(state);
+            }
+        });
     }
 
-    /// Pocketdesk quits with the window open: it closes as it would by its
-    /// own close button, the lock on close (PC8) asked first, each write
-    /// held to [`QUIT_WRITE`] so a stalled relay keeps the quit well under a
-    /// second.
+    /// Pocketdesk quits with windows open: each closes as it would by its
+    /// own close button, the lock on close (PC8) asked first by the last
+    /// window of each computer (PC11), each write held to [`QUIT_WRITE`] so
+    /// a stalled relay keeps the quit well under a second.
     pub fn quit(&self) {
-        quit_view(&self.state_dir, &mut lock(&self.shared));
+        let windows = self.windows();
+        // Each later window that would lock its computer as it closes: the
+        // last of them locks it (review I2).
+        let lockers: Vec<Option<String>> = windows.iter().map(|w| would_lock(&lock(w))).collect();
+        for (n, window) in windows.iter().enumerate() {
+            let mut state = lock(window);
+            let device = state.wanted.as_ref().map(|w| w.device_id.clone());
+            let later: Vec<Option<String>> = lockers
+                .iter()
+                .enumerate()
+                .map(|(m, l)| if m > n { l.clone() } else { None })
+                .collect();
+            state.same_computer_open = shown_elsewhere(device.as_deref(), &later, n);
+            quit_view(&self.state_dir, &mut state);
+        }
     }
 
-    /// Call each pass: keeps the window open while a screen is wanted.
+    /// Call each pass: keeps each window open while a screen is wanted
+    /// there, and opens what a window's bar asked for in a new one (PC11).
     pub fn show(&self, ctx: &egui::Context) {
-        let title = {
-            let state = lock(&self.shared);
+        self.follow_windows(ctx);
+        for window in self.windows() {
+            self.show_window(ctx, window);
+        }
+    }
+
+    /// What each window needs to know of the others (PC11): whether another
+    /// shows its computer; and a screen a window's bar asked for opened in
+    /// a new one.
+    fn follow_windows(&self, ctx: &egui::Context) {
+        let windows = self.windows();
+        let devices: Vec<Option<String>> = windows
+            .iter()
+            .map(|w| lock(w).wanted.as_ref().map(|w| w.device_id.clone()))
+            .collect();
+        // The computers each window would lock as it closes (review I2).
+        let lockers: Vec<Option<String>> = windows.iter().map(|w| would_lock(&lock(w))).collect();
+        for (n, window) in windows.iter().enumerate() {
+            let asked = {
+                let mut state = lock(window);
+                state.same_computer_open = shown_elsewhere(devices[n].as_deref(), &lockers, n);
+                state.open_new.take()
+            };
+            if let Some(monitor) = asked {
+                self.open_new_window(ctx, window, monitor);
+            }
+        }
+    }
+
+    /// Show the screen `monitor` of the computer `source` shows in a window
+    /// of its own (PC11): a window not in use, else a new one, at most
+    /// [`wire::MAX_VIEWS`] in all; it starts with `source`'s choices.
+    fn open_new_window(&self, ctx: &egui::Context, source: &Arc<Mutex<State>>, monitor: u32) {
+        let target = {
+            let mut extras = self
+                .extras
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // A window not in use: one of the others, else the first's
+            // (closed while they stay, review M3).
+            let free = extras
+                .iter()
+                .chain(std::iter::once(&self.shared))
+                .find(|w| !Arc::ptr_eq(w, source) && lock(w).wanted.is_none())
+                .cloned();
+            match free {
+                Some(free) => Some(free),
+                None if extras.len() + 1 < usize::from(wire::MAX_VIEWS) => {
+                    let slot = extras.len() as u8 + 1;
+                    let window = new_window(ctx, &self.state_dir, slot, self.mic_claims.clone());
+                    extras.push(window.clone());
+                    Some(window)
+                }
+                None => None,
+            }
+        };
+        let mut from = lock(source);
+        let Some(wanted) = from.wanted.clone() else {
+            return;
+        };
+        let Some(target) = target else {
+            from.saved_note = Some((
+                format!(
+                    "At most {} screen windows at once: close one first.",
+                    wire::MAX_VIEWS
+                ),
+                Instant::now(),
+            ));
+            return;
+        };
+        let mut state = lock(&target);
+        state.quality = from.quality;
+        state.view_only = from.view_only;
+        state.stats_on = from.stats_on;
+        state.hevc_setting = from.hevc_setting;
+        state.hw_decode = from.hw_decode;
+        state.lock_on_close = from.lock_on_close;
+        state.later = true;
+        // A computer that is not Windows takes a window's clicks over its
+        // first screen whatever screen the window shows (PR #570 review
+        // I4): another window of it opens View only, said on its bar.
+        state.view_only = state.view_only || extra_view_only(from.status.windows);
+        state.hevc_refused = false;
+        #[cfg(windows)]
+        {
+            state.grab.setting = from.grab.setting;
+        }
+        drop(from);
+        let next = Wanted { monitor, ..wanted };
+        if let Err(e) = ask(&self.state_dir, &mut state, next) {
+            state.ended = Some(e);
+        }
+        ctx.request_repaint_of(viewport_id(state.slot));
+    }
+
+    /// The window `shared`, while a screen is wanted there.
+    fn show_window(&self, ctx: &egui::Context, shared: Arc<Mutex<State>>) {
+        let (title, slot) = {
+            let state = lock(&shared);
             let Some(wanted) = &state.wanted else { return };
-            window_title(&wanted.name, state.mic.on())
+            (
+                window_title(&wanted.name, wanted.monitor, state.mic.on()),
+                state.slot,
+            )
         };
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_inner_size([1280.0, 760.0])
             .with_min_inner_size([320.0, 240.0]);
-        let shared = self.shared.clone();
         let state_dir = self.state_dir.clone();
         let config = self.config.clone();
-        ctx.show_viewport_deferred(viewport_id(), builder, move |ui, _class| {
+        ctx.show_viewport_deferred(viewport_id(slot), builder, move |ui, _class| {
             draw(&shared, &state_dir, config.as_deref(), ui);
         });
     }
+}
+
+/// Whether `device`, the computer the window `n` shows, is in `others`
+/// (each window's computer where it counts, `None` where not) for a window
+/// other than `n` (PC11).
+pub fn shown_elsewhere(device: Option<&str>, others: &[Option<String>], n: usize) -> bool {
+    device.is_some_and(|device| {
+        others
+            .iter()
+            .enumerate()
+            .any(|(m, other)| m != n && other.as_deref() == Some(device))
+    })
+}
+
+/// The computer a window would lock as it closes, if any (PR #570 review
+/// I2): one it shows, its view going and shown. A window ended, waiting to
+/// be let in, reconnecting or switching would not, so it never keeps
+/// another window's close from locking.
+fn would_lock(state: &State) -> Option<String> {
+    let going = state.ended.is_none()
+        && state.status.phase == Phase::Showing
+        && state.status.reconnecting == 0
+        && state.switching.is_none();
+    going
+        .then(|| state.wanted.as_ref().map(|w| w.device_id.clone()))
+        .flatten()
 }
 
 /// A write to the relay as Pocketdesk quits waits at most this long: the
@@ -851,6 +1398,8 @@ fn quit_view(state_dir: &Path, state: &mut State) {
     let lock = say_closing(state);
     stop_view(state_dir, state, lock);
     state.wanted = None;
+    state.switching = None;
+    state.record_carry = false;
     // The keyboard grab comes out with the window (PC4).
     #[cfg(windows)]
     {
@@ -878,9 +1427,10 @@ fn ask_with(
     );
     let release = state.input.release_all();
     send(state, release);
+    let slot = state.slot;
     match hevc_ask(could, known) {
         HevcAsk::Now(hevc) => {
-            computers::request(state_dir, view_ask(&wanted, hevc), now_unix())
+            computers::request(state_dir, view_ask(&wanted, hevc, slot), now_unix())
                 .map_err(|e| format!("Not asked: {e}"))?;
         }
         HevcAsk::Wait => {
@@ -892,7 +1442,7 @@ fn ask_with(
                 .spawn(move || {
                     let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
                     if let Err(e) =
-                        computers::request(&dir, view_ask(&request_for, hevc), now_unix())
+                        computers::request(&dir, view_ask(&request_for, hevc, slot), now_unix())
                     {
                         eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
                     }
@@ -912,11 +1462,34 @@ fn ask_with(
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
+    // A mic waiting after a switch is that switch's alone (re-review N1).
+    state.mic_resume = None;
+    // The old view's decoder may still give pictures (frames in flight, or
+    // read already): they are dropped, never taken for the next screen's
+    // (PR #570 review I1).
+    state.decoder_gen += 1;
+    state.picture = None;
     state.writer = None;
     state.newer_than = state.newer_than.max(state.session_id.unwrap_or(0));
     state.session_id = None;
+    // The same computer's screens stay on the bar meanwhile (PC11), so its
+    // buttons do not jump as it switches.
+    let same = state
+        .wanted
+        .as_ref()
+        .is_some_and(|w| w.device_id == wanted.device_id);
+    let (monitors, layout) = if same {
+        (
+            std::mem::take(&mut state.status.monitors),
+            std::mem::take(&mut state.status.layout),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
     state.status = ViewStatus {
         monitor: wanted.monitor,
+        monitors,
+        layout,
         ..ViewStatus::default()
     };
     state.ended = None;
@@ -957,13 +1530,63 @@ pub fn hevc_ask(could: bool, known: Option<bool>) -> HevcAsk {
     }
 }
 
-/// The ask for `wanted`'s screen, taking HEVC or not.
-fn view_ask(wanted: &Wanted, hevc: bool) -> ComputerAsk {
+/// The ask for `wanted`'s screen in the window `slot`, taking HEVC or not.
+fn view_ask(wanted: &Wanted, hevc: bool, slot: u8) -> ComputerAsk {
     ComputerAsk::View {
         device_id: wanted.device_id.clone(),
         monitor: wanted.monitor,
         hevc,
+        window: slot,
     }
+}
+
+/// Show another screen of the computer this window shows (PC11), keeping
+/// the window's state: its pointer lock let go first (the relay told, the
+/// system's grab freed on the next pass), its privacy shown as it was (the
+/// server moves the hold with the window), a recording going on in a new
+/// file, and the last picture shown dimmed until the new one comes.
+fn switch_screen(state_dir: &Path, state: &mut State, monitor: u32) -> Result<(), String> {
+    let Some(wanted) = state.wanted.clone() else {
+        return Ok(());
+    };
+    if wanted.monitor == monitor && state.ended.is_none() {
+        return Ok(());
+    }
+    if state.pointer.locked() || state.pointer_said == Some(true) {
+        say_pointer(state, false);
+    }
+    state.pointer.free();
+    // The mic goes on with the window (PC11): stopped here, its relay told,
+    // and started again on the new screen's view once that controls.
+    let resume = state.mic.on() || state.mic.wanted();
+    if resume {
+        let sending = state.mic.on();
+        state.mic.stopped();
+        if sending {
+            stop_mic(state);
+        }
+    }
+    let privacy = state.status.privacy.clone();
+    let going = state.ended.is_none();
+    // Carried only from a view going: one already ended has no recording
+    // to end, and a later end would wrongly start one (PR #570 review M2).
+    state.record_carry = state.record_want && going;
+    let device_id = wanted.device_id.clone();
+    ask(state_dir, state, Wanted { monitor, ..wanted })?;
+    // Set after the ask, which forgets any (re-review N1): only this
+    // switch carries it.
+    if resume {
+        state.mic_resume = Some(MicResume {
+            device_id,
+            asked: state.asked,
+            until: Instant::now() + MIC_RESUME_FOR,
+        });
+    }
+    if going {
+        state.status.privacy = privacy;
+    }
+    state.switching = Some((monitor, Instant::now()));
+    Ok(())
 }
 
 /// Whether a view whose last way just gave up (`step`) is asked for again
@@ -997,6 +1620,7 @@ fn stop_view(state_dir: &Path, state: &mut State, lock: bool) {
         ComputerAsk::StopView {
             session_id: shown,
             lock,
+            window: state.slot,
         },
         now_unix(),
     );
@@ -1076,7 +1700,13 @@ fn say_privacy(state: &mut State, ask: u8) {
 /// review I2).
 fn say_closing(state: &mut State) -> bool {
     let mut owed = false;
-    if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
+    // A mic waiting to start again after a switch never outlives the
+    // window (PR #570 re-review N1).
+    state.mic_resume = None;
+    // Another window still shows that computer (PC11): it is not locked
+    // under it.
+    let lock_it = state.lock_on_close && !state.same_computer_open;
+    if let Some(ask) = closing_ask(lock_it, state.status.phase) {
         say_privacy(state, ask);
         owed = lock_owed(state.writer.is_some(), state.ended.is_some());
     }
@@ -1137,6 +1767,7 @@ fn stop_mic(state: &mut State) {
     if state.mic_said == Some(true) {
         say_mic(state, false);
     }
+    release_window_mic(state);
 }
 
 /// Whether the window may send its microphone now (PR #569 review I2):
@@ -1170,6 +1801,73 @@ fn mic_stop_words(state: &State) -> Option<&'static str> {
     }
 }
 
+/// A mic to start again after a switch (PC11): only for the computer it
+/// was on for, only for that switch's ask (the window's `asked` just
+/// after it), and only until a while has passed (PR #570 re-review N1): a
+/// window closed, asked for anything else, or reused, never inherits it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicResume {
+    pub device_id: String,
+    pub asked: u64,
+    pub until: Instant,
+}
+
+/// How long a mic waits after a switch for the new screen's view to
+/// control that computer before it is given up, said.
+pub const MIC_RESUME_FOR: Duration = Duration::from_secs(30);
+
+/// What a window's mic does after it switched screens with the mic on
+/// (PC11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resume {
+    /// Not switching with it on.
+    Nothing,
+    /// The resume is not this view's (another ask since, another
+    /// computer): forgotten, the mic off, nothing said.
+    Forget,
+    /// The new screen's view is not shown yet: nothing yet.
+    Wait,
+    /// It controls that computer: the mic starts again.
+    Start,
+    /// It ended, shows without taking input, or took too long: the mic
+    /// stays off, said.
+    GiveUp,
+}
+
+/// [`Resume`] for a window's `resume` while it shows `device` after its
+/// ask number `asked`, at `now`, `controlling` that computer or not, its
+/// view `ended` or not and standing at `phase`.
+pub fn mic_resumes(
+    resume: Option<&MicResume>,
+    device: Option<&str>,
+    asked: u64,
+    now: Instant,
+    controlling: bool,
+    ended: bool,
+    phase: Phase,
+) -> Resume {
+    let Some(resume) = resume else {
+        return Resume::Nothing;
+    };
+    match () {
+        _ if device != Some(resume.device_id.as_str()) || asked != resume.asked => Resume::Forget,
+        _ if now >= resume.until => Resume::GiveUp,
+        _ if controlling => Resume::Start,
+        _ if ended || phase == Phase::Showing => Resume::GiveUp,
+        _ => Resume::Wait,
+    }
+}
+
+/// Why the mic stayed off after a switch (PC11).
+pub const MIC_SWITCH_WORDS: &str = "Mic stopped: the next screen does not take this computer's input. Turn Send my mic on again once it does.";
+
+/// Why a second window's mic is refused (PC11).
+pub fn mic_elsewhere_words(name: &str) -> String {
+    format!(
+        "Another window already sends your microphone to {name}: it has one \u{201c}Pocketdesk Mic\u{201d}. Turn it off there first."
+    )
+}
+
 /// "Send my mic", each pass (PC10): it starts as [`MicSwitch`] decides
 /// (wanted, and the window controls that computer), the relay told before
 /// any frame, and stops as it decides otherwise.
@@ -1180,9 +1878,48 @@ fn follow_mic(
     ctx: &egui::Context,
     controlling: bool,
 ) {
+    let viewport = viewport_id(state.slot);
     // On, but this connection's relay never heard so (a rejoin, another
     // computer asked, a write lost): nothing of it is heard there, so it
     // stops and says why (PR #569 review I1).
+    let device = state.wanted.as_ref().map(|w| w.device_id.clone());
+    match mic_resumes(
+        state.mic_resume.as_ref(),
+        device.as_deref(),
+        state.asked,
+        Instant::now(),
+        controlling,
+        state.ended.is_some(),
+        state.status.phase,
+    ) {
+        Resume::Wait => {
+            ctx.request_repaint_after(Duration::from_secs(1));
+            return;
+        }
+        Resume::Start => {
+            state.mic_resume = None;
+            if !state.mic.wanted() {
+                state.mic.toggle();
+            }
+        }
+        Resume::GiveUp => {
+            state.mic_resume = None;
+            state.mic_note = Some(MIC_SWITCH_WORDS.to_string());
+        }
+        Resume::Forget => state.mic_resume = None,
+        Resume::Nothing => {}
+    }
+    // One window's mic a computer (PC11): taken as it starts, so a second
+    // window's is refused, saying why (re-review N2).
+    if state.mic.wanted() && !state.mic.on() && controlling && !claim_window_mic(state) {
+        state.mic.stopped();
+        let name = state
+            .wanted
+            .as_ref()
+            .map_or_else(|| "that computer".to_string(), |w| w.name.clone());
+        state.mic_note = Some(mic_elsewhere_words(&name));
+        return;
+    }
     if state.mic.on() && state.mic_said != Some(true) {
         state.mic.stopped();
         stop_mic(state);
@@ -1194,6 +1931,7 @@ fn follow_mic(
             say_mic(state, true);
             if state.mic_said != Some(true) {
                 state.mic.stopped();
+                release_window_mic(state);
                 return;
             }
             state.mic_gen += 1;
@@ -1240,14 +1978,13 @@ fn follow_mic(
                 drop(state);
                 // The window's own viewport, and the main window, which
                 // says "Mic on" too (PR #569 review M6).
-                repaint.request_repaint_of(viewport_id());
+                repaint.request_repaint_of(viewport);
                 repaint.request_repaint_of(egui::ViewportId::ROOT);
             };
-            let opener = state.mic_open.clone();
-            let open = move || match opener {
-                Some(open) => open(device),
-                None => view_mic::open(device),
-            };
+            // Chosen here, on the window's own thread: in a test without a
+            // fake this fails the test at once (PR #570 check T3).
+            let opener = state.mic_open.clone().unwrap_or_else(default_mic_opener);
+            let open = move || opener(device);
             match MicRun::start(open, send, ended) {
                 Ok(run) => {
                     state.mic_run = Some(run);
@@ -1268,7 +2005,7 @@ fn follow_mic(
             }
             stop_mic(state);
             // The bar, drawn before, stops saying "Mic on" at once.
-            ctx.request_repaint_of(viewport_id());
+            ctx.request_repaint_of(viewport_id(state.slot));
         }
         None => {}
     }
@@ -1429,6 +2166,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         ));
         stop_view(state_dir, &mut state, lock);
         state.wanted = None;
+        // A switch under way ends with the window (PC11).
+        state.switching = None;
+        state.record_carry = false;
         state.fullscreen = false;
         // The GPU's picture goes with the window (PR #562 review M5): now,
         // if this pass is drawn, else as the window next opens.
@@ -1444,6 +2184,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     }
     if let Some(picture) = state.picture.take() {
+        // The new screen's first picture ends a switch (PC11).
+        if let Some((_, since)) = state.switching.take() {
+            state.last_switch = Some(since.elapsed());
+        }
         let picture = Arc::new(picture);
         if picture.planes == Planes::Nv12 && crate::nv12::planes() == Planes::Nv12 {
             // PC5: its planes go up as they are, and the GPU turns them to
@@ -1485,6 +2229,9 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let record_want = state.record_want;
     let recording = state.recording.clone();
     let fullscreen = state.fullscreen;
+    let later = state.later;
+    let switching = state.switching.map(|(to, _)| to);
+    let last_switch = state.last_switch;
     let mut stats_on = state.stats_on;
     // Ctrl+Alt+Shift+S, wherever the focus is (PR #551 review M8).
     if ctx.input(|i| i.events.iter().any(stats_chord)) {
@@ -1524,6 +2271,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     drop(state);
 
     let mut monitor = wanted.monitor;
+    let choices = screen_choices(&status);
+    // PC11: Ctrl+Alt+Shift+1 to 9 shows that screen, wherever the focus is.
+    if let Some(n) = events.iter().find_map(screen_chord)
+        && (n as usize) < choices.len()
+    {
+        monitor = n;
+    }
+    let mut open_new: Option<u32> = None;
     let mut send_key: Option<SendKey> = None;
     let mut privacy_ask: Option<u8> = None;
     egui::Panel::top("computer-view-bar")
@@ -1542,19 +2297,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         said.push_str(&format!(" \u{b7} {}", status.route));
                     }
                     ui.label(egui::RichText::new(said).strong());
-                    let choices = screen_choices(&status);
                     if choices.len() > 1 {
-                        let shown = choices
-                            .get(monitor as usize)
-                            .cloned()
-                            .unwrap_or_else(|| format!("Screen {}", monitor + 1));
-                        egui::ComboBox::from_id_salt("computer-view-screen")
-                            .selected_text(shown)
-                            .show_ui(ui, |ui| {
-                                for (n, choice) in choices.iter().enumerate() {
-                                    ui.selectable_value(&mut monitor, n as u32, choice);
-                                }
-                            });
+                        // PC11: a button a screen, laid out as they sit.
+                        let current = switching.unwrap_or(wanted.monitor);
+                        if let Some(pick) =
+                            screen_bar(ui, &choices, &status.layout, current, &mut open_new)
+                        {
+                            monitor = pick;
+                        }
                     }
                     let label = COMPUTER_VIEW_QUALITIES
                         .iter()
@@ -1647,7 +2397,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                                 .on_hover_text(mic_hover(&wanted.name));
                             if mic.clicked() {
                                 mic.surrender_focus();
-                                lock(shared).mic.toggle();
+                                let mut state = lock(shared);
+                                // The owner's own click decides from here:
+                                // a resume pending since a switch is
+                                // forgotten (PR #570 check S2).
+                                state.mic_resume = None;
+                                state.mic.toggle();
                             }
                         }
                     }
@@ -1736,6 +2491,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             .wrap(),
                     );
                 }
+                if ended.is_none() && says_first_screen(status.windows, later, wanted.monitor) {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
+                        )
+                        .wrap(),
+                    );
+                }
                 if let Some(words) = &mic_note {
                     ui.add(
                         egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
@@ -1756,13 +2519,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     // The toolbar's choices.
     let mut reconnect = false;
     let mut cancel = false;
+    if let Some(n) = open_new {
+        // The app opens it, on its next pass (PC11).
+        lock(shared).open_new = Some(n);
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
     if monitor != wanted.monitor {
         let mut state = lock(shared);
-        let next = Wanted {
-            monitor,
-            ..wanted.clone()
-        };
-        if let Err(e) = ask(state_dir, &mut state, next) {
+        if let Err(e) = switch_screen(state_dir, &mut state, monitor) {
             state.ended = Some(e);
         }
         return;
@@ -1881,6 +2645,34 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                                 .clicked();
                         });
                 });
+            } else if let (Some(to), Some([w, h])) = (switching, drawn) {
+                // The last screen's picture, dimmed, until the next one's
+                // comes (PC11); nothing goes there meanwhile.
+                paint_picture(
+                    ui,
+                    &gpu,
+                    on_gpu.is_some(),
+                    texture.as_ref(),
+                    letterbox(area, w, h),
+                    egui::Color32::from_gray(90),
+                );
+                let to_name = choices
+                    .get(to as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Screen {}", to + 1));
+                ui.vertical_centered(|ui| {
+                    ui.add_space(area.height() / 3.0);
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_black_alpha(200))
+                        .corner_radius(6.0)
+                        .inner_margin(12.0)
+                        .show(ui, |ui| {
+                            ui.colored_label(
+                                egui::Color32::LIGHT_GRAY,
+                                format!("Switching to {to_name}\u{2026}"),
+                            );
+                        });
+                });
             } else if let Some(note) = &note {
                 ui.centered_and_justified(|ui| ui.colored_label(egui::Color32::LIGHT_GRAY, note));
             } else if let Some([w, h]) = drawn {
@@ -1971,7 +2763,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             drop(state);
             // How the picture comes, over its corner (PC2).
             if stats_on && ended.is_none() {
-                let lines = stats_lines(&status, size, shown, &decoding);
+                let mut lines = stats_lines(&status, size, shown, &decoding);
+                lines.extend(window_lines(status.views, last_switch));
                 egui::Area::new(egui::Id::new("computer-view-stats"))
                     .fixed_pos(area.min + egui::vec2(8.0, 8.0))
                     .order(egui::Order::Foreground)
@@ -2180,7 +2973,7 @@ fn follow_grab(
         wanted = state.grab.grab.wanted(situation(state));
     }
     if wanted && state.grab.hook.is_none() {
-        state.grab.hook = INSTALL(ctx, viewport_id());
+        state.grab.hook = INSTALL(ctx, viewport_id(state.slot));
         if state.grab.hook.is_none() {
             // Not tried again each pass: the keys stay here until the
             // window leaves the front.
@@ -2228,7 +3021,7 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context, name: &str) {
     std::thread::spawn(move || {
         let note = crate::video::save_png(&stem, width, height, rgba);
         lock(&shared).saved_note = Some((note, Instant::now()));
-        ctx.request_repaint_of(viewport_id());
+        repaint(&ctx, &shared);
     });
 }
 
@@ -2255,9 +3048,20 @@ pub fn file_safe(name: &str) -> String {
 
 /// The worker: find the view this window wants, show it until it ends,
 /// again.
-fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
+fn watch(state_dir: &Path, worker: &std::sync::Weak<Mutex<State>>, ctx: &egui::Context) {
+    let Some(slot) = worker.upgrade().map(|shared| lock(&shared).slot) else {
+        return;
+    };
+    let viewport = viewport_id(slot);
+    let mut wait = POLL;
     loop {
-        std::thread::sleep(POLL);
+        std::thread::sleep(wait);
+        wait = POLL;
+        // The window's state gone (the app ending, a test over): done.
+        let Some(shared) = worker.upgrade() else {
+            return;
+        };
+        let shared = &shared;
         let (wanted, newer_than, asked) = {
             let mut state = lock(shared);
             let Some(wanted) = state.wanted.clone() else {
@@ -2266,7 +3070,7 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
             if state.ended.is_some() {
                 continue;
             }
-            let file = wire::read(state_dir)
+            let file = wire::read_window(state_dir, slot)
                 .filter(|f| f.device_id == wanted.device_id && f.session_id > state.newer_than);
             if file.is_none() {
                 if state.asked_at.is_some_and(|at| at.elapsed() >= NO_ANSWER) {
@@ -2274,20 +3078,33 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
                         "The server did not answer: is Pocketdesk's server running on this computer?"
                             .to_string(),
                     );
-                    ctx.request_repaint_of(viewport_id());
+                    ctx.request_repaint_of(viewport);
+                } else if state.asked_at.is_some() {
+                    // Asked (a switch, PC11): the server names it at once.
+                    wait = ASKED_POLL;
                 }
                 continue;
             }
             (wanted, state.newer_than, state.asked)
         };
-        let Some(file) = wire::read(state_dir)
+        let Some(file) = wire::read_window(state_dir, slot)
             .filter(|f| f.device_id == wanted.device_id && f.session_id > newer_than)
         else {
             continue;
         };
         let ended = view(&file, shared, ctx);
-        end_recording(shared, Some("the screen stopped"));
+        // A switch (PC11): a recording goes on in a new file for the next
+        // screen.
+        let carry = std::mem::take(&mut lock(shared).record_carry);
+        if carry {
+            end_recording(shared, Some("it goes on in a new file for the next screen"));
+            lock(shared).record_want = true;
+        } else {
+            end_recording(shared, Some("the screen stopped"));
+        }
         let mut state = lock(shared);
+        // The next view is looked for at once.
+        wait = ASKED_POLL;
         // HEVC gave nothing here (PR #562 review I3): the same screen is
         // asked for again as H.264, once, if the window still wants it.
         if std::mem::take(&mut state.redial_h264)
@@ -2300,7 +3117,7 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
             if let Err(e) = ask(state_dir, &mut state, wanted) {
                 state.ended = Some(e);
             }
-            ctx.request_repaint_of(viewport_id());
+            ctx.request_repaint_of(viewport);
             continue;
         }
         // The relay dropped this window but the view goes on (its queue
@@ -2316,8 +3133,9 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         // Still the one this window wants (not closed, nor asked again or
         // for another screen meanwhile).
         let ours = state.asked == asked && state.wanted.as_ref() == Some(&wanted);
-        let dropped =
-            cut && ours && wire::read(state_dir).is_some_and(|f| f.session_id == file.session_id);
+        let dropped = cut
+            && ours
+            && wire::read_window(state_dir, slot).is_some_and(|f| f.session_id == file.session_id);
         // At most this often, then the view ends (BK7 re-review N3): a
         // relay that drops the window each time is not joined for ever. A
         // cut this window made as its write stalled has its own, gentler
@@ -2372,12 +3190,17 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         state.writer = None;
         state.session_id = None;
         state.size = None;
-        state.texture = None;
-        state.on_gpu = None;
         state.picture = None;
-        state.shown = None;
+        // A switch keeps the last picture, shown dimmed until the next
+        // screen's comes (PC11).
+        if state.switching.is_none() || state.ended.is_some() {
+            state.switching = None;
+            state.texture = None;
+            state.on_gpu = None;
+            state.shown = None;
+        }
         state.input = WindowInput::default();
-        ctx.request_repaint_of(viewport_id());
+        ctx.request_repaint_of(viewport);
     }
 }
 
@@ -2393,7 +3216,10 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     stream.write_all(&token)?;
     // A stuck write must not hold the window: input is best effort.
     stream.set_write_timeout(Some(Duration::from_millis(200)))?;
-    {
+    // The window's ask this view is for: once it asks again (a switch, a
+    // close), what is still read of this view is dropped (PR #570
+    // re-review N3), never taken for the next screen's.
+    let asked = {
         let mut state = lock(shared);
         state.stream = Some(stream.try_clone()?);
         state.writer = Some(stream.try_clone()?);
@@ -2404,7 +3230,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         state.stalled = false;
         state.session_id = Some(file.session_id);
         state.asked_at = None;
-    }
+        state.asked
+    };
     let mut asks = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(256 * 1024, stream);
     let mut decoder: Option<Decoder> = None;
@@ -2422,6 +3249,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     let mut recorder: Option<Recorder> = None;
     loop {
         let message = Message::read(&mut reader)?;
+        if lock(shared).asked != asked {
+            return Ok(String::new());
+        }
         let want = lock(shared).record_want
             && matches!(message, Message::Frame { .. } | Message::Heartbeat);
         let stop = !lock(shared).record_want;
@@ -2454,7 +3284,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         } else if stop && recorder.is_some() {
             recorder = None;
             end_recording(shared, None);
-            ctx.request_repaint_of(viewport_id());
+            repaint(ctx, shared);
         }
         match message {
             Message::Status(status) => {
@@ -2466,7 +3296,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     send(&mut state, vec![InputPacket::QualityPreset { preset }]);
                 }
                 state.status = status;
-                ctx.request_repaint_of(viewport_id());
+                ctx.request_repaint_of(viewport_id(state.slot));
             }
             Message::Config { width, height } => {
                 // Another size: the decoder starts again at it, from the
@@ -2550,7 +3380,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                         gate = KeyGate::default();
                     } else {
                         lock(shared).note = Some(format!("The decoder stopped ({e})."));
-                        ctx.request_repaint_of(viewport_id());
+                        repaint(ctx, shared);
                     }
                 }
             }
@@ -2810,7 +3640,7 @@ fn start_decoder(
             None
         }
     };
-    ctx.request_repaint_of(viewport_id());
+    ctx.request_repaint_of(viewport_id(state.slot));
     decoder
 }
 
@@ -2863,8 +3693,9 @@ fn publisher(
             state.size = Some((w, h));
         }
         state.picture = Some(picture);
+        let slot = state.slot;
         drop(state);
-        ctx.request_repaint_of(viewport_id());
+        ctx.request_repaint_of(viewport_id(slot));
     })
 }
 
@@ -3050,6 +3881,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: false,
+                window: 0,
             }]
         );
         // Nothing open: nothing said, nothing asked.
@@ -3094,6 +3926,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: None,
                 lock: true,
+                window: 0,
             }]
         );
         quit_view(&dir, &mut gap(false, None));
@@ -3104,10 +3937,12 @@ mod tests {
                 ComputerAsk::StopView {
                     session_id: None,
                     lock: false,
+                    window: 0,
                 },
                 ComputerAsk::StopView {
                     session_id: None,
                     lock: false,
+                    window: 0,
                 }
             ]
         );
@@ -3179,6 +4014,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(9),
                 lock: true,
+                window: 0,
             }]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -3529,7 +4365,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true, window: 0 }
             ),
             "{asked:?}"
         );
@@ -3558,7 +4394,7 @@ mod tests {
         assert!(
             matches!(
                 asked.as_slice(),
-                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false }
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false, window: 0 }
             ),
             "{asked:?}"
         );
@@ -3678,6 +4514,7 @@ mod tests {
             [ComputerAsk::StopView {
                 session_id: Some(41),
                 lock: false,
+                window: 0,
             }]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -4293,8 +5130,8 @@ mod tests {
             let expected = (way == "control off there").then(|| view_mic::TAKEN_WORDS.to_string());
             assert_eq!(lock(&shared).mic_note, expected, "{way}");
             assert_eq!(
-                window_title("Desk", lock(&shared).mic.on()),
-                "Desk \u{b7} screen"
+                window_title("Desk", 0, lock(&shared).mic.on()),
+                "Desk \u{b7} screen 1"
             );
             drop(harness);
             drop(shared);
@@ -4363,10 +5200,10 @@ mod tests {
     #[test]
     fn the_title_and_the_main_window_say_mic_on() {
         use egui_kittest::kittest::Queryable;
-        assert_eq!(window_title("Desk", false), "Desk \u{b7} screen");
+        assert_eq!(window_title("Desk", 0, false), "Desk \u{b7} screen 1");
         assert_eq!(
-            window_title("Desk", true),
-            "Mic on \u{b7} Desk \u{b7} screen"
+            window_title("Desk", 1, true),
+            "Mic on \u{b7} Desk \u{b7} screen 2"
         );
         assert!(mic_on_air_words("Desk").contains("goes to Desk"));
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -4380,6 +5217,8 @@ mod tests {
         let ctx = egui::Context::default();
         let view = ComputerView {
             shared: shared.clone(),
+            extras: Mutex::new(Vec::new()),
+            mic_claims: MicClaims::default(),
             state_dir: dir.clone(),
             config: None,
             ctx: ctx.clone(),
@@ -4393,7 +5232,7 @@ mod tests {
         harness.get_by_label("Send my mic").click();
         harness.step();
         harness.step();
-        assert_eq!(view.mic_on_air().as_deref(), Some("Desk"));
+        assert_eq!(view.mic_on_air(), Some(mic_window_words("Desk", 0)));
         view.stop_mic();
         assert_eq!(view.mic_on_air(), None);
         assert!(!lock(&shared).mic.wanted());
@@ -4868,6 +5707,7 @@ mod tests {
                 device_id: "desk".into(),
                 monitor: 0,
                 hevc: false,
+                window: 0,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();
@@ -4937,5 +5777,1073 @@ mod tests {
             "the window stays open, saying why, until closed"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: the screen buttons sit as the screens do: side by side, one
+    /// higher, scaled to the bar; a row when the layout is not known.
+    #[test]
+    fn the_screen_buttons_sit_as_the_screens_do() {
+        let place = |x, y, width, height| wire::ScreenPlace {
+            x,
+            y,
+            width,
+            height,
+        };
+        let layout = [place(0, 0, 1920, 1080), place(1920, -200, 2560, 1440)];
+        let rects = screen_buttons(&layout, 2);
+        assert_eq!(rects.len(), 2);
+        let (a, b) = (rects[0], rects[1]);
+        assert!(a.right() <= b.left() + 0.01, "the second to the right");
+        assert!(b.top() < a.top(), "the second higher, as it sits");
+        assert!(a.left().abs() < 0.01 && b.top().abs() < 0.01, "from (0, 0)");
+        let bottom = rects.iter().map(|r| r.bottom()).fold(0.0, f32::max);
+        assert!(
+            (bottom - SCREENS_HIGH).abs() < 0.5,
+            "as high as the bar: {bottom}"
+        );
+        assert!(
+            (a.width() / a.height() - 1920.0 / 1080.0).abs() < 0.01,
+            "each its shape"
+        );
+        // Two stacked: each still big enough to hit.
+        let stacked = [place(0, 0, 1920, 1080), place(0, 1080, 1920, 1080)];
+        for rect in screen_buttons(&stacked, 2) {
+            assert!(rect.height() >= SCREEN_LEAST - 0.01, "{rect:?}");
+        }
+        // Many wide ones: no wider than the bar spares.
+        let wide: Vec<_> = (0..6).map(|n| place(n * 3840, 0, 3840, 1080)).collect();
+        let right = screen_buttons(&wide, 6)
+            .iter()
+            .map(|r| r.right())
+            .fold(0.0, f32::max);
+        assert!(right <= SCREENS_WIDE + 0.5, "{right}");
+        // PR #570 review M1: mirrored screens overlap, a tiny one beside a
+        // huge one cannot be hit: a row; four stacked stay at most twice
+        // the bar's height.
+        let is_row =
+            |rects: &[egui::Rect]| rects.iter().all(|r| r.top() == 0.0 && r.height() == 18.0);
+        let mirrored = [place(0, 0, 1920, 1080), place(0, 0, 1920, 1080)];
+        assert!(is_row(&screen_buttons(&mirrored, 2)));
+        let tiny = [place(0, 0, 7680, 4320), place(7680, 0, 320, 240)];
+        assert!(is_row(&screen_buttons(&tiny, 2)));
+        let tall: Vec<_> = (0..4).map(|n| place(0, n * 1080, 1920, 1080)).collect();
+        let tall = screen_buttons(&tall, 4);
+        assert!(!is_row(&tall));
+        let bottom = tall.iter().map(|r| r.bottom()).fold(0.0, f32::max);
+        assert!(bottom <= 2.0 * SCREENS_HIGH + 0.5, "{bottom}");
+        // Not known (a computer before PC11), or not for every screen: a row.
+        let row = screen_buttons(&[], 3);
+        assert_eq!(row.len(), 3);
+        assert!(row.windows(2).all(|p| p[0].right() < p[1].left()));
+        assert!(row.iter().all(|r| r.top() == 0.0));
+        assert_eq!(screen_buttons(&layout[..1], 2).len(), 2);
+        assert!(screen_buttons(&layout, 0).is_empty());
+    }
+
+    /// PC11: Ctrl+Alt+Shift+1 to 9 names a screen, kept here with what it
+    /// would type; nothing else does.
+    #[test]
+    fn ctrl_alt_shift_and_a_number_picks_a_screen_here() {
+        // As egui-winit says a key: what it types, and where it sits (PR
+        // #570 review I3: with Shift, the 1 key types "!").
+        let typed = |key, physical, pressed, modifiers| egui::Event::Key {
+            key,
+            physical_key: Some(physical),
+            pressed,
+            repeat: false,
+            modifiers,
+        };
+        let key = |key, pressed, modifiers| typed(key, key, pressed, modifiers);
+        let all = egui::Modifiers {
+            ctrl: true,
+            alt: true,
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        assert_eq!(screen_chord(&key(egui::Key::Num1, true, all)), Some(0));
+        assert_eq!(screen_chord(&key(egui::Key::Num9, true, all)), Some(8));
+        assert_eq!(screen_chord(&key(egui::Key::Num2, false, all)), None);
+        assert_eq!(screen_chord(&key(egui::Key::Num0, true, all)), None);
+        let ctrl_alt = egui::Modifiers {
+            shift: false,
+            ..all
+        };
+        assert_eq!(screen_chord(&key(egui::Key::Num2, true, ctrl_alt)), None);
+        let bang = typed(egui::Key::Exclamationmark, egui::Key::Num1, true, all);
+        assert_eq!(screen_chord(&bang), Some(0), "Shift+1 types !");
+        let slash = typed(egui::Key::Slash, egui::Key::Num7, true, all);
+        assert_eq!(screen_chord(&slash), Some(6), "a German Shift+7");
+        let mut kept = vec![bang.clone(), slash];
+        keep_chord_here(&mut kept);
+        assert!(kept.is_empty(), "kept here, never sent");
+        // The stats' and the pointer's chords, where a layout moves S or M.
+        let s = typed(egui::Key::O, egui::Key::S, true, all);
+        assert!(stats_chord(&s));
+        let m = typed(egui::Key::Comma, egui::Key::M, true, all);
+        assert!(view_pointer::lock_chord(&m));
+        let mut events = vec![
+            key(egui::Key::Num2, true, all),
+            egui::Event::Text("@".into()),
+            key(egui::Key::Num2, false, all),
+            key(egui::Key::A, true, egui::Modifiers::NONE),
+        ];
+        keep_chord_here(&mut events);
+        assert_eq!(events, [key(egui::Key::A, true, egui::Modifiers::NONE)]);
+        // Typing on its own still goes.
+        let mut typed = vec![egui::Event::Text("2".into())];
+        keep_chord_here(&mut typed);
+        assert_eq!(typed.len(), 1);
+    }
+
+    /// PC11: the stats count the windows and time the last switch; a
+    /// screen's button says its chord and the way to its own window.
+    #[test]
+    fn the_stats_count_the_windows_and_time_the_switch() {
+        assert!(window_lines(0, None).is_empty());
+        assert_eq!(
+            window_lines(2, Some(Duration::from_millis(840))),
+            ["Views on this server: 2 of 4", "Last switch: 840 ms"]
+        );
+        assert_eq!(
+            screen_hint("eDP-1 (1920x1080)", 0),
+            "eDP-1 (1920x1080) (Ctrl+Alt+Shift+1). Right-click to open it in a new window."
+        );
+        assert!(!screen_hint("Screen 10", 9).contains("Ctrl"));
+        // PR #570 review I4: later windows of a computer not Windows (or
+        // not said) open View only.
+        assert!(!extra_view_only(Some(true)));
+        assert!(extra_view_only(Some(false)));
+        assert!(extra_view_only(None));
+        // Re-review M-b: the first window says it too on another screen.
+        assert!(says_first_screen(Some(false), false, 1));
+        assert!(says_first_screen(Some(false), true, 0));
+        assert!(!says_first_screen(Some(false), false, 0));
+        assert!(!says_first_screen(Some(true), true, 1));
+    }
+
+    /// PC11: a computer two windows show is told apart from one shown once.
+    #[test]
+    fn a_computer_shown_in_another_window_is_seen() {
+        let devices = [Some("desk".to_string()), None, Some("desk".to_string())];
+        let at = |n: usize| devices[n].as_deref();
+        assert!(shown_elsewhere(at(0), &devices, 0));
+        assert!(shown_elsewhere(at(2), &devices, 2));
+        assert!(!shown_elsewhere(at(1), &devices, 1));
+        let once = [Some("desk".to_string()), Some("lap".to_string())];
+        assert!(!shown_elsewhere(once[0].as_deref(), &once, 0));
+        // PR #570 review I2: a window that would not lock (ended, not
+        // shown) keeps no other's close from locking.
+        let showing = |device: &str| State {
+            wanted: Some(Wanted {
+                device_id: device.into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        assert_eq!(would_lock(&showing("desk")).as_deref(), Some("desk"));
+        let ended = State {
+            ended: Some("Desk refused it.".into()),
+            ..showing("desk")
+        };
+        assert_eq!(would_lock(&ended), None);
+        let waiting = State {
+            status: ViewStatus::default(),
+            ..showing("desk")
+        };
+        assert_eq!(would_lock(&waiting), None);
+    }
+
+    /// PC11: switching screens keeps the window's state: the pointer let go
+    /// (the relay told first), privacy shown as it was, a recording carried
+    /// to the next screen, the screens kept on the bar, and the ask for the
+    /// window's own view.
+    #[test]
+    fn a_switch_keeps_the_windows_state() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-switch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        relay
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut state = State {
+            slot: 2,
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            session_id: Some(9),
+            writer: Some(writer),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                privacy: ViewPrivacy::On,
+                monitors: vec!["A".into(), "B".into()],
+                ..ViewStatus::default()
+            },
+            pointer_said: Some(true),
+            record_want: true,
+            ..State::default()
+        };
+        state.pointer.toggle();
+        switch_screen(&dir, &mut state, 1).unwrap();
+        assert_eq!(
+            Message::read(&mut relay).unwrap(),
+            Message::PointerLock(false),
+            "the relay hears the pointer let go"
+        );
+        assert!(!state.pointer.wanted(), "the lock let go here");
+        assert_eq!(state.status.privacy, ViewPrivacy::On);
+        assert_eq!(state.status.monitors, ["A", "B"], "the screens stay");
+        assert_eq!(state.status.monitor, 1);
+        assert!(state.record_carry && state.record_want);
+        assert_eq!(state.switching.map(|(to, _)| to), Some(1));
+        assert!(state.writer.is_none() && state.session_id.is_none());
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::View {
+                device_id: "desk".into(),
+                monitor: 1,
+                hevc: false,
+                window: 2,
+            }]
+        );
+        // The same screen again asks nothing.
+        switch_screen(&dir, &mut state, 1).unwrap();
+        assert!(computers::take_all(&dir, now_unix()).is_empty());
+        // From a view that ended, no recording is carried (review M2).
+        state.record_carry = false;
+        state.ended = Some("Lost the connection to Desk.".into());
+        switch_screen(&dir, &mut state, 0).unwrap();
+        assert!(!state.record_carry);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: "Open in a new window" shows the screen in a window of its
+    /// own, with the first one's choices, its own view asked; its close
+    /// stops only its view; at most four windows, a fifth said; and on quit
+    /// only the last window of a computer locks it.
+    #[test]
+    fn a_screen_opens_in_a_window_of_its_own() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-windows-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 3, true, true).unwrap();
+        computers::take_all(&dir, now_unix());
+        view.open_new_window(&ctx, &view.shared, 1);
+        let windows = view.windows();
+        assert_eq!(windows.len(), 2);
+        {
+            let second = lock(&windows[1]);
+            assert_eq!(second.slot, 1);
+            assert_eq!(second.wanted.as_ref().map(|w| w.monitor), Some(1));
+            assert_eq!(
+                (second.quality, second.view_only, second.stats_on),
+                (3, true, true),
+                "the first window's choices"
+            );
+        }
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::View {
+                device_id: "desk".into(),
+                monitor: 1,
+                hevc: false,
+                window: 1,
+            }]
+        );
+        // Its close stops its own view alone.
+        stop_view(&dir, &mut lock(&windows[1]), false);
+        lock(&windows[1]).wanted = None;
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::StopView {
+                session_id: None,
+                lock: false,
+                window: 1,
+            }]
+        );
+        assert!(lock(&view.shared).wanted.is_some(), "the first stays");
+        // A window not in use is used again; then up to four in all.
+        for monitor in [1, 0, 1] {
+            view.open_new_window(&ctx, &view.shared, monitor);
+        }
+        assert_eq!(view.windows().len(), 4);
+        assert_eq!(lock(&view.windows()[1]).slot, 1, "used again");
+        computers::take_all(&dir, now_unix());
+        view.open_new_window(&ctx, &view.shared, 0);
+        assert_eq!(view.windows().len(), 4, "no fifth");
+        assert!(computers::take_all(&dir, now_unix()).is_empty());
+        assert!(
+            lock(&view.shared)
+                .saved_note
+                .as_ref()
+                .is_some_and(|(note, _)| note.starts_with("At most 4")),
+            "said"
+        );
+        // Review M3: the first window closed while the others stay: its
+        // place is used again for the next, opened from another's bar.
+        lock(&view.shared).wanted = None;
+        let third = view.windows()[3].clone();
+        view.open_new_window(&ctx, &third, 0);
+        assert!(lock(&view.shared).wanted.is_some() && lock(&view.shared).later);
+        // Quit with the lock on close chosen: only the last window of the
+        // computer asks it, so it never locks under another.
+        for window in view.windows() {
+            let mut state = lock(&window);
+            state.lock_on_close = true;
+            state.status.phase = Phase::Showing;
+        }
+        view.quit();
+        let locks: Vec<(u8, bool)> = computers::take_all(&dir, now_unix())
+            .into_iter()
+            .filter_map(|r| match r.ask {
+                ComputerAsk::StopView { lock, window, .. } => Some((window, lock)),
+                _ => None,
+            })
+            .collect();
+        let mut locks = locks;
+        locks.sort();
+        assert_eq!(locks, [(0, false), (1, false), (2, false), (3, true)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: a window after the first follows its own view's file, never
+    /// the first window's; and after a switch it joins the next view
+    /// quickly (it looks every ASKED_POLL, not every POLL, while it waits):
+    /// the join's delay is measured here, the far computer's own start
+    /// aside.
+    #[test]
+    fn a_window_joins_its_own_view_and_a_switch_at_once() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-own-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let file = |session_id, token: [u8; 32]| ViewFile {
+            session_id,
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            port: listener.local_addr().unwrap().port(),
+            token: pocketdesk_core::local::cast::token_hex(&token),
+        };
+        // The first window's file names another view: never joined here.
+        wire::write(&dir, &file(50, [6u8; 32])).unwrap();
+        let ctx = egui::Context::default();
+        let window = new_window(&ctx, &dir, 1, MicClaims::default());
+        {
+            let mut state = lock(&window);
+            ask_with(
+                &dir,
+                &mut state,
+                Wanted {
+                    device_id: "desk".into(),
+                    name: "Desk".into(),
+                    monitor: 0,
+                },
+                Some(false),
+            )
+            .unwrap();
+        }
+        listener.set_nonblocking(true).unwrap();
+        let join = |want: [u8; 32]| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut relay = loop {
+                match listener.accept() {
+                    Ok((relay, _)) => break relay,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "joined within 10 s");
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            };
+            let joined = Instant::now();
+            relay.set_nonblocking(false).unwrap();
+            relay
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut given = [0u8; 32];
+            std::io::Read::read_exact(&mut relay, &mut given).unwrap();
+            assert_eq!(given, want, "its own view's token");
+            (relay, joined)
+        };
+        wire::write_window(&dir, 1, &file(60, [7u8; 32])).unwrap();
+        let (mut relay, _) = join([7u8; 32]);
+        // Switches: the next view is named as the old one ends, as the
+        // server does; the window joins it within a few polls.
+        let mut delays = Vec::new();
+        for (n, session) in (61..66).enumerate() {
+            {
+                let mut state = lock(&window);
+                switch_screen(&dir, &mut state, (n % 2) as u32 + 1).unwrap();
+            }
+            let token = [8 + n as u8; 32];
+            wire::write_window(&dir, 1, &file(session, token)).unwrap();
+            let named = Instant::now();
+            let _ = Message::End { why: String::new() }.write(&mut relay);
+            let (next, joined) = join(token);
+            delays.push(joined.saturating_duration_since(named));
+            relay = next;
+        }
+        let median = percentile(&mut delays, 0.5).unwrap();
+        eprintln!("a switch's join after the view is named: {delays:?}, median {median:?}");
+        assert!(median < Duration::from_millis(150), "{delays:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PC11: after a switch with the mic on, it waits for the new screen's
+    /// view, starts again once that controls, and is given up, said, if it
+    /// ends or shows without taking input.
+    #[test]
+    fn the_mic_goes_on_across_a_switch_or_says_why_not() {
+        let now = Instant::now();
+        let resume = MicResume {
+            device_id: "desk".into(),
+            asked: 7,
+            until: now + MIC_RESUME_FOR,
+        };
+        let at = |controlling, ended, phase| {
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                7,
+                now,
+                controlling,
+                ended,
+                phase,
+            )
+        };
+        assert_eq!(
+            mic_resumes(None, Some("desk"), 7, now, true, false, Phase::Showing),
+            Resume::Nothing
+        );
+        assert_eq!(at(false, false, Phase::Connecting), Resume::Wait);
+        assert_eq!(at(false, false, Phase::Waiting), Resume::Wait);
+        assert_eq!(at(true, false, Phase::Showing), Resume::Start);
+        assert_eq!(at(false, false, Phase::Showing), Resume::GiveUp);
+        assert_eq!(at(false, true, Phase::Connecting), Resume::GiveUp);
+        // Re-review N1: never for another computer, another ask, or late.
+        assert_eq!(
+            mic_resumes(
+                Some(&resume),
+                Some("lap"),
+                7,
+                now,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Forget
+        );
+        assert_eq!(
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                8,
+                now,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Forget
+        );
+        assert_eq!(
+            mic_resumes(Some(&resume), None, 7, now, true, false, Phase::Showing),
+            Resume::Forget
+        );
+        let late = now + MIC_RESUME_FOR;
+        assert_eq!(
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                7,
+                late,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::GiveUp
+        );
+        // The switch stops it here, to start again on the new view.
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-mic-switch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            ..State::default()
+        };
+        state.mic.toggle();
+        switch_screen(&dir, &mut state, 1).unwrap();
+        assert!(state.mic_resume.is_some() && !state.mic.wanted());
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        // Waiting for the new view: nothing yet.
+        follow_mic(&shared, &mut state, None, &ctx, false);
+        assert!(state.mic_resume.is_some() && state.mic_note.is_none());
+        // Shown, but without control there: given up, said.
+        state.status.phase = Phase::Showing;
+        follow_mic(&shared, &mut state, None, &ctx, false);
+        assert!(state.mic_resume.is_none() && !state.mic.wanted());
+        assert_eq!(state.mic_note.as_deref(), Some(MIC_SWITCH_WORDS));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #570 re-review N1: a mic waiting after a switch never starts by
+    /// itself elsewhere: the window closed and its place reused, or the
+    /// same window asked for another computer, and it stays off, the
+    /// relay told nothing, even with control there.
+    #[test]
+    fn a_mic_waiting_after_a_switch_never_starts_elsewhere() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-mic-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        let desk = || Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        let controlled = |state: &mut State| {
+            state.status = ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                ..ViewStatus::default()
+            };
+        };
+        for how in ["closed and reused", "another computer"] {
+            let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let mut state = State {
+                wanted: Some(desk()),
+                ..State::default()
+            };
+            state.mic.toggle();
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(state.mic_resume.is_some(), "{how}");
+            match how {
+                "closed and reused" => {
+                    quit_view(&dir, &mut state);
+                    ask_with(&dir, &mut state, desk(), Some(false)).unwrap();
+                }
+                _ => {
+                    let lap = Wanted {
+                        device_id: "lap".into(),
+                        name: "Lap".into(),
+                        monitor: 0,
+                    };
+                    ask_with(&dir, &mut state, lap, Some(false)).unwrap();
+                }
+            }
+            assert!(state.mic_resume.is_none(), "{how}");
+            // The new view controls there: nothing starts.
+            state.writer = Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+            controlled(&mut state);
+            follow_mic(&shared, &mut state, None, &ctx, true);
+            assert!(!state.mic.wanted() && !state.mic.on(), "{how}");
+            assert_eq!(state.mic_said, None, "{how}: the relay told nothing");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC11: one window's mic a computer: a second window's "Send my mic"
+    /// for it is refused, saying why, and its switch goes off; the app sees
+    /// which window sends where.
+    #[test]
+    fn a_second_windows_mic_for_one_computer_is_refused() {
+        use egui_kittest::kittest::Queryable;
+        struct Quiet;
+        impl view_mic::MicSource for Quiet {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(Vec::new())
+            }
+        }
+        let open: MicOpener = Arc::new(|_| Ok(Box::new(Quiet) as Box<dyn view_mic::MicSource>));
+        let claims = MicClaims::default();
+        let (first, _first_relay, dir) = mic_window("two-a", open.clone());
+        let (second, _second_relay, _) = mic_window("two-b", open);
+        for (slot, window) in [(0u8, &first), (1, &second)] {
+            let mut state = lock(window);
+            state.slot = slot;
+            state.mic_claims = Some(claims.clone());
+        }
+        let harness = |shared: &Arc<Mutex<State>>| {
+            let (shared, dir) = (shared.clone(), dir.clone());
+            egui_kittest::Harness::new_ui(move |ui| draw(&shared, &dir, None, ui))
+        };
+        let (mut a, mut b) = (harness(&first), harness(&second));
+        a.step();
+        b.step();
+        // Both turned on before either window's next pass.
+        a.get_by_label("Send my mic").click();
+        b.get_by_label("Send my mic").click();
+        a.step();
+        b.step();
+        a.step();
+        b.step();
+        let on_air = a.query_all_by_label(view_mic::ON_AIR).count()
+            + b.query_all_by_label(view_mic::ON_AIR).count();
+        assert_eq!(on_air, 1, "exactly one says Mic on");
+        assert!(lock(&first).mic.on() && !lock(&second).mic.on());
+        assert_eq!(lock(&second).mic_note, Some(mic_elsewhere_words("Desk")));
+        assert_ne!(
+            lock(&second).mic_said,
+            Some(true),
+            "the relay was told nothing"
+        );
+        // Given back as the first stops, the second may take it.
+        a.get_by_label("Send my mic").click();
+        a.step();
+        a.step();
+        assert!(!lock(&first).mic.on());
+        b.get_by_label("Send my mic").click();
+        b.step();
+        b.step();
+        assert!(lock(&second).mic.on(), "free once the first let go");
+        drop((a, b));
+        lock(&second).mic.stopped();
+        stop_mic(&mut lock(&second));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #570 review I1: a picture the old screen's decoder still gives
+    /// after a switch is dropped: it neither ends the switch (nor its
+    /// time) nor shows; the next screen's first picture does.
+    #[test]
+    fn an_old_screens_picture_after_a_switch_is_dropped() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-old-picture-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Arc::new(Mutex::new(State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            decoder_gen: 4,
+            ..State::default()
+        }));
+        let ctx = egui::Context::default();
+        let picture = || Picture {
+            width: 8,
+            height: 8,
+            planes: Planes::Rgba,
+            data: vec![0; 8 * 8 * 4],
+            colour: crate::video::Colour::default(),
+        };
+        let mut old = publisher(&shared, &ctx, 4);
+        switch_screen(&dir, &mut lock(&shared), 1).unwrap();
+        old(picture());
+        {
+            let state = lock(&shared);
+            assert!(state.picture.is_none(), "the old screen's picture");
+            assert!(state.switching.is_some(), "still switching");
+        }
+        // The next screen's decoder starts with a newer number.
+        let next = lock(&shared).decoder_gen + 1;
+        lock(&shared).decoder_gen = next;
+        publisher(&shared, &ctx, next)(picture());
+        assert!(lock(&shared).picture.is_some(), "the new screen's shows");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review I2: with "Lock it when I close the window" on, a
+    /// window whose view of the same computer ended does not keep the
+    /// shown window from locking it as Pocketdesk quits.
+    #[test]
+    fn a_window_ended_keeps_no_lock_from_the_one_shown() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-lock-ended-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        view.open_new_window(&ctx, &view.shared, 1);
+        computers::take_all(&dir, now_unix());
+        for window in view.windows() {
+            let mut state = lock(&window);
+            state.lock_on_close = true;
+            state.status.phase = Phase::Showing;
+        }
+        lock(&view.windows()[1]).ended = Some("Desk refused it.".into());
+        view.quit();
+        let mut locks: Vec<(u8, bool)> = computers::take_all(&dir, now_unix())
+            .into_iter()
+            .filter_map(|r| match r.ask {
+                ComputerAsk::StopView { lock, window, .. } => Some((window, lock)),
+                _ => None,
+            })
+            .collect();
+        locks.sort();
+        assert_eq!(locks, [(0, true), (1, false)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review I4: a later window of a computer that is not Windows
+    /// opens View only; of a Windows computer, with the first's choice.
+    #[test]
+    fn a_later_window_of_a_computer_not_windows_opens_view_only() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-extra-input-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        lock(&view.shared).status.windows = Some(false);
+        view.open_new_window(&ctx, &view.shared, 1);
+        assert!(lock(&view.windows()[1]).view_only, "Linux: View only");
+        assert!(!lock(&view.shared).view_only, "the first window as it was");
+        lock(&view.shared).status.windows = Some(true);
+        view.open_new_window(&ctx, &view.shared, 1);
+        assert!(!lock(&view.windows()[2]).view_only, "Windows: as chosen");
+        view.quit();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review M7: a window's worker holds its state weakly, so once
+    /// the window's state goes (a test over, the app ending) it lets go and
+    /// ends rather than polling for ever.
+    #[test]
+    fn a_windows_worker_ends_with_its_state() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-worker-end-{}", std::process::id()));
+        let window = new_window(&egui::Context::default(), &dir, 2, MicClaims::default());
+        let weak = Arc::downgrade(&window);
+        drop(window);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while weak.strong_count() > 0 {
+            assert!(Instant::now() < deadline, "TIMEOUT: the worker kept it");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(weak.upgrade().is_none());
+    }
+    /// PR #570 re-review N3: what is still read of the old view after a
+    /// switch (a status, a new size) is dropped: the window keeps the
+    /// switch's state (the next screen, not shown yet) and starts no
+    /// decoder for it.
+    #[test]
+    fn the_old_views_messages_after_a_switch_are_dropped() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let token = [9u8; 32];
+        wire::write(
+            &dir,
+            &ViewFile {
+                session_id: 70,
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                port: listener.local_addr().unwrap().port(),
+                token: pocketdesk_core::local::cast::token_hex(&token),
+            },
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let mut given = [0u8; 32];
+        std::io::Read::read_exact(&mut relay, &mut given).unwrap();
+        // A first status, taken: the worker reads the view's messages now.
+        Message::Status(ViewStatus {
+            phase: Phase::Waiting,
+            ..ViewStatus::default()
+        })
+        .write(&mut relay)
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lock(&view.shared).status.phase != Phase::Waiting {
+            assert!(Instant::now() < deadline, "TIMEOUT: not joined");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The worker reads the old view's status and waits for the window's
+        // state, which the switch holds meanwhile.
+        let mut state = lock(&view.shared);
+        let shown = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            monitor: 0,
+            ..ViewStatus::default()
+        };
+        Message::Status(shown).write(&mut relay).unwrap();
+        Message::Config {
+            width: 64,
+            height: 48,
+        }
+        .write(&mut relay)
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let decoders = state.decoder_gen;
+        switch_screen(&dir, &mut state, 1).unwrap();
+        let after = state.decoder_gen;
+        drop(state);
+        std::thread::sleep(Duration::from_millis(300));
+        let state = lock(&view.shared);
+        assert_eq!(state.status.monitor, 1, "the next screen's, as asked");
+        assert_eq!(state.status.phase, Phase::Connecting, "not the old view's");
+        assert_eq!(state.decoder_gen, after, "no decoder for the old view");
+        assert!(after > decoders);
+        drop(state);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 re-review N5: the main window names every computer the mic
+    /// goes to, two windows of two computers each sending.
+    #[test]
+    fn the_main_window_names_every_computer_the_mic_goes_to() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-mic-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        view.open_new_window(&ctx, &view.shared, 1);
+        lock(&view.windows()[1]).wanted = Some(Wanted {
+            device_id: "lap".into(),
+            name: "Lap".into(),
+            monitor: 1,
+        });
+        assert_eq!(view.mic_on_air(), None);
+        for window in view.windows() {
+            let mut state = lock(&window);
+            state.mic.toggle();
+            state.mic.step(true);
+        }
+        assert_eq!(
+            view.mic_on_air(),
+            Some(format!(
+                "{}; {}",
+                mic_window_words("Desk", 0),
+                mic_window_words("Lap", 1)
+            ))
+        );
+        view.stop_mic();
+        assert_eq!(view.mic_on_air(), None);
+        view.quit();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 re-review T2: a switch with the mic on, driven through the
+    /// window's passes with a fake microphone: the old view's relay hears
+    /// it stop; once the new view controls, the new relay hears "on"
+    /// before the start and any frame, and the bar says Mic on again.
+    #[test]
+    fn the_mic_starts_again_on_the_next_screens_view() {
+        use egui_kittest::kittest::Queryable;
+        struct Fake;
+        impl view_mic::MicSource for Fake {
+            fn read(&mut self) -> io::Result<Vec<i16>> {
+                std::thread::sleep(Duration::from_millis(5));
+                Ok(vec![100; view_mic::FRAME_SAMPLES / 2])
+            }
+        }
+        let (shared, mut old_relay, dir) = mic_window(
+            "resume",
+            Arc::new(|_| Ok(Box::new(Fake) as Box<dyn view_mic::MicSource>)),
+        );
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).mic.on());
+        std::thread::sleep(Duration::from_millis(100));
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        {
+            let mut state = lock(&shared);
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(!state.mic.on() && state.mic_resume.is_some());
+        }
+        harness.step();
+        assert!(!lock(&shared).mic.on(), "waits for the next view");
+        // The next screen's view joins and controls there.
+        let (mut new_relay, writer) = {
+            let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            (listener.accept().unwrap().0, writer)
+        };
+        {
+            let mut state = lock(&shared);
+            state.writer = Some(writer);
+            state.mic_said = None;
+            state.status = ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                monitor: 1,
+                ..ViewStatus::default()
+            };
+        }
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).mic.on(), "started again");
+        assert!(lock(&shared).mic_resume.is_none());
+        assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 1);
+        std::thread::sleep(Duration::from_millis(300));
+        drop(harness);
+        {
+            let mut state = lock(&shared);
+            state.mic.stopped();
+            stop_mic(&mut state);
+            state.writer = None;
+        }
+        let old = heard_mic(&mut old_relay);
+        assert_eq!(old.last(), Some(&"off"), "{old:?}");
+        let new = heard_mic(&mut new_relay);
+        assert_eq!(&new[..2], ["on", "start"], "{new:?}");
+        assert!(new.contains(&"frame"), "{new:?}");
+        assert_eq!(new.last(), Some(&"off"), "{new:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check S1: the main window's Stop also stops a mic waiting
+    /// to start again after a switch: once the new view controls, even
+    /// after the while has passed, it stays off.
+    #[test]
+    fn the_main_stop_cancels_a_mic_waiting_after_a_switch() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-stop-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        {
+            let mut state = lock(&view.shared);
+            state.mic_open = Some(Arc::new(|_| panic!("no microphone opens here")));
+            state.mic.toggle();
+            switch_screen(&dir, &mut state, 1).unwrap();
+            assert!(state.mic_resume.is_some());
+        }
+        view.stop_mic();
+        let mut state = lock(&view.shared);
+        assert!(state.mic_resume.is_none(), "Stop means every mic");
+        // Whenever the new view comes to control there (30 s on in fake
+        // time too), nothing starts.
+        let resume = MicResume {
+            device_id: "desk".into(),
+            asked: state.asked,
+            until: Instant::now() + MIC_RESUME_FOR,
+        };
+        let later = Instant::now() + MIC_RESUME_FOR;
+        assert_eq!(
+            mic_resumes(
+                None,
+                Some("desk"),
+                state.asked,
+                later,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::Nothing
+        );
+        assert_eq!(
+            mic_resumes(
+                Some(&resume),
+                Some("desk"),
+                state.asked,
+                later,
+                true,
+                false,
+                Phase::Showing
+            ),
+            Resume::GiveUp,
+            "and one left would have lapsed"
+        );
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        state.writer = Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        state.status = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            ..ViewStatus::default()
+        };
+        let shared = Arc::new(Mutex::new(State::default()));
+        follow_mic(&shared, &mut state, None, &ctx, true);
+        assert!(!state.mic.wanted() && !state.mic.on());
+        assert_eq!(state.mic_said, None, "the relay told nothing");
+        state.writer = None;
+        drop(state);
+        view.quit();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check S2: a click on Send my mic while a switch's resume
+    /// waits (the view reconnecting) forgets it: turned on then off by
+    /// hand, the mic stays off once the view controls again.
+    #[test]
+    fn a_click_on_send_my_mic_forgets_a_pending_resume() {
+        use egui_kittest::kittest::Queryable;
+        let (shared, _relay, dir) = mic_window(
+            "resume-click",
+            Arc::new(|_| panic!("no microphone opens here")),
+        );
+        {
+            let mut state = lock(&shared);
+            // As the server says a view dialled again: connecting, its try.
+            state.status.reconnecting = 1;
+            state.status.phase = Phase::Connecting;
+            state.mic_resume = Some(MicResume {
+                device_id: "desk".into(),
+                asked: state.asked,
+                until: Instant::now() + MIC_RESUME_FOR,
+            });
+        }
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        assert!(
+            lock(&shared).mic_resume.is_some(),
+            "waits while reconnecting"
+        );
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        assert!(lock(&shared).mic_resume.is_none(), "the click decides");
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        {
+            let mut state = lock(&shared);
+            state.status.reconnecting = 0;
+            state.status.phase = Phase::Showing;
+        }
+        harness.step();
+        harness.step();
+        assert!(!lock(&shared).mic.on() && !lock(&shared).mic.wanted());
+        drop(harness);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check T3: a window in a test with no fake microphone that
+    /// reaches capture fails loudly, on the test's thread, and opens
+    /// nothing.
+    #[test]
+    #[should_panic(expected = "a test reached the real microphone")]
+    fn a_test_never_opens_the_real_microphone() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut state = State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            writer: Some(TcpStream::connect(listener.local_addr().unwrap()).unwrap()),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        state.mic.toggle();
+        let shared = Arc::new(Mutex::new(State::default()));
+        follow_mic(&shared, &mut state, None, &egui::Context::default(), true);
     }
 }

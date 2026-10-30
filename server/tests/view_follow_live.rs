@@ -218,6 +218,7 @@ fn the_clipboard_and_files_follow_the_window() {
             device_id: b_id.clone(),
             monitor: 0,
             hevc: false,
+            window: 0,
         },
         pin::now_unix(),
     )
@@ -366,6 +367,7 @@ fn the_clipboard_and_files_follow_the_window() {
         ComputerAsk::StopView {
             session_id,
             lock: false,
+            window: 0,
         },
         pin::now_unix(),
     )
