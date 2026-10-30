@@ -176,8 +176,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                 // PC6: the magic packet, as the computer told this one.
                 ComputerAsk::Wake { device_id } => asked_wake(&dir, device_id),
                 ComputerAsk::View { device_id, monitor } => {
-                    // PC6: viewed now, for the recents.
-                    viewed(&dir, &device_id);
+                    // PC6: viewed now, for the recents, off the runtime.
+                    let (at, id) = (dir.clone(), device_id.clone());
+                    tokio::task::spawn_blocking(move || viewed(&at, &id));
                     let views = views.get_or_insert_with(|| {
                         crate::computer_view::spawn(dir.clone(), cert_manager.clone(), wan.clone())
                     });
