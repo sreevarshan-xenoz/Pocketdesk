@@ -502,18 +502,87 @@ pub(crate) fn ask_screens(device_id: &str) {
         link.send(NetworkPacket::new(MONITORS));
         return;
     }
+    // One ask on a connection at a time (PC9a review N2): a send that hangs
+    // is not stacked on by the view's asks again.
+    let Some(mark) = AskingScreens::mark(device_id) else {
+        return;
+    };
     let device_id = device_id.to_string();
     tokio::spawn(async move {
+        // Cleared however the task ends, a cancel or a panic too (PC9a
+        // review N7).
+        let _mark = mark;
         let client = crate::state::clone_clients()
             .await
             .into_iter()
             .find(|c| c.device_id() == device_id);
-        if let Some(client) = client
-            && let Err(e) = client.send_packet(&NetworkPacket::new(MONITORS)).await
-        {
-            tracing::debug!(device_id, "Its screens were not asked: {e}");
+        if let Some(client) = client {
+            match tokio::time::timeout(
+                SCREENS_ASK_WAIT,
+                client.send_packet(&NetworkPacket::new(MONITORS)),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::debug!(device_id, "Its screens were not asked: {e}"),
+                Err(_) => tracing::debug!(device_id, "Its screens were not asked in time"),
+            }
         }
     });
+}
+
+/// The computers whose screens are being asked on a connection now.
+static SCREENS_ASKING: LazyLock<Mutex<std::collections::HashSet<String>>> =
+    LazyLock::new(Default::default);
+
+/// A computer's screens being asked on a connection: its mark in
+/// [`SCREENS_ASKING`], taken off as this goes, however the ask ends.
+struct AskingScreens(String);
+
+impl AskingScreens {
+    /// The mark for `device_id`, or none while another ask holds it.
+    fn mark(device_id: &str) -> Option<Self> {
+        SCREENS_ASKING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(device_id.to_string())
+            .then(|| Self(device_id.to_string()))
+    }
+}
+
+impl Drop for AskingScreens {
+    fn drop(&mut self) {
+        SCREENS_ASKING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// How many times each computer's link has come up since this server
+/// started (PC9a review N6): a view asks its screens afresh as it does.
+static LINK_UPS: LazyLock<Mutex<HashMap<String, u64>>> = LazyLock::new(Default::default);
+
+/// How many times the link to `device_id` has come up.
+pub(crate) fn link_ups(device_id: &str) -> u64 {
+    LINK_UPS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(device_id)
+        .copied()
+        .unwrap_or(0)
+}
+
+/// How long an ask for a computer's screens may take to send.
+const SCREENS_ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the computer `device_id` has answered with its screens since
+/// this server started, even naming none (PC9a review N2).
+pub(crate) fn screens_answered(device_id: &str) -> bool {
+    SCREENS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(device_id)
 }
 
 /// Keep what the computer `device_id` said of its screens (`body`, a
@@ -653,6 +722,11 @@ impl LiveLink {
         LIVE.lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(device_id.to_string(), outgoing);
+        *LINK_UPS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(device_id.to_string())
+            .or_default() += 1;
         Self(device_id.to_string())
     }
 }
@@ -2736,6 +2810,38 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PC9a review N7: the screens' ask mark goes however the ask ends, a
+    /// panic too, and a second ask waits while one holds it.
+    #[test]
+    fn the_screens_ask_mark_goes_however_the_ask_ends() {
+        let id = "pc9a-n7-desk";
+        let held = AskingScreens::mark(id).expect("the first ask");
+        assert!(AskingScreens::mark(id).is_none(), "one ask at a time");
+        drop(held);
+        let panicked = std::thread::spawn(move || {
+            let _mark = AskingScreens::mark(id).expect("asked again");
+            panic!("the ask fails midway");
+        })
+        .join();
+        assert!(panicked.is_err());
+        assert!(
+            AskingScreens::mark(id).is_some(),
+            "a panicking ask leaves no mark"
+        );
+    }
+
+    /// PC9a review N6: each time a computer's link comes up is counted.
+    #[test]
+    fn a_link_coming_up_is_counted() {
+        let id = "pc9a-n6-desk";
+        assert_eq!(link_ups(id), 0);
+        let (tx, _rx) = mpsc::channel(1);
+        drop(LiveLink::new(id, tx.clone()));
+        assert_eq!(link_ups(id), 1);
+        let _again = LiveLink::new(id, tx);
+        assert_eq!(link_ups(id), 2);
+    }
 
     /// PC8 (PR #561 review M8): on the link this computer keeps, another
     /// computer's privacy answer goes to the window that asked, if it was
