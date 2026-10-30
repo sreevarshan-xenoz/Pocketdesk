@@ -1019,7 +1019,10 @@ pub(crate) async fn ask_back(device_id: &str) {
 /// Send `packet` to the computer `device_id`: on its connection here when it
 /// is linked to this one as its client, else on the link this one keeps to
 /// it.
-async fn send_to_computer(device_id: &str, packet: &NetworkPacket) -> Result<(), String> {
+pub(crate) async fn send_to_computer(
+    device_id: &str,
+    packet: &NetworkPacket,
+) -> Result<(), String> {
     let client = crate::state::clone_clients()
         .await
         .into_iter()

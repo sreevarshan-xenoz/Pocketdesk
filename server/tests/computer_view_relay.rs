@@ -15,7 +15,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pocketdesk_core::local::computers::{self, PeerComputer};
-use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile};
+use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewPrivacy};
+use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use pocketdesk_core::streaming::transport::{
     CertManager, PacketHeader, STREAM_KIND_READY, STREAM_KIND_VIDEO, StreamServer,
     StreamTransportConfig,
@@ -24,7 +25,7 @@ use pocketdesk_core::streaming::{
     InputPacket, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS,
     SCREEN_FEATURES_SAID,
 };
-use pocketdesk_server::computer_view::{Command, Dialer, run};
+use pocketdesk_server::computer_view::{Command, Dialer, PrivacyHost, run, run_with};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -878,5 +879,245 @@ async fn a_window_without_the_token_sees_nothing() {
     drop(commands);
     relay.await.unwrap();
     assert_eq!(wire::read(&dir), None, "the relay's end forgets the view");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The window's next status whose privacy is `want` (PC8), skipping the
+/// rest.
+async fn privacy_said(window: &mut TcpStream, want: &ViewPrivacy) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "privacy {want:?} said within 10 s"
+        );
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(window))
+                .await
+                .expect("a message")
+            && &status.privacy == want
+        {
+            return;
+        }
+    }
+}
+
+/// PC8: the window's "Hide what I do there" goes to the computer it shows
+/// as the phone's own privacy packet, to a stand-in for that computer here
+/// (nothing is grabbed or locked); the answer decides what the window says;
+/// another computer's answer is not taken; and the window's last word, a
+/// lock as it closes, lets privacy go and locks, once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<(String, serde_json::Value)>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = PrivacyHost {
+        send: Arc::new(move |id: &str, packet: NetworkPacket| {
+            assert_eq!(packet.packet_type, "kdeconnect.pocketdesk.privacy");
+            let _ = asked_tx.send((id.to_string(), packet.body));
+        }),
+        answers: answers_rx,
+    };
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run_with(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+        host,
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let mut window = join(&file).await;
+    // Shown, with control taken there.
+    loop {
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("shown within 10 s")
+            && status.phase == Phase::Showing
+            && status.control == Some(true)
+        {
+            break;
+        }
+    }
+    let next_ask = async |asked: &mut mpsc::UnboundedReceiver<(String, serde_json::Value)>| {
+        tokio::time::timeout(Duration::from_secs(5), asked.recv())
+            .await
+            .expect("an ask")
+            .expect("the host")
+    };
+    let say = |ask| Message::Privacy(ask).encode();
+
+    // Hide: the grab goes, the window hears it is asked, then held.
+    window.write_all(&say(wire::PRIVACY_HIDE)).await.unwrap();
+    assert_eq!(
+        next_ask(&mut asked).await,
+        ("desk".into(), serde_json::json!({"action": "grab"}))
+    );
+    privacy_said(&mut window, &ViewPrivacy::Asking).await;
+    // Another computer's answer is not this view's.
+    answers
+        .send((
+            "other".into(),
+            serde_json::json!({"ok": true, "grabbed": 2}),
+        ))
+        .await
+        .unwrap();
+    answers
+        .send(("desk".into(), serde_json::json!({"ok": true, "grabbed": 2})))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+
+    // That computer ends it (as a renewal refused says): the window says why.
+    let ended = "privacy mode ended there";
+    answers
+        .send((
+            "desk".into(),
+            serde_json::json!({"ok": false, "error": ended}),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::Refused(ended.into())).await;
+
+    // Refused by its Power switch: nothing held, nothing let go.
+    window.write_all(&say(wire::PRIVACY_HIDE)).await.unwrap();
+    assert_eq!(next_ask(&mut asked).await.1["action"], "grab");
+    let power =
+        "\u{201c}Lock, sleep, privacy and wake others\u{201d} is off for this computer there";
+    answers
+        .send((
+            "desk".into(),
+            serde_json::json!({"ok": false, "error": power}),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::Refused(power.into())).await;
+
+    // Held again, then the window closes with its lock: one release, with
+    // the lock, and nothing after it.
+    window.write_all(&say(wire::PRIVACY_HIDE)).await.unwrap();
+    assert_eq!(next_ask(&mut asked).await.1["action"], "grab");
+    answers
+        .send(("desk".into(), serde_json::json!({"ok": true, "grabbed": 2})))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    window.write_all(&say(wire::PRIVACY_LOCK)).await.unwrap();
+    assert_eq!(
+        next_ask(&mut asked).await,
+        (
+            "desk".into(),
+            serde_json::json!({"action": "release", "lock": true})
+        )
+    );
+    commands
+        .send(Command::Stop { session_id: None })
+        .await
+        .unwrap();
+    drop(window);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(700), asked.recv())
+            .await
+            .is_err(),
+        "let go once"
+    );
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// PC8: privacy held when the view ends some other way (Stop, the window
+/// gone) is let go there, without a lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn privacy_held_is_let_go_as_the_view_ends() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-end");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = PrivacyHost {
+        send: Arc::new(move |_: &str, packet: NetworkPacket| {
+            let _ = asked_tx.send(packet.body);
+        }),
+        answers: answers_rx,
+    };
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run_with(
+        rx,
+        listener,
+        dir.clone(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+        host,
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(&dir).await;
+    let mut window = join(&file).await;
+    loop {
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("shown within 10 s")
+            && status.phase == Phase::Showing
+            && status.control == Some(true)
+        {
+            break;
+        }
+    }
+    window
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let wait = Duration::from_secs(5);
+    let grab = tokio::time::timeout(wait, asked.recv()).await.unwrap();
+    assert_eq!(grab, Some(serde_json::json!({"action": "grab"})));
+    answers
+        .send(("desk".into(), serde_json::json!({"ok": true, "grabbed": 2})))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    commands
+        .send(Command::Stop { session_id: None })
+        .await
+        .unwrap();
+    let release = tokio::time::timeout(wait, asked.recv()).await.unwrap();
+    assert_eq!(release, Some(serde_json::json!({"action": "release"})));
+    drop(commands);
+    relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }

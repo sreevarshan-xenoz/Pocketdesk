@@ -20,6 +20,15 @@
 //! there; as it loses it, that computer's comes back
 //! ([`crate::clipboard_push::push_for_window`] and `ask_back`), with
 //! `computer_view_clipboard` on.
+//!
+//! Privacy follows the window too (PC8): its bar's "Hide what I do there"
+//! asks the other computer for its own privacy mode (its keyboard and
+//! mouse blocked, its ring shown), with the packet a phone asks it with
+//! and judged there by the same Power switch. It is renewed while the
+//! window shows that computer and controls it, and let go as the window
+//! closes, the view ends or drops, or control is taken away; that computer
+//! ends it too as the connection it was asked on closes. With "Lock it when
+//! I close the window" the window's last word asks that computer's lock.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -30,7 +39,10 @@ use std::time::{Duration, Instant};
 use pocketdesk_core::local::cast::{TOKEN_LEN, token_hex, token_matches};
 use pocketdesk_core::local::computers::{self, PeerComputer};
 use pocketdesk_core::local::paths::VIEW_FILE;
-use pocketdesk_core::local::view::{self as wire, Message, Phase, ViewFile, ViewStatus};
+use pocketdesk_core::local::view::{
+    self as wire, Message, Phase, ViewFile, ViewPrivacy, ViewStatus,
+};
+use pocketdesk_core::protocol::kdeconnect::NetworkPacket;
 use pocketdesk_core::streaming::cast::CastChain;
 use pocketdesk_core::streaming::transport::{
     CertManager, StreamClient, StreamTransportConfig, peer_label_for_address,
@@ -82,6 +94,13 @@ const STATS_EVERY: Duration = Duration::from_secs(1);
 /// The picture's codec, as the window names it: the view asks for H.264
 /// alone.
 const CODEC: &str = "H.264";
+
+/// The window's privacy ask waits this long for the other computer's
+/// answer (PC8), the first and each renewal: past it, privacy is given up.
+pub const PRIVACY_WAIT: Duration = Duration::from_secs(8);
+/// How often a privacy mode held there is renewed (PC8): it would lapse by
+/// itself after 10 minutes, and a renewal refused says it ended there.
+pub const PRIVACY_RENEW: Duration = Duration::from_secs(10);
 
 /// What the Computers page asks of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1156,9 +1175,230 @@ async fn play_sound(mut rx: mpsc::Receiver<AudioPacket>) {
     .await;
 }
 
+/// Sends a privacy packet to the computer named (PC8), without waiting.
+pub type PrivacySend = Arc<dyn Fn(&str, NetworkPacket) + Send + Sync>;
+
+/// Where the window's privacy asks go and their answers come from (PC8):
+/// the other computer, or a stand-in for it in tests.
+pub struct PrivacyHost {
+    pub send: PrivacySend,
+    pub answers: mpsc::Receiver<(String, serde_json::Value)>,
+}
+
+/// Where the answers that come on a link or a connection go: the relay
+/// running now.
+type AnswerSender = mpsc::Sender<(String, serde_json::Value)>;
+static ANSWERS: std::sync::Mutex<Option<AnswerSender>> = std::sync::Mutex::new(None);
+
+impl PrivacyHost {
+    /// The other computer itself: asked on its connection here or on the
+    /// link this one keeps to it, as the window's clipboard asks; its
+    /// answers come back through [`privacy_answer`].
+    pub fn real() -> Self {
+        let (tx, answers) = mpsc::channel(16);
+        *ANSWERS.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        let send: PrivacySend = Arc::new(|device_id: &str, packet: NetworkPacket| {
+            let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+                return;
+            };
+            let device_id = device_id.to_string();
+            runtime.spawn(async move {
+                if let Err(e) = crate::clipboard_push::send_to_computer(&device_id, &packet).await {
+                    tracing::debug!("Privacy not asked of {device_id}: {e}");
+                }
+            });
+        });
+        Self { send, answers }
+    }
+}
+
+/// An answer from the computer `device_id` to a privacy ask (PC8), for the
+/// view that asked it, if any.
+pub(crate) fn privacy_answer(device_id: &str, body: &serde_json::Value) {
+    if let Some(tx) = ANSWERS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.try_send((device_id.to_string(), body.clone()));
+    }
+}
+
+/// What the window's privacy ask does (PC8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrivacyStep {
+    /// Ask the other computer for its privacy mode.
+    Grab,
+    /// Let it go there, locking that computer too when `lock`.
+    Release {
+        lock: bool,
+    },
+    /// Lock that computer, with no privacy held.
+    Lock,
+    /// Not asked, and why.
+    Refuse(String),
+    Nothing,
+}
+
+/// What the window's privacy `ask` ([`wire::PRIVACY_HIDE`], `_SHOW` or
+/// `_LOCK`) does, with privacy `holding` or not, for the view of the
+/// computer `name` that stands as `status`: hidden only while shown and
+/// controlled (the window's input taken there), never while it reconnects.
+pub fn privacy_step(ask: u8, holding: bool, status: &ViewStatus, name: &str) -> PrivacyStep {
+    match ask {
+        wire::PRIVACY_HIDE if holding => PrivacyStep::Nothing,
+        wire::PRIVACY_HIDE if status.phase != Phase::Showing || status.reconnecting > 0 => {
+            PrivacyStep::Refuse(format!("Not connected to {name} now."))
+        }
+        wire::PRIVACY_HIDE if status.control != Some(true) => PrivacyStep::Refuse(format!(
+            "{name} does not take this computer's clicks and keys, so there is nothing to hide."
+        )),
+        wire::PRIVACY_HIDE => PrivacyStep::Grab,
+        wire::PRIVACY_LOCK if holding => PrivacyStep::Release { lock: true },
+        wire::PRIVACY_LOCK => PrivacyStep::Lock,
+        _ if holding => PrivacyStep::Release { lock: false },
+        _ => PrivacyStep::Nothing,
+    }
+}
+
+/// The packet a step sends the other computer, or none.
+pub fn privacy_packet(step: &PrivacyStep) -> Option<NetworkPacket> {
+    let body = match step {
+        PrivacyStep::Grab => serde_json::json!({ "action": "grab" }),
+        PrivacyStep::Release { lock: false } => serde_json::json!({ "action": "release" }),
+        PrivacyStep::Release { lock: true } => {
+            serde_json::json!({ "action": "release", "lock": true })
+        }
+        PrivacyStep::Lock => serde_json::json!({ "action": "status", "lock": true }),
+        PrivacyStep::Refuse(_) | PrivacyStep::Nothing => return None,
+    };
+    Some(NetworkPacket::new(crate::plugins::privacy::PRIVACY).with_body(body))
+}
+
+/// A renewal of a privacy mode held there: only one still held is renewed.
+pub fn renewal() -> NetworkPacket {
+    NetworkPacket::new(crate::plugins::privacy::PRIVACY)
+        .with_body(serde_json::json!({ "action": "grab", "renew": true }))
+}
+
+/// What an answer from the other computer says of a grab or a renewal:
+/// held (`Ok`), refused and why (`Err`), or nothing about one (a status, a
+/// release, a lock).
+pub fn privacy_heard(body: &serde_json::Value) -> Option<Result<(), String>> {
+    let ok = body.get("ok").and_then(|v| v.as_bool());
+    if ok == Some(false) {
+        let why = body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("it refused");
+        return Some(Err(why.to_string()));
+    }
+    let grab = body.get("grabbed").is_some() && body.get("ttlLeft").is_none();
+    (ok == Some(true) && grab).then_some(Ok(()))
+}
+
+/// What a held privacy mode needs now (PC8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivacyDue {
+    Nothing,
+    /// Renew it there.
+    Renew,
+    /// The last ask went unanswered: give it up.
+    GiveUp,
+}
+
+/// What a privacy mode held needs at `now`: given up when an ask sent at
+/// `sent` is still `waiting` after [`PRIVACY_WAIT`], renewed once `on` and
+/// [`PRIVACY_RENEW`] after the last.
+pub fn privacy_due(on: bool, waiting: bool, sent: Instant, now: Instant) -> PrivacyDue {
+    let since = now.saturating_duration_since(sent);
+    if waiting {
+        if since >= PRIVACY_WAIT {
+            PrivacyDue::GiveUp
+        } else {
+            PrivacyDue::Nothing
+        }
+    } else if on && since >= PRIVACY_RENEW {
+        PrivacyDue::Renew
+    } else {
+        PrivacyDue::Nothing
+    }
+}
+
+/// Why privacy held there ends as the view comes to stand as `status`, or
+/// `None` while it may stay: the view dropped (it reconnects) or that
+/// computer stopped taking this one's input.
+pub fn privacy_ends(status: &ViewStatus, name: &str) -> Option<String> {
+    if status.reconnecting > 0 || status.phase != Phase::Showing {
+        Some(format!(
+            "Privacy ended: the view of {name} dropped. Turn it on again once it is back."
+        ))
+    } else if status.control != Some(true) {
+        Some(format!(
+            "Privacy ended: {name} no longer takes this computer's clicks and keys."
+        ))
+    } else {
+        None
+    }
+}
+
+/// The window's privacy mode held on the other computer (PC8): asked, then
+/// renewed, and let go there however it ends here, as the hold drops.
+struct PrivacyHold {
+    device_id: String,
+    send: PrivacySend,
+    /// That computer said it holds it.
+    on: bool,
+    /// When the last grab or renewal went, and whether it is unanswered.
+    sent: Instant,
+    waiting: bool,
+    /// Let go already, or never held there (refused).
+    done: bool,
+}
+
+impl PrivacyHold {
+    fn ask(device_id: &str, send: PrivacySend, now: Instant) -> Self {
+        if let Some(packet) = privacy_packet(&PrivacyStep::Grab) {
+            send(device_id, packet);
+        }
+        Self {
+            device_id: device_id.to_string(),
+            send,
+            on: false,
+            sent: now,
+            waiting: true,
+            done: false,
+        }
+    }
+
+    fn renew(&mut self, now: Instant) {
+        (self.send)(&self.device_id, renewal());
+        self.sent = now;
+        self.waiting = true;
+    }
+
+    /// Let it go there, locking that computer when `lock`.
+    fn let_go(mut self, lock: bool) {
+        self.done = true;
+        if let Some(packet) = privacy_packet(&PrivacyStep::Release { lock }) {
+            (self.send)(&self.device_id, packet);
+        }
+    }
+}
+
+impl Drop for PrivacyHold {
+    fn drop(&mut self) {
+        if !self.done
+            && let Some(packet) = privacy_packet(&PrivacyStep::Release { lock: false })
+        {
+            (self.send)(&self.device_id, packet);
+        }
+    }
+}
+
 struct View {
     session_id: u64,
     device_id: String,
+    /// The computer's name, for the window's words.
+    name: String,
+    /// Its privacy mode, while the window holds it (PC8).
+    privacy: Option<PrivacyHold>,
     token: [u8; TOKEN_LEN],
     input: mpsc::Sender<InputPacket>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -1197,11 +1437,27 @@ impl Drop for Viewer {
 
 /// The relay's loop, over `listener` (bound to loopback).
 pub async fn run(
-    mut commands: mpsc::Receiver<Command>,
+    commands: mpsc::Receiver<Command>,
     listener: TcpListener,
     state_dir: PathBuf,
     dialer: Dialer,
 ) {
+    run_with(commands, listener, state_dir, dialer, PrivacyHost::real()).await
+}
+
+/// [`run`], with the window's privacy asked of `privacy` (PC8): the other
+/// computer itself, or a stand-in in tests.
+pub async fn run_with(
+    mut commands: mpsc::Receiver<Command>,
+    listener: TcpListener,
+    state_dir: PathBuf,
+    dialer: Dialer,
+    privacy: PrivacyHost,
+) {
+    let PrivacyHost {
+        send: privacy_send,
+        answers: mut privacy_answers,
+    } = privacy;
     let port = match listener.local_addr() {
         Ok(addr) => addr.port(),
         Err(e) => {
@@ -1220,6 +1476,7 @@ pub async fn run(
     let (events_tx, mut events) = mpsc::channel::<(u64, Event)>(64);
     let (joined_tx, mut joined_rx) = mpsc::channel::<(u64, TcpStream)>(4);
     let (focus_tx, mut focus_rx) = mpsc::channel::<(u64, bool)>(8);
+    let (privacy_tx, mut privacy_rx) = mpsc::channel::<(u64, String, u8)>(8);
     let pending = Arc::new(tokio::sync::Semaphore::new(PENDING_VIEWERS));
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     loop {
@@ -1284,6 +1541,8 @@ pub async fn run(
                 view = Some(View {
                     session_id,
                     device_id,
+                    name,
+                    privacy: None,
                     token,
                     input: input_tx,
                     task,
@@ -1308,6 +1567,15 @@ pub async fn run(
                             // A new session's counts start again, the
                             // window's too (PR #551 review M6).
                             None => current.window_dropped = 0,
+                        }
+                        // Privacy is the relay's to say (PC8): it ends
+                        // there as the view drops or control goes.
+                        status.privacy = current.status.privacy.clone();
+                        if current.privacy.is_some()
+                            && let Some(why) = privacy_ends(&status, &current.name)
+                        {
+                            current.privacy = None;
+                            status.privacy = ViewPrivacy::Refused(why);
                         }
                         current.status = status.clone();
                         if let Some(v) = watching {
@@ -1366,7 +1634,14 @@ pub async fn run(
                 let Some(v) = view.as_mut().filter(|v| v.session_id == session_id) else {
                     continue;
                 };
-                let joined = start_viewer(stream, session_id, v.input.clone(), focus_tx.clone());
+                let joined = start_viewer(
+                    stream,
+                    session_id,
+                    v.device_id.clone(),
+                    v.input.clone(),
+                    focus_tx.clone(),
+                    privacy_tx.clone(),
+                );
                 let _ = joined.tx.try_send(Message::Status(v.status.clone()));
                 if let Some((width, height)) = v.config {
                     let _ = joined.tx.try_send(Message::Config { width, height });
@@ -1403,7 +1678,93 @@ pub async fn run(
                 v.focus_said = Some((focused, now));
                 window_focus(v.device_id.clone(), focused, v.status.control);
             }
+            Some((session_id, device_id, ask)) = privacy_rx.recv() => {
+                let watching = viewer.as_ref().is_some_and(|w| w.session_id == session_id);
+                let Some(v) = view
+                    .as_mut()
+                    .filter(|v| v.session_id == session_id && v.ended.is_none() && watching)
+                else {
+                    // The view went before its window's last word: its
+                    // privacy was let go as it ended; a lock is still asked.
+                    if ask == wire::PRIVACY_LOCK
+                        && let Some(packet) = privacy_packet(&PrivacyStep::Lock)
+                    {
+                        privacy_send(&device_id, packet);
+                    }
+                    continue;
+                };
+                let said = match privacy_step(ask, v.privacy.is_some(), &v.status, &v.name) {
+                    PrivacyStep::Grab => {
+                        v.privacy = Some(PrivacyHold::ask(
+                            &v.device_id,
+                            privacy_send.clone(),
+                            Instant::now(),
+                        ));
+                        ViewPrivacy::Asking
+                    }
+                    PrivacyStep::Release { lock } => {
+                        if let Some(hold) = v.privacy.take() {
+                            hold.let_go(lock);
+                        }
+                        ViewPrivacy::Off
+                    }
+                    step @ PrivacyStep::Lock => {
+                        if let Some(packet) = privacy_packet(&step) {
+                            privacy_send(&v.device_id, packet);
+                        }
+                        v.status.privacy.clone()
+                    }
+                    PrivacyStep::Refuse(why) => ViewPrivacy::Refused(why),
+                    PrivacyStep::Nothing if ask == wire::PRIVACY_SHOW => ViewPrivacy::Off,
+                    PrivacyStep::Nothing => v.status.privacy.clone(),
+                };
+                say_privacy(v, viewer.as_ref(), said);
+            }
+            Some((device_id, body)) = privacy_answers.recv() => {
+                let Some(v) = view
+                    .as_mut()
+                    .filter(|v| v.device_id == device_id && v.privacy.is_some())
+                else {
+                    continue;
+                };
+                let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
+                match privacy_heard(&body) {
+                    Some(Ok(())) => {
+                        if let Some(hold) = v.privacy.as_mut() {
+                            hold.on = true;
+                            hold.waiting = false;
+                        }
+                        say_privacy(v, watching, ViewPrivacy::On);
+                    }
+                    Some(Err(why)) => {
+                        // Not held there: nothing to let go.
+                        if let Some(mut hold) = v.privacy.take() {
+                            hold.done = true;
+                        }
+                        tracing::info!(device_id = %v.device_id, "Privacy there refused: {why}");
+                        say_privacy(v, watching, ViewPrivacy::Refused(why));
+                    }
+                    None => {}
+                }
+            }
             _ = heartbeat.tick() => {
+                // A privacy mode held there is renewed, or given up when
+                // that computer stopped answering (PC8).
+                if let Some(v) = view.as_mut()
+                    && let Some(hold) = v.privacy.as_mut()
+                {
+                    let now = Instant::now();
+                    match privacy_due(hold.on, hold.waiting, hold.sent, now) {
+                        PrivacyDue::Renew => hold.renew(now),
+                        PrivacyDue::GiveUp => {
+                            v.privacy = None;
+                            let why = format!("{} did not answer; privacy is off here.", v.name);
+                            let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
+                            say_privacy(v, watching, ViewPrivacy::Refused(why));
+                        }
+                        PrivacyDue::Nothing => {}
+                    }
+                }
                 if viewer.as_ref().is_some_and(|v| v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed()) {
                     viewer = None;
                 }
@@ -1461,6 +1822,18 @@ fn window_focus(device_id: String, focused: bool, control: Option<bool>) {
     });
 }
 
+/// The view's privacy now stands as `privacy` (PC8): its window is told,
+/// when it changed.
+fn say_privacy(view: &mut View, viewer: Option<&Viewer>, privacy: ViewPrivacy) {
+    if view.status.privacy == privacy {
+        return;
+    }
+    view.status.privacy = privacy;
+    if let Some(w) = viewer.filter(|w| w.session_id == view.session_id) {
+        let _ = w.tx.try_send(Message::Status(view.status.clone()));
+    }
+}
+
 /// The view is over: its window is told, and `view.json` forgets it.
 fn end(view: &mut Option<View>, viewer: &mut Option<Viewer>, state_dir: &Path, why: Option<&str>) {
     if let Some(v) = viewer.take() {
@@ -1497,8 +1870,10 @@ async fn authenticate(
 fn start_viewer(
     stream: TcpStream,
     session_id: u64,
+    device_id: String,
     input: mpsc::Sender<InputPacket>,
     focus: mpsc::Sender<(u64, bool)>,
+    privacy: mpsc::Sender<(u64, String, u8)>,
 ) -> Viewer {
     let _ = stream.set_nodelay(true);
     let (mut read, mut write) = stream.into_split();
@@ -1526,6 +1901,22 @@ fn start_viewer(
                         break;
                     }
                     let _ = focus.try_send((session_id, focused[0] == 1));
+                }
+                // PC8: one byte, show, hide or lock; anything else ends it.
+                wire::PRIVACY if len == 1 => {
+                    let mut ask = [0u8; 1];
+                    if read.read_exact(&mut ask).await.is_err() || ask[0] > wire::PRIVACY_LOCK {
+                        break;
+                    }
+                    // Waited for, not dropped: a lock as the window closes
+                    // must reach the relay.
+                    if privacy
+                        .send((session_id, device_id.clone(), ask[0]))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 wire::INPUT if len > 0 && len <= wire::MAX_INPUT => {
                     let mut packet = vec![0u8; len];
@@ -1663,7 +2054,8 @@ mod tests {
         let (relay_end, _) = listener.accept().await.unwrap();
         let (input, mut queued) = mpsc::channel(1);
         let (focus, _) = mpsc::channel(1);
-        let _viewer = start_viewer(relay_end, 1, input, focus);
+        let (privacy, _) = mpsc::channel(1);
+        let _viewer = start_viewer(relay_end, 1, "desk".into(), input, focus, privacy);
         let press = |key| InputPacket::KeyEvent { key, pressed: true };
         for packet in [
             press(30),
@@ -1711,7 +2103,8 @@ mod tests {
         let (relay_end, _) = listener.accept().await.unwrap();
         let (input, _queued) = mpsc::channel(4);
         let (focus, mut focused) = mpsc::channel(4);
-        let mut viewer = start_viewer(relay_end, 7, input, focus);
+        let (privacy, _) = mpsc::channel(4);
+        let mut viewer = start_viewer(relay_end, 7, "desk".into(), input, focus, privacy);
         for message in [Message::Focus(true), Message::Focus(false)] {
             window.write_all(&message.encode()).await.unwrap();
         }
@@ -1727,6 +2120,274 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// PC8: the window's privacy asks reach the relay's loop, named with
+    /// their view and computer; a byte past lock ends the window's reader.
+    #[tokio::test]
+    async fn the_windows_privacy_asks_reach_the_relay_with_its_view() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, _queued) = mpsc::channel(4);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, mut asked) = mpsc::channel(4);
+        let mut viewer = start_viewer(relay_end, 9, "desk".into(), input, focus, privacy);
+        for ask in [wire::PRIVACY_HIDE, wire::PRIVACY_SHOW, wire::PRIVACY_LOCK] {
+            window
+                .write_all(&Message::Privacy(ask).encode())
+                .await
+                .unwrap();
+        }
+        let wait = Duration::from_secs(2);
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            got.push(tokio::time::timeout(wait, asked.recv()).await.unwrap());
+        }
+        let desk = || "desk".to_string();
+        assert_eq!(
+            got,
+            [
+                Some((9, desk(), wire::PRIVACY_HIDE)),
+                Some((9, desk(), wire::PRIVACY_SHOW)),
+                Some((9, desk(), wire::PRIVACY_LOCK)),
+            ]
+        );
+        window
+            .write_all(&[wire::PRIVACY, 1, 0, 0, 0, 3])
+            .await
+            .unwrap();
+        tokio::time::timeout(wait, &mut viewer.reader)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    fn controlled() -> ViewStatus {
+        ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            ..ViewStatus::default()
+        }
+    }
+
+    /// PC8: privacy is asked only of a computer shown and controlled; the
+    /// window's off lets it go, and a lock goes with a release or alone.
+    #[test]
+    fn privacy_is_asked_only_while_the_window_controls() {
+        let shown = controlled();
+        assert_eq!(
+            privacy_step(wire::PRIVACY_HIDE, false, &shown, "Desk"),
+            PrivacyStep::Grab
+        );
+        assert_eq!(
+            privacy_step(wire::PRIVACY_HIDE, true, &shown, "Desk"),
+            PrivacyStep::Nothing,
+            "held already"
+        );
+        let view_only = ViewStatus {
+            control: Some(false),
+            ..controlled()
+        };
+        let PrivacyStep::Refuse(why) = privacy_step(wire::PRIVACY_HIDE, false, &view_only, "Desk")
+        else {
+            panic!("refused without control");
+        };
+        assert!(why.contains("clicks and keys"), "{why}");
+        for not_shown in [
+            ViewStatus {
+                phase: Phase::Waiting,
+                ..controlled()
+            },
+            ViewStatus {
+                reconnecting: 2,
+                ..controlled()
+            },
+        ] {
+            assert!(matches!(
+                privacy_step(wire::PRIVACY_HIDE, false, &not_shown, "Desk"),
+                PrivacyStep::Refuse(_)
+            ));
+        }
+        assert_eq!(
+            privacy_step(wire::PRIVACY_SHOW, true, &shown, "Desk"),
+            PrivacyStep::Release { lock: false }
+        );
+        assert_eq!(
+            privacy_step(wire::PRIVACY_SHOW, false, &shown, "Desk"),
+            PrivacyStep::Nothing
+        );
+        assert_eq!(
+            privacy_step(wire::PRIVACY_LOCK, true, &view_only, "Desk"),
+            PrivacyStep::Release { lock: true }
+        );
+        assert_eq!(
+            privacy_step(wire::PRIVACY_LOCK, false, &view_only, "Desk"),
+            PrivacyStep::Lock,
+            "a lock as the window closes, with or without control"
+        );
+    }
+
+    /// PC8: the packets are the phone's own privacy packet, a renewal the
+    /// only addition.
+    #[test]
+    fn privacy_asks_the_phones_own_packet() {
+        let body = |step| privacy_packet(&step).map(|p| p.body);
+        assert_eq!(
+            body(PrivacyStep::Grab),
+            Some(serde_json::json!({"action": "grab"}))
+        );
+        assert_eq!(
+            body(PrivacyStep::Release { lock: false }),
+            Some(serde_json::json!({"action": "release"}))
+        );
+        assert_eq!(
+            body(PrivacyStep::Release { lock: true }),
+            Some(serde_json::json!({"action": "release", "lock": true}))
+        );
+        assert_eq!(
+            body(PrivacyStep::Lock),
+            Some(serde_json::json!({"action": "status", "lock": true}))
+        );
+        assert_eq!(body(PrivacyStep::Nothing), None);
+        assert_eq!(body(PrivacyStep::Refuse("no".into())), None);
+        let packet = privacy_packet(&PrivacyStep::Grab).unwrap();
+        assert_eq!(packet.packet_type, crate::plugins::privacy::PRIVACY);
+        assert_eq!(
+            renewal().body,
+            serde_json::json!({"action": "grab", "renew": true})
+        );
+    }
+
+    /// PC8: a grab's answer holds it, a refusal says why, and a status, a
+    /// release or a lock says nothing of it.
+    #[test]
+    fn an_answer_says_whether_privacy_is_held() {
+        use serde_json::json;
+        assert_eq!(
+            privacy_heard(&json!({"ok": true, "grabbed": 2})),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            privacy_heard(&json!({"ok": false, "error": "privacy mode ended there"})),
+            Some(Err("privacy mode ended there".into()))
+        );
+        assert_eq!(
+            privacy_heard(&json!({"ok": false})),
+            Some(Err("it refused".into()))
+        );
+        assert_eq!(
+            privacy_heard(&json!({"ok": true, "grabbed": 0, "ttlLeft": null})),
+            None,
+            "a status"
+        );
+        assert_eq!(privacy_heard(&json!({"ok": true, "released": 2})), None);
+        assert_eq!(
+            privacy_heard(&json!({"ok": true, "released": 2, "locked": "LockWorkStation"})),
+            None
+        );
+        assert_eq!(privacy_heard(&json!({"action": "grab"})), None);
+    }
+
+    /// PC8: an ask unanswered past the wait is given up; one held is
+    /// renewed each PRIVACY_RENEW.
+    #[test]
+    fn privacy_held_is_renewed_and_given_up_unanswered() {
+        let at = Instant::now();
+        let after = |d| at + d;
+        assert_eq!(
+            privacy_due(false, true, at, after(Duration::from_secs(1))),
+            PrivacyDue::Nothing
+        );
+        assert_eq!(
+            privacy_due(false, true, at, after(PRIVACY_WAIT)),
+            PrivacyDue::GiveUp
+        );
+        assert_eq!(
+            privacy_due(true, true, at, after(PRIVACY_WAIT)),
+            PrivacyDue::GiveUp,
+            "a renewal unanswered"
+        );
+        assert_eq!(
+            privacy_due(
+                true,
+                false,
+                at,
+                after(PRIVACY_RENEW - Duration::from_millis(1))
+            ),
+            PrivacyDue::Nothing
+        );
+        assert_eq!(
+            privacy_due(true, false, at, after(PRIVACY_RENEW)),
+            PrivacyDue::Renew
+        );
+        assert!(PRIVACY_RENEW < crate::privacy::GRAB_TTL);
+    }
+
+    /// PC8: privacy ends as the view drops or control goes, never left on
+    /// there with nobody driving.
+    #[test]
+    fn privacy_ends_as_the_view_drops_or_control_goes() {
+        assert_eq!(privacy_ends(&controlled(), "Desk"), None);
+        let dropped = ViewStatus {
+            reconnecting: 1,
+            ..controlled()
+        };
+        assert!(privacy_ends(&dropped, "Desk").unwrap().contains("dropped"));
+        let connecting = ViewStatus {
+            phase: Phase::Connecting,
+            ..controlled()
+        };
+        assert!(privacy_ends(&connecting, "Desk").is_some());
+        let taken = ViewStatus {
+            control: Some(false),
+            ..controlled()
+        };
+        assert!(privacy_ends(&taken, "Desk").unwrap().contains("no longer"));
+    }
+
+    /// PC8: a hold let go, dropped or refused sends one release at most,
+    /// and a lock only when asked.
+    #[test]
+    fn a_hold_lets_go_once_however_it_ends() {
+        let sent = Arc::new(std::sync::Mutex::new(
+            Vec::<(String, serde_json::Value)>::new(),
+        ));
+        let to = sent.clone();
+        let send: PrivacySend = Arc::new(move |id: &str, p: NetworkPacket| {
+            to.lock().unwrap().push((id.to_string(), p.body));
+        });
+        let taken = || std::mem::take(&mut *sent.lock().unwrap());
+        let now = Instant::now();
+        drop(PrivacyHold::ask("desk", send.clone(), now));
+        assert_eq!(
+            taken(),
+            [
+                ("desk".into(), serde_json::json!({"action": "grab"})),
+                ("desk".into(), serde_json::json!({"action": "release"})),
+            ],
+            "dropped: let go there"
+        );
+        PrivacyHold::ask("desk", send.clone(), now).let_go(true);
+        assert_eq!(
+            taken()[1],
+            (
+                "desk".into(),
+                serde_json::json!({"action": "release", "lock": true})
+            ),
+            "let go once, with the lock"
+        );
+        let mut refused = PrivacyHold::ask("desk", send.clone(), now);
+        refused.done = true;
+        drop(refused);
+        assert_eq!(taken().len(), 1, "refused there: nothing to let go");
+        let mut held = PrivacyHold::ask("desk", send, now);
+        held.renew(now);
+        assert!(held.waiting);
+        held.done = true;
+        assert_eq!(taken()[1].1, renewal().body);
     }
 
     /// PR #554 review M2: the relay passes a focus on only when it changed,

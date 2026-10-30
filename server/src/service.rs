@@ -1763,6 +1763,14 @@ where
                             if !pairing_packet {
                                 let_in_once = true;
                             }
+                            // PC8: another computer's answer to this one's
+                            // window asks nothing here, so no switch here
+                            // decides whether it is heard.
+                            if !pairing_packet
+                                && crate::plugins::privacy::take_answer(&device_id, &packet)
+                            {
+                                continue;
+                            }
                             // F5: the owner's per-device permissions (spec P3).
                             if !pairing_packet
                                 && !crate::plugins::pair::permits(&device_id, &packet_type)

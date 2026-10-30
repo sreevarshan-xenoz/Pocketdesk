@@ -1995,6 +1995,8 @@ async fn run_link(
         let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
     }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
+    // A privacy grab it asked on this link ends with the link (PC8).
+    let _privacy = crate::plugins::privacy::LinkGrab(computer.device_id.clone());
     let _accepting = acceptor.map(|acceptor| {
         AbortOnDrop(tokio::spawn(async move {
             while let Some(stream) = acceptor.accept().await {
@@ -2047,6 +2049,17 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         ) {
             refused(key, reason.unwrap_or("no reason given"));
         }
+        return;
+    }
+    // Privacy (PC8): its answer to this one's window, or its window asking
+    // this one's privacy mode, held to its Power switch here as on any
+    // connection.
+    if packet.packet_type == crate::plugins::privacy::PRIVACY {
+        if crate::plugins::privacy::take_answer(device_id, packet) {
+            return;
+        }
+        let (to, body) = (device_id.to_string(), packet.body.clone());
+        tokio::spawn(async move { privacy_on_link(&to, &body).await });
         return;
     }
     // Its window lost the focus and asks for this one's clipboard (PC3).
@@ -2107,6 +2120,29 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
                 }
             }
         });
+    }
+}
+
+/// Answer the privacy request `body` that the computer `device_id` made on
+/// the link this one keeps to it (PC8), as the plugin answers one on a
+/// connection here: its Power switch here decides, and its grab ends with
+/// the link.
+async fn privacy_on_link(device_id: &str, body: &serde_json::Value) {
+    use crate::plugins::privacy;
+    let id = device_id.to_string();
+    let permitted =
+        tokio::task::spawn_blocking(move || crate::plugins::pair::permits(&id, privacy::PRIVACY))
+            .await
+            .unwrap_or(false);
+    let response = if permitted {
+        privacy::respond(body, device_id, Some(&privacy::link_connection(device_id))).await
+    } else {
+        serde_json::json!({ "ok": false, "error": privacy::denied_words(true) })
+    };
+    if let Some(outgoing) = live(device_id) {
+        let _ = outgoing
+            .send(NetworkPacket::new(privacy::PRIVACY).with_body(response))
+            .await;
     }
 }
 
