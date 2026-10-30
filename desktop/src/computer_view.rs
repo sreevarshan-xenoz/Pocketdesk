@@ -651,25 +651,32 @@ pub fn screen_choices(status: &ViewStatus) -> Vec<String> {
 const SCREENS_HIGH: f32 = 26.0;
 const SCREENS_WIDE: f32 = 220.0;
 const SCREEN_LEAST: f32 = 16.0;
+/// A layout whose buttons would be smaller than this across, or overlap
+/// (mirrored screens), is shown as a row instead (PR #570 review M1).
+const SCREEN_SMALLEST: f32 = 10.0;
 
 /// The bar's screen buttons (PC11): one for each of `count` screens, laid
 /// out as `layout` says they sit on that computer (their corners and sizes,
-/// scaled to the bar), or in a row when it does not say where each is.
-/// Rectangles from (0, 0), in points.
+/// scaled to the bar, at most twice its height), or in a row when it does
+/// not say where each is, or the buttons would overlap or be too small to
+/// hit. Rectangles from (0, 0), in points.
 pub fn screen_buttons(layout: &[wire::ScreenPlace], count: usize) -> Vec<egui::Rect> {
-    if count == 0 {
-        return Vec::new();
-    }
-    if layout.len() != count {
+    let row = || {
         let wide = 24.0;
-        return (0..count)
+        (0..count)
             .map(|n| {
                 egui::Rect::from_min_size(
                     egui::pos2(n as f32 * (wide + 2.0), 0.0),
                     egui::vec2(wide, 18.0),
                 )
             })
-            .collect();
+            .collect()
+    };
+    if count == 0 {
+        return Vec::new();
+    }
+    if layout.len() != count {
+        return row();
     }
     let left = layout.iter().map(|p| p.x).min().unwrap_or(0) as f32;
     let top = layout.iter().map(|p| p.y).min().unwrap_or(0) as f32;
@@ -690,8 +697,9 @@ pub fn screen_buttons(layout: &[wire::ScreenPlace], count: usize) -> Vec<egui::R
     // wider than the bar can spare.
     let scale = (SCREENS_HIGH / high)
         .max(SCREEN_LEAST / least)
-        .min(SCREENS_WIDE / wide);
-    layout
+        .min(SCREENS_WIDE / wide)
+        .min(2.0 * SCREENS_HIGH / high);
+    let rects: Vec<egui::Rect> = layout
         .iter()
         .map(|p| {
             egui::Rect::from_min_size(
@@ -699,7 +707,17 @@ pub fn screen_buttons(layout: &[wire::ScreenPlace], count: usize) -> Vec<egui::R
                 egui::vec2(p.width as f32 * scale, p.height as f32 * scale),
             )
         })
-        .collect()
+        .collect();
+    let small = rects
+        .iter()
+        .any(|r| r.width() < SCREEN_SMALLEST || r.height() < SCREEN_SMALLEST);
+    let overlap = rects.iter().enumerate().any(|(n, a)| {
+        rects[n + 1..].iter().any(|b| {
+            let both = a.intersect(*b);
+            both.width() > 0.5 && both.height() > 0.5
+        })
+    });
+    if small || overlap { row() } else { rects }
 }
 
 /// The screen Ctrl+Alt+Shift+1 to 9 pressed asks for (PC11), from 0.
@@ -5638,6 +5656,20 @@ mod tests {
             .map(|r| r.right())
             .fold(0.0, f32::max);
         assert!(right <= SCREENS_WIDE + 0.5, "{right}");
+        // PR #570 review M1: mirrored screens overlap, a tiny one beside a
+        // huge one cannot be hit: a row; four stacked stay at most twice
+        // the bar's height.
+        let is_row =
+            |rects: &[egui::Rect]| rects.iter().all(|r| r.top() == 0.0 && r.height() == 18.0);
+        let mirrored = [place(0, 0, 1920, 1080), place(0, 0, 1920, 1080)];
+        assert!(is_row(&screen_buttons(&mirrored, 2)));
+        let tiny = [place(0, 0, 7680, 4320), place(7680, 0, 320, 240)];
+        assert!(is_row(&screen_buttons(&tiny, 2)));
+        let tall: Vec<_> = (0..4).map(|n| place(0, n * 1080, 1920, 1080)).collect();
+        let tall = screen_buttons(&tall, 4);
+        assert!(!is_row(&tall));
+        let bottom = tall.iter().map(|r| r.bottom()).fold(0.0, f32::max);
+        assert!(bottom <= 2.0 * SCREENS_HIGH + 0.5, "{bottom}");
         // Not known (a computer before PC11), or not for every screen: a row.
         let row = screen_buttons(&[], 3);
         assert_eq!(row.len(), 3);
