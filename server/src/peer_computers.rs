@@ -684,6 +684,10 @@ const AWAIT_LOOK: Duration = Duration::from_secs(2);
 /// that one is not linked to this one.
 const AWAITING: &str = "away: waiting for it to link to this one";
 
+/// What a link that could not be dialled says, whatever the dial's error
+/// (range review M9).
+const DIAL_FAILED: &str = "away: it did not answer";
+
 /// Say how the link to `device_id`, a computer paired both ways that keeps
 /// the link itself (PC1), is doing while it is listed: "linked" while it is
 /// connected here by that link ([`is_the_link`]: files, the clipboard and
@@ -1718,7 +1722,9 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
             }
             LinkEnd::Failed(why) => {
                 tracing::debug!(device_id, "No link to another computer: {why}");
-                set_link(&dir, &device_id, &format!("away: {why}"));
+                // Fixed words: the dial's own may name addresses and relays,
+                // and are kept in computers.json (range review M9).
+                set_link(&dir, &device_id, DIAL_FAILED);
                 let wait = backoff;
                 backoff = (backoff * 2).min(BACKOFF_MOST);
                 wait
