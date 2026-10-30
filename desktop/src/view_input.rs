@@ -26,8 +26,11 @@
 //! the text this computer's layout makes of it stays here: the other
 //! computer's own layout says what the key types, and a game reads WASD
 //! where WASD sit, whatever either layout prints on them. Text that came
-//! from no key (an input method's, a keypad key egui does not place) still
-//! goes as text.
+//! from no key (a keypad key egui does not place) still goes as text. Of
+//! Ctrl, Alt and Shift, a second kind held with another waits for a key,
+//! a button or the wheel, so this window's own chords and a layout switch
+//! never reach the other computer; Ctrl or Shift and C, X, V, Insert or
+//! Delete go as keys held, not as egui's copy, cut and paste.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -476,6 +479,16 @@ pub fn types(key: egui::Key) -> bool {
     )
 }
 
+/// Ctrl, Shift or Alt, either side, as one kind each.
+fn modifier_kind(code: u16) -> Option<u8> {
+    match code {
+        LEFT_CTRL | RIGHT_CTRL => Some(0),
+        LEFT_SHIFT | RIGHT_SHIFT => Some(1),
+        LEFT_ALT | RIGHT_ALT => Some(2),
+        _ => None,
+    }
+}
+
 fn is_shift(code: u16) -> bool {
     matches!(code, LEFT_SHIFT | RIGHT_SHIFT)
 }
@@ -526,9 +539,13 @@ pub struct WindowInput {
     relative: Option<egui::Vec2>,
     /// Keys by position (scancode mode): every key goes as where it sits.
     by_position: bool,
-    /// A key just went by its position: the text egui made of it here is
-    /// not sent as well.
+    /// A key that types just went by its position: the text egui made of
+    /// it here, which follows it in the same pass, is not sent as well.
     keyed: bool,
+    /// By position, the key pressed there for a copy, cut or paste egui
+    /// made of Ctrl or Shift and C, X, V, Insert or Delete (review I4),
+    /// held until that key is let go.
+    clip_held: Option<u16>,
 }
 
 impl WindowInput {
@@ -601,7 +618,7 @@ impl WindowInput {
                     self.flush_relative(&mut out);
                     let code = button(*which);
                     if *pressed {
-                        self.hold_shift(&mut out);
+                        self.hold_modifiers(&mut out);
                         self.buttons.insert(code);
                     } else if !self.buttons.remove(&code) {
                         continue;
@@ -628,7 +645,7 @@ impl WindowInput {
                         let Some(at) = fraction(picture, *pos, false) else {
                             continue;
                         };
-                        self.hold_shift(&mut out);
+                        self.hold_modifiers(&mut out);
                         self.move_to(at, now, &mut out);
                         self.buttons.insert(code);
                         out.push(InputPacket::MouseClick {
@@ -658,7 +675,7 @@ impl WindowInput {
                     }
                     self.wheel -= egui::vec2(dx, dy);
                     self.flush(now, &mut out, true);
-                    self.hold_shift(&mut out);
+                    self.hold_modifiers(&mut out);
                     // Content that moves down is the wheel turned up (the
                     // wire's positive); content that moves right is the
                     // wheel turned left.
@@ -684,27 +701,26 @@ impl WindowInput {
                     };
                     let Some(code) = code else { continue };
                     self.key(key, code, *pressed, placed, &mut out);
-                    self.keyed = placed && *pressed;
+                    self.keyed = placed && *pressed && types(key);
                 }
                 // That computer's layout makes this key's text there.
                 egui::Event::Text(_) if keyed => {}
-                // An input method's text is typing, whatever the keys did.
-                egui::Event::Ime(egui::ImeEvent::Commit(text))
-                    if self.by_position && !text.is_empty() =>
-                {
-                    out.push(InputPacket::Text(text.clone()));
-                }
                 egui::Event::Text(text) if !text.is_empty() => {
                     // With Ctrl or Alt held it is a shortcut, sent as keys.
                     if self.down_here.iter().any(|c| is_chord_modifier(*c)) {
                         continue;
                     }
-                    for shift in [LEFT_SHIFT, RIGHT_SHIFT] {
-                        if self.down_there.remove(&shift) {
-                            out.push(InputPacket::KeyEvent {
-                                key: shift,
-                                pressed: false,
-                            });
+                    // As text, Shift is let go there first, so the capitals
+                    // are not shifted twice; by position it is a key held
+                    // (review N3), and stays.
+                    if !self.by_position {
+                        for shift in [LEFT_SHIFT, RIGHT_SHIFT] {
+                            if self.down_there.remove(&shift) {
+                                out.push(InputPacket::KeyEvent {
+                                    key: shift,
+                                    pressed: false,
+                                });
+                            }
                         }
                     }
                     out.push(InputPacket::Text(text.clone()));
@@ -716,6 +732,9 @@ impl WindowInput {
                 _ => {}
             }
         }
+        // A key's text comes in its own pass: none is waited for after it
+        // (review I2).
+        self.keyed = false;
         self.flush(now, &mut out, false);
         self.flush_relative(&mut out);
         out
@@ -749,16 +768,42 @@ impl WindowInput {
         });
     }
 
-    /// Shift held here goes down there before what needs it.
-    fn hold_shift(&mut self, out: &mut Vec<InputPacket>) {
-        for shift in [LEFT_SHIFT, RIGHT_SHIFT] {
-            if self.down_here.contains(&shift) && self.down_there.insert(shift) {
+    /// The modifiers held here and not yet there go down there before what
+    /// needs them: Shift as text left it, and by position a second kind of
+    /// Ctrl, Alt or Shift held back ([`Self::key`]).
+    fn hold_modifiers(&mut self, out: &mut Vec<InputPacket>) {
+        for code in [
+            LEFT_CTRL,
+            RIGHT_CTRL,
+            LEFT_SHIFT,
+            RIGHT_SHIFT,
+            LEFT_ALT,
+            RIGHT_ALT,
+            LEFT_META,
+            RIGHT_META,
+        ] {
+            if self.down_here.contains(&code) && self.down_there.insert(code) {
                 out.push(InputPacket::KeyEvent {
-                    key: shift,
+                    key: code,
                     pressed: true,
                 });
             }
         }
+    }
+
+    /// Whether, by position, the modifier `code` waits for a key: another
+    /// kind of Ctrl, Alt or Shift is held here already (PR #573 review I1).
+    /// Two of them with no key between are this window's own chords
+    /// (Ctrl+Alt+Shift and M, S or a number, or alone) or a desktop's
+    /// layout switch (Alt+Shift, Ctrl+Shift): they never reach the other
+    /// computer by themselves.
+    fn waits(&self, code: u16) -> bool {
+        let Some(kind) = modifier_kind(code) else {
+            return false;
+        };
+        self.down_here
+            .iter()
+            .any(|c| modifier_kind(*c).is_some_and(|k| k != kind))
     }
 
     /// `key` (`code` there) going down or up; `placed`, by its position:
@@ -772,6 +817,22 @@ impl WindowInput {
         out: &mut Vec<InputPacket>,
     ) {
         if !pressed {
+            // By position, the key a copy, cut or paste pressed there goes
+            // up with whichever of its keys is let go (Ctrl+Insert copies
+            // as Ctrl+C does: the one pressed is let go).
+            if let Some(held) = self.clip_held
+                && matches!(code, KEY_C | KEY_X | KEY_V | KEY_INSERT | KEY_DELETE)
+            {
+                self.clip_held = None;
+                self.down_here.remove(&code);
+                if self.down_there.remove(&held) {
+                    out.push(InputPacket::KeyEvent {
+                        key: held,
+                        pressed: false,
+                    });
+                }
+                return;
+            }
             // A modifier let go first: what it made a copy, cut or paste of
             // goes now, with it still held there.
             if (is_shift(code) || is_chord_modifier(code)) && !self.clips.is_empty() {
@@ -819,13 +880,17 @@ impl WindowInput {
             // Held there once something needs it.
             return;
         }
+        if placed && self.waits(code) {
+            // Held there once a key, a button or the wheel needs it.
+            return;
+        }
         let chord = self.down_here.iter().any(|c| is_chord_modifier(*c));
         if types(key) && !chord && !placed {
             // It arrives as text.
             return;
         }
         if !is_chord_modifier(code) && !is_shift(code) {
-            self.hold_shift(out);
+            self.hold_modifiers(out);
         }
         // A key held repeats: each repeat is pressed again.
         self.down_there.insert(code);
@@ -859,8 +924,29 @@ impl WindowInput {
     /// Shift+Delete: which one, the key's release tells, and that key goes
     /// as itself then. With neither it was the keyboard's own Copy, Cut or
     /// Paste key: Ctrl and the letter go at once.
+    ///
+    /// By position (review I4) the press goes at once and is held, as the
+    /// key egui kept: C, X or V with Ctrl, else Delete or Insert with Shift,
+    /// at the place a QWERTY keyboard has them (egui says no more; Ctrl and
+    /// Insert copies as Ctrl+C), let go with the key.
     fn clip(&mut self, clip: Clip, out: &mut Vec<InputPacket>) {
         let held = self.ctrl_here() || (self.shift_here() && clip != Clip::Copy);
+        if held && self.by_position {
+            let code = match (clip, self.ctrl_here()) {
+                (_, true) => clip.letter(),
+                (Clip::Paste, false) => KEY_INSERT,
+                (_, false) => KEY_DELETE,
+            };
+            self.hold_modifiers(out);
+            // A press repeated is pressed again, as a key held is.
+            self.down_there.insert(code);
+            self.clip_held = Some(code);
+            out.push(InputPacket::KeyEvent {
+                key: code,
+                pressed: true,
+            });
+            return;
+        }
         if held {
             // Held, the key repeats its copy, cut or paste: one a press
             // (BK7 re-review N5), as with nothing to paste here, where egui
@@ -888,7 +974,7 @@ impl WindowInput {
 
     /// `code` pressed and let go, with what is held.
     fn tap(&mut self, code: u16, out: &mut Vec<InputPacket>) {
-        self.hold_shift(out);
+        self.hold_modifiers(out);
         for pressed in [true, false] {
             out.push(InputPacket::KeyEvent { key: code, pressed });
         }
@@ -902,7 +988,7 @@ impl WindowInput {
         let mut out = Vec::new();
         if pressed {
             if !is_shift(code) && !is_chord_modifier(code) {
-                self.hold_shift(&mut out);
+                self.hold_modifiers(&mut out);
             }
             self.down_there.insert(code);
             out.push(InputPacket::KeyEvent { key: code, pressed });
@@ -980,6 +1066,7 @@ impl WindowInput {
         self.clips.clear();
         self.clipped.clear();
         self.keyed = false;
+        self.clip_held = None;
         self.pending = None;
         self.wheel = egui::Vec2::ZERO;
         if let Some(sum) = self.relative.as_mut() {
@@ -1834,7 +1921,8 @@ mod tests {
         );
         assert_eq!(
             words(&out),
-            ["Text(\"*\")", "Text(\"\u{65e5}\")", "Text(\".\")"]
+            ["Text(\"*\")", "Text(\".\")"],
+            "the picture asks for no input method: none commits here (review N1)"
         );
     }
 
@@ -1894,5 +1982,221 @@ mod tests {
             ["KeyEvent { key: 32, pressed: false }"]
         );
         assert!(input.by_position(), "the mode outlives a release");
+    }
+
+    fn by_position_input() -> WindowInput {
+        let mut input = WindowInput::default();
+        let _ = input.set_by_position(true);
+        input
+    }
+
+    /// PR #573 review I1: by position, a second kind of Ctrl, Alt or Shift
+    /// waits for a key. This window's own chord (Ctrl+Alt+Shift and M, the
+    /// M kept here) and a layout switch (Alt+Shift) reach the other
+    /// computer only as the first modifier; a real chord goes whole, the
+    /// modifiers before its key.
+    #[test]
+    fn by_position_the_windows_chords_and_a_layout_switch_stay_here() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::AltLeft, true),
+                key(egui::Key::ShiftLeft, true),
+                // The window kept M (keep_chord_here): no event for it.
+                key(egui::Key::ShiftLeft, false),
+                key(egui::Key::AltLeft, false),
+                key(egui::Key::ControlLeft, false),
+                key(egui::Key::AltLeft, true),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::ShiftLeft, false),
+                key(egui::Key::AltLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 29, pressed: false }",
+                "KeyEvent { key: 56, pressed: true }",
+                "KeyEvent { key: 56, pressed: false }",
+            ],
+            "no Shift, and never two modifiers with nothing between"
+        );
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::T, true),
+                key(egui::Key::T, false),
+                key(egui::Key::ShiftLeft, false),
+                key(egui::Key::ControlLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 20, pressed: true }",
+                "KeyEvent { key: 20, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "Ctrl+Shift+T goes whole"
+        );
+        assert!(!input.holds());
+    }
+
+    /// PR #573 review I2: the text of a key that types nothing is never
+    /// waited for: a keypad `*` (text only) after F5 or an arrow, in the
+    /// same pass or the next, arrives.
+    #[test]
+    fn by_position_text_after_a_key_that_types_nothing_goes() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let _ = input.take(&[key(egui::Key::F5, true)], picture(), now);
+        let out = input.take(&[egui::Event::Text("*".into())], picture(), now);
+        assert_eq!(words(&out), ["Text(\"*\")"]);
+        let out = input.take(
+            &[
+                key(egui::Key::ArrowLeft, true),
+                egui::Event::Text("*".into()),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            ["KeyEvent { key: 105, pressed: true }", "Text(\"*\")"]
+        );
+        // A letter's text is its own, in its pass; the next pass's is not.
+        let _ = input.take(&[key(egui::Key::A, true)], picture(), now);
+        let out = input.take(&[egui::Event::Text("*".into())], picture(), now);
+        assert_eq!(words(&out), ["Text(\"*\")"]);
+    }
+
+    /// PR #573 review I4: by position, Ctrl or Shift and C, X, V, Insert or
+    /// Delete, which egui turns into copy, cut and paste, go as the key
+    /// held: pressed as egui says it, again as it repeats, let go with the
+    /// key (Ctrl+Insert as Ctrl+C), the modifier free to go first.
+    #[test]
+    fn by_position_copy_cut_and_paste_keys_are_held() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                egui::Event::Copy,
+                egui::Event::Copy,
+                key(egui::Key::ControlLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 29, pressed: false }",
+            ],
+            "C held there past Ctrl, as a crouching game's key"
+        );
+        assert!(input.holds());
+        let out = input.take(&[key(egui::Key::C, false)], picture(), now);
+        assert_eq!(words(&out), ["KeyEvent { key: 46, pressed: false }"]);
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                egui::Event::Copy,
+                key(egui::Key::Insert, false),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::ControlLeft, false),
+                egui::Event::Cut,
+                key(egui::Key::Delete, false),
+                key(egui::Key::ShiftLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
+                // Shift waited while Ctrl was held, until Delete needed it.
+                "KeyEvent { key: 29, pressed: false }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 111, pressed: true }",
+                "KeyEvent { key: 111, pressed: false }",
+                "KeyEvent { key: 42, pressed: false }",
+            ]
+        );
+        assert!(!input.holds());
+        // A paste with nothing to paste here says nothing: its release
+        // still goes, as before.
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::V, false),
+                key(egui::Key::ControlLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+    }
+
+    /// PR #573 review N3: by position, text from no key leaves Shift held
+    /// there (a run key stays down).
+    #[test]
+    fn by_position_text_leaves_shift_held() {
+        let mut input = by_position_input();
+        let out = input.take(
+            &[
+                key(egui::Key::ShiftLeft, true),
+                egui::Event::Text("*".into()),
+            ],
+            picture(),
+            Instant::now(),
+        );
+        assert_eq!(
+            words(&out),
+            ["KeyEvent { key: 42, pressed: true }", "Text(\"*\")"]
+        );
+        assert!(input.holds());
+    }
+
+    /// PR #573 review N7: a rejoin takes a fresh input after letting go of
+    /// what was held; the fresh one sends nothing as it takes the mode, and
+    /// holds nothing.
+    #[test]
+    fn a_rejoin_lets_go_and_starts_fresh_by_position() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let _ = input.take(&[key(egui::Key::W, true)], picture(), now);
+        assert_eq!(
+            words(&input.release_all()),
+            ["KeyEvent { key: 17, pressed: false }"]
+        );
+        let mut fresh = WindowInput::default();
+        assert!(fresh.set_by_position(true).is_empty());
+        assert!(!fresh.holds() && fresh.by_position());
     }
 }
