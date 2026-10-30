@@ -338,12 +338,18 @@ fn profile_carries(capability: Capability, computer: bool) -> bool {
 fn hint_for(capability: Capability, computer: bool, hint: &'static str) -> &'static str {
     if capability == Capability::Input && computer {
         COMPUTER_CONTROL
+    } else if capability == Capability::Mic && computer {
+        COMPUTER_MIC
     } else if capability == Capability::SharedInput && !computer {
         "This computer may move its keyboard and mouse onto this phone, used as another screen beside it (the phone must allow it too)"
     } else {
         hint
     }
 }
+
+/// What a paired computer's microphone switch does (PC10): its screen
+/// window's "Send my mic" plays here as a phone's microphone does.
+pub(crate) const COMPUTER_MIC: &str = "That computer's screen window can send its microphone here (Send my mic, while the window controls this computer), where it plays as a phone's microphone does.";
 
 /// What a paired computer's Control switch does (BK7): it can show this
 /// screen in a window there, and with this on, control this computer from it.
@@ -5051,6 +5057,10 @@ mod tests {
         assert!(profile_carries(Capability::Clipboard, false));
         assert!(hint_for(Capability::SharedInput, false, "x").contains("onto this phone"));
         assert_eq!(hint_for(Capability::SharedInput, true, "x"), "x");
+        // PC10: a computer's microphone comes from its screen window.
+        assert_eq!(hint_for(Capability::Mic, true, "x"), COMPUTER_MIC);
+        assert_eq!(hint_for(Capability::Mic, false, "x"), "x");
+        assert!(COMPUTER_MIC.contains("Send my mic"));
         let row = PERMISSIONS
             .iter()
             .find(|(c, _, _)| *c == Capability::SharedInput)
