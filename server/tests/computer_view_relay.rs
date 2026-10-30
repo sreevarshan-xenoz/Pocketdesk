@@ -410,6 +410,47 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
         "the mic packet went nowhere"
     );
 
+    // PC10: once the window says its mic is on, its frames reach the
+    // computer; as it says off, the relay sends the computer the stop.
+    let next_input = async |input_rx: &mut mpsc::UnboundedReceiver<InputPacket>| loop {
+        match tokio::time::timeout(Duration::from_secs(10), input_rx.recv())
+            .await
+            .expect("input arrives")
+        {
+            Some(InputPacket::RequestKeyframe) => continue,
+            other => return format!("{other:?}"),
+        }
+    };
+    window
+        .write_all(&Message::Mic(true).encode())
+        .await
+        .unwrap();
+    window
+        .write_all(
+            &Message::Input(
+                InputPacket::Mic {
+                    enabled: true,
+                    opus: vec![0xF8, 0xFF, 0xFE],
+                }
+                .encode(),
+            )
+            .encode(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        next_input(&mut input_rx).await,
+        "Some(Mic { enabled: true, opus: [248, 255, 254] })"
+    );
+    window
+        .write_all(&Message::Mic(false).encode())
+        .await
+        .unwrap();
+    assert_eq!(
+        next_input(&mut input_rx).await,
+        "Some(Mic { enabled: false, opus: [] })"
+    );
+
     // The computer ends the session (its End): the window hears so, it is
     // not dialled again, and view.json forgets the view.
     let _ = hang_up_tx.send(KICKED);

@@ -81,6 +81,11 @@ const INTERNET_TRY: Duration = Duration::from_secs(20);
 pub const PREFER_HOME: Duration = Duration::from_millis(300);
 /// One input packet's way to the other computer, at most.
 const INPUT_SEND: Duration = Duration::from_secs(2);
+/// The window's mic frames waiting to go (PC10 review I3): about 100 ms of
+/// audio. Past it the oldest is dropped: late audio is worse than a gap.
+pub const MIC_BACKLOG: usize = 5;
+/// One mic frame's way to the other computer, at most.
+const MIC_SEND: Duration = Duration::from_millis(500);
 /// A view nobody watches (the app never came, or went without a word) ends.
 const UNWATCHED: Duration = Duration::from_secs(30);
 /// An ended view is kept this long for a window that comes late to hear why.
@@ -948,6 +953,7 @@ async fn session(
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
+    mic: Arc<MicLink>,
 ) {
     let say = Say { session_id, events };
     let name = computer.name.clone();
@@ -960,6 +966,9 @@ async fn session(
     // The window's input goes to the session of the moment, for the
     // view's whole life.
     let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+    // The window's mic frames go their own way (PC10 review I3), never
+    // queued behind (or ahead of) its keys.
+    let _forward_mic = AbortOnDrop(tokio::spawn(forward_mic(mic, conn_rx.clone())));
     let _forward = AbortOnDrop(tokio::spawn(forward_input(input, conn_rx)));
     let mut reconnect = Reconnect::default();
     let mut shown_once = false;
@@ -1086,6 +1095,108 @@ async fn forward_input(
             }
         }
     }
+}
+
+/// The window's mic frames on their own short way to the other computer
+/// (PC10 review I3): at most [`MIC_BACKLOG`] wait, the oldest dropped past
+/// it, so a slow link loses old audio rather than delaying the window's
+/// keys and pointer behind seconds of it. The start and the stop go the
+/// input's reliable way. It also knows whether the view controls the other
+/// computer now (review M3): the relay passes the window's mic only then.
+#[derive(Default)]
+pub struct MicLink {
+    frames: std::sync::Mutex<std::collections::VecDeque<Vec<u8>>>,
+    ready: tokio::sync::Notify,
+    controls: std::sync::atomic::AtomicBool,
+    /// Held while a frame is taken and on its way, so a stop waits for it
+    /// and is never overtaken by a frame queued before it.
+    sending: tokio::sync::Mutex<()>,
+}
+
+impl MicLink {
+    /// Whether the view controls the other computer now: shown, its
+    /// Control on for this computer, not reconnecting.
+    pub fn set_controls(&self, controls: bool) {
+        self.controls
+            .store(controls, std::sync::atomic::Ordering::Release);
+        // Frames waiting as control goes are not sent (PR #569 re-review
+        // N1).
+        if !controls {
+            self.clear();
+        }
+    }
+
+    pub fn controls(&self) -> bool {
+        self.controls.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn frames(&self) -> std::sync::MutexGuard<'_, std::collections::VecDeque<Vec<u8>>> {
+        self.frames
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// One frame to go; the oldest is dropped past [`MIC_BACKLOG`].
+    pub fn push(&self, opus: Vec<u8>) {
+        {
+            let mut frames = self.frames();
+            while frames.len() >= MIC_BACKLOG {
+                frames.pop_front();
+            }
+            frames.push_back(opus);
+        }
+        self.ready.notify_one();
+    }
+
+    /// The frames waiting, oldest first.
+    pub fn waiting(&self) -> Vec<Vec<u8>> {
+        self.frames().iter().cloned().collect()
+    }
+
+    fn clear(&self) {
+        self.frames().clear();
+    }
+
+    /// Forget the frames waiting, and wait for one on its way: what goes
+    /// after this (the stop) is never overtaken by a frame.
+    pub async fn quiet(&self) {
+        self.clear();
+        let _sending = self.sending.lock().await;
+        self.clear();
+    }
+}
+
+/// The window's mic frames to the session of the moment (PC10 review I3),
+/// each on its own stream as a phone's, given [`MIC_SEND`] at most.
+async fn forward_mic(
+    mic: Arc<MicLink>,
+    conn: tokio::sync::watch::Receiver<Option<SharedConnection>>,
+) {
+    loop {
+        let sending = mic.sending.lock().await;
+        let next = mic.frames().pop_front();
+        let Some(opus) = next else {
+            drop(sending);
+            mic.ready.notified().await;
+            continue;
+        };
+        let current = conn.borrow().clone();
+        // Taken as control went (re-review N1): dropped.
+        if let Some(current) = current.filter(|_| mic.controls()) {
+            let packet = InputPacket::Mic {
+                enabled: true,
+                opus,
+            };
+            let _ = tokio::time::timeout(MIC_SEND, send_input(&current, &packet)).await;
+        }
+        drop(sending);
+    }
+}
+
+/// Whether the view lets the window's mic through now (PC10 review M3):
+/// shown, controlling the other computer, not reconnecting.
+pub fn mic_may_go(status: &ViewStatus) -> bool {
+    status.phase == Phase::Showing && status.control == Some(true) && status.reconnecting == 0
 }
 
 /// One input packet to the other computer, a release tried again on a
@@ -1684,6 +1795,8 @@ struct View {
     privacy: Option<PrivacyHold>,
     token: [u8; TOKEN_LEN],
     input: mpsc::Sender<InputPacket>,
+    /// The window's mic frames, apart from its input (PC10).
+    mic: Arc<MicLink>,
     task: Option<tokio::task::JoinHandle<()>>,
     /// The stream's codec and size as last told, for a window that joins.
     config: Option<Message>,
@@ -1835,6 +1948,7 @@ pub async fn run_with(
                     tracing::warn!(error = %e, "Could not say where the view is");
                 }
                 let (input_tx, input_rx) = mpsc::channel(INPUT_QUEUE);
+                let mic = Arc::new(MicLink::default());
                 let (task, ended) = match computer {
                     Some(computer) => (
                         Some(tokio::spawn(session(
@@ -1846,6 +1960,7 @@ pub async fn run_with(
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
+                            mic.clone(),
                         ))),
                         None,
                     ),
@@ -1861,6 +1976,7 @@ pub async fn run_with(
                     privacy: None,
                     token,
                     input: input_tx,
+                    mic,
                     task,
                     config: None,
                     status: ViewStatus { monitor, ..ViewStatus::default() },
@@ -1893,6 +2009,7 @@ pub async fn run_with(
                             current.privacy = None;
                             status.privacy = ViewPrivacy::Refused(why);
                         }
+                        current.mic.set_controls(mic_may_go(&status));
                         current.status = status.clone();
                         if let Some(v) = watching {
                             let _ = v.tx.try_send(Message::Status(status));
@@ -1955,6 +2072,7 @@ pub async fn run_with(
                     session_id,
                     v.device_id.clone(),
                     v.input.clone(),
+                    v.mic.clone(),
                     focus_tx.clone(),
                     privacy_tx.clone(),
                 );
@@ -2308,6 +2426,79 @@ async fn leased<R>(
 /// (PR #563 review I1); the window says it again about every second.
 pub const POINTER_LEASE: Duration = Duration::from_secs(3);
 
+/// The window's mic (PC10): on as the window last said with
+/// [`wire::MIC`] on its connection (a new connection starts off), and only
+/// then, while the view controls the other computer, do its
+/// [`InputPacket::Mic`] frames go on. Its stop goes to the other computer
+/// as the window says off, as the reader ends with it on, and, as a last
+/// word, as the reader is dropped or aborted with it on (a window
+/// replaced, or the view ending), so that computer's "Pocketdesk Mic" never
+/// outlives the window that fed it.
+struct WindowMic {
+    on: bool,
+    input: mpsc::Sender<InputPacket>,
+    link: Arc<MicLink>,
+}
+
+impl WindowMic {
+    fn new(input: mpsc::Sender<InputPacket>, link: Arc<MicLink>) -> Self {
+        Self {
+            on: false,
+            input,
+            link,
+        }
+    }
+
+    /// The frames waiting are forgotten, one on its way is waited for, and
+    /// the stop goes the reliable way: on only once it went (review M1).
+    async fn stop(&mut self) -> Result<(), mpsc::error::SendError<InputPacket>> {
+        self.link.quiet().await;
+        self.input.send(mic_stop()).await?;
+        self.on = false;
+        Ok(())
+    }
+}
+
+/// The mic's stop, as a phone's: the other computer takes its mic down.
+pub fn mic_stop() -> InputPacket {
+    InputPacket::Mic {
+        enabled: false,
+        opus: Vec::new(),
+    }
+}
+
+impl Drop for WindowMic {
+    fn drop(&mut self) {
+        if !self.on {
+            return;
+        }
+        self.link.clear();
+        // Waited for on a task of its own (review M2): a full queue does
+        // not lose it, given a little while; and after the frame on its
+        // way, so a late frame never starts the mic again there after the
+        // stop (re-review N2).
+        let input = self.input.clone();
+        let link = self.link.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(runtime) => {
+                runtime.spawn(async move {
+                    let _ = tokio::time::timeout(MIC_STOP_WAIT, async {
+                        link.quiet().await;
+                        input.send(mic_stop()).await
+                    })
+                    .await;
+                });
+            }
+            Err(_) => {
+                let _ = input.try_send(mic_stop());
+            }
+        }
+    }
+}
+
+/// How long a window's mic stop may wait for room in the input queue.
+const MIC_STOP_WAIT: Duration = Duration::from_secs(5);
+
 /// The viewer's two halves: messages go out in order; its keyframe asks and
 /// the input it may send reach the other computer, and its focus the
 /// relay's loop (`focus`, PC3).
@@ -2316,6 +2507,7 @@ fn start_viewer(
     session_id: u64,
     device_id: String,
     input: mpsc::Sender<InputPacket>,
+    mic_link: Arc<MicLink>,
     focus: mpsc::Sender<(u64, bool)>,
     privacy: mpsc::Sender<(u64, String, u8)>,
 ) -> Viewer {
@@ -2347,6 +2539,8 @@ fn start_viewer(
         let mut lease_until = tokio::time::Instant::now();
         // Relative movement that found the queue full, not yet sent.
         let mut owed = (0i32, 0i32);
+        // The window's "Send my mic" (PC10): its own latest word, kept here.
+        let mut mic = WindowMic::new(input.clone(), mic_link);
         loop {
             if pointer_locked {
                 let left = lease_until.saturating_duration_since(tokio::time::Instant::now());
@@ -2426,14 +2620,53 @@ fn start_viewer(
                             pointer_locked.then(crate::shared_input::view_hold::PointerHold::take);
                     }
                 }
+                // PC10: one byte, 0 or 1; anything else ends it.
+                wire::MIC if len == 1 => {
+                    let mut on = [0u8; 1];
+                    if read.read_exact(&mut on).await.is_err() || on[0] > 1 {
+                        break;
+                    }
+                    // Off then on again quickly behind a backlog of keys: the
+                    // stop waits in the input queue while the new frames take
+                    // their own way, so the other computer may hear a new
+                    // frame, then the old stop, then the next frame start it
+                    // again. A gap of one frame, never a mic left on (PR #569
+                    // re-review N3).
+                    if on[0] == 1 {
+                        mic.on = true;
+                    } else if mic.on {
+                        // Waited for, not dropped: the other computer
+                        // takes its mic down.
+                        let sent =
+                            leased(mic.stop(), &mut pointer_locked, &mut hold, lease_until).await;
+                        if !pointer_locked {
+                            owed = (0, 0);
+                        }
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
+                }
                 wire::INPUT if len > 0 && len <= wire::MAX_INPUT => {
                     let mut packet = vec![0u8; len];
                     if read.read_exact(&mut packet).await.is_err() {
                         break;
                     }
                     // Only what the window may send; the rest is dropped.
+                    // The mic passes only while the window says it is on and
+                    // the view controls the other computer (review M3).
+                    let mic_goes = mic.on && mic.link.controls();
                     match InputPacket::decode(&packet) {
-                        Ok(packet) if wire::input_allowed(&packet, pointer_locked) => {
+                        // Its frames go their own short way (review I3).
+                        Ok(InputPacket::Mic {
+                            enabled: true,
+                            opus,
+                        }) if !opus.is_empty() => {
+                            if mic_goes {
+                                mic.link.push(opus);
+                            }
+                        }
+                        Ok(packet) if wire::input_allowed(&packet, pointer_locked, mic_goes) => {
                             // A release waits for room (BK7 review M7): a
                             // key or button let go of here must be let go of
                             // there. The rest may be dropped.
@@ -2472,6 +2705,11 @@ fn start_viewer(
                 }
                 _ => break,
             }
+        }
+        // The window went with its mic on: the other computer takes it
+        // down, given a moment for room (the drop's try is the fallback).
+        if mic.on {
+            let _ = tokio::time::timeout(MIC_STOP_WAIT, mic.stop()).await;
         }
     });
     Viewer {
@@ -2707,7 +2945,15 @@ mod tests {
         let (input, mut queued) = mpsc::channel(1);
         let (focus, _) = mpsc::channel(1);
         let (privacy, _) = mpsc::channel(1);
-        let _viewer = start_viewer(relay_end, 1, "desk".into(), input, focus, privacy);
+        let _viewer = start_viewer(
+            relay_end,
+            1,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         let press = |key| InputPacket::KeyEvent { key, pressed: true };
         for packet in [
             press(30),
@@ -2756,7 +3002,15 @@ mod tests {
         let (input, _queued) = mpsc::channel(4);
         let (focus, mut focused) = mpsc::channel(4);
         let (privacy, _) = mpsc::channel(4);
-        let mut viewer = start_viewer(relay_end, 7, "desk".into(), input, focus, privacy);
+        let mut viewer = start_viewer(
+            relay_end,
+            7,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         for message in [Message::Focus(true), Message::Focus(false)] {
             window.write_all(&message.encode()).await.unwrap();
         }
@@ -2786,7 +3040,15 @@ mod tests {
         let (input, _queued) = mpsc::channel(4);
         let (focus, _focused) = mpsc::channel(4);
         let (privacy, mut asked) = mpsc::channel(4);
-        let mut viewer = start_viewer(relay_end, 9, "desk".into(), input, focus, privacy);
+        let mut viewer = start_viewer(
+            relay_end,
+            9,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         for ask in [wire::PRIVACY_HIDE, wire::PRIVACY_SHOW, wire::PRIVACY_LOCK] {
             window
                 .write_all(&Message::Privacy(ask).encode())
@@ -2832,7 +3094,15 @@ mod tests {
         let (input, mut queued) = mpsc::channel(16);
         let (focus, _focused) = mpsc::channel(4);
         let (privacy, _asked) = mpsc::channel(4);
-        let mut viewer = start_viewer(relay_end, 3, "desk".into(), input, focus, privacy);
+        let mut viewer = start_viewer(
+            relay_end,
+            3,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         let nudge = |dx| Message::Input(InputPacket::MouseMove { dx, dy: 0 }.encode());
         for message in [
             nudge(1),
@@ -2876,6 +3146,437 @@ mod tests {
             .unwrap();
     }
 
+    /// A mic link that lets the window's mic through: the view controls
+    /// the other computer.
+    fn controlling() -> Arc<MicLink> {
+        let link = Arc::new(MicLink::default());
+        link.set_controls(true);
+        link
+    }
+
+    fn mic_frame(byte: u8) -> Message {
+        Message::Input(
+            InputPacket::Mic {
+                enabled: true,
+                opus: vec![byte],
+            }
+            .encode(),
+        )
+    }
+
+    fn mic_start() -> Message {
+        Message::Input(
+            InputPacket::Mic {
+                enabled: true,
+                opus: Vec::new(),
+            }
+            .encode(),
+        )
+    }
+
+    /// Until `link` holds `frames` (bounded).
+    async fn link_holds(link: &MicLink, frames: &[Vec<u8>]) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while link.waiting() != frames {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "TIMEOUT: {:?} not {frames:?}",
+                link.waiting()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// PC10: the window's mic frames go (their own way) only after it said
+    /// its mic is on and while the view controls the other computer; the
+    /// start and the stop go the input's way; the relay sends the stop
+    /// itself as it goes off (forgetting frames still waiting) and as the
+    /// window's socket closes with it on; a mic byte that is neither 0 nor
+    /// 1 ends the reader.
+    #[tokio::test]
+    async fn mic_frames_go_only_while_the_window_says_its_mic_is_on() {
+        let link = controlling();
+        let (mut window, mut viewer, mut queued) = joined_window_with(link.clone()).await;
+        let wait = Duration::from_secs(2);
+        let key = Message::Input(
+            InputPacket::KeyEvent {
+                key: 30,
+                pressed: true,
+            }
+            .encode(),
+        );
+        for message in [
+            mic_frame(1),
+            mic_start(),
+            Message::Mic(false),
+            Message::Mic(true),
+            mic_start(),
+            mic_frame(2),
+            mic_frame(3),
+        ] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        link_holds(&link, &[vec![2], vec![3]]).await;
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(Mic { enabled: true, opus: [] })",
+            "the start before on was dropped, the one after went"
+        );
+        // Off: the frames still waiting are forgotten, the stop goes once.
+        for message in [
+            Message::Mic(false),
+            mic_frame(4),
+            key.clone(),
+            Message::Mic(false),
+        ] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        let mut got = Vec::new();
+        for _ in 0..2 {
+            let packet = tokio::time::timeout(wait, queued.recv()).await.unwrap();
+            got.push(format!("{packet:?}"));
+        }
+        assert_eq!(
+            got,
+            [
+                "Some(Mic { enabled: false, opus: [] })",
+                "Some(KeyEvent { key: 30, pressed: true })"
+            ]
+        );
+        assert!(link.waiting().is_empty(), "nothing after off");
+        // Review M3: on, but the view does not control that computer now
+        // (Control off there, or reconnecting): nothing of the mic goes.
+        link.set_controls(false);
+        for message in [Message::Mic(true), mic_start(), mic_frame(5), key.clone()] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(KeyEvent { key: 30, pressed: true })"
+        );
+        assert!(link.waiting().is_empty(), "no frame without control");
+        link.set_controls(true);
+        window.write_all(&mic_frame(6).encode()).await.unwrap();
+        link_holds(&link, &[vec![6]]).await;
+        // The window's socket closes with it on: the relay stops it.
+        window.shutdown().await.unwrap();
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(Mic { enabled: false, opus: [] })"
+        );
+        tokio::time::timeout(wait, &mut viewer.reader)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(link.waiting().is_empty());
+        // The reader is gone, and with it the queue's sender: nothing more.
+        assert!(
+            tokio::time::timeout(wait, queued.recv())
+                .await
+                .unwrap()
+                .is_none(),
+            "one stop, not two"
+        );
+
+        // A bad byte ends a fresh window's reader.
+        let (mut window, mut viewer, _queued) = joined_window().await;
+        window.write_all(&[wire::MIC, 1, 0, 0, 0, 2]).await.unwrap();
+        tokio::time::timeout(wait, &mut viewer.reader)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// PC10: a viewer dropped (replaced, or the view ending) while the
+    /// window's mic is on still sends the stop.
+    #[tokio::test]
+    async fn a_viewer_dropped_with_the_mic_on_sends_the_stop() {
+        let (mut window, viewer, mut queued) = joined_window().await;
+        window
+            .write_all(&Message::Mic(true).encode())
+            .await
+            .unwrap();
+        // Something after the word, to know the reader has read it.
+        window
+            .write_all(&Message::Input(InputPacket::RequestKeyframe.encode()).encode())
+            .await
+            .unwrap();
+        let wait = Duration::from_secs(2);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(RequestKeyframe)"
+        );
+        drop(viewer);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(Mic { enabled: false, opus: [] })"
+        );
+        drop(window);
+    }
+
+    /// PR #569 re-review N2: a viewer dropped with the mic on while a
+    /// frame is on its way sends the stop only after that frame went.
+    #[tokio::test]
+    async fn a_dropped_viewers_stop_waits_for_the_frame_on_its_way() {
+        let link = controlling();
+        let (mut window, viewer, mut queued) = joined_window_with(link.clone()).await;
+        window
+            .write_all(&Message::Mic(true).encode())
+            .await
+            .unwrap();
+        window
+            .write_all(&Message::Input(InputPacket::RequestKeyframe.encode()).encode())
+            .await
+            .unwrap();
+        let wait = Duration::from_secs(2);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(RequestKeyframe)"
+        );
+        // A frame on its way: the forwarder holds this while it sends.
+        let on_its_way = link.sending.lock().await;
+        drop(viewer);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), queued.recv())
+                .await
+                .is_err(),
+            "no stop while the frame is on its way"
+        );
+        drop(on_its_way);
+        assert_eq!(
+            format!(
+                "{:?}",
+                tokio::time::timeout(wait, queued.recv()).await.unwrap()
+            ),
+            "Some(Mic { enabled: false, opus: [] })"
+        );
+        drop(window);
+    }
+
+    /// PC10 review M2: a viewer dropped with the mic on while the input
+    /// queue is full still sends the stop once there is room.
+    #[tokio::test]
+    async fn a_stop_waits_for_room_in_a_full_queue() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, mut queued) = mpsc::channel(2);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, _asked) = mpsc::channel(4);
+        let viewer = start_viewer(
+            relay_end,
+            4,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
+        window
+            .write_all(&Message::Mic(true).encode())
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            window
+                .write_all(&Message::Input(InputPacket::RequestKeyframe.encode()).encode())
+                .await
+                .unwrap();
+        }
+        let wait = Duration::from_secs(2);
+        // The queue full (two keyframe asks), the viewer goes.
+        let deadline = tokio::time::Instant::now() + wait;
+        while queued.len() < 2 {
+            assert!(tokio::time::Instant::now() < deadline, "TIMEOUT: queue");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        drop(viewer);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            let packet = tokio::time::timeout(wait, queued.recv()).await.unwrap();
+            got.push(format!("{packet:?}"));
+        }
+        assert_eq!(
+            got.last().map(String::as_str),
+            Some("Some(Mic { enabled: false, opus: [] })"),
+            "{got:?}"
+        );
+        drop(window);
+    }
+
+    /// PR #569 re-review N1: control going clears the frames waiting, and
+    /// a frame taken without control is dropped, not sent.
+    #[tokio::test]
+    async fn frames_waiting_as_control_goes_are_not_sent() {
+        let link = controlling();
+        for byte in 0..3u8 {
+            link.push(vec![byte]);
+        }
+        link.set_controls(false);
+        assert!(link.waiting().is_empty());
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+        let conn: SharedConnection = Arc::new(Kept(kept.clone()));
+        conn_now.send_replace(Some(conn));
+        let _forward_mic = AbortOnDrop(tokio::spawn(forward_mic(link.clone(), conn_rx)));
+        link.push(vec![9]);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(kept.lock().unwrap().is_empty(), "nothing without control");
+        link.set_controls(true);
+        link.push(vec![10]);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while kept.lock().unwrap().is_empty() {
+            assert!(tokio::time::Instant::now() < deadline, "TIMEOUT: frame");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            format!("{:?}", kept.lock().unwrap()),
+            "[Mic { enabled: true, opus: [10] }]"
+        );
+    }
+
+    /// PC10 review I3: past the backlog the oldest frames are dropped.
+    #[test]
+    fn the_mic_backlog_keeps_the_newest_frames() {
+        let link = MicLink::default();
+        for byte in 0..8u8 {
+            link.push(vec![byte]);
+        }
+        assert_eq!(
+            link.waiting(),
+            (3..8u8).map(|b| vec![b]).collect::<Vec<_>>(),
+            "the newest {MIC_BACKLOG}"
+        );
+        let mut status = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            ..ViewStatus::default()
+        };
+        assert!(mic_may_go(&status));
+        status.reconnecting = 1;
+        assert!(!mic_may_go(&status), "reconnecting");
+        status.reconnecting = 0;
+        status.control = Some(false);
+        assert!(!mic_may_go(&status), "Control off there");
+        status.control = Some(true);
+        status.phase = Phase::Waiting;
+        assert!(!mic_may_go(&status), "not let in");
+    }
+
+    /// PC10 review I3: on a slow link the mic's frames wait on their own
+    /// short way: a key release behind a burst of audio goes at once, and
+    /// the audio past the backlog is dropped, never queued for seconds.
+    #[tokio::test]
+    async fn a_slow_link_drops_old_audio_and_never_delays_a_release() {
+        let kept = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (input, rx) = mpsc::channel(INPUT_QUEUE);
+        let link = controlling();
+        let (conn_now, conn_rx) = tokio::sync::watch::channel(None);
+        let _forward_mic = AbortOnDrop(tokio::spawn(forward_mic(link.clone(), conn_rx.clone())));
+        let _forward = AbortOnDrop(tokio::spawn(forward_input(rx, conn_rx)));
+        // Each stream takes 100 ms to open: a slow link.
+        let conn: SharedConnection = Arc::new(Slow(Kept(kept.clone()), Duration::from_millis(100)));
+        conn_now.send_replace(Some(conn));
+        // A second of audio arrives at once.
+        for byte in 0..50u8 {
+            link.push(vec![byte]);
+        }
+        let start = Instant::now();
+        input
+            .send(InputPacket::KeyEvent {
+                key: 30,
+                pressed: false,
+            })
+            .await
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let released = loop {
+            let at = kept
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| matches!(p, InputPacket::KeyEvent { pressed: false, .. }));
+            if at {
+                break start.elapsed();
+            }
+            assert!(Instant::now() < deadline, "TIMEOUT: the release");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        assert!(released < Duration::from_millis(400), "{released:?}");
+        // The audio that went: at most the backlog and the one on its way.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        let frames: Vec<u8> = kept
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|p| match p {
+                InputPacket::Mic { opus, .. } => opus.first().copied(),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !frames.is_empty() && frames.len() <= MIC_BACKLOG + 1,
+            "{frames:?}"
+        );
+        assert_eq!(frames.last(), Some(&49), "the newest went");
+    }
+
+    /// A connection whose every stream takes a while to open.
+    struct Slow(Kept, Duration);
+
+    #[async_trait::async_trait]
+    impl pocketdesk_core::streaming::Connection for Slow {
+        async fn open_uni(
+            &self,
+        ) -> Result<
+            Box<dyn pocketdesk_core::streaming::OutStream>,
+            pocketdesk_core::streaming::ConnectionError,
+        > {
+            tokio::time::sleep(self.1).await;
+            self.0.open_uni().await
+        }
+        async fn accept_uni(
+            &self,
+        ) -> Result<
+            Box<dyn pocketdesk_core::streaming::InStream>,
+            pocketdesk_core::streaming::ConnectionError,
+        > {
+            self.0.accept_uni().await
+        }
+        fn remote_address(&self) -> SocketAddr {
+            self.0.remote_address()
+        }
+        fn stats(&self) -> pocketdesk_core::streaming::ConnectionStats {
+            self.0.stats()
+        }
+        fn transport_family(&self) -> pocketdesk_core::streaming::TransportFamily {
+            self.0.transport_family()
+        }
+        fn close(&self, code: u32, reason: &[u8]) {
+            self.0.close(code, reason)
+        }
+    }
+
     /// PC7: while the window says its pointer is locked, shared input's
     /// edges are paused; they come back as it frees it, as its socket
     /// closes with the pointer still locked, and as its viewer is dropped.
@@ -2901,7 +3602,15 @@ mod tests {
         let (input, _queued) = mpsc::channel(4);
         let (focus, _focused) = mpsc::channel(4);
         let (privacy, _asked) = mpsc::channel(4);
-        let viewer = start_viewer(relay_end, 5, "desk".into(), input, focus, privacy);
+        let viewer = start_viewer(
+            relay_end,
+            5,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         assert!(!pointer_held());
         let say = |locked| Message::PointerLock(locked).encode();
         window.write_all(&say(true)).await.unwrap();
@@ -2999,6 +3708,12 @@ mod tests {
 
     /// A window joined to a fresh viewer, with the input it sends kept.
     async fn joined_window() -> (TcpStream, Viewer, mpsc::Receiver<InputPacket>) {
+        joined_window_with(controlling()).await
+    }
+
+    async fn joined_window_with(
+        link: Arc<MicLink>,
+    ) -> (TcpStream, Viewer, mpsc::Receiver<InputPacket>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let window = TcpStream::connect(listener.local_addr().unwrap())
             .await
@@ -3007,7 +3722,7 @@ mod tests {
         let (input, queued) = mpsc::channel(16);
         let (focus, _focused) = mpsc::channel(4);
         let (privacy, _asked) = mpsc::channel(4);
-        let viewer = start_viewer(relay_end, 6, "desk".into(), input, focus, privacy);
+        let viewer = start_viewer(relay_end, 6, "desk".into(), input, link, focus, privacy);
         (window, viewer, queued)
     }
 
@@ -3073,7 +3788,15 @@ mod tests {
         let (input, mut queued) = mpsc::channel(1);
         let (focus, _focused) = mpsc::channel(4);
         let (privacy, _asked) = mpsc::channel(4);
-        let _viewer = start_viewer(relay_end, 8, "desk".into(), input, focus, privacy);
+        let _viewer = start_viewer(
+            relay_end,
+            8,
+            "desk".into(),
+            input,
+            controlling(),
+            focus,
+            privacy,
+        );
         let press = InputPacket::KeyEvent {
             key: 30,
             pressed: true,
