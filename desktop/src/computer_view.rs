@@ -2384,7 +2384,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                                 .on_hover_text(mic_hover(&wanted.name));
                             if mic.clicked() {
                                 mic.surrender_focus();
-                                lock(shared).mic.toggle();
+                                let mut state = lock(shared);
+                                // The owner's own click decides from here:
+                                // a resume pending since a switch is
+                                // forgotten (PR #570 check S2).
+                                state.mic_resume = None;
+                                state.mic.toggle();
                             }
                         }
                     }
@@ -6755,6 +6760,52 @@ mod tests {
         state.writer = None;
         drop(state);
         view.quit();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 check S2: a click on Send my mic while a switch's resume
+    /// waits (the view reconnecting) forgets it: turned on then off by
+    /// hand, the mic stays off once the view controls again.
+    #[test]
+    fn a_click_on_send_my_mic_forgets_a_pending_resume() {
+        use egui_kittest::kittest::Queryable;
+        let (shared, _relay, dir) = mic_window(
+            "resume-click",
+            Arc::new(|_| panic!("no microphone opens here")),
+        );
+        {
+            let mut state = lock(&shared);
+            // As the server says a view dialled again: connecting, its try.
+            state.status.reconnecting = 1;
+            state.status.phase = Phase::Connecting;
+            state.mic_resume = Some(MicResume {
+                device_id: "desk".into(),
+                asked: state.asked,
+                until: Instant::now() + MIC_RESUME_FOR,
+            });
+        }
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness.step();
+        assert!(
+            lock(&shared).mic_resume.is_some(),
+            "waits while reconnecting"
+        );
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        assert!(lock(&shared).mic_resume.is_none(), "the click decides");
+        harness.get_by_label("Send my mic").click();
+        harness.step();
+        {
+            let mut state = lock(&shared);
+            state.status.reconnecting = 0;
+            state.status.phase = Phase::Showing;
+        }
+        harness.step();
+        harness.step();
+        assert!(!lock(&shared).mic.on() && !lock(&shared).mic.wanted());
+        drop(harness);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
