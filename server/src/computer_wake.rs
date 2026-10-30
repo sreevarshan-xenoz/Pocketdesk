@@ -164,12 +164,15 @@ fn normal_mac(mac: &str) -> Option<String> {
 }
 
 /// Keep what the computer `device_id` said of how to wake it, on its entry
-/// here: a computer this one does not list is not kept. Blocking.
+/// here: a computer this one does not list is not kept, and one not paired
+/// both ways now (paired one way, or its grant lapsed) keeps none, so this
+/// computer cannot wake it (SECURITY 68; PR #572 re-review N6). Blocking.
 pub fn keep(dir: &Path, device_id: &str, body: &serde_json::Value, now_unix: u64) {
     let wake = told(body, now_unix);
     let saved = computers::update(dir, |file| {
+        let both_ways = file.both_ways(device_id);
         if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
-            c.wake = wake;
+            c.wake = if both_ways { wake } else { None };
         }
     });
     if let Err(e) = saved {
@@ -366,7 +369,7 @@ mod tests {
             link: "linked".to_string(),
             link_unix: 1,
             lets_drive: false,
-            mine: false,
+            mine: true,
             wake: None,
             viewed_unix: 0,
         }
@@ -539,12 +542,53 @@ mod tests {
     #[test]
     fn only_a_computers_word_is_kept() {
         let dir = temp("from");
-        computers::update(&dir, |file| file.computers.push(computer("desk"))).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: true,
+                ..computer("desk")
+            })
+        })
+        .unwrap();
         let told = packet_for(true, Some(&facts())).body;
         keep_from(&dir, "desk", false, &told, 3);
         assert_eq!(computers::read(&dir).computers[0].wake, None, "a phone's");
         keep_from(&dir, "desk", true, &told, 4);
         assert!(computers::read(&dir).computers[0].wake.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #572 re-review N6: wake facts are kept only from a computer
+    /// paired both ways now: not one paired one way, nor one whose grant
+    /// lapsed, which also forgets what it said before.
+    #[test]
+    fn wake_facts_are_kept_only_from_a_computer_paired_both_ways() {
+        let dir = temp("keep-both-ways");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..computer("one-way")
+            });
+            file.computers.push(PeerComputer {
+                mine: true,
+                ..computer("lap")
+            });
+        })
+        .unwrap();
+        let told = packet_for(true, Some(&facts())).body;
+        let wake = |id: &str| {
+            computers::read(&dir)
+                .computers
+                .into_iter()
+                .find(|c| c.device_id == id)
+                .and_then(|c| c.wake)
+        };
+        keep(&dir, "one-way", &told, 3);
+        assert_eq!(wake("one-way"), None, "paired one way");
+        keep(&dir, "lap", &told, 3);
+        assert!(wake("lap").is_some(), "both ways");
+        computers::update(&dir, |file| file.lapsed.push("lap".to_string())).unwrap();
+        keep(&dir, "lap", &told, 4);
+        assert_eq!(wake("lap"), None, "its grant lapsed: forgotten");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
