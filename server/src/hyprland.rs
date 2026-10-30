@@ -10,11 +10,13 @@
 //! active window geometry for capture cropping, and follow window
 //! activations/moves via socket2 events.
 //!
-//! Only the read side is implemented: the *write* grammar of socket1
+//! Only the read side is implemented here: the *write* grammar of socket1
 //! (`dispatch`, `keyword`, `setoption`) has been broken upstream since the
 //! Lua IPC rewrite in 0.56 — plain `hyprctl dispatch workspace 3` errors on a
 //! stock 0.56.2 compositor (hyprwm/Hyprland discussion #16224) — so no action
-//! dispatchers live here. Workspace switching already works through injected
+//! dispatchers live here. (`output create`/`output remove` and `eval` with
+//! real Lua are not caught by it; the phone's second screen uses them, through
+//! [`HyprlandIpc::request_blocking`].) Workspace switching already works through injected
 //! keybinds (ShortcutBar), and window focus can ride the input-injection path
 //! if the picker needs it.
 
@@ -170,7 +172,7 @@ impl HyprlandIpc {
         Self::from_env().is_ok_and(|ipc| ipc.request_socket().is_some())
     }
 
-    fn request_socket(&self) -> Option<PathBuf> {
+    pub(crate) fn request_socket(&self) -> Option<PathBuf> {
         // Newer Hyprland renamed socket1; try both.
         for name in [".socket.sock", ".socket1.sock"] {
             let p = self.socket_dir.join(name);
@@ -203,6 +205,29 @@ impl HyprlandIpc {
             .await
             .context("read Hyprland reply")?;
         String::from_utf8(buf).context("non-UTF8 Hyprland reply")
+    }
+
+    /// [`Self::request`] for blocking code (it waits at most 5 s each way).
+    #[cfg(unix)]
+    pub fn request_blocking(&self, req: &str) -> std::io::Result<String> {
+        use std::io::{Read, Write};
+        let path = self
+            .request_socket()
+            .ok_or_else(|| std::io::Error::other("no Hyprland request socket found"))?;
+        let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+        let wait = Some(std::time::Duration::from_secs(5));
+        stream.set_read_timeout(wait)?;
+        stream.set_write_timeout(wait)?;
+        stream.write_all(req.as_bytes())?;
+        let mut buf = Vec::new();
+        // Hyprland answers and closes; a reply this large is no answer.
+        stream.take(4 * 1024 * 1024).read_to_end(&mut buf)?;
+        String::from_utf8(buf).map_err(std::io::Error::other)
+    }
+
+    #[cfg(not(unix))]
+    pub fn request_blocking(&self, _req: &str) -> std::io::Result<String> {
+        Err(std::io::Error::other("Hyprland IPC needs Unix sockets"))
     }
 
     async fn json<T: serde::de::DeserializeOwned>(&self, req: &str) -> Result<T> {
