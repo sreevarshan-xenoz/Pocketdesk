@@ -2196,7 +2196,7 @@ impl SettingsForm {
                     );
                     note(
                         ui,
-                        "HEVC needs less bitrate for the same picture, which helps most over the internet. Only with decoding on the graphics card on too: on the processor HEVC is slower than H.264. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
+                        "HEVC usually needs less bitrate for a moving picture, which helps most over the internet. Only with decoding on the graphics card on too: on the processor HEVC is slower than H.264. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
                     );
                 });
                 row(ui, "computer_view_lock_on_close", |ui| {
