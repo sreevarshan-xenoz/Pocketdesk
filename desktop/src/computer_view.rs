@@ -3181,7 +3181,10 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     stream.write_all(&token)?;
     // A stuck write must not hold the window: input is best effort.
     stream.set_write_timeout(Some(Duration::from_millis(200)))?;
-    {
+    // The window's ask this view is for: once it asks again (a switch, a
+    // close), what is still read of this view is dropped (PR #570
+    // re-review N3), never taken for the next screen's.
+    let asked = {
         let mut state = lock(shared);
         state.stream = Some(stream.try_clone()?);
         state.writer = Some(stream.try_clone()?);
@@ -3192,7 +3195,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         state.stalled = false;
         state.session_id = Some(file.session_id);
         state.asked_at = None;
-    }
+        state.asked
+    };
     let mut asks = stream.try_clone()?;
     let mut reader = BufReader::with_capacity(256 * 1024, stream);
     let mut decoder: Option<Decoder> = None;
@@ -3210,6 +3214,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     let mut recorder: Option<Recorder> = None;
     loop {
         let message = Message::read(&mut reader)?;
+        if lock(shared).asked != asked {
+            return Ok(String::new());
+        }
         let want = lock(shared).record_want
             && matches!(message, Message::Frame { .. } | Message::Heartbeat);
         let stop = !lock(shared).record_want;
@@ -6480,5 +6487,75 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(weak.upgrade().is_none());
+    }
+    /// PR #570 re-review N3: what is still read of the old view after a
+    /// switch (a status, a new size) is dropped: the window keeps the
+    /// switch's state (the next screen, not shown yet) and starts no
+    /// decoder for it.
+    #[test]
+    fn the_old_views_messages_after_a_switch_are_dropped() {
+        let dir = std::env::temp_dir().join(format!("pd-computer-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let token = [9u8; 32];
+        wire::write(
+            &dir,
+            &ViewFile {
+                session_id: 70,
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                port: listener.local_addr().unwrap().port(),
+                token: pocketdesk_core::local::cast::token_hex(&token),
+            },
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let mut given = [0u8; 32];
+        std::io::Read::read_exact(&mut relay, &mut given).unwrap();
+        // A first status, taken: the worker reads the view's messages now.
+        Message::Status(ViewStatus {
+            phase: Phase::Waiting,
+            ..ViewStatus::default()
+        })
+        .write(&mut relay)
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lock(&view.shared).status.phase != Phase::Waiting {
+            assert!(Instant::now() < deadline, "TIMEOUT: not joined");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // The worker reads the old view's status and waits for the window's
+        // state, which the switch holds meanwhile.
+        let mut state = lock(&view.shared);
+        let shown = ViewStatus {
+            phase: Phase::Showing,
+            control: Some(true),
+            monitor: 0,
+            ..ViewStatus::default()
+        };
+        Message::Status(shown).write(&mut relay).unwrap();
+        Message::Config {
+            width: 64,
+            height: 48,
+        }
+        .write(&mut relay)
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let decoders = state.decoder_gen;
+        switch_screen(&dir, &mut state, 1).unwrap();
+        let after = state.decoder_gen;
+        drop(state);
+        std::thread::sleep(Duration::from_millis(300));
+        let state = lock(&view.shared);
+        assert_eq!(state.status.monitor, 1, "the next screen's, as asked");
+        assert_eq!(state.status.phase, Phase::Connecting, "not the old view's");
+        assert_eq!(state.decoder_gen, after, "no decoder for the old view");
+        assert!(after > decoders);
+        drop(state);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
