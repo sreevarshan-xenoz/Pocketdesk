@@ -2243,6 +2243,30 @@ pub fn owe(owed: &mut (i32, i32), lost: &InputPacket) {
     }
 }
 
+/// Wait for `send` (a send the reader must not drop), letting a window's
+/// pointer lock lapse at `lease_until` meanwhile: a queue held full by a
+/// stalled link never keeps shared input's edges paused past the lease
+/// (PR #563 re-review N1). The send itself still completes.
+async fn leased<R>(
+    send: impl std::future::Future<Output = R>,
+    pointer_locked: &mut bool,
+    hold: &mut Option<crate::shared_input::view_hold::PointerHold>,
+    lease_until: tokio::time::Instant,
+) -> R {
+    tokio::pin!(send);
+    if *pointer_locked {
+        tokio::select! {
+            sent = &mut send => return sent,
+            () = tokio::time::sleep_until(lease_until) => {
+                tracing::info!("A screen window's pointer lock lapsed while its input waited");
+                *pointer_locked = false;
+                *hold = None;
+            }
+        }
+    }
+    send.await
+}
+
 /// A window's pointer lock lapses this long after its last "locked"
 /// (PR #563 review I1); the window says it again about every second.
 pub const POINTER_LEASE: Duration = Duration::from_secs(3);
@@ -2333,11 +2357,17 @@ fn start_viewer(
                     }
                     // Waited for, not dropped: a lock as the window closes
                     // must reach the relay.
-                    if privacy
-                        .send((session_id, device_id.clone(), ask[0]))
-                        .await
-                        .is_err()
-                    {
+                    let sent = leased(
+                        privacy.send((session_id, device_id.clone(), ask[0])),
+                        &mut pointer_locked,
+                        &mut hold,
+                        lease_until,
+                    )
+                    .await;
+                    if !pointer_locked {
+                        owed = (0, 0);
+                    }
+                    if sent.is_err() {
                         break;
                     }
                 }
@@ -2371,7 +2401,20 @@ fn start_viewer(
                             // key or button let go of here must be let go of
                             // there. The rest may be dropped.
                             if is_release(&packet) {
-                                if input.send(packet).await.is_err() {
+                                // A full queue (the far link stalled) may hold
+                                // this a while: the pointer's lease still runs
+                                // out meanwhile (PR #563 re-review N1).
+                                let sent = leased(
+                                    input.send(packet),
+                                    &mut pointer_locked,
+                                    &mut hold,
+                                    lease_until,
+                                )
+                                .await;
+                                if !pointer_locked {
+                                    owed = (0, 0);
+                                }
+                                if sent.is_err() {
                                     break;
                                 }
                             } else {
@@ -2928,6 +2971,49 @@ mod tests {
             "Some(MouseMoveAbs { x_norm: 1, y_norm: 1 })"
         );
         assert!(!viewer.reader.is_finished());
+    }
+
+    /// PR #563 re-review N1: a release the full input queue holds back (the
+    /// far link stalled) does not keep the pointer held past the lease;
+    /// the release still goes once there is room.
+    #[tokio::test]
+    async fn a_full_queue_never_holds_the_lock_past_its_lease() {
+        let _alone = crate::shared_input::view_hold::TESTS.lock().await;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, mut queued) = mpsc::channel(1);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, _asked) = mpsc::channel(4);
+        let _viewer = start_viewer(relay_end, 8, "desk".into(), input, focus, privacy);
+        let press = InputPacket::KeyEvent {
+            key: 30,
+            pressed: true,
+        };
+        let release = InputPacket::KeyEvent {
+            key: 30,
+            pressed: false,
+        };
+        for message in [
+            Message::PointerLock(true),
+            Message::Input(press.encode()),
+            Message::Input(release.encode()),
+        ] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        until_held(true, "the lock", 2).await;
+        // The press fills the queue; the release waits, the window silent.
+        let waited = tokio::time::Instant::now();
+        until_held(false, "the lease, the release waiting", 6).await;
+        assert!(waited.elapsed() < POINTER_LEASE + Duration::from_secs(1));
+        let got = [queued.recv().await, queued.recv().await];
+        assert_eq!(
+            format!("{got:?}"),
+            "[Some(KeyEvent { key: 30, pressed: true }), Some(KeyEvent { key: 30, pressed: false })]",
+            "the release still went"
+        );
     }
 
     /// PR #563 review M8: the window's focus lost frees its lock at the
