@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1051 open items.
+1054 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 39 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
 | Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 132 |
+| A second computer | 133 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -130,6 +130,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **236. The rest of the pages (Desktop UX 4)**
 
 - With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
+
+**240. One version across my devices**
+
+- The OPPO on this build with a throwaway server on this build: after a connection, the computer's card on Home says "runs <this release>" in the muted colour, and the server's `pocketdesk devices --json` lists the phone's `version` as the app's. Then the phone on 0.8.2 from F-Droid or a release APK: the card says nothing (the server on 0.8.2 sends no release), and a 0.8.2 phone against this build's server leaves the phone's `version` null. (where: here)
+- A throwaway server whose `pocketdeskVersion` differs from the phone's (a build from a commit with the workspace version raised, say 0.9.0): the card says "runs 0.9.0, newer than this app: update this app" in the tertiary colour; with Settings → Pairing's switch off it says "runs 0.9.0" only. Its Devices page lists the phone with "older than this one: update it" in the warning colour, and plainly with Settings → Phones' switch off. (where: here)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -1066,6 +1071,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - Windows and the Linux laptop sharing the keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there", once with Windows' keyboard on the laptop and once with it home: both times the bar says it was refused (it shares its keyboard and mouse), and Windows' keys and clicks still work. With shared input off on Windows, the same ask is taken (keyboard blocked, ring shown); then Ctrl+Alt+Del, Lock, and unlock Windows (and again with Windows+L): within about a second of the unlock the grab ends and Windows' keyboard and mouse work. On the laptop as the far side (a grab from Windows' window, shared input off there): `loginctl lock-session`, then `loginctl unlock-session` over ssh, ends the grab only with a locker that sets the locked hint (note which: hyprlock, swaylock, GNOME); and unplugging and plugging the laptop's USB keyboard back in gives a keyboard that types while the grab holds. (where: second computer)
 - Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
+
+**240. One version across my devices**
+
+- Windows and the Linux laptop paired both ways, one on this build and one a release behind: each one's Settings → Other computers shows the other's release, with the advice on the newer one's row only pointing at the older; on the computer that dials the link it comes from `computers.json`, on the other from the trust store. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
