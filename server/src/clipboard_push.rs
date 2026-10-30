@@ -454,8 +454,19 @@ fn copy_generation() -> u64 {
     if !crate::plugins::clipboard::stand_ins_set() {
         return u64::from(crate::platform::clipboard_windows::sequence());
     }
+    // With no watcher to count the copies (none started, `wl-paste`
+    // missing, X11 failing), every read is a new copy, so nothing is
+    // skipped as the same text (PR #572 re-review N3).
+    #[cfg(not(windows))]
+    if !WATCHING.load(Ordering::Relaxed) {
+        return COPIES.fetch_add(1, Ordering::Relaxed) + 1;
+    }
     COPIES.load(Ordering::Relaxed)
 }
+
+/// Whether a clipboard watcher counts [`COPIES`] now.
+#[cfg(not(windows))]
+static WATCHING: AtomicBool = AtomicBool::new(false);
 
 /// Whether a push of `follows` (read as copy `copy`) to `device_id` is
 /// skipped: a window's, not an answer, of the same text it sent there
@@ -1423,6 +1434,7 @@ enum WatchSource {
 #[cfg(target_os = "linux")]
 impl Drop for ChangeWatch {
     fn drop(&mut self) {
+        WATCHING.store(false, Ordering::Relaxed);
         if let WatchSource::X11 { stop, .. } = &self.source {
             stop.store(true, Ordering::Relaxed);
         }
@@ -1472,6 +1484,14 @@ fn x11_watch() -> std::io::Result<x11rb::rust_connection::RustConnection> {
 #[cfg(not(windows))]
 impl ChangeWatch {
     fn start() -> std::io::Result<Self> {
+        let started = Self::start_any();
+        if started.is_ok() {
+            WATCHING.store(true, Ordering::Relaxed);
+        }
+        started
+    }
+
+    fn start_any() -> std::io::Result<Self> {
         match pocketdesk_core::local::clip_tool::Tool::current() {
             pocketdesk_core::local::clip_tool::Tool::Wayland => {
                 Self::start_with("wl-paste", &["--watch", "echo"])
@@ -2643,6 +2663,16 @@ mod tests {
         let turn = lock(&handing.moves).note("b", true, at).unwrap();
         assert!(gain_goes(&handing, "b", turn, at).await);
         assert!(at.elapsed() >= HANDOVER);
+    }
+
+    /// PR #572 re-review N3: with no watcher counting copies, each read is
+    /// a new copy, so a copy made again is never skipped as the same text.
+    #[cfg(not(windows))]
+    #[test]
+    fn without_a_watcher_every_read_is_a_new_copy() {
+        WATCHING.store(false, Ordering::Relaxed);
+        let first = copy_generation();
+        assert_ne!(copy_generation(), first);
     }
 
     /// Range review I2, PR #572 review I2: the text a window sent a
