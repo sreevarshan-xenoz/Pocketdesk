@@ -19,6 +19,7 @@
     <string name="settings_find">Buscar un ajuste</string>
     <string name="settings_find_clear">Borrar la búsqueda</string>
     <string name="settings_find_none">Ningún ajuste coincide con «%1$s»</string>
+    <string name="settings_jump_to">Ir a %1$s</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_back">Atrás</string>
     <string name="settings_appearance">Apariencia</string>
@@ -739,6 +740,20 @@
     <string name="status_not_paired">Sin emparejar</string>
     <string name="status_unpaired_by_it">Ya no está emparejado con este teléfono</string>
     <string name="status_auto">Se conecta al abrir</string>
+    <string name="status_used_just_now">Usado hace un momento</string>
+    <plurals name="status_used_minutes">
+        <item quantity="one">Usado hace %1$d min</item>
+        <item quantity="other">Usado hace %1$d min</item>
+    </plurals>
+    <plurals name="status_used_hours">
+        <item quantity="one">Usado hace %1$d hora</item>
+        <item quantity="other">Usado hace %1$d horas</item>
+    </plurals>
+    <plurals name="status_used_days">
+        <item quantity="one">Usado hace %1$d día</item>
+        <item quantity="other">Usado hace %1$d días</item>
+    </plurals>
+    <string name="status_used_long_ago">Usado hace tiempo</string>
     <string name="rename_title">Renombrar %1$s</string>
     <string name="rename_label">Nombre</string>
     <string name="rename_hint">En blanco: el nombre que se da a sí mismo</string>

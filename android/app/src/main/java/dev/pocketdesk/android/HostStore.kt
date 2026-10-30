@@ -72,6 +72,31 @@ object HostStore {
     }
 
     /**
+     * UX1: a session with the saved computer at [address] came up (its
+     * stream, or a remote or sound session admitted), for its card's "Used
+     * 2 hours ago". Not on pairing, a shortcut or a tap that never connects
+     * (PR #575 review N2). Nothing for an address that is not saved.
+     */
+    fun markUsed(ctx: Context, address: String, now: Long = System.currentTimeMillis()) {
+        if (hosts(ctx).none { it.address == address }) return
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putLong("$KEY_LAST_USED_PREFIX$address", now)
+        }
+    }
+
+    /**
+     * UX1: when [address] was last used, in ms since the epoch; null before,
+     * and null for a time more than five minutes ahead of [now] (a clock set
+     * forward, then back, would have pinned "Used just now"; review N1).
+     */
+    fun lastUsed(ctx: Context, address: String, now: Long = System.currentTimeMillis()): Long? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong("$KEY_LAST_USED_PREFIX$address", 0L)
+            .takeIf { it > 0L && it <= now + FUTURE_SLACK_MS }
+
+    private const val FUTURE_SLACK_MS = 5 * 60_000L
+
+    /**
      * Keep [host] in the list without moving it to the front: a computer
      * reached from discovery is saved only once it has paired, so an
      * unverified announcement never becomes the auto-connect host.
@@ -118,6 +143,8 @@ object HostStore {
             KEY_CHOSEN_NAME_PREFIX,
             // O6: the player chosen for the computer.
             KEY_PLAYER_PREFIX,
+            // UX1: when it was last used.
+            KEY_LAST_USED_PREFIX,
         )
     }
 
@@ -172,6 +199,7 @@ object HostStore {
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
     private const val KEY_PLAYER_PREFIX = "computer_player:"
+    private const val KEY_LAST_USED_PREFIX = "last_used:"
 
     /** O6: the player chosen for the computer at [address], or null for the computer's own choice. */
     fun player(ctx: Context, address: String): String? =
