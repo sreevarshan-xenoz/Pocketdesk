@@ -246,7 +246,7 @@ impl KeyGate {
 }
 
 /// The codec a stream comes in (PC5: HEVC beside H.264).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Codec {
     H264,
     Hevc,
@@ -277,7 +277,7 @@ const AUD_HEVC: [u8; 7] = [0, 0, 0, 1, 0x46, 0x01, 0x50];
 /// How the sidecar decodes (PC5): on the graphics card through Direct3D
 /// 11 or VA-API (at a render node), whichever ffmpeg finds, or on the
 /// processor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Accel {
     D3d11va,
     Vaapi(String),

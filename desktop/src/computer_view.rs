@@ -137,6 +137,9 @@ struct State {
     /// older one, still on its way as it is replaced, is dropped.
     decoder_gen: u64,
     way: Option<(u64, Accel)>,
+    /// The ways that gave nothing for a codec, for as long as the app runs
+    /// (PR #562 review M3): the next view does not wait on them again.
+    failed_ways: std::collections::HashSet<(Codec, Accel)>,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
     /// Files dropped on the window, on their way; the word on the last
@@ -1754,6 +1757,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the screen changed size"));
                 }
                 stream_is = Some((Codec::H264, Some((width, height))));
+                skip_failed(shared, &mut ladder, Codec::H264);
                 decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                 gate = KeyGate::default();
                 ladder.started();
@@ -1765,6 +1769,7 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the picture changed"));
                 }
                 stream_is = Some((Codec::Hevc, None));
+                skip_failed(shared, &mut ladder, Codec::Hevc);
                 decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                 gate = KeyGate::default();
                 ladder.started();
@@ -1811,7 +1816,10 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 ladder.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
-                    if ladder.failed() == Step::Next {
+                    let tried = ladder.way().clone();
+                    let step = ladder.failed();
+                    remember_failed(shared, stream_is, tried, step);
+                    if step == Step::Next {
                         // The next way, from the next keyframe (PC5).
                         decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                         gate = KeyGate::default();
@@ -1920,6 +1928,18 @@ impl Ladder {
         Step::Stay
     }
 
+    /// Pass over the ways `failed` says gave nothing before, unless one is
+    /// settled; never past the last.
+    pub fn skip(&mut self, failed: impl Fn(&Accel) -> bool) {
+        if self.settled {
+            return;
+        }
+        while self.at + 1 < self.ways.len() && failed(&self.ways[self.at]) {
+            self.at += 1;
+            self.first_fed = None;
+        }
+    }
+
     /// The decoder could not take an access unit.
     pub fn failed(&mut self) -> Step {
         self.settled = false;
@@ -1955,7 +1975,9 @@ fn climb(
     let Some(d) = decoder.as_ref() else {
         return Step::Stay;
     };
+    let tried = ladder.way().clone();
     let step = ladder.check(d.pictures(), d.ended(), Instant::now());
+    remember_failed(shared, stream_is, tried, step);
     match step {
         Step::Next => {
             *decoder = start_decoder(shared, ctx, stream_is, ladder.way());
@@ -1970,6 +1992,29 @@ fn climb(
         Step::Stay | Step::Exhausted => {}
     }
     step
+}
+
+/// A way that gave up (`step` from it) is remembered as failed for the
+/// stream's codec (PR #562 review M3); the processor never is.
+fn remember_failed(
+    shared: &Mutex<State>,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+    tried: Accel,
+    step: Step,
+) {
+    if matches!(step, Step::Next | Step::Exhausted)
+        && tried != Accel::Software
+        && let Some((codec, _)) = stream_is
+    {
+        lock(shared).failed_ways.insert((codec, tried));
+    }
+}
+
+/// Before a decoder of `codec` starts, the ways that failed for it in this
+/// app are passed over.
+fn skip_failed(shared: &Mutex<State>, ladder: &mut Ladder, codec: Codec) {
+    let state = lock(shared);
+    ladder.skip(|way| state.failed_ways.contains(&(codec, way.clone())));
 }
 
 /// A decoder for a stream that `is` this codec and size, decoding `way`
@@ -2398,6 +2443,36 @@ mod tests {
         assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
         assert_eq!(card.check(0, true, at(0)), Step::Exhausted);
         assert_eq!(Ladder::new(Vec::new(), None).way(), &Accel::Software);
+    }
+
+    /// PR #562 review M3: a way that failed for a codec is remembered for
+    /// the app's life and passed over for that codec, never the processor,
+    /// never a settled way, and not for the other codec.
+    #[test]
+    fn a_way_that_failed_is_passed_over_next_time() {
+        let shared = Mutex::new(State::default());
+        let hevc = Some((Codec::Hevc, None));
+        remember_failed(&shared, hevc, Accel::D3d11va, Step::Next);
+        remember_failed(&shared, hevc, Accel::Auto, Step::Stay);
+        remember_failed(&shared, hevc, Accel::Software, Step::Exhausted);
+        remember_failed(&shared, None, Accel::Auto, Step::Next);
+        assert_eq!(
+            lock(&shared).failed_ways,
+            [(Codec::Hevc, Accel::D3d11va)].into_iter().collect()
+        );
+        let ways = vec![Accel::D3d11va, Accel::Auto, Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), None);
+        skip_failed(&shared, &mut ladder, Codec::Hevc);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        let mut ladder = Ladder::new(ways.clone(), None);
+        skip_failed(&shared, &mut ladder, Codec::H264);
+        assert_eq!(ladder.way(), &Accel::D3d11va, "H.264's own");
+        let mut settled = Ladder::new(ways.clone(), Some(&Accel::D3d11va));
+        skip_failed(&shared, &mut settled, Codec::Hevc);
+        assert_eq!(settled.way(), &Accel::D3d11va, "settled, kept");
+        let mut all = Ladder::new(ways, None);
+        all.skip(|_| true);
+        assert_eq!(all.way(), &Accel::Software, "never past the last");
     }
 
     /// PC5: the percentiles by nearest rank.
