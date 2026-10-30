@@ -26,11 +26,11 @@
 //! the text this computer's layout makes of it stays here: the other
 //! computer's own layout says what the key types, and a game reads WASD
 //! where WASD sit, whatever either layout prints on them. Text that came
-//! from no key (a keypad key egui does not place) still goes as text. Of
-//! Ctrl, Alt and Shift, a second kind held with another waits for a key,
-//! a button or the wheel, so this window's own chords and a layout switch
-//! never reach the other computer; Ctrl or Shift and C, X, V, Insert or
-//! Delete go as keys held, not as egui's copy, cut and paste.
+//! from no key (a keypad key egui does not place) still goes as text. The
+//! third of Ctrl, Alt and Shift waits for a key, a button or the wheel, so
+//! this window's own Ctrl+Alt+Shift chords never reach the other computer
+//! whole; Ctrl or Shift and C, X, V, Insert or Delete go as keys held, not
+//! as egui's copy, cut and paste.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -769,8 +769,8 @@ impl WindowInput {
     }
 
     /// The modifiers held here and not yet there go down there before what
-    /// needs them: Shift as text left it, and by position a second kind of
-    /// Ctrl, Alt or Shift held back ([`Self::key`]).
+    /// needs them: Shift as text left it, and by position the third of
+    /// Ctrl, Alt and Shift held back ([`Self::key`]).
     fn hold_modifiers(&mut self, out: &mut Vec<InputPacket>) {
         for code in [
             LEFT_CTRL,
@@ -791,19 +791,23 @@ impl WindowInput {
         }
     }
 
-    /// Whether, by position, the modifier `code` waits for a key: another
-    /// kind of Ctrl, Alt or Shift is held here already (PR #573 review I1).
-    /// Two of them with no key between are this window's own chords
-    /// (Ctrl+Alt+Shift and M, S or a number, or alone) or a desktop's
-    /// layout switch (Alt+Shift, Ctrl+Shift): they never reach the other
-    /// computer by themselves.
+    /// Whether, by position, the modifier `code` waits for a key: it would
+    /// make all three of Ctrl, Alt and Shift, the two other kinds held here
+    /// already (PR #573 review I1, re-review I-A). Ctrl+Alt+Shift is this
+    /// window's own chord (with M, S or a number, or alone): its third
+    /// modifier never reaches the other computer by itself. Two kinds go at
+    /// once, as a game's crouch and run.
     fn waits(&self, code: u16) -> bool {
         let Some(kind) = modifier_kind(code) else {
             return false;
         };
-        self.down_here
+        let others: BTreeSet<u8> = self
+            .down_here
             .iter()
-            .any(|c| modifier_kind(*c).is_some_and(|k| k != kind))
+            .filter_map(|c| modifier_kind(*c))
+            .filter(|k| *k != kind)
+            .collect();
+        others.len() == 2
     }
 
     /// `key` (`code` there) going down or up; `placed`, by its position:
@@ -818,10 +822,15 @@ impl WindowInput {
     ) {
         if !pressed {
             // By position, the key a copy, cut or paste pressed there goes
-            // up with whichever of its keys is let go (Ctrl+Insert copies
-            // as Ctrl+C does: the one pressed is let go).
+            // up with the key egui kept: whichever of C, X, V, Insert or
+            // Delete (Ctrl+Insert copies as Ctrl+C does), or any key not
+            // held there, as the key in C's place on a Dvorak keyboard is
+            // (re-review C-A: its press never came, its code is its own).
             if let Some(held) = self.clip_held
-                && matches!(code, KEY_C | KEY_X | KEY_V | KEY_INSERT | KEY_DELETE)
+                && !is_shift(code)
+                && !is_chord_modifier(code)
+                && (matches!(code, KEY_C | KEY_X | KEY_V | KEY_INSERT | KEY_DELETE)
+                    || !self.down_there.contains(&code))
             {
                 self.clip_held = None;
                 self.down_here.remove(&code);
@@ -1990,28 +1999,133 @@ mod tests {
         input
     }
 
-    /// PR #573 review I1: by position, a second kind of Ctrl, Alt or Shift
-    /// waits for a key. This window's own chord (Ctrl+Alt+Shift and M, the
-    /// M kept here) and a layout switch (Alt+Shift) reach the other
-    /// computer only as the first modifier; a real chord goes whole, the
-    /// modifiers before its key.
+    /// PR #573 review I1, re-review I-A: by position, the third of Ctrl,
+    /// Alt and Shift waits for a key, so this window's own chord
+    /// (Ctrl+Alt+Shift and M, the M kept here) never reaches the other
+    /// computer whole, in any order; two kinds go at once.
     #[test]
-    fn by_position_the_windows_chords_and_a_layout_switch_stay_here() {
+    fn by_position_the_windows_chord_never_goes_whole() {
+        let now = Instant::now();
+        for order in [
+            [
+                egui::Key::ControlLeft,
+                egui::Key::AltLeft,
+                egui::Key::ShiftLeft,
+            ],
+            [
+                egui::Key::ShiftLeft,
+                egui::Key::ControlLeft,
+                egui::Key::AltLeft,
+            ],
+            [
+                egui::Key::AltLeft,
+                egui::Key::ShiftLeft,
+                egui::Key::ControlLeft,
+            ],
+        ] {
+            let mut input = by_position_input();
+            let mut events: Vec<egui::Event> = order.iter().map(|k| key(*k, true)).collect();
+            // The window kept M (keep_chord_here): no event for it.
+            events.extend(order.iter().rev().map(|k| key(*k, false)));
+            let out = input.take(&events, picture(), now);
+            let first_two: Vec<u16> = order[..2].iter().filter_map(|k| by_position(*k)).collect();
+            let third = by_position(order[2]).unwrap();
+            let sent: Vec<u16> = out
+                .iter()
+                .filter_map(|p| match p {
+                    InputPacket::KeyEvent { key, pressed: true } => Some(*key),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(sent, first_two, "{order:?}: the third never goes");
+            assert!(!sent.contains(&third));
+            assert!(!input.holds(), "{order:?}");
+        }
+        // With a key, the chord goes whole, its modifiers first.
+        let mut input = by_position_input();
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::AltLeft, true),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::T, true),
+                key(egui::Key::T, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 56, pressed: true }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 20, pressed: true }",
+                "KeyEvent { key: 20, pressed: false }",
+            ]
+        );
+    }
+
+    /// Re-review I-A: a game's W held, then crouch (Ctrl) and run (Shift):
+    /// all three reach the other computer as pressed, with nothing else
+    /// needed; Ctrl+Shift and Alt+Shift alone go too.
+    #[test]
+    fn by_position_crouch_then_run_reach_the_game() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::W, true),
+                key(egui::Key::ControlLeft, true),
+                key(egui::Key::ShiftLeft, true),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 17, pressed: true }",
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 42, pressed: true }",
+            ]
+        );
+        let _ = input.release_all();
+        let out = input.take(
+            &[
+                key(egui::Key::AltLeft, true),
+                key(egui::Key::ShiftLeft, true),
+                key(egui::Key::ShiftLeft, false),
+                key(egui::Key::AltLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 56, pressed: true }",
+                "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 42, pressed: false }",
+                "KeyEvent { key: 56, pressed: false }",
+            ],
+            "two kinds go at once"
+        );
+    }
+
+    /// Re-review C-A: on a Dvorak keyboard Ctrl and the key printed C is
+    /// QWERTY's J: egui says copy, the C place goes down there, and the J
+    /// let go lets it go; nothing stays held.
+    #[test]
+    fn by_position_a_copy_from_another_place_is_let_go_with_its_key() {
         let mut input = by_position_input();
         let now = Instant::now();
         let out = input.take(
             &[
                 key(egui::Key::ControlLeft, true),
-                key(egui::Key::AltLeft, true),
-                key(egui::Key::ShiftLeft, true),
-                // The window kept M (keep_chord_here): no event for it.
-                key(egui::Key::ShiftLeft, false),
-                key(egui::Key::AltLeft, false),
+                egui::Event::Copy,
+                key(egui::Key::J, false),
                 key(egui::Key::ControlLeft, false),
-                key(egui::Key::AltLeft, true),
-                key(egui::Key::ShiftLeft, true),
-                key(egui::Key::ShiftLeft, false),
-                key(egui::Key::AltLeft, false),
             ],
             picture(),
             now,
@@ -2020,19 +2134,20 @@ mod tests {
             words(&out),
             [
                 "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
                 "KeyEvent { key: 29, pressed: false }",
-                "KeyEvent { key: 56, pressed: true }",
-                "KeyEvent { key: 56, pressed: false }",
-            ],
-            "no Shift, and never two modifiers with nothing between"
+            ]
         );
+        assert!(!input.holds());
+        // A key held there beside it keeps its own release.
         let out = input.take(
             &[
+                key(egui::Key::W, true),
                 key(egui::Key::ControlLeft, true),
-                key(egui::Key::ShiftLeft, true),
-                key(egui::Key::T, true),
-                key(egui::Key::T, false),
-                key(egui::Key::ShiftLeft, false),
+                egui::Event::Copy,
+                key(egui::Key::W, false),
+                key(egui::Key::J, false),
                 key(egui::Key::ControlLeft, false),
             ],
             picture(),
@@ -2041,14 +2156,13 @@ mod tests {
         assert_eq!(
             words(&out),
             [
+                "KeyEvent { key: 17, pressed: true }",
                 "KeyEvent { key: 29, pressed: true }",
-                "KeyEvent { key: 42, pressed: true }",
-                "KeyEvent { key: 20, pressed: true }",
-                "KeyEvent { key: 20, pressed: false }",
-                "KeyEvent { key: 42, pressed: false }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 17, pressed: false }",
+                "KeyEvent { key: 46, pressed: false }",
                 "KeyEvent { key: 29, pressed: false }",
-            ],
-            "Ctrl+Shift+T goes whole"
+            ]
         );
         assert!(!input.holds());
     }
@@ -2132,9 +2246,8 @@ mod tests {
                 "KeyEvent { key: 29, pressed: true }",
                 "KeyEvent { key: 46, pressed: true }",
                 "KeyEvent { key: 46, pressed: false }",
-                // Shift waited while Ctrl was held, until Delete needed it.
-                "KeyEvent { key: 29, pressed: false }",
                 "KeyEvent { key: 42, pressed: true }",
+                "KeyEvent { key: 29, pressed: false }",
                 "KeyEvent { key: 111, pressed: true }",
                 "KeyEvent { key: 111, pressed: false }",
                 "KeyEvent { key: 42, pressed: false }",
