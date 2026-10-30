@@ -196,6 +196,13 @@ pub struct Config {
     /// device is removed only here (Devices → Unpair, `pocketdesk unpair`).
     #[serde(default = "default_remote_revoke")]
     pub remote_revoke: bool,
+    /// Let my computers add my phones here (ecosystem phase 4): another of
+    /// the owner's computers paired both ways may introduce a phone paired
+    /// with its own code, which then pairs here as an owner phone once its
+    /// owner confirmed on it. On by default; it matters only for computers
+    /// paired both ways. Off, every introduction is refused (`off`).
+    #[serde(default = "default_computer_introductions")]
+    pub computer_introductions: bool,
     /// Keep the last this many texts that crossed between this computer and
     /// its phones, either way (D3); 0 keeps none. Off by default: the texts
     /// stay on disk, owner-only.
@@ -561,6 +568,10 @@ fn default_remote_revoke() -> bool {
     true
 }
 
+fn default_computer_introductions() -> bool {
+    true
+}
+
 fn default_pairing_required() -> bool {
     true
 }
@@ -621,6 +632,7 @@ impl Default for Config {
             computer_clipboard: false,
             nearby_pairing: true,
             remote_revoke: true,
+            computer_introductions: true,
             clipboard_history: 0,
             clipboard_never_from: Vec::new(),
             clipboard_never_like: Vec::new(),
@@ -888,6 +900,7 @@ impl Config {
         "computer_clipboard",
         "nearby_pairing",
         "remote_revoke",
+        "computer_introductions",
         "clipboard_history",
         "clipboard_never_from",
         "clipboard_never_like",

@@ -243,7 +243,55 @@ pub struct ComputersFile {
     /// written before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub there: Option<DevicesThere>,
+    /// The owner's phones introduced between this computer and another of
+    /// the owner's (ecosystem phase 4): each one this computer introduced
+    /// to a computer, or was introduced to by one. Removing such a phone
+    /// here removes it there too ([`Self::owed_removals`]). Absent in files
+    /// written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub introduced: Vec<Introduced>,
+    /// Removals this computer owes the computers a removed phone was
+    /// introduced between (ecosystem phase 4), sent on the link to each
+    /// and dropped once answered. Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owed_removals: Vec<OwedRemoval>,
 }
+
+/// A phone introduced between this computer and `computer` (ecosystem
+/// phase 4), either way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Introduced {
+    /// The phone's device id.
+    pub phone: String,
+    /// The other computer: the one this computer introduced the phone to,
+    /// or the one that introduced it here.
+    pub computer: String,
+    /// When (unix seconds).
+    pub unix: u64,
+}
+
+/// The removal of `phone` this computer owes `computer` (ecosystem phase
+/// 4): the phone was removed here, and it was introduced between the two.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwedRemoval {
+    pub phone: String,
+    pub computer: String,
+    /// When it was removed here (unix seconds): one owed longer than
+    /// [`OWED_FOR`] is dropped.
+    pub unix: u64,
+    /// The request id it is asked under, its answer naming it.
+    pub request: String,
+    /// When it was last sent (unix seconds), 0 never: one unanswered for
+    /// [`OWED_RESEND`] is sent again.
+    #[serde(default)]
+    pub sent_unix: u64,
+}
+
+/// How long a removal is owed before it is dropped: thirty days.
+pub const OWED_FOR: u64 = 30 * 24 * 60 * 60;
+
+/// How long an owed removal waits for its answer before it is sent again.
+pub const OWED_RESEND: u64 = 5 * 60;
 
 /// This computer's ask of the devices paired with another of the owner's
 /// computers (remote revoke), as the server keeps it for the app.
@@ -339,6 +387,10 @@ impl ComputersFile {
         let computer = self.computers.remove(at);
         self.pending.retain(|id| id != device_id);
         self.lapsed.retain(|id| id != device_id);
+        // What was introduced between the two, and the removals owed it,
+        // go with it (ecosystem phase 4).
+        self.introduced.retain(|i| i.computer != device_id);
+        self.owed_removals.retain(|o| o.computer != device_id);
         // Its devices' list goes with it (remote revoke).
         if self
             .there
