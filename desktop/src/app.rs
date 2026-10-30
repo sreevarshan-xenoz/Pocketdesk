@@ -387,6 +387,16 @@ pub const PAIR_ELSEWHERE: &str = "Pair a computer on the Pair page.";
 /// Its button, and the fix where no computer is paired.
 pub const PAIR_A_COMPUTER: &str = "Pair a computer";
 
+/// Sessions with none live (UX 4): what shows there, and how.
+pub const SESSIONS_EMPTY: &str = "No one is viewing or driving this computer";
+pub const SESSIONS_HOW: &str = "A phone shows here while it views or drives it: on the phone, tap Connect on this computer's card.";
+/// Files with nothing to take one (UX 4).
+pub const FILES_NO_TARGET: &str = "No phone or computer can take a file right now.";
+/// Why a failed file's Send again is off.
+pub const SEND_AGAIN_OFF: &str = "Send again waits for it to be able to take files.";
+/// Files with nothing received (UX 4).
+pub const FILES_NONE_RECEIVED: &str = "Nothing received yet";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Status,
@@ -2993,11 +3003,12 @@ impl PocketdeskApp {
     fn sessions_tab(&mut self, ui: &mut egui::Ui) {
         // A stopped server is said by the bar at the top (UX 1).
         if self.snapshot.sessions.is_empty() {
-            ui.label(
-                "No phone is viewing this computer right now. On the phone, tap Connect on this \
-                 computer's card.",
-            );
-            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+            // UX 4: what shows here, and how to make it show.
+            let none_paired = self.snapshot.devices.is_empty();
+            let pair = crate::widgets::empty(ui, SESSIONS_EMPTY, SESSIONS_HOW, |ui| {
+                none_paired && ui.button("Pair a phone").clicked()
+            });
+            if pair {
                 self.switch_to(Tab::Pair);
             }
         } else {
@@ -3023,9 +3034,10 @@ impl PocketdeskApp {
         let count = self.snapshot.sessions.len();
         for session in &self.snapshot.sessions {
             let control = model::control_cell(session, count, self.snapshot.shared_control);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_width(ui.available_width());
+            crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
+                    // UX 4: a live session's dot, as a linked device's.
+                    crate::theme::dot(ui, crate::theme::GOOD);
                     match session.device_id.as_deref() {
                         Some(id) => {
                             ui.label(
@@ -3135,34 +3147,47 @@ impl PocketdeskApp {
         let now = now_unix();
         for recent in &self.recent_sessions {
             let who = model::recent_who(recent, &self.snapshot.devices);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(who).strong());
-                let mut line = vec![crate::words::ago(now, recent.ended_unix)];
-                if !recent.refused
-                    && let Some(secs) = recent.duration_secs.filter(|&secs| secs > 0)
-                {
-                    line.push(format!("for {}", human_duration(secs)));
-                }
-                line.push(match recent.times {
-                    1 => recent.how.to_string(),
-                    n => format!("{} {n} times", recent.how),
-                });
-                // Capture to arrival, not to the screen (J3 review: "latency"
-                // read as the whole way to the phone's screen).
-                if let Some(ms) = recent.e2e_ms {
-                    line.push(format!("{ms} ms capture to arrival"));
-                }
-                let text = RichText::new(line.join(" · "));
-                let label = ui.label(if recent.refused {
-                    text.color(crate::theme::warn(ui))
-                } else {
-                    text.color(crate::theme::muted(ui))
-                });
-                if recent.e2e_ms.is_some() {
-                    label.on_hover_text(
-                        "The session's median, measured by the phone: from this computer                          capturing the screen to the picture arriving on the phone, before                          the phone decodes and shows it.",
+            // UX 4: a card each; its dot grey once over, amber for a refusal.
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if recent.refused {
+                            crate::theme::WARN
+                        } else {
+                            crate::theme::MUTED
+                        },
                     );
-                }
+                    ui.label(RichText::new(who).strong());
+                    let mut line = vec![crate::words::ago(now, recent.ended_unix)];
+                    if !recent.refused
+                        && let Some(secs) = recent.duration_secs.filter(|&secs| secs > 0)
+                    {
+                        line.push(format!("for {}", human_duration(secs)));
+                    }
+                    line.push(match recent.times {
+                        1 => recent.how.to_string(),
+                        n => format!("{} {n} times", recent.how),
+                    });
+                    // Capture to arrival, not to the screen (J3 review: "latency"
+                    // read as the whole way to the phone's screen).
+                    if let Some(ms) = recent.e2e_ms {
+                        line.push(format!("{ms} ms capture to arrival"));
+                    }
+                    let text = RichText::new(line.join(" · "));
+                    let label = ui.label(if recent.refused {
+                        text.color(crate::theme::warn(ui))
+                    } else {
+                        text.color(crate::theme::muted(ui))
+                    });
+                    if recent.e2e_ms.is_some() {
+                        label.on_hover_text(
+                            "The session's median, measured by the phone: from this computer \
+                         capturing the screen to the picture arriving on the phone, before \
+                         the phone decodes and shows it.",
+                        );
+                    }
+                });
             });
         }
     }
@@ -3853,20 +3878,20 @@ impl PocketdeskApp {
     }
 
     fn send_box(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Send a file");
+        crate::theme::section(ui, "Send a file");
         let Some(device) = self.send_target() else {
-            ui.label(
-                RichText::new(
-                    "No phone or computer can take a file right now. A phone takes one in a screen or sound session, or \
-                     with \"Files from the computer in the background\" on in Pocketdesk's Settings on the phone; \
-                     another of your computers, while its link is up. Files land in the \
-                     phone's folder for files from computers (Downloads/Pocketdesk unless chosen).",
-                )
-                .color(crate::theme::muted(ui)),
-            );
             // Not only a session: a phone linked at home or by the internet
-            // road, or another computer, takes files too (U5).
-            if self.snapshot.devices.is_empty() && ui.button("Pair a phone").clicked() {
+            // road, or another computer, takes files too (U5). UX 4: a card,
+            // the note cut to what makes one take a file.
+            let none_paired = self.snapshot.devices.is_empty();
+            let pair = crate::widgets::empty(
+                ui,
+                FILES_NO_TARGET,
+                "A phone takes one in a session, or with \"Files from the computer in the \
+                 background\" on in its Pocketdesk Settings; another computer, while linked.",
+                |ui| none_paired && ui.button("Pair a phone").clicked(),
+            );
+            if pair {
                 self.switch_to(Tab::Pair);
             }
             return;
@@ -4054,7 +4079,7 @@ impl PocketdeskApp {
         if self.snapshot.under_way.is_empty() {
             return;
         }
-        ui.strong("Under way");
+        crate::theme::section(ui, "Under way");
         let mut cancel = None;
         egui::Grid::new("under_way")
             .num_columns(4)
@@ -4105,56 +4130,71 @@ impl PocketdeskApp {
         if self.snapshot.sent.is_empty() {
             return;
         }
-        ui.strong("Sent");
+        crate::theme::section(ui, "Sent");
         let now = now_unix();
         let targets = model::send_target_ids(&self.snapshot);
         let mut again = None;
         // A block a row, wrapping at a narrow width (I3), as Devices' are.
+        // UX 4: a card each, its dot saying how it went.
         for file in &self.snapshot.sent {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(&file.name).strong())
-                    .on_hover_text(&file.path);
-                ui.label(
-                    RichText::new(format!(
-                        "to {} · {}",
-                        model::target_label(&self.snapshot, &file.device_id),
-                        crate::words::ago(now, file.sent_unix)
-                    ))
-                    .color(crate::theme::muted(ui)),
-                );
-                // What a folder send left out goes beside its state.
-                let note = file
-                    .note
-                    .as_deref()
-                    .map(|n| format!(" · {n}"))
-                    .unwrap_or_default();
-                match &file.state {
-                    SentState::Offered => {
-                        // U3: the row says to whom; a computer or a KDE
-                        // device takes files too.
-                        ui.label(format!("waiting to be taken{note}"));
-                    }
-                    SentState::Sent => {
-                        ui.label(format!("saved there{note}"));
-                    }
-                    SentState::Failed(reason) => {
-                        ui.label(
-                            RichText::new(format!("not sent: {reason}{note}"))
-                                .color(crate::theme::bad(ui)),
-                        );
-                        // I3: tried again while its phone can take files.
-                        let reachable = targets.contains(&file.device_id);
-                        if ui
-                            .add_enabled(reachable, egui::Button::new("Send again"))
-                            .on_disabled_hover_text("Its phone cannot take files now.")
-                            .clicked()
-                        {
-                            again = Some((file.device_id.clone(), file.path.clone()));
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        match file.state {
+                            SentState::Sent => crate::theme::GOOD,
+                            SentState::Offered => crate::theme::MUTED,
+                            SentState::Failed(_) => crate::theme::BAD,
+                        },
+                    );
+                    ui.label(RichText::new(&file.name).strong())
+                        .on_hover_text(&file.path);
+                    ui.label(
+                        RichText::new(format!(
+                            "to {} · {}",
+                            model::target_label(&self.snapshot, &file.device_id),
+                            crate::words::ago(now, file.sent_unix)
+                        ))
+                        .color(crate::theme::muted(ui)),
+                    );
+                    // What a folder send left out goes beside its state.
+                    let note = file
+                        .note
+                        .as_deref()
+                        .map(|n| format!(" · {n}"))
+                        .unwrap_or_default();
+                    match &file.state {
+                        SentState::Offered => {
+                            // U3: the row says to whom; a computer or a KDE
+                            // device takes files too.
+                            ui.label(format!("waiting to be taken{note}"));
+                        }
+                        SentState::Sent => {
+                            ui.label(format!("saved there{note}"));
+                        }
+                        SentState::Failed(reason) => {
+                            ui.label(
+                                RichText::new(format!("not sent: {reason}{note}"))
+                                    .color(crate::theme::bad(ui)),
+                            );
+                            // I3: tried again while its phone can take files.
+                            let reachable = targets.contains(&file.device_id);
+                            if ui
+                                .add_enabled(reachable, egui::Button::new("Send again"))
+                                .on_disabled_hover_text(SEND_AGAIN_OFF)
+                                .clicked()
+                            {
+                                again = Some((file.device_id.clone(), file.path.clone()));
+                            }
                         }
                     }
+                });
+                // UX 1's pattern: why Send again is off, in a line.
+                if matches!(file.state, SentState::Failed(_)) && !targets.contains(&file.device_id)
+                {
+                    crate::widgets::why_off(ui, SEND_AGAIN_OFF, None);
                 }
             });
-            ui.add_space(4.0);
         }
         if let Some((device, path)) = again {
             self.notice = crate::notice::Notice::outcome(
@@ -4177,15 +4217,14 @@ impl PocketdeskApp {
     }
 
     fn received_list(&mut self, ui: &mut egui::Ui) {
-        ui.strong("Received");
+        crate::theme::section(ui, "Received");
         if self.snapshot.received.is_empty() {
-            ui.label("Nothing received yet.");
-            ui.label(
-                RichText::new(
-                    "Share a file to Pocketdesk on your phone; it lands where Settings says (Downloads unless chosen) and is \
-                     listed here.",
-                )
-                .color(crate::theme::muted(ui)),
+            crate::widgets::empty(
+                ui,
+                FILES_NONE_RECEIVED,
+                "Share a file to Pocketdesk on your phone: it lands in Downloads unless \
+                 Settings says otherwise, and shows here.",
+                |_| {},
             );
             return;
         }
@@ -4195,39 +4234,49 @@ impl PocketdeskApp {
         // A block a row, wrapping at a narrow width (I3).
         for row in &self.snapshot.received {
             let file = &row.file;
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new(&file.name).strong())
-                    .on_hover_text(&file.path);
-                ui.label(
-                    RichText::new(format!(
-                        "{} · {}",
-                        human_size(file.size),
-                        crate::words::ago(now, file.received_unix)
-                    ))
-                    .color(crate::theme::muted(ui)),
-                );
-                if row.exists {
-                    // I3: what opens in a viewer opens from here.
-                    // Judged by the file opened as well as the name shown
-                    // (I3 review): the two come from different places.
-                    let opened_name = std::path::Path::new(&file.path)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    if crate::reveal::openable(&file.name)
-                        && crate::reveal::openable(&opened_name)
-                        && ui.button("Open").clicked()
-                    {
-                        open = Some(file.path.clone());
+            // UX 4: a card each; a file moved away is greyed.
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if row.exists {
+                            crate::theme::GOOD
+                        } else {
+                            crate::theme::MUTED
+                        },
+                    );
+                    ui.label(RichText::new(&file.name).strong())
+                        .on_hover_text(&file.path);
+                    ui.label(
+                        RichText::new(format!(
+                            "{} · {}",
+                            human_size(file.size),
+                            crate::words::ago(now, file.received_unix)
+                        ))
+                        .color(crate::theme::muted(ui)),
+                    );
+                    if row.exists {
+                        // I3: what opens in a viewer opens from here.
+                        // Judged by the file opened as well as the name shown
+                        // (I3 review): the two come from different places.
+                        let opened_name = std::path::Path::new(&file.path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if crate::reveal::openable(&file.name)
+                            && crate::reveal::openable(&opened_name)
+                            && ui.button("Open").clicked()
+                        {
+                            open = Some(file.path.clone());
+                        }
+                        if ui.button("Show in folder").clicked() {
+                            show = Some(file.path.clone());
+                        }
+                    } else {
+                        ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
                     }
-                    if ui.button("Show in folder").clicked() {
-                        show = Some(file.path.clone());
-                    }
-                } else {
-                    ui.label(RichText::new("moved or deleted").color(crate::theme::muted(ui)));
-                }
+                })
             });
-            ui.add_space(4.0);
         }
         if let Some(path) = show
             && let Err(e) = crate::reveal::show_in_folder(std::path::Path::new(&path))

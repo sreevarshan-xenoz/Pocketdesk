@@ -787,7 +787,7 @@ fn empty_sessions_and_files_say_what_to_do_next() {
     );
     // AS3: the sentence after it says what can, with its verb.
     assert!(
-        app.query_by_label_contains("A phone takes one in a screen or sound session")
+        app.query_by_label_contains("A phone takes one in a session")
             .is_some()
     );
     app.get_by_label("Pair a phone").click();
@@ -796,6 +796,40 @@ fn empty_sessions_and_files_say_what_to_do_next() {
         app.query_by_label(Tab::Pair.purpose()).is_some(),
         "Pair opened"
     );
+}
+
+/// UX 4: Sessions with none live says, in a card, what shows there and
+/// how; its Pair a phone opens Pair. Files says what it will list.
+#[test]
+fn empty_sessions_and_files_are_cards_with_the_next_step() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::SESSIONS_EMPTY).is_some());
+    assert!(app.query_by_label(crate::app::SESSIONS_HOW).is_some());
+    app.get_by_label("Pair a phone").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Pair.purpose()).is_some(),
+        "Pair opened"
+    );
+
+    go_to(&app, Tab::Files);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::app::FILES_NONE_RECEIVED)
+            .is_some()
+    );
+    assert!(app.query_by_label_contains("shows here").is_some());
+}
+
+/// UX 4: with a phone paired, Sessions' empty card has no Pair button.
+#[test]
+fn sessions_with_a_phone_paired_offer_no_pairing() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::SESSIONS_EMPTY).is_some());
+    assert!(app.query_by_label("Pair a phone").is_none());
 }
 
 /// With no phone paired, the Notifications and Phone files pages each offer

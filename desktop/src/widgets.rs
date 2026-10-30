@@ -56,6 +56,22 @@ pub fn why_off_ask(ui: &mut egui::Ui, reason: &str, fix: &str, ask: Ask) {
     }
 }
 
+/// An empty page's card (UX 4): what shows here, as a strong line; how to
+/// make it show, as a muted one; then the caller's button, where one
+/// action does it.
+pub fn empty<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    how: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    crate::theme::card(ui, |ui| {
+        ui.label(RichText::new(title).strong());
+        ui.label(RichText::new(how).color(crate::theme::muted(ui)));
+        add(ui)
+    })
+}
+
 /// The fix for "the server is not running".
 pub const START: &str = "Start the server";
 
