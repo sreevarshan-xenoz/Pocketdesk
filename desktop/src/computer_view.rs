@@ -1152,6 +1152,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         state.pointer.free();
     }
     let pointer_wanted = state.pointer.wanted();
+    // While the pointer is locked the hidden pointer may rest on the bar
+    // (Wayland keeps it where it was): its clicks are the other computer's,
+    // never the bar's (PR #563 review I2). The chords free it.
+    let pointer_locked = state.pointer.locked();
     #[cfg(windows)]
     let grab_setting = state.grab.setting;
     let lock_on_close = state.lock_on_close;
@@ -1177,192 +1181,194 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         .show(ui, |ui| {
             // Dark whatever the theme, as the cast window's bar.
             ui.style_mut().visuals = egui::Visuals::dark();
-            ui.horizontal_wrapped(|ui| {
-                let mut said = wanted.name.clone();
-                if !status.route.is_empty() {
-                    said.push_str(&format!(" \u{b7} {}", status.route));
-                }
-                ui.label(egui::RichText::new(said).strong());
-                let choices = screen_choices(&status);
-                if choices.len() > 1 {
-                    let shown = choices
-                        .get(monitor as usize)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Screen {}", monitor + 1));
-                    egui::ComboBox::from_id_salt("computer-view-screen")
-                        .selected_text(shown)
+            ui.add_enabled_ui(!pointer_locked, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let mut said = wanted.name.clone();
+                    if !status.route.is_empty() {
+                        said.push_str(&format!(" \u{b7} {}", status.route));
+                    }
+                    ui.label(egui::RichText::new(said).strong());
+                    let choices = screen_choices(&status);
+                    if choices.len() > 1 {
+                        let shown = choices
+                            .get(monitor as usize)
+                            .cloned()
+                            .unwrap_or_else(|| format!("Screen {}", monitor + 1));
+                        egui::ComboBox::from_id_salt("computer-view-screen")
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                for (n, choice) in choices.iter().enumerate() {
+                                    ui.selectable_value(&mut monitor, n as u32, choice);
+                                }
+                            });
+                    }
+                    let label = COMPUTER_VIEW_QUALITIES
+                        .iter()
+                        .find(|(_, id)| *id == quality)
+                        .map_or("Auto", |(name, _)| {
+                            crate::settings_view::computer_quality_label(name)
+                        });
+                    egui::ComboBox::from_id_salt("computer-view-quality")
+                        .selected_text(format!("Quality: {label}"))
                         .show_ui(ui, |ui| {
-                            for (n, choice) in choices.iter().enumerate() {
-                                ui.selectable_value(&mut monitor, n as u32, choice);
+                            for (name, id) in COMPUTER_VIEW_QUALITIES {
+                                ui.selectable_value(
+                                    &mut quality,
+                                    id,
+                                    crate::settings_view::computer_quality_label(name),
+                                );
                             }
                         });
-                }
-                let label = COMPUTER_VIEW_QUALITIES
-                    .iter()
-                    .find(|(_, id)| *id == quality)
-                    .map_or("Auto", |(name, _)| {
-                        crate::settings_view::computer_quality_label(name)
-                    });
-                egui::ComboBox::from_id_salt("computer-view-quality")
-                    .selected_text(format!("Quality: {label}"))
-                    .show_ui(ui, |ui| {
-                        for (name, id) in COMPUTER_VIEW_QUALITIES {
-                            ui.selectable_value(
-                                &mut quality,
-                                id,
-                                crate::settings_view::computer_quality_label(name),
-                            );
-                        }
-                    });
-                let switch = ui
-                    .checkbox(&mut view_only, "View only")
-                    .on_hover_text("Show the computer without sending it clicks or keys");
-                if switch.clicked() {
-                    switch.surrender_focus();
-                }
-                // PC4: the keys this computer keeps, or that cannot be
-                // pressed through the window, while it controls.
-                if ended.is_none() && controls(status.control, view_only, connected, true) {
-                    ui.menu_button("Send keys", |ui| {
-                        for key in send_key_choices(status.windows) {
-                            if ui.button(key.label()).clicked() {
-                                send_key = Some(key);
-                                ui.close();
+                    let switch = ui
+                        .checkbox(&mut view_only, "View only")
+                        .on_hover_text("Show the computer without sending it clicks or keys");
+                    if switch.clicked() {
+                        switch.surrender_focus();
+                    }
+                    // PC4: the keys this computer keeps, or that cannot be
+                    // pressed through the window, while it controls.
+                    if ended.is_none() && controls(status.control, view_only, connected, true) {
+                        ui.menu_button("Send keys", |ui| {
+                            for key in send_key_choices(status.windows) {
+                                if ui.button(key.label()).clicked() {
+                                    send_key = Some(key);
+                                    ui.close();
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text("Send a key or chord this computer would keep to itself");
+                        #[cfg(windows)]
+                        {
+                            let mut grab_on = grab_setting;
+                            let grab = ui
+                                .checkbox(&mut grab_on, "Send Win and Alt+Tab there")
+                                .on_hover_text(format!(
+                                    "In full screen, the Windows key, Alt+Tab, Alt+Esc and Ctrl+Esc go to {}. Press and let go of Ctrl+Alt+Shift to keep them here.",
+                                    wanted.name
+                                ));
+                            if grab.clicked() {
+                                grab.surrender_focus();
+                                switch_grab(shared, config, grab_on);
                             }
                         }
-                    })
-                    .response
-                    .on_hover_text("Send a key or chord this computer would keep to itself");
-                    #[cfg(windows)]
-                    {
-                        let mut grab_on = grab_setting;
-                        let grab = ui
-                            .checkbox(&mut grab_on, "Send Win and Alt+Tab there")
+                        // PC7: the pointer held in the window, its movement sent.
+                        let mut pointer_on = pointer_wanted;
+                        let pointer = ui
+                            .checkbox(&mut pointer_on, "Lock the pointer")
                             .on_hover_text(format!(
-                                "In full screen, the Windows key, Alt+Tab, Alt+Esc and Ctrl+Esc go to {}. Press and let go of Ctrl+Alt+Shift to keep them here.",
+                                "Hold the pointer in this window and send {} how far the mouse moves, for games and 3D. Ctrl+Alt+Shift+M switches it; Ctrl+Alt+Shift alone, or leaving the window, frees it.",
                                 wanted.name
                             ));
-                        if grab.clicked() {
-                            grab.surrender_focus();
-                            switch_grab(shared, config, grab_on);
+                        if pointer.clicked() {
+                            pointer.surrender_focus();
+                            lock(shared).pointer.toggle();
+                        }
+                        // PC8: the other computer's own privacy mode.
+                        let mut hide = hiding(&status.privacy);
+                        let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
+                            format!(
+                                "Ask {} to block its own keyboard and mouse and show a ring on its screen while this window drives it. {} decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
+                                wanted.name, wanted.name
+                            ),
+                        );
+                        if hidden.clicked() {
+                            hidden.surrender_focus();
+                            privacy_ask = Some(if hide {
+                                wire::PRIVACY_HIDE
+                            } else {
+                                wire::PRIVACY_SHOW
+                            });
                         }
                     }
-                    // PC7: the pointer held in the window, its movement sent.
-                    let mut pointer_on = pointer_wanted;
-                    let pointer = ui
-                        .checkbox(&mut pointer_on, "Lock the pointer")
-                        .on_hover_text(format!(
-                            "Hold the pointer in this window and send {} how far the mouse moves, for games and 3D. Ctrl+Alt+Shift+M switches it; Ctrl+Alt+Shift alone, or leaving the window, frees it.",
-                            wanted.name
-                        ));
-                    if pointer.clicked() {
-                        pointer.surrender_focus();
-                        lock(shared).pointer.toggle();
+                    if ended.is_none() && status.phase == Phase::Showing {
+                        let mut lock_on = lock_on_close;
+                        let lock_switch = ui
+                            .checkbox(&mut lock_on, "Lock it when I close the window")
+                            .on_hover_text(format!(
+                                "Lock {} as this window closes, with its own lock. Its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
+                                wanted.name
+                            ));
+                        if lock_switch.clicked() {
+                            lock_switch.surrender_focus();
+                            switch_lock(shared, config, lock_on);
+                        }
                     }
-                    // PC8: the other computer's own privacy mode.
-                    let mut hide = hiding(&status.privacy);
-                    let hidden = ui.checkbox(&mut hide, "Hide what I do there").on_hover_text(
-                        format!(
-                            "Ask {} to block its own keyboard and mouse and show a ring on its screen while this window drives it. {} decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
-                            wanted.name, wanted.name
-                        ),
+                    let shot = ui
+                        .add_enabled(drawn.is_some(), egui::Button::new("Screenshot"))
+                        .on_hover_text("Save the computer's screen as a picture, and copy it");
+                    if shot.clicked() {
+                        shot.surrender_focus();
+                        screenshot(shared, &ctx, &wanted.name);
+                    }
+                    let record = ui
+                        .add_enabled(
+                            drawn.is_some() || record_want,
+                            egui::Button::new(if record_want { "Stop" } else { "Record" }),
+                        )
+                        .on_hover_text("Record the computer's screen as a video, as it comes");
+                    if record.clicked() {
+                        record.surrender_focus();
+                        lock(shared).record_want = !record_want;
+                    }
+                    let full = ui.button(if fullscreen {
+                        "Exit full screen"
+                    } else {
+                        "Full screen"
+                    });
+                    if full.clicked() {
+                        full.surrender_focus();
+                        lock(shared).fullscreen = !fullscreen;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+                    }
+                    let stats = ui.checkbox(&mut stats_on, "Stats").on_hover_text(
+                        "Show how the picture comes: frames, bitrate, round trip, road and decode time (Ctrl+Alt+Shift+S)",
                     );
-                    if hidden.clicked() {
-                        hidden.surrender_focus();
-                        privacy_ask = Some(if hide {
-                            wire::PRIVACY_HIDE
-                        } else {
-                            wire::PRIVACY_SHOW
-                        });
+                    if stats.clicked() {
+                        stats.surrender_focus();
+                        switch_stats(shared, config, stats_on);
                     }
-                }
-                if ended.is_none() && status.phase == Phase::Showing {
-                    let mut lock_on = lock_on_close;
-                    let lock_switch = ui
-                        .checkbox(&mut lock_on, "Lock it when I close the window")
-                        .on_hover_text(format!(
-                            "Lock {} as this window closes, with its own lock. Its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer.",
-                            wanted.name
-                        ));
-                    if lock_switch.clicked() {
-                        lock_switch.surrender_focus();
-                        switch_lock(shared, config, lock_on);
+                    if let Some((_, since)) = &recording {
+                        let secs = since.elapsed().as_secs();
+                        ui.colored_label(
+                            egui::Color32::LIGHT_GRAY,
+                            format!("Recording {}:{:02}", secs / 60, secs % 60),
+                        );
+                        ctx.request_repaint_after(Duration::from_secs(1));
+                    } else if let Some(note) = &saved {
+                        ui.colored_label(egui::Color32::LIGHT_GRAY, note);
+                        ctx.request_repaint_after(SAVED_NOTE);
                     }
-                }
-                let shot = ui
-                    .add_enabled(drawn.is_some(), egui::Button::new("Screenshot"))
-                    .on_hover_text("Save the computer's screen as a picture, and copy it");
-                if shot.clicked() {
-                    shot.surrender_focus();
-                    screenshot(shared, &ctx, &wanted.name);
-                }
-                let record = ui
-                    .add_enabled(
-                        drawn.is_some() || record_want,
-                        egui::Button::new(if record_want { "Stop" } else { "Record" }),
-                    )
-                    .on_hover_text("Record the computer's screen as a video, as it comes");
-                if record.clicked() {
-                    record.surrender_focus();
-                    lock(shared).record_want = !record_want;
-                }
-                let full = ui.button(if fullscreen {
-                    "Exit full screen"
-                } else {
-                    "Full screen"
                 });
-                if full.clicked() {
-                    full.surrender_focus();
-                    lock(shared).fullscreen = !fullscreen;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
-                }
-                let stats = ui.checkbox(&mut stats_on, "Stats").on_hover_text(
-                    "Show how the picture comes: frames, bitrate, round trip, road and decode time (Ctrl+Alt+Shift+S)",
-                );
-                if stats.clicked() {
-                    stats.surrender_focus();
-                    switch_stats(shared, config, stats_on);
-                }
-                if let Some((_, since)) = &recording {
-                    let secs = since.elapsed().as_secs();
-                    ui.colored_label(
-                        egui::Color32::LIGHT_GRAY,
-                        format!("Recording {}:{:02}", secs / 60, secs % 60),
+                // What keeps the picture from showing, over a picture that
+                // stopped (BK7 review M6).
+                if ended.is_none()
+                    && drawn.is_some()
+                    && let Some(note) = &status.note
+                {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY))
+                            .wrap(),
                     );
-                    ctx.request_repaint_after(Duration::from_secs(1));
-                } else if let Some(note) = &saved {
-                    ui.colored_label(egui::Color32::LIGHT_GRAY, note);
-                    ctx.request_repaint_after(SAVED_NOTE);
+                }
+                if ended.is_none()
+                    && status.phase == Phase::Showing
+                    && let Some(words) = control_words(&wanted.name, status.control, view_only)
+                {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
+                            .wrap(),
+                    );
+                }
+                if ended.is_none()
+                    && let Some(words) = privacy_words(&wanted.name, &status.privacy)
+                {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
+                            .wrap(),
+                    );
                 }
             });
-            // What keeps the picture from showing, over a picture that
-            // stopped (BK7 review M6).
-            if ended.is_none()
-                && drawn.is_some()
-                && let Some(note) = &status.note
-            {
-                ui.add(
-                    egui::Label::new(egui::RichText::new(note).color(egui::Color32::LIGHT_GRAY))
-                        .wrap(),
-                );
-            }
-            if ended.is_none()
-                && status.phase == Phase::Showing
-                && let Some(words) = control_words(&wanted.name, status.control, view_only)
-            {
-                ui.add(
-                    egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
-                        .wrap(),
-                );
-            }
-            if ended.is_none()
-                && let Some(words) = privacy_words(&wanted.name, &status.privacy)
-            {
-                ui.add(
-                    egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
-                        .wrap(),
-                );
-            }
         });
 
     // The toolbar's choices.
@@ -1500,8 +1506,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Computer screen")
                 });
-                if response.clicked()
-                    || response.drag_started()
+                // Locked, a click is the other computer's alone.
+                if (!pointer_locked && (response.clicked() || response.drag_started()))
                     || !ui.memory(|m| m.focused().is_some())
                 {
                     response.request_focus();
@@ -3176,6 +3182,110 @@ mod tests {
         ];
         keep_chord_here(&mut events);
         assert_eq!(events.len(), 1, "only the plain M goes on");
+    }
+
+    /// PR #563 review I2: while the pointer is locked the bar is off, so a
+    /// click where its "Lock the pointer" sits (where Wayland's locked
+    /// pointer rests after the bar locked it) goes to the other computer
+    /// alone and leaves the lock on. Nothing is grabbed: a test window
+    /// sends its viewport commands nowhere.
+    #[test]
+    fn a_click_on_the_bar_while_locked_is_the_other_computers() {
+        use egui_kittest::kittest::Queryable;
+        use std::io::Read;
+        let dir = std::env::temp_dir().join(format!("pd-computer-lockbar-{}", std::process::id()));
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let writer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut relay, _) = listener.accept().unwrap();
+        let (w, h) = (64usize, 36usize);
+        let shared = Arc::new(Mutex::new(State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            status: ViewStatus {
+                phase: Phase::Showing,
+                control: Some(true),
+                ..ViewStatus::default()
+            },
+            writer: Some(writer),
+            picture: Some(Picture {
+                width: w,
+                height: h,
+                planes: Planes::Rgba,
+                data: vec![0; w * h * 4],
+                colour: Default::default(),
+            }),
+            size: Some((w as u16, h as u16)),
+            ..State::default()
+        }));
+        let mut harness = egui_kittest::Harness::new_ui({
+            let (shared, dir) = (shared.clone(), dir.clone());
+            move |ui| draw(&shared, &dir, None, ui)
+        });
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .focused = Some(true);
+        harness.step();
+        let switch = harness.get_by_label("Lock the pointer").rect().center();
+        let all = egui::Modifiers {
+            alt: true,
+            ctrl: true,
+            shift: true,
+            mac_cmd: false,
+            command: true,
+        };
+        harness.key_press_modifiers(all, egui::Key::M);
+        harness.step();
+        harness.step();
+        assert!(lock(&shared).pointer.locked(), "the chord locked it");
+        harness.hover_at(switch);
+        harness.drag_at(switch);
+        harness.step();
+        harness.drop_at(switch);
+        harness.step();
+        harness.step();
+        assert!(
+            lock(&shared).pointer.locked(),
+            "the bar's switch did nothing"
+        );
+        // The relay heard the lock and both halves of the click.
+        drop(harness);
+        lock(&shared).writer = None;
+        drop(shared);
+        relay
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut heard = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = relay.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            heard.extend_from_slice(&buf[..n]);
+        }
+        let mut reader = io::Cursor::new(heard);
+        let (mut locked, mut clicks) = (false, Vec::new());
+        while let Ok(message) = Message::read(&mut reader) {
+            match message {
+                Message::PointerLock(true) => locked = true,
+                Message::Input(bytes) => {
+                    if let Ok(InputPacket::MouseClick { button, pressed }) =
+                        InputPacket::decode(&bytes)
+                    {
+                        clicks.push((button, pressed));
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(locked);
+        assert_eq!(clicks, vec![(0, true), (0, false)]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PR #563 review I1: a write to the relay that fails ends the

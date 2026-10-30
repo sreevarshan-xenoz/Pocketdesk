@@ -230,8 +230,10 @@ pub fn commands(change: Change, mode: GrabMode, picture: egui::Rect) -> Vec<egui
                 GrabMode::Locked => CursorGrab::Locked,
                 GrabMode::Confined => CursorGrab::Confined,
             }),
-            // Into the picture, so a click there never lands on the bar
-            // (Wayland moves a locked pointer only after it is locked).
+            // Into the picture where the system moves it (Windows, X11).
+            // Wayland takes this only as where the pointer shows again on
+            // unlock: a locked pointer stays where it was, so the window
+            // turns its bar off while locked.
             egui::ViewportCommand::CursorPosition(picture.center()),
         ],
         Change::Free => vec![egui::ViewportCommand::CursorGrab(CursorGrab::None)],
