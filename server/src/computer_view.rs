@@ -2374,7 +2374,9 @@ pub async fn run_with(
                         // with nothing held is nothing, and one that crossed
                         // a grant is not left held.
                         v.privacy = None;
-                        tracing::info!(device_id = %v.device_id, "Privacy there refused: {why}");
+                        // Its words are the other computer's: the window
+                        // says them, the log does not (range review M7).
+                        tracing::info!(device_id = %v.device_id, "Privacy there refused");
                         say_privacy(v, watching, ViewPrivacy::Refused(why));
                     }
                     None => {}
