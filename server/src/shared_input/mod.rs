@@ -58,6 +58,7 @@ pub mod screens_wayland;
 pub mod share_test;
 pub mod sound;
 pub mod status;
+pub mod view_hold;
 pub mod wire;
 
 /// What a test logs, caught as text (no times, no colours), from debug up,

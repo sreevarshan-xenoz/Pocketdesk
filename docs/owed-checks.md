@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1028 open items.
+1036 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 157 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 158 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 112 |
+| A second computer | 119 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -529,6 +529,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
+**235. Pointer lock and relative mouse (PC7)**
+
+- On a test machine (never the owner's box), run `POCKETDESK_POINTER_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_grab_locks_and_frees -- --ignored` (without the variable it skips) and move the mouse during the five seconds: the pointer stays hidden and inside the window, the test reports relative moves above zero, and the pointer comes back free as the window closes. On Windows, and on the laptop under Hyprland (Wayland, locked in place) and under an X11 session if one is at hand (confined). (where: owner)
+
 **236. The rest of the pages (Desktop UX 4)**
 
 - On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), with nothing paired: Sessions, Files, Messages, Notifications, Phone files, Clipboard, Activity, Diagnostics and Logs each show a card saying what will show there and how, light and dark, nothing clipped at the smallest window; each button on them (Pair a phone, Open Devices, Turn it on in Settings, Clipboard settings) opens what it says. (where: owner)
@@ -1014,6 +1018,16 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - HEVC both ways: with `allow_hevc` on on the other computer, Stats say `HEVC` and the picture is right; another screen, or a resolution change there, restarts it at the new size; with "Use HEVC when both can" off here (next view) it is H.264 again. Note the bitrate Stats say for each codec on the same screen. (where: second computer)
 - Record a view that came as HEVC (Stats say `HEVC`) for ten seconds: the MKV plays in a player and is ten seconds long (`ffprobe` says `codec_name=hevc`). (where: second computer)
 - "Decode a computer's screen on the graphics card" off: the next view's Stats say `software`; on again, the card. Compare the ffmpeg sidecar's CPU in Task Manager (or `top` on the laptop) for the card and software at the same screen, 1440p and full motion. (where: second computer)
+
+**235. Pointer lock and relative mouse (PC7)**
+
+- The laptop viewing Windows, a 3D or mouse-look program in front on Windows (Blender's viewport fly mode, or a game in a window): Lock the pointer turns it as the mouse moves, with no edge stop; "Ctrl+Alt+Shift+M frees the pointer" shows for about 3 s; the chord frees it. Never the other way round with the owner's box grabbed. (where: second computer)
+- Windows (a test machine) viewing the laptop's headless sway stand-in, locked: `wev` on the stand-in counts relative motion events while the mouse moves (counts only), and none once freed (the moves go absolute again). (where: second computer)
+- Locked, each of these frees it at once and the pointer shows again: Ctrl+Alt+Shift pressed and let go alone (in full screen with “Send Win and Alt+Tab there” on, note that it also gives Win and Alt+Tab back to this computer until the window leaves full screen; Ctrl+Alt+Shift+M frees only the pointer); Alt+Tab or a click elsewhere (focus loss); View only; closing the window; the view dropping into Reconnecting. Coming back to the window does not lock again by itself. (where: second computer)
+- With the shared keyboard and mouse on and the laptop placed beside the viewing computer: locked, pushing against that edge (and pressing the switch key) never crosses, the badge says a screen window holds the pointer; freed, the edge crosses again. With a game in front holding the edges already, locking and freeing says nothing more. (where: second computer)
+- A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding; and a fast circle on a slow internet road comes back about where it started (a relative move the relay's full queue drops is owed and goes with the next, up to 256 counts each way; past that, after a long stall, the rest is dropped so the view never spins, PR #563 review M5 and re-review N4). (where: second computer)
+- Locked from the bar (on Wayland, where the hidden pointer stays on the bar's switch), click in the picture several times: each click reaches the far computer and the lock stays on; the bar looks greyed out until it is freed. (where: second computer)
+- Locked, stop the window answering (suspend the desktop app with Resource Monitor's Suspend Process on Windows or `kill -STOP` on Linux, on a test machine): within about 3 s the shared keyboard and mouse's edges lead on again, and the badge says so. (where: second computer)
 
 **236. The rest of the pages (Desktop UX 4)**
 

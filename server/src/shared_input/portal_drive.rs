@@ -317,6 +317,17 @@ impl<B: Backend> Glue<B> {
         }
         let actions = driver.set_driven(by.as_deref(), active_here);
         self.apply(driver, actions);
+        // A computer's screen window here holding the pointer (PC7) leads
+        // the edges nowhere meanwhile, as being driven does.
+        let held = super::view_hold::pointer_held();
+        if held != driver.view_held() {
+            tracing::info!(
+                held,
+                "Shared input: a screen window holds the pointer now, or no longer (no edge watched meanwhile)"
+            );
+        }
+        let actions = driver.set_view_held(held);
+        self.apply(driver, actions);
     }
 
     /// The sound of the computer driven plays here while the cursor is on

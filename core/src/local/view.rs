@@ -52,6 +52,12 @@ pub const PRIVACY_SHOW: u8 = 0;
 pub const PRIVACY_HIDE: u8 = 1;
 pub const PRIVACY_LOCK: u8 = 2;
 
+/// App → server: the window locked (`1`) or freed (`0`) its pointer (PC7),
+/// `[locked u8]`. Only while the window's latest word is "locked" does the
+/// relay pass on relative moves ([`InputPacket::MouseMove`]), and the shared
+/// keyboard and mouse here leave the screens' edges alone meanwhile.
+pub const POINTER_LOCK: u8 = 0x15;
+
 /// The longest input packet the app sends (a pasted text).
 pub const MAX_INPUT: usize = 16 * 1024;
 /// The longest status or reason.
@@ -187,6 +193,8 @@ pub enum Message {
     Focus(bool),
     /// [`PRIVACY_SHOW`], [`PRIVACY_HIDE`] or [`PRIVACY_LOCK`].
     Privacy(u8),
+    /// The window's pointer locked or freed (PC7).
+    PointerLock(bool),
 }
 
 impl Message {
@@ -218,6 +226,7 @@ impl Message {
             Message::Input(packet) => (INPUT, packet.clone()),
             Message::Focus(focused) => (FOCUS, vec![u8::from(*focused)]),
             Message::Privacy(ask) => (PRIVACY, vec![*ask]),
+            Message::PointerLock(locked) => (POINTER_LOCK, vec![u8::from(*locked)]),
         };
         let mut out = Vec::with_capacity(5 + payload.len());
         out.push(kind);
@@ -269,6 +278,7 @@ impl Message {
             INPUT if len > 0 && len <= MAX_INPUT => Message::Input(payload),
             FOCUS if len == 1 && payload[0] <= 1 => Message::Focus(payload[0] == 1),
             PRIVACY if len == 1 && payload[0] <= PRIVACY_LOCK => Message::Privacy(payload[0]),
+            POINTER_LOCK if len == 1 && payload[0] <= 1 => Message::PointerLock(payload[0] == 1),
             _ => return Err(bad()),
         })
     }
@@ -291,10 +301,15 @@ fn cut(words: &str) -> &str {
 }
 
 /// Whether the window may send `packet` to the other computer: the pointer,
-/// the keys, typed text, a keyframe ask, the quality preset and view-only.
-/// Nothing that measures the link, nor the mic, a pen, a pad, a crop or the
-/// laser: those are a phone's.
-pub fn input_allowed(packet: &InputPacket) -> bool {
+/// the keys, typed text, a keyframe ask, the quality preset and view-only,
+/// and relative moves only while its pointer is locked (`pointer_locked`, as
+/// the window last said with [`POINTER_LOCK`], PC7). Nothing that measures
+/// the link, nor the mic, a pen, a pad, a crop or the laser: those are a
+/// phone's.
+pub fn input_allowed(packet: &InputPacket, pointer_locked: bool) -> bool {
+    if matches!(packet, InputPacket::MouseMove { .. }) {
+        return pointer_locked;
+    }
     matches!(
         packet,
         InputPacket::MouseMoveAbs { .. }
@@ -413,6 +428,8 @@ mod tests {
             Message::Privacy(PRIVACY_SHOW),
             Message::Privacy(PRIVACY_HIDE),
             Message::Privacy(PRIVACY_LOCK),
+            Message::PointerLock(true),
+            Message::PointerLock(false),
             Message::Status(ViewStatus {
                 privacy: ViewPrivacy::Refused("Power is off".into()),
                 ..ViewStatus::default()
@@ -458,6 +475,10 @@ mod tests {
         assert!(Message::parse(PRIVACY, vec![3]).is_err());
         assert!(Message::parse(PRIVACY, vec![0xff]).is_err());
         assert!(Message::parse(PRIVACY, vec![1, 1]).is_err());
+        // PC7: a pointer lock is one byte, 0 or 1.
+        assert!(Message::parse(POINTER_LOCK, Vec::new()).is_err());
+        assert!(Message::parse(POINTER_LOCK, vec![2]).is_err());
+        assert!(Message::parse(POINTER_LOCK, vec![1, 0]).is_err());
         let not_json = Message::parse(STATUS, b"{nope".to_vec());
         assert!(not_json.is_err());
         // A status from a later server, with more to say, still reads.
@@ -567,10 +588,14 @@ mod tests {
             InputPacket::QualityPreset { preset: 2 },
             InputPacket::ViewOnly { enabled: true },
         ] {
-            assert!(input_allowed(&allowed), "{allowed:?}");
+            assert!(input_allowed(&allowed, false), "{allowed:?}");
+            assert!(input_allowed(&allowed, true), "{allowed:?} while locked");
         }
+        // PC7: a relative move only while the window's pointer is locked.
+        let relative = InputPacket::MouseMove { dx: 1, dy: -1 };
+        assert!(!input_allowed(&relative, false));
+        assert!(input_allowed(&relative, true));
         for refused in [
-            InputPacket::MouseMove { dx: 1, dy: 1 },
             InputPacket::Mic {
                 enabled: true,
                 opus: Vec::new(),
@@ -597,7 +622,8 @@ mod tests {
                 values: Vec::new(),
             },
         ] {
-            assert!(!input_allowed(&refused), "{refused:?}");
+            assert!(!input_allowed(&refused, false), "{refused:?}");
+            assert!(!input_allowed(&refused, true), "{refused:?} while locked");
         }
     }
 
