@@ -58,4 +58,20 @@ class HostStatusTest {
                 .none { it is HostStatus.Part.LastUsed },
         )
     }
+
+    /** PR #575 review I1: the card's own buckets, said from the app's plurals. */
+    @org.junit.Test
+    fun `how long ago falls into minutes hours and days`() {
+        val min = 60_000L
+        val now = 100L * 24 * 60 * min
+        org.junit.Assert.assertEquals(HostStatus.Ago.JustNow, HostStatus.ago(now - 59_999L, now))
+        org.junit.Assert.assertEquals("ahead of now", HostStatus.Ago.JustNow, HostStatus.ago(now + 3 * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Minutes(1), HostStatus.ago(now - min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Minutes(59), HostStatus.ago(now - 59 * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Hours(1), HostStatus.ago(now - 60 * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Hours(23), HostStatus.ago(now - (24 * 60 - 1) * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Days(1), HostStatus.ago(now - 24 * 60 * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.Days(6), HostStatus.ago(now - (7 * 24 * 60 - 1) * min, now))
+        org.junit.Assert.assertEquals(HostStatus.Ago.LongAgo, HostStatus.ago(now - 7 * 24 * 60 * min, now))
+    }
 }

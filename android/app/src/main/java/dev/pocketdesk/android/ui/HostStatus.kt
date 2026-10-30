@@ -49,4 +49,28 @@ object HostStatus {
         }
         if (lastUsed != null) add(Part.LastUsed(lastUsed))
     }
+
+    /**
+     * How long ago [at] was, as the card says it (PR #575 review I1: from
+     * the app's own plurals, so its language holds; Android's relative
+     * time follows the system's). A time ahead of [now] is just now.
+     */
+    sealed interface Ago {
+        data object JustNow : Ago
+        data class Minutes(val n: Int) : Ago
+        data class Hours(val n: Int) : Ago
+        data class Days(val n: Int) : Ago
+        data object LongAgo : Ago
+    }
+
+    fun ago(at: Long, now: Long): Ago {
+        val minutes = (now - at) / 60_000L
+        return when {
+            minutes < 1 -> Ago.JustNow
+            minutes < 60 -> Ago.Minutes(minutes.toInt())
+            minutes < 24 * 60 -> Ago.Hours((minutes / 60).toInt())
+            minutes < 7 * 24 * 60 -> Ago.Days((minutes / (24 * 60)).toInt())
+            else -> Ago.LongAgo
+        }
+    }
 }
