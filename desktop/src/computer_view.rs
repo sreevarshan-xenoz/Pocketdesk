@@ -668,9 +668,18 @@ fn switch_keys(shared: &Mutex<State>, state_dir: &Path, device_id: &str, on: boo
         device_id: device_id.to_string(),
         on,
     };
-    // The switch shows only while the window is connected, through this
-    // computer's server, which takes the ask (PR #573 review N5).
-    if let Err(e) = computers::request(state_dir, ask, now_unix()) {
+    // This computer's server takes the ask (PR #573 review N5): left for
+    // it all the same, in case it starts within the ask's two minutes.
+    let saved = computers::request(state_dir, ask, now_unix())
+        .map_err(|e| e.to_string())
+        .and_then(|_| {
+            if pocketdesk_core::local::server::is_running(state_dir) {
+                Ok(())
+            } else {
+                Err("Pocketdesk's server is not running here".to_string())
+            }
+        });
+    if let Err(e) = saved {
         eprintln!("Pocketdesk: Keys by position not saved for this computer: {e}");
         state.saved_note = Some((format!("Not saved: {e}"), Instant::now()));
     }
