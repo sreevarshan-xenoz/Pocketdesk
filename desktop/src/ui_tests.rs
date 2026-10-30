@@ -2121,8 +2121,9 @@ fn the_sharing_pages_say_what_shows_there() {
     go_to(&app, Tab::Messages);
     app.run_steps(3);
     assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
+    // With none paired it says to pair first (PR #567 review).
     assert!(
-        app.query_by_label(crate::messages_view::EMPTY_HOW)
+        app.query_by_label(crate::messages_view::EMPTY_PAIR_FIRST)
             .is_some()
     );
     app.get_by_label("Pair a phone").click();
@@ -2142,6 +2143,10 @@ fn phone_files_with_no_phone_linked_opens_devices() {
     let mut app = fixture.open(Some(Tab::Messages));
     assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
     assert!(app.query_by_label("Pair a phone").is_none());
+    assert!(
+        app.query_by_label(crate::messages_view::EMPTY_HOW)
+            .is_some()
+    );
     go_to(&app, Tab::Phone);
     app.run_steps(3);
     assert!(

@@ -19,6 +19,9 @@ const REFRESH: Duration = Duration::from_secs(2);
 pub const EMPTY: &str = "No texts yet";
 pub const EMPTY_HOW: &str =
     "On the phone, turn on \"Show texts on my computer\" in Pocketdesk's Settings.";
+/// The same with no phone paired: the step before.
+pub const EMPTY_PAIR_FIRST: &str =
+    "Pair a phone, then on it turn on \"Show texts on my computer\" in Pocketdesk's Settings.";
 
 /// One line in a conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,7 +218,12 @@ impl MessagesView {
                 // paired, the step before.
                 let pair = list
                     .with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        crate::widgets::empty(ui, EMPTY, EMPTY_HOW, |ui| {
+                        let how = if devices.is_empty() {
+                            EMPTY_PAIR_FIRST
+                        } else {
+                            EMPTY_HOW
+                        };
+                        crate::widgets::empty(ui, EMPTY, how, |ui| {
                             devices.is_empty() && ui.button("Pair a phone").clicked()
                         })
                     })
