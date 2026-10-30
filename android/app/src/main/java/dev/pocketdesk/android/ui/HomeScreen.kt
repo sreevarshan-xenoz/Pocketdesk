@@ -313,6 +313,16 @@ fun HomeScreen(
             if (Prefs.healthDismissed(context) != null) Prefs.setHealthDismissed(context, null)
         }
     }
+    // UX1: the cards' "Used 2 min ago", read once per list and resume
+    // (review N3: not from the preferences at every recomposition), and the
+    // clock it is told against, a tick a minute while Home shows.
+    val lastUsed = remember(hosts, resumes) { hosts.associate { it.address to HostStore.lastUsed(context, it.address) } }
+    val minuteNow by produceState(System.currentTimeMillis(), resumes) {
+        while (true) {
+            value = System.currentTimeMillis()
+            delay(60_000L - value % 60_000L)
+        }
+    }
     // The Health card's Choose opens the picker itself (E6).
     val chooseFolder = rememberDownloadFolderPicker()
     val showHealth = Prefs.healthAlerts(context) &&
@@ -522,8 +532,8 @@ fun HomeScreen(
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         unpairedByIt = host.address in refusers,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
-                        // Read again with the list, which a connection reorders.
-                        lastUsed = hosts.let { HostStore.lastUsed(context, host.address) },
+                        lastUsed = lastUsed[host.address],
+                        now = minuteNow,
                         onRemote = { onRemote(host) },
                         onSound = { onSound(host) },
                         onCast = { onCast(host) },
@@ -914,6 +924,7 @@ private fun HostCard(
     unpairedByIt: Boolean,
     hasWake: Boolean,
     lastUsed: Long?,
+    now: Long,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
     onSound: () -> Unit,
@@ -946,7 +957,7 @@ private fun HostCard(
                 Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed)),
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed), now),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1048,7 +1059,7 @@ private fun HostCard(
 
 /** The card's status line: [HostStatus]'s parts in words, "On this network" in the accent colour. */
 @Composable
-private fun statusLine(parts: List<HostStatus.Part>, now: Long = System.currentTimeMillis()): AnnotatedString {
+private fun statusLine(parts: List<HostStatus.Part>, now: Long): AnnotatedString {
     val accent = MaterialTheme.colorScheme.primary
     val error = MaterialTheme.colorScheme.error
     val words = parts.map { part ->
