@@ -203,8 +203,14 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                         );
                     }
                 }
-                ComputerAsk::StopView { session_id } => {
+                ComputerAsk::StopView { session_id, lock } => {
                     if let Some(views) = &views {
+                        // The window's lock on close that did not reach the
+                        // relay goes first (PR #568 review I2).
+                        if lock {
+                            let ask = crate::computer_view::Command::LockAsItStops { session_id };
+                            let _ = views.send(ask).await;
+                        }
                         let stop = crate::computer_view::Command::Stop { session_id };
                         let _ = views.send(stop).await;
                     }

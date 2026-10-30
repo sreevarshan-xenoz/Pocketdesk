@@ -1292,6 +1292,110 @@ async fn privacy_stays_for_a_window_that_joins_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// PR #568 review I2: a lock on close that did not reach the relay (the
+/// window between joins, or its write failed) comes with the stop: privacy
+/// held is let go, then the lock asked, its refusal said here; one for a
+/// view already gone is said here as not done.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lock_on_close_carried_by_the_stop_is_asked_or_said() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-lock-stop");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let (told_tx, mut told) = mpsc::unbounded_channel::<String>();
+    let mut host = stand_in_host(
+        move |_, body| {
+            let _ = asked_tx.send(body);
+        },
+        answers_rx,
+    );
+    host.notice = Arc::new(move |words| {
+        let _ = told_tx.send(words);
+    });
+    let (commands, relay, mut window) = controlled_view(&dir, addr, cert, host).await;
+    let wait = Duration::from_secs(5);
+    window
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let grab = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(grab["action"], "grab");
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&grab, serde_json::json!({"ok": true, "grabbed": 2})),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    // The window went with no word (between joins); its stop carries the
+    // lock.
+    drop(window);
+    commands
+        .send(Command::LockAsItStops { session_id: None })
+        .await
+        .unwrap();
+    commands
+        .send(Command::Stop { session_id: None })
+        .await
+        .unwrap();
+    let release = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(release["action"], "release", "privacy let go first");
+    let lock = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (&lock["action"], &lock["lock"]),
+        (&"status".into(), &true.into())
+    );
+    answers
+        .send((
+            "desk".into(),
+            answer_to(
+                &lock,
+                serde_json::json!({"ok": false, "error": "that switch is off there"}),
+            ),
+        ))
+        .await
+        .unwrap();
+    let said = tokio::time::timeout(wait, told.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(said, "Couldn't lock Desk: that switch is off there");
+    // No view now: said as not done, nothing asked.
+    commands
+        .send(Command::LockAsItStops { session_id: None })
+        .await
+        .unwrap();
+    let said = tokio::time::timeout(wait, told.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(said.starts_with("Couldn't lock "), "{said}");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), asked.recv())
+            .await
+            .is_err(),
+        "nothing asked of a computer with no view"
+    );
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A stand-in for the computer shown (PC8): what the relay asks of it goes
 /// to `asked`, with the computer's id; its answers come from `answers`.
 /// Nothing is grabbed or locked.

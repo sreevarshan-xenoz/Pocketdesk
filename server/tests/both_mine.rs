@@ -130,7 +130,15 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
     let seen = watch(state, other, 8);
     assert_eq!(sessions_from(other_state, me), 1, "listed there");
     let session_id = wire::read(state).map(|v| v.session_id);
-    computers::request(state, ComputerAsk::StopView { session_id }, pin::now_unix()).unwrap();
+    computers::request(
+        state,
+        ComputerAsk::StopView {
+            session_id,
+            lock: false,
+        },
+        pin::now_unix(),
+    )
+    .unwrap();
     wait_for(30, "the session gone", || {
         (sessions_from(other_state, me) == 0).then_some(())
     });

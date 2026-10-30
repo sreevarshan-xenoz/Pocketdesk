@@ -3187,7 +3187,7 @@ Built 2026-10-30. While a computer's screen window controls that computer, its b
 - [ ] With a phone holding privacy on the laptop first, Hide what I do there says another phone or computer holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)
 - [ ] Lock it when I close the window on, the switch on there: quit Pocketdesk here from the tray with the window open (showing the laptop): the laptop locks, the app is gone within about a second, and the laptop's session list no longer shows the view. With the window reconnecting as you quit, it does not lock. (where: second computer)
 - [ ] With Hide what I do there on, stall the window's writes (on a test machine: slow the link with `clumsy` on Windows or `tc qdisc ... netem delay 2000ms` on the laptop while dragging the mouse fast, so the relay's input queue fills): the window's connection ends and it joins again within a second, the bar stays “hidden” and the laptop's keyboard and touchpad stay blocked throughout (no “Privacy ended: the window closed”). (where: second computer)
-- [ ] Lock it when I close the window on, the pointer locked, the link slowed as above: close the window during a stall: the laptop still locks (the lock goes before the pointer's free). (where: second computer)
+- [ ] Lock it when I close the window on, the pointer locked, the link slowed as above: close the window during a stall: the laptop locks (the lock goes before the pointer's free, and one that cannot be written goes with the stop), or a “Couldn't lock” notification here says why; never neither. (where: second computer)
 
 ## 234. A faster picture: hardware decode, NV12 and HEVC (PC5)
 

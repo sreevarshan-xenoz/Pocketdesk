@@ -221,6 +221,11 @@ pub enum Command {
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one shown now.
     Stop { session_id: Option<u64> },
+    /// Lock the computer of the view `session_id` (or of the one shown now)
+    /// as its window closes (PR #568 review I2): the window's own lock ask
+    /// did not reach this relay. Its privacy is let go first; with no such
+    /// view, the owner is told it could not lock.
+    LockAsItStops { session_id: Option<u64> },
     /// The computer `device_id` was forgotten here (PR #551 review I1): its
     /// view, if shown, ends.
     Forgotten { device_id: String },
@@ -1788,6 +1793,22 @@ pub async fn run_with(
                             if view.as_ref().is_some_and(|v| v.device_id == device_id) =>
                         {
                             end(&mut view, &mut viewer, &state_dir, Some(NOT_PAIRED));
+                        }
+                        Command::LockAsItStops { session_id } => {
+                            match view.as_mut().filter(|v| {
+                                stops(session_id, Some(v.session_id)) && v.ended.is_none()
+                            }) {
+                                Some(v) => {
+                                    if let Some(hold) = v.privacy.take() {
+                                        hold.let_go();
+                                    }
+                                    lock_pending = Some(ask_lock(&v.device_id, &v.name));
+                                }
+                                None => privacy_notice(lock_failed_words(
+                                    "the other computer",
+                                    "its view had already ended.",
+                                )),
+                            }
                         }
                         _ => {}
                     }

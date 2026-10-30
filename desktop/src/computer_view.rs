@@ -763,8 +763,8 @@ fn quit_view(state_dir: &Path, state: &mut State) {
         return;
     }
     hold_writes_short(state);
-    say_closing(state);
-    stop_view(state_dir, state);
+    let lock = say_closing(state);
+    stop_view(state_dir, state, lock);
     state.wanted = None;
     // The keyboard grab comes out with the window (PC4).
     #[cfg(windows)]
@@ -882,8 +882,10 @@ pub fn redial_without_hevc(step: Step, codec: Option<Codec>, refused: bool) -> b
 
 /// Let go of what is held there, then end the view on the server: the
 /// view this window shows, when it reached one (BK7 review M1). Its end is
-/// no longer this window's to say.
-fn stop_view(state_dir: &Path, state: &mut State) {
+/// no longer this window's to say. `lock`: the lock on close did not reach
+/// the relay, so the server is asked to lock with the stop (PR #568 review
+/// I2), and says so if it cannot.
+fn stop_view(state_dir: &Path, state: &mut State, lock: bool) {
     // The clipboard comes back as the window goes (PC3).
     if let Some(edge) = state.edges.leave() {
         say_focus(state, edge);
@@ -900,7 +902,10 @@ fn stop_view(state_dir: &Path, state: &mut State) {
     state.asked += 1;
     let _ = computers::request(
         state_dir,
-        ComputerAsk::StopView { session_id: shown },
+        ComputerAsk::StopView {
+            session_id: shown,
+            lock,
+        },
         now_unix(),
     );
 }
@@ -908,7 +913,7 @@ fn stop_view(state_dir: &Path, state: &mut State) {
 /// Cancel, while the server dials the other computer again after a drop
 /// (PC2): the view stops there, and the window says so, with Reconnect.
 fn cancel_reconnect(state_dir: &Path, state: &mut State) {
-    stop_view(state_dir, state);
+    stop_view(state_dir, state, false);
     let name = state
         .wanted
         .as_ref()
@@ -973,15 +978,28 @@ fn say_privacy(state: &mut State, ask: u8) {
 /// chosen (PC8), on its own and first, then the pointer let go (PC7). A
 /// free whose write stalls ends the connection, so it went second (PR #563
 /// re-review): the lock never waits on it, and the connection's end lets go
-/// of the pointer at the relay anyway.
-fn say_closing(state: &mut State) {
+/// of the pointer at the relay anyway. Whether the lock is still owed: it
+/// was chosen but did not reach the relay (no connection, as between joins
+/// after a stall, or its write failed), for the stop to carry (PR #568
+/// review I2).
+fn say_closing(state: &mut State) -> bool {
+    let mut owed = false;
     if let Some(ask) = closing_ask(state.lock_on_close, state.status.phase) {
         say_privacy(state, ask);
+        owed = lock_owed(state.writer.is_some(), state.ended.is_some());
     }
     if state.pointer.locked() || state.pointer_said == Some(true) {
         say_pointer(state, false);
     }
     state.pointer = PointerLock::default();
+    owed
+}
+
+/// Whether a lock on close asked is still owed after its write: the
+/// connection is gone (never there, or the write failed and ended it), and
+/// the view did not end meanwhile.
+pub fn lock_owed(connected: bool, ended: bool) -> bool {
+    !connected && !ended
 }
 
 /// Say the window's pointer lock to the server (PC7): only while it says
@@ -1147,11 +1165,11 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     };
     if ctx.input(|i| i.viewport().close_requested()) {
-        say_closing(&mut state);
+        let lock = say_closing(&mut state);
         ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(
             egui::viewport::CursorGrab::None,
         ));
-        stop_view(state_dir, &mut state);
+        stop_view(state_dir, &mut state, lock);
         state.wanted = None;
         state.fullscreen = false;
         // The GPU's picture goes with the window (PR #562 review M5): now,
@@ -2681,7 +2699,10 @@ mod tests {
             pointer_said: Some(true),
             ..State::default()
         };
-        say_closing(&mut state);
+        relay
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        assert!(!say_closing(&mut state), "the lock reached the relay");
         assert_eq!(
             Message::read(&mut relay).unwrap(),
             Message::Privacy(wire::PRIVACY_LOCK)
@@ -2736,12 +2757,69 @@ mod tests {
         assert_eq!(
             asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
             [ComputerAsk::StopView {
-                session_id: Some(9)
+                session_id: Some(9),
+                lock: false,
             }]
         );
         // Nothing open: nothing said, nothing asked.
         quit_view(&dir, &mut state);
         assert!(computers::take_all(&dir, now_unix()).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #568 review I2: a window closed between joins (its stall ended the
+    /// connection, the next join not made yet) still asks the lock, on the
+    /// stop; one whose view ended, or without the option, does not.
+    #[test]
+    fn a_lock_on_close_with_no_connection_rides_the_stop() {
+        assert!(lock_owed(false, false));
+        assert!(!lock_owed(true, false), "it reached the relay");
+        assert!(!lock_owed(false, true), "the view ended");
+        let dir = std::env::temp_dir().join(format!("pd-computer-lockgap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let gap = |lock_on_close: bool, ended: Option<String>| State {
+            wanted: Some(Wanted {
+                device_id: "desk".into(),
+                name: "Desk".into(),
+                monitor: 0,
+            }),
+            lock_on_close,
+            ended,
+            status: ViewStatus {
+                phase: Phase::Showing,
+                ..ViewStatus::default()
+            },
+            ..State::default()
+        };
+        let stops = |dir: &Path| {
+            computers::take_all(dir, now_unix())
+                .into_iter()
+                .map(|r| r.ask)
+                .collect::<Vec<_>>()
+        };
+        quit_view(&dir, &mut gap(true, None));
+        assert_eq!(
+            stops(&dir),
+            [ComputerAsk::StopView {
+                session_id: None,
+                lock: true,
+            }]
+        );
+        quit_view(&dir, &mut gap(false, None));
+        quit_view(&dir, &mut gap(true, Some("The view of Desk ended.".into())));
+        assert_eq!(
+            stops(&dir),
+            [
+                ComputerAsk::StopView {
+                    session_id: None,
+                    lock: false,
+                },
+                ComputerAsk::StopView {
+                    session_id: None,
+                    lock: false,
+                }
+            ]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -2803,6 +2881,15 @@ mod tests {
         let took = started.elapsed();
         assert!(took < Duration::from_secs(1), "quit took {took:?}");
         assert!(state.wanted.is_none() && state.writer.is_none());
+        // The lock's write failed: the stop carries it (PR #568 review I2).
+        let asked = computers::take_all(&dir, now_unix());
+        assert_eq!(
+            asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
+            [ComputerAsk::StopView {
+                session_id: Some(9),
+                lock: true,
+            }]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3298,7 +3385,8 @@ mod tests {
         assert_eq!(
             sent.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
             [ComputerAsk::StopView {
-                session_id: Some(41)
+                session_id: Some(41),
+                lock: false,
             }]
         );
         let _ = std::fs::remove_dir_all(&dir);
