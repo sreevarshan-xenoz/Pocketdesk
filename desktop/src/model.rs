@@ -1482,13 +1482,16 @@ pub fn view_reach(
 }
 
 /// Whether Wake is offered for `computer` (PC6): the server runs (it
-/// sends the magic packet), the link is down, and the computer told this
-/// one how to wake it.
+/// sends the magic packet), the link is down but not refused (a computer
+/// that refused this one unpaired it, review M-7), and the computer told
+/// this one how to wake it.
 pub fn can_wake(
     computer: &pocketdesk_core::local::computers::PeerComputer,
     server_running: bool,
 ) -> bool {
-    server_running && computer.link != "linked" && computer.wake.is_some()
+    server_running
+        && !matches!(computer.link.as_str(), "linked" | "refused")
+        && computer.wake.is_some()
 }
 
 #[cfg(test)]

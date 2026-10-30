@@ -1059,6 +1059,11 @@ mod tests {
             ..sleeping(true)
         };
         assert!(!can_wake(&linked, true), "up already");
+        let refused = PeerComputer {
+            link: "refused".to_string(),
+            ..sleeping(true)
+        };
+        assert!(!can_wake(&refused, true), "unpaired there");
         assert!(!can_wake(&computer("away: x"), true), "never said");
         assert!(wake_note(true).contains("Wi-Fi rarely wakes"));
         assert!(wake_note(true).ends_with("Its adapter is Wi-Fi."));
