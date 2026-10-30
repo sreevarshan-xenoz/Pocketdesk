@@ -414,14 +414,14 @@ fun HomeScreen(
                 Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
                 // Not over a Home with nothing saved yet (UX1: it said "Your
                 // saved computers" above only a computer found on the network).
-                if (hosts.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.home_subtitle),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // Its line is kept empty, so the header does not change height
+                // as the first computer is saved (PR #575 review N8).
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (hosts.isNotEmpty()) stringResource(R.string.home_subtitle) else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             IconButton(onClick = onOpenSettings) {
                 LlIcon(LlIcons.Settings, stringResource(R.string.settings_title))
