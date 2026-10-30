@@ -2504,6 +2504,11 @@ impl PocketdeskApp {
         }
     }
 
+    /// Settings' "Tell me when my devices run different versions" (item 4).
+    fn version_hints(&self) -> bool {
+        self.config.as_ref().is_none_or(|c| c.version_hints)
+    }
+
     fn devices_tab(&mut self, ui: &mut egui::Ui) {
         if self.snapshot.devices.is_empty() {
             // U5: an empty page says what to do next, with the way there.
@@ -2545,6 +2550,8 @@ impl PocketdeskApp {
                     }
                     ui.label(battery_text(device.battery.as_ref(), now))
                         .on_hover_text("The phone's battery, as it last reported it in a session");
+                    // Item 4: the release it runs, and which to update.
+                    version_label(ui, device.version.as_deref(), self.version_hints());
                     // N1: ring a phone that keeps a link, with Ring on.
                     let can_ring = device.linked
                         && !device.computer
@@ -3331,6 +3338,9 @@ impl PocketdeskApp {
                                 crate::widgets::ask(ui.ctx(), crate::widgets::Ask::PairComputer);
                             }
                         });
+                        // Item 4: what a computer that dials this one said.
+                        self.computers
+                            .know_versions(&self.snapshot.devices, self.version_hints());
                         self.computers.show_list(
                             ui,
                             &self.state_dir,
@@ -4917,6 +4927,22 @@ fn phone_row(ui: &mut egui::Ui, devices: &[model::Device], id: &str) {
 /// Overview is drawn as a warning (I3).
 pub fn battery_low(battery: &pocketdesk_core::local::phone_status::PhoneBattery) -> bool {
     battery.charge <= 15 && !battery.charging
+}
+
+/// A device's release on its row (item 4), on Devices and under Other
+/// computers: muted, or as a warning when it asks for an update. Nothing
+/// for a device that says none.
+pub fn version_label(ui: &mut egui::Ui, version: Option<&str>, hints: bool) {
+    let Some((words, update)) = model::version_words(version, hints) else {
+        return;
+    };
+    let color = if update {
+        crate::theme::warn(ui)
+    } else {
+        crate::theme::muted(ui)
+    };
+    ui.label(RichText::new(words).color(color))
+        .on_hover_text(model::version_hover());
 }
 
 /// A phone's last battery report for the Devices tab (T8b): its charge,

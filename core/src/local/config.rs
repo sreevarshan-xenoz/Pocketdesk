@@ -429,6 +429,12 @@ pub struct Config {
     /// were told. On by default.
     #[serde(default = "default_true")]
     pub computer_wake_facts: bool,
+    /// Say what to update when a paired phone or computer runs another
+    /// Pocketdesk release than this one (item 4): "runs 0.8.1, older than
+    /// this one: update it". Off, the release is still shown, plainly.
+    /// Read by the desktop app; nothing asks the internet. On by default.
+    #[serde(default = "default_true")]
+    pub version_hints: bool,
 }
 
 fn default_computer_view_quality() -> String {
@@ -658,6 +664,7 @@ impl Default for Config {
             computer_view_lock_on_close: false,
             computer_view_mic_device: None,
             computer_wake_facts: true,
+            version_hints: true,
         }
     }
 }
@@ -922,6 +929,7 @@ impl Config {
         "computer_view_lock_on_close",
         "computer_view_mic_device",
         "computer_wake_facts",
+        "version_hints",
     ];
 }
 
@@ -1340,6 +1348,24 @@ phone_battery = \"x\"
             upper.computer_view_preset(),
             crate::streaming::input_packet::PRESET_BALANCED
         );
+    }
+
+    /// Item 4: the version hints are on until turned off, and the choice
+    /// saves and reads back.
+    #[test]
+    fn version_hints_are_on_until_turned_off() {
+        let path = temp("version-hints");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().version_hints);
+        assert!(Config::default().version_hints);
+        let chosen = Config {
+            version_hints: false,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["version_hints"]).unwrap();
+        assert!(!Config::load_from(&path).unwrap().version_hints);
+        assert_eq!(Config::default().changed_keys(&chosen), ["version_hints"]);
+        let _ = std::fs::remove_file(path);
     }
 
     /// PC6: this computer tells its computers how to wake it unless turned

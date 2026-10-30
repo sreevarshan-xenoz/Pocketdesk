@@ -283,6 +283,70 @@ fn unpair_asks_by_name_and_only_the_answer_unpairs() {
     assert!(!store.is_trusted(PHONE), "Unpair removes it");
 }
 
+/// Item 4: a phone's row says the release it runs and which to update;
+/// with the hints off, only the release.
+#[test]
+fn devices_say_the_release_each_runs() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    TrustStore::update(fixture.state().join(TRUST_FILE), |store| {
+        store.note_claimed_version(PHONE, "0.0.1")
+    })
+    .expect("a version");
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("runs 0.0.1, older than this one: update it")
+            .is_some()
+    );
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "version_hints = false
+",
+    )
+    .expect("config");
+    let mut app = fixture.open(Some(Tab::Devices));
+    app.run_steps(3);
+    assert!(app.query_by_label("runs 0.0.1").is_some(), "hints off");
+}
+
+/// Item 4: a computer under Other computers says the release it said on
+/// the link this one dials.
+#[test]
+fn other_computers_say_the_release_each_runs() {
+    let fixture = Fixture::new();
+    let id = "00000000-0000-4000-8000-0000000000d4";
+    pocketdesk_core::local::computers::update(fixture.state(), |file| {
+        file.computers
+            .push(pocketdesk_core::local::computers::PeerComputer {
+                device_id: id.to_string(),
+                name: "Test Desk".to_string(),
+                addresses: Vec::new(),
+                control_port: 1716,
+                stream_port: 4716,
+                fingerprint: String::new(),
+                endpoint: None,
+                paired_unix: 0,
+                link: String::new(),
+                link_unix: 0,
+                lets_drive: false,
+                mine: false,
+                wake: None,
+                viewed_unix: 0,
+            });
+        file.note_version(id, "999.0.0");
+    })
+    .expect("a computers file");
+    let mut app = fixture.open(Some(Tab::Settings));
+    find(&app).focus();
+    find(&app).type_text("Other computers");
+    app.run_steps(3);
+    assert!(
+        app.query_by_label("runs 999.0.0, newer than this one: update this one")
+            .is_some()
+    );
+}
+
 /// BA3: a computer is unpaired by the server, so with it stopped, Unpair
 /// waits for it, as Pair does.
 #[test]

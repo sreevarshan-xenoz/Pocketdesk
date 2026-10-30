@@ -185,6 +185,7 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Phones,
     ),
     ("open_links", "Links from phones", Section::Phones),
+    ("version_hints", VERSION_HINTS, Section::Phones),
     ("link_rules", "Links by site", Section::Phones),
     ("share_state", "This computer's state", Section::Phones),
     ("phone_battery_alerts", "Phones' batteries", Section::Phones),
@@ -452,6 +453,9 @@ pub fn name(key: &str) -> &'static str {
         .unwrap_or("A setting")
 }
 
+/// Settings' name for the version hints switch (item 4), as the phone's.
+pub const VERSION_HINTS: &str = "Tell me when my devices run different versions";
+
 /// "Send from the browser", beside Phones' rows (J2: found by its name).
 pub const EXTRA_BROWSER: &str = "Send from the browser";
 /// The file manager's "Send to phone", beside Phones' rows.
@@ -617,6 +621,8 @@ fn section_of(key: &str) -> Option<Section> {
 pub fn applies_live(key: &str) -> bool {
     matches!(
         key,
+        // Item 4: read by this app as it draws a device's row.
+        "version_hints" |
         // Read by the server at each nearby computer's ask.
         "nearby_pairing"
             // BK7: read by this app as a computer's window opens.
@@ -1618,6 +1624,17 @@ impl SettingsForm {
                         );
                     });
                 }
+                // Item 4: which device to update, beside its release.
+                row(ui, "version_hints", |ui| {
+                    ui.checkbox(
+                        &mut e.version_hints,
+                        "say which to update when a phone or computer runs another Pocketdesk release than this one",
+                    );
+                    note(
+                        ui,
+                        "Each device says its release as it connects, shown on Devices and under Other computers, such as: runs 0.8.1, older than this one: update it. Off, the release is still shown. Nothing asks the internet for the newest release.",
+                    );
+                });
                 if drawn_here("mic_relay_device") {
                     let mic = &mut self.mic_device_text;
                     row(ui, "mic_relay_device", |ui| {
@@ -2998,6 +3015,18 @@ mod tests {
 
     /// PC6: letting the other computers wake this one is with them, and
     /// waits for a restart: the links are told as they come up.
+    /// Item 4: the version hints are with the phones, apply at once and
+    /// are drawn everywhere.
+    #[test]
+    fn the_version_hints_are_with_the_phones() {
+        let key = "version_hints";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Tell me when my devices run different versions"
+            && *s == Section::Phones));
+        assert!(applies_live(key));
+        assert!(drawn_here(key));
+    }
+
     #[test]
     fn letting_computers_wake_this_one_is_with_the_computers() {
         let key = "computer_wake_facts";

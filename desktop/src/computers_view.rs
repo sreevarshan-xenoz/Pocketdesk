@@ -67,6 +67,11 @@ pub struct ComputersView {
     offer: Option<String>,
     /// PC6: a computer woken to show its screen, until its link comes.
     waking: Option<Waking>,
+    /// Item 4: the release each paired device said it runs to this
+    /// computer's server, by id (a computer that dials this one says it
+    /// there), and whether to say which to update.
+    versions: std::collections::HashMap<String, String>,
+    version_hints: bool,
 }
 
 /// How long "Wake it and show" waits for the computer's link (PC6): a
@@ -401,6 +406,24 @@ impl ComputersView {
         &self.file.computers
     }
 
+    /// What the paired devices said they run (item 4), from the app's
+    /// snapshot, and Settings' hints switch.
+    pub fn know_versions(&mut self, devices: &[crate::model::Device], hints: bool) {
+        self.versions = devices
+            .iter()
+            .filter_map(|d| Some((d.id.clone(), d.version.clone()?)))
+            .collect();
+        self.version_hints = hints;
+    }
+
+    /// The release `computer` runs: as it said on the link this one dials,
+    /// else as it said dialing this one.
+    fn version_of(&self, computer: &PeerComputer) -> Option<&str> {
+        self.file
+            .version(&computer.device_id)
+            .or_else(|| self.versions.get(&computer.device_id).map(String::as_str))
+    }
+
     fn refresh(&mut self, state_dir: &Path) {
         let every = if self.pairing.is_some() || self.waking.is_some() {
             PAIRING_REFRESH
@@ -722,6 +745,8 @@ impl ComputersView {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(RichText::new(&computer.name).strong());
                     ui.label(RichText::new(link_words(computer)).weak());
+                    // Item 4: the release it runs, and which to update.
+                    crate::app::version_label(ui, self.version_of(computer), self.version_hints);
                     // PC1: paired both ways, with consent given at pairing; the
                     // grant here waits for the link (review M1).
                     if computer.mine && self.file.lapsed.contains(&computer.device_id) {
