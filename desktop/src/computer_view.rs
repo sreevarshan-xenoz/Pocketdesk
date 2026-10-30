@@ -2178,7 +2178,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             | Message::Input(_)
             | Message::Focus(_)
             | Message::Privacy(_)
-            | Message::PointerLock(_) => {}
+            | Message::PointerLock(_)
+            | Message::Mic(_) => {}
         }
     }
 }

@@ -1248,6 +1248,7 @@ mod tests {
                         key: *code,
                         pressed: true
                     },
+                    false,
                     false
                 ));
             }
