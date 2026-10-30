@@ -84,7 +84,6 @@ fun SettingsScreen(onBack: () -> Unit) {
 
     val scroll = rememberScrollState()
     val jumps = remember { SettingsJumps() }
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -99,13 +98,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
         },
     ) { padding ->
+        // The search box and the groups' row stay on screen above the
+        // scrolled settings (PR #575 review N4: in the scroll, the row was
+        // above the fold after a first jump).
         Column(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(scroll)
-                    .padding(bottom = 24.dp),
+                    .padding(padding),
         ) {
             // O8: find a setting; Back empties the box first.
             OutlinedTextField(
@@ -134,25 +134,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
             // UX1: the groups, to jump to one; not while searching, when the
             // search already shows only what matches.
-            if (!SettingsSearch.searching(query)) {
-                val groups = jumps.ordered()
-                if (groups.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        groups.forEach { (label, top) ->
-                            SuggestionChip(
-                                onClick = { scope.launch { scroll.animateScrollTo(top) } },
-                                label = { Text(label) },
-                            )
-                        }
-                    }
-                }
-            }
+            SettingsJumpRow(jumps, scroll, shown = !SettingsSearch.searching(query))
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(scroll)
+                    .padding(bottom = 24.dp),
+            ) {
             if (filter.nothingFound()) {
                 Text(
                     stringResource(R.string.settings_find_none, query.trim()),
@@ -655,6 +643,36 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
             }
+            }
+        }
+    }
+}
+
+/**
+ * UX1: a row of Settings' groups that scrolls [scroll] to the one tapped.
+ * Its own composable, so only it reads where the headings are (PR #575
+ * review N5: read in the screen's lambda, each heading's place recomposed
+ * every row); its own scroll is kept while a search hides it.
+ */
+@Composable
+private fun SettingsJumpRow(jumps: SettingsJumps, scroll: androidx.compose.foundation.ScrollState, shown: Boolean) {
+    val scope = rememberCoroutineScope()
+    val rowScroll = rememberScrollState()
+    if (!shown) return
+    val groups = jumps.ordered()
+    if (groups.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rowScroll)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        groups.forEach { (label, top) ->
+            SuggestionChip(
+                onClick = { scope.launch { scroll.animateScrollTo(top) } },
+                label = { Text(label) },
+            )
         }
     }
 }
