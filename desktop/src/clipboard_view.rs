@@ -93,6 +93,13 @@ pub struct ClipboardView {
     search_focused: bool,
 }
 
+/// The history off, and nothing kept yet (UX 4).
+pub const OFF: &str = "The clipboard history is off";
+pub const EMPTY: &str = "Nothing copied yet";
+/// Why Send to… is off, said once above the texts.
+pub const SEND_OFF: &str =
+    "Send to… needs a phone with \"Share the clipboard\" on (Devices), linked now.";
+
 impl ClipboardView {
     pub fn show(
         &mut self,
@@ -103,13 +110,14 @@ impl ClipboardView {
         now_unix: u64,
     ) -> Option<Action> {
         if history == 0 {
-            ui.label(
-                "The history is off. With it on, the texts that cross between this computer and its phones, either way, are kept here, to copy or send again.",
-            );
-            return ui
-                .button("Turn it on in Settings")
-                .clicked()
-                .then_some(Action::OpenSettings);
+            return crate::widgets::empty(
+                ui,
+                OFF,
+                "With it on, texts that cross between this computer and its phones stay here, \
+                 to copy or send again.",
+                |ui| ui.button("Turn it on in Settings").clicked(),
+            )
+            .then_some(Action::OpenSettings);
         }
         if self.read_at.is_none_or(|at| at.elapsed() >= REFRESH) {
             self.entries = clip_history::read_limited(state_dir, history);
@@ -153,18 +161,21 @@ impl ClipboardView {
         });
         if self.entries.is_empty() {
             self.search_focused = false;
-            ui.label(
-                RichText::new("Nothing yet: copy something on a connected phone, or here with \"Clipboard to phones\" on.")
-                    .color(crate::theme::muted(ui)),
+            // The next step, with its button (E5), in a card (UX 4).
+            crate::widgets::empty(
+                ui,
+                EMPTY,
+                "Copy something on a linked phone, or here with \"Clipboard to phones\" on.",
+                |ui| {
+                    if devices.is_empty() {
+                        if ui.button("Pair a phone").clicked() {
+                            action = Some(Action::Pair);
+                        }
+                    } else if ui.button("Clipboard settings").clicked() {
+                        action = Some(Action::OpenSettings);
+                    }
+                },
             );
-            // The next step, with its button (E5).
-            if devices.is_empty() {
-                if ui.button("Pair a phone").clicked() {
-                    action = Some(Action::Pair);
-                }
-            } else if ui.button("Clipboard settings").clicked() {
-                action = Some(Action::OpenSettings);
-            }
             return action;
         }
         self.search_focused = crate::search_box::show(ui, &mut self.search).has_focus();
@@ -185,10 +196,13 @@ impl ClipboardView {
             return action;
         }
         let targets = targets(devices);
+        // UX 1's pattern: why every Send to… is off, once, not on hover only.
+        if targets.is_empty() {
+            crate::widgets::why_off(ui, SEND_OFF, None);
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for entry in shown {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                crate::theme::card(ui, |ui| {
                     let mut head = format!(
                         "{} · {}",
                         origin(entry, devices),

@@ -2079,3 +2079,100 @@ fn each_permission_group_switch_saves_its_permissions() {
         others_kept(&before, &kept, group);
     }
 }
+
+/// UX 4: with no phone paired, Notifications, Messages and Phone files
+/// each say in a card what shows there and how; Messages' new Pair a
+/// phone opens Pair.
+#[test]
+fn the_sharing_pages_say_what_shows_there() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Notifications));
+    assert!(app.query_by_label(crate::notes_view::EMPTY).is_some());
+    assert!(app.query_by_label(crate::notes_view::EMPTY_HOW).is_some());
+    go_to(&app, Tab::Phone);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::phone_files_view::NONE_PAIRED)
+            .is_some()
+    );
+    go_to(&app, Tab::Messages);
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
+    assert!(
+        app.query_by_label(crate::messages_view::EMPTY_HOW)
+            .is_some()
+    );
+    app.get_by_label("Pair a phone").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Pair.purpose()).is_some(),
+        "Pair opened"
+    );
+}
+
+/// UX 4: a phone paired but sharing no folders: Phone files says so, and
+/// Open Devices opens Devices; Messages offers no pairing.
+#[test]
+fn phone_files_with_no_folders_shared_opens_devices() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let mut app = fixture.open(Some(Tab::Messages));
+    assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
+    assert!(app.query_by_label("Pair a phone").is_none());
+    go_to(&app, Tab::Phone);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::phone_files_view::NONE_SHARING)
+            .is_some()
+    );
+    app.get_by_label(crate::phone_files_view::OPEN_DEVICES)
+        .click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Devices.purpose()).is_some(),
+        "Devices opened"
+    );
+}
+
+/// UX 4: the Clipboard's history off, empty, and with a text no phone can
+/// take: each says so in words, the last once above the texts.
+#[test]
+fn the_clipboard_says_why_it_is_empty_or_cannot_send() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label(crate::clipboard_view::OFF).is_some());
+    app.get_by_label("Turn it on in Settings").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Settings.purpose()).is_some(),
+        "Settings opened"
+    );
+
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "clipboard_history = 20\n",
+    )
+    .expect("config");
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label(crate::clipboard_view::EMPTY).is_some());
+    assert!(app.query_by_label("Clipboard settings").is_some());
+    assert!(
+        app.query_by_label(crate::clipboard_view::SEND_OFF)
+            .is_none()
+    );
+
+    use pocketdesk_core::local::clip_history::{ClipEntry, record};
+    record(
+        fixture.state(),
+        ClipEntry::new("the meeting link", None, 200),
+        20,
+    )
+    .expect("kept");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label("the meeting link").is_some());
+    assert!(
+        app.query_by_label(crate::clipboard_view::SEND_OFF)
+            .is_some()
+    );
+}

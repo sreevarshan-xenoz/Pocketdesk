@@ -15,6 +15,12 @@ use crate::model::Device;
 
 const REFRESH: Duration = Duration::from_secs(1);
 
+/// No phone paired, and none sharing folders now (UX 4).
+pub const NONE_PAIRED: &str = "No phone is paired yet";
+pub const NONE_SHARING: &str = "No phone shares folders now";
+/// The button to Devices, where a phone's Send files is.
+pub const OPEN_DEVICES: &str = "Open Devices";
+
 /// How long a list request waits for the phone's answer before the tab says so.
 const ANSWER_SECS: u64 = 15;
 
@@ -153,23 +159,24 @@ impl PhoneFilesView {
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();
         if phones.is_empty() {
             // The next step, with its button (E5).
+            // UX 4: a card each, with its button.
             if devices.is_empty() {
-                ui.label(RichText::new("No phone is paired yet.").color(crate::theme::muted(ui)));
-                if ui.button("Pair a phone").clicked() {
+                if crate::widgets::empty(
+                    ui,
+                    NONE_PAIRED,
+                    "The folders a paired phone shares show here.",
+                    |ui| ui.button("Pair a phone").clicked(),
+                ) {
                     self.go_to = Some(crate::app::Tab::Pair);
                 }
-            } else {
-                ui.label(
-                    RichText::new(
-                        "No phone that shares folders is linked now. A phone with folders shared \
-                         (\"Folders the computer may open\" in Pocketdesk's Settings on the phone) \
-                         stays linked to answer, through notification access.",
-                    )
-                    .color(crate::theme::muted(ui)),
-                );
-                if ui.button("Devices").clicked() {
-                    self.go_to = Some(crate::app::Tab::Devices);
-                }
+            } else if crate::widgets::empty(
+                ui,
+                NONE_SHARING,
+                "On the phone, turn on \"Folders the computer may open\" in Pocketdesk's \
+                 Settings; with \"Send files\" on in Devices, it stays linked to answer.",
+                |ui| ui.button(OPEN_DEVICES).clicked(),
+            ) {
+                self.go_to = Some(crate::app::Tab::Devices);
             }
             return;
         }
