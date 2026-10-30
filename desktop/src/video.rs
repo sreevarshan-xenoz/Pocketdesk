@@ -552,9 +552,10 @@ fn size_problem(w: usize, h: usize) -> Option<io::Error> {
 /// `nobuffer` is left out, as it drops the packets read while probing (the
 /// keyframe), and the rawvideo encoder holds a frame unless it runs on one
 /// thread. A card's way asks for the card's own frames and downloads them,
-/// so a card that cannot decode stops ffmpeg rather than leaving it to
-/// decode on the processor unsaid; `auto` cannot, so its log says which it
-/// took. The log is verbose for the lines read: the size, the colours and
+/// so a card that cannot decode gives no picture (ffmpeg stops, or with
+/// `-max_error_rate 1` may go on giving nothing) rather than decoding on
+/// the processor unsaid, and the window's 2 s rule takes the next way;
+/// `auto` cannot, so its log says which it took. The log is verbose for the lines read: the size, the colours and
 /// `auto`'s way.
 pub fn decoder_args(wanted: &DecodeWanted, fps_mode: &str) -> Vec<String> {
     let mut args: Vec<String> = ["-hide_banner", "-loglevel", "verbose", "-nostats"]
@@ -1390,9 +1391,11 @@ mod tests {
         assert_eq!(pictures[0].data.len(), Layout::new(318, 182).len());
     }
 
-    /// PC5: Direct3D 11 decodes where the card can (a machine without one
-    /// stops ffmpeg, the window's cue for the next way); `auto` decodes on
-    /// whatever it finds. Skipped without ffmpeg and libx264.
+    /// PC5: a card that cannot decode gives no picture at all, never one
+    /// decoded on the processor unsaid (PR #562 review M4: a VA-API node
+    /// that is not there, on any system); Direct3D 11 decodes where the
+    /// card can; `auto` decodes on whatever it finds. Skipped without
+    /// ffmpeg and libx264.
     #[test]
     fn a_card_decodes_or_stops_and_auto_decodes() {
         let Some(stream) = encoded("testsrc2=size=128x72:rate=10", 3) else {
@@ -1407,6 +1410,9 @@ mod tests {
         };
         let auto = decode(&wanted, &stream, 3);
         assert_eq!(auto.len(), 3, "auto decodes");
+        wanted.accel = Accel::Vaapi("/nonexistent/renderD999".into());
+        let none = decode(&wanted, &stream, 3);
+        assert!(none.is_empty(), "a card that is not there gave pictures");
         if cfg!(windows) {
             wanted.accel = Accel::D3d11va;
             let card = decode(&wanted, &stream, 3);
