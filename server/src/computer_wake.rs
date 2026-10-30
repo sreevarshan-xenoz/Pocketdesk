@@ -94,7 +94,12 @@ fn seed_packet_as(
     if !is_computer {
         return None;
     }
-    let listed = computers::read(dir)
+    let file = computers::read(dir);
+    // Paired both ways, its grant not lapsed (PR #572 review I3).
+    if !file.both_ways(device_id) {
+        return None;
+    }
+    let listed = file
         .computers
         .into_iter()
         .find(|c| c.device_id == device_id)?;
@@ -504,13 +509,28 @@ mod tests {
     #[test]
     fn only_a_listed_computer_is_told_at_the_seed() {
         let dir = temp("seed");
-        computers::update(&dir, |file| file.computers.push(computer("mine"))).unwrap();
+        computers::update(&dir, |file| {
+            for id in ["mine", "lapsed", "listed-one-way"] {
+                file.computers.push(PeerComputer {
+                    mine: id != "listed-one-way",
+                    ..computer(id)
+                });
+            }
+            file.lapsed.push("lapsed".to_string());
+        })
+        .unwrap();
         let seeded = |id: &str, is_computer: bool| {
             seed_packet_as(false, &dir, id, is_computer, None).map(|p| p.packet_type)
         };
         assert_eq!(seeded("mine", true), Some(COMPUTER_WAKE.to_string()));
         assert_eq!(seeded("one-way", true), None, "paired one way: not listed");
         assert_eq!(seeded("mine", false), None, "not a computer");
+        assert_eq!(
+            seeded("lapsed", true),
+            None,
+            "its grant lapsed (PR #572 review I3)"
+        );
+        assert_eq!(seeded("listed-one-way", true), None, "listed, not mine");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

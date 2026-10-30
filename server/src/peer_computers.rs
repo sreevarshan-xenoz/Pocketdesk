@@ -2236,8 +2236,15 @@ async fn run_link(
     let linked_at = std::time::Instant::now();
     let (outgoing_tx, mut outgoing) = mpsc::channel(32);
     // Paired both ways and recorded here: said on the link, for the other
-    // to give what it granted (PC1 re-review I-2).
-    if computer.mine {
+    // to give what it granted (PC1 re-review I-2). Not once its grant
+    // lapsed here (PR #572 review I3): no both-ways word, no wake facts.
+    let both_ways = {
+        let (dir, id) = (dir.to_path_buf(), computer.device_id.clone());
+        tokio::task::spawn_blocking(move || computers::read(&dir).both_ways(&id))
+            .await
+            .unwrap_or(false)
+    };
+    if both_ways {
         let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
         // How to wake this computer (PC6), for the other, which lists this
         // one only when paired both ways: by the adapter toward it.
@@ -3183,6 +3190,35 @@ mod tests {
             "its link stopped"
         );
         assert!(!still, "Other computers' Unpair untrusts it too");
+    }
+
+    /// PR #572 review I3: a computer whose both-ways grant lapsed stays
+    /// `mine` here, so Unpair under Other computers still takes its trust.
+    #[test]
+    fn forget_untrusts_a_lapsed_computer() {
+        use pocketdesk_core::protocol::kdeconnect::TrustStore;
+        let dir = temp("forget-lapsed");
+        let trust = dir.join("trusted_devices.json");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        TrustStore::update(&trust, |store| store.trust_computer("lap")).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: true,
+                ..facts().into_peer("lap", "", 1)
+            });
+            file.pending.push("lap".to_string());
+        })
+        .unwrap();
+        computers::update(&dir, |file| {
+            file.lapse_pending(1 + computers::PENDING_FOR);
+        })
+        .unwrap();
+        let lapsed = computers::read(&dir);
+        forget_in(&dir, Some(&trust), &certs, "lap");
+        let still = TrustStore::read(&trust).unwrap().is_trusted("lap");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(lapsed.lapsed.contains(&"lap".to_string()) && !lapsed.both_ways("lap"));
+        assert!(!still, "Forget untrusts it");
     }
 
     /// PC1 re-review I-2: only a connection that proved the iroh key the

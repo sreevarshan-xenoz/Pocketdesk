@@ -240,9 +240,9 @@ impl ComputersFile {
     /// Let each grant both ways that has waited for the link longer than
     /// [`PENDING_FOR`] since its computer paired (`paired_unix`) lapse at
     /// `now_unix`, or one whose computer is gone; the lapsed ones. A lapsed
-    /// computer is paired one way here from then on, so it is no longer
-    /// `mine` (range review M2): it is told no MAC, and is linked as one
-    /// paired one way.
+    /// computer keeps `mine` (its listing, Forget and the link's direction
+    /// stay as they were), but is no longer [`Self::both_ways`] (range
+    /// review M2, PR #572 review I3).
     pub fn lapse_pending(&mut self, now_unix: u64) -> Vec<String> {
         let paired = |id: &str| {
             self.computers
@@ -262,14 +262,17 @@ impl ComputersFile {
                 self.lapsed.push(id.clone());
             }
         }
-        for c in self
-            .computers
-            .iter_mut()
-            .filter(|c| lapsed.contains(&c.device_id))
-        {
-            c.mine = false;
-        }
         lapsed
+    }
+
+    /// Whether `device_id` is paired both ways now: listed as `mine`, and
+    /// its grant not lapsed (PR #572 review I3). Only such a computer is
+    /// told this one's MAC and the link's both-ways facts.
+    pub fn both_ways(&self, device_id: &str) -> bool {
+        self.computers
+            .iter()
+            .any(|c| c.device_id == device_id && c.mine)
+            && !self.lapsed.iter().any(|id| id == device_id)
     }
 
     /// Whether `device_id` is listed here with a certificate other than
@@ -1095,8 +1098,19 @@ mod tests {
         assert_eq!(file.pending, ["young"]);
         assert_eq!(file.lapsed, ["old"], "said for a computer still listed");
         let mine = |id: &str| file.computers.iter().any(|c| c.device_id == id && c.mine);
-        assert!(!mine("old"), "paired one way here now (range review M2)");
-        assert!(mine("young"), "still waiting");
+        assert!(mine("old"), "its listing stays (PR #572 review I3)");
+        assert!(!file.both_ways("old"), "but it is not both ways now");
+        assert!(file.both_ways("young"), "still waiting, still both ways");
+        let old = file
+            .computers
+            .iter()
+            .find(|c| c.device_id == "old")
+            .unwrap();
+        assert!(
+            !keeps_link("zz-own", old),
+            "the link's direction does not flip"
+        );
+        assert!(keeps_link("a-own", old));
         assert!(file.lapse_pending(1_000 + PENDING_FOR).is_empty(), "once");
         file.remove("old");
         assert!(file.lapsed.is_empty(), "gone with its computer");
