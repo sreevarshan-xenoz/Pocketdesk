@@ -542,10 +542,11 @@ pub struct WindowInput {
     /// A key that types just went by its position: the text egui made of
     /// it here, which follows it in the same pass, is not sent as well.
     keyed: bool,
-    /// By position, the key pressed there for a copy, cut or paste egui
-    /// made of Ctrl or Shift and C, X, V, Insert or Delete (review I4),
-    /// held until that key is let go.
-    clip_held: Option<u16>,
+    /// By position, the keys pressed there for the copies, cuts and pastes
+    /// egui made of Ctrl or Shift and C, X, V, Insert or Delete (review
+    /// I4), each held until its key is let go; several at once in a roll
+    /// (Ctrl+C, then V before C is up: re-review C-B).
+    clip_held: BTreeSet<u16>,
 }
 
 impl WindowInput {
@@ -821,26 +822,29 @@ impl WindowInput {
         out: &mut Vec<InputPacket>,
     ) {
         if !pressed {
-            // By position, the key a copy, cut or paste pressed there goes
-            // up with the key egui kept: whichever of C, X, V, Insert or
-            // Delete (Ctrl+Insert copies as Ctrl+C does), or any key not
-            // held there, as the key in C's place on a Dvorak keyboard is
-            // (re-review C-A: its press never came, its code is its own).
-            if let Some(held) = self.clip_held
-                && !is_shift(code)
-                && !is_chord_modifier(code)
-                && (matches!(code, KEY_C | KEY_X | KEY_V | KEY_INSERT | KEY_DELETE)
-                    || !self.down_there.contains(&code))
-            {
-                self.clip_held = None;
-                self.down_here.remove(&code);
-                if self.down_there.remove(&held) {
-                    out.push(InputPacket::KeyEvent {
-                        key: held,
-                        pressed: false,
-                    });
+            // By position, the keys copies, cuts and pastes pressed there
+            // go up with the keys egui kept (re-reviews C-A, C-B): the one
+            // let go if it is one of them; every one for a key not held
+            // there that is none of them (Ctrl+Insert copies as Ctrl+C;
+            // the key in C's place on a Dvorak keyboard is its own code);
+            // and every one as Ctrl or Shift, which made them, is let go.
+            if !self.clip_held.is_empty() {
+                if matches!(code, LEFT_CTRL | RIGHT_CTRL | LEFT_SHIFT | RIGHT_SHIFT) {
+                    self.let_go_of_clips(out);
+                } else if self.clip_held.remove(&code) {
+                    self.down_here.remove(&code);
+                    if self.down_there.remove(&code) {
+                        out.push(InputPacket::KeyEvent {
+                            key: code,
+                            pressed: false,
+                        });
+                    }
+                    return;
+                } else if !is_chord_modifier(code) && !self.down_there.contains(&code) {
+                    self.down_here.remove(&code);
+                    self.let_go_of_clips(out);
+                    return;
                 }
-                return;
             }
             // A modifier let go first: what it made a copy, cut or paste of
             // goes now, with it still held there.
@@ -949,7 +953,7 @@ impl WindowInput {
             self.hold_modifiers(out);
             // A press repeated is pressed again, as a key held is.
             self.down_there.insert(code);
-            self.clip_held = Some(code);
+            self.clip_held.insert(code);
             out.push(InputPacket::KeyEvent {
                 key: code,
                 pressed: true,
@@ -979,6 +983,18 @@ impl WindowInput {
             key: LEFT_CTRL,
             pressed: false,
         });
+    }
+
+    /// Every key a copy, cut or paste holds there, let go.
+    fn let_go_of_clips(&mut self, out: &mut Vec<InputPacket>) {
+        for code in std::mem::take(&mut self.clip_held) {
+            if self.down_there.remove(&code) {
+                out.push(InputPacket::KeyEvent {
+                    key: code,
+                    pressed: false,
+                });
+            }
+        }
     }
 
     /// `code` pressed and let go, with what is held.
@@ -1075,7 +1091,7 @@ impl WindowInput {
         self.clips.clear();
         self.clipped.clear();
         self.keyed = false;
-        self.clip_held = None;
+        self.clip_held.clear();
         self.pending = None;
         self.wheel = egui::Vec2::ZERO;
         if let Some(sum) = self.relative.as_mut() {
@@ -2219,13 +2235,14 @@ mod tests {
                 "KeyEvent { key: 29, pressed: true }",
                 "KeyEvent { key: 46, pressed: true }",
                 "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
                 "KeyEvent { key: 29, pressed: false }",
             ],
-            "C held there past Ctrl, as a crouching game's key"
+            "C held while Ctrl is, let go before Ctrl (re-review C-B)"
         );
-        assert!(input.holds());
+        assert!(!input.holds());
         let out = input.take(&[key(egui::Key::C, false)], picture(), now);
-        assert_eq!(words(&out), ["KeyEvent { key: 46, pressed: false }"]);
+        assert!(out.is_empty(), "{out:?}");
         let out = input.take(
             &[
                 key(egui::Key::ControlLeft, true),
@@ -2311,5 +2328,83 @@ mod tests {
         let mut fresh = WindowInput::default();
         assert!(fresh.set_by_position(true).is_empty());
         assert!(!fresh.holds() && fresh.by_position());
+    }
+
+    /// Re-review C-B: a Ctrl+C, V roll (V pressed before C is let go): each
+    /// key goes up once with its own key, on QWERTY; on Dvorak (J and K,
+    /// codes of their own) the first let go lets both go and the second is
+    /// nothing; nothing stays held, nothing is tapped.
+    #[test]
+    fn by_position_a_copy_then_paste_roll_lets_each_go() {
+        let now = Instant::now();
+        let roll = |first: egui::Key, second: egui::Key| {
+            let mut input = by_position_input();
+            let out = input.take(
+                &[
+                    key(egui::Key::ControlLeft, true),
+                    egui::Event::Copy,
+                    egui::Event::Paste("here".into()),
+                    key(first, false),
+                    key(second, false),
+                    key(egui::Key::ControlLeft, false),
+                ],
+                picture(),
+                now,
+            );
+            assert!(!input.holds(), "{first:?} {second:?}");
+            words(&out)
+        };
+        assert_eq!(
+            roll(egui::Key::C, egui::Key::V),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+        assert_eq!(
+            roll(egui::Key::J, egui::Key::K),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 46, pressed: true }",
+                "KeyEvent { key: 47, pressed: true }",
+                "KeyEvent { key: 46, pressed: false }",
+                "KeyEvent { key: 47, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+    }
+
+    /// Re-review C-B backstop: Ctrl let go while a copy key is held lets
+    /// that key go first, then Ctrl; the key's own release later is
+    /// nothing.
+    #[test]
+    fn by_position_letting_go_of_ctrl_lets_go_of_a_copy_key() {
+        let mut input = by_position_input();
+        let now = Instant::now();
+        let out = input.take(
+            &[
+                key(egui::Key::ControlLeft, true),
+                egui::Event::Cut,
+                key(egui::Key::ControlLeft, false),
+            ],
+            picture(),
+            now,
+        );
+        assert_eq!(
+            words(&out),
+            [
+                "KeyEvent { key: 29, pressed: true }",
+                "KeyEvent { key: 45, pressed: true }",
+                "KeyEvent { key: 45, pressed: false }",
+                "KeyEvent { key: 29, pressed: false }",
+            ]
+        );
+        assert!(!input.holds());
+        let out = input.take(&[key(egui::Key::X, false)], picture(), now);
+        assert!(out.is_empty(), "{out:?}");
     }
 }
