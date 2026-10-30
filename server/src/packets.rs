@@ -198,6 +198,9 @@ mod tests {
             // one dials: never to a phone, so not announced to one.
             "kdeconnect.pocketdesk.wan_key",
             "kdeconnect.pocketdesk.both_ways",
+            // How to wake this computer (PC6), told only to the owner's
+            // computers, on the link and to one linked here.
+            "kdeconnect.pocketdesk.computer_wake",
             "kdeconnect.pocketdesk.file_fetch",
             "kdeconnect.pocketdesk.file_offer_declined",
             // This computer's KDE identity (3a), broadcast and sent on a KDE

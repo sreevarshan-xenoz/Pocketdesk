@@ -303,6 +303,7 @@ fn unpairing_a_computer_waits_for_the_server() {
                 link_unix: 0,
                 lets_drive: false,
                 mine: false,
+                wake: None,
             });
     })
     .expect("a computers file");
@@ -418,6 +419,7 @@ fn other_computers_say_which_is_mine() {
             link_unix: 0,
             lets_drive: false,
             mine,
+            wake: None,
         };
     pocketdesk_core::local::computers::update(fixture.state(), |file| {
         file.computers.push(computer(
@@ -473,6 +475,7 @@ fn keyboard_mouse_computers(state: &Path) {
                 link_unix: 0,
                 lets_drive: false,
                 mine: false,
+                wake: None,
             });
     })
     .expect("a computers file");
@@ -1833,6 +1836,7 @@ fn add_computer(state: &Path, name: &str) {
                 link_unix: 0,
                 lets_drive: false,
                 mine: false,
+                wake: None,
             });
     })
     .expect("a computers file");

@@ -917,6 +917,7 @@ async fn pair_with(
         link_unix: now,
         lets_drive: false,
         mine,
+        wake: None,
     };
     let mut was = None;
     let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
@@ -1993,6 +1994,18 @@ async fn run_link(
     // to give what it granted (PC1 re-review I-2).
     if computer.mine {
         let _ = outgoing_tx.try_send(NetworkPacket::new(BOTH_WAYS));
+        // How to wake this computer (PC6), for the other, which lists this
+        // one only when paired both ways: by the adapter toward it.
+        let (addresses, tx) = (computer.addresses.clone(), outgoing_tx.clone());
+        tokio::spawn(async move {
+            let packet = tokio::task::spawn_blocking(move || {
+                crate::computer_wake::packet_toward(&addresses, None)
+            })
+            .await;
+            if let Ok(packet) = packet {
+                let _ = tx.send(packet).await;
+            }
+        });
     }
     let _live = LiveLink::new(&computer.device_id, outgoing_tx);
     let _accepting = acceptor.map(|acceptor| {
@@ -2034,6 +2047,11 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
             // ways (PC1): it shows this one's screen too.
             let _ = outgoing.send(crate::plugins::monitors::answer()).await;
         }
+        return;
+    }
+    // How to wake it while its link is down (PC6).
+    if packet.packet_type == crate::computer_wake::COMPUTER_WAKE {
+        crate::computer_wake::heard(device_id, &packet.body).await;
         return;
     }
     if packet.packet_type == crate::offers::OFFER {
@@ -2335,6 +2353,7 @@ mod tests {
                 link_unix: 1,
                 lets_drive: false,
                 mine: true,
+                wake: None,
             })
         })
         .unwrap();
@@ -2948,6 +2967,7 @@ mod tests {
             link_unix: 1,
             lets_drive: false,
             mine: false,
+            wake: None,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();

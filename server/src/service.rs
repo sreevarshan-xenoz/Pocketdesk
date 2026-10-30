@@ -297,6 +297,7 @@ pub async fn run(config: Config) -> Result<()> {
         tokio::spawn(crate::kdeconnect_compat::run_requests());
     }
     crate::wake_info::configure(config.wake_announce, config.wake_port);
+    crate::computer_wake::configure(config.computer_wake_facts);
     crate::driving::configure(config.input_control, config.input_idle_secs);
     crate::plugins::share::configure(config.transfer_keep_hours);
     crate::plugins::share::spawn_partials_sweep();
@@ -1198,6 +1199,34 @@ async fn seed_desktop_state(
     }
     // Files offered while its app was gone, offered again (S2).
     crate::offers::offer_again(&**sender).await;
+    // How to wake this computer, for one of the owner's computers linked
+    // here (PC6): the adapter its link leaves by, or that it reached.
+    let device_id = sender.device_id().to_string();
+    let reached = match road {
+        Road::Local { local, .. } => local,
+        Road::Internet => None,
+    };
+    let for_computer = tokio::task::spawn_blocking(move || {
+        crate::plugins::pair::is_computer_device(&device_id).then(|| {
+            let addresses = crate::state::state_dir()
+                .ok()
+                .and_then(|dir| {
+                    pocketdesk_core::local::computers::read(&dir)
+                        .computers
+                        .into_iter()
+                        .find(|c| c.device_id == device_id)
+                })
+                .map(|c| c.addresses)
+                .unwrap_or_default();
+            crate::computer_wake::packet_toward(&addresses, reached)
+        })
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(packet) = for_computer {
+        let _ = sender.send_packet(&packet).await;
+    }
     // How to wake this computer, for the adapter the phone reached (N6). A
     // connection over the internet reached none: the phone keeps the one it
     // learned at home.

@@ -335,6 +335,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_wake_facts",
+        "Let my computers wake this one",
+        Section::Computers,
+    ),
+    (
         "shared_input",
         crate::arrange_view::SHARE_SWITCH,
         Section::SharedInput,
@@ -2102,6 +2107,17 @@ impl SettingsForm {
                         "Only while the window controls that computer, and with this on on both. Never a password manager's copy, nor one Never send keeps here. With Clipboard with my computers on here, the window leaves copies to that sync: turn it on on the other computer too, or nothing crosses. Files dropped on the window go to its Downloads either way.",
                     );
                 });
+                // PC6: what Wake on the other computers needs from this one.
+                row(ui, "computer_wake_facts", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_wake_facts,
+                        "tell my paired computers how to wake this one: its network adapter's hardware address and broadcast address",
+                    );
+                    note(
+                        ui,
+                        "Sent on each link as it comes up; turned off, they forget it at the next. A wired adapter wakes best: Wi-Fi rarely wakes a computer. Wake-on-LAN must be on in this computer's firmware and adapter settings too.",
+                    );
+                });
             }
             Section::SharedInput => {
                 // UX 2: one home, the Keyboard and mouse page; a search for
@@ -2843,6 +2859,18 @@ mod tests {
         // Windows' timer is named only on Windows (BK10 review M8).
         assert_eq!(quick_note().contains("Windows' timer"), cfg!(windows));
         assert!(quick_note().contains("byte every 50 ms"));
+    }
+
+    /// PC6: letting the other computers wake this one is with them, and
+    /// waits for a restart: the links are told as they come up.
+    #[test]
+    fn letting_computers_wake_this_one_is_with_the_computers() {
+        let key = "computer_wake_facts";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Let my computers wake this one"
+            && *s == Section::Computers));
+        assert!(!applies_live(key));
+        assert!(drawn_here(key));
     }
 
     /// BK7: a computer's window's quality and view-only start are with the

@@ -62,6 +62,7 @@ fn paired(dir: &Path) {
             link_unix: 0,
             lets_drive: false,
             mine: false,
+            wake: None,
         })
     })
     .unwrap();

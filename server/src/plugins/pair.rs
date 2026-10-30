@@ -767,6 +767,7 @@ impl Plugin for PairPlugin {
             "kdeconnect.identity",
             WAN_KEY,
             crate::peer_computers::BOTH_WAYS,
+            crate::computer_wake::COMPUTER_WAKE,
         ]
     }
 
@@ -817,6 +818,11 @@ impl Plugin for PairPlugin {
                 if let Err(e) = heard {
                     tracing::debug!("A computer's word that it paired both ways was lost: {e}");
                 }
+            }
+            // How to wake one of the owner's computers (PC6), kept only
+            // for a computer this one lists.
+            crate::computer_wake::COMPUTER_WAKE if is_computer_device(&conn) => {
+                crate::computer_wake::heard(&conn, &packet.body).await;
             }
             _ => {}
         }

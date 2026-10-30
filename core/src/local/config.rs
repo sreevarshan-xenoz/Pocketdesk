@@ -393,6 +393,12 @@ pub struct Config {
     /// as it loses it. Taken here too only while on. On by default.
     #[serde(default = "default_true")]
     pub computer_view_clipboard: bool,
+    /// Tell the owner's paired computers how to wake this one (PC6): the
+    /// MAC and broadcast address of the adapter its link leaves by, sent on
+    /// each link as it comes up. Off, it tells them to forget what they
+    /// were told. On by default.
+    #[serde(default = "default_true")]
+    pub computer_wake_facts: bool,
 }
 
 fn default_computer_view_quality() -> String {
@@ -616,6 +622,7 @@ impl Default for Config {
             computer_view_only: false,
             computer_view_stats: false,
             computer_view_clipboard: true,
+            computer_wake_facts: true,
         }
     }
 }
@@ -874,6 +881,7 @@ impl Config {
         "computer_view_only",
         "computer_view_stats",
         "computer_view_clipboard",
+        "computer_wake_facts",
     ];
 }
 
@@ -1291,6 +1299,28 @@ phone_battery = \"x\"
         assert_eq!(
             upper.computer_view_preset(),
             crate::streaming::input_packet::PRESET_BALANCED
+        );
+    }
+
+    /// PC6: this computer tells its computers how to wake it unless turned
+    /// off, and the choice saves and reads back.
+    #[test]
+    fn telling_computers_how_to_wake_this_one_is_on_until_turned_off() {
+        let path = temp("computer-wake-facts");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_wake_facts);
+        assert!(Config::default().computer_wake_facts);
+        let chosen = Config {
+            computer_wake_facts: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_wake_facts"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_wake_facts);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_wake_facts"]
         );
     }
 

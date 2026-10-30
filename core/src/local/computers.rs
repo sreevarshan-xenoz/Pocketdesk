@@ -62,6 +62,27 @@ pub struct PeerComputer {
     /// ([`keeps_link`]). Off in files written before.
     #[serde(default)]
     pub mine: bool,
+    /// How to wake it (PC6), as it said on its link: its adapter's MAC and
+    /// broadcast address. `None` until it says, or once it says to forget.
+    /// Owner-only, as the whole file is: a MAC identifies the computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<ComputerWake>,
+}
+
+/// How to wake a paired computer (PC6): what it told this one about the
+/// adapter its link leaves by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComputerWake {
+    /// `AA:BB:CC:DD:EE:FF`.
+    pub mac: String,
+    /// Its subnet's directed broadcast address (IPv4).
+    pub broadcast: std::net::Ipv4Addr,
+    /// Ethernet: Wi-Fi rarely wakes a computer.
+    #[serde(default)]
+    pub wired: bool,
+    /// When it last said (unix seconds).
+    #[serde(default)]
+    pub told_unix: u64,
 }
 
 fn default_stream_port() -> u16 {
@@ -126,6 +147,7 @@ impl ComputerFacts {
             link_unix: now_unix,
             lets_drive: false,
             mine: true,
+            wake: None,
         }
     }
 }
@@ -588,6 +610,7 @@ mod tests {
             link_unix: 0,
             lets_drive: false,
             mine: false,
+            wake: None,
         }
     }
 
