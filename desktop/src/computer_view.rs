@@ -4371,7 +4371,7 @@ mod tests {
         assert!(mic_on_air_words("Desk").contains("goes to Desk"));
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = reads.clone();
-        let (shared, _relay, dir) = mic_window(
+        let (shared, mut relay, dir) = mic_window(
             "onair",
             Arc::new(move |_| {
                 Ok(Box::new(Counted(counted.clone())) as Box<dyn view_mic::MicSource>)
@@ -4397,6 +4397,13 @@ mod tests {
         view.stop_mic();
         assert_eq!(view.mic_on_air(), None);
         assert!(!lock(&shared).mic.wanted());
+        // Re-review T2: the relay heard the main window's Stop.
+        drop(harness);
+        drop(view);
+        drop(shared);
+        let mut heard = heard_mic(&mut relay);
+        heard.retain(|w| !matches!(*w, "start" | "frame"));
+        assert_eq!(heard, ["on", "off"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
