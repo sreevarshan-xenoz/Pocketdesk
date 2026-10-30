@@ -2212,6 +2212,10 @@ async fn authenticate(
     }
 }
 
+/// A window's pointer lock lapses this long after its last "locked"
+/// (PR #563 review I1); the window says it again about every second.
+pub const POINTER_LEASE: Duration = Duration::from_secs(3);
+
 /// The viewer's two halves: messages go out in order; its keyframe asks and
 /// the input it may send reach the other computer, and its focus the
 /// relay's loop (`focus`, PC3).
@@ -2224,7 +2228,7 @@ fn start_viewer(
     privacy: mpsc::Sender<(u64, String, u8)>,
 ) -> Viewer {
     let _ = stream.set_nodelay(true);
-    let (mut read, mut write) = stream.into_split();
+    let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::channel::<Message>(VIEWER_QUEUE);
     tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
@@ -2236,6 +2240,8 @@ fn start_viewer(
         let _ = write.shutdown().await;
     });
     let reader = tokio::spawn(async move {
+        use tokio::io::AsyncBufReadExt;
+        let mut read = tokio::io::BufReader::new(read);
         let mut head = [0u8; 5];
         // The window's pointer is locked (PC7): its own latest word, kept
         // here, never taken from a packet. Only then do relative moves go.
@@ -2243,7 +2249,29 @@ fn start_viewer(
         // Meanwhile shared input leaves the screens' edges alone; given
         // back as the window frees it or this reader ends (gap 12).
         let mut hold: Option<crate::shared_input::view_hold::PointerHold> = None;
-        while read.read_exact(&mut head).await.is_ok() {
+        // A lease (PR #563 review I1): the window says "locked" again about
+        // every second; one silent for POINTER_LEASE (hung, or its word
+        // lost) is taken to have freed it.
+        let mut lease_until = tokio::time::Instant::now();
+        loop {
+            if pointer_locked {
+                let left = lease_until.saturating_duration_since(tokio::time::Instant::now());
+                // Waiting for bytes is cancel-safe (a buffered fill), so a
+                // lapse never cuts a message in half.
+                match tokio::time::timeout(left, read.fill_buf()).await {
+                    Err(_) => {
+                        tracing::info!("A screen window's pointer lock lapsed unrenewed");
+                        pointer_locked = false;
+                        hold = None;
+                        continue;
+                    }
+                    Ok(Ok([])) | Ok(Err(_)) => break,
+                    Ok(Ok(_)) => {}
+                }
+            }
+            if read.read_exact(&mut head).await.is_err() {
+                break;
+            }
             let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
             match head[0] {
                 wire::WANT_KEYFRAME if len == 0 => {
@@ -2279,6 +2307,9 @@ fn start_viewer(
                         break;
                     }
                     pointer_locked = locked[0] == 1;
+                    if pointer_locked {
+                        lease_until = tokio::time::Instant::now() + POINTER_LEASE;
+                    }
                     if pointer_locked != hold.is_some() {
                         hold =
                             pointer_locked.then(crate::shared_input::view_hold::PointerHold::take);
@@ -2705,6 +2736,80 @@ mod tests {
         drop(window);
         drop(viewer);
         until(false, "the window gone").await;
+    }
+
+    /// Wait (at most `secs`) until the pointer is held as `held`.
+    async fn until_held(held: bool, step: &str, secs: u64) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
+        while crate::shared_input::view_hold::pointer_held() != held {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "TIMEOUT: held {held} after {step}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// A window joined to a fresh viewer, with the input it sends kept.
+    async fn joined_window() -> (TcpStream, Viewer, mpsc::Receiver<InputPacket>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, queued) = mpsc::channel(16);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, _asked) = mpsc::channel(4);
+        let viewer = start_viewer(relay_end, 6, "desk".into(), input, focus, privacy);
+        (window, viewer, queued)
+    }
+
+    /// PR #563 review I1: a window that says "locked" and then goes silent
+    /// (its socket open, no bytes) is freed once the lease runs out, and
+    /// its relative moves stop going; one that says it again keeps it.
+    #[tokio::test]
+    async fn a_silent_windows_lock_lapses_and_a_renewed_one_holds() {
+        let _alone = crate::shared_input::view_hold::TESTS.lock().await;
+        let (mut window, viewer, mut queued) = joined_window().await;
+        let started = tokio::time::Instant::now();
+        window
+            .write_all(&Message::PointerLock(true).encode())
+            .await
+            .unwrap();
+        until_held(true, "the lock", 2).await;
+        // Renewed each second for longer than a lease: still held.
+        for _ in 0..4 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            window
+                .write_all(&Message::PointerLock(true).encode())
+                .await
+                .unwrap();
+        }
+        assert!(started.elapsed() > POINTER_LEASE);
+        assert!(crate::shared_input::view_hold::pointer_held(), "renewed");
+        // Silent now: let go within the lease and a little.
+        let silent = tokio::time::Instant::now();
+        until_held(false, "silence", 6).await;
+        assert!(silent.elapsed() >= POINTER_LEASE - Duration::from_millis(100));
+        // The connection lives on, and relative moves no longer go.
+        let nudge = Message::Input(InputPacket::MouseMove { dx: 1, dy: 0 }.encode());
+        window.write_all(&nudge.encode()).await.unwrap();
+        let abs = Message::Input(
+            InputPacket::MouseMoveAbs {
+                x_norm: 1,
+                y_norm: 1,
+            }
+            .encode(),
+        );
+        window.write_all(&abs.encode()).await.unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(2), queued.recv())
+            .await
+            .unwrap();
+        assert_eq!(
+            format!("{got:?}"),
+            "Some(MouseMoveAbs { x_norm: 1, y_norm: 1 })"
+        );
+        assert!(!viewer.reader.is_finished());
     }
 
     fn controlled() -> ViewStatus {

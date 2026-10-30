@@ -179,7 +179,14 @@ struct State {
     pointer: PointerLock,
     release_chord: ReleaseChord,
     pointer_said: Option<bool>,
+    /// When "locked" was last said: it is said again each
+    /// [`POINTER_RENEW`], the relay's lease (PR #563 review I1).
+    pointer_said_at: Option<Instant>,
 }
+
+/// How often a locked window says so again: well inside the relay's 3 s
+/// lease, so one lost word never frees it there.
+pub const POINTER_RENEW: Duration = Duration::from_secs(1);
 
 /// How long the bar shows "Asking…" before it gives up: the relay's own
 /// give-up (8 s, said at its next 2 s heartbeat) and a little more.
@@ -925,13 +932,21 @@ fn say_pointer(state: &mut State, locked: bool) {
         return;
     }
     state.pointer_said = Some(locked);
+    state.pointer_said_at = Some(Instant::now());
 }
 
 /// Whether the relay must be told the lock again: locked and not said so on
-/// this connection, or freed after it was said locked (PC7).
-pub fn pointer_to_say(locked: bool, said: Option<bool>) -> bool {
+/// this connection or not for [`POINTER_RENEW`] (its lease), or freed after
+/// it was said locked (PC7).
+pub fn pointer_to_say(
+    locked: bool,
+    said: Option<bool>,
+    said_at: Option<Instant>,
+    now: Instant,
+) -> bool {
     if locked {
         said != Some(true)
+            || said_at.is_none_or(|at| now.saturating_duration_since(at) >= POINTER_RENEW)
     } else {
         said == Some(true)
     }
@@ -1625,7 +1640,7 @@ fn follow_pointer(
         }
     }
     let locked = state.pointer.locked();
-    if pointer_to_say(locked, state.pointer_said) {
+    if pointer_to_say(locked, state.pointer_said, state.pointer_said_at, now) {
         say_pointer(state, locked);
     }
     state.input.set_relative(locked);
@@ -1633,6 +1648,8 @@ fn follow_pointer(
         return;
     }
     ctx.set_cursor_icon(egui::CursorIcon::None);
+    // Said again in time for the relay's lease, mouse moving or not.
+    ctx.request_repaint_after(POINTER_RENEW);
     if mode == view_pointer::GrabMode::Confined
         && let Some(back) = view_pointer::recentre(ctx.input(|i| i.pointer.latest_pos()), over)
     {
@@ -3193,16 +3210,28 @@ mod tests {
         );
     }
 
-    /// PC7: the relay hears the lock once per connection, and the release
-    /// only after it heard the lock.
+    /// PC7: the relay hears the lock once per connection and again each
+    /// second, and the release only after it heard the lock.
     #[test]
     fn the_relay_is_told_the_lock_once_a_connection() {
-        assert!(pointer_to_say(true, None), "a new connection");
-        assert!(pointer_to_say(true, Some(false)));
-        assert!(!pointer_to_say(true, Some(true)), "said already");
-        assert!(pointer_to_say(false, Some(true)));
-        assert!(!pointer_to_say(false, Some(false)));
-        assert!(!pointer_to_say(false, None), "never said locked");
+        let t = Instant::now();
+        let just = Some(t);
+        assert!(pointer_to_say(true, None, None, t), "a new connection");
+        assert!(pointer_to_say(true, Some(false), just, t));
+        assert!(!pointer_to_say(true, Some(true), just, t), "said already");
+        assert!(pointer_to_say(false, Some(true), just, t));
+        assert!(!pointer_to_say(false, Some(false), just, t));
+        assert!(!pointer_to_say(false, None, None, t), "never said locked");
+        // PR #563 review I1: said again each second, for the relay's lease.
+        let later = t + POINTER_RENEW;
+        assert!(!pointer_to_say(
+            true,
+            Some(true),
+            just,
+            t + POINTER_RENEW / 2
+        ));
+        assert!(pointer_to_say(true, Some(true), just, later));
+        assert!(!pointer_to_say(false, Some(false), just, later));
     }
 
     #[test]
