@@ -1028,8 +1028,10 @@ private fun HostCard(
                     .padding(top = 8.dp, end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Narrower than Material's 24 dp sides, so the three fit one row on a phone.
-                val pad = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                // Narrower than Material's 24 dp sides, so the three fit one row
+                // on a 360 dp phone (UX1: at 16 dp "Show screen" wrapped to a
+                // second row, cut off at the fold).
+                val pad = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
                 // The phone as a remote (T10i): trackpad and keys, no picture.
                 OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(stringResource(R.string.remote_button)) }
