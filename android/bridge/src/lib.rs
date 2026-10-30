@@ -2103,6 +2103,18 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePeerNam
     to_jstring(&mut env, peer_names::name(&address).unwrap_or_default())
 }
 
+/// The Pocketdesk release the computer at `address` said it runs when last
+/// connected (item 4), or "" when it has not said.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativePeerVersion(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    address: JString<'_>,
+) -> jstring {
+    let address = jstring_to_string(&mut env, &address);
+    to_jstring(&mut env, peer_names::version(&address).unwrap_or_default())
+}
+
 /// The replies the desktop asked this phone to text (N5b), as JSON.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeTakeSmsRequests(

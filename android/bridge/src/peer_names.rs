@@ -1,6 +1,7 @@
 //! What each computer says of itself in its identity, by the address this
-//! phone dialed it at: the name it gives itself (U3), for the app to keep
-//! and show, and whether it answers notifications that ask (C3). Heard
+//! phone dialed it at: the name it gives itself (U3) and the Pocketdesk
+//! release it runs (item 4), for the app to keep and show, and whether it
+//! answers notifications that ask (C3). Heard
 //! again at every handshake, so a computer replaced or changed at an address
 //! is seen at its next connection.
 
@@ -16,6 +17,11 @@ fn names() -> &'static Mutex<HashMap<String, String>> {
 fn acks() -> &'static Mutex<HashMap<String, bool>> {
     static ACKS: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
     ACKS.get_or_init(Default::default)
+}
+
+fn versions() -> &'static Mutex<HashMap<String, String>> {
+    static VERSIONS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    VERSIONS.get_or_init(Default::default)
 }
 
 fn lives() -> &'static Mutex<HashMap<String, bool>> {
@@ -45,6 +51,18 @@ pub(crate) fn note(address: &str, claims: PeerClaims) {
             .unwrap_or_else(|e| e.into_inner())
             .insert(address.to_string(), name);
     }
+    // An identity that says no release (an older computer, replaced at the
+    // address) forgets the last one: an old release is not shown for it.
+    let mut versions = versions().lock().unwrap_or_else(|e| e.into_inner());
+    match claims.version {
+        Some(version) => {
+            versions.insert(address.to_string(), version);
+        }
+        None if claims.sends.is_some() => {
+            versions.remove(address);
+        }
+        None => {}
+    }
 }
 
 /// Forget what the computer at `address` said of itself, as the phone lets
@@ -61,6 +79,10 @@ pub(crate) fn forget(address: &str) {
         .unwrap_or_else(|e| e.into_inner())
         .remove(address);
     lives()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(address);
+    versions()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(address);
@@ -97,6 +119,16 @@ pub fn name(address: &str) -> Option<String> {
         .cloned()
 }
 
+/// The Pocketdesk release the computer at `address` said it runs when
+/// last heard (item 4), if it said one.
+pub fn version(address: &str) -> Option<String> {
+    versions()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(address)
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +137,7 @@ mod tests {
         PeerClaims {
             name: name.map(str::to_string),
             sends: None,
+            version: None,
         }
     }
 
@@ -129,6 +162,7 @@ mod tests {
             } else {
                 vec![]
             }),
+            version: None,
         };
         assert!(!acks_notifications("192.0.2.50"), "never heard");
         note("192.0.2.50", says(true));
@@ -152,6 +186,7 @@ mod tests {
                     "kdeconnect.notification.ack".to_string(),
                     "kdeconnect.pocketdesk.notification_open".to_string(),
                 ]),
+                version: Some("0.8.1".to_string()),
             },
         );
         assert!(acks_notifications(address) && takes_live(address));
@@ -159,6 +194,7 @@ mod tests {
         assert_eq!(name(address), None);
         assert!(!acks_notifications(address));
         assert!(!takes_live(address));
+        assert_eq!(version(address), None, "its release goes too");
         note(address, named(None));
         assert_eq!(name(address), None, "another computer there gives none");
     }
@@ -169,6 +205,7 @@ mod tests {
         let says = |sends: Vec<&str>| PeerClaims {
             name: None,
             sends: Some(sends.into_iter().map(str::to_string).collect()),
+            version: None,
         };
         assert!(!takes_live("192.0.2.60"));
         note(
@@ -178,5 +215,25 @@ mod tests {
         assert!(takes_live("192.0.2.60"));
         note("192.0.2.60", says(vec!["kdeconnect.notification.ack"]));
         assert!(!takes_live("192.0.2.60"), "an older computer");
+    }
+
+    /// Item 4: the release a computer says is kept per address; a handshake
+    /// with no identity changes nothing, and an identity that says none (an
+    /// older computer now at the address) forgets it.
+    #[test]
+    fn a_computers_release_follows_its_latest_identity() {
+        let address = "192.0.2.90";
+        let says = |release: Option<&str>| PeerClaims {
+            name: None,
+            sends: Some(Vec::new()),
+            version: release.map(str::to_string),
+        };
+        assert_eq!(version(address), None, "never heard");
+        note(address, says(Some("0.8.1")));
+        assert_eq!(version(address).as_deref(), Some("0.8.1"));
+        note(address, named(None));
+        assert_eq!(version(address).as_deref(), Some("0.8.1"), "no identity");
+        note(address, says(None));
+        assert_eq!(version(address), None, "an older computer now");
     }
 }
