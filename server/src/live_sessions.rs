@@ -408,8 +408,21 @@ pub async fn run_watcher() {
                     serde_json::json!({}),
                 );
             }
+            // Ecosystem phase 4: a phone introduced between this computer
+            // and another, removed here however it went, is owed there.
+            if let Ok(dir) = crate::state::state_dir() {
+                let paired = paired.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    crate::introductions::owe_removals(&dir, &paired)
+                })
+                .await;
+            }
             forget_due = true;
             seen_paired = Some(paired);
+        }
+        // The removals owed, sent to the computers linked now.
+        if sweep && let Ok(dir) = crate::state::state_dir() {
+            crate::introductions::send_owed(&dir).await;
         }
         // An unpaired phone's notifications, live cards, texts and contacts
         // go with it (AY5); with pairing off it is still let in.

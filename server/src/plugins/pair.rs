@@ -1044,6 +1044,15 @@ async fn handle_pair(conn: &str, packet: &NetworkPacket, sender: &dyn DeviceSend
     // later in a packet.
     let phone_id = conn.to_string();
 
+    // Ecosystem phase 4: a PIN this computer handed another of the owner's
+    // computers for a phone it introduced, for this id and the key that
+    // computer named only, pairs that phone as an owner phone once.
+    if let Some(intro) = crate::introductions::take_pin(&phone_id, sender.peer_key().as_ref(), pin)
+    {
+        crate::introductions::pair_introduced(&phone_id, packet, sender, intro).await;
+        return;
+    }
+
     let matches_pending = pins()
         .lock()
         .expect("pair state")
@@ -1504,7 +1513,7 @@ fn guest_may_pair_in(
     }
 }
 
-async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) {
+pub(crate) async fn respond_pair(sender: &dyn DeviceSender, paired: bool, server_id: &str) {
     respond_pair_as(sender, paired, server_id, false).await;
 }
 
@@ -2516,6 +2525,12 @@ forged log line"
             // holds the gate); an answer is taken only for the ask waiting.
             "kdeconnect.pocketdesk.remote_devices",
             "kdeconnect.pocketdesk.remote_devices_answer",
+            // Ecosystem phase 4: an owner phone's ask (the plugin holds the
+            // gate), a computer's introduction (a computer paired both ways
+            // only) and its answer (only for the introduction waiting).
+            "kdeconnect.pocketdesk.introduce",
+            "kdeconnect.pocketdesk.introduce_phone",
+            "kdeconnect.pocketdesk.introduce_phone_answer",
         ];
         for packet_type in ALWAYS_ALLOWED {
             assert!(
