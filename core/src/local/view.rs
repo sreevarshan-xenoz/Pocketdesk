@@ -29,6 +29,10 @@ pub const END: u8 = 3;
 pub const HEARTBEAT: u8 = 4;
 /// Server → app: how the view stands ([`ViewStatus`], as JSON).
 pub const STATUS: u8 = 5;
+/// Server → app: the picture comes as HEVC from the next frame, a keyframe
+/// with new parameter sets (PC5); no payload. Its size is the first
+/// decoded picture's. Sent only for a view that offered HEVC.
+pub const HEVC_CONFIG: u8 = 6;
 /// App → server: send a keyframe (the decoder started or lost its way).
 pub const WANT_KEYFRAME: u8 = 0x11;
 /// App → server: one input packet for the other computer
@@ -172,6 +176,8 @@ pub enum Message {
         width: u16,
         height: u16,
     },
+    /// The stream is HEVC from here (PC5).
+    HevcConfig,
     Frame {
         keyframe: bool,
         seq: u64,
@@ -214,6 +220,7 @@ impl Message {
             }
             Message::End { why } => (END, cut(why).as_bytes().to_vec()),
             Message::Heartbeat => (HEARTBEAT, Vec::new()),
+            Message::HevcConfig => (HEVC_CONFIG, Vec::new()),
             Message::Status(status) => (STATUS, serde_json::to_vec(status).unwrap_or_default()),
             Message::WantKeyframe => (WANT_KEYFRAME, Vec::new()),
             Message::Input(packet) => (INPUT, packet.clone()),
@@ -263,6 +270,7 @@ impl Message {
                 why: String::from_utf8(payload).map_err(|_| bad())?,
             },
             HEARTBEAT if len == 0 => Message::Heartbeat,
+            HEVC_CONFIG if len == 0 => Message::HevcConfig,
             STATUS if len <= MAX_WORDS => {
                 Message::Status(serde_json::from_slice(&payload).map_err(|_| bad())?)
             }
@@ -395,6 +403,7 @@ mod tests {
             },
             Message::End { why: String::new() },
             Message::Heartbeat,
+            Message::HevcConfig,
             Message::Status(ViewStatus {
                 phase: Phase::Showing,
                 route: "home network".into(),
@@ -455,6 +464,8 @@ mod tests {
         long.extend_from_slice(&((MAX_INPUT + 1) as u32).to_le_bytes());
         long.resize(5 + MAX_INPUT + 1, 0);
         assert!(Message::read(&mut io::Cursor::new(long)).is_err());
+        // PC5: HEVC's config carries nothing.
+        assert!(Message::parse(HEVC_CONFIG, vec![0]).is_err());
         // PC3: a focus is one byte, 0 or 1.
         assert!(Message::parse(FOCUS, Vec::new()).is_err());
         assert!(Message::parse(FOCUS, vec![2]).is_err());

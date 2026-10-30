@@ -91,9 +91,100 @@ const LOOK: Duration = Duration::from_millis(250);
 const NOT_PAIRED: &str = "That computer is no longer paired with this one.";
 /// How often the window hears how the picture comes (PC2).
 const STATS_EVERY: Duration = Duration::from_secs(1);
-/// The picture's codec, as the window names it: the view asks for H.264
-/// alone.
-const CODEC: &str = "H.264";
+/// The codecs a view offers the other computer (PC5): HEVC beside H.264
+/// when the app's ask said its ffmpeg decodes it (`asked`, PR #562 review
+/// I3: the app's sidecar decodes, not this process) and
+/// `computer_view_hevc` and `computer_view_hw_decode` are on here
+/// (`wanted`; review M10: HEVC on the processor is slower than H.264);
+/// else H.264 alone, said by sending none. An app before PC5 never asks,
+/// so it never hears HEVC.
+pub fn codec_caps(asked: bool, wanted: bool) -> Option<u8> {
+    (asked && wanted).then_some(pocketdesk_core::streaming::client::CODEC_CAP_HEVC)
+}
+
+/// The codecs a view the app asked for (`asked` HEVC or not) offers now.
+fn view_codec_caps(asked: bool) -> Option<u8> {
+    let config = crate::events::current_config();
+    codec_caps(
+        asked,
+        config.computer_view_hevc && config.computer_view_hw_decode,
+    )
+}
+
+/// What a keyframe says the stream is (PC5): H.264 of the size its SPS
+/// says, or HEVC, known by its parameter sets (its size is the window's
+/// first picture's); `None` for neither.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shape {
+    H264(u16, u16),
+    Hevc(Vec<u8>),
+}
+
+impl Shape {
+    /// The codec as the window's stats name it.
+    pub fn codec(&self) -> &'static str {
+        match self {
+            Shape::H264(..) => "H.264",
+            Shape::Hevc(_) => "HEVC",
+        }
+    }
+
+    /// What the window is told before the frames of this shape.
+    pub fn message(&self) -> Message {
+        match self {
+            Shape::H264(width, height) => Message::Config {
+                width: *width,
+                height: *height,
+            },
+            Shape::Hevc(_) => Message::HevcConfig,
+        }
+    }
+}
+
+/// The NAL units of an Annex-B access unit, start codes taken off.
+fn nal_units(data: &[u8]) -> Vec<&[u8]> {
+    let mut starts = Vec::new();
+    let mut i = 0;
+    while i + 3 <= data.len() {
+        if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
+            starts.push(i + 3);
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(n, &start)| {
+            let mut end = starts.get(n + 1).map_or(data.len(), |&next| next - 3);
+            // A four-byte start code's leading zero.
+            if starts.get(n + 1).is_some() && end > start && data[end - 1] == 0 {
+                end -= 1;
+            }
+            &data[start..end.max(start)]
+        })
+        .collect()
+}
+
+/// The shape of a keyframe's stream (PC5): HEVC when it carries a video
+/// parameter set (type 32, layer 0: `0x40 0x01`, which no H.264 unit
+/// begins with), its parameter sets (VPS, SPS, PPS) together as its mark;
+/// else H.264 when its SPS gives a size.
+pub fn stream_shape(data: &[u8]) -> Option<Shape> {
+    let units = nal_units(data);
+    let hevc_type =
+        |unit: &[u8]| (unit.len() >= 2 && unit[1] == 0x01).then(|| (unit[0] >> 1) & 0x3F);
+    if units.iter().any(|u| hevc_type(u) == Some(32)) {
+        let sets: Vec<u8> = units
+            .iter()
+            .filter(|u| matches!(hevc_type(u), Some(32..=34)))
+            .flat_map(|u| u.iter().copied())
+            .collect();
+        return Some(Shape::Hevc(sets));
+    }
+    pocketdesk_core::streaming::h264_sps::picture_size(data).map(|(w, h)| Shape::H264(w, h))
+}
 
 /// The window's privacy ask waits this long for the other computer's
 /// answer (PC8), the first and each renewal: past it, privacy is given up.
@@ -110,7 +201,12 @@ const WINDOW_GONE: &str = "Privacy ended: the window closed.";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     /// Show the computer `device_id`'s screen `monitor`, replacing any view.
-    Start { device_id: String, monitor: u32 },
+    /// `hevc`: the app decodes HEVC and asks for it (PC5).
+    Start {
+        device_id: String,
+        monitor: u32,
+        hevc: bool,
+    },
     /// Stop showing it: the view `session_id` when given (one since
     /// replaced is left alone, BK7 review M1), else the one shown now.
     Stop { session_id: Option<u64> },
@@ -220,9 +316,14 @@ pub enum Dialer {
 }
 
 impl Dialer {
-    async fn dial(&self, computer: &PeerComputer, monitor: u32) -> Result<Dialed, String> {
+    async fn dial(
+        &self,
+        computer: &PeerComputer,
+        monitor: u32,
+        caps: Option<u8>,
+    ) -> Result<Dialed, String> {
         match self {
-            Dialer::Real { certs, wan } => dial(computer, certs, wan.as_ref(), monitor).await,
+            Dialer::Real { certs, wan } => dial(computer, certs, wan.as_ref(), monitor, caps).await,
             Dialer::Direct { addr, certs, id } => {
                 let (client, frames, audio) = StreamingClient::connect(
                     &addr.to_string(),
@@ -230,7 +331,7 @@ impl Dialer {
                     Some(monitor),
                     Some(id),
                     None,
-                    None,
+                    caps,
                     SessionMode::Screen,
                 )
                 .await
@@ -257,6 +358,7 @@ async fn dial(
     certs: &Arc<CertManager>,
     wan: Option<&iroh::Endpoint>,
     monitor: u32,
+    caps: Option<u8>,
 ) -> Result<Dialed, String> {
     let me = crate::kde::host_identity();
     let iroh_id = wan.map(|e| e.id().to_string());
@@ -303,8 +405,7 @@ async fn dial(
         Some(monitor),
         Some(&me.device_id),
         iroh_id.as_deref(),
-        // H.264 only: the window's decoder reads no HEVC.
-        None,
+        caps,
         SessionMode::Screen,
     )
     .await;
@@ -512,7 +613,8 @@ pub async fn race<T: Send + 'static>(
 #[derive(Debug)]
 enum Event {
     Status(ViewStatus),
-    Config(u16, u16),
+    /// The stream's codec and size, as the window is told it.
+    Config(Message),
     Frame {
         keyframe: bool,
         seq: u64,
@@ -820,11 +922,13 @@ enum Outcome {
 /// One view, until it ends: dialled, shown, and after a drop dialled again
 /// by itself with [`backoff`] for about two minutes (PC2). A Stop or a
 /// window closed aborts it, so it never dials again after one.
+#[allow(clippy::too_many_arguments)]
 async fn session(
     session_id: u64,
     state_dir: PathBuf,
     mut computer: PeerComputer,
     monitor: u32,
+    hevc: bool,
     dialer: Arc<Dialer>,
     events: mpsc::Sender<(u64, Event)>,
     input: mpsc::Receiver<InputPacket>,
@@ -845,7 +949,9 @@ async fn session(
     let mut shown_once = false;
     loop {
         let dial_started = Instant::now();
-        let next = match dialer.dial(&computer, monitor).await {
+        // HEVC too when the window's decoder reads it (PC5), as this
+        // computer's settings say at each dial.
+        let next = match dialer.dial(&computer, monitor, view_codec_caps(hevc)).await {
             Err(why) if !shown_once => {
                 // Its addresses stay out of the log at info (BK7 review M8):
                 // the window says them to the owner.
@@ -1009,7 +1115,7 @@ async fn attempt(
     status.phase = Phase::Waiting;
     status.route = route.to_string();
     say.say(Event::Status(status.clone())).await;
-    let mut size: Option<(u16, u16)> = None;
+    let mut shape: Option<Shape> = None;
     let mut last_seq: Option<u64> = None;
     let mut admitted = false;
     let mut shown = false;
@@ -1030,16 +1136,17 @@ async fn attempt(
                     continue;
                 }
                 last_seq = Some(packet.sequence);
-                // A new size (another screen, its resolution changed) comes
-                // with the keyframe that starts it.
+                // A new size (another screen, its resolution changed) or
+                // codec comes with the keyframe that starts it; HEVC's by
+                // new parameter sets (PC5).
                 if packet.is_keyframe
-                    && let Some(read) = pocketdesk_core::streaming::h264_sps::picture_size(&packet.data)
-                    && size != Some(read)
+                    && let Some(read) = stream_shape(&packet.data)
+                    && shape.as_ref() != Some(&read)
                 {
-                    size = Some(read);
-                    say.say(Event::Config(read.0, read.1)).await;
+                    say.say(Event::Config(read.message())).await;
+                    shape = Some(read);
                 }
-                if size.is_none() {
+                if shape.is_none() {
                     continue;
                 }
                 // A frame the relay cannot carry (BK7 review M6): said once,
@@ -1099,7 +1206,7 @@ async fn attempt(
                     lost: counts.lost(),
                     late: counts.late,
                     dropped: counts.dropped,
-                    codec: CODEC.to_string(),
+                    codec: shape.as_ref().map_or("H.264", Shape::codec).to_string(),
                 });
                 say.say(Event::Status(status.clone())).await;
             }
@@ -1562,7 +1669,8 @@ struct View {
     token: [u8; TOKEN_LEN],
     input: mpsc::Sender<InputPacket>,
     task: Option<tokio::task::JoinHandle<()>>,
-    config: Option<(u16, u16)>,
+    /// The stream's codec and size as last told, for a window that joins.
+    config: Option<Message>,
     status: ViewStatus,
     /// Why it ended, and when.
     ended: Option<(String, Instant)>,
@@ -1658,7 +1766,7 @@ pub async fn run_with(
         tokio::select! {
             command = commands.recv() => {
                 let Some(command) = command else { break };
-                let Command::Start { device_id, monitor } = command else {
+                let Command::Start { device_id, monitor, hevc } = command else {
                     match command {
                         Command::Stop { session_id }
                             if stops(session_id, view.as_ref().map(|v| v.session_id)) =>
@@ -1702,6 +1810,7 @@ pub async fn run_with(
                             state_dir.clone(),
                             computer,
                             monitor,
+                            hevc,
                             dialer.clone(),
                             events_tx.clone(),
                             input_rx,
@@ -1757,12 +1866,12 @@ pub async fn run_with(
                             let _ = v.tx.try_send(Message::Status(status));
                         }
                     }
-                    Event::Config(width, height) => {
-                        current.config = Some((width, height));
+                    Event::Config(config) => {
+                        current.config = Some(config.clone());
                         // A viewer that missed a new size would decode at the
                         // old one: it is dropped, and rejoins with the size.
                         if let Some(v) = watching
-                            && v.tx.try_send(Message::Config { width, height }).is_err()
+                            && v.tx.try_send(config).is_err()
                         {
                             viewer = None;
                         }
@@ -1818,8 +1927,8 @@ pub async fn run_with(
                     privacy_tx.clone(),
                 );
                 let _ = joined.tx.try_send(Message::Status(v.status.clone()));
-                if let Some((width, height)) = v.config {
-                    let _ = joined.tx.try_send(Message::Config { width, height });
+                if let Some(config) = v.config.clone() {
+                    let _ = joined.tx.try_send(config);
                 }
                 if let Some((why, _)) = &v.ended {
                     let _ = joined.tx.try_send(Message::End { why: why.clone() });
@@ -2211,6 +2320,77 @@ fn start_viewer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// PC5: a keyframe's stream is HEVC by its video parameter set, with
+    /// its parameter sets as its mark (new ones: a new config); H.264 by
+    /// its SPS's size; neither, nothing.
+    #[test]
+    fn a_keyframe_says_its_codec_and_shape() {
+        let Some(Shape::Hevc(sets)) = stream_shape(&HEVC_SAMPLE) else {
+            panic!("HEVC");
+        };
+        assert_eq!(&sets[..2], [0x40, 0x01], "the VPS first");
+        assert!(sets.len() > 40 && sets.len() < HEVC_SAMPLE.len());
+        // The same sets with another picture: the same shape.
+        let mut again = HEVC_SAMPLE.to_vec();
+        *again.last_mut().unwrap() ^= 0x01;
+        assert_eq!(stream_shape(&again), Some(Shape::Hevc(sets.clone())));
+        // Another SPS: another shape.
+        let mut other = HEVC_SAMPLE.to_vec();
+        other[45] ^= 0x10;
+        assert_ne!(stream_shape(&other), Some(Shape::Hevc(sets)));
+        // H.264: a 64x32 keyframe from libx264, SPS, PPS and slice.
+        let h264 = [
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0a, 0xdc, 0x45, 0xb0, 0x11, 0x00, 0x00,
+            0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x02, 0x0f, 0x12, 0x27, 0x80, 0x00, 0x00,
+            0x00, 0x01, 0x68, 0xce, 0x0f, 0x2c, 0x80, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x04,
+            0xbc, 0x98, 0xa0, 0x00, 0x20, 0x2f, 0x27, 0x27, 0x27, 0x5d, 0x75, 0xd7, 0x80,
+        ];
+        let shape = stream_shape(&h264);
+        assert_eq!(shape, Some(Shape::H264(64, 32)));
+        assert_eq!(shape.as_ref().map(Shape::codec), Some("H.264"));
+        assert_eq!(stream_shape(&[0, 0, 0, 1, 0x65, 0x88]), None);
+        assert_eq!(Shape::Hevc(Vec::new()).codec(), "HEVC");
+        assert_eq!(Shape::Hevc(Vec::new()).message(), Message::HevcConfig);
+        assert_eq!(
+            Shape::H264(640, 360).message(),
+            Message::Config {
+                width: 640,
+                height: 360
+            }
+        );
+    }
+
+    /// A one-picture HEVC stream, 16 by 16 grey (libx265, 91 bytes).
+    const HEVC_SAMPLE: [u8; 91] = [
+        0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x03,
+        0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03, 0x00, 0x00, 0x1e, 0xba, 0x02, 0x40, 0x00, 0x00, 0x00,
+        0x01, 0x42, 0x01, 0x01, 0x04, 0x08, 0x00, 0x00, 0x03, 0x00, 0x9f, 0xa8, 0x00, 0x00, 0x03,
+        0x00, 0x00, 0x1e, 0xa0, 0x88, 0x45, 0x96, 0xea, 0xaf, 0x2b, 0xc0, 0x5a, 0x02, 0x00, 0x00,
+        0x03, 0x00, 0x02, 0x00, 0x00, 0x03, 0x00, 0x02, 0x10, 0x00, 0x00, 0x00, 0x01, 0x44, 0x01,
+        0xc1, 0x73, 0xc0, 0x89, 0x00, 0x00, 0x01, 0x28, 0x01, 0xaf, 0x78, 0xf8, 0x5d, 0xf7, 0xe1,
+        0x70,
+    ];
+
+    /// PC5, PR #562 review I3: HEVC is offered only when the app asked for
+    /// it (its own ffmpeg decodes it) and the setting here is on; an app
+    /// before PC5 never asks.
+    #[test]
+    fn hevc_is_offered_only_when_the_app_asks_and_the_setting_lets_it() {
+        let hevc = pocketdesk_core::streaming::client::CODEC_CAP_HEVC;
+        assert_eq!(codec_caps(true, true), Some(hevc));
+        assert_eq!(codec_caps(true, false), None, "turned off here");
+        assert_eq!(codec_caps(false, true), None, "the app did not ask");
+        let older: pocketdesk_core::local::computers::ComputerRequest = serde_json::from_str(
+            r#"{"id":"a","ask":"view","device_id":"desk","monitor":0,"created_unix":1}"#,
+        )
+        .unwrap();
+        let pocketdesk_core::local::computers::ComputerAsk::View { hevc: asked, .. } = older.ask
+        else {
+            panic!("a view");
+        };
+        assert_eq!(codec_caps(asked, true), None, "an app before PC5");
+    }
 
     fn computer(addresses: &[&str], endpoint: Option<serde_json::Value>) -> PeerComputer {
         PeerComputer {

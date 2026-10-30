@@ -38,7 +38,8 @@ use pocketdesk_core::local::view::{
 use pocketdesk_core::streaming::InputPacket;
 
 use crate::video::{
-    Admit, Decoder, KeyGate, Picture, Recorder, free_name, letterbox, now_unix, stamp, user_folder,
+    Accel, Admit, Codec, DecodeWanted, Decoder, KeyGate, Picture, Planes, Recorder, free_name,
+    letterbox, now_unix, stamp, user_folder,
 };
 use crate::view_follow::{self, DropBatch, Edge, FocusEdges};
 use crate::view_input::{MOVE_EVERY, SendKey, WindowInput, send_key_choices};
@@ -65,6 +66,16 @@ const SAVED_NOTE: Duration = Duration::from_secs(8);
 const DROP_NOTE: Duration = Duration::from_secs(8);
 /// How often a drop on its way looks at the sent list.
 const DROP_LOOK: Duration = Duration::from_millis(500);
+/// A way of decoding on the graphics card that gives no picture this long
+/// after its first access unit is given up for the next (PC5).
+const NO_PICTURE: Duration = Duration::from_secs(2);
+/// The last way, the processor, gets longer (PR #562 re-review N2): a cold
+/// ffmpeg or a large first picture is not taken for a decoder that cannot,
+/// which would drop an HEVC view to H.264.
+const LAST_NO_PICTURE: Duration = Duration::from_secs(6);
+/// A view asked for before the HEVC probe has said waits this long for it,
+/// off the UI thread (PR #562 re-review N1).
+const HEVC_PROBE_WAIT: Duration = Duration::from_millis(1500);
 /// How often the keyboard grab reads where the shared keyboard is (PC4).
 #[cfg(windows)]
 const ACROSS_LOOK: Duration = Duration::from_millis(500);
@@ -98,8 +109,12 @@ struct State {
     size: Option<(u16, u16)>,
     picture: Option<Picture>,
     texture: Option<egui::TextureHandle>,
+    /// An NV12 picture drawn by the GPU (PC5), and its size while it is
+    /// the one drawn (else the texture is).
+    gpu: Arc<crate::nv12::Gpu>,
+    on_gpu: Option<[usize; 2]>,
     /// The picture shown, for a screenshot.
-    shown: Option<Picture>,
+    shown: Option<Arc<Picture>>,
     /// What keeps the picture from showing (no decoder).
     note: Option<String>,
     /// Why the view ended, until Reconnect.
@@ -123,6 +138,25 @@ struct State {
     stats_saved: Option<bool>,
     /// The decoder's time and the pictures shown.
     clock: DecodeClock,
+    /// Decode on the graphics card when it can (`computer_view_hw_decode`,
+    /// PC5), the way decoding now ("d3d11va", "software"), and the way a
+    /// view settled on: its session and that way (PR #562 review M1: not
+    /// its place, as the ways may differ by the next join).
+    hw_decode: bool,
+    decoding: String,
+    /// Counts the decoders started (PR #562 review I2): a picture from an
+    /// older one, still on its way as it is replaced, is dropped.
+    decoder_gen: u64,
+    way: Option<(u64, Accel)>,
+    /// The ways that gave nothing for a codec, for as long as the app runs
+    /// (PR #562 review M3): the next view does not wait on them again.
+    failed_ways: std::collections::HashSet<(Codec, Accel)>,
+    /// "Use HEVC when both can" as Settings has it (PC5), whether this
+    /// view gave up on HEVC (every way gave nothing, PR #562 review I3),
+    /// and whether the worker asks for it again without.
+    hevc_setting: bool,
+    hevc_refused: bool,
+    redial_h264: bool,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
     /// Files dropped on the window, on their way; the word on the last
@@ -167,12 +201,27 @@ struct GrabWindow {
     across_read: Option<Instant>,
 }
 
-/// What the window measures itself (PC2): pictures shown a second, and how
-/// long the decoder takes over one.
+/// What the window measures itself (PC2): pictures shown a second, how
+/// long the decoder takes over one (the median and the 95th percentile of
+/// the last second's, PC5), and the bytes each picture brings out of the
+/// decoder and up to the screen.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Shown {
     pub fps: u32,
     pub decode: Option<Duration>,
+    pub decode_p95: Option<Duration>,
+    pub bytes: u64,
+}
+
+/// The `p`th percentile (0 to 1) of `samples`, by nearest rank: `None` for
+/// none. The samples are sorted in place.
+pub fn percentile(samples: &mut [Duration], p: f64) -> Option<Duration> {
+    if samples.is_empty() {
+        return None;
+    }
+    samples.sort_unstable();
+    let rank = (p.clamp(0.0, 1.0) * samples.len() as f64).ceil() as usize;
+    Some(samples[rank.clamp(1, samples.len()) - 1])
 }
 
 /// Times the decoder and counts the pictures shown (PC2). The sidecar gives
@@ -183,8 +232,8 @@ pub struct DecodeClock {
     fed: VecDeque<Instant>,
     since: Option<Instant>,
     pictures: u32,
-    took: Duration,
-    timed: u32,
+    took: Vec<Duration>,
+    bytes: u64,
     shown: Shown,
 }
 
@@ -201,13 +250,13 @@ impl DecodeClock {
         self.fed.push_back(at);
     }
 
-    /// A picture came out at `at`.
-    pub fn decoded(&mut self, at: Instant) {
+    /// A picture of `bytes` came out at `at`.
+    pub fn decoded(&mut self, at: Instant, bytes: usize) {
         if let Some(fed) = self.fed.pop_front() {
-            self.took += at.saturating_duration_since(fed);
-            self.timed += 1;
+            self.took.push(at.saturating_duration_since(fed));
         }
         self.pictures = self.pictures.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes as u64);
         self.roll(at);
     }
 
@@ -231,12 +280,25 @@ impl DecodeClock {
         let ms = elapsed.as_millis().max(1);
         self.shown = Shown {
             fps: u32::try_from(u128::from(self.pictures) * 1000 / ms).unwrap_or(u32::MAX),
-            decode: (self.timed > 0).then(|| self.took / self.timed),
+            decode: percentile(&mut self.took, 0.5),
+            decode_p95: percentile(&mut self.took, 0.95),
+            bytes: self.bytes / u64::from(self.pictures.max(1)),
         };
         self.pictures = 0;
-        self.took = Duration::ZERO;
-        self.timed = 0;
+        self.took.clear();
+        self.bytes = 0;
         self.since = Some(now);
+    }
+}
+
+/// Bytes in words: B, KB or MB (decimal, as a file's size is said).
+pub fn bytes_words(bytes: u64) -> String {
+    if bytes >= 1_000_000 {
+        format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+    } else if bytes >= 1_000 {
+        format!("{:.0} KB", bytes as f64 / 1_000.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -264,7 +326,12 @@ pub fn bitrate_words(kbps: u32) -> String {
 /// picture's size and codec, the frames that came and were shown, the
 /// bitrate, the round trip, the decoder's time, and the frames lost, late
 /// and dropped.
-pub fn stats_lines(status: &ViewStatus, size: Option<(u16, u16)>, shown: Shown) -> Vec<String> {
+pub fn stats_lines(
+    status: &ViewStatus,
+    size: Option<(u16, u16)>,
+    shown: Shown,
+    decoding: &str,
+) -> Vec<String> {
     let stats = status.stats.clone().unwrap_or_default();
     let mut road = format!("Road: {}", road_words(status));
     if let Some(ms) = stats.dial_ms {
@@ -290,18 +357,50 @@ pub fn stats_lines(status: &ViewStatus, size: Option<(u16, u16)>, shown: Shown) 
                 .rtt_ms
                 .map_or_else(|| "not known".to_string(), |ms| format!("{ms} ms"))
         ),
+        decode_words(shown, decoding),
         format!(
-            "Decode: {}",
-            shown.decode.map_or_else(
-                || "not yet".to_string(),
-                |d| format!("{:.1} ms", d.as_secs_f64() * 1000.0)
-            )
+            "Pipe: {}",
+            if shown.bytes == 0 {
+                "not yet".to_string()
+            } else {
+                format!("{} a picture", bytes_words(shown.bytes))
+            }
         ),
         format!(
             "Lost {} \u{b7} late {} \u{b7} dropped {}",
             stats.lost, stats.late, stats.dropped
         ),
     ]
+}
+
+/// The decoder's line: its median time over a picture in the last second,
+/// its 95th percentile, and the way it decodes (PC5).
+fn decode_words(shown: Shown, decoding: &str) -> String {
+    let ms = |d: Duration| format!("{:.1} ms", d.as_secs_f64() * 1000.0);
+    let time = match (shown.decode, shown.decode_p95) {
+        (Some(p50), Some(p95)) => format!("{} (p95 {})", ms(p50), ms(p95)),
+        (Some(p50), None) => ms(p50),
+        _ => "not yet".to_string(),
+    };
+    if decoding.is_empty() {
+        format!("Decode: {time}")
+    } else {
+        format!("Decode: {time} \u{b7} {decoding}")
+    }
+}
+
+/// Whether a decoder that gave `pictures`, has `ended` or not, and was
+/// first fed at `first_fed`, is given up for the next way at `now` (PC5):
+/// one that never gave a picture, and ended or has had `limit`.
+pub fn give_up(
+    pictures: u64,
+    ended: bool,
+    first_fed: Option<Instant>,
+    now: Instant,
+    limit: Duration,
+) -> bool {
+    pictures == 0
+        && (ended || first_fed.is_some_and(|at| now.saturating_duration_since(at) >= limit))
 }
 
 /// Whether `event` is Ctrl+Alt+Shift+S pressed: the stats' switch, kept
@@ -534,6 +633,7 @@ impl ComputerView {
             .as_ref()
             .is_some_and(|w| w.device_id == device_id);
         if !same {
+            state.hevc_refused = false;
             state.quality = quality;
             state.view_only = view_only;
             state.stats_on = stats;
@@ -545,6 +645,23 @@ impl ComputerView {
     pub fn set_stats(&self, on: bool) {
         lock(&self.shared).stats_on = on;
         self.ctx.request_repaint_of(viewport_id());
+    }
+
+    /// "Use HEVC when both can" as Settings has it (PC5): the next view
+    /// follows.
+    pub fn set_hevc(&self, on: bool) {
+        lock(&self.shared).hevc_setting = on;
+    }
+
+    /// "Decode on the graphics card" as Settings has it (PC5): the next
+    /// view follows.
+    pub fn set_hw_decode(&self, on: bool) {
+        let mut state = lock(&self.shared);
+        if state.hw_decode != on {
+            // The ways are tried afresh (PR #562 re-review N3).
+            state.failed_ways.clear();
+        }
+        state.hw_decode = on;
     }
 
     /// The bar's Stats switch, saved since the last call (PC2): Settings
@@ -603,13 +720,48 @@ impl ComputerView {
 
 /// Ask the server for `wanted`'s screen; a view shown now is let go first.
 fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String> {
-    let request = ComputerAsk::View {
-        device_id: wanted.device_id.clone(),
-        monitor: wanted.monitor,
-    };
+    ask_with(state_dir, state, wanted, crate::video::hevc_known())
+}
+
+/// [`ask`], with the HEVC probe's answer as it stands (`known`).
+fn ask_with(
+    state_dir: &Path,
+    state: &mut State,
+    wanted: Wanted,
+    known: Option<bool>,
+) -> Result<(), String> {
+    let could = offer_hevc(
+        state.hevc_setting,
+        state.hw_decode,
+        true,
+        state.hevc_refused,
+    );
     let release = state.input.release_all();
     send(state, release);
-    computers::request(state_dir, request, now_unix()).map_err(|e| format!("Not asked: {e}"))?;
+    match hevc_ask(could, known) {
+        HevcAsk::Now(hevc) => {
+            computers::request(state_dir, view_ask(&wanted, hevc), now_unix())
+                .map_err(|e| format!("Not asked: {e}"))?;
+        }
+        HevcAsk::Wait => {
+            // The probe has not said yet: the ask waits for it on a thread
+            // of its own, at most HEVC_PROBE_WAIT.
+            let (dir, request_for) = (state_dir.to_path_buf(), wanted.clone());
+            let waited = std::thread::Builder::new()
+                .name("computer-view-ask".into())
+                .spawn(move || {
+                    let hevc = crate::video::wait_for_hevc_probe(HEVC_PROBE_WAIT);
+                    if let Err(e) =
+                        computers::request(&dir, view_ask(&request_for, hevc), now_unix())
+                    {
+                        eprintln!("Pocketdesk: a computer's screen was not asked for: {e}");
+                    }
+                });
+            if let Err(e) = waited {
+                return Err(format!("Not asked: {e}"));
+            }
+        }
+    }
     if let Some(stream) = state.stream.take() {
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
@@ -627,6 +779,49 @@ fn ask(state_dir: &Path, state: &mut State, wanted: Wanted) -> Result<(), String
     state.asked += 1;
     state.rejoins.clear();
     Ok(())
+}
+
+/// Whether a view asks for HEVC (PC5, PR #562 review I3): with "Use HEVC
+/// when both can" on, decoding on the graphics card on too (review M10: on
+/// the processor HEVC decodes about twice as slowly as H.264), this app's
+/// ffmpeg shown to decode it, and the view not given up on it.
+pub fn offer_hevc(setting: bool, hw_decode: bool, decodes: bool, refused: bool) -> bool {
+    setting && hw_decode && decodes && !refused
+}
+
+/// When a view's ask says whether it takes HEVC (PR #562 re-review N1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HevcAsk {
+    /// Now, saying this.
+    Now(bool),
+    /// Once the probe has said, as it could take HEVC.
+    Wait,
+}
+
+/// When and what an ask says of HEVC: at once when it `could` not take it
+/// whatever the probe says, or the probe has said (`known`); else after
+/// waiting for the probe.
+pub fn hevc_ask(could: bool, known: Option<bool>) -> HevcAsk {
+    match (could, known) {
+        (false, _) => HevcAsk::Now(false),
+        (true, Some(decodes)) => HevcAsk::Now(decodes),
+        (true, None) => HevcAsk::Wait,
+    }
+}
+
+/// The ask for `wanted`'s screen, taking HEVC or not.
+fn view_ask(wanted: &Wanted, hevc: bool) -> ComputerAsk {
+    ComputerAsk::View {
+        device_id: wanted.device_id.clone(),
+        monitor: wanted.monitor,
+        hevc,
+    }
+}
+
+/// Whether a view whose last way just gave up (`step`) is asked for again
+/// without HEVC: once, when the stream is HEVC (PR #562 review I3).
+pub fn redial_without_hevc(step: Step, codec: Option<Codec>, refused: bool) -> bool {
+    step == Step::Exhausted && codec == Some(Codec::Hevc) && !refused
 }
 
 /// Let go of what is held there, then end the view on the server: the
@@ -858,6 +1053,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         stop_view(state_dir, &mut state);
         state.wanted = None;
         state.fullscreen = false;
+        // The GPU's picture goes with the window (PR #562 review M5): now,
+        // if this pass is drawn, else as the window next opens.
+        state.on_gpu = None;
+        if state.gpu.holds() {
+            ui.painter().add(state.gpu.free(ui.max_rect()));
+        }
         // The keyboard grab comes out with the window (PC4).
         #[cfg(windows)]
         {
@@ -866,18 +1067,21 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         return;
     }
     if let Some(picture) = state.picture.take() {
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [picture.width, picture.height],
-            &picture.rgba,
-        );
-        match &mut state.texture {
-            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
-            None => {
-                state.texture =
-                    Some(ctx.load_texture("computer-view", image, egui::TextureOptions::LINEAR));
-            }
+        let picture = Arc::new(picture);
+        if picture.planes == Planes::Nv12 && crate::nv12::planes() == Planes::Nv12 {
+            // PC5: its planes go up as they are, and the GPU turns them to
+            // RGB as it draws them.
+            state.gpu.put(picture.clone());
+            state.on_gpu = Some([picture.width, picture.height]);
+        } else {
+            to_texture(&mut state, &ctx, &picture);
         }
         state.shown = Some(picture);
+    } else if state.on_gpu.is_some() && crate::nv12::planes() == Planes::Rgba {
+        // The shader failed: the picture shown is drawn as RGBA.
+        if let Some(picture) = state.shown.clone() {
+            to_texture(&mut state, &ctx, &picture);
+        }
     }
     // The window lost focus: whatever is held there is let go.
     let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
@@ -886,6 +1090,15 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
         send(&mut state, release);
     }
     let texture = state.texture.clone();
+    let gpu = state.gpu.clone();
+    let on_gpu = state.on_gpu;
+    // No picture on the GPU now (the view ended, or RGBA instead): its GL
+    // objects go (PR #562 review M5).
+    if on_gpu.is_none() && gpu.holds() {
+        ui.painter().add(gpu.free(ui.max_rect()));
+    }
+    // The size of the picture drawn, wherever it is drawn from.
+    let drawn = on_gpu.or_else(|| texture.as_ref().map(egui::TextureHandle::size));
     let status = state.status.clone();
     let ended = state.ended.clone();
     let note = state.note.clone();
@@ -918,6 +1131,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let lock_on_close = state.lock_on_close;
     let size = state.size;
     let shown = state.clock.shown(Instant::now());
+    let decoding = state.decoding.clone();
     let saved = state
         .saved_note
         .clone()
@@ -1050,7 +1264,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     }
                 }
                 let shot = ui
-                    .add_enabled(texture.is_some(), egui::Button::new("Screenshot"))
+                    .add_enabled(drawn.is_some(), egui::Button::new("Screenshot"))
                     .on_hover_text("Save the computer's screen as a picture, and copy it");
                 if shot.clicked() {
                     shot.surrender_focus();
@@ -1058,7 +1272,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 }
                 let record = ui
                     .add_enabled(
-                        texture.is_some() || record_want,
+                        drawn.is_some() || record_want,
                         egui::Button::new(if record_want { "Stop" } else { "Record" }),
                     )
                     .on_hover_text("Record the computer's screen as a video, as it comes");
@@ -1098,7 +1312,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             // What keeps the picture from showing, over a picture that
             // stopped (BK7 review M6).
             if ended.is_none()
-                && texture.is_some()
+                && drawn.is_some()
                 && let Some(note) = &status.note
             {
                 ui.add(
@@ -1223,12 +1437,13 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 });
             } else if let Some(words) = reconnect_words(&wanted.name, &status) {
                 // The last picture, dimmed, while it dials again (PC2).
-                if let Some(texture) = &texture {
-                    let [w, h] = texture.size();
-                    ui.painter().image(
-                        texture.id(),
+                if let Some([w, h]) = drawn {
+                    paint_picture(
+                        ui,
+                        &gpu,
+                        on_gpu.is_some(),
+                        texture.as_ref(),
                         letterbox(area, w, h),
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                         egui::Color32::from_gray(90),
                     );
                 }
@@ -1249,8 +1464,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 });
             } else if let Some(note) = &note {
                 ui.centered_and_justified(|ui| ui.colored_label(egui::Color32::LIGHT_GRAY, note));
-            } else if let Some(texture) = &texture {
-                let [w, h] = texture.size();
+            } else if let Some([w, h]) = drawn {
                 let rect = letterbox(area, w, h);
                 picture_rect = Some(rect);
                 let id = ui.id().with("computer-picture");
@@ -1277,10 +1491,12 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         },
                     )
                 });
-                ui.painter().image(
-                    texture.id(),
+                paint_picture(
+                    ui,
+                    &gpu,
+                    on_gpu.is_some(),
+                    texture.as_ref(),
                     rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
             } else {
@@ -1293,8 +1509,8 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             }
             // This pass's input, to the other computer.
             let mut state = lock(shared);
-            let current = match (&texture, state.size) {
-                (Some(t), Some((w, h))) => t.size() == [usize::from(w), usize::from(h)],
+            let current = match (drawn, state.size) {
+                (Some(size), Some((w, h))) => size == [usize::from(w), usize::from(h)],
                 _ => false,
             };
             let going = ended.is_none();
@@ -1332,7 +1548,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
             drop(state);
             // How the picture comes, over its corner (PC2).
             if stats_on && ended.is_none() {
-                let lines = stats_lines(&status, size, shown);
+                let lines = stats_lines(&status, size, shown, &decoding);
                 egui::Area::new(egui::Id::new("computer-view-stats"))
                     .fixed_pos(area.min + egui::vec2(8.0, 8.0))
                     .order(egui::Order::Foreground)
@@ -1426,6 +1642,45 @@ fn follow_pointer(
                     });
             });
         ctx.request_repaint_after(view_pointer::HINT_FOR);
+    }
+}
+
+/// `picture` as the window's texture (RGBA, or NV12 turned to RGBA here),
+/// drawn from now on in place of the GPU's.
+fn to_texture(state: &mut State, ctx: &egui::Context, picture: &Picture) {
+    let image = egui::ColorImage::from_rgba_unmultiplied(
+        [picture.width, picture.height],
+        &picture.to_rgba(),
+    );
+    match &mut state.texture {
+        Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+        None => {
+            state.texture =
+                Some(ctx.load_texture("computer-view", image, egui::TextureOptions::LINEAR));
+        }
+    }
+    state.on_gpu = None;
+}
+
+/// Draw the picture over `rect`, tinted: the GPU's NV12 (PC5) or the
+/// texture.
+fn paint_picture(
+    ui: &egui::Ui,
+    gpu: &Arc<crate::nv12::Gpu>,
+    on_gpu: bool,
+    texture: Option<&egui::TextureHandle>,
+    rect: egui::Rect,
+    tint: egui::Color32,
+) {
+    if on_gpu {
+        ui.painter().add(gpu.paint(rect, tint));
+    } else if let Some(texture) = texture {
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            tint,
+        );
     }
 }
 
@@ -1533,7 +1788,7 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context, name: &str) {
     let Some((width, height, rgba)) = lock(shared)
         .shown
         .as_ref()
-        .map(|p| (p.width, p.height, p.rgba.clone()))
+        .map(|p| (p.width, p.height, p.to_rgba()))
     else {
         return;
     };
@@ -1607,6 +1862,21 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         let ended = view(&file, shared, ctx);
         end_recording(shared, Some("the screen stopped"));
         let mut state = lock(shared);
+        // HEVC gave nothing here (PR #562 review I3): the same screen is
+        // asked for again as H.264, once, if the window still wants it.
+        if std::mem::take(&mut state.redial_h264)
+            && state.asked == asked
+            && state.wanted.as_ref() == Some(&wanted)
+        {
+            let release = state.input.release_all();
+            send(&mut state, release);
+            state.input = WindowInput::default();
+            if let Err(e) = ask(state_dir, &mut state, wanted) {
+                state.ended = Some(e);
+            }
+            ctx.request_repaint_of(viewport_id());
+            continue;
+        }
         // The relay dropped this window but the view goes on (its queue
         // was full at a new size, BK7 review M3): it is joined again, with
         // what is held let go meanwhile.
@@ -1660,6 +1930,7 @@ fn watch(state_dir: &Path, shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
         state.session_id = None;
         state.size = None;
         state.texture = None;
+        state.on_gpu = None;
         state.picture = None;
         state.shown = None;
         state.input = WindowInput::default();
@@ -1692,6 +1963,16 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     let mut reader = BufReader::with_capacity(256 * 1024, stream);
     let mut decoder: Option<Decoder> = None;
     let mut gate = KeyGate::default();
+    // The ways to decode, and the one this view settled on, if it did
+    // (PC5): a rejoin of the same view keeps it.
+    let ways = crate::video::local_accel_chain(lock(shared).hw_decode);
+    let settled_on = match &lock(shared).way {
+        Some((session, way)) if *session == file.session_id => Some(way.clone()),
+        _ => None,
+    };
+    let mut ladder = Ladder::new(ways, settled_on.as_ref());
+    // The stream's codec and size, for a decoder started again.
+    let mut stream_is: Option<(Codec, Option<(u16, u16)>)> = None;
     let mut recorder: Option<Recorder> = None;
     loop {
         let message = Message::read(&mut reader)?;
@@ -1702,7 +1983,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             let dir = user_folder("Videos");
             let name = file_safe(&file.name);
             let path = free_name(&dir, &format!("{name} screen {}", stamp(now_unix())), "mkv");
-            let started = std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path));
+            // The stream's own codec (PC5 review I1): HEVC is copied as
+            // HEVC.
+            let codec = stream_is.map_or(Codec::H264, |(codec, _)| codec);
+            let started =
+                std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path, codec));
             let mut state = lock(shared);
             match started {
                 Ok(r) => {
@@ -1740,32 +2025,53 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             Message::Config { width, height } => {
                 // Another size: the decoder starts again at it, from the
                 // next keyframe.
-                decoder = None;
-                gate = KeyGate::default();
                 if recorder.take().is_some() {
                     end_recording(shared, Some("it stopped as the screen changed size"));
                 }
-                let started = Decoder::start(width, height, publisher(shared, ctx));
-                let mut state = lock(shared);
-                state.clock.restart();
-                state.size = Some((width, height));
-                match started {
-                    Ok(d) => {
-                        decoder = Some(d);
-                        state.note = None;
-                    }
-                    Err(e) => {
-                        state.note =
-                            Some(crate::video::decoder_words(&e, "another computer's screen"));
-                    }
+                stream_is = Some((Codec::H264, Some((width, height))));
+                skip_failed(shared, &mut ladder, Codec::H264);
+                decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+                gate = KeyGate::default();
+                ladder.started();
+            }
+            Message::HevcConfig => {
+                // PC5: HEVC from the next keyframe, its size the first
+                // picture's.
+                if recorder.take().is_some() {
+                    end_recording(shared, Some("it stopped as the picture changed"));
                 }
-                ctx.request_repaint_of(viewport_id());
+                stream_is = Some((Codec::Hevc, None));
+                skip_failed(shared, &mut ladder, Codec::Hevc);
+                decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+                gate = KeyGate::default();
+                ladder.started();
             }
             Message::Frame {
                 keyframe,
                 seq,
                 data,
             } => {
+                let step = climb(
+                    shared,
+                    ctx,
+                    file.session_id,
+                    &mut ladder,
+                    &mut decoder,
+                    &mut gate,
+                    stream_is,
+                );
+                if give_up_hevc(shared, step, stream_is) {
+                    return Ok(String::new());
+                }
+                // The GPU's shader failed (PC5): the decoder gives RGBA.
+                if decoder
+                    .as_ref()
+                    .is_some_and(|d| d.planes() != crate::nv12::planes())
+                {
+                    decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+                    gate = KeyGate::default();
+                    ladder.started();
+                }
                 let Some(d) = decoder.as_mut() else { continue };
                 match gate.admit(keyframe, seq) {
                     Admit::Feed => {}
@@ -1782,20 +2088,292 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
                 lock(shared).clock.fed(Instant::now());
+                ladder.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
+                    let gave = d.pictures();
                     decoder = None;
-                    lock(shared).note = Some(format!("The decoder stopped ({e})."));
-                    ctx.request_repaint_of(viewport_id());
+                    let tried = ladder.way().clone();
+                    let step = ladder.failed();
+                    remember_failed(shared, stream_is, tried, step, gave);
+                    if give_up_hevc(shared, step, stream_is) {
+                        return Ok(String::new());
+                    }
+                    if step == Step::Next {
+                        // The next way, from the next keyframe (PC5).
+                        decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+                        gate = KeyGate::default();
+                    } else {
+                        lock(shared).note = Some(format!("The decoder stopped ({e})."));
+                        ctx.request_repaint_of(viewport_id());
+                    }
                 }
             }
             Message::End { why } => return Ok(why),
-            Message::Heartbeat
-            | Message::WantKeyframe
+            // A still screen sends no frames, only the relay's heartbeat
+            // every 2 s: a card that stalled on its first keyframe is left
+            // then too, not at the next movement (PR #562 review M2).
+            Message::Heartbeat => {
+                let step = climb(
+                    shared,
+                    ctx,
+                    file.session_id,
+                    &mut ladder,
+                    &mut decoder,
+                    &mut gate,
+                    stream_is,
+                );
+                if give_up_hevc(shared, step, stream_is) {
+                    return Ok(String::new());
+                }
+                // The next way starts from a keyframe, asked for now.
+                if step == Step::Next {
+                    Message::WantKeyframe.write(&mut asks)?;
+                }
+            }
+            Message::WantKeyframe
             | Message::Input(_)
             | Message::Focus(_)
             | Message::Privacy(_)
             | Message::PointerLock(_) => {}
         }
+    }
+}
+
+/// What the ladder of ways says to do now (PC5 review M9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Keep the decoder.
+    Stay,
+    /// Start the next way, from a keyframe.
+    Next,
+    /// The way gave its first picture: it holds for the view.
+    Settled,
+    /// The last way gave up too.
+    Exhausted,
+}
+
+/// The ways to decode in order, the one tried now, and whether it gave a
+/// picture (PC5): a way that ends or gives nothing for [`NO_PICTURE`] after
+/// its first access unit, or cannot take one, gives way to the next.
+#[derive(Debug, Clone)]
+pub struct Ladder {
+    ways: Vec<Accel>,
+    at: usize,
+    settled: bool,
+    first_fed: Option<Instant>,
+    exhausted: bool,
+}
+
+impl Ladder {
+    /// The ways, settled already on `settled_on` (a rejoin of the same
+    /// view) when it is still among them, else trying the first.
+    pub fn new(ways: Vec<Accel>, settled_on: Option<&Accel>) -> Self {
+        let ways = if ways.is_empty() {
+            vec![Accel::Software]
+        } else {
+            ways
+        };
+        let settled = settled_on.and_then(|on| ways.iter().position(|w| w == on));
+        Self {
+            ways,
+            at: settled.unwrap_or(0),
+            settled: settled.is_some(),
+            first_fed: None,
+            exhausted: false,
+        }
+    }
+
+    /// The way tried now.
+    pub fn way(&self) -> &Accel {
+        &self.ways[self.at]
+    }
+
+    /// A decoder of this way started again (another size or codec).
+    pub fn started(&mut self) {
+        self.first_fed = None;
+    }
+
+    /// An access unit went to the decoder at `at`.
+    pub fn fed(&mut self, at: Instant) {
+        self.first_fed.get_or_insert(at);
+    }
+
+    /// The decoder has given `pictures` and `ended` or not, at `now`.
+    pub fn check(&mut self, pictures: u64, ended: bool, now: Instant) -> Step {
+        if self.settled {
+            return Step::Stay;
+        }
+        if pictures > 0 {
+            self.settled = true;
+            return Step::Settled;
+        }
+        let last = self.at + 1 >= self.ways.len();
+        let limit = if last { LAST_NO_PICTURE } else { NO_PICTURE };
+        if give_up(pictures, ended, self.first_fed, now, limit) {
+            return self.next();
+        }
+        Step::Stay
+    }
+
+    /// Pass over the ways `failed` says gave nothing before, unless one is
+    /// settled; never past the last.
+    pub fn skip(&mut self, failed: impl Fn(&Accel) -> bool) {
+        if self.settled {
+            return;
+        }
+        while self.at + 1 < self.ways.len() && failed(&self.ways[self.at]) {
+            self.at += 1;
+            self.first_fed = None;
+        }
+    }
+
+    /// The decoder could not take an access unit.
+    pub fn failed(&mut self) -> Step {
+        self.settled = false;
+        self.next()
+    }
+
+    fn next(&mut self) -> Step {
+        self.first_fed = None;
+        if self.at + 1 < self.ways.len() {
+            self.at += 1;
+            Step::Next
+        } else if !self.exhausted {
+            self.exhausted = true;
+            Step::Exhausted
+        } else {
+            Step::Stay
+        }
+    }
+}
+
+/// Follow the ladder for the decoder now (PC5): the next way started, or
+/// the way that gave a picture kept for the view and said.
+#[allow(clippy::too_many_arguments)]
+fn climb(
+    shared: &Arc<Mutex<State>>,
+    ctx: &egui::Context,
+    session_id: u64,
+    ladder: &mut Ladder,
+    decoder: &mut Option<Decoder>,
+    gate: &mut KeyGate,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+) -> Step {
+    let Some(d) = decoder.as_ref() else {
+        return Step::Stay;
+    };
+    let tried = ladder.way().clone();
+    let gave = d.pictures();
+    let step = ladder.check(gave, d.ended(), Instant::now());
+    remember_failed(shared, stream_is, tried, step, gave);
+    match step {
+        Step::Next => {
+            *decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+            *gate = KeyGate::default();
+        }
+        Step::Settled => {
+            let words = way_words(ladder.way(), d.auto_took());
+            let mut state = lock(shared);
+            state.way = Some((session_id, ladder.way().clone()));
+            state.decoding = words;
+        }
+        Step::Stay | Step::Exhausted => {}
+    }
+    step
+}
+
+/// The last way gave nothing on HEVC (PC5, PR #562 review I3): the view
+/// is asked for again without it, once, by the worker as this one ends.
+fn give_up_hevc(
+    shared: &Mutex<State>,
+    step: Step,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+) -> bool {
+    let mut state = lock(shared);
+    let codec = stream_is.map(|(codec, _)| codec);
+    if !redial_without_hevc(step, codec, state.hevc_refused) {
+        return false;
+    }
+    state.hevc_refused = true;
+    state.redial_h264 = true;
+    true
+}
+
+/// A way that gave up (`step` from it) is remembered as failed for the
+/// stream's codec (PR #562 review M3), only when it never gave a picture
+/// (`gave`, re-review N3: one that worked and then stopped, a driver reset
+/// or a crash, is tried again next time); the processor never is.
+fn remember_failed(
+    shared: &Mutex<State>,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+    tried: Accel,
+    step: Step,
+    gave: u64,
+) {
+    if matches!(step, Step::Next | Step::Exhausted)
+        && gave == 0
+        && tried != Accel::Software
+        && let Some((codec, _)) = stream_is
+    {
+        lock(shared).failed_ways.insert((codec, tried));
+    }
+}
+
+/// Before a decoder of `codec` starts, the ways that failed for it in this
+/// app are passed over.
+fn skip_failed(shared: &Mutex<State>, ladder: &mut Ladder, codec: Codec) {
+    let state = lock(shared);
+    ladder.skip(|way| state.failed_ways.contains(&(codec, way.clone())));
+}
+
+/// A decoder for a stream that `is` this codec and size, decoding `way`
+/// (PC5); the window says the way, or why none started.
+fn start_decoder(
+    shared: &Arc<Mutex<State>>,
+    ctx: &egui::Context,
+    is: Option<(Codec, Option<(u16, u16)>)>,
+    way: &Accel,
+) -> Option<Decoder> {
+    let (codec, size) = is?;
+    let wanted = DecodeWanted {
+        codec,
+        size,
+        accel: way.clone(),
+        planes: crate::nv12::planes(),
+    };
+    // A new decoder: the stream's size, or none until its first picture,
+    // and only its own pictures from now on (PR #562 review I2).
+    let decoder_gen = {
+        let mut state = lock(shared);
+        state.decoder_gen += 1;
+        state.size = size;
+        state.decoder_gen
+    };
+    let started = Decoder::open(&wanted, publisher(shared, ctx, decoder_gen));
+    let mut state = lock(shared);
+    state.clock.restart();
+    state.decoding = way.words();
+    let decoder = match started {
+        Ok(d) => {
+            state.note = None;
+            Some(d)
+        }
+        Err(e) => {
+            state.note = Some(crate::video::decoder_words(&e, "another computer's screen"));
+            None
+        }
+    };
+    ctx.request_repaint_of(viewport_id());
+    decoder
+}
+
+/// The overlay's word for the way a view settled on: `auto` with what it
+/// took, when ffmpeg said (PC5).
+pub fn way_words(way: &Accel, auto_took: Option<String>) -> String {
+    match (way, auto_took) {
+        (Accel::Auto, Some(took)) => format!("auto ({took})"),
+        (Accel::Auto, None) => "auto (software)".to_string(),
+        _ => way.words(),
     }
 }
 
@@ -1816,13 +2394,27 @@ fn end_recording(shared: &Mutex<State>, why: Option<&str>) {
     state.saved_note = Some((note, Instant::now()));
 }
 
-/// Where a decoded picture goes: the window's next pass takes it.
-fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(Picture) + Send> {
+/// Where a decoded picture of the decoder `decoder_gen` goes: the window's
+/// next pass takes it, unless a newer decoder has started since.
+fn publisher(
+    shared: &Arc<Mutex<State>>,
+    ctx: &egui::Context,
+    decoder_gen: u64,
+) -> Box<dyn FnMut(Picture) + Send> {
     let shared = shared.clone();
     let ctx = ctx.clone();
     Box::new(move |picture| {
         let mut state = lock(&shared);
-        state.clock.decoded(Instant::now());
+        if state.decoder_gen != decoder_gen {
+            return;
+        }
+        state.clock.decoded(Instant::now(), picture.data.len());
+        // HEVC's size is the first picture's (PC5).
+        if state.size.is_none()
+            && let (Ok(w), Ok(h)) = (u16::try_from(picture.width), u16::try_from(picture.height))
+        {
+            state.size = Some((w, h));
+        }
         state.picture = Some(picture);
         drop(state);
         ctx.request_repaint_of(viewport_id());
@@ -2016,36 +2608,316 @@ mod tests {
         let shown = Shown {
             fps: 58,
             decode: Some(Duration::from_micros(6_100)),
+            decode_p95: Some(Duration::from_micros(9_400)),
+            bytes: 3_110_400,
         };
         assert_eq!(
-            stats_lines(&status, Some((1920, 1080)), shown),
+            stats_lines(&status, Some((1920, 1080)), shown, "d3d11va"),
             [
                 "Road: internet, by a relay (reached in 640 ms)",
                 "Picture: 1920\u{d7}1080 H.264",
                 "Frames: 59 a second in, 58 shown",
                 "Bitrate: 8.4 Mb/s",
                 "Round trip: 23 ms",
-                "Decode: 6.1 ms",
+                "Decode: 6.1 ms (p95 9.4 ms) \u{b7} d3d11va",
+                "Pipe: 3.1 MB a picture",
                 "Lost 2 \u{b7} late 1 \u{b7} dropped 0",
             ]
         );
         status.stats.as_mut().unwrap().relayed = false;
         assert_eq!(
-            stats_lines(&status, Some((1920, 1080)), shown)[0],
+            stats_lines(&status, Some((1920, 1080)), shown, "d3d11va")[0],
             "Road: internet, direct (reached in 640 ms)"
         );
         status.route = "home network".into();
         assert_eq!(
-            stats_lines(&status, Some((1920, 1080)), shown)[0],
+            stats_lines(&status, Some((1920, 1080)), shown, "d3d11va")[0],
             "Road: home network (reached in 640 ms)"
         );
         // Nothing known yet.
-        let lines = stats_lines(&ViewStatus::default(), None, Shown::default());
+        let lines = stats_lines(&ViewStatus::default(), None, Shown::default(), "");
         assert_eq!(lines[0], "Road: not yet");
         assert_eq!(lines[1], "Picture: not yet");
         assert_eq!(lines[4], "Round trip: not known");
         assert_eq!(lines[5], "Decode: not yet");
+        assert_eq!(lines[6], "Pipe: not yet");
         assert_eq!(bitrate_words(950), "950 kb/s");
+        assert_eq!(bytes_words(8_294_400), "8.3 MB");
+        assert_eq!(bytes_words(4_200), "4 KB");
+        assert_eq!(bytes_words(12), "12 B");
+    }
+
+    /// PR #562 review I2: a picture from a decoder already replaced is
+    /// dropped, so it cannot give the new stream its size; the current
+    /// decoder's first picture does.
+    #[test]
+    fn only_the_current_decoders_pictures_count() {
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        let picture = |width: usize, height: usize| Picture {
+            width,
+            height,
+            planes: Planes::Rgba,
+            data: vec![0; width * height * 4],
+            colour: crate::video::Colour::default(),
+        };
+        lock(&shared).decoder_gen = 2;
+        let mut old = publisher(&shared, &ctx, 1);
+        old(picture(64, 36));
+        {
+            let state = lock(&shared);
+            assert!(state.picture.is_none(), "the old decoder's picture");
+            assert_eq!(state.size, None, "and not its size");
+        }
+        let mut current = publisher(&shared, &ctx, 2);
+        current(picture(32, 18));
+        assert_eq!(lock(&shared).size, Some((32, 18)));
+        current(picture(16, 8));
+        assert_eq!(lock(&shared).size, Some((32, 18)), "the first picture's");
+        old(picture(64, 36));
+        assert_eq!(
+            lock(&shared).picture.as_ref().map(|p| p.width),
+            Some(16),
+            "a late old picture replaces nothing"
+        );
+    }
+
+    /// PC5: a way is given up when it never gave a picture and ended, or
+    /// had two seconds since its first access unit; one that gave a picture
+    /// is kept.
+    #[test]
+    fn a_way_that_gives_no_picture_is_given_up() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let two = NO_PICTURE;
+        assert!(!give_up(0, false, None, at(9_000), two), "not fed yet");
+        assert!(!give_up(0, false, Some(t), at(1_999), two));
+        assert!(give_up(0, false, Some(t), at(2_000), two));
+        assert!(give_up(0, true, None, t, two), "ffmpeg ended at once");
+        assert!(
+            !give_up(1, true, Some(t), at(9_000), two),
+            "it gave a picture"
+        );
+        assert!(!give_up(5, false, Some(t), at(9_000), two));
+        assert_eq!(way_words(&Accel::D3d11va, None), "d3d11va");
+        assert_eq!(way_words(&Accel::Software, None), "software");
+        assert_eq!(
+            way_words(&Accel::Auto, Some("dxva2".into())),
+            "auto (dxva2)"
+        );
+        assert_eq!(way_words(&Accel::Auto, None), "auto (software)");
+    }
+
+    /// PC5 review M9: the ladder goes to the next way when one gives no
+    /// picture in time, ends or cannot take a unit; settles on the one
+    /// that gives a picture and keeps it; says once that the last gave up.
+    #[test]
+    fn the_ladder_climbs_settles_and_runs_out() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let ways = vec![Accel::D3d11va, Accel::Auto, Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), None);
+        assert_eq!(ladder.way(), &Accel::D3d11va);
+        assert_eq!(ladder.check(0, false, at(9_000)), Step::Stay, "not fed");
+        ladder.fed(at(0));
+        ladder.fed(at(500));
+        assert_eq!(ladder.check(0, false, at(1_999)), Step::Stay);
+        assert_eq!(ladder.check(0, false, at(2_000)), Step::Next);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        // The new way's clock starts at its own first unit.
+        assert_eq!(ladder.check(0, false, at(5_000)), Step::Stay);
+        assert_eq!(ladder.check(0, true, at(5_000)), Step::Next, "ended");
+        assert_eq!(ladder.way(), &Accel::Software);
+        ladder.fed(at(6_000));
+        // The processor, last, is given 6 s, not 2 (re-review N2).
+        assert_eq!(ladder.check(0, false, at(8_000)), Step::Stay);
+        assert_eq!(ladder.check(1, false, at(8_010)), Step::Settled);
+        assert_eq!(ladder.check(0, true, at(99_000)), Step::Stay, "settled");
+        // A feed error leaves the last way: said once.
+        assert_eq!(ladder.failed(), Step::Exhausted);
+        assert_eq!(ladder.failed(), Step::Stay);
+        // A feed error on a card goes to the next.
+        let mut ladder = Ladder::new(ways.clone(), None);
+        assert_eq!(ladder.failed(), Step::Next);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        // A rejoin starts settled on the way the view settled on (review
+        // M1); one no longer among the ways (the setting changed) starts
+        // afresh, unsettled.
+        let mut ladder = Ladder::new(ways.clone(), Some(&Accel::Auto));
+        assert_eq!(ladder.way(), &Accel::Auto);
+        assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
+        let software_only = vec![Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), Some(&Accel::Software));
+        assert_eq!(ladder.way(), &Accel::Software);
+        let mut afresh = Ladder::new(ways, Some(&Accel::Vaapi("/dev/dri/renderD128".into())));
+        assert_eq!(afresh.way(), &Accel::D3d11va);
+        afresh.fed(at(0));
+        assert_eq!(afresh.check(0, false, at(2_000)), Step::Next, "not settled");
+        let mut card = Ladder::new(software_only, Some(&Accel::D3d11va));
+        assert_eq!(card.way(), &Accel::Software);
+        assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
+        assert_eq!(card.check(0, true, at(0)), Step::Exhausted);
+        assert_eq!(Ladder::new(Vec::new(), None).way(), &Accel::Software);
+    }
+
+    /// PR #562 review M3: a way that failed for a codec is remembered for
+    /// the app's life and passed over for that codec, never the processor,
+    /// never a settled way, and not for the other codec.
+    #[test]
+    fn a_way_that_failed_is_passed_over_next_time() {
+        let shared = Mutex::new(State::default());
+        let hevc = Some((Codec::Hevc, None));
+        remember_failed(&shared, hevc, Accel::D3d11va, Step::Next, 0);
+        remember_failed(&shared, hevc, Accel::Auto, Step::Stay, 0);
+        remember_failed(&shared, hevc, Accel::Software, Step::Exhausted, 0);
+        remember_failed(&shared, None, Accel::Auto, Step::Next, 0);
+        // A way that worked, then stopped (re-review N3), is not.
+        remember_failed(&shared, hevc, Accel::Auto, Step::Next, 120);
+        assert_eq!(
+            lock(&shared).failed_ways,
+            [(Codec::Hevc, Accel::D3d11va)].into_iter().collect()
+        );
+        let ways = vec![Accel::D3d11va, Accel::Auto, Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), None);
+        skip_failed(&shared, &mut ladder, Codec::Hevc);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        let mut ladder = Ladder::new(ways.clone(), None);
+        skip_failed(&shared, &mut ladder, Codec::H264);
+        assert_eq!(ladder.way(), &Accel::D3d11va, "H.264's own");
+        let mut settled = Ladder::new(ways.clone(), Some(&Accel::D3d11va));
+        skip_failed(&shared, &mut settled, Codec::Hevc);
+        assert_eq!(settled.way(), &Accel::D3d11va, "settled, kept");
+        let mut all = Ladder::new(ways, None);
+        all.skip(|_| true);
+        assert_eq!(all.way(), &Accel::Software, "never past the last");
+        // Turning decoding on the card off or on tries every way afresh
+        // (re-review N3).
+        let ctx = egui::Context::default();
+        let dir = std::env::temp_dir().join(format!("pd-pc5-n3-{}", std::process::id()));
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.set_hw_decode(true);
+        lock(&view.shared)
+            .failed_ways
+            .insert((Codec::H264, Accel::D3d11va));
+        view.set_hw_decode(true);
+        assert_eq!(lock(&view.shared).failed_ways.len(), 1, "unchanged, kept");
+        view.set_hw_decode(false);
+        assert!(lock(&view.shared).failed_ways.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #562 review I3: a view asks for HEVC only with the setting on,
+    /// this app's ffmpeg decoding it and the view not given up on it; it
+    /// is given up once, when the last way gives nothing on HEVC.
+    #[test]
+    fn hevc_is_asked_for_only_when_this_app_decodes_it_and_given_up_once() {
+        assert!(offer_hevc(true, true, true, false));
+        assert!(!offer_hevc(false, true, true, false), "the setting off");
+        assert!(
+            !offer_hevc(true, false, true, false),
+            "no graphics card decode (review M10)"
+        );
+        assert!(!offer_hevc(true, true, false, false), "this ffmpeg cannot");
+        assert!(
+            !offer_hevc(true, true, true, true),
+            "given up for this view"
+        );
+        let hevc = Some(Codec::Hevc);
+        assert!(redial_without_hevc(Step::Exhausted, hevc, false));
+        assert!(!redial_without_hevc(Step::Exhausted, hevc, true), "once");
+        assert!(!redial_without_hevc(Step::Next, hevc, false), "a way left");
+        assert!(!redial_without_hevc(
+            Step::Exhausted,
+            Some(Codec::H264),
+            false
+        ));
+        let shared = Mutex::new(State::default());
+        assert!(give_up_hevc(
+            &shared,
+            Step::Exhausted,
+            Some((Codec::Hevc, None))
+        ));
+        assert!(lock(&shared).redial_h264 && lock(&shared).hevc_refused);
+        assert!(
+            !give_up_hevc(&shared, Step::Exhausted, Some((Codec::Hevc, None))),
+            "not twice"
+        );
+    }
+
+    /// PR #562 re-review N1: an ask made after the probe said this app
+    /// decodes HEVC says hevc: true; one made before it waits; one that
+    /// could not take HEVC says false at once.
+    #[test]
+    fn an_ask_after_the_probe_says_hevc() {
+        assert_eq!(hevc_ask(true, Some(true)), HevcAsk::Now(true));
+        assert_eq!(hevc_ask(true, Some(false)), HevcAsk::Now(false));
+        assert_eq!(hevc_ask(true, None), HevcAsk::Wait);
+        assert_eq!(hevc_ask(false, None), HevcAsk::Now(false), "no wait");
+        let dir = std::env::temp_dir().join(format!("pd-pc5-n1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            hevc_setting: true,
+            hw_decode: true,
+            ..State::default()
+        };
+        let wanted = Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        ask_with(&dir, &mut state, wanted, Some(true)).unwrap();
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(
+            matches!(
+                asked.as_slice(),
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: true }
+            ),
+            "{asked:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR #562 review I3: the ask says HEVC as the window offers it.
+    #[test]
+    fn the_view_ask_says_whether_it_takes_hevc() {
+        let dir = std::env::temp_dir().join(format!("pd-pc5-ask-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = State {
+            hevc_setting: true,
+            hw_decode: true,
+            hevc_refused: true,
+            ..State::default()
+        };
+        let wanted = Wanted {
+            device_id: "desk".into(),
+            name: "Desk".into(),
+            monitor: 0,
+        };
+        ask(&dir, &mut state, wanted).unwrap();
+        let asked = computers::take_all(&dir, now_unix());
+        assert!(
+            matches!(
+                asked.as_slice(),
+                [r] if r.ask == ComputerAsk::View { device_id: "desk".into(), monitor: 0, hevc: false }
+            ),
+            "{asked:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC5: the percentiles by nearest rank.
+    #[test]
+    fn a_percentile_is_by_nearest_rank() {
+        let d = Duration::from_millis;
+        assert_eq!(percentile(&mut [], 0.5), None);
+        assert_eq!(percentile(&mut [d(3)], 0.95), Some(d(3)));
+        let mut samples: Vec<Duration> = (1..=20).rev().map(d).collect();
+        assert_eq!(percentile(&mut samples, 0.5), Some(d(10)));
+        assert_eq!(percentile(&mut samples, 0.95), Some(d(19)));
+        assert_eq!(percentile(&mut samples, 1.0), Some(d(20)));
+        assert_eq!(percentile(&mut samples, 0.0), Some(d(1)));
     }
 
     /// PC2: each picture is timed against the access unit it came from,
@@ -2059,23 +2931,29 @@ mod tests {
         assert_eq!(clock.shown(t), Shown::default());
         for n in 0..30u64 {
             clock.fed(ms(n * 33));
-            clock.decoded(ms(n * 33 + 5));
+            // Two slow pictures in thirty-one: the median keeps to the
+            // rest, the 95th percentile (the 30th by nearest rank) shows
+            // them (PC5; one alone would sit above it, review M8).
+            let slow = n == 7 || n == 20;
+            clock.decoded(ms(n * 33 + if slow { 40 } else { 5 }), 100);
         }
         clock.fed(ms(1000));
-        clock.decoded(ms(1006));
+        clock.decoded(ms(1006), 400);
         let shown = clock.shown(ms(1006));
         assert_eq!(shown.fps, 30);
         assert_eq!(shown.decode.map(|d| d.as_millis()), Some(5));
+        assert_eq!(shown.decode_p95.map(|d| d.as_millis()), Some(40));
+        assert_eq!(shown.bytes, (30 * 100 + 400) / 31);
         // Nothing for two seconds: none shown, no decode time.
         assert_eq!(clock.shown(ms(3100)), Shown::default());
         // A new decoder forgets the units the old one was fed: a picture
         // with none waiting is counted, not timed.
         clock.fed(ms(3200));
         clock.restart();
-        clock.decoded(ms(3900));
+        clock.decoded(ms(3900), 1);
         clock.fed(ms(4000));
-        clock.decoded(ms(4002));
-        clock.decoded(ms(4004));
+        clock.decoded(ms(4002), 1);
+        clock.decoded(ms(4004), 1);
         let shown = clock.shown(ms(4200));
         assert_eq!(shown.fps, 2, "{shown:?}");
         assert_eq!(shown.decode.map(|d| d.as_millis()), Some(2));
@@ -2498,7 +3376,8 @@ mod tests {
             asked.iter().map(|r| r.ask.clone()).collect::<Vec<_>>(),
             [ComputerAsk::View {
                 device_id: "desk".into(),
-                monitor: 0
+                monitor: 0,
+                hevc: false,
             }]
         );
         let (mut relay, _) = listener.accept().unwrap();

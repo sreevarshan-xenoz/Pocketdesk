@@ -437,7 +437,7 @@ fn draw(shared: &Arc<Mutex<State>>, ui: &mut egui::Ui, control: bool) {
     if let Some(picture) = state.picture.take() {
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [picture.width, picture.height],
-            &picture.rgba,
+            &picture.data,
         );
         match &mut state.texture {
             Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
@@ -727,7 +727,7 @@ fn screenshot(shared: &Arc<Mutex<State>>, ctx: &egui::Context) {
     let Some((width, height, rgba)) = lock(shared)
         .shown
         .as_ref()
-        .map(|p| (p.width, p.height, p.rgba.clone()))
+        .map(|p| (p.width, p.height, p.data.clone()))
     else {
         return;
     };
@@ -833,7 +833,8 @@ fn view(file: &CastFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
         if want && recorder.is_none() {
             let dir = user_folder("Videos");
             let path = free_name(&dir, &format!("Phone screen {}", stamp(now_unix())), "mkv");
-            let started = std::fs::create_dir_all(&dir).and_then(|()| Recorder::start(&path));
+            let started = std::fs::create_dir_all(&dir)
+                .and_then(|()| Recorder::start(&path, crate::video::Codec::H264));
             let mut state = lock(shared);
             match started {
                 Ok(r) => {

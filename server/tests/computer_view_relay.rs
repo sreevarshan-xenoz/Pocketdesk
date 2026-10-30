@@ -299,6 +299,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -462,6 +463,7 @@ async fn a_dropped_view_reconnects_by_itself_until_stopped() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -574,6 +576,7 @@ async fn shown_view(
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -726,6 +729,7 @@ async fn frames_too_large_for_the_window_are_said() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -767,6 +771,7 @@ async fn a_computer_not_paired_here_ends_the_view_with_why() {
         .send(Command::Start {
             device_id: "gone".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -823,6 +828,7 @@ async fn a_window_that_comes_late_still_hears_why_the_view_ended() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -867,6 +873,7 @@ async fn a_window_without_the_token_sees_nothing() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -948,6 +955,7 @@ async fn the_windows_privacy_is_asked_of_the_computer_and_let_go_as_it_closes() 
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -1103,6 +1111,7 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();
@@ -1257,6 +1266,7 @@ async fn controlled_view(
         .send(Command::Start {
             device_id: "desk".into(),
             monitor: 0,
+            hevc: false,
         })
         .await
         .unwrap();

@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1024 open items.
+1029 open items.
 
 | Where | Items |
 |---|---|
@@ -12,8 +12,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 111 |
-| A Linux desktop (the Azure VM serves for some) | 177 |
+| A second computer | 115 |
+| A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
 
@@ -525,7 +525,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 - On a Windows test machine (never the owner's box), run `POCKETDESK_HOOK_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_hook_goes_in_and_comes_out -- --ignored` (without the variable it skips): the hook goes in and the watchdog takes it out within about 1.5 s, the keyboard working throughout. (where: owner)
 
-**234. Pointer lock and relative mouse (PC7)**
+**235. Pointer lock and relative mouse (PC7)**
 
 - On a test machine (never the owner's box), run `POCKETDESK_POINTER_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_grab_locks_and_frees -- --ignored` (without the variable it skips) and move the mouse during the five seconds: the pointer stays hidden and inside the window, the test reports relative moves above zero, and the pointer comes back free as the window closes. On Windows, and on the laptop under Hyprland (Wayland, locked in place) and under an X11 session if one is at hand (confined). (where: owner)
 
@@ -1003,7 +1003,14 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Lock it when I close the window, on (bar or Settings), with the switch on there: closing the window locks the laptop (`loginctl lock-session` or hyprlock); with the switch off there it does not, and a notification here says "Couldn't lock" with that switch's name; with the option off it does not. Never the other way round: Windows here is the owner's box and is never the one locked. (where: second computer)
 - With a phone holding privacy on the laptop first, Hide what I do there says another phone or computer holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)
 
-**234. Pointer lock and relative mouse (PC7)**
+**234. A faster picture: hardware decode, NV12 and HEVC (PC5)**
+
+- In the real window on Windows viewing the Linux laptop: Stats say `d3d11va`, and the picture's colours match the laptop's screen (a red, a skin tone and a grey side by side; NV12 by the shader against the window's own Screenshot, which converts on the processor); resize, full screen, the dimmed picture while it reconnects and another screen all draw. (where: second computer)
+- HEVC both ways: with `allow_hevc` on on the other computer, Stats say `HEVC` and the picture is right; another screen, or a resolution change there, restarts it at the new size; with "Use HEVC when both can" off here (next view) it is H.264 again. Note the bitrate Stats say for each codec on the same screen. (where: second computer)
+- Record a view that came as HEVC (Stats say `HEVC`) for ten seconds: the MKV plays in a player and is ten seconds long (`ffprobe` says `codec_name=hevc`). (where: second computer)
+- "Decode a computer's screen on the graphics card" off: the next view's Stats say `software`; on again, the card. Compare the ffmpeg sidecar's CPU in Task Manager (or `top` on the laptop) for the card and software at the same screen, 1440p and full motion. (where: second computer)
+
+**235. Pointer lock and relative mouse (PC7)**
 
 - The laptop viewing Windows, a 3D or mouse-look program in front on Windows (Blender's viewport fly mode, or a game in a window): Lock the pointer turns it as the mouse moves, with no edge stop; "Ctrl+Alt+Shift+M frees the pointer" shows for about 3 s; the chord frees it. Never the other way round with the owner's box grabbed. (where: second computer)
 - Windows (a test machine) viewing the laptop's headless sway stand-in, locked: `wev` on the stand-in counts relative motion events while the mouse moves (counts only), and none once freed (the moves go absolute again). (where: second computer)
@@ -1489,6 +1496,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The phone's screen sharing still works after driving: with shared input on, turn sharing off and on twice on the Linux laptop, then show its screen on the phone (GNOME or KDE, through the screen-sharing portal; on Hyprland too): it starts within a few seconds, never waiting on a portal call. (where: linux)
 - GNOME at scale 2 in its default physical-layout mode: the computer's own screens in `shared_screens.json` (read from xdg-output where Hyprland's IPC is not there) are its logical size, 1920x1080 for a 4K screen at 200%, not 3840x2160 (mutter's xdg-output may report physical-layout boxes); if not, the screens come from somewhere else on GNOME. (where: linux)
 - GNOME 45 or later and KDE Plasma 6.1 or later (a VM serves): the dialog, a crossing to a second computer and back, keys, and a lock bringing them home; on GNOME 46 a monitor change may need sharing turned off and on (its portal cannot re-enable a disabled session). (where: linux)
+
+**234. A faster picture: hardware decode, NV12 and HEVC (PC5)**
+
+- The Linux laptop viewing Windows: Stats say `vaapi (renderD129)` (the Intel iHD node, past the NVIDIA renderD128 that has no VA driver); with `POCKETDESK_VAAPI_DEVICE=/dev/dri/renderD128` the window moves on to `auto` or `software` within about 2 s and the picture comes; the shader draws on the laptop's GL (colours as above). (where: linux)
 
 ## Other hardware: a foldable, tablet, mouse, game pad, older or newer Android
 

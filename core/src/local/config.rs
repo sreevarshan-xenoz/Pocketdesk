@@ -399,6 +399,18 @@ pub struct Config {
     /// (PC4); Ctrl+Alt+Shift takes them back. On by default.
     #[serde(default = "default_true")]
     pub computer_view_grab_keys: bool,
+    /// The window that shows another computer's screen decodes on the
+    /// graphics card when it can (PC5): Direct3D 11 on Windows, VA-API on
+    /// Linux, else what ffmpeg finds, falling back to the processor when the
+    /// card gives no picture. Read as each view starts. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_hw_decode: bool,
+    /// The window that shows another computer's screen asks for HEVC when
+    /// both computers can (PC5): this one's ffmpeg decodes it (found as the
+    /// server starts) and the other's encoder makes it (its `allow_hevc`).
+    /// Read as each view dials. On by default.
+    #[serde(default = "default_true")]
+    pub computer_view_hevc: bool,
     /// The other computer is locked as the window that shows its screen
     /// closes (PC8), with that computer's own lock, which its "Lock, sleep,
     /// privacy and wake others" switch for this one allows. Off until
@@ -635,6 +647,8 @@ impl Default for Config {
             computer_view_stats: false,
             computer_view_clipboard: true,
             computer_view_grab_keys: true,
+            computer_view_hw_decode: true,
+            computer_view_hevc: true,
             computer_view_lock_on_close: false,
             computer_wake_facts: true,
         }
@@ -896,6 +910,8 @@ impl Config {
         "computer_view_stats",
         "computer_view_clipboard",
         "computer_view_grab_keys",
+        "computer_view_hw_decode",
+        "computer_view_hevc",
         "computer_view_lock_on_close",
         "computer_wake_facts",
     ];
@@ -1403,6 +1419,48 @@ phone_battery = \"x\"
         assert_eq!(
             Config::default().changed_keys(&chosen),
             ["computer_view_grab_keys"]
+        );
+    }
+
+    /// PC5: the window decodes on the graphics card until turned off, and the
+    /// choice saves and reads back.
+    #[test]
+    fn a_computers_window_decodes_on_the_card_until_turned_off() {
+        let path = temp("computer-view-hw-decode");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_hw_decode);
+        assert!(Config::default().computer_view_hw_decode);
+        let chosen = Config {
+            computer_view_hw_decode: false,
+            ..Config::default()
+        };
+        chosen
+            .save_keys_to(&path, &["computer_view_hw_decode"])
+            .unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_hw_decode);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_hw_decode"]
+        );
+    }
+
+    /// PC5: the window asks for HEVC until turned off, and the choice saves
+    /// and reads back.
+    #[test]
+    fn a_computers_window_asks_for_hevc_until_turned_off() {
+        let path = temp("computer-view-hevc");
+        std::fs::write(&path, "").unwrap();
+        assert!(Config::load_from(&path).unwrap().computer_view_hevc);
+        assert!(Config::default().computer_view_hevc);
+        let chosen = Config {
+            computer_view_hevc: false,
+            ..Config::default()
+        };
+        chosen.save_keys_to(&path, &["computer_view_hevc"]).unwrap();
+        assert!(!Config::load_from(&path).unwrap().computer_view_hevc);
+        assert_eq!(
+            Config::default().changed_keys(&chosen),
+            ["computer_view_hevc"]
         );
     }
 

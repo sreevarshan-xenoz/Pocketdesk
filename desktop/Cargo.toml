@@ -48,6 +48,8 @@ windows.workspace = true
 windows-future = "0.3"
 # N2: the live test names its cover as the phone does.
 sha2 = "0.10"
+# PC5: the NV12 shader's test opens its window off the main thread.
+winit = { version = "0.30", default-features = false }
 
 # The tray. tray-icon's Linux backend needs a GTK main loop the app does not
 # run, so Linux has its own (src/tray_linux.rs): a StatusNotifierItem over

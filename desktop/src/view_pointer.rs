@@ -456,7 +456,7 @@ mod tests {
         }
     }
 
-    /// The owed desk check (checklist §234): a real window locks this
+    /// The owed desk check (checklist §235): a real window locks this
     /// computer's pointer as the view does, sums the raw movement for five
     /// seconds while the tester moves the mouse, then frees it and closes.
     /// The pointer must stay hidden and held, and come back where the

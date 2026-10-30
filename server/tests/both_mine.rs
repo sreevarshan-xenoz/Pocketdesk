@@ -122,6 +122,7 @@ fn view(state: &Path, other: &str, other_state: &Path, me: &str) -> Seen {
         ComputerAsk::View {
             device_id: other.to_string(),
             monitor: 0,
+            hevc: false,
         },
         pin::now_unix(),
     )
