@@ -2004,8 +2004,9 @@ On the A71 against a throwaway server with a stand-in clipboard (`scratchpad/d3_
 - [ ] With the window closed: a phone that must ask, an ask-first task, and a phone's "Show screen" each start the window (once each), with the prompt or the screen. (where: by hand)
 - [ ] Quit from the tray program closes the window too; with no window open, an app started just after Quit stays open.
 - [ ] An install without `pocketdesk-tray`: the app's own tray, as before.
-- [ ] Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close).
-      (FAILED 2026-10-30 on the Linux laptop, waybar's tray running, release build of the server and the app together: `pocketdesk-tray` panicked in ksni's service thread, zbus "there is no reactor running, must be called from the context of a Tokio 1.x runtime" (`ksni::blocking::spawn_with_options` → zbus `Transport::connect` → `Handle::current`), then said "no tray icon (the tray host did not answer within 3 s); running without one".)
+- [x] Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in).
+      (Failed 2026-10-30 in a build of the server and the app together, where zbus carries `tokio`: `pocketdesk-tray` panicked in ksni's thread, "there is no reactor running", and ran without an icon. Fixed by starting ksni inside a Tokio runtime of its own; seen 2026-10-31 on the Linux laptop, Hyprland with waybar's tray, a throwaway server, the same kind of build: `pocketdesk-tray` registered with the StatusNotifierWatcher (its item listed beside the others, title "Pocketdesk"), no panic in its log, and the item's `Activate` over D-Bus, what a click on the icon sends, opened the app's "Pocketdesk" window. On a bus with no tray host (`dbus-run-session`) it says it has no icon, with the watcher's error, and does not panic.)
+- [ ] Linux: on a desktop with no tray host, the window quits on close.
 
 ## 122. The phone as a pen (E3)
 

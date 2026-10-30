@@ -1378,7 +1378,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **121. The tray on its own (E2)**
 
-- Linux: the tray program on a StatusNotifierItem host (or the WSL stand-in), and on a desktop with none (the window then quits on close). (FAILED 2026-10-30 on the Linux laptop, waybar's tray running, release build of the server and the app together: `pocketdesk-tray` panicked in ksni's service thread, zbus "there is no reactor running, must be called from the context of a Tokio 1.x runtime" (`ksni::blocking::spawn_with_options` → zbus `Transport::connect` → `Handle::current`), then said "no tray icon (the tray host did not answer within 3 s); running without one".)
+- Linux: on a desktop with no tray host, the window quits on close.
 
 **122. The phone as a pen (E3)**
 
