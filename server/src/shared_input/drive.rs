@@ -367,7 +367,11 @@ impl Driver {
                 true,
                 Some("A screen window here took the pointer"),
             );
-        } else if self.driven.is_none() && !self.game_held && !self.targets().is_empty() {
+        } else if self.driven.is_none()
+            && !self.game_held
+            && !self.locked
+            && !self.targets().is_empty()
+        {
             out.push(note(if held {
                 "A screen window holds the pointer: the edges lead nowhere until it lets go"
             } else {
@@ -2844,6 +2848,23 @@ mod tests {
         assert!(sent_home.contains(&sent("L", Msg::Leave)), "{home:?}");
         assert_eq!(d.away_on(), None);
         assert_eq!(d.mode(), Mode::Off);
+    }
+
+    /// PR #563 review M2: with this computer's session locked, the edges
+    /// lead nowhere anyway: the window's hold and its end say nothing.
+    #[test]
+    fn a_window_hold_while_locked_here_says_nothing_of_the_edges() {
+        let mut d = driver(desk(false), &["L"]);
+        d.start();
+        d.on(Captured::Locked);
+        for held in [true, false] {
+            let said = d.set_view_held(held);
+            assert!(
+                !said.iter().any(|a| matches!(a, Action::Badge(_))),
+                "{said:?}"
+            );
+            assert_eq!(d.mode(), Mode::Off);
+        }
     }
 
     /// PC7: with a game holding them already, the window's hold says
