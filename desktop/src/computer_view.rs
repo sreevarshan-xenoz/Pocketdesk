@@ -1555,6 +1555,10 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                 going,
                 connected,
             );
+            // Relative moves need no picture of the right size: a size
+            // change while locked keeps the movement and what is held
+            // (PR #563 review M6).
+            let current = current || state.pointer.locked();
             let on = controls(status.control, state.view_only, connected, current) && focused;
             let packets = match picture_rect {
                 Some(rect) if on => {
@@ -3244,6 +3248,9 @@ mod tests {
         harness.step();
         harness.step();
         assert!(lock(&shared).pointer.locked(), "the chord locked it");
+        // The picture's size changing (a new size said, its picture not
+        // come yet) leaves locked input going (PR #563 review M6).
+        lock(&shared).size = Some((w as u16 + 2, h as u16));
         harness.hover_at(switch);
         harness.drag_at(switch);
         harness.step();
