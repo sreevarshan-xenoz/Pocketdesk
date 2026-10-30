@@ -217,6 +217,7 @@ fn the_clipboard_and_files_follow_the_window() {
         ComputerAsk::View {
             device_id: b_id.clone(),
             monitor: 0,
+            hevc: false,
         },
         pin::now_unix(),
     )

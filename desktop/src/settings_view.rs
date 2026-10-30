@@ -340,6 +340,16 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_view_hw_decode",
+        "Decode a computer's screen on the graphics card",
+        Section::Computers,
+    ),
+    (
+        "computer_view_hevc",
+        "Use HEVC when both can",
+        Section::Computers,
+    ),
+    (
         "computer_view_lock_on_close",
         "Lock it when I close the window",
         Section::Computers,
@@ -610,6 +620,10 @@ pub fn applies_live(key: &str) -> bool {
             | "computer_view_clipboard"
             // PC4: read by an open window at once.
             | "computer_view_grab_keys"
+            // PC5: read as each view starts, and by the server as each
+            // view dials.
+            | "computer_view_hw_decode"
+            | "computer_view_hevc"
             // PC8: read by an open window at once.
             | "computer_view_lock_on_close"
             | "events"
@@ -2164,6 +2178,27 @@ impl SettingsForm {
                         );
                     });
                 }
+                // PC5: how the window decodes.
+                row(ui, "computer_view_hw_decode", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_hw_decode,
+                        "decode a computer's screen on the graphics card when it can",
+                    );
+                    note(
+                        ui,
+                        "Direct3D 11 on Windows, VA-API on Linux, else what ffmpeg finds; a card that gives no picture in 2 s is left for the processor. The window's Stats say which. Applies from the next view.",
+                    );
+                });
+                row(ui, "computer_view_hevc", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_view_hevc,
+                        "use HEVC when both can: a computer's screen comes as HEVC when its encoder makes it and this computer's ffmpeg decodes it",
+                    );
+                    note(
+                        ui,
+                        "HEVC usually needs less bitrate for a moving picture, which helps most over the internet. Only with decoding on the graphics card on too: on the processor HEVC is slower than H.264. The other computer sends it only with H.265 (HEVC) on there, in its Settings under Phones (allow_hevc). Applies from the next view.",
+                    );
+                });
                 row(ui, "computer_view_lock_on_close", |ui| {
                     ui.checkbox(
                         &mut e.computer_view_lock_on_close,
@@ -2951,6 +2986,8 @@ mod tests {
             "computer_view_stats",
             "computer_view_clipboard",
             "computer_view_grab_keys",
+            "computer_view_hw_decode",
+            "computer_view_hevc",
             "computer_view_lock_on_close",
         ] {
             assert!(

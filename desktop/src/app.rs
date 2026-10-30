@@ -541,6 +541,9 @@ pub struct PocketdeskApp {
 impl PocketdeskApp {
     /// The app, open on `page` (`--page`) or the Overview.
     pub fn new(state_dir: PathBuf, tray: Option<Tray>, page: Option<Tab>) -> Self {
+        // PC5: whether this app's ffmpeg decodes HEVC, found once, off the
+        // UI thread, before a computer's screen is asked for.
+        crate::video::start_hevc_probe();
         let mut app = Self {
             state_dir,
             tray,
@@ -984,6 +987,14 @@ impl PocketdeskApp {
                 Config::path().ok(),
             )
         });
+        // PC5: the next view asks for HEVC, or not, as Settings say.
+        view.set_hevc(self.config.as_ref().is_none_or(|c| c.computer_view_hevc));
+        // PC5: the next view decodes on the card, or not, as Settings say.
+        view.set_hw_decode(
+            self.config
+                .as_ref()
+                .is_none_or(|c| c.computer_view_hw_decode),
+        );
         // PC4: the keyboard grab follows Settings in every window.
         #[cfg(windows)]
         view.set_grab_keys(

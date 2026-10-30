@@ -24,6 +24,7 @@ mod nearby_view;
 mod network_profile;
 mod notes_view;
 mod notice;
+mod nv12;
 mod pair_view;
 mod phone_files_view;
 mod photos_view;
@@ -42,6 +43,8 @@ mod view_follow;
 #[cfg(windows)]
 mod view_grab;
 mod view_input;
+#[cfg(test)]
+mod view_live;
 mod widgets;
 
 use eframe::egui;
@@ -135,6 +138,9 @@ fn main() -> eframe::Result {
         TITLE,
         options,
         Box::new(move |cc| {
+            // PC5: a computer's screen is drawn as NV12 by a shader where
+            // the app draws with glow.
+            nv12::set_glow(cc.gl.is_some());
             // Glyphs for scripts egui's own fonts lack (U1).
             fonts::install(&cc.egui_ctx);
             // Lesser text readable in both themes (U1 review).

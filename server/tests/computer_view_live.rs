@@ -187,6 +187,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
         ComputerAsk::View {
             device_id: b_id.clone(),
             monitor: 0,
+            hevc: false,
         },
         pin::now_unix(),
     )
@@ -235,6 +236,7 @@ fn a_computers_screen_is_shown_on_another_by_both_roads() {
         ComputerAsk::View {
             device_id: b_id.clone(),
             monitor: 0,
+            hevc: false,
         },
         pin::now_unix(),
     )
