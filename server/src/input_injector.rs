@@ -282,6 +282,54 @@ pub struct InputInjector {
     /// yet (`None`), not offered (`Some(None)`), or ready.
     #[cfg(target_os = "linux")]
     vkeyboard: VkState,
+    /// Never Alt+SysRq, the kernel's magic SysRq (PR #559 re-review N3).
+    #[cfg(target_os = "linux")]
+    sysrq: SysrqGuard,
+}
+
+/// Keeps Alt+SysRq from Linux's kernel (PR #559 re-review N3): magic SysRq
+/// reads uinput keyboards even under a desktop, and with Alt and SysRq down
+/// the next key is a kernel command (sync, reboot, kill...). A SysRq (Print
+/// Screen) pressed while an Alt this injector pressed is down is dropped,
+/// with its release; from a computer's window or the shared keyboard alike.
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Default)]
+struct SysrqGuard {
+    /// The Alts this injector holds down.
+    alts: std::collections::BTreeSet<u16>,
+    /// A SysRq press was dropped: its release is dropped too.
+    dropped: bool,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl SysrqGuard {
+    /// Whether the key `code` going down or up may be injected.
+    fn passes(&mut self, code: u16, pressed: bool) -> bool {
+        let (left_alt, right_alt, sysrq) = (
+            KeyCode::KEY_LEFTALT.0,
+            KeyCode::KEY_RIGHTALT.0,
+            KeyCode::KEY_SYSRQ.0,
+        );
+        if code == left_alt || code == right_alt {
+            if pressed {
+                self.alts.insert(code);
+            } else {
+                self.alts.remove(&code);
+            }
+            return true;
+        }
+        if code != sysrq {
+            return true;
+        }
+        if pressed {
+            if !self.alts.is_empty() {
+                self.dropped = true;
+                return false;
+            }
+            return true;
+        }
+        !std::mem::take(&mut self.dropped)
+    }
 }
 
 /// The game controller the phone's gamepad drives (T7): not made yet;
@@ -495,6 +543,7 @@ impl InputInjector {
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
+                                sysrq: SysrqGuard::default(),
                             });
                         }
                         // GNOME and KDE: their RemoteDesktop portal, through
@@ -511,6 +560,7 @@ impl InputInjector {
                                 pad: PadSlot::Untried,
                                 pen: PenState::default(),
                                 vkeyboard: VkState::Untried,
+                                sysrq: SysrqGuard::default(),
                             });
                         }
                         Err(wlr) => warn!(
@@ -533,6 +583,7 @@ impl InputInjector {
                     pen: PenState::default(),
                     #[cfg(target_os = "linux")]
                     vkeyboard: VkState::Untried,
+                    sysrq: SysrqGuard::default(),
                 });
             }
             Err(e) => e,
@@ -586,6 +637,7 @@ impl InputInjector {
             pad: PadSlot::Untried,
             pen: PenState::default(),
             vkeyboard: VkState::Untried,
+            sysrq: SysrqGuard::default(),
         })
     }
 
@@ -810,6 +862,12 @@ impl InputInjector {
     /// the desktop. The virtual keyboard declares codes 0..255, so anything the
     /// phone can name is already registrable here.
     fn inject_keycode(&mut self, code: u16, pressed: bool) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if !self.sysrq.passes(code, pressed) {
+            // That a key was held back, never which: no keystroke in a log.
+            debug!("held back a key that would have made the kernel's SysRq");
+            return Ok(());
+        }
         match &mut self.backend {
             #[cfg(windows)]
             InputBackend::SendInput(backend) => backend.key(code, pressed),
@@ -1800,6 +1858,40 @@ pub fn key_name_to_enigo_key(key: &str) -> Key {
                 Key::Unicode('?')
             }
         }
+    }
+}
+
+/// PR #559 re-review N3: Print Screen never reaches the kernel with an
+/// injected Alt down (magic SysRq); alone, or after Alt is let go, it does.
+#[cfg(test)]
+mod sysrq_tests {
+    use super::*;
+
+    #[test]
+    fn print_screen_with_an_injected_alt_down_is_held_back() {
+        let (alt, altgr, sysrq) = (
+            KeyCode::KEY_LEFTALT.0,
+            KeyCode::KEY_RIGHTALT.0,
+            KeyCode::KEY_SYSRQ.0,
+        );
+        let mut guard = SysrqGuard::default();
+        assert!(
+            guard.passes(sysrq, true) && guard.passes(sysrq, false),
+            "alone"
+        );
+        assert!(guard.passes(alt, true));
+        assert!(!guard.passes(sysrq, true), "Alt+SysRq");
+        assert!(guard.passes(KeyCode::KEY_B.0, true), "other keys pass");
+        assert!(guard.passes(KeyCode::KEY_B.0, false));
+        assert!(!guard.passes(sysrq, false), "its release too");
+        assert!(guard.passes(alt, false));
+        assert!(guard.passes(sysrq, true), "Alt let go");
+        assert!(guard.passes(sysrq, false));
+        assert!(guard.passes(altgr, true));
+        assert!(!guard.passes(sysrq, true), "the right Alt too");
+        assert!(guard.passes(altgr, false));
+        assert!(!guard.passes(sysrq, false), "a held-back press's release");
+        assert!(guard.passes(sysrq, true) && guard.passes(sysrq, false));
     }
 }
 

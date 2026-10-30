@@ -13,6 +13,8 @@ pub mod keys;
 /// Typing any character through a Wayland virtual keyboard (roadmap F4).
 #[cfg(all(target_os = "linux", feature = "injection"))]
 pub mod vkeyboard;
+/// A Windows hook's scancode as the evdev code the wire carries (PC4).
+pub mod windows_scan;
 /// Pointer and keys on wlroots without uinput (T10f).
 #[cfg(all(target_os = "linux", feature = "injection"))]
 pub mod wlr_input;

@@ -88,6 +88,11 @@ pub struct ViewStatus {
     /// `None` before.
     #[serde(default)]
     pub stats: Option<ViewStats>,
+    /// Whether the other computer runs Windows (else Linux), as its screen
+    /// session said (PC4): the window's Send keys menu offers that system's
+    /// keys. `None` until it says, or from a computer before PC4.
+    #[serde(default)]
+    pub windows: Option<bool>,
 }
 
 /// How a view's picture comes, as the server measures it (PC2). Each field
@@ -348,6 +353,7 @@ mod tests {
                 monitors: vec!["DP-1".into(), "HDMI-A-1".into()],
                 monitor: 1,
                 note: Some("Its frames are too large to show here.".into()),
+                windows: Some(true),
                 ..ViewStatus::default()
             }),
             Message::Status(ViewStatus::default()),

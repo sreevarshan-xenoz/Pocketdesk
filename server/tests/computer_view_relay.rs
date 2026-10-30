@@ -20,7 +20,10 @@ use pocketdesk_core::streaming::transport::{
     CertManager, PacketHeader, STREAM_KIND_READY, STREAM_KIND_VIDEO, StreamServer,
     StreamTransportConfig,
 };
-use pocketdesk_core::streaming::{InputPacket, SCREEN_FEATURE_INPUT, SCREEN_FEATURES_SAID};
+use pocketdesk_core::streaming::{
+    InputPacket, SCREEN_FEATURE_INPUT, SCREEN_FEATURE_SYSTEM_SAID, SCREEN_FEATURE_WINDOWS,
+    SCREEN_FEATURES_SAID,
+};
 use pocketdesk_server::computer_view::{Command, Dialer, run};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -158,7 +161,13 @@ async fn serve(
         STREAM_KIND_READY,
         0,
         false,
-        vec![SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT],
+        // A Windows computer, for the window's Send keys menu (PC4).
+        vec![
+            SCREEN_FEATURES_SAID
+                | SCREEN_FEATURE_INPUT
+                | SCREEN_FEATURE_SYSTEM_SAID
+                | SCREEN_FEATURE_WINDOWS,
+        ],
     )
     .await
     .expect("ready");
@@ -318,6 +327,7 @@ async fn a_computers_screen_reaches_the_window_and_its_input_the_computer() {
     }
     let showing = showing.expect("the window heard it is shown");
     assert_eq!(showing.control, Some(true));
+    assert_eq!(showing.windows, Some(true), "its system, said (PC4)");
     assert_eq!(showing.route, "home network");
 
     // PC2: about once a second, how the picture comes.

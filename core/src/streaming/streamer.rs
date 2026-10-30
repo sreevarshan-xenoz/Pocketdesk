@@ -99,9 +99,13 @@ impl Drop for CastEnded {
 /// What a screen session's ready stream says this computer takes (E3): a
 /// pen only for a phone whose input is taken (E3 review: one in view-only
 /// was offered a pen whose every stroke was dropped), and whether its input
-/// is taken at all (BK7: another computer's window says it is view-only).
+/// is taken at all (BK7: another computer's window says it is view-only),
+/// and which system this computer runs (PC4: that window offers its keys).
 fn screen_feature_byte(input: bool) -> u8 {
-    let mut byte = super::client::SCREEN_FEATURES_SAID;
+    let mut byte = super::client::SCREEN_FEATURES_SAID | super::client::SCREEN_FEATURE_SYSTEM_SAID;
+    if cfg!(windows) {
+        byte |= super::client::SCREEN_FEATURE_WINDOWS;
+    }
     if input {
         byte |= super::client::SCREEN_FEATURE_PEN | super::client::SCREEN_FEATURE_INPUT;
     }
@@ -2769,6 +2773,18 @@ mod tests {
             0,
             "said, and view-only"
         );
+    }
+
+    /// PC4: a screen session hears which system this computer runs.
+    #[test]
+    fn a_screen_session_hears_this_computers_system() {
+        use super::super::client::{screen_features, screen_runs_windows};
+        for input in [true, false] {
+            assert_eq!(
+                screen_runs_windows(screen_features(&[screen_feature_byte(input)])),
+                Some(cfg!(windows))
+            );
+        }
     }
 
     #[test]
