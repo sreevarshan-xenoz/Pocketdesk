@@ -252,14 +252,21 @@ object HostStore {
     fun claimedVersion(ctx: Context, address: String): String? = stored(ctx, "$KEY_VERSION_PREFIX$address")
 
     /**
-     * Keep the release the computer at [address] says it runs, as each
-     * connection hears it; a saved computer only. Whether it changed.
+     * Keep what the computer at [address] said of its release at its latest
+     * identity ([PeerVersion.kept]): one that said none, or no version,
+     * clears it, so a downgraded computer shows no old release; nothing
+     * heard keeps it. A saved computer only. Whether it changed.
      */
-    fun saveClaimedVersion(ctx: Context, address: String, raw: String?): Boolean {
-        val version = PeerVersion.clean(raw) ?: return false
-        if (hosts(ctx).none { it.address == address } || claimedVersion(ctx, address) == version) return false
+    fun saveClaimedVersion(ctx: Context, address: String, heard: PeerVersion.Heard?): Boolean {
+        if (hosts(ctx).none { it.address == address }) return false
+        val old = claimedVersion(ctx, address)
+        val new = PeerVersion.kept(heard, old)
+        if (new == old) return false
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
-            putString("$KEY_VERSION_PREFIX$address", version)
+            when (new) {
+                null -> remove("$KEY_VERSION_PREFIX$address")
+                else -> putString("$KEY_VERSION_PREFIX$address", new)
+            }
         }
         return true
     }

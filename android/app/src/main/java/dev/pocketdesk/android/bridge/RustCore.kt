@@ -452,9 +452,19 @@ object RustCore {
     fun peerName(address: String): String? =
         runCatching { nativePeerName(address) }.getOrNull()?.takeIf { it.isNotBlank() }
 
-    /** The Pocketdesk release the computer at [address] said it runs when last connected (item 4), or null. */
-    fun peerVersion(address: String): String? =
-        runCatching { nativePeerVersion(address) }.getOrNull()?.takeIf { it.isNotBlank() }
+    /**
+     * What the computer at [address] said of its Pocketdesk release at its
+     * latest identity on this run (item 4): null when none was heard, else
+     * the release it said, [dev.pocketdesk.android.PeerVersion.Heard.version]
+     * null when it said none.
+     */
+    fun peerVersion(address: String): dev.pocketdesk.android.PeerVersion.Heard? {
+        val said = runCatching { nativePeerVersion(address) }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        return runCatching {
+            val json = JSONObject(said)
+            dev.pocketdesk.android.PeerVersion.Heard(if (json.isNull("version")) null else json.getString("version"))
+        }.getOrNull()
+    }
 
     /** The computer the live control connection is to, or null. */
     fun controlPeer(): Pair<String, Int>? =

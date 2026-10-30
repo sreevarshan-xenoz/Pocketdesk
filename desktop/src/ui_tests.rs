@@ -290,7 +290,7 @@ fn devices_say_the_release_each_runs() {
     let fixture = Fixture::new();
     pair_phone(fixture.state(), PHONE, "Test Phone");
     TrustStore::update(fixture.state().join(TRUST_FILE), |store| {
-        store.note_claimed_version(PHONE, "0.0.1")
+        store.note_claimed_version(PHONE, Some("0.0.1"))
     })
     .expect("a version");
     let mut app = fixture.open(Some(Tab::Devices));
@@ -335,7 +335,7 @@ fn other_computers_say_the_release_each_runs() {
                 viewed_unix: 0,
                 keys_by_position: None,
             });
-        file.note_version(id, "999.0.0");
+        file.note_version(id, Some("999.0.0"));
     })
     .expect("a computers file");
     let mut app = fixture.open(Some(Tab::Settings));

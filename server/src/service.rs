@@ -1152,20 +1152,16 @@ pub async fn connect_peer(peer: String, port: u16, identity: &DeviceIdentity) ->
 }
 
 /// What a paired phone or computer says of itself in its identity, kept off
-/// the runtime: its name (U3) and the release it runs (item 4). The trust
-/// store is a file, written only when one changed.
+/// the runtime: its name (U3), kept when it gives one, and the release it
+/// runs (item 4), which every identity replaces, so one with none clears
+/// it. The trust store is a file, written only when one changed.
 fn note_claims(device_id: &str, claims: &Claims) {
-    if claims.name.is_none() && claims.version.is_none() {
-        return;
-    }
     let (id, claims) = (device_id.to_string(), claims.clone());
     tokio::task::spawn_blocking(move || {
         if let Some(name) = &claims.name {
             crate::plugins::pair::note_claimed_name(&id, name);
         }
-        if let Some(version) = &claims.version {
-            crate::plugins::pair::note_claimed_version(&id, version);
-        }
+        crate::plugins::pair::note_claimed_version(&id, claims.version.as_deref());
     });
 }
 

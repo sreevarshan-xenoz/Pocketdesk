@@ -34,6 +34,19 @@ class PeerVersionTest {
         assertNull(PeerVersion.clean("latest"))
         assertNull(PeerVersion.clean("0.8.1<b>"))
         assertEquals(PeerVersion.MAX_CHARS, PeerVersion.clean("0.8.1-" + "a".repeat(80))!!.length)
+        // As the core: ASCII white space cuts, a no-break space is no release.
+        assertEquals("0.8.1", PeerVersion.clean("\t0.8.1\nx"))
+        assertNull(PeerVersion.clean("0.8.1" + Char(0xA0) + "foo"))
+    }
+
+    /** PR #579 review I1: every identity replaces the kept release; one with none clears it. */
+    @Test
+    fun theLatestIdentityDecidesTheKeptRelease() {
+        assertEquals("nothing heard: kept", "0.9.0", PeerVersion.kept(null, "0.9.0"))
+        assertEquals("0.8.2", PeerVersion.kept(PeerVersion.Heard("0.8.2"), "0.9.0"))
+        assertNull("a downgrade to a release before this", PeerVersion.kept(PeerVersion.Heard(null), "0.9.0"))
+        assertNull("no release once cleaned", PeerVersion.kept(PeerVersion.Heard("latest"), "0.9.0"))
+        assertEquals("0.8.2", PeerVersion.kept(PeerVersion.Heard(" 0.8.2 "), null))
     }
 
     @Test

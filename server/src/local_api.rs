@@ -1734,7 +1734,9 @@ mod tests {
         let mut store = TrustStore::load_or_create(dir.join(TRUST_FILE)).unwrap();
         store.trust_device("phone-a").unwrap();
         store.note_claimed_name("phone-a", "Galaxy A71").unwrap();
-        store.note_claimed_version("phone-a", "0.8.1").unwrap();
+        store
+            .note_claimed_version("phone-a", Some("0.8.1"))
+            .unwrap();
         store
             .trust_device_with_ttl("phone-b", std::time::Duration::from_secs(60))
             .unwrap();

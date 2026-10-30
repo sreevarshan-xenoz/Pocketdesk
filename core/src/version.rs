@@ -27,11 +27,14 @@ pub const IDENTITY_FIELD: &str = "pocketdeskVersion";
 pub const MAX_VERSION_CHARS: usize = 32;
 
 /// A version as said by another device, cleaned: trimmed, cut at the first
-/// space, letters, digits and `.+-_` only, at most [`MAX_VERSION_CHARS`],
+/// space (ASCII white space only, as the phone's `PeerVersion.clean`; any
+/// other space is a character not allowed, so no version), letters, digits and `.+-_` only, at most [`MAX_VERSION_CHARS`],
 /// and starting with a digit (after an optional `v`). `None` when nothing
 /// usable is left.
 pub fn clean_version(raw: &str) -> Option<String> {
-    let word = raw.split_whitespace().next()?;
+    let word = raw
+        .split(|c: char| c.is_ascii_whitespace())
+        .find(|w| !w.is_empty())?;
     if !word
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-' | '_'))
@@ -172,6 +175,12 @@ mod tests {
     #[test]
     fn a_claimed_version_is_cleaned() {
         assert_eq!(clean_version(" 0.8.1 ").as_deref(), Some("0.8.1"));
+        assert_eq!(clean_version("\t0.8.1\nx").as_deref(), Some("0.8.1"));
+        // A no-break space is not white space here, as on the phone.
+        assert_eq!(
+            clean_version(&format!("0.8.1{}foo", char::from(0xa0u8))),
+            None
+        );
         assert_eq!(
             clean_version("0.8.1 (built by hand)").as_deref(),
             Some("0.8.1")

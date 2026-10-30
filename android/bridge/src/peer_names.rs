@@ -19,8 +19,10 @@ fn acks() -> &'static Mutex<HashMap<String, bool>> {
     ACKS.get_or_init(Default::default)
 }
 
-fn versions() -> &'static Mutex<HashMap<String, String>> {
-    static VERSIONS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+/// The release each computer's latest identity said, by address: `None`
+/// for an identity that said none, so the app clears what it kept.
+fn versions() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static VERSIONS: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
     VERSIONS.get_or_init(Default::default)
 }
 
@@ -51,17 +53,15 @@ pub(crate) fn note(address: &str, claims: PeerClaims) {
             .unwrap_or_else(|e| e.into_inner())
             .insert(address.to_string(), name);
     }
-    // An identity that says no release (an older computer, replaced at the
-    // address) forgets the last one: an old release is not shown for it.
-    let mut versions = versions().lock().unwrap_or_else(|e| e.into_inner());
-    match claims.version {
-        Some(version) => {
-            versions.insert(address.to_string(), version);
-        }
-        None if claims.sends.is_some() => {
-            versions.remove(address);
-        }
-        None => {}
+    // Every identity replaces the last word on the release: one that says
+    // none (an older computer, a downgrade, another at the address) is
+    // kept as none, so the app clears its own and no old release is shown.
+    // A handshake with no identity changes nothing.
+    if claims.sends.is_some() {
+        versions()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(address.to_string(), claims.version);
     }
 }
 
@@ -121,7 +121,9 @@ pub fn name(address: &str) -> Option<String> {
 
 /// The Pocketdesk release the computer at `address` said it runs when
 /// last heard (item 4), if it said one.
-pub fn version(address: &str) -> Option<String> {
+/// `None` when no identity was heard from it on this run; `Some(None)`
+/// when its latest said no release.
+pub fn version(address: &str) -> Option<Option<String>> {
     versions()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -230,10 +232,14 @@ mod tests {
         };
         assert_eq!(version(address), None, "never heard");
         note(address, says(Some("0.8.1")));
-        assert_eq!(version(address).as_deref(), Some("0.8.1"));
+        assert_eq!(version(address), Some(Some("0.8.1".to_string())));
         note(address, named(None));
-        assert_eq!(version(address).as_deref(), Some("0.8.1"), "no identity");
+        assert_eq!(
+            version(address),
+            Some(Some("0.8.1".to_string())),
+            "no identity"
+        );
         note(address, says(None));
-        assert_eq!(version(address), None, "an older computer now");
+        assert_eq!(version(address), Some(None), "an older computer now");
     }
 }

@@ -815,20 +815,25 @@ impl TrustStore {
         self.versions.get(device_id).map(String::as_str)
     }
 
-    /// Keep the release a paired device says it runs in its identity;
-    /// whether the store changed (and was written). A device not trusted,
-    /// or a version unchanged or not a version once cleaned, writes nothing.
-    pub fn note_claimed_version(&mut self, device_id: &str, raw: &str) -> Result<bool> {
+    /// Keep what a paired device's latest identity says it runs: `raw` is
+    /// its `pocketdeskVersion`, `None` when it sent none. Every identity
+    /// replaces the last word, so one with none, or with one that is not a
+    /// version once cleaned (a downgrade to a release before this, another
+    /// device under the id), clears it and no old release is shown. Whether
+    /// the store changed (and was written); a device not trusted, or a
+    /// version unchanged, writes nothing.
+    pub fn note_claimed_version(&mut self, device_id: &str, raw: Option<&str>) -> Result<bool> {
         if !self.is_trusted(device_id) {
             return Ok(false);
         }
-        let Some(version) = crate::version::clean_version(raw) else {
-            return Ok(false);
-        };
-        if self.version(device_id) == Some(version.as_str()) {
+        let version = raw.and_then(crate::version::clean_version);
+        if self.version(device_id) == version.as_deref() {
             return Ok(false);
         }
-        self.versions.insert(device_id.to_string(), version);
+        match version {
+            Some(version) => self.versions.insert(device_id.to_string(), version),
+            None => self.versions.remove(device_id),
+        };
         self.persist()?;
         Ok(true)
     }
@@ -1401,27 +1406,62 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    /// Item 4: a paired device's release is kept as it says it, cleaned,
-    /// written only when it changes, and goes with the device.
+    /// Item 4: a paired device's release is kept as its latest identity
+    /// says it, cleaned, written only when it changes, cleared by one that
+    /// says none or no version, and goes with the device.
     #[test]
     fn a_paired_device_keeps_the_release_it_runs() {
         let path = temp_store_path("versions");
         let mut store = TrustStore::load_or_create(&path).unwrap();
         assert!(
-            !store.note_claimed_version("phone-v", "0.8.1").unwrap(),
+            !store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap(),
             "not paired: nothing kept"
         );
         store.trust_device("phone-v").unwrap();
-        assert!(store.note_claimed_version("phone-v", " 0.8.1 ").unwrap());
         assert!(
-            !store.note_claimed_version("phone-v", "0.8.1").unwrap(),
+            store
+                .note_claimed_version("phone-v", Some(" 0.8.1 "))
+                .unwrap()
+        );
+        assert!(
+            !store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap(),
             "unchanged: not written again"
         );
         assert!(
-            !store.note_claimed_version("phone-v", "latest").unwrap(),
-            "not a version: the last one stays"
+            store
+                .note_claimed_version("phone-v", Some("0.9.0"))
+                .unwrap()
         );
-        assert!(store.note_claimed_version("phone-v", "0.8.2").unwrap());
+        assert!(
+            store.note_claimed_version("phone-v", None).unwrap(),
+            "an identity with none (a downgrade) clears it"
+        );
+        assert_eq!(TrustStore::read(&path).unwrap().version("phone-v"), None);
+        assert!(
+            !store.note_claimed_version("phone-v", None).unwrap(),
+            "already none: not written again"
+        );
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("0.8.1"))
+                .unwrap()
+        );
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("latest"))
+                .unwrap(),
+            "not a version clears it too"
+        );
+        assert_eq!(store.version("phone-v"), None);
+        assert!(
+            store
+                .note_claimed_version("phone-v", Some("0.8.2"))
+                .unwrap()
+        );
         assert_eq!(
             TrustStore::read(&path).unwrap().version("phone-v"),
             Some("0.8.2")

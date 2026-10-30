@@ -21,11 +21,25 @@ object PeerVersion {
      * null when nothing usable is left.
      */
     fun clean(raw: String?): String? {
-        val word = raw?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        // ASCII white space only, as the core's `clean_version`: any other
+        // character outside the allowed ones makes it no release.
+        val word = raw?.trim { asciiSpace(it) }?.takeWhile { !asciiSpace(it) }?.takeIf { it.isNotEmpty() } ?: return null
         if (!ALLOWED.matches(word)) return null
         val cut = word.take(MAX_CHARS)
         return cut.takeIf { release(it) != null }
     }
+
+    private fun asciiSpace(c: Char): Boolean = c.code < 128 && c.isWhitespace()
+
+    /** What a computer's latest identity said of its release: [version] null when it said none. */
+    data class Heard(val version: String?)
+
+    /**
+     * What to keep for a computer that had [old], given what was [heard]
+     * (null: no identity heard, [old] stays). Every identity replaces it,
+     * so one with none, or with no release once cleaned, clears it.
+     */
+    fun kept(heard: Heard?, old: String?): String? = if (heard == null) old else clean(heard.version)
 
     /** Its release numbers (`major.minor.patch`, missing ones 0), or null. */
     fun release(version: String): List<Long>? {

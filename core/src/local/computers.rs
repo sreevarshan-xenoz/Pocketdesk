@@ -297,9 +297,12 @@ impl ComputersFile {
             .flatten()
     }
 
-    /// Keep the release the listed computer `device_id` says it runs,
-    /// cleaned; a computer no longer listed is dropped. Whether it changed.
-    pub fn note_version(&mut self, device_id: &str, raw: &str) -> bool {
+    /// Keep what the listed computer `device_id`'s latest identity says it
+    /// runs, cleaned: `raw` is its `pocketdeskVersion`, `None` when it sent
+    /// none, and none or one that is no version clears the kept one (a
+    /// downgrade shows no old release). A computer no longer listed is
+    /// dropped. Whether it changed.
+    pub fn note_version(&mut self, device_id: &str, raw: Option<&str>) -> bool {
         let listed = |id: &str| self.computers.iter().any(|c| c.device_id == id);
         let before = self.versions.len();
         let kept: BTreeMap<String, String> = std::mem::take(&mut self.versions)
@@ -308,11 +311,15 @@ impl ComputersFile {
             .collect();
         self.versions = kept;
         let pruned = self.versions.len() != before;
-        let Some(version) = crate::version::clean_version(raw).filter(|_| listed(device_id)) else {
+        if !listed(device_id) {
             return pruned;
+        }
+        let changed = match raw.and_then(crate::version::clean_version) {
+            Some(version) => {
+                self.versions.insert(device_id.to_string(), version.clone()) != Some(version)
+            }
+            None => self.versions.remove(device_id).is_some(),
         };
-        let changed = self.versions.get(device_id) != Some(&version);
-        self.versions.insert(device_id.to_string(), version);
         changed || pruned
     }
 
@@ -1201,27 +1208,34 @@ mod tests {
         assert_eq!(old.device_id, "");
     }
 
-    /// PC1 review C1, M2: a listed computer's id with another certificate
-    /// is someone else's; the same certificate, in either case, or an id
-    /// not listed, is not.
-    /// Item 4: a listed computer's release is kept cleaned, read back only
-    /// while it is listed, and dropped once it is not.
+    /// Item 4: a listed computer's release is kept cleaned as its latest
+    /// identity says it, cleared by one with none or no version, read back
+    /// only while it is listed, and dropped once it is not.
     #[test]
     fn a_listed_computers_release_is_kept_while_it_is_listed() {
         let mut file = ComputersFile {
             computers: vec![computer("desk")],
             ..ComputersFile::default()
         };
-        assert!(file.note_version("desk", "0.8.1"));
-        assert!(!file.note_version("desk", "0.8.1"), "unchanged");
-        assert!(!file.note_version("desk", "newest"), "not a version");
-        assert!(!file.note_version("stranger", "0.8.1"), "not listed");
+        assert!(file.note_version("desk", Some("0.8.1")));
+        assert!(!file.note_version("desk", Some("0.8.1")), "unchanged");
+        assert!(!file.note_version("stranger", Some("0.8.1")), "not listed");
         assert_eq!(file.version("desk"), Some("0.8.1"));
         assert_eq!(file.version("stranger"), None);
+        assert!(file.note_version("desk", None), "a downgrade clears it");
+        assert_eq!(file.version("desk"), None);
+        assert!(!file.note_version("desk", None), "already none");
+        assert!(file.note_version("desk", Some("0.9.0")));
+        assert!(
+            file.note_version("desk", Some("newest")),
+            "no version clears it"
+        );
+        assert_eq!(file.version("desk"), None);
+        assert!(file.note_version("desk", Some("0.9.0")));
         file.computers.clear();
         assert_eq!(file.version("desk"), None, "forgotten");
         file.computers.push(computer("lap"));
-        assert!(file.note_version("lap", "0.8.2"));
+        assert!(file.note_version("lap", Some("0.8.2")));
         assert_eq!(
             file.versions.keys().collect::<Vec<_>>(),
             ["lap"],
@@ -1229,6 +1243,9 @@ mod tests {
         );
     }
 
+    /// PC1 review C1, M2: a listed computer's id with another certificate
+    /// is someone else's; the same certificate, in either case, or an id
+    /// not listed, is not.
     #[test]
     fn a_listed_id_with_another_certificate_is_someone_elses() {
         let file = ComputersFile {
