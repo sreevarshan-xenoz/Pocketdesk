@@ -1379,6 +1379,11 @@ async fn attempt(
         if let Some(windows) = pocketdesk_core::streaming::screen_runs_windows(features) {
             next.windows = Some(windows);
         }
+        // Whether it plays this computer's mic, so the window says why
+        // nothing is heard (PC10 review).
+        if let Some(mic) = pocketdesk_core::streaming::screen_takes_mic(features) {
+            next.mic = Some(mic);
+        }
         if admitted {
             next.phase = Phase::Showing;
             if !shown {

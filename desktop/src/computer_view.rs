@@ -970,6 +970,27 @@ pub fn mic_on_air_words(name: &str) -> String {
     format!("Mic on: this computer's microphone goes to {name}.")
 }
 
+/// Why the window's mic is not heard there (PC10 review), on the bar while
+/// it is on: the other computer said it does not play it.
+pub fn mic_refused_words(name: &str, mic_on: bool, played: Option<bool>) -> Option<String> {
+    (mic_on && played == Some(false)).then(|| {
+        format!(
+            "{name} does not play this computer's microphone: it needs \u{201c}Use the phone as a microphone\u{201d} on for this computer on its Devices page, and this window controlling it."
+        )
+    })
+}
+
+/// What the bar's "Mic on" says on hover (PC10 review): with a computer
+/// that does not say whether it plays the mic, what it needs for that.
+pub fn on_air_hover(name: &str, played: Option<bool>) -> String {
+    match played {
+        None => format!(
+            "This computer's microphone goes to {name} now. If {name} plays nothing, the other computer needs \u{201c}Use the phone as a microphone\u{201d} on for this one."
+        ),
+        Some(_) => format!("This computer's microphone goes to {name} now"),
+    }
+}
+
 /// The bar's "Mic on" (PC10): red, as a recording light.
 pub const ON_AIR_RED: egui::Color32 = egui::Color32::from_rgb(255, 92, 92);
 
@@ -2407,10 +2428,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                         }
                     }
                     if mic_on {
-                        on_air_label(ui).on_hover_text(format!(
-                            "This computer's microphone goes to {} now",
-                            wanted.name
-                        ));
+                        on_air_label(ui).on_hover_text(on_air_hover(&wanted.name, status.mic));
                     }
                     if ended.is_none() && status.phase == Phase::Showing {
                         let mut lock_on = lock_on_close;
@@ -2497,6 +2515,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                             egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
                         )
                         .wrap(),
+                    );
+                }
+                if ended.is_none()
+                    && let Some(words) = mic_refused_words(&wanted.name, mic_on, status.mic)
+                {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
+                            .wrap(),
                     );
                 }
                 if let Some(words) = &mic_note {
@@ -5193,6 +5219,21 @@ mod tests {
             assert_eq!(heard, ["on", "off"], "{way}");
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// PC10 review: a computer that does not play the mic says so on the
+    /// bar; one that does not say gets a hover note of what it needs.
+    #[test]
+    fn the_bar_says_why_the_mic_is_not_heard() {
+        let refused = mic_refused_words("Desk", true, Some(false)).unwrap();
+        assert!(refused.contains("Use the phone as a microphone"));
+        assert_eq!(mic_refused_words("Desk", true, Some(true)), None);
+        assert_eq!(mic_refused_words("Desk", true, None), None);
+        assert_eq!(mic_refused_words("Desk", false, Some(false)), None);
+        assert!(on_air_hover("Desk", None).contains(
+            "the other computer needs \u{201c}Use the phone as a microphone\u{201d} on for this one"
+        ));
+        assert!(!on_air_hover("Desk", Some(true)).contains("needs"));
     }
 
     /// PR #569 review I2: "Mic on" is in the window's title and said to

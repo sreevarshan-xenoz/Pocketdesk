@@ -274,6 +274,12 @@ pub struct DevicePermissions {
     /// Hold each session until the owner approves it at the desktop (spec P5).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_first: bool,
+    /// A session from another computer (PC10 review): its microphone plays
+    /// here only while the session may drive this one, never in a
+    /// view-only one. Never stored: the session gate sets it for a device
+    /// paired as a computer. A phone's mic goes on in a view-only session.
+    #[serde(skip)]
+    pub mic_needs_control: bool,
 }
 
 impl DevicePermissions {
@@ -371,7 +377,8 @@ impl DevicePermissions {
     /// What another of the owner's computers may do when it pairs from a
     /// link made for one of them (PC1, "This is another of my computers"):
     /// [`Self::computer`]'s, and control (the mouse and keyboard in a
-    /// session) and the shared keyboard and mouse, with no session asked
+    /// session), the shared keyboard and mouse, and its microphone sent
+    /// into this one's (PC10's "Send my mic"), with no session asked
     /// first. The PIN on that link proved the owner was at both computers,
     /// so the consent is given once, at pairing; each switch can be turned
     /// back on its Devices page.
@@ -379,6 +386,7 @@ impl DevicePermissions {
         let mut permissions = Self::computer();
         permissions.set(Capability::Input, true);
         permissions.set(Capability::SharedInput, true);
+        permissions.set(Capability::Mic, true);
         permissions.ask_first = false;
         permissions
     }
@@ -437,8 +445,9 @@ mod tests {
     }
 
     /// PC1: one of the owner's own computers, paired from a link made for
-    /// one, sees and controls this one without asking, and shares its
-    /// keyboard and mouse; nothing more than a computer's otherwise.
+    /// one, sees and controls this one without asking, shares its keyboard
+    /// and mouse, and may send its microphone (PC10); nothing more than a
+    /// computer's otherwise. A computer paired one way may not send it.
     #[test]
     fn another_of_my_computers_sees_and_controls_without_asking() {
         let mine = DevicePermissions::computer_mine();
@@ -452,11 +461,13 @@ mod tests {
                         | Capability::Links
                         | Capability::Input
                         | Capability::SharedInput
+                        | Capability::Mic
                 ),
                 "{capability:?}"
             );
         }
         assert!(!mine.ask_first, "no session waits for the owner");
+        assert!(!DevicePermissions::computer().allows(Capability::Mic));
     }
 
     #[test]

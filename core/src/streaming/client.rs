@@ -106,6 +106,15 @@ pub const SCREEN_FEATURE_SYSTEM_SAID: u8 = 4;
 /// the keys that system takes (Ctrl+Shift+Esc and Lock in place of
 /// Ctrl+Alt+Del, which only a SYSTEM service can send there).
 pub const SCREEN_FEATURE_WINDOWS: u8 = 8;
+/// The computer says whether it plays this session's microphone (PC10
+/// review): with it, [`SCREEN_FEATURE_MIC`] is meaningful. Computers
+/// before it do not say it.
+pub const SCREEN_FEATURE_MIC_SAID: u8 = 16;
+/// The computer plays this session's microphone ([`super::InputPacket::Mic`])
+/// when [`SCREEN_FEATURE_MIC_SAID`] is set: its "Use the phone as a
+/// microphone" is on for this device, and, for another computer, the
+/// session takes its input.
+pub const SCREEN_FEATURE_MIC: u8 = 32;
 
 /// A remote's ready stream carries one byte of what the computer offers
 /// it (G4): this bit marks the byte as said. Computers before G4 send a
@@ -150,6 +159,14 @@ pub fn screen_takes_input(features: u8) -> Option<bool> {
 pub fn screen_runs_windows(features: u8) -> Option<bool> {
     (features & SCREEN_FEATURES_SAID != 0 && features & SCREEN_FEATURE_SYSTEM_SAID != 0)
         .then_some(features & SCREEN_FEATURE_WINDOWS != 0)
+}
+
+/// Whether the computer plays a screen session's microphone, from what its
+/// ready stream said ([`screen_features`]): `None` until it says, or from a
+/// computer before the PC10 review.
+pub fn screen_takes_mic(features: u8) -> Option<bool> {
+    (features & SCREEN_FEATURES_SAID != 0 && features & SCREEN_FEATURE_MIC_SAID != 0)
+        .then_some(features & SCREEN_FEATURE_MIC != 0)
 }
 
 /// What a session is for.
@@ -1102,6 +1119,20 @@ mod remote_tests {
             "a computer before PC4"
         );
         assert_eq!(screen_runs_windows(SCREEN_FEATURE_SYSTEM_SAID), None);
+    }
+
+    /// PC10 review: a screen session says whether its microphone is
+    /// played; one before says nothing of it.
+    #[test]
+    fn a_screen_session_says_whether_its_mic_is_played() {
+        let said = SCREEN_FEATURES_SAID | SCREEN_FEATURE_MIC_SAID;
+        assert_eq!(screen_takes_mic(said | SCREEN_FEATURE_MIC), Some(true));
+        assert_eq!(screen_takes_mic(said), Some(false));
+        assert_eq!(
+            screen_takes_mic(SCREEN_FEATURES_SAID | SCREEN_FEATURE_INPUT),
+            None,
+            "a computer before it"
+        );
     }
 
     #[test]
