@@ -773,6 +773,10 @@ struct FocusMove {
     lost: Option<std::time::Instant>,
     /// A window of it gained the focus then.
     gained: Option<std::time::Instant>,
+    /// At its last gain, whether a window was known to hold the focus
+    /// (one of its own or another computer's): only then can a loss still
+    /// follow (PR #572 re-review N5).
+    held_before: bool,
 }
 
 impl FocusMoves {
@@ -782,8 +786,15 @@ impl FocusMoves {
     /// other way within [`HANDOVER`] before (a hand-over between its
     /// windows), which ends that one's wait too.
     fn note(&mut self, device_id: &str, focused: bool, now: std::time::Instant) -> Option<u64> {
+        let held_elsewhere = self
+            .by_device
+            .iter()
+            .any(|(id, m)| id != device_id && m.gained.is_some());
         let m = self.by_device.entry(device_id.to_string()).or_default();
         m.turn += 1;
+        if focused {
+            m.held_before = held_elsewhere || m.gained.is_some();
+        }
         let within = |at: Option<std::time::Instant>| {
             at.is_some_and(|at| now.saturating_duration_since(at) < HANDOVER)
         };
@@ -842,6 +853,19 @@ pub(crate) fn note_window_focus(
 /// if a window of the same computer lost the focus meanwhile; at once when
 /// another computer's window did (its answer is then waited for).
 async fn gain_goes(handing: &Handing, device_id: &str, turn: u64, at: std::time::Instant) -> bool {
+    {
+        let moves = lock(&handing.moves);
+        let held_before = moves
+            .by_device
+            .get(device_id)
+            .is_some_and(|m| m.held_before);
+        // From another program (no window held the focus), no loss can
+        // follow; after another computer's loss, its answer is waited for
+        // anyway: no wait either way (PR #572 re-review N5).
+        if !held_before || moves.other_losing(device_id, at) {
+            return moves.stands(device_id, turn);
+        }
+    }
     loop {
         {
             let moves = lock(&handing.moves);
@@ -2626,6 +2650,8 @@ mod tests {
     #[tokio::test]
     async fn a_gain_heard_first_waits_for_the_loss() {
         let handing = std::sync::Arc::new(Handing::default());
+        // B's window holds the focus.
+        lock(&handing.moves).note("b", true, std::time::Instant::now() - HANDOVER);
         let at = std::time::Instant::now();
         let turn = lock(&handing.moves).note("c", true, at).unwrap();
         let going = {
@@ -2643,6 +2669,8 @@ mod tests {
         );
 
         let handing = std::sync::Arc::new(Handing::default());
+        // B's first window holds the focus.
+        lock(&handing.moves).note("b", true, std::time::Instant::now() - HANDOVER);
         let at = std::time::Instant::now();
         let turn = lock(&handing.moves).note("b", true, at).unwrap();
         let going = {
@@ -2657,8 +2685,25 @@ mod tests {
         );
         assert!(!going.await.unwrap(), "and nothing is pushed");
 
-        // No loss at all (from another program): it goes after HANDOVER.
+        // From another program (no window held the focus): at once (PR
+        // #572 re-review N5).
         let handing = Handing::default();
+        let at = std::time::Instant::now();
+        let turn = lock(&handing.moves).note("b", true, at).unwrap();
+        assert!(gain_goes(&handing, "b", turn, at).await);
+        assert!(at.elapsed() < HANDOVER);
+        // After another computer's loss heard first: at once too.
+        let handing = Handing::default();
+        lock(&handing.moves).note("c", true, std::time::Instant::now() - HANDOVER * 2);
+        lock(&handing.moves).note("c", false, std::time::Instant::now());
+        let at = std::time::Instant::now();
+        let turn = lock(&handing.moves).note("b", true, at).unwrap();
+        assert!(gain_goes(&handing, "b", turn, at).await);
+        assert!(at.elapsed() < HANDOVER);
+        // A window holding the focus that never says it lost it: the wait
+        // runs out and the push goes.
+        let handing = Handing::default();
+        lock(&handing.moves).note("c", true, std::time::Instant::now());
         let at = std::time::Instant::now();
         let turn = lock(&handing.moves).note("b", true, at).unwrap();
         assert!(gain_goes(&handing, "b", turn, at).await);
