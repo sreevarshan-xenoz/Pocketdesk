@@ -2102,7 +2102,10 @@ async fn privacy_is_let_go_as_the_window_turns_to_another_computer() {
         })
         .await
         .unwrap();
-    let (id, release) = tokio::time::timeout(Duration::from_secs(5), async {
+    // Well inside WINDOW_GRACE (4 s), which would let a hold carried to
+    // the new view go too (PR #570 re-review T1): only the turn lets go
+    // this soon.
+    let (id, release) = tokio::time::timeout(Duration::from_millis(1500), async {
         loop {
             let (id, body) = asked.recv().await.unwrap();
             if body["action"] == "release" {
