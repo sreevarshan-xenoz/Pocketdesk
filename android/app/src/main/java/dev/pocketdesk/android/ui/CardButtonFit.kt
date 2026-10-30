@@ -14,12 +14,18 @@ object CardButtonFit {
     /** Material's narrowest button. */
     private const val MIN_BUTTON_DP = 58f
 
+    /**
+     * Room kept spare: a measured width a fraction of a dp under the row's
+     * on a boundary could pick a fit that wraps (UX2, review N12).
+     */
+    const val SLACK_DP = 1f
+
     fun sideDp(labelWidthsDp: List<Float>, rowWidthDp: Float, gapDp: Float = 8f): Int {
         fun width(side: Int) = labelWidthsDp.sumOf { maxOf(it + 2 * side, MIN_BUTTON_DP).toDouble() } +
             gapDp * (labelWidthsDp.size - 1)
         return when {
-            width(ROOMY_DP) <= rowWidthDp -> ROOMY_DP
-            width(TIGHT_DP) <= rowWidthDp -> TIGHT_DP
+            width(ROOMY_DP) <= rowWidthDp - SLACK_DP -> ROOMY_DP
+            width(TIGHT_DP) <= rowWidthDp - SLACK_DP -> TIGHT_DP
             else -> ROOMY_DP
         }
     }
