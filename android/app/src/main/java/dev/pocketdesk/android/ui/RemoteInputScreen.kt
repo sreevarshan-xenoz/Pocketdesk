@@ -104,6 +104,9 @@ fun RemoteInputScreen(
 
     // Ecosystem 1f: other apps hear the remote start and end.
     val tell = remember(address) { SessionTell("remote") }
+    // UX2 (review N10): a session that came up is stamped again as it
+    // ends, so a long one reads "Used just now" back on Home.
+    val wasUp = remember(address) { java.util.concurrent.atomic.AtomicBoolean(false) }
     var shownName by remember(address) { mutableStateOf(HostStore.shownName(context, address)) }
     LaunchedEffect(state) {
         val told = when (state) {
@@ -114,6 +117,7 @@ fun RemoteInputScreen(
                 shownName = HostStore.shownName(context, address)
                 // UX1: its card's "Used just now".
                 HostStore.markUsed(context, address)
+                wasUp.set(true)
                 tell.up(Prefs.tellOtherApps(context))
             }
             State.Down, State.TooOld -> tell.lost()
@@ -123,6 +127,9 @@ fun RemoteInputScreen(
     }
     DisposableEffect(tell) {
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
+    }
+    DisposableEffect(address) {
+        onDispose { if (wasUp.get()) HostStore.markUsed(context, address) }
     }
 
     // The session's foreground service: started from the foreground (the

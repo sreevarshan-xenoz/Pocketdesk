@@ -371,6 +371,9 @@ fun RemoteScreen(
     val status = streamStatus
     // Ecosystem 1f: other apps hear the session start and end.
     val tell = remember(address) { SessionTell("screen") }
+    // UX2 (review N10): a session that came up is stamped again as it
+    // ends, so a long one reads "Used just now" back on Home.
+    val wasUp = remember(address) { java.util.concurrent.atomic.AtomicBoolean(false) }
     LaunchedEffect(status, awaitingPicture) {
         val told = when {
             // Started once the picture comes: a computer that asks before
@@ -383,6 +386,9 @@ fun RemoteScreen(
     }
     DisposableEffect(tell) {
         onDispose { tell.left()?.let { PhoneEventBroadcast.send(context, it.kind, address, it.fields) } }
+    }
+    DisposableEffect(address) {
+        onDispose { if (wasUp.get()) HostStore.markUsed(context, address) }
     }
     LaunchedEffect(status, awaitingPicture) {
         showAwaitHint = false
@@ -874,6 +880,7 @@ fun RemoteScreen(
             RustCore.peerName(address)?.let { HostStore.saveClaimedName(context, address, it) }
             // UX1: its card's "Used just now".
             HostStore.markUsed(context, address)
+            wasUp.set(true)
         }
     }
     LaunchedEffect(streamUps) {
