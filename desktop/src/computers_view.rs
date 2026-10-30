@@ -101,11 +101,18 @@ pub enum WakeStep {
     TimedOut,
 }
 
+/// How long past [`WAKE_WAIT`] a link still counts as having come in time:
+/// one seen a moment late (the app busy) still shows; one seen later (the
+/// window hidden a while) does not pop a window long after the countdown.
+const WAKE_LATE: Duration = Duration::from_secs(5);
+
 impl Waking {
     /// Where the wait stands at `now`, its link up or not.
     pub fn step(&self, linked: bool, now: Instant) -> WakeStep {
         let waited = now.saturating_duration_since(self.since);
-        if linked {
+        if waited >= WAKE_WAIT + WAKE_LATE {
+            WakeStep::TimedOut
+        } else if linked {
             WakeStep::Linked
         } else if waited >= WAKE_WAIT {
             WakeStep::TimedOut
@@ -1078,6 +1085,16 @@ mod tests {
             WakeStep::Linked
         );
         assert_eq!(waking.step(false, since + WAKE_WAIT), WakeStep::TimedOut);
+        assert_eq!(
+            waking.step(true, since + WAKE_WAIT + Duration::from_secs(1)),
+            WakeStep::Linked,
+            "a moment late still shows"
+        );
+        assert_eq!(
+            waking.step(true, since + Duration::from_secs(600)),
+            WakeStep::TimedOut,
+            "a link seen long after does not pop a window"
+        );
         assert!(waiting_words("Desk", 43).ends_with("(43 s)"));
         assert!(timed_out("Desk").starts_with("Desk did not come up within 120 s"));
     }
@@ -1203,6 +1220,45 @@ mod tests {
         assert_eq!(shown, Some(("up".to_string(), "Desk".to_string())));
         assert!(said);
         assert_eq!(view.take_view(), None);
+    }
+
+    /// PC6 review M-4, M-9: a wait whose countdown ended, read late, says
+    /// so and opens no window though the link is up by then; one cancelled
+    /// opens none either.
+    #[test]
+    fn a_wake_that_ran_out_opens_no_window() {
+        let dir = temp("ran-out");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                link: "linked".to_string(),
+                ..sleeping(true)
+            })
+        })
+        .unwrap();
+        let mut view = ComputersView {
+            waking: Some(Waking {
+                device_id: "b".to_string(),
+                name: "Desk".to_string(),
+                since: Instant::now()
+                    .checked_sub(WAKE_WAIT + Duration::from_secs(30))
+                    .expect("a clock this old"),
+            }),
+            ..ComputersView::default()
+        };
+        view.tick(&dir);
+        let said = view.take_notice().is_some();
+        let shown = view.take_view();
+        let waiting = view.waking().is_some();
+        // Cancelled: the wait is gone, so its link opens nothing.
+        let mut cancelled = ComputersView::default();
+        cancelled.wake_and_show(&dir, "b", "Desk", pocketdesk_core::local::pin::now_unix());
+        cancelled.waking = None;
+        cancelled.tick(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(said);
+        assert_eq!(shown, None);
+        assert!(!waiting);
+        assert_eq!(cancelled.take_view(), None);
     }
 
     /// PC6: a woken computer whose link comes up has its window asked for.
