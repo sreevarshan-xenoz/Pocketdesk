@@ -328,16 +328,50 @@ pub fn declined_answer(request: &str, refusal: Refusal) -> Value {
     json!({ "request": request, "refused": refusal.code() })
 }
 
+/// B's word that the phone it was introduced under `request` paired:
+/// A keeps the introduction only then.
+pub fn confirmed_answer(request: &str, device_id: &str) -> Value {
+    json!({ "request": request, "paired": device_id })
+}
+
+/// A's word that the introduction `request` is off (the phone was removed
+/// at A): B drops the PIN it waits with.
+pub fn cancel_body(request: &str) -> Value {
+    json!({ "cancel": request })
+}
+
+/// The introduction an [`INTRODUCE_PHONE`] body cancels, if it is a
+/// cancel.
+pub fn read_cancel(body: &Value) -> Option<String> {
+    let request = body.get("cancel")?.as_str()?;
+    request_reads(request).then(|| request.to_string())
+}
+
 /// What B's answer says, read at A.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComputerAnswer {
-    Accepted { pin: String, facts: Facts },
+    Accepted {
+        pin: String,
+        facts: Facts,
+    },
     Refused(Refusal),
+    /// The phone introduced under this request paired.
+    Paired {
+        device_id: String,
+    },
 }
 
 /// The request id B's answer names and what it says.
 pub fn read_computer_answer(body: &Value) -> Option<(String, ComputerAnswer)> {
     let request = body.get("request")?.as_str()?.to_string();
+    if let Some(device_id) = body.get("paired").and_then(Value::as_str) {
+        return Some((
+            request,
+            ComputerAnswer::Paired {
+                device_id: device_id.to_string(),
+            },
+        ));
+    }
     if let Some(code) = body.get("refused").and_then(Value::as_str) {
         return Some((request, ComputerAnswer::Refused(Refusal::from_code(code))));
     }
@@ -525,6 +559,18 @@ mod tests {
             read_computer_answer(&declined_answer("r", Refusal::Off)),
             Some(("r".to_string(), ComputerAnswer::Refused(Refusal::Off)))
         );
+        assert_eq!(
+            read_computer_answer(&confirmed_answer("r", "p")),
+            Some((
+                "r".to_string(),
+                ComputerAnswer::Paired {
+                    device_id: "p".to_string()
+                }
+            ))
+        );
+        assert_eq!(read_cancel(&cancel_body("r-9")), Some("r-9".to_string()));
+        assert_eq!(read_cancel(&cancel_body("")), None);
+        assert_eq!(read_cancel(&json!({ "request": "r" })), None);
         // A PIN that is not six digits does not read.
         assert_eq!(
             read_computer_answer(&json!({ "request": "r", "pin": "12345" })),

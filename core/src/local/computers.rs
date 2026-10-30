@@ -262,7 +262,33 @@ pub struct ComputersFile {
     /// and dropped once answered. Absent in files written before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owed_removals: Vec<OwedRemoval>,
+    /// Introductions this computer made whose pairing the other computer
+    /// has not yet confirmed (ecosystem phase 4): kept apart from
+    /// [`Self::introduced`] until it does, and cancelled there if the
+    /// phone is removed here first. Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_introductions: Vec<PendingIntroduction>,
+    /// Pairings of introduced phones this computer owes their introducers
+    /// a confirmation of (ecosystem phase 4), sent on the link when it is
+    /// up. Absent in files written before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owed_confirmations: Vec<PendingIntroduction>,
 }
+
+/// An introduction of `phone` to `computer` under `request` (ecosystem
+/// phase 4), waiting for that computer to confirm the phone paired.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingIntroduction {
+    pub phone: String,
+    pub computer: String,
+    pub request: String,
+    /// When (unix seconds).
+    pub unix: u64,
+}
+
+/// How long an unconfirmed introduction is kept: a day, past which the
+/// other computer's PIN has long run out.
+pub const PENDING_INTRODUCTION_FOR: u64 = 24 * 60 * 60;
 
 /// A phone introduced between this computer and `computer` (ecosystem
 /// phase 4), either way.
@@ -286,6 +312,10 @@ pub struct OwedRemoval {
     /// When it was removed here (unix seconds): one owed longer than
     /// [`OWED_FOR`] is dropped.
     pub unix: u64,
+    /// The introduction it cancels at the other computer, when its pairing
+    /// was not yet confirmed: that computer drops the waiting PIN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel: Option<String>,
     /// The request id it is asked under, its answer naming it.
     pub request: String,
     /// When it was last sent (unix seconds), 0 never: one unanswered for
@@ -429,10 +459,13 @@ impl ComputersFile {
         let computer = self.computers.remove(at);
         self.pending.retain(|id| id != device_id);
         self.lapsed.retain(|id| id != device_id);
-        // What was introduced between the two, and the removals owed it,
-        // go with it (ecosystem phase 4).
+        // What was introduced between the two goes with it (ecosystem phase
+        // 4); a removal still owed it is dropped by the server, which says
+        // so.
         self.introduced.retain(|i| i.computer != device_id);
-        self.owed_removals.retain(|o| o.computer != device_id);
+        self.pending_introductions
+            .retain(|i| i.computer != device_id);
+        self.owed_confirmations.retain(|i| i.computer != device_id);
         // Its devices' list goes with it (remote revoke).
         if self
             .there
