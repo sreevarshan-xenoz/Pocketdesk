@@ -4471,6 +4471,52 @@ mod tests {
         assert!(lock(&shared).pointer.locked(), "locked");
         assert!(lock(&shared).mic.on(), "the mic goes on");
         assert_eq!(harness.query_all_by_label(view_mic::ON_AIR).count(), 1);
+        // Re-review T1: painted red at full opacity, not faded with the bar.
+        fn texts<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::epaint::TextShape>) {
+            match shape {
+                egui::Shape::Text(text) => out.push(text),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, out)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for clipped in &harness.output().shapes {
+            texts(&clipped.shape, &mut found);
+        }
+        let on_air: Vec<_> = found
+            .into_iter()
+            .filter(|t| t.galley.text() == view_mic::ON_AIR)
+            .collect();
+        assert_eq!(on_air.len(), 1, "painted once");
+        let text = on_air[0];
+        assert_eq!(text.opacity_factor, 1.0, "not faded");
+        assert_eq!(text.fallback_color, ON_AIR_RED);
+        assert!(text.override_text_color.is_none_or(|c| c == ON_AIR_RED));
+        assert!(
+            text.galley
+                .job
+                .sections
+                .iter()
+                .all(|section| section.format.color == ON_AIR_RED),
+            "its glyphs are red"
+        );
+        // The bar's other words, beside it, are faded while it is locked.
+        let mut all = Vec::new();
+        for clipped in &harness.output().shapes {
+            texts(&clipped.shape, &mut all);
+        }
+        assert!(
+            all.iter().any(
+                |t| t.galley.text() == "Send my mic" && t.opacity_factor < 1.0
+                    || t.galley.text() == "Send my mic"
+                        && t.galley
+                            .job
+                            .sections
+                            .iter()
+                            .all(|s| s.format.color.a() < 255)
+            ),
+            "the greyed bar is greyed (the check above is not vacuous)"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
