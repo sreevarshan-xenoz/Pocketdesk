@@ -1690,17 +1690,13 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     // The ways to decode, and the one this view settled on, if it did
     // (PC5): a rejoin of the same view keeps it.
     let ways = crate::video::local_accel_chain(lock(shared).hw_decode);
-    let mut way = match lock(shared).way {
-        Some((session, at)) if session == file.session_id && at < ways.len() => at,
-        _ => 0,
+    let settled_at = match lock(shared).way {
+        Some((session, at)) if session == file.session_id => Some(at),
+        _ => None,
     };
-    let mut settled = lock(shared)
-        .way
-        .is_some_and(|(session, _)| session == file.session_id);
-    // The stream's codec and size, for a decoder started again; when the
-    // decoder now was first fed.
+    let mut ladder = Ladder::new(ways, settled_at);
+    // The stream's codec and size, for a decoder started again.
     let mut stream_is: Option<(Codec, Option<(u16, u16)>)> = None;
-    let mut first_fed: Option<Instant> = None;
     let mut recorder: Option<Recorder> = None;
     loop {
         let message = Message::read(&mut reader)?;
@@ -1757,9 +1753,9 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the screen changed size"));
                 }
                 stream_is = Some((Codec::H264, Some((width, height))));
-                decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
+                decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                 gate = KeyGate::default();
-                first_fed = None;
+                ladder.started();
             }
             Message::HevcConfig => {
                 // PC5: HEVC from the next keyframe, its size the first
@@ -1768,42 +1764,32 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the picture changed"));
                 }
                 stream_is = Some((Codec::Hevc, None));
-                decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
+                decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                 gate = KeyGate::default();
-                first_fed = None;
+                ladder.started();
             }
             Message::Frame {
                 keyframe,
                 seq,
                 data,
             } => {
-                // A way that gives no picture is given up for the next
-                // (PC5), which starts from a keyframe.
-                if !settled
-                    && way + 1 < ways.len()
-                    && decoder.as_ref().is_some_and(|d| {
-                        give_up(d.pictures(), d.ended(), first_fed, Instant::now())
-                    })
-                {
-                    way += 1;
-                    decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
-                    gate = KeyGate::default();
-                    first_fed = None;
-                }
+                climb(
+                    shared,
+                    ctx,
+                    file.session_id,
+                    &mut ladder,
+                    &mut decoder,
+                    &mut gate,
+                    stream_is,
+                );
                 // The GPU's shader failed (PC5): the decoder gives RGBA.
                 if decoder
                     .as_ref()
                     .is_some_and(|d| d.planes() != crate::nv12::planes())
                 {
-                    decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
+                    decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                     gate = KeyGate::default();
-                    first_fed = None;
-                }
-                if !settled && let Some(d) = decoder.as_ref().filter(|d| d.pictures() > 0) {
-                    settled = true;
-                    let mut state = lock(shared);
-                    state.way = Some((file.session_id, way));
-                    state.decoding = way_words(&ways[way], d.auto_took());
+                    ladder.started();
                 }
                 let Some(d) = decoder.as_mut() else { continue };
                 match gate.admit(keyframe, seq) {
@@ -1821,16 +1807,13 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some(&format!("it stopped ({e})")));
                 }
                 lock(shared).clock.fed(Instant::now());
-                first_fed.get_or_insert_with(Instant::now);
+                ladder.fed(Instant::now());
                 if let Err(e) = d.feed(&data) {
                     decoder = None;
-                    if way + 1 < ways.len() {
+                    if ladder.failed() == Step::Next {
                         // The next way, from the next keyframe (PC5).
-                        way += 1;
-                        settled = false;
-                        decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
+                        decoder = start_decoder(shared, ctx, stream_is, ladder.way());
                         gate = KeyGate::default();
-                        first_fed = None;
                     } else {
                         lock(shared).note = Some(format!("The decoder stopped ({e})."));
                         ctx.request_repaint_of(viewport_id());
@@ -1845,6 +1828,137 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             | Message::Privacy(_) => {}
         }
     }
+}
+
+/// What the ladder of ways says to do now (PC5 review M9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Keep the decoder.
+    Stay,
+    /// Start the next way, from a keyframe.
+    Next,
+    /// The way gave its first picture: it holds for the view.
+    Settled,
+    /// The last way gave up too.
+    Exhausted,
+}
+
+/// The ways to decode in order, the one tried now, and whether it gave a
+/// picture (PC5): a way that ends or gives nothing for [`NO_PICTURE`] after
+/// its first access unit, or cannot take one, gives way to the next.
+#[derive(Debug, Clone)]
+pub struct Ladder {
+    ways: Vec<Accel>,
+    at: usize,
+    settled: bool,
+    first_fed: Option<Instant>,
+    exhausted: bool,
+}
+
+impl Ladder {
+    /// The ways, settled already on the one at `settled_at` (a rejoin of
+    /// the same view), else trying the first.
+    pub fn new(ways: Vec<Accel>, settled_at: Option<usize>) -> Self {
+        let ways = if ways.is_empty() {
+            vec![Accel::Software]
+        } else {
+            ways
+        };
+        let settled = settled_at.filter(|at| *at < ways.len());
+        Self {
+            ways,
+            at: settled.unwrap_or(0),
+            settled: settled.is_some(),
+            first_fed: None,
+            exhausted: false,
+        }
+    }
+
+    /// The way tried now.
+    pub fn way(&self) -> &Accel {
+        &self.ways[self.at]
+    }
+
+    /// Its place among the ways.
+    pub fn at(&self) -> usize {
+        self.at
+    }
+
+    /// A decoder of this way started again (another size or codec).
+    pub fn started(&mut self) {
+        self.first_fed = None;
+    }
+
+    /// An access unit went to the decoder at `at`.
+    pub fn fed(&mut self, at: Instant) {
+        self.first_fed.get_or_insert(at);
+    }
+
+    /// The decoder has given `pictures` and `ended` or not, at `now`.
+    pub fn check(&mut self, pictures: u64, ended: bool, now: Instant) -> Step {
+        if self.settled {
+            return Step::Stay;
+        }
+        if pictures > 0 {
+            self.settled = true;
+            return Step::Settled;
+        }
+        if give_up(pictures, ended, self.first_fed, now) {
+            return self.next();
+        }
+        Step::Stay
+    }
+
+    /// The decoder could not take an access unit.
+    pub fn failed(&mut self) -> Step {
+        self.settled = false;
+        self.next()
+    }
+
+    fn next(&mut self) -> Step {
+        self.first_fed = None;
+        if self.at + 1 < self.ways.len() {
+            self.at += 1;
+            Step::Next
+        } else if !self.exhausted {
+            self.exhausted = true;
+            Step::Exhausted
+        } else {
+            Step::Stay
+        }
+    }
+}
+
+/// Follow the ladder for the decoder now (PC5): the next way started, or
+/// the way that gave a picture kept for the view and said.
+#[allow(clippy::too_many_arguments)]
+fn climb(
+    shared: &Arc<Mutex<State>>,
+    ctx: &egui::Context,
+    session_id: u64,
+    ladder: &mut Ladder,
+    decoder: &mut Option<Decoder>,
+    gate: &mut KeyGate,
+    stream_is: Option<(Codec, Option<(u16, u16)>)>,
+) -> Step {
+    let Some(d) = decoder.as_ref() else {
+        return Step::Stay;
+    };
+    let step = ladder.check(d.pictures(), d.ended(), Instant::now());
+    match step {
+        Step::Next => {
+            *decoder = start_decoder(shared, ctx, stream_is, ladder.way());
+            *gate = KeyGate::default();
+        }
+        Step::Settled => {
+            let words = way_words(ladder.way(), d.auto_took());
+            let mut state = lock(shared);
+            state.way = Some((session_id, ladder.at()));
+            state.decoding = words;
+        }
+        Step::Stay | Step::Exhausted => {}
+    }
+    step
 }
 
 /// A decoder for a stream that `is` this codec and size, decoding `way`
@@ -2223,6 +2337,44 @@ mod tests {
             "auto (dxva2)"
         );
         assert_eq!(way_words(&Accel::Auto, None), "auto (software)");
+    }
+
+    /// PC5 review M9: the ladder goes to the next way when one gives no
+    /// picture in time, ends or cannot take a unit; settles on the one
+    /// that gives a picture and keeps it; says once that the last gave up.
+    #[test]
+    fn the_ladder_climbs_settles_and_runs_out() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let ways = vec![Accel::D3d11va, Accel::Auto, Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), None);
+        assert_eq!(ladder.way(), &Accel::D3d11va);
+        assert_eq!(ladder.check(0, false, at(9_000)), Step::Stay, "not fed");
+        ladder.fed(at(0));
+        ladder.fed(at(500));
+        assert_eq!(ladder.check(0, false, at(1_999)), Step::Stay);
+        assert_eq!(ladder.check(0, false, at(2_000)), Step::Next);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        // The new way's clock starts at its own first unit.
+        assert_eq!(ladder.check(0, false, at(5_000)), Step::Stay);
+        assert_eq!(ladder.check(0, true, at(5_000)), Step::Next, "ended");
+        assert_eq!(ladder.way(), &Accel::Software);
+        ladder.fed(at(6_000));
+        assert_eq!(ladder.check(1, false, at(6_010)), Step::Settled);
+        assert_eq!(ladder.check(0, true, at(99_000)), Step::Stay, "settled");
+        // A feed error leaves the last way: said once.
+        assert_eq!(ladder.failed(), Step::Exhausted);
+        assert_eq!(ladder.failed(), Step::Stay);
+        // A feed error on a card goes to the next.
+        let mut ladder = Ladder::new(ways.clone(), None);
+        assert_eq!(ladder.failed(), Step::Next);
+        assert_eq!(ladder.way(), &Accel::Auto);
+        // A rejoin starts settled where the view settled.
+        let mut ladder = Ladder::new(ways.clone(), Some(1));
+        assert_eq!(ladder.way(), &Accel::Auto);
+        assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
+        assert_eq!(Ladder::new(ways, Some(7)).way(), &Accel::D3d11va);
+        assert_eq!(Ladder::new(Vec::new(), None).way(), &Accel::Software);
     }
 
     /// PC5: the percentiles by nearest rank.
