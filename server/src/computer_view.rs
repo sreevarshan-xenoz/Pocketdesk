@@ -102,6 +102,10 @@ pub const PRIVACY_WAIT: Duration = Duration::from_secs(8);
 /// itself after 10 minutes, and a renewal refused says it ended there.
 pub const PRIVACY_RENEW: Duration = Duration::from_secs(10);
 
+/// Why privacy ended when no window watched the view any more (PR #561
+/// review I2).
+const WINDOW_GONE: &str = "Privacy ended: the window closed.";
+
 /// What the Computers page asks of the view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -1748,25 +1752,46 @@ pub async fn run_with(
                 }
             }
             _ = heartbeat.tick() => {
-                // A privacy mode held there is renewed, or given up when
-                // that computer stopped answering (PC8).
-                if let Some(v) = view.as_mut()
-                    && let Some(hold) = v.privacy.as_mut()
-                {
-                    let now = Instant::now();
-                    match privacy_due(hold.on, hold.waiting, hold.sent, now) {
-                        PrivacyDue::Renew => hold.renew(now),
-                        PrivacyDue::GiveUp => {
-                            v.privacy = None;
-                            let why = format!("{} did not answer; privacy is off here.", v.name);
-                            let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
-                            say_privacy(v, watching, ViewPrivacy::Refused(why));
-                        }
-                        PrivacyDue::Nothing => {}
-                    }
-                }
-                if viewer.as_ref().is_some_and(|v| v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed()) {
+                // A window gone (closed, crashed): its socket closed, so its
+                // reader ended, or its writer can no longer write.
+                if viewer.as_ref().is_some_and(|v| {
+                    v.reader.is_finished()
+                        || (v.tx.try_send(Message::Heartbeat).is_err() && v.tx.is_closed())
+                }) {
                     viewer = None;
+                }
+                // A privacy mode held there is renewed only while a window
+                // watches (PR #561 review I2): with none, it is let go at
+                // once; else given up when that computer stopped answering
+                // (PC8).
+                if let Some(v) = view.as_mut()
+                    && v.privacy.is_some()
+                {
+                    let watching = viewer.as_ref().filter(|w| w.session_id == v.session_id);
+                    let now = Instant::now();
+                    let due = v
+                        .privacy
+                        .as_ref()
+                        .map(|hold| privacy_due(hold.on, hold.waiting, hold.sent, now));
+                    if watching.is_none() {
+                        v.privacy = None;
+                        tracing::info!(device_id = %v.device_id, "Privacy there let go: no window watches it");
+                        say_privacy(v, None, ViewPrivacy::Refused(WINDOW_GONE.to_string()));
+                    } else {
+                        match due {
+                            Some(PrivacyDue::Renew) => {
+                                if let Some(hold) = v.privacy.as_mut() {
+                                    hold.renew(now);
+                                }
+                            }
+                            Some(PrivacyDue::GiveUp) => {
+                                v.privacy = None;
+                                let why = format!("{} did not answer; privacy is off here.", v.name);
+                                say_privacy(v, watching, ViewPrivacy::Refused(why));
+                            }
+                            Some(PrivacyDue::Nothing) | None => {}
+                        }
+                    }
                 }
                 let now = Instant::now();
                 if let Some(v) = view.as_mut() {

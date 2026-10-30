@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1012 open items.
+1013 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 100 |
+| A second computer | 101 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -986,6 +986,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Turn that switch on on the laptop: Hide what I do there turns on within a second, the laptop's keyboard and touchpad stop working there while the window still drives it, and the bar says it is hidden; the laptop's ring shows on its screen (look at the laptop, or a screencopy count of red edge pixels) and is not in the window's picture. (where: second computer)
 - Turn it off from the bar, turn View only on, and close the window, each in turn: the laptop's keyboard and touchpad work again within a second each time. (where: second computer)
 - With it on, cut the link (stop Windows' server, or turn Wi-Fi off on Windows): the laptop's keyboard and touchpad come back without waiting for the 10-minute TTL (note how long), and the window, once back, says privacy ended. (where: second computer)
+- With it on, end the desktop app on Windows from Task Manager (a crash, not a close): the laptop's keyboard and touchpad come back within about 4 s. (where: second computer)
 - Both ways of the link: repeat the on and off with the laptop as the computer that keeps the link (its id sorts first) and with Windows keeping it, by pairing the other way round or a throwaway pair of ids. (where: second computer)
 - Lock it when I close the window, on (bar or Settings), with the switch on there: closing the window locks the laptop (`loginctl lock-session` or hyprlock); with the switch off there it does not, and nothing breaks; with the option off it does not. Never the other way round: Windows here is the owner's box and is never the one locked. (where: second computer)
 - With a phone holding privacy on the laptop first, Hide what I do there says another phone holds privacy mode, and closing the window with the lock option still locks the laptop and leaves the phone's grab as it was. (where: second computer)

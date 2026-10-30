@@ -1121,3 +1121,134 @@ async fn privacy_held_is_let_go_as_the_view_ends() {
     relay.await.unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// PR #561 review I2: a window gone without a word (its socket closed, as
+/// a crash leaves it) lets privacy go there at once, not after the view's
+/// 30 s without a watcher, and nothing is renewed for nobody.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn privacy_is_let_go_as_the_window_goes() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let dir = temp_dir("privacy-gone");
+    paired(&dir);
+    let cert = Arc::new(CertManager::new().expect("cert manager"));
+    let (input_tx, _input_rx) = mpsc::unbounded_channel();
+    let (_hang_up, hang_up_rx) = tokio::sync::oneshot::channel();
+    let addr = other_computer(cert.clone(), input_tx, hang_up_rx).await;
+    let (asked_tx, mut asked) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (answers, answers_rx) = mpsc::channel(8);
+    let host = stand_in_host(
+        move |_, body| {
+            let _ = asked_tx.send(body);
+        },
+        answers_rx,
+    );
+    let (commands, relay, mut window) = controlled_view(&dir, addr, cert, host).await;
+    window
+        .write_all(&Message::Privacy(wire::PRIVACY_HIDE).encode())
+        .await
+        .unwrap();
+    let wait = Duration::from_secs(5);
+    let grab = tokio::time::timeout(wait, asked.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(grab["action"], "grab");
+    answers
+        .send((
+            "desk".into(),
+            answer_to(&grab, serde_json::json!({"ok": true, "grabbed": 2})),
+        ))
+        .await
+        .unwrap();
+    privacy_said(&mut window, &ViewPrivacy::On).await;
+    // The window's socket closes, with no word first.
+    drop(window);
+    let release = tokio::time::timeout(Duration::from_secs(6), asked.recv())
+        .await
+        .expect("let go within two heartbeats")
+        .unwrap();
+    assert_eq!(release["action"], "release");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), asked.recv())
+            .await
+            .is_err(),
+        "nothing renewed for nobody"
+    );
+    drop(commands);
+    relay.await.unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A stand-in for the computer shown (PC8): what the relay asks of it goes
+/// to `asked`, with the computer's id; its answers come from `answers`.
+/// Nothing is grabbed or locked.
+fn stand_in_host(
+    asked: impl Fn(&str, serde_json::Value) + Send + Sync + 'static,
+    answers: mpsc::Receiver<(String, serde_json::Value)>,
+) -> PrivacyHost {
+    PrivacyHost {
+        send: Arc::new(move |id: &str, packet: NetworkPacket| {
+            assert_eq!(packet.packet_type, "kdeconnect.pocketdesk.privacy");
+            asked(id, packet.body);
+        }),
+        answers,
+    }
+}
+
+/// The answer `body` to the ask `asked`, naming it as a host from PC8's
+/// review on does (its `id`, when it had one).
+fn answer_to(asked: &serde_json::Value, mut body: serde_json::Value) -> serde_json::Value {
+    if let Some(id) = asked.get("id") {
+        body["id"] = id.clone();
+    }
+    body
+}
+
+/// A view of the stand-in at `addr` through a relay over `dir` asking its
+/// privacy of `host`, joined as the window and read until it is shown with
+/// control taken there.
+async fn controlled_view(
+    dir: &Path,
+    addr: SocketAddr,
+    cert: Arc<CertManager>,
+    host: PrivacyHost,
+) -> (
+    mpsc::Sender<Command>,
+    tokio::task::JoinHandle<()>,
+    TcpStream,
+) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let (commands, rx) = mpsc::channel(4);
+    let relay = tokio::spawn(run_with(
+        rx,
+        listener,
+        dir.to_path_buf(),
+        Dialer::Direct {
+            addr,
+            certs: cert,
+            id: "viewer".into(),
+        },
+        host,
+    ));
+    commands
+        .send(Command::Start {
+            device_id: "desk".into(),
+            monitor: 0,
+        })
+        .await
+        .unwrap();
+    let file = view_file(dir).await;
+    let mut window = join(&file).await;
+    loop {
+        if let Message::Status(status) =
+            tokio::time::timeout(Duration::from_secs(10), read_message(&mut window))
+                .await
+                .expect("shown within 10 s")
+            && status.phase == Phase::Showing
+            && status.control == Some(true)
+        {
+            break;
+        }
+    }
+    (commands, relay, window)
+}
