@@ -1,9 +1,12 @@
 package dev.pocketdesk.android.ui
 
 import android.view.KeyEvent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,9 +27,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.pocketdesk.android.R
 import dev.pocketdesk.android.bridge.RustCore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
@@ -251,23 +259,31 @@ fun WorkspaceHud(
     }
 }
 
-/** E1 window chip: tap to crop-stream this window; re-tap to return to full desktop. */
+/**
+ * E1 window chip: tap to crop-stream this window; re-tap to return to full
+ * desktop. UX2: a long title is cut in its middle, so both its start (the
+ * document) and its end (often the app) show, the chip is at most 160 dp
+ * wide, and a long-press shows the whole title; TalkBack reads it whole.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun WindowChip(
     window: DesktopWindow,
     streamed: Boolean,
     onPull: () -> Unit,
 ) {
+    val context = LocalContext.current
     val shape = RoundedCornerShape(6.dp)
     val label = window.title.ifBlank { window.app.ifBlank { window.address } }
+    val fullTitleLabel = stringResource(R.string.window_chip_full_title)
     Text(
         label,
         maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
+        overflow = TextOverflow.MiddleEllipsis,
         fontSize = 11.sp,
         color = if (streamed) Color.Black else Color.White,
         modifier = Modifier
-            .widthIn(max = 140.dp)
+            .widthIn(max = 160.dp)
             .clip(shape)
             .then(
                 if (streamed) {
@@ -276,7 +292,12 @@ private fun WindowChip(
                     Modifier.border(1.dp, Color.White.copy(alpha = 0.35f), shape)
                 },
             )
-            .clickable { onPull() }
+            .combinedClickable(
+                onLongClickLabel = fullTitleLabel,
+                onLongClick = { Toast.makeText(context, label, Toast.LENGTH_LONG).show() },
+                onClick = onPull,
+            )
+            .semantics { contentDescription = label }
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }

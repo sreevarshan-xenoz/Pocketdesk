@@ -739,6 +739,7 @@
     <string name="card_menu_manage">Administrar</string>
     <string name="card_menu_open">Desplegado</string>
     <string name="card_menu_closed">Plegado</string>
+    <string name="window_chip_full_title">Mostrar el título completo</string>
     <string name="card_rename">Renombrar</string>
     <string name="card_more">Más opciones para %1$s</string>
     <string name="status_paired">Emparejado</string>

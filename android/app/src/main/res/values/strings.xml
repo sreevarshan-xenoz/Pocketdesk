@@ -743,6 +743,8 @@
     <string name="card_menu_manage">Manage</string>
     <string name="card_menu_open">Expanded</string>
     <string name="card_menu_closed">Collapsed</string>
+    <!-- UX2: a session's window chip, long-pressed (TalkBack's action name). -->
+    <string name="window_chip_full_title">Show the full title</string>
     <string name="card_rename">Rename</string>
     <string name="card_more">More for %1$s</string>
     <string name="status_paired">Paired</string>
