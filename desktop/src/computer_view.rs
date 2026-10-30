@@ -1492,7 +1492,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                 }
             }
             Message::End { why } => return Ok(why),
-            Message::Heartbeat | Message::WantKeyframe | Message::Input(_) | Message::Focus(_) => {}
+            Message::Heartbeat
+            | Message::WantKeyframe
+            | Message::Input(_)
+            | Message::Focus(_)
+            | Message::Privacy(_) => {}
         }
     }
 }
