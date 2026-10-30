@@ -767,6 +767,7 @@ impl Plugin for PairPlugin {
             "kdeconnect.identity",
             WAN_KEY,
             crate::peer_computers::BOTH_WAYS,
+            crate::computer_wake::COMPUTER_WAKE,
         ]
     }
 
@@ -817,6 +818,11 @@ impl Plugin for PairPlugin {
                 if let Err(e) = heard {
                     tracing::debug!("A computer's word that it paired both ways was lost: {e}");
                 }
+            }
+            // How to wake one of the owner's computers (PC6), kept only
+            // from a computer, and only for one this computer lists.
+            crate::computer_wake::COMPUTER_WAKE => {
+                crate::computer_wake::heard(&conn, &packet.body, false).await;
             }
             _ => {}
         }
@@ -2411,6 +2417,9 @@ forged log line"
             // pairing; it gives only what this computer's owner granted, on
             // its link, held to its iroh key.
             "kdeconnect.pocketdesk.both_ways",
+            // PC6: how to wake one of the owner's computers, taken only
+            // from a computer and kept only for one this computer lists.
+            "kdeconnect.pocketdesk.computer_wake",
             // The deck (F1): the listing tells only labels and kinds, and a
             // press is held to the phone's permission for its action.
             "kdeconnect.pocketdesk.deck",

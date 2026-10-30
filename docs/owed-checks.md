@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1013 open items.
+1018 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 101 |
+| A second computer | 106 |
 | A Linux desktop (the Azure VM serves for some) | 177 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
@@ -980,7 +980,15 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - In full screen with Win held through the window, Alt+Tab away by a mouse click elsewhere (a second monitor) or a toast: nothing stays held on the laptop, and Windows' own Win key works at once. (where: second computer)
 - With the shared keyboard and mouse across on another computer while the window is in full screen, keys go where the shared keyboard is, once, never to both. With privacy mode turned on here from the phone, Win and Alt+Tab go nowhere (the shield keeps them), not to the laptop. (where: second computer)
 
-**232. Privacy for the far computer from the window (PC8)**
+**232. Your computers on the Overview and in the tray, and waking one that sleeps (PC6)**
+
+- With the link up, Windows' `computers.json` holds the laptop's entry with `wake` (its adapter's MAC and broadcast); the laptop's own Diagnostics names the same adapter. Paired one way instead, neither computer's entry gets `wake`, and no Wake shows. Turn "Let my computers wake this one" off on the laptop and restart its server: once the link is back, the entry has no `wake`, and Wake no longer shows. (where: second computer)
+- Sleep the laptop by hand, on the laptop itself, never this Windows box (wired, if it has a port): its card on Windows' Overview shows Wake with the note on wired and Wi-Fi; Wake wakes it, and its card says linked again within about a minute. Once more on Wi-Fi only: say whether it woke. (where: second computer)
+- With the laptop asleep, Show its screen on its card offers "Wake it and show": the countdown runs, the laptop wakes, and its window opens by itself (note how many seconds the countdown had used); Cancel during the countdown stops the wait (the window does not open later). With Wake-on-LAN off on the laptop, two minutes later the notice says it did not come up. (where: second computer)
+- The tray on Windows (and the laptop's tray, SNI, for a computer it pasted) lists "Show <name>'s screen" above Quit, the most recently viewed first, and "Wake <name>" only while that computer sleeps; Show opens the window, or with it asleep the Overview with the offer to wake it. (where: second computer)
+- Show two computers' screens one after the other: the Overview's cards and the tray list the last one shown first, with "viewed just now". (where: second computer)
+
+**233. Privacy for the far computer from the window (PC8)**
 
 - Windows viewing the laptop with the laptop's "Lock, sleep, privacy and wake others" off for Windows: Hide what I do there stays off and the bar says that switch is off there, by its name. (where: second computer)
 - Turn that switch on on the laptop: Hide what I do there turns on within a second, the laptop's keyboard and touchpad stop working there while the window still drives it, and the bar says it is hidden; the laptop's ring shows on its screen (look at the laptop, or a screencopy count of red edge pixels) and is not in the window's picture. (where: second computer)

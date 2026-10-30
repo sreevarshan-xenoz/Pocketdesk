@@ -345,6 +345,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_wake_facts",
+        "Let my computers wake this one",
+        Section::Computers,
+    ),
+    (
         "shared_input",
         crate::arrange_view::SHARE_SWITCH,
         Section::SharedInput,
@@ -2169,6 +2174,17 @@ impl SettingsForm {
                         "With that computer's own lock, when the window closes while it shows that computer (not while it reconnects, nor when Pocketdesk quits with it open); a notification says when it could not lock. That computer decides: its Devices page needs \u{201c}Lock, sleep, privacy and wake others\u{201d} on for this computer. The window's bar has it too, with \u{201c}Hide what I do there\u{201d}.",
                     );
                 });
+                // PC6: what Wake on the other computers needs from this one.
+                row(ui, "computer_wake_facts", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_wake_facts,
+                        "tell my paired computers how to wake this one: its network adapter's hardware address and broadcast address",
+                    );
+                    note(
+                        ui,
+                        "Sent on each link as it comes up; turned off, they forget it at the next. A wired adapter wakes best: Wi-Fi rarely wakes a computer. Wake-on-LAN must be on in this computer's firmware and adapter settings too.",
+                    );
+                });
             }
             Section::SharedInput => {
                 // UX 2: one home, the Keyboard and mouse page; a search for
@@ -2910,6 +2926,18 @@ mod tests {
         // Windows' timer is named only on Windows (BK10 review M8).
         assert_eq!(quick_note().contains("Windows' timer"), cfg!(windows));
         assert!(quick_note().contains("byte every 50 ms"));
+    }
+
+    /// PC6: letting the other computers wake this one is with them, and
+    /// waits for a restart: the links are told as they come up.
+    #[test]
+    fn letting_computers_wake_this_one_is_with_the_computers() {
+        let key = "computer_wake_facts";
+        assert!(SETTINGS.iter().any(|(k, n, s)| *k == key
+            && *n == "Let my computers wake this one"
+            && *s == Section::Computers));
+        assert!(!applies_live(key));
+        assert!(drawn_here(key));
     }
 
     /// BK7: a computer's window's quality and view-only start are with the

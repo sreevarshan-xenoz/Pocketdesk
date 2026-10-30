@@ -39,6 +39,10 @@ impl OpenRequest {
 /// window, not a page of its own).
 pub const TYPE: &str = "type";
 
+/// The page asked for to show a paired computer's screen (PC6; BK7's
+/// window, not a page of its own), the computer's id in `phone`.
+pub const COMPUTER_VIEW: &str = "computer_view";
+
 /// Ask the window to open `page` (for `phone`).
 pub fn request(state_dir: &Path, page: &str, phone: Option<&str>, now_unix: u64) -> io::Result<()> {
     let request = OpenRequest {
