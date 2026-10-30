@@ -1200,26 +1200,21 @@ async fn seed_desktop_state(
     // Files offered while its app was gone, offered again (S2).
     crate::offers::offer_again(&**sender).await;
     // How to wake this computer, for one of the owner's computers linked
-    // here (PC6): the adapter its link leaves by, or that it reached.
+    // here that this one lists (PC6: paired both ways): the adapter its
+    // link leaves by, or that it reached.
     let device_id = sender.device_id().to_string();
     let reached = match road {
         Road::Local { local, .. } => local,
         Road::Internet => None,
     };
     let for_computer = tokio::task::spawn_blocking(move || {
-        crate::plugins::pair::is_computer_device(&device_id).then(|| {
-            let addresses = crate::state::state_dir()
-                .ok()
-                .and_then(|dir| {
-                    pocketdesk_core::local::computers::read(&dir)
-                        .computers
-                        .into_iter()
-                        .find(|c| c.device_id == device_id)
-                })
-                .map(|c| c.addresses)
-                .unwrap_or_default();
-            crate::computer_wake::packet_toward(&addresses, reached)
-        })
+        let dir = crate::state::state_dir().ok()?;
+        crate::computer_wake::seed_packet(
+            &dir,
+            &device_id,
+            crate::plugins::pair::is_computer_device(&device_id),
+            reached,
+        )
     })
     .await
     .ok()

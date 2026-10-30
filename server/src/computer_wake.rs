@@ -65,6 +65,42 @@ fn packet_toward_as(tell: bool, addresses: &[String], local: Option<IpAddr>) -> 
     )
 }
 
+/// The packet for a connection of `device_id` (a computer, `is_computer`)
+/// as it is seeded (PC6 review I-3): only for a computer this one lists,
+/// which on the computer dialed is one paired both ways. A computer paired
+/// one way, which may not be the owner's, learns nothing. Blocking.
+pub fn seed_packet(
+    dir: &Path,
+    device_id: &str,
+    is_computer: bool,
+    reached: Option<IpAddr>,
+) -> Option<NetworkPacket> {
+    seed_packet_as(
+        TELL.load(Ordering::Relaxed),
+        dir,
+        device_id,
+        is_computer,
+        reached,
+    )
+}
+
+fn seed_packet_as(
+    tell: bool,
+    dir: &Path,
+    device_id: &str,
+    is_computer: bool,
+    reached: Option<IpAddr>,
+) -> Option<NetworkPacket> {
+    if !is_computer {
+        return None;
+    }
+    let listed = computers::read(dir)
+        .computers
+        .into_iter()
+        .find(|c| c.device_id == device_id)?;
+    Some(packet_toward_as(tell, &listed.addresses, reached))
+}
+
 /// This computer's address on the adapter it reaches the first IPv4 of
 /// `addresses` by, from the routing table: a UDP socket connected there
 /// sends nothing.
@@ -439,6 +475,22 @@ mod tests {
         assert_eq!(never, "it never said how to wake it");
         let none = send(&told_computer(&[]), &[]).unwrap_err();
         assert_eq!(none, "no target took the packet");
+    }
+
+    /// PC6 review I-3: a connection is seeded with how to wake this
+    /// computer only for a computer this one lists (paired both ways),
+    /// never one paired one way or a phone.
+    #[test]
+    fn only_a_listed_computer_is_told_at_the_seed() {
+        let dir = temp("seed");
+        computers::update(&dir, |file| file.computers.push(computer("mine"))).unwrap();
+        let seeded = |id: &str, is_computer: bool| {
+            seed_packet_as(false, &dir, id, is_computer, None).map(|p| p.packet_type)
+        };
+        assert_eq!(seeded("mine", true), Some(COMPUTER_WAKE.to_string()));
+        assert_eq!(seeded("one-way", true), None, "paired one way: not listed");
+        assert_eq!(seeded("mine", false), None, "not a computer");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// PC6: with telling off, the packet on a link says to forget.
