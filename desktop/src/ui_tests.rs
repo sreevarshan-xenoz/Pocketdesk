@@ -2205,3 +2205,19 @@ fn the_help_pages_say_what_shows_there() {
         "Settings opened"
     );
 }
+
+/// UX 4: a computer on the Keyboard and mouse page is a card; its greyed
+/// "may drive" box, kept by a stopped server, says why in a line.
+#[test]
+fn a_computers_greyed_drive_box_says_why() {
+    use egui_kittest::kittest::NodeT;
+    let fixture = Fixture::new();
+    keyboard_mouse_computers(fixture.state());
+    let app = fixture.open(Some(Tab::KeyboardMouse));
+    let boxed = app.get_by_label_contains("Test Laptop may drive");
+    assert!(boxed.accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::arrange_view::STOPPED_LINE)
+            .is_some()
+    );
+}
