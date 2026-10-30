@@ -132,6 +132,9 @@ struct State {
     /// view settled on: its session and its place in the ways to try.
     hw_decode: bool,
     decoding: String,
+    /// Counts the decoders started (PR #562 review I2): a picture from an
+    /// older one, still on its way as it is replaced, is dropped.
+    decoder_gen: u64,
     way: Option<(u64, usize)>,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
@@ -1754,7 +1757,6 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the screen changed size"));
                 }
                 stream_is = Some((Codec::H264, Some((width, height))));
-                lock(shared).size = Some((width, height));
                 decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
                 gate = KeyGate::default();
                 first_fed = None;
@@ -1766,7 +1768,6 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
                     end_recording(shared, Some("it stopped as the picture changed"));
                 }
                 stream_is = Some((Codec::Hevc, None));
-                lock(shared).size = None;
                 decoder = start_decoder(shared, ctx, stream_is, &ways[way]);
                 gate = KeyGate::default();
                 first_fed = None;
@@ -1861,7 +1862,15 @@ fn start_decoder(
         accel: way.clone(),
         planes: crate::nv12::planes(),
     };
-    let started = Decoder::open(&wanted, publisher(shared, ctx));
+    // A new decoder: the stream's size, or none until its first picture,
+    // and only its own pictures from now on (PR #562 review I2).
+    let decoder_gen = {
+        let mut state = lock(shared);
+        state.decoder_gen += 1;
+        state.size = size;
+        state.decoder_gen
+    };
+    let started = Decoder::open(&wanted, publisher(shared, ctx, decoder_gen));
     let mut state = lock(shared);
     state.clock.restart();
     state.decoding = way.words();
@@ -1906,12 +1915,20 @@ fn end_recording(shared: &Mutex<State>, why: Option<&str>) {
     state.saved_note = Some((note, Instant::now()));
 }
 
-/// Where a decoded picture goes: the window's next pass takes it.
-fn publisher(shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> Box<dyn FnMut(Picture) + Send> {
+/// Where a decoded picture of the decoder `decoder_gen` goes: the window's
+/// next pass takes it, unless a newer decoder has started since.
+fn publisher(
+    shared: &Arc<Mutex<State>>,
+    ctx: &egui::Context,
+    decoder_gen: u64,
+) -> Box<dyn FnMut(Picture) + Send> {
     let shared = shared.clone();
     let ctx = ctx.clone();
     Box::new(move |picture| {
         let mut state = lock(&shared);
+        if state.decoder_gen != decoder_gen {
+            return;
+        }
         state.clock.decoded(Instant::now(), picture.data.len());
         // HEVC's size is the first picture's (PC5).
         if state.size.is_none()
@@ -2149,6 +2166,41 @@ mod tests {
         assert_eq!(bytes_words(8_294_400), "8.3 MB");
         assert_eq!(bytes_words(4_200), "4 KB");
         assert_eq!(bytes_words(12), "12 B");
+    }
+
+    /// PR #562 review I2: a picture from a decoder already replaced is
+    /// dropped, so it cannot give the new stream its size; the current
+    /// decoder's first picture does.
+    #[test]
+    fn only_the_current_decoders_pictures_count() {
+        let shared = Arc::new(Mutex::new(State::default()));
+        let ctx = egui::Context::default();
+        let picture = |width: usize, height: usize| Picture {
+            width,
+            height,
+            planes: Planes::Rgba,
+            data: vec![0; width * height * 4],
+            colour: crate::video::Colour::default(),
+        };
+        lock(&shared).decoder_gen = 2;
+        let mut old = publisher(&shared, &ctx, 1);
+        old(picture(64, 36));
+        {
+            let state = lock(&shared);
+            assert!(state.picture.is_none(), "the old decoder's picture");
+            assert_eq!(state.size, None, "and not its size");
+        }
+        let mut current = publisher(&shared, &ctx, 2);
+        current(picture(32, 18));
+        assert_eq!(lock(&shared).size, Some((32, 18)));
+        current(picture(16, 8));
+        assert_eq!(lock(&shared).size, Some((32, 18)), "the first picture's");
+        old(picture(64, 36));
+        assert_eq!(
+            lock(&shared).picture.as_ref().map(|p| p.width),
+            Some(16),
+            "a late old picture replaces nothing"
+        );
     }
 
     /// PC5: a way is given up when it never gave a picture and ended, or
