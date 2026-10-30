@@ -2133,10 +2133,10 @@ fn the_sharing_pages_say_what_shows_there() {
     );
 }
 
-/// UX 4: a phone paired but sharing no folders: Phone files says so, and
+/// UX 4: a phone paired but not linked: Phone files says so, and
 /// Open Devices opens Devices; Messages offers no pairing.
 #[test]
-fn phone_files_with_no_folders_shared_opens_devices() {
+fn phone_files_with_no_phone_linked_opens_devices() {
     let fixture = Fixture::new();
     pair_phone(fixture.state(), PHONE, "Test Phone");
     let mut app = fixture.open(Some(Tab::Messages));
@@ -2145,7 +2145,7 @@ fn phone_files_with_no_folders_shared_opens_devices() {
     go_to(&app, Tab::Phone);
     app.run_steps(3);
     assert!(
-        app.query_by_label(crate::phone_files_view::NONE_SHARING)
+        app.query_by_label(crate::phone_files_view::NOT_LINKED)
             .is_some()
     );
     app.get_by_label(crate::phone_files_view::OPEN_DEVICES)
