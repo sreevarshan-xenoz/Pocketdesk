@@ -304,6 +304,11 @@ class MainActivity : ComponentActivity() {
     override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean =
         mouseKeySwallowed(keyCode, event) || super.onKeyUp(keyCode, event)
 
+    // UX2: a debuggable build's font-scale override, for layout checks.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(DebugFontScale.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
