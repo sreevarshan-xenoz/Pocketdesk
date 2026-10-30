@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1064 open items.
+1066 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 137 |
+| A second computer | 139 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -554,7 +554,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 
 **240. Keys by position in a computer's screen window**
 
-- An input method here (Windows' Japanese IME, or Linux fcitx): with Keys by position on, note whether it composes in the window at all (the picture asks for no input method) and, if it commits a word, that it arrives there as text. (where: owner)
+- An input method here (Windows' Japanese IME, or Linux fcitx): note that it does not compose in the window in either mode (the picture asks for no input method), and that with Keys by position on, its keys go by place with nothing typed twice. (where: owner)
 
 ## A phone with a SIM
 
@@ -1078,6 +1078,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With W held, switch Keys by position off, Alt+Tab away, turn View only on, and close the window, each in turn: `wev` shows W let go each time, nothing stuck. The view reconnecting (stop the laptop's server for a moment) leaves nothing held either. (where: second computer)
 - Lock the pointer with Keys by position off: the bar says "Games usually want Keys by position" with its buttons; free the pointer and click Turn on: it is on, and closing and opening the window for the same computer starts it on (another computer starts as Settings say). "Not now" in a fresh window: locking again does not offer it. (where: second computer)
 - A Linux far side on X11 (enigo, no uinput) with a German layout: Keys by position on, the laptop's Y key types "z" there (by its place, as on uinput and Windows hosts). The phone's own keys on that desktop now go by place too: note what the phone's shortcut sheet's Ctrl+Z does there with a German or AZERTY layout (before this, enigo looked the letter up in the layout). (where: second computer)
+- Keys by position on, Windows far side with two layouts (Alt+Shift switches them): press Ctrl+Alt+Shift+M and Ctrl+Alt+Shift+S at the laptop, and Alt+Shift alone: Windows' layout does not change, and a key logger there sees only the first modifier pressed and let go. Ctrl held (crouch) then C held in a game there: C is held as long as it is, not tapped at its release. (where: second computer)
+- A Japanese (JIS) or Brazilian (ABNT) keyboard at the laptop, Keys by position on, a Windows far side with that layout: the Ro, Yen, Henkan, Muhenkan and Katakana/Hiragana keys and the keypad's Enter and slash do there what they do on its own keyboard; with a US layout there, note what each does (the scancodes are written from Microsoft's table, not seen on a device). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
