@@ -1074,5 +1074,7 @@
     <string name="there_refused_yourself">இந்த ஃபோன் இவ்வாறு தன்னைத்தானே நீக்க முடியாது.</string>
     <string name="there_refused_not_paired">அந்தச் சாதனம் இனி அங்கே இணைக்கப்படவில்லை.</string>
     <string name="there_refused_last_owner">அங்கே உள்ள உங்கள் கடைசி சாதனம் அது: அதை நீக்கினால் நிர்வகிக்க எதுவும் இருக்காது.</string>
+    <string name="there_refused_off">தொலைவிலிருந்து சாதனங்களை நீக்குவதைக் கணினியின் உரிமையாளர் அணைத்துள்ளார். கணினியிலேயே நீக்குங்கள்: சாதனங்கள், இணைப்பை நீக்கு.</string>
+    <string name="there_refused_busy">ஒரு நிமிடத்தில் மிக அதிகக் கோரிக்கைகள். ஒரு நிமிடம் காத்திருந்து மீண்டும் முயலுங்கள்.</string>
     <string name="there_refused_failed">கணினியால் அதைச் செய்ய முடியவில்லை. மீண்டும் முயலுங்கள்.</string>
 </resources>

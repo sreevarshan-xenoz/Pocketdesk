@@ -1610,9 +1610,11 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeDevices
     _class: JClass<'_>,
     address: JString<'_>,
     port: jint,
+    request: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
-    let json = envelope(RUNTIME.block_on(remote_devices::list(address, port as u16)));
+    let request = jstring_to_string(&mut env, &request);
+    let json = envelope(RUNTIME.block_on(remote_devices::list(address, port as u16, request)));
     to_jstring(&mut env, json)
 }
 
@@ -1625,10 +1627,17 @@ pub extern "system" fn Java_dev_pocketdesk_android_bridge_RustCore_nativeRemoveT
     address: JString<'_>,
     port: jint,
     device_id: JString<'_>,
+    request: JString<'_>,
 ) -> jstring {
     let address = jstring_to_string(&mut env, &address);
     let device_id = jstring_to_string(&mut env, &device_id);
-    let json = envelope(RUNTIME.block_on(remote_devices::remove(address, port as u16, device_id)));
+    let request = jstring_to_string(&mut env, &request);
+    let json = envelope(RUNTIME.block_on(remote_devices::remove(
+        address,
+        port as u16,
+        device_id,
+        request,
+    )));
     to_jstring(&mut env, json)
 }
 

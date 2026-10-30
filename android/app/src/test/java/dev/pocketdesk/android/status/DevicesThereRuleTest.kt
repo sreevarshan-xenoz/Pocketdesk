@@ -75,6 +75,28 @@ class DevicesThereRuleTest {
         assertEquals(R.string.there_refused_failed, DevicesThereRule.refusal(null))
     }
 
+    /** PR #574 review I2: only the answer naming this ask's id is taken. */
+    @Test
+    fun anAnswerIsTakenOnlyForTheAskItNames() {
+        val first = DevicesThereRule.newRequest()
+        val second = DevicesThereRule.newRequest()
+        assertTrue(first != second)
+        assertTrue(DevicesThereRule.isAnswerTo(second, second))
+        assertFalse("a late answer to the first ask", DevicesThereRule.isAnswerTo(second, first))
+        assertFalse(DevicesThereRule.isAnswerTo(second, null))
+        assertFalse(DevicesThereRule.isAnswerTo("", ""))
+    }
+
+    /** Review N8: a device already gone there leaves the list too. */
+    @Test
+    fun aDeviceGoneThereLeavesTheList() {
+        assertTrue(DevicesThereRule.dropsRow(true, null))
+        assertTrue(DevicesThereRule.dropsRow(false, "not_paired"))
+        assertFalse(DevicesThereRule.dropsRow(false, "too_many"))
+        assertEquals(R.string.there_refused_off, DevicesThereRule.refusal("off"))
+        assertEquals(R.string.there_refused_busy, DevicesThereRule.refusal("busy"))
+    }
+
     @Test
     fun aRemovedDeviceLeavesTheList() {
         val list = listOf(device("a"), device("b"))

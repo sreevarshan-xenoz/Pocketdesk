@@ -56,10 +56,21 @@ fun DevicesThereSheet(address: String, controlPort: Int, computer: String, onDis
 
     LaunchedEffect(address, controlPort, asks) {
         failure = null
-        withContext(Dispatchers.IO) { RustCore.devicesThere(address, controlPort) }
+        // This ask's own id: only the answer naming it is taken (PR #574
+        // review I2).
+        val asked = DevicesThereRule.newRequest()
+        withContext(Dispatchers.IO) { RustCore.devicesThere(address, controlPort, asked) }
             .mapCatching { JSONObject(it) }
+            .mapCatching { answer ->
+                check(DevicesThereRule.isAnswerTo(asked, answer.optString("request"))) {
+                    "an answer to another ask"
+                }
+                answer
+            }
             .onSuccess { answer ->
                 if (answer.has("refused")) {
+                    // No list kept from before (review N8).
+                    devices = null
                     failure = DevicesThereRule.refusal(answer.optString("refused"))
                 } else {
                     devices = DevicesThereRule.sorted(parseDevices(answer))
@@ -111,27 +122,32 @@ fun DevicesThereSheet(address: String, controlPort: Int, computer: String, onDis
                     confirming = null
                     removing = true
                     scope.launch {
+                        val asked = DevicesThereRule.newRequest()
                         val answer = withContext(Dispatchers.IO) {
-                            RustCore.removeThere(address, controlPort, device.id)
+                            RustCore.removeThere(address, controlPort, device.id, asked)
                         }.mapCatching { JSONObject(it) }.getOrNull()
+                            ?.takeIf { DevicesThereRule.isAnswerTo(asked, it.optString("request")) }
                         removing = false
                         said = when {
                             answer == null -> R.string.there_no_answer_remove to name
                             answer.has("refused") ->
                                 DevicesThereRule.refusal(answer.optString("refused")) to null
                             else -> {
-                                val outcome = DevicesThereRule.outcome(
-                                    answer.optBoolean("removed"),
-                                    answer.optString("reason").ifEmpty { null },
-                                )
-                                if (outcome.removed) {
+                                val reason = answer.optString("reason").ifEmpty { null }
+                                val outcome = DevicesThereRule.outcome(answer.optBoolean("removed"), reason)
+                                // Gone either way: removed now, or before (review N8).
+                                if (DevicesThereRule.dropsRow(outcome.removed, reason)) {
                                     devices = devices?.let { DevicesThereRule.without(it, device.id) }
+                                }
+                                if (outcome.removed) {
                                     R.string.there_removed to name
                                 } else {
                                     (outcome.reason ?: R.string.there_refused_failed) to null
                                 }
                             }
                         }
+                        // Listed again, so what shows is what is there now.
+                        asks++
                     }
                 }) { Text(stringResource(R.string.there_remove), color = MaterialTheme.colorScheme.error) }
             },

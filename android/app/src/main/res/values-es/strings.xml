@@ -1082,5 +1082,7 @@
     <string name="there_refused_yourself">Este teléfono no puede quitarse a sí mismo de esta forma.</string>
     <string name="there_refused_not_paired">Ese dispositivo ya no está vinculado allí.</string>
     <string name="there_refused_last_owner">Es el último dispositivo tuyo allí: quitarlo no dejaría ninguno para administrarla.</string>
+    <string name="there_refused_off">El dueño de la computadora desactivó quitar dispositivos a distancia. Quítalo en la computadora: Dispositivos, Desvincular.</string>
+    <string name="there_refused_busy">Demasiadas solicitudes en un minuto. Espera un minuto e inténtalo de nuevo.</string>
     <string name="there_refused_failed">La computadora no pudo hacerlo. Inténtalo de nuevo.</string>
 </resources>

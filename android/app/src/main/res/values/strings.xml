@@ -941,6 +941,8 @@
     <string name="there_refused_yourself">This phone cannot remove itself this way.</string>
     <string name="there_refused_not_paired">That device is not paired there any more.</string>
     <string name="there_refused_last_owner">That is the last device of yours there: removing it would leave none to manage it.</string>
+    <string name="there_refused_off">The computer\'s owner turned off removing devices from afar. Remove it at the computer: Devices, Unpair.</string>
+    <string name="there_refused_busy">Too many asks in a minute. Wait a minute and try again.</string>
     <string name="there_refused_failed">The computer could not do it. Try again.</string>
     <string name="allowed_title">What %1$s allows</string>
     <string name="allowed_hint">A feature works when it is on here and the computer allows it.</string>

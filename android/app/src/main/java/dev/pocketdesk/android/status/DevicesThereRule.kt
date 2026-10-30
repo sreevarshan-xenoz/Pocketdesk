@@ -55,12 +55,23 @@ object DevicesThereRule {
         "yourself" -> R.string.there_refused_yourself
         "not_paired" -> R.string.there_refused_not_paired
         "last_owner" -> R.string.there_refused_last_owner
+        "off" -> R.string.there_refused_off
+        "busy" -> R.string.there_refused_busy
         else -> R.string.there_refused_failed
     }
 
     /** A removal's answer: `removed`, else its `reason`. */
     fun outcome(removed: Boolean, reason: String?): Outcome =
         if (removed) Outcome(true, null) else Outcome(false, refusal(reason))
+
+    /** A fresh id for one ask: the computer's answer names it. */
+    fun newRequest(): String = java.util.UUID.randomUUID().toString().replace("-", "")
+
+    /** Whether an answer naming [answered] is the one to the ask [asked]. */
+    fun isAnswerTo(asked: String, answered: String?): Boolean = asked.isNotEmpty() && answered == asked
+
+    /** Whether a removal's answer takes the row away: removed, or not paired there already. */
+    fun dropsRow(removed: Boolean, reason: String?): Boolean = removed || reason == "not_paired"
 
     /** The list once [id] was removed there. */
     fun without(devices: List<Device>, id: String): List<Device> = devices.filterNot { it.id == id }
