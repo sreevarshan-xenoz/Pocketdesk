@@ -66,7 +66,11 @@ pub fn empty<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     crate::theme::card(ui, |ui| {
-        ui.label(RichText::new(title).strong());
+        ui.label(
+            RichText::new(title)
+                .size(crate::theme::CARD_TITLE_TEXT)
+                .strong(),
+        );
         ui.label(RichText::new(how).color(crate::theme::muted(ui)));
         add(ui)
     })

@@ -48,6 +48,10 @@ pub const HEADING_TEXT: f32 = 20.0;
 /// A section's heading inside a page (UX 3), drawn by [`section`].
 pub const SECTION_TEXT: f32 = 15.0;
 
+/// An empty page's card title (UX 4): a step above body text, as the
+/// bundled fonts have no bold for `strong` to use.
+pub const CARD_TITLE_TEXT: f32 = 14.0;
+
 /// The one accent (UX 3): the keyboard focus ring, a focused text box's
 /// frame and the selected text. Read at 4.5:1 on the panel and on
 /// [`ACCENT_FILL`], as a test holds.
