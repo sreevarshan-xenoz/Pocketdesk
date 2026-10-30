@@ -29,8 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -263,7 +261,8 @@ fun WorkspaceHud(
  * E1 window chip: tap to crop-stream this window; re-tap to return to full
  * desktop. UX2: a long title is cut in its middle, so both its start (the
  * document) and its end (often the app) show, the chip is at most 160 dp
- * wide, and a long-press shows the whole title; TalkBack reads it whole.
+ * wide, and a long-press shows the whole title; TalkBack reads the text
+ * itself, whole (no description to say it twice, PR #580 review N4).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -297,7 +296,6 @@ private fun WindowChip(
                 onLongClick = { Toast.makeText(context, label, Toast.LENGTH_LONG).show() },
                 onClick = onPull,
             )
-            .semantics { contentDescription = label }
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }

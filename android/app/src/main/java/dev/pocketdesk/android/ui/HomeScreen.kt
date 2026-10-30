@@ -90,7 +90,10 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.font.FontWeight
@@ -978,8 +981,6 @@ private fun HostCard(
     val connectLabel = stringResource(R.string.connect)
     var menu by remember { mutableStateOf(false) }
     var manageOpen by remember { mutableStateOf(false) }
-    val expandedWord = stringResource(R.string.card_menu_open)
-    val collapsedWord = stringResource(R.string.card_menu_closed)
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1049,7 +1050,21 @@ private fun HostCard(
                                     },
                                     onClick = { manageOpen = !manageOpen },
                                     modifier = Modifier.semantics {
-                                        stateDescription = if (manageOpen) expandedWord else collapsedWord
+                                        // A button TalkBack calls expanded or
+                                        // collapsed in its own words (PR #580
+                                        // review N4).
+                                        role = Role.Button
+                                        if (manageOpen) {
+                                            collapse {
+                                                manageOpen = false
+                                                true
+                                            }
+                                        } else {
+                                            expand {
+                                                manageOpen = true
+                                                true
+                                            }
+                                        }
                                     },
                                 )
                                 if (!manageOpen) return@forEachIndexed
