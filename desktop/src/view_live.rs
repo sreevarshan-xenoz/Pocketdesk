@@ -287,10 +287,31 @@ fn ways() -> Vec<(String, Accel, Planes)> {
     ways
 }
 
+/// Sends StopView for A's view as it goes, however the test ends (PC9a
+/// review N4): a panicking measure leaves no view running on A.
+struct StopViewOnDrop<'a>(&'a Path);
+
+impl Drop for StopViewOnDrop<'_> {
+    fn drop(&mut self) {
+        let session_id = wire::read(self.0).map(|v| v.session_id);
+        let _ = computers::request(
+            self.0,
+            ComputerAsk::StopView {
+                session_id,
+                lock: false,
+                window: 0,
+            },
+            pin::now_unix(),
+        );
+    }
+}
+
 /// Measure each way (`PD_LIVE_WAYS` picks some by their names' starts) on
-/// A's view of B, print the numbers, then stop the view.
-fn measure_ways(a_state: &Path, b_id: &str, secs: u64, screen: &str) {
+/// A's view of B and print the numbers; each way that gave pictures, with
+/// what it measured.
+fn measure_ways(a_state: &Path, b_id: &str, secs: u64, screen: &str) -> Vec<(String, Measured)> {
     let wanted = std::env::var("PD_LIVE_WAYS").unwrap_or_default();
+    let mut gave = Vec::new();
     for (name, accel, planes) in ways() {
         if !wanted.is_empty() && !wanted.split(',').any(|w| name.starts_with(w.trim())) {
             continue;
@@ -313,17 +334,9 @@ fn measure_ways(a_state: &Path, b_id: &str, secs: u64, screen: &str) {
         if accel == Accel::Software {
             assert!(m.pictures > 0, "{name}: no picture");
         }
+        gave.push((name, m));
     }
-    let session_id = wire::read(a_state).map(|v| v.session_id);
-    let _ = computers::request(
-        a_state,
-        ComputerAsk::StopView {
-            session_id,
-            lock: false,
-            window: 0,
-        },
-        pin::now_unix(),
-    );
+    gave
 }
 
 /// The same measure on a pair already running, here or across a network
@@ -355,7 +368,16 @@ fn the_decoder_on_a_running_pairs_view() {
         pin::now_unix(),
     )
     .unwrap();
-    measure_ways(&a_state, &b_id, secs, "the other computer's screen");
+    let _stop = StopViewOnDrop(&a_state);
+    let gave = measure_ways(&a_state, &b_id, secs, "the other computer's screen");
+    // The processor always decodes: each software way gave pictures of a
+    // known size, with a time for each.
+    for (name, m) in gave.iter().filter(|(name, _)| name.starts_with("software")) {
+        assert!(m.size.is_some(), "{name}: the picture's size");
+        assert!(m.p50.is_some() && m.p95 >= m.p50, "{name}: decode times");
+        assert!(m.frames_in > 0, "{name}: frames came");
+    }
+    assert!(!gave.is_empty(), "some way gave pictures");
 }
 
 #[test]
@@ -450,7 +472,10 @@ fn the_windows_decoder_on_a_real_view() {
     } else {
         "this screen"
     };
-    measure_ways(&a_state, &b_id, secs, screen);
+    {
+        let _stop = StopViewOnDrop(&a_state);
+        measure_ways(&a_state, &b_id, secs, screen);
+    }
     for base in [&a_base, &b_base] {
         let log = std::fs::read_to_string(base.join("server.log")).unwrap_or_default();
         for line in log.lines().filter(|l| {
