@@ -1621,10 +1621,8 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
                 );
                 set_link(&dir, &device_id, "refused");
                 let now = pocketdesk_core::local::pin::now_unix();
-                let wait = refused_wait(computer.paired_unix, now, backoff);
-                if wait == backoff {
-                    backoff = (backoff * 2).min(BACKOFF_MOST);
-                }
+                let (wait, next) = refused_wait(computer.paired_unix, now, backoff);
+                backoff = next;
                 wait
             }
             LinkEnd::Failed(why) => {
@@ -1643,14 +1641,16 @@ async fn keep_link(dir: PathBuf, wan: iroh::Endpoint, device_id: String) {
 }
 
 /// How long a link the other computer refused waits before it is dialed
-/// again: `backoff`, the link's own, within [`JUST_PAIRED`] of pairing
-/// with it (`paired_unix`, either way, so a clock set back counts too),
-/// else [`REFUSED_RETRY`].
-fn refused_wait(paired_unix: u64, now_unix: u64, backoff: Duration) -> Duration {
+/// again, and the backoff after: `backoff`, the link's own, doubled after,
+/// within [`JUST_PAIRED`] of pairing with it (`paired_unix`, either way,
+/// so a clock set back counts too); else [`REFUSED_RETRY`], the backoff
+/// starting over, so a later failure is tried again after 2 s, not the
+/// most the window's refusals left it at.
+fn refused_wait(paired_unix: u64, now_unix: u64, backoff: Duration) -> (Duration, Duration) {
     if now_unix.abs_diff(paired_unix) < JUST_PAIRED.as_secs() {
-        backoff
+        (backoff, (backoff * 2).min(BACKOFF_MOST))
     } else {
-        REFUSED_RETRY
+        (REFUSED_RETRY, BACKOFF_FIRST)
     }
 }
 
@@ -3211,14 +3211,21 @@ mod tests {
     fn a_refusal_just_after_pairing_waits_the_backoff() {
         let paired = 1_000_000;
         let backoff = Duration::from_secs(4);
-        assert_eq!(refused_wait(paired, paired, backoff), backoff);
-        assert_eq!(refused_wait(paired, paired + 119, backoff), backoff);
-        assert_eq!(refused_wait(paired, paired + 120, backoff), REFUSED_RETRY);
-        assert_eq!(refused_wait(paired, paired + 3600, backoff), REFUSED_RETRY);
+        let wait = |paired, now, backoff| refused_wait(paired, now, backoff).0;
+        assert_eq!(wait(paired, paired, backoff), backoff);
+        assert_eq!(wait(paired, paired + 119, backoff), backoff);
+        assert_eq!(wait(paired, paired + 120, backoff), REFUSED_RETRY);
+        assert_eq!(wait(paired, paired + 3600, backoff), REFUSED_RETRY);
         // A clock set back since: still near the pairing, or not.
-        assert_eq!(refused_wait(paired, paired - 30, backoff), backoff);
-        assert_eq!(refused_wait(paired, paired - 3600, backoff), REFUSED_RETRY);
-        assert_eq!(refused_wait(0, paired, backoff), REFUSED_RETRY);
+        assert_eq!(wait(paired, paired - 30, backoff), backoff);
+        assert_eq!(wait(paired, paired - 3600, backoff), REFUSED_RETRY);
+        assert_eq!(wait(0, paired, backoff), REFUSED_RETRY);
+        // The backoff doubles in the window, up to its most, and starts
+        // over after it, so a later failure is tried again after 2 s.
+        let next = |now, backoff| refused_wait(paired, now, backoff).1;
+        assert_eq!(next(paired + 10, backoff), Duration::from_secs(8));
+        assert_eq!(next(paired + 10, BACKOFF_MOST), BACKOFF_MOST);
+        assert_eq!(next(paired + 300, BACKOFF_MOST), BACKOFF_FIRST);
     }
 
     /// PC1 third review m-E: while this computer trusts and records a
