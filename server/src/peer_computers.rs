@@ -178,6 +178,8 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     });
                 }
                 ComputerAsk::View { device_id, monitor } => {
+                    // PC6: viewed now, for the recents.
+                    viewed(&dir, &device_id);
                     let views = views.get_or_insert_with(|| {
                         crate::computer_view::spawn(dir.clone(), cert_manager.clone(), wan.clone())
                     });
@@ -925,6 +927,7 @@ async fn pair_with(
         lets_drive: false,
         mine,
         wake: None,
+        viewed_unix: 0,
     };
     let mut was = None;
     let recorded = computers::update(dir, |file| was = record_pasted(file, &computer));
@@ -2135,6 +2138,19 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
     }
 }
 
+/// Record that the screen of `device_id` was asked for now (PC6).
+fn viewed(dir: &Path, device_id: &str) {
+    let now = pocketdesk_core::local::pin::now_unix();
+    let saved = computers::update(dir, |file| {
+        if let Some(c) = file.computers.iter_mut().find(|c| c.device_id == device_id) {
+            c.viewed_unix = now;
+        }
+    });
+    if let Err(e) = saved {
+        tracing::debug!("Could not record when a computer was viewed: {e}");
+    }
+}
+
 /// Record how the link to `device_id` is doing, when it changed.
 fn set_link(dir: &Path, device_id: &str, link: &str) {
     let now = pocketdesk_core::local::pin::now_unix();
@@ -2361,6 +2377,7 @@ mod tests {
                 lets_drive: false,
                 mine: true,
                 wake: None,
+                viewed_unix: 0,
             })
         })
         .unwrap();
@@ -2383,6 +2400,26 @@ mod tests {
                 paired_unix: 1,
             }]
         );
+    }
+
+    /// PC6: asking for a computer's screen records when, for the recents;
+    /// a computer not listed records nothing.
+    #[test]
+    fn a_view_asked_records_when() {
+        let dir = temp("viewed");
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                device_id: "pc-b".to_string(),
+                ..ComputerFacts::into_peer(facts(), "pc-b", "", 1)
+            })
+        })
+        .unwrap();
+        viewed(&dir, "pc-x");
+        assert_eq!(computers::read(&dir).computers[0].viewed_unix, 0);
+        let before = pocketdesk_core::local::pin::now_unix();
+        viewed(&dir, "pc-b");
+        assert!(computers::read(&dir).computers[0].viewed_unix >= before);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -2975,6 +3012,7 @@ mod tests {
             lets_drive: false,
             mine: false,
             wake: None,
+            viewed_unix: 0,
         };
         drop_pins(&certs, &was, &[label("192.0.2.31")]);
         let left: HashMap<String, [u8; 32]> = certs.known_peers().into_iter().collect();

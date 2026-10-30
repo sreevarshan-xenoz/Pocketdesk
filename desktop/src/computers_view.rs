@@ -79,6 +79,17 @@ pub fn link_words(computer: &PeerComputer) -> String {
     }
 }
 
+/// When `computer`'s screen was last shown here, as "viewed 2 h ago"
+/// (PC6); none when never.
+pub fn viewed_words(computer: &PeerComputer, now_unix: u64) -> Option<String> {
+    (computer.viewed_unix > 0).then(|| {
+        format!(
+            "viewed {}",
+            crate::words::ago(now_unix, computer.viewed_unix)
+        )
+    })
+}
+
 /// Whether "Show its screen" can ask for `computer` now (BK7): the server
 /// dials it, so it must run, and the computer must be reachable some way,
 /// its link up or an address known. Why not, when it cannot.
@@ -774,7 +785,23 @@ mod tests {
             lets_drive: false,
             mine: false,
             wake: None,
+            viewed_unix: 0,
         }
+    }
+
+    /// PC6: a computer's last view reads as how long ago; never viewed,
+    /// nothing.
+    #[test]
+    fn the_last_view_reads_as_how_long_ago() {
+        let viewed = |at: u64| PeerComputer {
+            viewed_unix: at,
+            ..computer("linked")
+        };
+        assert_eq!(viewed_words(&viewed(0), 10_000), None);
+        assert_eq!(
+            viewed_words(&viewed(10_000 - 7_300), 10_000).as_deref(),
+            Some("viewed 2 h ago")
+        );
     }
 
     #[test]

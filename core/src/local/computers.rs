@@ -67,6 +67,19 @@ pub struct PeerComputer {
     /// Owner-only, as the whole file is: a MAC identifies the computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<ComputerWake>,
+    /// When its screen was last asked for here (PC6: unix seconds; 0
+    /// never), so the Overview and the tray put the computers viewed most
+    /// recently first.
+    #[serde(default)]
+    pub viewed_unix: u64,
+}
+
+/// `computers` with the one viewed most recently first (PC6), those never
+/// viewed after, each group in the order they paired.
+pub fn by_recent(computers: &[PeerComputer]) -> Vec<&PeerComputer> {
+    let mut sorted: Vec<&PeerComputer> = computers.iter().collect();
+    sorted.sort_by_key(|c| std::cmp::Reverse(c.viewed_unix));
+    sorted
 }
 
 /// How to wake a paired computer (PC6): what it told this one about the
@@ -148,6 +161,7 @@ impl ComputerFacts {
             lets_drive: false,
             mine: true,
             wake: None,
+            viewed_unix: 0,
         }
     }
 }
@@ -614,6 +628,7 @@ mod tests {
             lets_drive: false,
             mine: false,
             wake: None,
+            viewed_unix: 0,
         }
     }
 
@@ -807,6 +822,32 @@ mod tests {
             serde_json::from_str(&raw.replace(",\"stream_port\":4716", "")).unwrap();
         assert_eq!(old.stream_port, 4716);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PC6: the computers viewed most recently come first, those never
+    /// viewed after in the order they paired; a file from before reads as
+    /// never viewed.
+    #[test]
+    fn the_computers_viewed_last_come_first() {
+        let viewed = |id: &str, at: u64| PeerComputer {
+            viewed_unix: at,
+            ..computer(id)
+        };
+        let list = [
+            viewed("a", 0),
+            viewed("b", 50),
+            viewed("c", 0),
+            viewed("d", 90),
+        ];
+        let ids: Vec<&str> = by_recent(&list)
+            .iter()
+            .map(|c| c.device_id.as_str())
+            .collect();
+        assert_eq!(ids, ["d", "b", "a", "c"]);
+        let raw = serde_json::to_string(&computer("a")).unwrap();
+        let old: PeerComputer =
+            serde_json::from_str(&raw.replace(",\"viewed_unix\":0", "")).unwrap();
+        assert_eq!(old.viewed_unix, 0);
     }
 
     /// PC6: a wake is asked for a computer by its id; a computer from a

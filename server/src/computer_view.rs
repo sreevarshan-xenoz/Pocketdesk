@@ -1575,6 +1575,7 @@ mod tests {
             lets_drive: false,
             mine: false,
             wake: None,
+            viewed_unix: 0,
         }
     }
 

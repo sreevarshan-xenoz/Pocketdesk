@@ -1608,7 +1608,9 @@ impl PocketdeskApp {
         into_here: &[model::Device],
     ) {
         let mut show = None;
-        for computer in computers {
+        let now = now_unix();
+        // PC6: the one viewed most recently first.
+        for computer in pocketdesk_core::local::computers::by_recent(computers) {
             crate::theme::card(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     crate::theme::dot(
@@ -1624,6 +1626,9 @@ impl PocketdeskApp {
                         RichText::new(crate::computers_view::link_words(computer))
                             .color(crate::theme::muted(ui)),
                     );
+                    if let Some(viewed) = crate::computers_view::viewed_words(computer, now) {
+                        ui.label(RichText::new(viewed).color(crate::theme::muted(ui)));
+                    }
                 });
                 let reach = crate::computers_view::view_reach(computer, self.snapshot.running);
                 ui.horizontal_wrapped(|ui| {
