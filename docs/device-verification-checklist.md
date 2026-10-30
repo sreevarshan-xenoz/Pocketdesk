@@ -3324,6 +3324,8 @@ Built 2026-10-31. A phone paired with one computer's own code is offered the own
 - [ ] The OPPO paired with the Windows throwaway as someone else's, or with a guest grant: the offer says only a phone paired with the computer's own code can be introduced, and the laptop gets nothing. A computer paired one way is never offered. (where: second computer)
 - [ ] Unpair the introduced OPPO on the Windows throwaway (Devices → Unpair): within seconds of the link being up it is gone from the laptop too, the laptop notifying "<Windows> removed <phone> from this computer". With the laptop's "Let my devices remove others from afar" off, the Windows throwaway says the phone stays paired there. Pair the OPPO again with its own code afterwards. (where: second computer)
 - [ ] An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
+- [ ] On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer)
+- [ ] With the OPPO paired with the laptop through the Windows throwaway, its card for the laptop offers nothing under Pair with my other computers… (an introduced phone is not introduced onward). (where: second computer)
 
 ## Recording results
 

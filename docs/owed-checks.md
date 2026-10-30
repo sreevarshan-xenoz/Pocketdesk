@@ -2,7 +2,7 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1083 open items.
+1085 open items.
 
 | Where | Items |
 |---|---|
@@ -12,7 +12,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 | A phone with a SIM | 39 |
 | A second phone | 16 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 149 |
+| A second computer | 151 |
 | A Linux desktop (the Azure VM serves for some) | 171 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 375 |
@@ -1125,6 +1125,8 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - The OPPO paired with the Windows throwaway as someone else's, or with a guest grant: the offer says only a phone paired with the computer's own code can be introduced, and the laptop gets nothing. A computer paired one way is never offered. (where: second computer)
 - Unpair the introduced OPPO on the Windows throwaway (Devices → Unpair): within seconds of the link being up it is gone from the laptop too, the laptop notifying "<Windows> removed <phone> from this computer". With the laptop's "Let my devices remove others from afar" off, the Windows throwaway says the phone stays paired there. Pair the OPPO again with its own code afterwards. (where: second computer)
 - An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
+- On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer)
+- With the OPPO paired with the laptop through the Windows throwaway, its card for the laptop offers nothing under Pair with my other computers… (an introduced phone is not introduced onward). (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
