@@ -132,6 +132,10 @@ pub struct DeviceIdentity {
     pub protocol_version: u32,
     pub incoming_capabilities: Vec<String>,
     pub outgoing_capabilities: Vec<String>,
+    /// The Pocketdesk release it runs (`pocketdeskVersion`), for the other
+    /// end to show; `None` sends none.
+    #[serde(default)]
+    pub pocketdesk_version: Option<String>,
 }
 
 impl DeviceIdentity {
@@ -143,18 +147,24 @@ impl DeviceIdentity {
             protocol_version: PROTOCOL_VERSION,
             incoming_capabilities: Vec::new(),
             outgoing_capabilities: Vec::new(),
+            pocketdesk_version: Some(crate::version::THIS_VERSION.to_string()),
         }
     }
 
     pub fn as_identity_packet(&self) -> NetworkPacket {
-        NetworkPacket::new("kdeconnect.identity").with_body(serde_json::json!({
+        let mut body = serde_json::json!({
             "deviceId": self.device_id,
             "deviceName": self.device_name,
             "deviceType": self.device_type,
             "protocolVersion": self.protocol_version,
             "incomingCapabilities": self.incoming_capabilities,
             "outgoingCapabilities": self.outgoing_capabilities,
-        }))
+        });
+        // An extra field: KDE Connect and an older Pocketdesk ignore it.
+        if let Some(version) = &self.pocketdesk_version {
+            body[crate::version::IDENTITY_FIELD] = Value::String(version.clone());
+        }
+        NetworkPacket::new("kdeconnect.identity").with_body(body)
     }
 }
 
@@ -478,6 +488,8 @@ pub struct TrustStore {
     computers: HashSet<String>,
     /// U3: deviceId -> what it calls itself and the owner's rename.
     names: HashMap<String, DeviceName>,
+    /// deviceId -> the Pocketdesk release it last said it runs (item 4).
+    versions: HashMap<String, String>,
 }
 
 /// A paired device's name (U3): what it calls itself in its identity, and
@@ -633,6 +645,7 @@ impl TrustStore {
                 permissions: HashMap::new(),
                 computers: HashSet::new(),
                 names: HashMap::new(),
+                versions: HashMap::new(),
             });
         }
 
@@ -668,6 +681,12 @@ impl TrustStore {
             .into_iter()
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
+        // And what it runs (item 4).
+        let versions = decoded
+            .versions
+            .into_iter()
+            .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
+            .collect();
         Ok(Self {
             path,
             trusted_device_ids,
@@ -675,6 +694,7 @@ impl TrustStore {
             permissions,
             computers,
             names,
+            versions,
         })
     }
 
@@ -713,6 +733,7 @@ impl TrustStore {
         self.permissions.remove(device_id);
         self.computers.remove(device_id);
         self.names.remove(device_id);
+        self.versions.remove(device_id);
         self.persist()
     }
 
@@ -748,6 +769,30 @@ impl TrustStore {
             return Ok(false);
         }
         entry.claimed = Some(claimed);
+        self.persist()?;
+        Ok(true)
+    }
+
+    /// The Pocketdesk release a paired device last said it runs (item 4);
+    /// `None` until one that says has connected.
+    pub fn version(&self, device_id: &str) -> Option<&str> {
+        self.versions.get(device_id).map(String::as_str)
+    }
+
+    /// Keep the release a paired device says it runs in its identity;
+    /// whether the store changed (and was written). A device not trusted,
+    /// or a version unchanged or not a version once cleaned, writes nothing.
+    pub fn note_claimed_version(&mut self, device_id: &str, raw: &str) -> Result<bool> {
+        if !self.is_trusted(device_id) {
+            return Ok(false);
+        }
+        let Some(version) = crate::version::clean_version(raw) else {
+            return Ok(false);
+        };
+        if self.version(device_id) == Some(version.as_str()) {
+            return Ok(false);
+        }
+        self.versions.insert(device_id.to_string(), version);
         self.persist()?;
         Ok(true)
     }
@@ -853,6 +898,7 @@ impl TrustStore {
             permissions: self.permissions.clone(),
             computers,
             names: self.names.clone(),
+            versions: self.versions.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -883,6 +929,8 @@ struct TrustStoreFile {
     computers: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     names: HashMap<String, DeviceName>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    versions: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -1306,6 +1354,43 @@ mod tests {
             None,
             "the name went with the device"
         );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Item 4: a paired device's release is kept as it says it, cleaned,
+    /// written only when it changes, and goes with the device.
+    #[test]
+    fn a_paired_device_keeps_the_release_it_runs() {
+        let path = temp_store_path("versions");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        assert!(
+            !store.note_claimed_version("phone-v", "0.8.1").unwrap(),
+            "not paired: nothing kept"
+        );
+        store.trust_device("phone-v").unwrap();
+        assert!(store.note_claimed_version("phone-v", " 0.8.1 ").unwrap());
+        assert!(
+            !store.note_claimed_version("phone-v", "0.8.1").unwrap(),
+            "unchanged: not written again"
+        );
+        assert!(
+            !store.note_claimed_version("phone-v", "latest").unwrap(),
+            "not a version: the last one stays"
+        );
+        assert!(store.note_claimed_version("phone-v", "0.8.2").unwrap());
+        assert_eq!(
+            TrustStore::read(&path).unwrap().version("phone-v"),
+            Some("0.8.2")
+        );
+        store.untrust_device("phone-v").unwrap();
+        store.trust_device("phone-v").unwrap();
+        assert_eq!(
+            TrustStore::read(&path).unwrap().version("phone-v"),
+            None,
+            "the version went with the device"
+        );
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("versions"), "none kept, none written: {raw}");
         let _ = std::fs::remove_file(path);
     }
 
