@@ -2,20 +2,20 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1032 open items.
+1036 open items.
 
 | Where | Items |
 |---|---|
-| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 36 |
+| Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 157 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 158 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 118 |
+| A second computer | 119 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
-| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 371 |
+| By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
 
 ## Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input
 
@@ -126,6 +126,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **230. Look and feel (Desktop UX 3)**
 
 - On a phone's Devices entry, a group switch turned off ends that phone's running session (when it holds Control or sound), and turned on leaves Run commands off. (where: OPPO)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
 
 ## Power, lock or server stop on the owner's Windows box: never run here (the owner's rule)
 
@@ -528,6 +532,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **235. Pointer lock and relative mouse (PC7)**
 
 - On a test machine (never the owner's box), run `POCKETDESK_POINTER_TEST_MACHINE=1 cargo test -p pocketdesk-desktop the_real_grab_locks_and_frees -- --ignored` (without the variable it skips) and move the mouse during the five seconds: the pointer stays hidden and inside the window, the test reports relative moves above zero, and the pointer comes back free as the window closes. On Windows, and on the laptop under Hyprland (Wayland, locked in place) and under an X11 session if one is at hand (confined). (where: owner)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), with nothing paired: Sessions, Files, Messages, Notifications, Phone files, Clipboard, Activity, Diagnostics and Logs each show a card saying what will show there and how, light and dark, nothing clipped at the smallest window; each button on them (Pair a phone, Open Devices, Turn it on in Settings, Clipboard settings) opens what it says. (where: owner)
 
 ## A phone with a SIM
 
@@ -1020,6 +1028,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - A long, slow drag of the mouse while locked (a few pixels a second) moves the far pointer the same distance as a quick one, with no drift lost to rounding; and a fast circle on a slow internet road comes back about where it started (a relative move the relay's full queue drops is owed and goes with the next, up to 256 counts each way; past that, after a long stall, the rest is dropped so the view never spins, PR #563 review M5 and re-review N4). (where: second computer)
 - Locked from the bar (on Wayland, where the hidden pointer stays on the bar's switch), click in the picture several times: each click reaches the far computer and the lock stays on; the bar looks greyed out until it is freed. (where: second computer)
 - Locked, stop the window answering (suspend the desktop app with Resource Monitor's Suspend Process on Windows or `kill -STOP` on Linux, on a test machine): within about 3 s the shared keyboard and mouse's edges lead on again, and the badge says so. (where: second computer)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
@@ -2550,3 +2562,7 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 **221. No lag while sharing (BK10)**
 
 - The setting in the desktop app's Keyboard and mouse section on Windows and Linux; turned off, the next `share-test` says "the link kept quick: no". (where: by hand)
+
+**236. The rest of the pages (Desktop UX 4)**
+
+- Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)

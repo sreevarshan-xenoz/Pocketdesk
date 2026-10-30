@@ -3208,6 +3208,14 @@ Built 2026-10-30. While a computer's screen window controls that computer, **Loc
 - [ ] Locked from the bar (on Wayland, where the hidden pointer stays on the bar's switch), click in the picture several times: each click reaches the far computer and the lock stays on; the bar looks greyed out until it is freed. (where: second computer)
 - [ ] Locked, stop the window answering (suspend the desktop app with Resource Monitor's Suspend Process on Windows or `kill -STOP` on Linux, on a test machine): within about 3 s the shared keyboard and mouse's edges lead on again, and the badge says so. (where: second computer)
 
+## 236. The rest of the pages (Desktop UX 4)
+
+Built 2026-10-30. Kittest drove each new empty card and its button, the greyed reasons and Pair at the smallest window; the Sessions snapshots were drawn by Mesa. Not seen on a real screen: fonts, scaling, and the cards with real data.
+- [ ] On Windows at 100 % and 150 % scaling, and on the Linux laptop (Hyprland), with nothing paired: Sessions, Files, Messages, Notifications, Phone files, Clipboard, Activity, Diagnostics and Logs each show a card saying what will show there and how, light and dark, nothing clipped at the smallest window; each button on them (Pair a phone, Open Devices, Turn it on in Settings, Clipboard settings) opens what it says. (where: owner)
+- [ ] With the OPPO paired and a session or two over: Sessions lists them as cards with a grey dot (amber for a refused one), and a live session's card has a green dot; Files lists a sent and a received file as cards with their dots. (where: OPPO)
+- [ ] Pair → Phone at the smallest window (640×440): the code is smaller but scans from the OPPO, and the PIN and "Whose phone is it?" are whole. (where: OPPO)
+- [ ] Keyboard and mouse with the Linux laptop paired: Your computers shows it as a card with its dot (green linked directly); with the server stopped its "may drive" box is greyed with the line and Start the server, which starts it. (where: second computer)
+
 ## Recording results
 
 Update `AGENTS.md` Current Status (mark verified items / list failures) and

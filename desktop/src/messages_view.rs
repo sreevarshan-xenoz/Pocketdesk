@@ -15,6 +15,14 @@ use crate::model::Device;
 /// How often the conversation is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
 
+/// No texts yet (UX 4): what shows, and how.
+pub const EMPTY: &str = "No texts yet";
+pub const EMPTY_HOW: &str =
+    "On the phone, turn on \"Show texts on my computer\" in Pocketdesk's Settings.";
+/// The same with no phone paired: the step before.
+pub const EMPTY_PAIR_FIRST: &str =
+    "Pair a phone, then on it turn on \"Show texts on my computer\" in Pocketdesk's Settings.";
+
 /// One line in a conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
@@ -206,14 +214,26 @@ impl MessagesView {
             }
             list.add_space(6.0);
             if conversations.is_empty() {
-                ragged(
-                    list,
-                    RichText::new(
-                        "No texts yet. A phone shares its texts once its owner turns on \
-                         \"Show texts on my computer\" in Pocketdesk's Settings on the phone.",
-                    )
-                    .color(muted),
-                );
+                // UX 4: a card, ragged as the rest (AM3); with no phone
+                // paired, the step before.
+                let pair = list
+                    .with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                        let how = if devices.is_empty() {
+                            EMPTY_PAIR_FIRST
+                        } else {
+                            EMPTY_HOW
+                        };
+                        crate::widgets::empty(ui, EMPTY, how, |ui| {
+                            devices.is_empty() && ui.button("Pair a phone").clicked()
+                        })
+                    })
+                    .inner;
+                if pair {
+                    crate::widgets::ask(
+                        list.ctx(),
+                        crate::widgets::Ask::Go(crate::app::Tab::Pair),
+                    );
+                }
             }
             egui::ScrollArea::vertical()
                 .id_salt("conversations")

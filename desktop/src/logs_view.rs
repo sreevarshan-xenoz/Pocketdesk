@@ -86,10 +86,13 @@ impl LogsView {
         self.refresh(state_dir);
         ui.ctx().request_repaint_after(LOOK_EVERY);
         if self.read.is_none() {
-            ui.label(
-                "No log file yet. The server writes one when it starts at logon \
-                 (as pocketdesk start --background); started from a terminal it logs \
-                 there instead.",
+            // UX 4: a card; no button, as none makes a log alone.
+            crate::widgets::empty(
+                ui,
+                "No log file yet",
+                "The server writes one when it runs in the background (pocketdesk start \
+                 --background, as at logon); from a terminal, it logs there.",
+                |_| {},
             );
             return;
         }

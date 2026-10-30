@@ -105,6 +105,10 @@ pub fn shown<'a>(
         .collect()
 }
 
+/// The event log off, and nothing logged yet (UX 4).
+pub const LOG_OFF: &str = "The event log is off";
+pub const EMPTY: &str = "Nothing has happened yet";
+
 impl ActivityView {
     /// Read what was written since the last look (the history, the first
     /// time).
@@ -151,12 +155,15 @@ impl ActivityView {
     ) -> Option<Action> {
         let mut action = None;
         if !log_on {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("The event log is off, so nothing new shows here.");
-                if ui.button("Turn it on in Settings").clicked() {
-                    action = Some(Action::OpenSettings);
-                }
-            });
+            // UX 4: a card, with its button.
+            if crate::widgets::empty(
+                ui,
+                LOG_OFF,
+                "Nothing new shows here until it is on.",
+                |ui| ui.button("Turn it on in Settings").clicked(),
+            ) {
+                action = Some(Action::OpenSettings);
+            }
             ui.add_space(4.0);
         }
         ui.horizontal_wrapped(|ui| {
@@ -196,10 +203,12 @@ impl ActivityView {
                         self.filter = Filter::All;
                     }
                 });
-            } else {
-                ui.label(
-                    RichText::new("Nothing yet. Sessions, phones, files, links, notifications and hooks show here as they happen.")
-                        .color(crate::theme::muted(ui)),
+            } else if log_on {
+                crate::widgets::empty(
+                    ui,
+                    EMPTY,
+                    "Sessions, phones, files, links, notifications and hooks show here as they happen.",
+                    |_| {},
                 );
             }
             return action;

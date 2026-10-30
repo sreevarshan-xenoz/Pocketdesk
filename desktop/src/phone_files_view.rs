@@ -15,6 +15,39 @@ use crate::model::Device;
 
 const REFRESH: Duration = Duration::from_secs(1);
 
+/// No phone paired, and none linked (UX 4).
+pub const NONE_PAIRED: &str = "No phone is paired yet";
+pub const NOT_LINKED: &str = "No phone is linked now";
+/// How a phone comes to show its folders here, when none is linked.
+pub const NOT_LINKED_HOW: &str = "A phone shows its folders here while it is linked: open \
+     Pocketdesk on it, or turn on \"Folders the computer may open\" in its Settings to stay linked.";
+pub const FILES_OFF_HOW: &str = "Turn it on in Devices to open its folders here.";
+pub const NO_REACH_HOW: &str = "It is linked from away: turn on \"Files over the internet\" in \
+     Settings, or join the same network.";
+
+/// Why no phone's folders can be opened, from what is known here: none
+/// linked; a linked phone's Send files off in Devices; or files cannot
+/// reach it (linked from away without Files over the internet). Paired
+/// phones only (not computers). The title, and how to fix it.
+pub fn why_no_folders(devices: &[Device]) -> (String, &'static str) {
+    let linked: Vec<&Device> = devices.iter().filter(|d| !d.computer && d.linked).collect();
+    let Some(first) = linked.first() else {
+        return (NOT_LINKED.to_string(), NOT_LINKED_HOW);
+    };
+    let files_off = |d: &Device| {
+        !d.permissions
+            .allows(pocketdesk_core::protocol::permissions::Capability::Files)
+    };
+    if let Some(off) = linked.iter().find(|d| files_off(d)) {
+        let name = crate::model::device_label(devices, &off.id);
+        return (format!("Send files is off for {name}"), FILES_OFF_HOW);
+    }
+    let name = crate::model::device_label(devices, &first.id);
+    (format!("Files can't reach {name} now"), NO_REACH_HOW)
+}
+/// The button to Devices, where a phone's Send files is.
+pub const OPEN_DEVICES: &str = "Open Devices";
+
 /// How long a list request waits for the phone's answer before the tab says so.
 const ANSWER_SECS: u64 = 15;
 
@@ -153,21 +186,20 @@ impl PhoneFilesView {
         let phones: Vec<&Device> = devices.iter().filter(|d| d.takes_files).collect();
         if phones.is_empty() {
             // The next step, with its button (E5).
+            // UX 4: a card each, with its button.
             if devices.is_empty() {
-                ui.label(RichText::new("No phone is paired yet.").color(crate::theme::muted(ui)));
-                if ui.button("Pair a phone").clicked() {
+                if crate::widgets::empty(
+                    ui,
+                    NONE_PAIRED,
+                    "The folders a paired phone shares show here.",
+                    |ui| ui.button("Pair a phone").clicked(),
+                ) {
                     self.go_to = Some(crate::app::Tab::Pair);
                 }
             } else {
-                ui.label(
-                    RichText::new(
-                        "No phone that shares folders is linked now. A phone with folders shared \
-                         (\"Folders the computer may open\" in Pocketdesk's Settings on the phone) \
-                         stays linked to answer, through notification access.",
-                    )
-                    .color(crate::theme::muted(ui)),
-                );
-                if ui.button("Devices").clicked() {
+                // PR #567 review: words for what was seen, not one cause.
+                let (title, how) = why_no_folders(devices);
+                if crate::widgets::empty(ui, &title, how, |ui| ui.button(OPEN_DEVICES).clicked()) {
                     self.go_to = Some(crate::app::Tab::Devices);
                 }
             }
@@ -331,6 +363,42 @@ impl PhoneFilesView {
 #[cfg(test)]
 mod tests {
     use super::{ANSWER_SECS, answered};
+
+    /// PR #567 review: the empty card names what it saw: none linked, a
+    /// linked phone's Send files off, or files that cannot reach it.
+    #[test]
+    fn no_folders_says_why_from_what_it_saw() {
+        use super::{FILES_OFF_HOW, NO_REACH_HOW, NOT_LINKED, NOT_LINKED_HOW, why_no_folders};
+        use crate::model::Device;
+        use pocketdesk_core::protocol::permissions::Capability;
+        let mut phone = Device {
+            id: "phone-a".to_string(),
+            name: Some("Pixel 8".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            why_no_folders(std::slice::from_ref(&phone)),
+            (NOT_LINKED.to_string(), NOT_LINKED_HOW)
+        );
+        phone.linked = true;
+        assert_eq!(
+            why_no_folders(std::slice::from_ref(&phone)),
+            ("Files can't reach Pixel 8 now".to_string(), NO_REACH_HOW)
+        );
+        phone.permissions.set(Capability::Files, false);
+        assert_eq!(
+            why_no_folders(std::slice::from_ref(&phone)),
+            ("Send files is off for Pixel 8".to_string(), FILES_OFF_HOW)
+        );
+        // A computer linked is no phone.
+        let computer = Device {
+            id: "desk".to_string(),
+            linked: true,
+            computer: true,
+            ..Default::default()
+        };
+        assert_eq!(why_no_folders(&[computer]).0, NOT_LINKED);
+    }
 
     #[test]
     fn a_list_request_is_answered_by_a_newer_listing_or_given_up() {

@@ -627,7 +627,7 @@ impl ArrangeView {
         let muted = crate::theme::muted(ui);
         // UX 2: each step, done or not, with its fix.
         let facts = self.facts(devices, sharing_on, server_running);
-        ui.label(RichText::new(SETUP).strong());
+        crate::theme::section(ui, SETUP);
         for step in checklist(facts) {
             ui.horizontal_wrapped(|ui| {
                 // The mark in a box of one width, so the labels line up
@@ -801,84 +801,91 @@ impl ArrangeView {
             return action;
         }
         let mut ask: Option<(String, bool)> = None;
-        egui::Grid::new("keyboard_mouse_computers")
-            .num_columns(2)
-            // Its name on a line of its own, not a narrow column (UX 2).
-            .min_col_width(180.0)
-            .spacing([16.0, 6.0])
-            .striped(true)
-            .show(ui, |ui| {
-                for id in &paired {
-                    let name = self.name_of(devices, id);
-                    let link = self.status.link.get(id).map_or(LINK_AWAY, String::as_str);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&name).strong());
-                        let linked = matches!(link, LINK_DIRECT);
-                        let words = RichText::new(link_words(link));
-                        ui.label(if linked {
-                            words.color(crate::theme::good(ui))
-                        } else if link.starts_with("refused") {
-                            words.color(crate::theme::warn(ui))
+        // UX 4: a card each, as the Overview's, its dot how it is linked.
+        for id in &paired {
+            let name = self.name_of(devices, id);
+            let link = self.status.link.get(id).map_or(LINK_AWAY, String::as_str);
+            let linked = matches!(link, LINK_DIRECT);
+            let refused = link.starts_with("refused");
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if linked {
+                            crate::theme::GOOD
+                        } else if refused {
+                            crate::theme::WARN
                         } else {
-                            words.color(muted)
-                        });
-                        if !shown.iter().any(|c| c.device_id == *id) {
-                            ui.label(
-                                RichText::new("It has not said its screens yet.").color(muted),
-                            );
-                        }
+                            crate::theme::MUTED
+                        },
+                    );
+                    ui.label(RichText::new(&name).strong());
+                    let words = RichText::new(link_words(link));
+                    ui.label(if linked {
+                        words.color(crate::theme::good(ui))
+                    } else if refused {
+                        words.color(crate::theme::warn(ui))
+                    } else {
+                        words.color(muted)
                     });
-                    ui.vertical(|ui| {
-                        // This computer letting it drive this one: its trust
-                        // store entry when it paired with this one, else what
-                        // this one keeps for a computer it paired with.
-                        let device = devices.iter().find(|d| d.computer && d.id == *id);
-                        let mut allowed = match device {
-                            Some(d) => d.permissions.allows(Capability::SharedInput),
-                            None => self
-                                .computers
-                                .computers
-                                .iter()
-                                .any(|c| c.device_id == *id && c.lets_drive),
-                        };
-                        // Kept by the server for a computer this one paired
-                        // with, so asked of it: not while it is stopped.
-                        let can = device.is_some() || server_running;
-                        if ui
-                            .add_enabled(
-                                can,
-                                egui::Checkbox::new(
-                                    &mut allowed,
-                                    format!("{name} may drive {this_name}"),
-                                ),
-                            )
-                            .on_hover_text(
-                                "Its keyboard and mouse may move onto this computer's screens \
-                                 (the Keyboard and mouse permission).",
-                            )
-                            .on_disabled_hover_text(STOPPED)
-                            .changed()
-                        {
-                            if device.is_some() {
-                                action = Some(Action::Allow {
-                                    device_id: id.clone(),
-                                    allow: allowed,
-                                });
-                            } else {
-                                ask = Some((id.clone(), allowed));
-                            }
-                        }
-                        let (words, warn) = self.drives_it(link, id, &name, &this_name, sharing_on);
-                        let words = RichText::new(words);
-                        ui.label(if warn {
-                            words.color(crate::theme::warn(ui))
-                        } else {
-                            words.color(muted)
-                        });
-                    });
-                    ui.end_row();
+                });
+                if !shown.iter().any(|c| c.device_id == *id) {
+                    ui.label(RichText::new("It has not said its screens yet.").color(muted));
                 }
+                // This computer letting it drive this one: its trust
+                // store entry when it paired with this one, else what
+                // this one keeps for a computer it paired with.
+                let device = devices.iter().find(|d| d.computer && d.id == *id);
+                let mut allowed = match device {
+                    Some(d) => d.permissions.allows(Capability::SharedInput),
+                    None => self
+                        .computers
+                        .computers
+                        .iter()
+                        .any(|c| c.device_id == *id && c.lets_drive),
+                };
+                // Kept by the server for a computer this one paired
+                // with, so asked of it: not while it is stopped.
+                let can = device.is_some() || server_running;
+                if ui
+                    .add_enabled(
+                        can,
+                        egui::Checkbox::new(&mut allowed, format!("{name} may drive {this_name}")),
+                    )
+                    .on_hover_text(
+                        "Its keyboard and mouse may move onto this computer's screens \
+                         (the Keyboard and mouse permission).",
+                    )
+                    .on_disabled_hover_text(STOPPED)
+                    .changed()
+                {
+                    if device.is_some() {
+                        action = Some(Action::Allow {
+                            device_id: id.clone(),
+                            allow: allowed,
+                        });
+                    } else {
+                        ask = Some((id.clone(), allowed));
+                    }
+                }
+                // UX 1's pattern: why the box is off, beside it, with its fix.
+                if !can {
+                    crate::widgets::why_off_ask(
+                        ui,
+                        STOPPED_LINE,
+                        crate::widgets::START,
+                        crate::widgets::Ask::StartServer,
+                    );
+                }
+                let (words, warn) = self.drives_it(link, id, &name, &this_name, sharing_on);
+                let words = RichText::new(words);
+                ui.label(if warn {
+                    words.color(crate::theme::warn(ui))
+                } else {
+                    words.color(muted)
+                });
             });
+        }
         if let Some((device_id, allow)) = ask {
             let done = if allow {
                 "Asked the server to let it drive this computer."
@@ -920,51 +927,54 @@ impl ArrangeView {
         let mut action = None;
         ui.add_space(8.0);
         crate::theme::section(ui, "Your phones");
-        egui::Grid::new("keyboard_mouse_phones")
-            .num_columns(2)
-            .min_col_width(180.0)
-            .spacing([16.0, 6.0])
-            .striped(true)
-            .show(ui, |ui| {
-                for id in &phones {
-                    let name = self.name_of(devices, id);
-                    let standing = self.status.phones.get(id).map_or("", String::as_str);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&name).strong());
-                        let (words, warn) = phone_words(standing, &name, this_name);
-                        let words = RichText::new(words);
-                        ui.label(if standing == PHONE_READY {
-                            words.color(crate::theme::good(ui))
+        // UX 4: a card each, its dot whether it may be driven now.
+        for id in &phones {
+            let name = self.name_of(devices, id);
+            let standing = self.status.phones.get(id).map_or("", String::as_str);
+            let (words, warn) = phone_words(standing, &name, this_name);
+            let ready = standing == PHONE_READY;
+            crate::theme::card(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    crate::theme::dot(
+                        ui,
+                        if ready {
+                            crate::theme::GOOD
                         } else if warn {
-                            words.color(crate::theme::warn(ui))
+                            crate::theme::WARN
                         } else {
-                            words.color(muted)
-                        });
+                            crate::theme::MUTED
+                        },
+                    );
+                    ui.label(RichText::new(&name).strong());
+                    let words = RichText::new(words);
+                    ui.label(if ready {
+                        words.color(crate::theme::good(ui))
+                    } else if warn {
+                        words.color(crate::theme::warn(ui))
+                    } else {
+                        words.color(muted)
                     });
-                    ui.vertical(|ui| {
-                        let Some(device) = devices.iter().find(|d| !d.computer && d.id == *id)
-                        else {
-                            return;
-                        };
-                        let mut allowed = device.permissions.allows(Capability::SharedInput);
-                        if ui
-                            .checkbox(&mut allowed, format!("{this_name} may drive {name}"))
-                            .on_hover_text(
-                                "This computer's keyboard and mouse may move onto the phone, \
-                                 used as another screen (its Keyboard and mouse permission). \
-                                 The phone must allow it too.",
-                            )
-                            .changed()
-                        {
-                            action = Some(Action::Allow {
-                                device_id: id.clone(),
-                                allow: allowed,
-                            });
-                        }
+                });
+                let Some(device) = devices.iter().find(|d| !d.computer && d.id == *id) else {
+                    return;
+                };
+                let mut allowed = device.permissions.allows(Capability::SharedInput);
+                if ui
+                    .checkbox(&mut allowed, format!("{this_name} may drive {name}"))
+                    .on_hover_text(
+                        "This computer's keyboard and mouse may move onto the phone, \
+                         used as another screen (its Keyboard and mouse permission). \
+                         The phone must allow it too.",
+                    )
+                    .changed()
+                {
+                    action = Some(Action::Allow {
+                        device_id: id.clone(),
+                        allow: allowed,
                     });
-                    ui.end_row();
                 }
             });
+        }
         action
     }
 
@@ -1029,6 +1039,8 @@ fn phone_glyph(painter: &egui::Painter, r: Rect, fill: egui::Color32, edge: Stro
 
 /// Why a computer this one paired with cannot be let drive it now.
 const STOPPED: &str = "Start the server first: it keeps this for a computer this one paired with";
+/// The same, in the line under the greyed box (UX 4).
+pub const STOPPED_LINE: &str = "Changing this needs the server running.";
 
 /// The arrangement to keep: where each computer shown is (`placed`), and
 /// where `saved` put a computer still `paired` that is not shown now (its

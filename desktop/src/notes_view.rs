@@ -13,6 +13,11 @@ use pocketdesk_core::local::phone_notes::{self, Answer, PhoneNote};
 /// How often the list is read again while the tab is open.
 const REFRESH: Duration = Duration::from_secs(2);
 
+/// The page with nothing to answer (UX 4): what shows, and how.
+pub const EMPTY: &str = "No notifications to answer yet";
+pub const EMPTY_HOW: &str = "Ones you can answer show here, with their buttons and a reply box. \
+     On the phone, turn on \"This phone's notifications\" and \"Let the computer answer notifications\" in Pocketdesk's Settings.";
+
 #[derive(Default)]
 pub struct NotesView {
     notes: Vec<PhoneNote>,
@@ -193,10 +198,9 @@ impl NotesView {
             going_on(&self.cards, devices, now_unix)
         };
         if !going.is_empty() {
-            ui.label(RichText::new("Going on now").strong());
+            crate::theme::section(ui, "Going on now");
             for card in going {
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
+                crate::theme::card(ui, |ui| {
                     ui.label(RichText::new(format!("{}: {}", card.app, card.title)).strong());
                     if !card.text.is_empty() {
                         ui.label(&card.text);
@@ -220,17 +224,10 @@ impl NotesView {
             ui.add_space(8.0);
         }
         if self.notes.is_empty() {
-            ui.label(
-                RichText::new(
-                    "Notifications from your phone that you can answer appear here: \
-                     their buttons, and a reply box for chats. The phone sends them once \
-                     \"This phone's notifications\" is on, and lets you answer once \
-                     \"Let the computer answer notifications\" is on, in Pocketdesk's Settings on the phone.",
-                )
-                .color(crate::theme::muted(ui)),
-            );
-            // With no phone paired, the step before (E5).
-            if devices.is_empty() && ui.button("Pair a phone").clicked() {
+            // UX 4: a card; with no phone paired, the step before (E5).
+            if crate::widgets::empty(ui, EMPTY, EMPTY_HOW, |ui| {
+                devices.is_empty() && ui.button("Pair a phone").clicked()
+            }) {
                 self.go_to = Some(crate::app::Tab::Pair);
             }
             return;
@@ -249,7 +246,7 @@ impl NotesView {
                     })
                     .1
                     .clone();
-                ui.group(|ui| {
+                crate::theme::card(ui, |ui| {
                     ui.horizontal(|ui| {
                         // K3: the app's icon, as the phone sent it.
                         if let Some(icon) = &icon {

@@ -787,7 +787,7 @@ fn empty_sessions_and_files_say_what_to_do_next() {
     );
     // AS3: the sentence after it says what can, with its verb.
     assert!(
-        app.query_by_label_contains("A phone takes one in a screen or sound session")
+        app.query_by_label_contains("A phone takes one in a session")
             .is_some()
     );
     app.get_by_label("Pair a phone").click();
@@ -796,6 +796,40 @@ fn empty_sessions_and_files_say_what_to_do_next() {
         app.query_by_label(Tab::Pair.purpose()).is_some(),
         "Pair opened"
     );
+}
+
+/// UX 4: Sessions with none live says, in a card, what shows there and
+/// how; its Pair a phone opens Pair. Files says what it will list.
+#[test]
+fn empty_sessions_and_files_are_cards_with_the_next_step() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::SESSIONS_EMPTY).is_some());
+    assert!(app.query_by_label(crate::app::SESSIONS_HOW).is_some());
+    app.get_by_label("Pair a phone").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Pair.purpose()).is_some(),
+        "Pair opened"
+    );
+
+    go_to(&app, Tab::Files);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::app::FILES_NONE_RECEIVED)
+            .is_some()
+    );
+    assert!(app.query_by_label_contains("shows here").is_some());
+}
+
+/// UX 4: with a phone paired, Sessions' empty card has no Pair button.
+#[test]
+fn sessions_with_a_phone_paired_offer_no_pairing() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(Some(Tab::Sessions));
+    assert!(app.query_by_label(crate::app::SESSIONS_EMPTY).is_some());
+    assert!(app.query_by_label("Pair a phone").is_none());
 }
 
 /// With no phone paired, the Notifications and Phone files pages each offer
@@ -816,7 +850,7 @@ fn empty_pages_with_no_phone_offer_pairing() {
     }
 }
 
-/// The Overview, Devices, Settings and Keyboard and mouse at 720×480 in both themes, compared
+/// The Overview, Devices, Settings, Sessions and Keyboard and mouse at 720×480 in both themes, compared
 /// with the pictures under `desktop/tests/snapshots/` (C4). They need a GPU
 /// renderer, so only with the `snapshots` feature; CI draws them with
 /// Mesa's software Vulkan, where they were made. `UPDATE_SNAPSHOTS=1`
@@ -853,6 +887,25 @@ mod snapshots {
                 if let Err(e) = app.try_snapshot_options(format!("{name}_{shade}"), &options) {
                     failed.push(e.to_string());
                 }
+            }
+        }
+        // UX 4: Sessions with none live (its empty card) and two recent
+        // ones, finished and refused, as cards with their dots.
+        recent_sessions(fixture.state());
+        for (theme, shade) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+            let state = fixture.state().to_path_buf();
+            let mut app = Harness::builder()
+                .with_size(SIZE)
+                .with_theme(theme)
+                .wgpu()
+                .build_eframe(move |cc| {
+                    crate::theme::install(&cc.egui_ctx);
+                    PocketdeskApp::new(state, None, Some(Tab::Sessions))
+                });
+            app.run_steps(3);
+            let name = format!("sessions_{shade}");
+            if let Err(e) = app.try_snapshot_options(name, &options) {
+                failed.push(e.to_string());
             }
         }
         // The Keyboard and mouse page with a computer beside this one,
@@ -1040,12 +1093,9 @@ fn find<'a>(app: &'a Harness<'static, PocketdeskApp>) -> egui_kittest::Node<'a> 
         .expect("the search box")
 }
 
-/// J3: the Sessions page lists the recent sessions from the log, by the
-/// phone's name, a refused one as refused, with the server not running.
-#[test]
-fn the_sessions_page_lists_the_recent_sessions() {
-    let fixture = Fixture::new();
-    pair_phone(fixture.state(), PHONE, "Test Phone");
+/// Two recent sessions in the session log (J3): one two hours ago on this
+/// network, one refused two minutes ago.
+fn recent_sessions(state: &Path) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
@@ -1057,12 +1107,19 @@ fn the_sessions_page_lists_the_recent_sessions() {
         now - 120,
     );
     std::fs::write(
-        fixture
-            .state()
-            .join(pocketdesk_core::local::paths::SESSIONS_FILE),
+        state.join(pocketdesk_core::local::paths::SESSIONS_FILE),
         log,
     )
     .expect("log");
+}
+
+/// J3: the Sessions page lists the recent sessions from the log, by the
+/// phone's name, a refused one as refused, with the server not running.
+#[test]
+fn the_sessions_page_lists_the_recent_sessions() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    recent_sessions(fixture.state());
     let mut app = fixture.open(Some(Tab::Sessions));
     app.run_steps(3);
     assert!(app.query_by_label(crate::app::STOPPED_BAR).is_some());
@@ -2043,5 +2100,304 @@ fn each_permission_group_switch_saves_its_permissions() {
             assert!(!read(fixture.state()).allows(*c), "{group}: {c:?} off");
         }
         others_kept(&before, &kept, group);
+    }
+}
+
+/// UX 4: with no phone paired, Notifications, Messages and Phone files
+/// each say in a card what shows there and how; Messages' new Pair a
+/// phone opens Pair.
+#[test]
+fn the_sharing_pages_say_what_shows_there() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Notifications));
+    assert!(app.query_by_label(crate::notes_view::EMPTY).is_some());
+    assert!(app.query_by_label(crate::notes_view::EMPTY_HOW).is_some());
+    go_to(&app, Tab::Phone);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::phone_files_view::NONE_PAIRED)
+            .is_some()
+    );
+    go_to(&app, Tab::Messages);
+    app.run_steps(3);
+    assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
+    // With none paired it says to pair first (PR #567 review).
+    assert!(
+        app.query_by_label(crate::messages_view::EMPTY_PAIR_FIRST)
+            .is_some()
+    );
+    app.get_by_label("Pair a phone").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Pair.purpose()).is_some(),
+        "Pair opened"
+    );
+}
+
+/// UX 4: a phone paired but not linked: Phone files says so, and
+/// Open Devices opens Devices; Messages offers no pairing.
+#[test]
+fn phone_files_with_no_phone_linked_opens_devices() {
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let mut app = fixture.open(Some(Tab::Messages));
+    assert!(app.query_by_label(crate::messages_view::EMPTY).is_some());
+    assert!(app.query_by_label("Pair a phone").is_none());
+    assert!(
+        app.query_by_label(crate::messages_view::EMPTY_HOW)
+            .is_some()
+    );
+    go_to(&app, Tab::Phone);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::phone_files_view::NOT_LINKED)
+            .is_some()
+    );
+    app.get_by_label(crate::phone_files_view::OPEN_DEVICES)
+        .click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Devices.purpose()).is_some(),
+        "Devices opened"
+    );
+}
+
+/// UX 4: the Clipboard's history off, empty, and with a text no phone can
+/// take: each says so in words, the last once above the texts.
+#[test]
+fn the_clipboard_says_why_it_is_empty_or_cannot_send() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label(crate::clipboard_view::OFF).is_some());
+    app.get_by_label("Turn it on in Settings").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Settings.purpose()).is_some(),
+        "Settings opened"
+    );
+
+    std::fs::write(
+        fixture.config().join("config.toml"),
+        "clipboard_history = 20\n",
+    )
+    .expect("config");
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label(crate::clipboard_view::EMPTY).is_some());
+    assert!(app.query_by_label("Clipboard settings").is_some());
+    assert!(
+        app.query_by_label(crate::clipboard_view::SEND_OFF)
+            .is_none()
+    );
+
+    use pocketdesk_core::local::clip_history::{ClipEntry, record};
+    record(
+        fixture.state(),
+        ClipEntry::new("the meeting link", None, 200),
+        20,
+    )
+    .expect("kept");
+    let app = fixture.open(Some(Tab::Clipboard));
+    assert!(app.query_by_label("the meeting link").is_some());
+    assert!(
+        app.query_by_label(crate::clipboard_view::SEND_OFF)
+            .is_some()
+    );
+}
+
+/// UX 4: Activity with nothing logged, and with the log off (its button
+/// opens Settings), and Diagnostics before a run, each say so in a card.
+#[test]
+fn the_help_pages_say_what_shows_there() {
+    let fixture = Fixture::new();
+    let mut app = fixture.open(Some(Tab::Activity));
+    assert!(app.query_by_label(crate::activity_view::EMPTY).is_some());
+    assert!(app.query_by_label(crate::activity_view::LOG_OFF).is_none());
+    go_to(&app, Tab::Diagnostics);
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(crate::diagnostics_view::NOT_RUN)
+            .is_some()
+    );
+    assert!(app.query_by_label_contains("say what to fix").is_some());
+
+    std::fs::write(fixture.config().join("config.toml"), "events = false\n").expect("config");
+    let mut app = fixture.open(Some(Tab::Activity));
+    assert!(app.query_by_label(crate::activity_view::LOG_OFF).is_some());
+    // Off, the log says only that: not "nothing has happened" as well.
+    assert!(app.query_by_label(crate::activity_view::EMPTY).is_none());
+    app.get_by_label("Turn it on in Settings").click();
+    app.run_steps(3);
+    assert!(
+        app.query_by_label(Tab::Settings.purpose()).is_some(),
+        "Settings opened"
+    );
+}
+
+/// UX 4: a computer on the Keyboard and mouse page is a card; its greyed
+/// "may drive" box, kept by a stopped server, says why in a line.
+#[test]
+fn a_computers_greyed_drive_box_says_why() {
+    use egui_kittest::kittest::NodeT;
+    let fixture = Fixture::new();
+    keyboard_mouse_computers(fixture.state());
+    let app = fixture.open(Some(Tab::KeyboardMouse));
+    let boxed = app.get_by_label_contains("Test Laptop may drive");
+    assert!(boxed.accesskit_node().is_disabled());
+    assert!(
+        app.query_by_label(crate::arrange_view::STOPPED_LINE)
+            .is_some()
+    );
+}
+
+/// PR #567 review: the line's Start the server asks the app to start it.
+/// Drawn by the page alone, so the ask is read here and no server starts
+/// (the app would start one).
+#[test]
+fn a_computers_drive_box_line_asks_to_start_the_server() {
+    let fixture = Fixture::new();
+    keyboard_mouse_computers(fixture.state());
+    let state = fixture.state().to_path_buf();
+    let mut view = crate::arrange_view::ArrangeView::default();
+    let mut harness = Harness::builder()
+        .with_size(egui::vec2(720.0, 1400.0))
+        .build_ui(move |ui| {
+            crate::theme::install(ui.ctx());
+            view.show(ui, &state, &[], true, false, 0);
+        });
+    harness.run_steps(3);
+    let line = harness
+        .get_by_label(crate::arrange_view::STOPPED_LINE)
+        .rect();
+    // Setup's own Start the server is above; the line's is beside it.
+    let start = harness
+        .get_all_by_label(crate::widgets::START)
+        .find(|b| (b.rect().center().y - line.center().y).abs() < 20.0)
+        .expect("Start the server beside the line");
+    start.click();
+    harness.run_steps(1);
+    assert_eq!(
+        crate::widgets::take_ask(&harness.ctx),
+        Some(crate::widgets::Ask::StartServer)
+    );
+}
+
+/// PR #567 review: Files' sent and received cards, each with its state, and
+/// a failed file's greyed Send again saying why in a line when its phone
+/// cannot take files.
+#[test]
+fn files_lists_sent_and_received_cards_and_why_send_again_is_off() {
+    use egui_kittest::kittest::NodeT;
+    use pocketdesk_core::local::received::{self, ReceivedFile};
+    use pocketdesk_core::local::sent::{self, SentFile, SentState};
+    let fixture = Fixture::new();
+    pair_phone(fixture.state(), PHONE, "Test Phone");
+    for (id, name, state) in [
+        ("a", "notes.txt", SentState::Sent),
+        ("b", "photo.jpg", SentState::Offered),
+        (
+            "c",
+            "report.pdf",
+            SentState::Failed("the phone went away".to_string()),
+        ),
+    ] {
+        sent::record(
+            fixture.state(),
+            SentFile {
+                id: id.to_string(),
+                name: name.to_string(),
+                path: fixture.state().join(name).to_string_lossy().into_owned(),
+                size: 10,
+                device_id: PHONE.to_string(),
+                sent_unix: 100,
+                state,
+                note: None,
+            },
+        )
+        .expect("recorded");
+    }
+    let kept = fixture.state().join("kept.txt");
+    std::fs::write(&kept, "kept").expect("a received file");
+    for (name, path) in [
+        ("kept.txt", kept.clone()),
+        ("gone.txt", fixture.state().join("gone.txt")),
+    ] {
+        received::record(
+            fixture.state(),
+            ReceivedFile {
+                name: name.to_string(),
+                path: path.to_string_lossy().into_owned(),
+                size: 4,
+                received_unix: 100,
+                from: PHONE.to_string(),
+            },
+        )
+        .expect("recorded");
+    }
+    let app = fixture.open(Some(Tab::Files));
+    assert!(app.query_by_label("saved there").is_some());
+    assert!(app.query_by_label("waiting to be taken").is_some());
+    assert!(
+        app.query_by_label("not sent: the phone went away")
+            .is_some()
+    );
+    assert!(
+        app.get_by_label("Send again")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(app.query_by_label(crate::app::SEND_AGAIN_OFF).is_some());
+    assert!(app.query_by_label("kept.txt").is_some());
+    assert!(app.query_by_label("Show in folder").is_some());
+    assert!(app.query_by_label("moved or deleted").is_some());
+    assert!(
+        app.query_by_label(crate::app::FILES_NONE_RECEIVED)
+            .is_none()
+    );
+}
+
+/// UX 4: at the smallest window (640×440) the phone's code shrinks so its
+/// words beside it fit: "Whose phone is it?", its box and the PIN stay
+/// inside, right of the code. The code waits on an address lookup on a
+/// thread: frames are stepped, up to a bound, with no sleeps.
+#[test]
+fn pair_fits_the_smallest_window() {
+    use pocketdesk_core::local::pin;
+    let fixture = Fixture::new();
+    let smallest = egui::vec2(640.0, 440.0);
+    let state = fixture.state().to_path_buf();
+    let mut app = Harness::builder()
+        .with_size(smallest)
+        .build_eframe(move |cc| {
+            crate::theme::install(&cc.egui_ctx);
+            PocketdeskApp::new(state, None, Some(Tab::Pair))
+        });
+    let shown = (0..5000).any(|_| {
+        app.step();
+        app.query_by_label("Whose phone is it?").is_some()
+    });
+    assert!(shown, "the Pair page never showed its code");
+    app.run_steps(2);
+    let code = app
+        .get_by_label("Pairing code to scan with the phone")
+        .rect();
+    let digits = pin::read(fixture.state(), pin::now_unix()).expect("a code on file");
+    let spaced = crate::pair_view::spaced_pin(&digits.pin);
+    for (what, rect) in [
+        (
+            "box",
+            app.get_by_role(egui::accesskit::Role::ComboBox).rect(),
+        ),
+        ("PIN line", app.get_by_label("Or enter this PIN:").rect()),
+        ("PIN", app.get_by_label(&spaced).rect()),
+    ] {
+        assert!(
+            rect.right() <= smallest.x,
+            "{what}: {rect:?} inside {smallest:?}"
+        );
+        assert!(
+            code.right() <= rect.left(),
+            "{what}: {rect:?} right of the code {code:?}"
+        );
     }
 }

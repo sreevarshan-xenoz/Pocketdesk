@@ -94,6 +94,21 @@ impl DiagnosticsView {
             ui.label(egui::RichText::new(fonts).color(crate::theme::muted(ui)));
         }
         let Some(report) = &self.report else {
+            // UX 4: what a run shows, before the first.
+            crate::widgets::empty(
+                ui,
+                if self.running.is_some() {
+                    CHECKING
+                } else if self.failed {
+                    // PR #567 review: a run that failed is not "none run".
+                    DID_NOT_FINISH
+                } else {
+                    NOT_RUN
+                },
+                "They look at the server, its ports, the firewall and this network, \
+                 and say what to fix.",
+                |_| {},
+            );
             return;
         };
         ui.add_space(8.0);
@@ -103,7 +118,7 @@ impl DiagnosticsView {
             ui.add_space(6.0);
         }
         ui.add_space(10.0);
-        ui.strong("Last session");
+        crate::theme::section(ui, "Last session");
         match &report.last_session {
             None => {
                 ui.label("None recorded yet.");
@@ -134,7 +149,7 @@ impl DiagnosticsView {
         // Only once one was measured: most owners never run the test.
         if let Some(latency) = &self.latency {
             ui.add_space(10.0);
-            ui.strong("Keyboard and mouse to another computer");
+            crate::theme::section(ui, "Keyboard and mouse to another computer");
             for line in latency_lines(latency, now_unix()) {
                 ui.label(line);
             }
@@ -161,6 +176,11 @@ impl DiagnosticsView {
         );
     }
 }
+
+/// Before the first run, during it, and after one that failed (UX 4).
+pub const NOT_RUN: &str = "No checks run yet";
+pub const DID_NOT_FINISH: &str = "The checks did not finish";
+pub const CHECKING: &str = "Running the checks";
 
 /// The last measured latency, in words: when, then each share, in
 /// milliseconds.
