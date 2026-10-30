@@ -840,6 +840,18 @@ pub fn window_title(name: &str, screen: u32, mic_on: bool) -> String {
     }
 }
 
+/// Whether a window after the first, of a computer that runs Windows
+/// (`windows`, as its session said) or not, opens View only (PR #570
+/// review I4): only Windows maps a session's clicks onto the screen it
+/// shows; elsewhere they land over its first screen.
+pub fn extra_view_only(windows: Option<bool>) -> bool {
+    windows != Some(true)
+}
+
+/// What a later window of such a computer says on its bar (review I4).
+pub const EXTRA_INPUT_WORDS: &str =
+    "This computer's other screens take input in the first window only.";
+
 /// Where the microphone goes, as the main window names it (PC11): the
 /// computer, and the window by the screen it shows.
 pub fn mic_window_words(name: &str, screen: u32) -> String {
@@ -1197,6 +1209,10 @@ impl ComputerView {
         state.hevc_setting = from.hevc_setting;
         state.hw_decode = from.hw_decode;
         state.lock_on_close = from.lock_on_close;
+        // A computer that is not Windows takes a window's clicks over its
+        // first screen whatever screen the window shows (PR #570 review
+        // I4): another window of it opens View only, said on its bar.
+        state.view_only = state.view_only || extra_view_only(from.status.windows);
         state.hevc_refused = false;
         #[cfg(windows)]
         {
@@ -2054,6 +2070,7 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
     let record_want = state.record_want;
     let recording = state.recording.clone();
     let fullscreen = state.fullscreen;
+    let slot = state.slot;
     let switching = state.switching.map(|(to, _)| to);
     let last_switch = state.last_switch;
     let mut stats_on = state.stats_on;
@@ -2308,6 +2325,14 @@ fn draw(shared: &Arc<Mutex<State>>, state_dir: &Path, config: Option<&Path>, ui:
                     ui.add(
                         egui::Label::new(egui::RichText::new(words).color(egui::Color32::LIGHT_GRAY))
                             .wrap(),
+                    );
+                }
+                if ended.is_none() && slot != 0 && extra_view_only(status.windows) {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(EXTRA_INPUT_WORDS).color(egui::Color32::LIGHT_GRAY),
+                        )
+                        .wrap(),
                     );
                 }
                 if let Some(words) = &mic_note {
@@ -5691,6 +5716,11 @@ mod tests {
             "eDP-1 (1920x1080) (Ctrl+Alt+Shift+1). Right-click to open it in a new window."
         );
         assert!(!screen_hint("Screen 10", 9).contains("Ctrl"));
+        // PR #570 review I4: later windows of a computer not Windows (or
+        // not said) open View only.
+        assert!(!extra_view_only(Some(true)));
+        assert!(extra_view_only(Some(false)));
+        assert!(extra_view_only(None));
     }
 
     /// PC11: a computer two windows show is told apart from one shown once.
@@ -6130,6 +6160,26 @@ mod tests {
             .collect();
         locks.sort();
         assert_eq!(locks, [(0, true), (1, false)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    /// PR #570 review I4: a later window of a computer that is not Windows
+    /// opens View only; of a Windows computer, with the first's choice.
+    #[test]
+    fn a_later_window_of_a_computer_not_windows_opens_view_only() {
+        let dir =
+            std::env::temp_dir().join(format!("pd-computer-extra-input-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let ctx = egui::Context::default();
+        let view = ComputerView::new(&ctx, dir.clone(), None);
+        view.open("desk", "Desk", 0, 0, false, false).unwrap();
+        lock(&view.shared).status.windows = Some(false);
+        view.open_new_window(&ctx, &view.shared, 1);
+        assert!(lock(&view.windows()[1]).view_only, "Linux: View only");
+        assert!(!lock(&view.shared).view_only, "the first window as it was");
+        lock(&view.shared).status.windows = Some(true);
+        view.open_new_window(&ctx, &view.shared, 1);
+        assert!(!lock(&view.windows()[2]).view_only, "Windows: as chosen");
+        view.quit();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
