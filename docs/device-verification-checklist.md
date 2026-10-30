@@ -3248,6 +3248,8 @@ Built 2026-10-30. The window's bar has a numbered button for each of the other c
 Built 2026-10-30. Fixes from the review of everything merged since 0.8.2: a computer driven from here through the shared keyboard and mouse is refused this computer's privacy mode, and a grab it holds ends as they go there.
 
 - [ ] Windows with its keyboard and mouse on the Linux laptop through the shared keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there": the bar says it was refused (this computer's keyboard and mouse are on yours now), and Windows' keys and clicks still reach the laptop. Bring them home, turn it on (Windows' keyboard is blocked, its ring shows), then move to the laptop with the switch key: the grab ends on Windows and the keys reach the laptop. (where: second computer)
+- [ ] Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
+- [ ] Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
 
 ## Recording results
 

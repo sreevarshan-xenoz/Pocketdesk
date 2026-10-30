@@ -2,17 +2,17 @@
 
 Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.py` (C6); CI fails when it is stale. Each open item is placed by its own words and its section's, the first place that matches; a line can say `(where: <place>)` itself. Tick items in the checklist, then run the script again.
 
-1055 open items.
+1058 open items.
 
 | Where | Items |
 |---|---|
 | Here: this Windows box and the test phone (the OPPO), without touching the owner's power, lock or input | 37 |
 | Power, lock or server stop on the owner's Windows box: never run here (the owner's rule) | 16 |
-| Needs the owner's OK on this box: input reaching Windows, or its display settings | 166 |
+| Needs the owner's OK on this box: input reaching Windows, or its display settings | 167 |
 | A phone with a SIM | 39 |
 | A second phone | 15 |
 | Away from home: another network, or through a router | 39 |
-| A second computer | 130 |
+| A second computer | 132 |
 | A Linux desktop (the Azure VM serves for some) | 178 |
 | Other hardware: a foldable, tablet, mouse, game pad, older or newer Android | 63 |
 | By hand or eye on this box: hearing, looking, the tray, drag and drop, a screen reader, a real app | 372 |
@@ -548,6 +548,10 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - With Send my mic on, Alt+Tab to another window here, and minimise the window: the window's title (and its taskbar button) starts with "Mic on", the main window says "Mic on: this computer's microphone goes to …" on every page, and the laptop's `pocketdesk_mic` stays; the main window's Stop stops it. Minimised, turn Control off for Windows on the laptop: the mic stops within a second (the laptop's `pocketdesk_mic` goes) with no look at the window. The window dropping into Reconnecting turns it off, and it stays off as the picture comes back until turned on again. (where: owner)
 - Task Manager (or `top` on the laptop): the desktop app's CPU with Send my mic on is a few percent at most, and the Stats' bitrate barely moves. On a slow internet road (a relay), typing while it sends: keys arrive as without it, and the laptop's mic lags well under a second. (where: owner)
 
+**239. The range review after 0.8.2**
+
+- Two computers paired both ways after this build (fresh pairing): the laptop's Devices page for Windows shows "Use the phone as a microphone" on. At Windows, Send my mic on with Control on: `pocketdesk_mic` appears on the laptop. Turn the window's View only on, then back off and Send my mic on again: no frames play on the laptop while view-only (counts of samples above silence only). With the switch off there, the bar says the laptop does not play this computer's microphone. (where: owner)
+
 ## A phone with a SIM
 
 **11. WAN over iroh (R1)**
@@ -1057,6 +1061,11 @@ Generated from `docs/device-verification-checklist.md` by `scripts/owed_checks.p
 - Close the second window: the first goes on untouched, the far computer lists one session; open it again, then stop the first window: the second goes on. Quit Pocketdesk with both open and "Lock it when I close the window" on: the far computer locks once, after both stopped. (where: second computer)
 - Open four windows, then a fifth from any bar: "At most 4 screen windows at once" shows and nothing else opens; the server's memory and the far computer's CPU with four views (counts only). (where: second computer)
 - With "Hide what I do there" on in one window, ask it in the second window of the same computer: it says another window already hides it, and nothing changes there. (where: second computer)
+
+**239. The range review after 0.8.2**
+
+- Windows with its keyboard and mouse on the Linux laptop through the shared keyboard and mouse (Power on for the laptop on Windows' Devices page): at the laptop, open Windows' screen window and turn on "Hide what I do there": the bar says it was refused (this computer's keyboard and mouse are on yours now), and Windows' keys and clicks still reach the laptop. Bring them home, turn it on (Windows' keyboard is blocked, its ring shows), then move to the laptop with the switch key: the grab ends on Windows and the keys reach the laptop. (where: second computer)
+- Two windows on the laptop's two screens: copy a line in window 1, click window 2 and paste: the line pastes. With a window on the laptop and one on a third computer: copy in the laptop's window, click the other window and paste: the copy from the laptop arrives. (where: second computer)
 
 ## A Linux desktop (the Azure VM serves for some)
 
