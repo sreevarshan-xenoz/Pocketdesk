@@ -99,6 +99,9 @@ impl DiagnosticsView {
                 ui,
                 if self.running.is_some() {
                     CHECKING
+                } else if self.failed {
+                    // PR #567 review: a run that failed is not "none run".
+                    DID_NOT_FINISH
                 } else {
                     NOT_RUN
                 },
@@ -174,8 +177,9 @@ impl DiagnosticsView {
     }
 }
 
-/// Before the first run, and during it (UX 4).
+/// Before the first run, during it, and after one that failed (UX 4).
 pub const NOT_RUN: &str = "No checks run yet";
+pub const DID_NOT_FINISH: &str = "The checks did not finish";
 pub const CHECKING: &str = "Running the checks";
 
 /// The last measured latency, in words: when, then each share, in
