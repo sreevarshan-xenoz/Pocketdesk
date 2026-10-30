@@ -56,6 +56,9 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -1037,21 +1040,37 @@ private fun HostCard(
                         .padding(top = 4.dp, end = 12.dp),
                 )
             }
-            FlowRow(
+            val remoteLabel = stringResource(R.string.remote_button)
+            val castLabel = stringResource(R.string.cast_button)
+            val measurer = rememberTextMeasurer()
+            val labelStyle = MaterialTheme.typography.labelLarge
+            val density = LocalDensity.current
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // Narrower than Material's 24 dp sides, so the three fit one row
                 // on a 360 dp phone (UX1: at 16 dp "Show screen" wrapped to a
-                // second row, cut off at the fold).
-                val pad = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
-                // The phone as a remote (T10i): trackpad and keys, no picture.
-                OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(stringResource(R.string.remote_button)) }
-                // This phone's screen on the computer (T10k).
-                OutlinedButton(onClick = onCast, contentPadding = pad) { Text(stringResource(R.string.cast_button)) }
+                // second row, cut off at the fold), and narrower still when
+                // only that fits (review N7: Spanish's wrapped at 12 dp).
+                val side = remember(connectLabel, remoteLabel, castLabel, labelStyle, maxWidth, density) {
+                    val widths = listOf(connectLabel, remoteLabel, castLabel).map {
+                        with(density) { measurer.measure(it, labelStyle).size.width.toDp().value }
+                    }
+                    CardButtonFit.sideDp(widths, maxWidth.value)
+                }
+                val pad = PaddingValues(horizontal = side.dp, vertical = 8.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = onConnect, contentPadding = pad) { Text(connectLabel) }
+                    // The phone as a remote (T10i): trackpad and keys, no picture.
+                    OutlinedButton(onClick = onRemote, contentPadding = pad) { Text(remoteLabel) }
+                    // This phone's screen on the computer (T10k).
+                    OutlinedButton(onClick = onCast, contentPadding = pad) { Text(castLabel) }
+                }
             }
         }
     }
