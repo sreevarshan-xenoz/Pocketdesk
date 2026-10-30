@@ -177,6 +177,16 @@ fn note(words: &str) -> Action {
     Action::Badge(badge::of(&badge::Event::Note(words)))
 }
 
+/// A word on the owner's own action (a screen window's pointer lock):
+/// drawn as the badge, never a notification where it cannot be (PR #563
+/// review M3).
+fn quiet_note(words: &str) -> Action {
+    Action::Badge(badge::Badge {
+        text: words.to_string(),
+        fallback: crate::overlay::Fallback::Quiet,
+    })
+}
+
 /// The state of this computer's keyboard and mouse.
 pub struct Driver {
     this: String,
@@ -372,7 +382,7 @@ impl Driver {
             && !self.locked
             && !self.targets().is_empty()
         {
-            out.push(note(if held {
+            out.push(quiet_note(if held {
                 "A screen window holds the pointer: the edges lead nowhere until it lets go"
             } else {
                 "The screen window let go of the pointer: the edges lead on again"
@@ -2822,10 +2832,13 @@ mod tests {
         assert_eq!(d.mode(), Mode::Off);
         let freed = d.set_view_held(false);
         assert!(freed.contains(&Action::SetMode(Mode::Watch)), "{freed:?}");
-        // Its words are one clean line (PR #563 review M1).
+        // Its words are one clean line (PR #563 review M1), and the owner's
+        // own doing: never a notification where the badge cannot be drawn
+        // (M3).
         for said in held.iter().chain(&freed) {
             if let Action::Badge(badge) = said {
                 assert!(!badge.text.contains("  "), "{:?}", badge.text);
+                assert_eq!(badge.fallback, crate::overlay::Fallback::Quiet);
             }
         }
         // The first position watched only marks where it is.
