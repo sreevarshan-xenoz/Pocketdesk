@@ -172,11 +172,9 @@ pub async fn run(cert_manager: Arc<CertManager>, wan: Option<iroh::Endpoint>) {
                     device_id,
                     paired_unix,
                 } => {
-                    if forget_as_listed(&dir, &cert_manager, &device_id, paired_unix)
-                        && let Some(link) = links.remove(&device_id)
-                    {
-                        link.task.abort();
-                    }
+                    let forgetting = (device_id, paired_unix);
+                    forget_paired(&dir, &cert_manager, forgetting, &mut links, views.as_ref())
+                        .await;
                 }
                 ComputerAsk::LetDrive { device_id, allow } => {
                     let_drive(&dir, &device_id, allow);
@@ -1359,6 +1357,30 @@ fn forget_as_listed(dir: &Path, certs: &CertManager, device_id: &str, paired_uni
         forget(dir, certs, device_id);
     }
     listed
+}
+
+/// Forget the computer a pairing the other way asked to forget
+/// ([`ComputerAsk::ForgetPaired`]: its id and when it was listed) if it is
+/// still listed as it was then: its link stops, and its view, if shown,
+/// ends as a forgotten computer's does (PR #551 review I1). Whether it was.
+async fn forget_paired(
+    dir: &Path,
+    certs: &CertManager,
+    (device_id, paired_unix): (String, u64),
+    links: &mut HashMap<String, Link>,
+    views: Option<&mpsc::Sender<crate::computer_view::Command>>,
+) -> bool {
+    if !forget_as_listed(dir, certs, &device_id, paired_unix) {
+        return false;
+    }
+    if let Some(link) = links.remove(&device_id) {
+        link.task.abort();
+    }
+    if let Some(views) = views {
+        let forgotten = crate::computer_view::Command::Forgotten { device_id };
+        let _ = views.send(forgotten).await;
+    }
+    true
 }
 
 fn forget(dir: &Path, certs: &CertManager, device_id: &str) {
@@ -2950,6 +2972,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!stale && kept == 1, "listed again since: stays");
         assert!(current && left == 0, "as it was listed: forgotten");
+    }
+
+    /// PC2 review: a computer a pairing the other way forgets, as it was
+    /// listed, ends its view as one forgotten on Other computers does; a
+    /// stale ask (listed again since) leaves the view alone.
+    #[tokio::test]
+    async fn forgetting_a_paired_computer_ends_its_view() {
+        let dir = temp("forget-paired-view");
+        let certs = CertManager::load_or_create(&dir).unwrap();
+        computers::update(&dir, |file| {
+            file.computers.push(PeerComputer {
+                mine: false,
+                ..facts().into_peer("lap", "", 5)
+            })
+        })
+        .unwrap();
+        let (views, mut told) = mpsc::channel(4);
+        let mut links = HashMap::new();
+        let stale = ("lap".to_string(), 4);
+        let stale = forget_paired(&dir, &certs, stale, &mut links, Some(&views)).await;
+        let quiet = told.try_recv().is_err();
+        let current = ("lap".to_string(), 5);
+        let current = forget_paired(&dir, &certs, current, &mut links, Some(&views)).await;
+        let left = computers::read(&dir).computers.len();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!stale && quiet, "listed again since: its view goes on");
+        assert!(current && left == 0, "as it was listed: forgotten");
+        match told.try_recv() {
+            Ok(crate::computer_view::Command::Forgotten { device_id }) => {
+                assert_eq!(device_id, "lap");
+            }
+            other => panic!("its view told it was forgotten: {other:?}"),
+        }
     }
 
     /// PC1 review M7: the run loop's look at the trust store forgets a
