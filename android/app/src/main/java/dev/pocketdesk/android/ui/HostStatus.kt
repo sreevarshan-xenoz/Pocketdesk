@@ -19,6 +19,9 @@ object HostStatus {
         data object UnpairedByIt : Part
         data object OpensAtLaunch : Part
         data class Ports(val stream: Int, val control: Int) : Part
+
+        /** UX1: when it was last used, in ms since the epoch. */
+        data class LastUsed(val at: Long) : Part
     }
 
     fun parts(
@@ -28,6 +31,7 @@ object HostStatus {
         paired: Boolean,
         auto: Boolean,
         unpairedByIt: Boolean = false,
+        lastUsed: Long? = null,
     ): List<Part> = buildList {
         if (named) add(Part.Address(host.address))
         if (online) add(Part.OnThisNetwork)
@@ -43,5 +47,6 @@ object HostStatus {
         if (host.port != HostStore.DEFAULT_STREAMING_PORT || host.controlPort != HostStore.DEFAULT_CONTROL_PORT) {
             add(Part.Ports(host.port, host.controlPort))
         }
+        if (lastUsed != null) add(Part.LastUsed(lastUsed))
     }
 }

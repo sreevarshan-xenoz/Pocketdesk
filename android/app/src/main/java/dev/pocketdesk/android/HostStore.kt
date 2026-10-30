@@ -69,7 +69,16 @@ object HostStore {
     fun save(ctx: Context, host: Host) {
         val rest = hosts(ctx).filterNot { it.address == host.address }
         writeHosts(ctx, listOf(host) + rest)
+        // UX1: when, for its card ("Used 2 hours ago").
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+            putLong("$KEY_LAST_USED_PREFIX${host.address}", System.currentTimeMillis())
+        }
     }
+
+    /** UX1: when [address] was last connected to from its card, in ms since the epoch; null before. */
+    fun lastUsed(ctx: Context, address: String): Long? =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong("$KEY_LAST_USED_PREFIX$address", 0L).takeIf { it > 0L }
 
     /**
      * Keep [host] in the list without moving it to the front: a computer
@@ -118,6 +127,8 @@ object HostStore {
             KEY_CHOSEN_NAME_PREFIX,
             // O6: the player chosen for the computer.
             KEY_PLAYER_PREFIX,
+            // UX1: when it was last used.
+            KEY_LAST_USED_PREFIX,
         )
     }
 
@@ -172,6 +183,7 @@ object HostStore {
     private const val KEY_NAME_PREFIX = "computer_name:"
     private const val KEY_CHOSEN_NAME_PREFIX = "computer_name_chosen:"
     private const val KEY_PLAYER_PREFIX = "computer_player:"
+    private const val KEY_LAST_USED_PREFIX = "last_used:"
 
     /** O6: the player chosen for the computer at [address], or null for the computer's own choice. */
     fun player(ctx: Context, address: String): String? =

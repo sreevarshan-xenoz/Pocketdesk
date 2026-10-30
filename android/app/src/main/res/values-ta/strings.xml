@@ -733,6 +733,8 @@
     <string name="status_not_paired">இணைக்கப்படவில்லை</string>
     <string name="status_unpaired_by_it">இந்தக் கணினியில் இந்தத் தொலைபேசி இனி இணைக்கப்படவில்லை</string>
     <string name="status_auto">திறக்கும்போது இணையும்</string>
+    <string name="status_last_used">பயன்படுத்தியது %1$s</string>
+    <string name="status_used_just_now">இப்போது பயன்படுத்தியது</string>
     <string name="rename_title">%1$s-க்கு மறுபெயரிடு</string>
     <string name="rename_label">பெயர்</string>
     <string name="rename_hint">வெறுமையாக: அது தனக்குத் தரும் பெயர்</string>

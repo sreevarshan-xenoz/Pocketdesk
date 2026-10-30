@@ -521,6 +521,8 @@ fun HomeScreen(
                         paired = HostStore.pairedDesktopId(context, host.address) != null,
                         unpairedByIt = host.address in refusers,
                         hasWake = wakeVersion.let { Waker.canWake(Waker.planFor(context, host.address)) },
+                        // Read again with the list, which a connection reorders.
+                        lastUsed = hosts.let { HostStore.lastUsed(context, host.address) },
                         onRemote = { onRemote(host) },
                         onSound = { onSound(host) },
                         onCast = { onCast(host) },
@@ -910,6 +912,7 @@ private fun HostCard(
     paired: Boolean,
     unpairedByIt: Boolean,
     hasWake: Boolean,
+    lastUsed: Long?,
     onConnect: () -> Unit,
     onRemote: () -> Unit,
     onSound: () -> Unit,
@@ -942,7 +945,7 @@ private fun HostCard(
                 Column(modifier = Modifier.weight(1f).padding(top = 4.dp)) {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt)),
+                        statusLine(HostStatus.parts(host, name != null, online, paired, isAuto, unpairedByIt, lastUsed)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1056,6 +1059,20 @@ private fun statusLine(parts: List<HostStatus.Part>): AnnotatedString {
             HostStatus.Part.UnpairedByIt -> stringResource(R.string.status_unpaired_by_it)
             HostStatus.Part.OpensAtLaunch -> stringResource(R.string.status_auto)
             is HostStatus.Part.Ports -> stringResource(R.string.host_ports, part.stream, part.control)
+            // Android's "0 min ago" under a minute read oddly (UX1, on the OPPO).
+            is HostStatus.Part.LastUsed -> if (System.currentTimeMillis() - part.at < 60_000L) {
+                stringResource(R.string.status_used_just_now)
+            } else {
+                stringResource(
+                    R.string.status_last_used,
+                    android.text.format.DateUtils.getRelativeTimeSpanString(
+                        part.at,
+                        System.currentTimeMillis(),
+                        android.text.format.DateUtils.MINUTE_IN_MILLIS,
+                        android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
+                    ),
+                )
+            }
         }
     }
     return buildAnnotatedString {

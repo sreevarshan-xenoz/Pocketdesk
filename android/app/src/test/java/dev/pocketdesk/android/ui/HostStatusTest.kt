@@ -46,4 +46,16 @@ class HostStatusTest {
             HostStatus.parts(host, named = false, online = false, paired = false, auto = false, unpairedByIt = true)[0],
         )
     }
+
+    /** UX1: when it was last used comes last, and only once it has been. */
+    @org.junit.Test
+    fun `last used comes last once known`() {
+        val host = dev.pocketdesk.android.HostStore.Host("192.0.2.1", dev.pocketdesk.android.HostStore.DEFAULT_STREAMING_PORT)
+        val parts = HostStatus.parts(host, named = false, online = false, paired = true, auto = false, lastUsed = 1_000L)
+        org.junit.Assert.assertEquals(HostStatus.Part.LastUsed(1_000L), parts.last())
+        org.junit.Assert.assertTrue(
+            HostStatus.parts(host, named = false, online = false, paired = true, auto = false)
+                .none { it is HostStatus.Part.LastUsed },
+        )
+    }
 }
