@@ -788,6 +788,21 @@ const ENDED_ON_PURPOSE: [&str; 4] = ["kicked", "refused", "not paired", "not all
 /// by itself (PC2): not when that computer ended it on purpose. A server
 /// stopping or restarting, a link gone, the encoder rebuilt or permissions
 /// changed are worth another dial.
+/// How often a view asks the other computer's screens again while it does
+/// not know them (PC9a).
+const SCREENS_AGAIN: Duration = Duration::from_secs(5);
+
+/// Whether to ask the other computer's screens again: only while none are
+/// known, and at most each [`SCREENS_AGAIN`] (`asked` is the last ask,
+/// moved on when this says yes).
+pub fn ask_screens_again(unknown: bool, asked: &mut Instant, now: Instant) -> bool {
+    if !unknown || now.saturating_duration_since(*asked) < SCREENS_AGAIN {
+        return false;
+    }
+    *asked = now;
+    true
+}
+
 pub fn may_reconnect(reason: Option<&str>) -> bool {
     let reason = reason.unwrap_or("").to_ascii_lowercase();
     !ENDED_ON_PURPOSE.iter().any(|word| reason.contains(word))
@@ -1279,6 +1294,7 @@ async fn attempt(
     let mut counts = FrameCounts::default();
     let mut stats_tick = tokio::time::interval(STATS_EVERY);
     let mut second = Instant::now();
+    let mut screens_asked = Instant::now();
     loop {
         tokio::select! {
             packet = frames.recv() => {
@@ -1347,6 +1363,17 @@ async fn attempt(
             }
             _ = look.tick() => {}
             _ = stats_tick.tick() => {
+                // Its screens, asked again while not known (PC9a): the
+                // ask as the view began finds no link when the link is
+                // still coming up (that computer just restarted), and the
+                // window's screen buttons would stay empty for the view.
+                if ask_screens_again(
+                    crate::peer_computers::screens(&computer.device_id).is_empty(),
+                    &mut screens_asked,
+                    Instant::now(),
+                ) {
+                    crate::peer_computers::ask_screens(&computer.device_id);
+                }
                 // How the picture comes, for the window's stats (PC2).
                 let (fps, kbps) = counts.second(second.elapsed());
                 second = Instant::now();
@@ -4827,6 +4854,40 @@ mod tests {
         // Shown for long enough: a later drop starts afresh.
         tries.shown(at(10));
         assert_eq!(tries.dropped(at(200)), Some((1, Duration::from_secs(1))));
+    }
+
+    /// PC9a: the screens are asked again only while unknown, at most each
+    /// 5 s.
+    #[test]
+    fn unknown_screens_are_asked_again_now_and_then() {
+        let start = Instant::now();
+        let mut asked = start;
+        assert!(!ask_screens_again(
+            true,
+            &mut asked,
+            start + Duration::from_secs(4)
+        ));
+        assert!(ask_screens_again(
+            true,
+            &mut asked,
+            start + Duration::from_secs(5)
+        ));
+        assert_eq!(asked, start + Duration::from_secs(5));
+        assert!(!ask_screens_again(
+            true,
+            &mut asked,
+            start + Duration::from_secs(9)
+        ));
+        assert!(!ask_screens_again(
+            false,
+            &mut asked,
+            start + Duration::from_secs(60)
+        ));
+        assert!(ask_screens_again(
+            true,
+            &mut asked,
+            start + Duration::from_secs(60)
+        ));
     }
 
     /// PC2: a view the other computer ended on purpose (its End, a refusal,
