@@ -901,9 +901,26 @@ pub async fn run(config: Config) -> Result<()> {
     if !crate::shared_input::portal_drive::stop(SHARED_INPUT_STOP).await {
         tracing::warn!("Shared input: the driver did not end in time");
     }
+    // The screen sessions' connections are closed, not dropped (PC9a): a
+    // computer's window showing this screen hears the stop at once and
+    // dials again, where a dropped endpoint left it on a still picture
+    // until QUIC's idle timeout (45 s) ran out.
+    quic_endpoint.close(0u32.into(), STOPPING);
+    let _ = tokio::time::timeout(STREAMS_CLOSE_WAIT, quic_endpoint.wait_idle()).await;
+    if let Some(endpoint) = wan_endpoint.as_ref() {
+        let _ = tokio::time::timeout(STREAMS_CLOSE_WAIT, endpoint.close()).await;
+    }
 
     Ok(())
 }
+
+/// The reason a stopping server gives its screen sessions' connections; a
+/// window dials such a view again (`computer_view::may_reconnect`).
+const STOPPING: &[u8] = b"server stopping";
+
+/// How long a stopping server waits for each endpoint to say its
+/// connections closed (bounded again by `pocketdesk stop`'s wait).
+const STREAMS_CLOSE_WAIT: Duration = Duration::from_millis(500);
 
 /// How long the server's stop waits for the shared keyboard and mouse to
 /// come home (it is bounded again by the process's own exit grace).
@@ -2223,6 +2240,17 @@ pub(crate) fn gate(packet: &NetworkPacket, permitted: impl FnOnce() -> bool) -> 
         Gate::Dispatch
     } else {
         Gate::Denied
+    }
+}
+
+#[cfg(test)]
+mod stop_tests {
+    /// PC9a: what a stopping server tells the screen sessions it closes is
+    /// a reason a window dials again, not an end on purpose.
+    #[test]
+    fn a_stopping_servers_viewers_dial_again() {
+        let reason = std::str::from_utf8(super::STOPPING).unwrap();
+        assert!(crate::computer_view::may_reconnect(Some(reason)));
     }
 }
 
