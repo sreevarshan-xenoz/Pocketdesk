@@ -129,13 +129,14 @@ struct State {
     clock: DecodeClock,
     /// Decode on the graphics card when it can (`computer_view_hw_decode`,
     /// PC5), the way decoding now ("d3d11va", "software"), and the way a
-    /// view settled on: its session and its place in the ways to try.
+    /// view settled on: its session and that way (PR #562 review M1: not
+    /// its place, as the ways may differ by the next join).
     hw_decode: bool,
     decoding: String,
     /// Counts the decoders started (PR #562 review I2): a picture from an
     /// older one, still on its way as it is replaced, is dropped.
     decoder_gen: u64,
-    way: Option<(u64, usize)>,
+    way: Option<(u64, Accel)>,
     /// The window's focus, as said to the server for the clipboard (PC3).
     edges: FocusEdges,
     /// Files dropped on the window, on their way; the word on the last
@@ -1690,11 +1691,11 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
     // The ways to decode, and the one this view settled on, if it did
     // (PC5): a rejoin of the same view keeps it.
     let ways = crate::video::local_accel_chain(lock(shared).hw_decode);
-    let settled_at = match lock(shared).way {
-        Some((session, at)) if session == file.session_id => Some(at),
+    let settled_on = match &lock(shared).way {
+        Some((session, way)) if *session == file.session_id => Some(way.clone()),
         _ => None,
     };
-    let mut ladder = Ladder::new(ways, settled_at);
+    let mut ladder = Ladder::new(ways, settled_on.as_ref());
     // The stream's codec and size, for a decoder started again.
     let mut stream_is: Option<(Codec, Option<(u16, u16)>)> = None;
     let mut recorder: Option<Recorder> = None;
@@ -1856,15 +1857,15 @@ pub struct Ladder {
 }
 
 impl Ladder {
-    /// The ways, settled already on the one at `settled_at` (a rejoin of
-    /// the same view), else trying the first.
-    pub fn new(ways: Vec<Accel>, settled_at: Option<usize>) -> Self {
+    /// The ways, settled already on `settled_on` (a rejoin of the same
+    /// view) when it is still among them, else trying the first.
+    pub fn new(ways: Vec<Accel>, settled_on: Option<&Accel>) -> Self {
         let ways = if ways.is_empty() {
             vec![Accel::Software]
         } else {
             ways
         };
-        let settled = settled_at.filter(|at| *at < ways.len());
+        let settled = settled_on.and_then(|on| ways.iter().position(|w| w == on));
         Self {
             ways,
             at: settled.unwrap_or(0),
@@ -1877,11 +1878,6 @@ impl Ladder {
     /// The way tried now.
     pub fn way(&self) -> &Accel {
         &self.ways[self.at]
-    }
-
-    /// Its place among the ways.
-    pub fn at(&self) -> usize {
-        self.at
     }
 
     /// A decoder of this way started again (another size or codec).
@@ -1953,7 +1949,7 @@ fn climb(
         Step::Settled => {
             let words = way_words(ladder.way(), d.auto_took());
             let mut state = lock(shared);
-            state.way = Some((session_id, ladder.at()));
+            state.way = Some((session_id, ladder.way().clone()));
             state.decoding = words;
         }
         Step::Stay | Step::Exhausted => {}
@@ -2369,11 +2365,23 @@ mod tests {
         let mut ladder = Ladder::new(ways.clone(), None);
         assert_eq!(ladder.failed(), Step::Next);
         assert_eq!(ladder.way(), &Accel::Auto);
-        // A rejoin starts settled where the view settled.
-        let mut ladder = Ladder::new(ways.clone(), Some(1));
+        // A rejoin starts settled on the way the view settled on (review
+        // M1); one no longer among the ways (the setting changed) starts
+        // afresh, unsettled.
+        let mut ladder = Ladder::new(ways.clone(), Some(&Accel::Auto));
         assert_eq!(ladder.way(), &Accel::Auto);
         assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
-        assert_eq!(Ladder::new(ways, Some(7)).way(), &Accel::D3d11va);
+        let software_only = vec![Accel::Software];
+        let mut ladder = Ladder::new(ways.clone(), Some(&Accel::Software));
+        assert_eq!(ladder.way(), &Accel::Software);
+        let mut afresh = Ladder::new(ways, Some(&Accel::Vaapi("/dev/dri/renderD128".into())));
+        assert_eq!(afresh.way(), &Accel::D3d11va);
+        afresh.fed(at(0));
+        assert_eq!(afresh.check(0, false, at(2_000)), Step::Next, "not settled");
+        let mut card = Ladder::new(software_only, Some(&Accel::D3d11va));
+        assert_eq!(card.way(), &Accel::Software);
+        assert_eq!(ladder.check(0, true, at(0)), Step::Stay);
+        assert_eq!(card.check(0, true, at(0)), Step::Exhausted);
         assert_eq!(Ladder::new(Vec::new(), None).way(), &Accel::Software);
     }
 
