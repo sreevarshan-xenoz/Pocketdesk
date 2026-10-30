@@ -2128,6 +2128,9 @@ fn start_viewer(
     });
     let reader = tokio::spawn(async move {
         let mut head = [0u8; 5];
+        // The window's pointer is locked (PC7): its own latest word, kept
+        // here, never taken from a packet. Only then do relative moves go.
+        let mut pointer_locked = false;
         while read.read_exact(&mut head).await.is_ok() {
             let len = u32::from_le_bytes([head[1], head[2], head[3], head[4]]) as usize;
             match head[0] {
@@ -2157,6 +2160,14 @@ fn start_viewer(
                         break;
                     }
                 }
+                // PC7: one byte, 0 or 1; anything else ends it.
+                wire::POINTER_LOCK if len == 1 => {
+                    let mut locked = [0u8; 1];
+                    if read.read_exact(&mut locked).await.is_err() || locked[0] > 1 {
+                        break;
+                    }
+                    pointer_locked = locked[0] == 1;
+                }
                 wire::INPUT if len > 0 && len <= wire::MAX_INPUT => {
                     let mut packet = vec![0u8; len];
                     if read.read_exact(&mut packet).await.is_err() {
@@ -2164,7 +2175,7 @@ fn start_viewer(
                     }
                     // Only what the window may send; the rest is dropped.
                     match InputPacket::decode(&packet) {
-                        Ok(packet) if wire::input_allowed(&packet) => {
+                        Ok(packet) if wire::input_allowed(&packet, pointer_locked) => {
                             // A release waits for room (BK7 review M7): a
                             // key or button let go of here must be let go of
                             // there. The rest may be dropped.
@@ -2398,6 +2409,63 @@ mod tests {
         );
         window
             .write_all(&[wire::PRIVACY, 1, 0, 0, 0, 3])
+            .await
+            .unwrap();
+        tokio::time::timeout(wait, &mut viewer.reader)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    /// PC7: a relative move goes on only after the window said its pointer
+    /// is locked, and not after it said it is free; a lock byte that is
+    /// neither 0 nor 1 ends the window's reader.
+    #[tokio::test]
+    async fn relative_moves_go_only_while_the_window_holds_the_pointer() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let mut window = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (relay_end, _) = listener.accept().await.unwrap();
+        let (input, mut queued) = mpsc::channel(16);
+        let (focus, _focused) = mpsc::channel(4);
+        let (privacy, _asked) = mpsc::channel(4);
+        let mut viewer = start_viewer(relay_end, 3, "desk".into(), input, focus, privacy);
+        let nudge = |dx| Message::Input(InputPacket::MouseMove { dx, dy: 0 }.encode());
+        for message in [
+            nudge(1),
+            Message::PointerLock(true),
+            nudge(2),
+            nudge(3),
+            Message::PointerLock(false),
+            nudge(4),
+            Message::Input(
+                InputPacket::MouseMoveAbs {
+                    x_norm: 5,
+                    y_norm: 5,
+                }
+                .encode(),
+            ),
+        ] {
+            window.write_all(&message.encode()).await.unwrap();
+        }
+        let wait = Duration::from_secs(2);
+        let mut got = Vec::new();
+        for _ in 0..3 {
+            let packet = tokio::time::timeout(wait, queued.recv()).await.unwrap();
+            got.push(format!("{packet:?}"));
+        }
+        assert_eq!(
+            got,
+            [
+                "Some(MouseMove { dx: 2, dy: 0 })",
+                "Some(MouseMove { dx: 3, dy: 0 })",
+                "Some(MouseMoveAbs { x_norm: 5, y_norm: 5 })"
+            ],
+            "the moves before the lock and after the release were dropped"
+        );
+        window
+            .write_all(&[wire::POINTER_LOCK, 1, 0, 0, 0, 2])
             .await
             .unwrap();
         tokio::time::timeout(wait, &mut viewer.reader)

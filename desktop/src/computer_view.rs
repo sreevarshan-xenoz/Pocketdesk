@@ -1656,7 +1656,8 @@ fn view(file: &ViewFile, shared: &Arc<Mutex<State>>, ctx: &egui::Context) -> io:
             | Message::WantKeyframe
             | Message::Input(_)
             | Message::Focus(_)
-            | Message::Privacy(_) => {}
+            | Message::Privacy(_)
+            | Message::PointerLock(_) => {}
         }
     }
 }

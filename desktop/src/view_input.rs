@@ -1161,7 +1161,8 @@ mod tests {
                     &InputPacket::KeyEvent {
                         key: *code,
                         pressed: true
-                    }
+                    },
+                    false
                 ));
             }
         }
