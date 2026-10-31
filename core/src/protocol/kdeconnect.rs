@@ -494,6 +494,11 @@ pub struct TrustStore {
     /// someone else's, a profile's or a guest's), which may list and
     /// remove this computer's other devices from afar.
     owners: HashSet<String>,
+    /// Ecosystem phase 4: the owner phones another of the owner's computers
+    /// introduced here, each with the computer that did. Owners all the same
+    /// for remote revoke, but never introduced onward, and they lose the
+    /// mark when that computer is no longer paired both ways here.
+    introduced_owners: HashMap<String, String>,
 }
 
 /// A paired device's name (U3): what it calls itself in its identity, and
@@ -651,6 +656,7 @@ impl TrustStore {
                 names: HashMap::new(),
                 versions: HashMap::new(),
                 owners: HashSet::new(),
+                introduced_owners: HashMap::new(),
             });
         }
 
@@ -693,10 +699,16 @@ impl TrustStore {
             .filter(|(id, _)| trusted_device_ids.contains(id) || grants.contains_key(id))
             .collect();
         // An owner phone is one paired for good, and a phone.
-        let owners = decoded
+        let owners: HashSet<String> = decoded
             .owners
             .into_iter()
             .filter(|id| trusted_device_ids.contains(id) && !computers.contains(id))
+            .collect();
+        // An introduced owner is an owner first (ecosystem phase 4).
+        let introduced_owners = decoded
+            .introduced_owners
+            .into_iter()
+            .filter(|(id, _)| owners.contains(id))
             .collect();
         Ok(Self {
             path,
@@ -707,6 +719,7 @@ impl TrustStore {
             names,
             versions,
             owners,
+            introduced_owners,
         })
     }
 
@@ -747,6 +760,7 @@ impl TrustStore {
         self.names.remove(device_id);
         self.versions.remove(device_id);
         self.owners.remove(device_id);
+        self.introduced_owners.remove(device_id);
         self.persist()
     }
 
@@ -761,7 +775,59 @@ impl TrustStore {
         } else {
             self.owners.remove(&id);
         }
+        // Paired here by a code of this computer's: no longer introduced.
+        self.introduced_owners.remove(&id);
         self.trust_device(id)
+    }
+
+    /// Trust the phone `device_id` for good as an owner phone that the
+    /// computer `introducer` introduced here (ecosystem phase 4).
+    pub fn trust_introduced_phone(
+        &mut self,
+        device_id: impl Into<String>,
+        introducer: impl Into<String>,
+    ) -> Result<()> {
+        let id = device_id.into();
+        self.owners.insert(id.clone());
+        self.introduced_owners.insert(id.clone(), introducer.into());
+        self.trust_device(id)
+    }
+
+    /// Whether `device_id` is an owner phone paired with this computer's
+    /// own code, not one another computer introduced (ecosystem phase 4:
+    /// only such a phone is introduced onward).
+    pub fn is_own_code_owner(&self, device_id: &str) -> bool {
+        self.is_owner_phone(device_id) && !self.introduced_owners.contains_key(device_id)
+    }
+
+    /// The computer that introduced the owner phone `device_id` here, if
+    /// one did (ecosystem phase 4).
+    pub fn introducer(&self, device_id: &str) -> Option<&str> {
+        self.introduced_owners
+            .get(device_id)
+            .filter(|_| self.is_owner_phone(device_id))
+            .map(String::as_str)
+    }
+
+    /// The introduced owner phones, each with its introducer.
+    pub fn introduced_owners(&self) -> Vec<(String, String)> {
+        let mut all: Vec<(String, String)> = self
+            .introduced_owners
+            .iter()
+            .filter(|(id, _)| self.is_owner_phone(id))
+            .map(|(id, by)| (id.clone(), by.clone()))
+            .collect();
+        all.sort();
+        all
+    }
+
+    /// Take the owner mark from `device_id`, which stays paired with its
+    /// permissions as they are (ecosystem phase 4: the computer that
+    /// introduced it is no longer one of the owner's here).
+    pub fn demote_owner(&mut self, device_id: &str) -> Result<()> {
+        self.owners.remove(device_id);
+        self.introduced_owners.remove(device_id);
+        self.persist()
     }
 
     /// Whether `device_id` is a phone paired with the owner's own code
@@ -938,6 +1004,7 @@ impl TrustStore {
         computers.sort();
         let mut owners: Vec<String> = self.owners.iter().cloned().collect();
         owners.sort();
+        let introduced_owners = self.introduced_owners.clone();
         let payload = TrustStoreFile {
             trusted_device_ids: permanent,
             grants: self.grants.clone(),
@@ -946,6 +1013,7 @@ impl TrustStore {
             names: self.names.clone(),
             versions: self.versions.clone(),
             owners,
+            introduced_owners,
         };
         let bytes = serde_json::to_vec_pretty(&payload)?;
         // Whole-file replace: the server and the desktop app both write this
@@ -980,6 +1048,8 @@ struct TrustStoreFile {
     versions: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     owners: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    introduced_owners: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -1361,6 +1431,35 @@ mod tests {
             "a control dropped; NEL is white space"
         );
         assert_eq!(clean_device_name(""), None);
+    }
+
+    #[test]
+    fn an_introduced_owner_is_kept_apart_from_one_of_this_computers_own_code() {
+        let path = temp_store_path("introduced-owners");
+        let mut store = TrustStore::load_or_create(&path).unwrap();
+        store.trust_introduced_phone("p", "pc-a").unwrap();
+        store.trust_phone("q", true).unwrap();
+        let store = TrustStore::read(&path).unwrap();
+        assert!(store.is_owner_phone("p") && store.is_owner_phone("q"));
+        assert_eq!(store.introducer("p"), Some("pc-a"));
+        assert!(!store.is_own_code_owner("p"));
+        assert!(store.is_own_code_owner("q"));
+        assert_eq!(
+            store.introduced_owners(),
+            vec![("p".to_string(), "pc-a".to_string())]
+        );
+        // Paired again with this computer's own code: its own now.
+        let mut store = store;
+        store.trust_phone("p", true).unwrap();
+        assert!(TrustStore::read(&path).unwrap().is_own_code_owner("p"));
+        // Demoted: paired still, no owner, no introducer.
+        store.trust_introduced_phone("r", "pc-a").unwrap();
+        store.demote_owner("r").unwrap();
+        let store = TrustStore::read(&path).unwrap();
+        assert!(store.is_trusted("r"));
+        assert!(!store.is_owner_phone("r"));
+        assert_eq!(store.introducer("r"), None);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

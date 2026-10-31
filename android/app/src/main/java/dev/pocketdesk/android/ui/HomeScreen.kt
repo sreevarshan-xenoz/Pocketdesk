@@ -206,6 +206,14 @@ fun HomeScreen(
     var peekFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var allowedFor by remember { mutableStateOf<HostStore.Host?>(null) }
     var devicesFor by remember { mutableStateOf<HostStore.Host?>(null) }
+    // Ecosystem phase 4: the computer whose other computers are offered,
+    // and whether it was offered by itself after pairing.
+    var introduceFor by remember { mutableStateOf<Pair<HostStore.Host, Boolean>?>(null) }
+    LaunchedEffect(hosts) {
+        val pending = Prefs.takeIntroducePending(context) ?: return@LaunchedEffect
+        if (!Prefs.offerMyComputers(context)) return@LaunchedEffect
+        hosts.firstOrNull { it.address == pending }?.let { introduceFor = it to true }
+    }
     var names by remember { mutableIntStateOf(0) }
     // Item 4: this app's release, to set each computer's beside.
     val mine = remember { PeerVersion.mine(context) }
@@ -603,6 +611,7 @@ fun HomeScreen(
                         onPeek = { peekFor = host },
                         onAllowed = { allowedFor = host },
                         onDevices = { devicesFor = host },
+                        onIntroduce = { introduceFor = host to false },
                     )
                 }
                 item {
@@ -777,6 +786,21 @@ fun HomeScreen(
             controlPort = host.controlPort,
             computer = HostStore.shownName(context, host.address),
             onDismiss = { devicesFor = null },
+        )
+    }
+
+    // Ecosystem phase 4: "Also pair with <computer>?" for each of the
+    // owner's other computers this one can introduce the phone to.
+    introduceFor?.let { (host, auto) ->
+        IntroduceSheet(
+            address = host.address,
+            controlPort = host.controlPort,
+            computer = HostStore.shownName(context, host.address),
+            auto = auto,
+            onDismiss = {
+                introduceFor = null
+                hosts = HostStore.hosts(context)
+            },
         )
     }
 
@@ -985,6 +1009,7 @@ private fun HostCard(
     onPeek: () -> Unit,
     onAllowed: () -> Unit,
     onDevices: () -> Unit,
+    onIntroduce: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = name ?: host.address
@@ -1050,6 +1075,7 @@ private fun HostCard(
                                 CardMenu.Action.WAKE_SETTINGS -> onWakeSettings()
                                 CardMenu.Action.ALLOWED -> onAllowed()
                                 CardMenu.Action.DEVICES -> onDevices()
+                                CardMenu.Action.INTRODUCE -> onIntroduce()
                                 CardMenu.Action.RENAME -> onRename()
                                 CardMenu.Action.REMOVE -> onRemove()
                             }
@@ -1194,6 +1220,7 @@ private fun cardMenuLabel(action: CardMenu.Action): Int = when (action) {
     CardMenu.Action.WAKE_SETTINGS -> R.string.wake_settings
     CardMenu.Action.ALLOWED -> R.string.card_allowed
     CardMenu.Action.DEVICES -> R.string.card_devices_there
+    CardMenu.Action.INTRODUCE -> R.string.card_introduce
     CardMenu.Action.RENAME -> R.string.card_rename
     CardMenu.Action.REMOVE -> R.string.remove_host
 }

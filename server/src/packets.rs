@@ -73,6 +73,18 @@ fn permission(packet_type: &str) -> String {
     if packet_type == pocketdesk_core::protocol::remote_devices::REMOTE_DEVICES_ANSWER {
         return "none (only the computer asked, for the ask waiting)".to_string();
     }
+    // Ecosystem phase 4: an owner phone's ask, held by the plugin; an
+    // introduction only from a computer paired both ways; its answer only
+    // from the computer asked, for the introduction waiting.
+    if packet_type == pocketdesk_core::protocol::introductions::INTRODUCE {
+        return "none (an owner phone only)".to_string();
+    }
+    if packet_type == pocketdesk_core::protocol::introductions::INTRODUCE_PHONE {
+        return "none (a computer paired both ways only)".to_string();
+    }
+    if packet_type == pocketdesk_core::protocol::introductions::INTRODUCE_PHONE_ANSWER {
+        return "none (only the computer asked, for the introduction waiting)".to_string();
+    }
     match capability_for(packet_type) {
         Some(capability) => format!("{capability:?}"),
         None => "none (any paired phone)".to_string(),

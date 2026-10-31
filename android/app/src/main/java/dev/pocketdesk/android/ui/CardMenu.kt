@@ -11,7 +11,7 @@ object CardMenu {
     enum class Action {
         WAKE, PEEK, SOUND, DECK, STATE,
         CAMERA, PHONE_SOUND, EARLIER_COPY,
-        CHECK, WAKE_SETTINGS, ALLOWED, DEVICES, RENAME, REMOVE,
+        CHECK, WAKE_SETTINGS, ALLOWED, DEVICES, INTRODUCE, RENAME, REMOVE,
     }
 
     enum class Kind {
@@ -53,7 +53,16 @@ object CardMenu {
         ),
         Section(
             Kind.MANAGE,
-            listOf(Action.CHECK, Action.WAKE_SETTINGS, Action.ALLOWED, Action.DEVICES, Action.RENAME, Action.REMOVE),
+            listOf(
+                Action.CHECK,
+                Action.WAKE_SETTINGS,
+                Action.ALLOWED,
+                Action.DEVICES,
+                // Ecosystem phase 4: the owner's other computers, added here too.
+                Action.INTRODUCE,
+                Action.RENAME,
+                Action.REMOVE,
+            ),
         ),
     )
 }

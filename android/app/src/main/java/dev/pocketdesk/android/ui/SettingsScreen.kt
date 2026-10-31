@@ -331,6 +331,13 @@ fun SettingsScreen(onBack: () -> Unit) {
                     Prefs.computerAlerts(context),
                     { Prefs.setComputerAlerts(context, it) },
                 )
+                // Ecosystem phase 4: after pairing, the owner's other computers.
+                SettingSwitch(
+                    stringResource(R.string.settings_offer_my_computers),
+                    introduceSummary(context),
+                    Prefs.offerMyComputers(context),
+                    { Prefs.setOfferMyComputers(context, it) },
+                )
                 // BF2: a still of the computer's screen from Home.
                 SettingSwitch(
                     stringResource(R.string.settings_peek),
@@ -853,3 +860,24 @@ private fun hasVibrator(context: android.content.Context): Boolean =
         @Suppress("DEPRECATION")
         context.getSystemService(android.os.Vibrator::class.java)?.hasVibrator() == true
     }
+
+/**
+ * Ecosystem phase 4: what "Offer my other computers after pairing" does,
+ * and how the last introduction went.
+ */
+@Composable
+private fun introduceSummary(context: android.content.Context): String {
+    val summary = stringResource(R.string.settings_offer_my_computers_summary)
+    val last = dev.pocketdesk.android.pair.IntroduceRule.decode(Prefs.introduceLast(context)) ?: return summary
+    val said = when (last.kind) {
+        dev.pocketdesk.android.pair.IntroduceRule.Kind.PAIRED ->
+            stringResource(R.string.introduce_last_paired, last.name)
+        dev.pocketdesk.android.pair.IntroduceRule.Kind.REFUSED ->
+            stringResource(R.string.introduce_last_refused, last.name, last.code)
+        dev.pocketdesk.android.pair.IntroduceRule.Kind.UNREACHABLE ->
+            stringResource(R.string.introduce_last_unreachable, last.name)
+        dev.pocketdesk.android.pair.IntroduceRule.Kind.EXPIRED ->
+            stringResource(R.string.introduce_last_expired, last.name)
+    }
+    return summary + "\n" + stringResource(R.string.settings_introduce_last, said)
+}

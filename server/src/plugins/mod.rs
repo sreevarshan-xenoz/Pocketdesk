@@ -118,5 +118,6 @@ pub fn register_all() -> PluginSet {
     registry.register(crate::asks::AskPlugin);
     registry.register(note::NotePlugin);
     registry.register(crate::remote_devices::RemoteDevicesPlugin);
+    registry.register(crate::introductions::IntroductionsPlugin);
     registry
 }

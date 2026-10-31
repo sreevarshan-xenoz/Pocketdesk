@@ -3313,6 +3313,20 @@ Built 2026-10-31. The computer card's menu is headed sections with its upkeep un
 - [ ] TalkBack on the card menu: the two headings are read as headings, Manage as collapsed and then expanded; on a window chip, the whole title and the "Show the full title" action. (where: by hand)
 - [ ] The card menu in Spanish and Tamil at font scale 1.3. (where: OPPO)
 
+## 244. One pairing for all my devices: a computer introduces the phone
+
+Built 2026-10-31. A phone paired with one computer's own code is offered the owner's other computers paired both ways and, after its owner taps Pair, is paired with one through the link between the two (`kdeconnect.pocketdesk.introduce`, `introduce_phone` and their answers; docs/protocol.md §2.8). Unit-tested only, with A, B and the phone's pairing run in one process; the bridge .so with it was not built.
+
+- [ ] Rebuild the bridge from this tree and install; logcat shows no "No implementation found" for `nativeIntroductions` or `nativeIntroduce`.
+- [ ] Two throwaway servers paired both ways (Windows and the Linux laptop), input off on both. Pair the OPPO with the Windows throwaway's own code: Home then shows "Also pair with <laptop>?". Pair: the laptop's `pocketdesk devices --json` lists the OPPO with `"owner": true`, the laptop notifies "<Windows> added <phone> to this computer" once, `pocketdesk events` shows `device_introduced` with `by` the Windows throwaway's id, and a view-only session from the OPPO to the laptop opens. Counts only. (where: second computer)
+- [ ] Not now leaves the laptop untouched; the card's Manage → Pair with my other computers… offers it again; with the OPPO already paired with the laptop, it offers nothing. (where: second computer)
+- [ ] The laptop's "Let my computers add my phones here" off: Pair says the other computer's owner turned it off, and nothing is added there; on again, it pairs. The phone's Settings line says how the last one went. (where: second computer)
+- [ ] The OPPO paired with the Windows throwaway as someone else's, or with a guest grant: the offer says only a phone paired with the computer's own code can be introduced, and the laptop gets nothing. A computer paired one way is never offered. (where: second computer)
+- [ ] Unpair the introduced OPPO on the Windows throwaway (Devices → Unpair): within seconds of the link being up it is gone from the laptop too, the laptop notifying "<Windows> removed <phone> from this computer". With the laptop's "Let my devices remove others from afar" off, the Windows throwaway says the phone stays paired there. Pair the OPPO again with its own code afterwards. (where: second computer)
+- [ ] An older server on one side (the last release): the phone says the computer did not answer, and nothing is added. (where: second computer)
+- [ ] On the laptop, turn Control off for the Windows throwaway on its Devices page, then introduce the OPPO: the OPPO's entry there has Control off. Unpair the Windows throwaway on the laptop: within seconds the laptop says the OPPO is no longer treated as yours, `pocketdesk devices --json` keeps it with `"owner": false`. (where: second computer)
+- [ ] With the OPPO paired with the laptop through the Windows throwaway, its card for the laptop offers nothing under Pair with my other computers… (an introduced phone is not introduced onward). (where: second computer)
+
 ## 245. A second screen at the phone's shape on Hyprland
 
 Built 2026-10-31. On Hyprland 0.56 a phone's screen is a headless output named `PD-<tag>-<n>` (the tag from the server's state folder), its rule set first with `eval hl.monitor({…, position = "auto-right"})`, then made with `output create headless` (it comes up at the rule's size) and removed with `output remove`; a server that starts removes its own tagged outputs that its record does not list.

@@ -2468,6 +2468,28 @@ async fn take(dir: &Path, device_id: &str, packet: &NetworkPacket) {
         crate::remote_devices::heard(device_id, &packet.body).await;
         return;
     }
+    // Ecosystem phase 4: its introduction of a phone, held to the same gate
+    // as on a connection (a computer this one paired into alone is not
+    // paired both ways here), or its answer to this one's.
+    if packet.packet_type == pocketdesk_core::protocol::introductions::INTRODUCE_PHONE {
+        let (to, body) = (device_id.to_string(), packet.body.clone());
+        tokio::spawn(async move {
+            if let Some(answer) = crate::introductions::answer_computer(&to, &body).await
+                && let Some(outgoing) = live(&to)
+            {
+                let packet = NetworkPacket::new(
+                    pocketdesk_core::protocol::introductions::INTRODUCE_PHONE_ANSWER,
+                )
+                .with_body(answer);
+                let _ = outgoing.send(packet).await;
+            }
+        });
+        return;
+    }
+    if packet.packet_type == pocketdesk_core::protocol::introductions::INTRODUCE_PHONE_ANSWER {
+        crate::introductions::heard(device_id, &packet.body);
+        return;
+    }
     if packet.packet_type == crate::plugins::share::FETCH_REFUSED {
         if let (Some(key), reason) = (
             packet.body.get("key").and_then(|v| v.as_str()),

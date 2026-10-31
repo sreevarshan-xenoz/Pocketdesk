@@ -320,6 +320,11 @@ pub const SETTINGS: &[(&str, &str, Section)] = &[
         Section::Computers,
     ),
     (
+        "computer_introductions",
+        "Let my computers add my phones here",
+        Section::Computers,
+    ),
+    (
         "computer_view_quality",
         "Quality of a computer's screen here",
         Section::Computers,
@@ -637,6 +642,8 @@ pub fn applies_live(key: &str) -> bool {
         "nearby_pairing"
             // Remote revoke: read by the server at each ask.
             | "remote_revoke"
+            // Ecosystem phase 4: read by the server at each introduction.
+            | "computer_introductions"
             // BK7: read by this app as a computer's window opens.
             | "computer_view_quality"
             | "computer_view_only"
@@ -2170,6 +2177,18 @@ impl SettingsForm {
                     note(
                         ui,
                         "Your own phone and computers paired both ways may list this computer's devices and remove a lost one. Off: only Devices → Unpair here removes one.",
+                    );
+                });
+                // Ecosystem phase 4: a computer paired both ways introduces
+                // the owner's phone here.
+                row(ui, "computer_introductions", |ui| {
+                    ui.checkbox(
+                        &mut e.computer_introductions,
+                        name("computer_introductions"),
+                    );
+                    note(
+                        ui,
+                        "A phone paired with your other computer's own code can pair here too, once you say yes on the phone: it gets this computer's usual permissions, never more than it has there. Only your computers paired both ways can ask. Removing the phone on one computer removes it on the other.",
                     );
                 });
                 // BK7: "Show its screen" is on each computer's line below.
